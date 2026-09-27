@@ -128,7 +128,7 @@ function idValueScheme(value: string): ExtractIdScheme | null {
 }
 
 /**
- * Parse compact page locators, Beaver Extract record ids, and multi-page passages.
+ * Parse compact page locators, Beaver Extract record ids, and sentence lists.
  *
  * Record ids come in two schemes (see `ExtractIdScheme`): document-wide
  * (`s243`, range `s243-s250`) and page-scoped (`s5.6`, ranges `s5.6-s5.9` and
@@ -137,54 +137,48 @@ function idValueScheme(value: string): ExtractIdScheme | null {
  * document version and parses as `unknown`.
  *
  * A comma-separated list of page-scoped sentence ids or ranges
- * (`s7.45,s8.1-s8.2`) cites one passage that continues on the next page; see
- * `parsePageContinuation`.
+ * (`s7.45,s8.1-s8.2`, `s2.36,s2.42-s2.43`) parses as one sentence locator
+ * naming every piece; see `parseSentenceList`.
  */
 export function parseLoc(token: string | undefined): Locator | undefined {
     if (token == null) return undefined;
-    const passage = /[,;]/.test(token) ? parsePageContinuation(token) : null;
-    return passage ?? parseSingleLoc(token);
+    const sentences = /[,;]/.test(token) ? parseSentenceList(token) : null;
+    return sentences ?? parseSingleLoc(token);
 }
 
-/** First and last page of a page-scoped sentence locator. */
-function pageScopedSentencePages(locator: Locator): [start: number, end: number] | null {
-    if (locator.kind !== 'sentence' || locatorIdScheme(locator) !== 'page') return null;
+/** Whether a locator is a page-scoped sentence id or forward range. */
+function isPageScopedSentence(locator: Locator): boolean {
+    if (locator.kind !== 'sentence' || locatorIdScheme(locator) !== 'page') return false;
     const [startValue, endValue = startValue] = locator.value.split('-');
     const start = parseExtractIdValue(startValue);
     const end = parseExtractIdValue(endValue);
-    if (start?.page === undefined || end?.page === undefined) return null;
-    if (end.page < start.page || (end.page === start.page && end.n < start.n)) return null;
-    return [start.page, end.page];
+    if (start?.page === undefined || end?.page === undefined) return false;
+    return end.page > start.page || (end.page === start.page && end.n >= start.n);
 }
 
 /**
  * Parse `s7.45,s8.1-s8.2` into one sentence locator valued `7.45,8.1-8.2`.
  *
- * The pieces of one passage that continues across pages: page-scoped
- * sentence ids or ranges, each starting on the page after the previous piece
- * ends. The first piece that breaks this ends the passage, so a list naming
- * separate passages keeps only its first one.
+ * Every piece is kept, in the order given: a passage continuing on the next
+ * page, or parts of one page's text interrupted by a figure or footnote.
  *
- * Returns `null` when the first piece is not a page-scoped sentence locator:
- * such comma-joined locators keep parsing as one token. Mirrors the backend's
- * `parse_loc`.
+ * Returns `null` unless every piece is a page-scoped sentence id or range;
+ * other comma-joined locators keep parsing as one token. Mirrors the
+ * backend's `parse_loc`.
  */
-function parsePageContinuation(raw: string): Locator | null {
+function parseSentenceList(raw: string): Locator | null {
     const values: string[] = [];
-    let previousEndPage: number | null = null;
     for (const token of raw.split(/[,;]/).map((part) => part.trim())) {
+        if (!token) continue;
         const locator = parseSingleLoc(token);
-        const pages = pageScopedSentencePages(locator);
-        if (!pages) break;
-        if (previousEndPage !== null && pages[0] !== previousEndPage + 1) break;
+        if (!isPageScopedSentence(locator)) return null;
         values.push(locator.value);
-        previousEndPage = pages[1];
     }
     if (values.length === 0) return null;
     return { kind: 'sentence', value: values.join(','), raw };
 }
 
-/** The values a locator names: its value, or each piece of a multi-page passage. */
+/** The values a locator names: its value, or each piece of a sentence list. */
 export function locatorValues(locator: Locator): string[] {
     return locator.kind === 'sentence' ? locator.value.split(',') : [locator.value];
 }
@@ -246,7 +240,7 @@ function rawRangeCandidateIds(raw: string): string[] {
 
 /**
  * Return structured extraction citation-index ids addressed by a locator: the
- * id itself, both ends of a range, or those of each piece of a multi-page passage.
+ * id itself, both ends of a range, or those of each piece of a sentence list.
  * A range covers everything between its ends in reading order, never an
  * arithmetic span of the id suffixes.
  */
@@ -273,15 +267,32 @@ export function citationIndexCandidateIdsForLocator(locator: Locator): string[] 
 }
 
 /**
- * True when a non-page locator spans several ids: an id range (`12-15`,
- * `5.6-6.2`) or a multi-page passage (`7.45,8.1`).
+ * True when a non-page locator spans one run of ids: an id range (`12-15`,
+ * `5.6-6.2`) or a sentence list whose pages leave no gap (`7.45,8.1`). A list
+ * that skips pages (`5.2,9.4`) names separate pages, not a range.
  */
 export function isRecordIdRange(locator: Locator): boolean {
     if (locator.kind === 'page') return false;
     const pieces = locatorValues(locator);
-    if (pieces.length > 1) return pieces.every((piece) => idValueScheme(piece.split('-')[0]) !== null);
+    if (pieces.length > 1) return sentenceListPagesAreContiguous(pieces);
     const ends = locator.value.split('-');
     return ends.length === 2 && ends.every((end) => idValueScheme(end) !== null);
+}
+
+/** Whether each piece starts on the page the previous piece ends on, or the next one. */
+function sentenceListPagesAreContiguous(pieces: string[]): boolean {
+    let previousEndPage: number | null = null;
+    for (const piece of pieces) {
+        const [startValue, endValue = startValue] = piece.split('-');
+        const start = parseExtractIdValue(startValue)?.page;
+        const end = parseExtractIdValue(endValue)?.page;
+        if (start === undefined || end === undefined) return false;
+        if (previousEndPage !== null && start !== previousEndPage && start !== previousEndPage + 1) {
+            return false;
+        }
+        previousEndPage = end;
+    }
+    return true;
 }
 
 /**

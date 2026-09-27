@@ -209,7 +209,7 @@ describe('citationGrammar', () => {
     });
 });
 
-describe('multi-page passages', () => {
+describe('sentence lists', () => {
     it.each([
         // A passage continuing on the next page, piece by piece.
         ['s7.45,s8.3', 'sentence', '7.45,8.3'],
@@ -217,15 +217,19 @@ describe('multi-page passages', () => {
         ['s7.44-45, s8.3', 'sentence', '7.44-7.45,8.3'],
         ['s7.45;s8.3', 'sentence', '7.45,8.3'],
         ['s3.40,s4.1-s5.2,s6.1', 'sentence', '3.40,4.1-5.2,6.1'],
-        // A piece not on the next page ends the passage.
-        ['s3.58,s3.63', 'sentence', '3.58'],
-        ['s2.3,s9.4', 'sentence', '2.3'],
-        ['s8.3,s7.45', 'sentence', '8.3'],
-        ['s7.45,s8.3,s8.5', 'sentence', '7.45,8.3'],
-        ['s3.5,s243', 'sentence', '3.5'],
-        ['s3.5,page4', 'sentence', '3.5'],
-        ['s3.5,heading4.1', 'sentence', '3.5'],
-        // Lists that do not start with a page-scoped sentence parse as one token, as before.
+        // Every piece is kept, wherever it sits.
+        ['s3.58,s3.63', 'sentence', '3.58,3.63'],
+        ['s2.36,s2.42-s2.43', 'sentence', '2.36,2.42-2.43'],
+        ['s2.36, s2.40', 'sentence', '2.36,2.40'],
+        ['s2.3,s9.4', 'sentence', '2.3,9.4'],
+        ['s8.3,s7.45', 'sentence', '8.3,7.45'],
+        ['s7.45,s8.3,s8.5', 'sentence', '7.45,8.3,8.5'],
+        ['s7.45,s8.1,s12.3', 'sentence', '7.45,8.1,12.3'],
+        ['s2.36,,s2.40,', 'sentence', '2.36,2.40'],
+        // Lists with any other piece parse as one token, as before.
+        ['s3.5,s243', 'unknown', 's3.5,s243'],
+        ['s3.5,page4', 'unknown', 's3.5,page4'],
+        ['s3.5,heading4.1', 'unknown', 's3.5,heading4.1'],
         ['s12,s40', 'unknown', 's12,s40'],
         ['page3,page5', 'page', '3,page5'],
         ['heading3.1,s4.2', 'unknown', 'heading3.1,s4.2'],
@@ -239,7 +243,22 @@ describe('multi-page passages', () => {
         expect(citationIndexCandidateIdsForLocator(loc)).toEqual(['s7.44', 's7.45', 's8.3']);
         expect(locatorIdScheme(loc)).toBe('page');
         expect(isRecordIdRange(loc)).toBe(true);
-        expect(isRecordIdRange(parseLoc('s2.3,s9.4')!)).toBe(false);
+    });
+
+    it('addresses every piece of a same-page list', () => {
+        const loc = parseLoc('s2.36,s2.42-s2.43')!;
+        expect(locatorValues(loc)).toEqual(['2.36', '2.42-2.43']);
+        expect(citationIndexCandidateIdsForLocator(loc)).toEqual(['s2.36', 's2.42', 's2.43']);
+    });
+
+    it.each([
+        ['s2.36,s2.42-s2.43', true],
+        ['s7.45,s8.1', true],
+        ['s3.40,s4.1-s5.2,s6.1', true],
+        ['s2.3,s9.4', false],
+        ['s7.45,s8.1,s12.3', false],
+    ])('treats %s as one page range: %s', (raw, expected) => {
+        expect(isRecordIdRange(parseLoc(raw)!)).toBe(expected);
     });
 
     it('keeps the raw list as the citation key', () => {

@@ -47,6 +47,7 @@ import {
 import {
     citationIndexCandidateIdsForLocator,
     getPageLocator,
+    isRecordIdRange,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
@@ -289,7 +290,9 @@ export async function preloadNotePageLabels(
  * Map a non-page (structural) locator to the page it appears on, using the
  * document's structured citation index. The label is the page's display label
  * when available, otherwise the 1-based page number; null when the locator is
- * not indexed.
+ * not indexed. With `includeRange`, every page the locator names is kept; they
+ * read as one first–last span only when the locator is a contiguous run, so a
+ * sentence list that skips pages (`s2.1,s9.1`) reads "2, 9".
  */
 function resolvePageFromStructuredResult(
     result: StructuredExtractResult,
@@ -306,7 +309,9 @@ function resolvePageFromStructuredResult(
         if (entry.pageLabel) labels[entry.pageIndex] = entry.pageLabel;
         if (!includeRange) break;
     }
-    const label = formatCitationPages(pages, labels, { inclusiveRange: includeRange });
+    const label = formatCitationPages(pages, labels, {
+        inclusiveRange: includeRange && isRecordIdRange(locator),
+    });
     // The physical page is kept alongside the label: a label cannot be
     // translated back once the extraction result is out of scope, and link
     // citations navigate the reader by physical page.
