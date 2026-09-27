@@ -87,6 +87,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // markdown renderer does with object-id hrefs; a client that predates it would
 // treat `[Smith 2004](u-KEY)` as a broken relative link, so the backend only
 // tells the model to write those when this feature is declared.
+// two_page_highlights is declaration-only because it gates a relocation shape
+// the client must apply: a build that predates it refuses a two-page highlight
+// destination, so the backend keeps rejecting those unless it is declared.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -110,6 +113,7 @@ const DECLARATION_ONLY_FEATURES = [
     'batch_item_display',
     'item_links',
     'continuation_new_run',
+    'two_page_highlights',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

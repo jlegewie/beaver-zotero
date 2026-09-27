@@ -116,7 +116,50 @@ describe("prepareRelocation", () => {
         ).rejects.toThrow(/whole page/);
     });
 
-    it("refuses to apply only the first page of a multi-page highlight", async () => {
+    it("places a highlight across two consecutive pages as one position", async () => {
+        const nextGeometry = { ...PAGE_GEOMETRY, viewBox: [5, 5, 605, 805] as const };
+        getPageGeometryForAttachment.mockImplementation(async (_attachment: any, pageIndex: number) =>
+            pageIndex === 5 ? nextGeometry : PAGE_GEOMETRY,
+        );
+        const placement = await prepareRelocation(
+            attachment,
+            "highlight",
+            pdfRelocation({
+                page_locations: [
+                    pdfRelocation().page_locations[0],
+                    {
+                        page_idx: 5,
+                        boxes: [{ l: 10, t: 20, r: 300, b: 40 }],
+                        page_label: "6",
+                        reading_order_offset: 0,
+                    },
+                ],
+            }),
+        );
+
+        const position = JSON.parse(placement.position);
+        expect(position.pageIndex).toBe(4);
+        expect(position.rects).toHaveLength(1);
+        // Converted with page 5's viewBox, not page 4's.
+        expect(position.nextPageRects).toEqual([[15, 765, 305, 785]]);
+        expect(placement.pageLabel).toBe("5");
+        expect(placement.sortIndex.startsWith("00004|000042|")).toBe(true);
+        expect(getPageGeometryForAttachment).toHaveBeenCalledWith(attachment, 5);
+    });
+
+    it("drops nextPageRects when a two-page highlight moves to one page", async () => {
+        // The placement replaces the position wholesale; nothing is merged
+        // from the annotation's previous two-page position.
+        const placement = await prepareRelocation(
+            attachment,
+            "highlight",
+            pdfRelocation(),
+        );
+
+        expect(JSON.parse(placement.position)).not.toHaveProperty("nextPageRects");
+    });
+
+    it("refuses a two-page destination whose continuation has no usable boxes", async () => {
         await expect(
             prepareRelocation(
                 attachment,
@@ -124,11 +167,42 @@ describe("prepareRelocation", () => {
                 pdfRelocation({
                     page_locations: [
                         pdfRelocation().page_locations[0],
-                        { ...pdfRelocation().page_locations[0], page_idx: 5 },
+                        { page_idx: 5, boxes: [], page_label: "6" },
                     ],
                 }),
             ),
-        ).rejects.toThrow(/spans multiple pages/);
+        ).rejects.toThrow(/continuation on the next page produced no rects/);
+    });
+
+    it("refuses a highlight destination spanning three pages", async () => {
+        const location = pdfRelocation().page_locations[0];
+        await expect(
+            prepareRelocation(
+                attachment,
+                "highlight",
+                pdfRelocation({
+                    page_locations: [
+                        location,
+                        { ...location, page_idx: 5 },
+                        { ...location, page_idx: 6 },
+                    ],
+                }),
+            ),
+        ).rejects.toThrow(/one page or two consecutive pages/);
+        expect(getPageGeometryForAttachment).not.toHaveBeenCalled();
+    });
+
+    it("refuses a highlight destination on two pages that are not consecutive", async () => {
+        const location = pdfRelocation().page_locations[0];
+        await expect(
+            prepareRelocation(
+                attachment,
+                "highlight",
+                pdfRelocation({
+                    page_locations: [location, { ...location, page_idx: 7 }],
+                }),
+            ),
+        ).rejects.toThrow(/one page or two consecutive pages/);
         expect(getPageGeometryForAttachment).not.toHaveBeenCalled();
     });
 

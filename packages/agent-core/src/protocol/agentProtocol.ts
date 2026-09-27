@@ -2826,6 +2826,13 @@ export const CLIENT_FEATURES = {
      * write them.
      */
     ITEM_LINKS: 'item_links',
+    /**
+     * A PDF highlight covering two consecutive pages is one annotation with
+     * `position.nextPageRects`, and `edit_annotations` can move a highlight to
+     * such a destination. Without it the backend keeps rejecting two-page
+     * relocation targets, which an older client refuses.
+     */
+    TWO_PAGE_HIGHLIGHTS: 'two_page_highlights',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

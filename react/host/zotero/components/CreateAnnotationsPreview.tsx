@@ -118,6 +118,9 @@ function formatAnnotationFailureMessage(
             return 'Could not create annotation because the cited passage was not found in the EPUB.';
         case 'epub_math_section_unsupported':
             return 'Could not create annotation because the passage follows a math equation, which is not yet supported.';
+        case 'highlight_spans_too_many_pages':
+        case 'highlight_pages_not_consecutive':
+            return 'Could not create annotation because a highlight can cover at most two consecutive pages.';
         case 'attachment_file_unavailable':
             return 'Could not create annotation because the attachment file is not available locally.';
         case 'apply_failed':

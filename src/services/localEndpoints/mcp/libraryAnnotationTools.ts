@@ -77,7 +77,7 @@ function creationTool(highlight: boolean) {
             'For PDFs, copy exact page_locations or note_position from read_attachment with include_annotation_locations=true; never guess coordinates. ' +
             'The same read option returns EPUB section and text/anchor locators; snapshots use text or anchor_id. ' +
             'Writes immediately after validation; the MCP client handles approval. Returns created annotation IDs and per-item failures. ' +
-            'A multi-page highlight creates one annotation per page. Retrying successful items creates duplicates; retry only failed items.',
+            'A highlight covers at most two consecutive pages and is always one annotation. Retrying successful items creates duplicates; retry only failed items.',
         inputSchema: {
             type: 'object', additionalProperties: false, required: ['attachment_id', 'items'],
             properties: {
@@ -92,7 +92,7 @@ function creationTool(highlight: boolean) {
                             comment: { type: 'string', ...(highlight ? {} : { minLength: 1 }) },
                             color: { type: 'string', enum: colors, default: 'yellow' },
                             page_label: string,
-                            ...(highlight ? { page_locations: { type: 'array', minItems: 1, maxItems: 30, items: locationSchema } }
+                            ...(highlight ? { page_locations: { type: 'array', minItems: 1, maxItems: 30, items: locationSchema, description: 'Boxes to highlight, on one page or two consecutive pages.' } }
                                 : { note_position: notePositionSchema, reading_order_offset: pageIndex }),
                             section_href: string,
                             section_ordinal: { type: 'integer', minimum: 1 },
