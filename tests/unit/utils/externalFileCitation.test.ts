@@ -76,6 +76,26 @@ describe('external file citations in notes', () => {
             .toBe(`(<a href="file:///stored/Report.pdf">Report.pdf</a>, p. ${label})`);
     });
 
+    it.each([
+        ['s2.1,s9.1', '2, 9'],
+        ['s2.1,s3.1', '2-3'],
+        ['s2.1,s2.2', '2'],
+        ['s2.1-s9.1', '2-9'],
+    ])('labels sentence locator %s as p. %s', async (loc, label) => {
+        (Zotero as any).Beaver.documentCache = {
+            getResult: vi.fn().mockResolvedValue(structuredResultWithCitablePages(9, [
+                { index: 1, items: [{ id: 'p2.1', sentences: ['s2.1', 's2.2'] }] },
+                { index: 2, items: [{ id: 'p3.1', sentences: ['s3.1'] }] },
+                { index: 8, items: [{ id: 'p9.1', sentences: ['s9.1'] }] },
+            ])),
+        };
+        const input = `<citation id="ext-MRDTFYHP" loc="${loc}"/>`;
+        const { files } = await preloadExternalFileCitations(input);
+        const resolved = await preloadStructuralLocatorPages(input);
+        expect(expandToRawHtml(input, metadata(), 'new', context(files), undefined, resolved.pages))
+            .toBe(`(<a href="file:///stored/Report.pdf">Report.pdf</a>, p. ${label})`);
+    });
+
     it('retains the structural locator when cached extraction is missing', async () => {
         (Zotero as any).Beaver.documentCache = { getResult: vi.fn().mockResolvedValue(null) };
         const input = '<citation id="ext-MRDTFYHP" loc="s5"/>';
