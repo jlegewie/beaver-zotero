@@ -8,7 +8,7 @@ import { expectedExtractionSchemaVersion } from '../documentExtraction/shared/ex
 import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
 import { recordReadingOutcome } from '../documentExtraction/readingOutcome';
 import { loadAttachmentData, resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
-import { observeAttachmentSource } from '../documentExtraction/sourceObservation';
+import { isLegacyRemoteIdentity, observeAttachmentSource } from '../documentExtraction/sourceObservation';
 import { OCR_ENGINE_VERSION, OCR_PRIORITY_BACKFILL, OCR_PRIORITY_ON_DEMAND } from '../ocr/constants';
 import type { AttachmentRef } from './issues';
 import { enqueueOcrJob, maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
@@ -602,6 +602,15 @@ export class ReconcilerService {
         if (statFile || kindChanged) {
             const observation = await observeAttachmentSource(item, kind);
             if (!isBackgroundProcessingLibraryEnabled(item.libraryID)) return;
+            if (observation && row.extractionSource != null && !kindChanged
+                && isLegacyRemoteIdentity(row.extractionSource, observation.identity)) {
+                const adopted = await db.replaceAttachmentExtractionSource({
+                    libraryId: item.libraryID, zoteroKey: item.key,
+                    expectedSource: row.extractionSource, source: observation.identity,
+                });
+                if (!adopted) return;
+                row = { ...row, extractionSource: observation.identity };
+            }
             const changed = observation && row.extractionSource != null && observation.identity !== row.extractionSource;
             // Legacy successes can adopt a matching local signature without work.
             // Unknown failures are rechecked only by a deep pass, never by reading activity.

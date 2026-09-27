@@ -21,12 +21,74 @@ async function focusLegacyTarget(win: ReturnType<typeof Zotero.getMainWindow>): 
     assertLegacyTarget(win);
 }
 
+/**
+ * The attachment's file is not on this computer and could not be downloaded.
+ * The user has already been shown Zotero's attachment-not-found dialog or sync error.
+ */
+export class AttachmentFileUnavailableError extends Error {
+    readonly code = 'attachment_file_unavailable';
+    constructor(itemID: number) { super(`The file for attachment ${itemID} is not available`); }
+}
+
+/**
+ * Make sure a file attachment exists locally before the reader opens it, mirroring
+ * `ZoteroPane.viewAttachment`: files Zotero has queued for download are fetched from
+ * the file server first. `Zotero.Reader.open` never downloads, and opening a missing
+ * file produces a blank reader tab.
+ */
+async function ensureAttachmentFileForReader(itemID: number, win: ReturnType<typeof Zotero.getMainWindow>): Promise<void> {
+    const item = await Zotero.Items.getAsync(itemID);
+    if (!item?.isFileAttachment()) return;
+    const pane = win.ZoteroPane as any;
+    const noLocate = !pane.collectionsView?.editable;
+    const isLinkedFile = !item.isStoredFileAttachment();
+    const path = item.getFilePath();
+    if (!path) {
+        pane.showAttachmentNotFoundDialog(item, path, { noLocate: true, notOnServer: true, linkedFile: isLinkedFile });
+        throw new AttachmentFileUnavailableError(itemID);
+    }
+    let fileExists = false;
+    try {
+        fileExists = await IOUtils.exists(path);
+    } catch (error) {
+        Zotero.logError(error as Error);
+    }
+    const syncingEnabled = Zotero.Sync.Storage.Local.getEnabledForLibrary(item.libraryID);
+    // A file queued for download was replaced on the server; open the new version.
+    const queued = [
+        Zotero.Sync.Storage.Local.SYNC_STATE_TO_DOWNLOAD,
+        Zotero.Sync.Storage.Local.SYNC_STATE_FORCE_DOWNLOAD,
+    ].includes(item.attachmentSyncState);
+    if (fileExists && !(queued && syncingEnabled && !isLinkedFile)) return;
+    if (!fileExists && (isLinkedFile || !syncingEnabled)) {
+        pane.showAttachmentNotFoundDialog(item, path, { noLocate, notOnServer: false, linkedFile: isLinkedFile });
+        throw new AttachmentFileUnavailableError(itemID);
+    }
+    try {
+        await Zotero.Sync.Runner.downloadFile(item);
+    } catch (error) {
+        Zotero.logError(error as Error);
+        // A failed refresh of an existing file still opens the local copy.
+        if (fileExists) return;
+        (Zotero.Sync.Runner as any).alert(error);
+        throw new AttachmentFileUnavailableError(itemID);
+    }
+    if (!(await item.getFilePathAsync())) {
+        if (fileExists) return;
+        pane.showAttachmentNotFoundDialog(item, path, { noLocate, notOnServer: true });
+        throw new AttachmentFileUnavailableError(itemID);
+    }
+    Zotero.Notifier.trigger('redraw', 'item', []);
+}
+
 /** Pin a real main window before any reader initialization awaits. */
 export async function openReader(
     itemID: number, location?: any, options: Record<string, any> = {},
     origin: Window = getContextWindow(),
 ): Promise<any> {
     const win = await resolveNavigationWindow(origin);
+    await ensureAttachmentFileForReader(itemID, win);
+    if (win.closed || win.__beaverRuntime?.status === 'closing') throw new WindowUnavailableError();
     // Older Zotero releases ignore the window option and use the focused main window.
     // Recheck activation immediately before each native call that uses global focus.
     const legacy = typeof (win.Zotero_Tabs as any).isOwnTabEvent !== 'function';

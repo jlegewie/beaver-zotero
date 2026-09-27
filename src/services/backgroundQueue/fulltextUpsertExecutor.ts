@@ -536,6 +536,18 @@ export class FulltextUpsertExecutor implements JobExecutor {
             Zotero.Beaver.account?.revokeSearchIndexAccess();
             return { kind: 'release', reason: 'not_entitled' };
         }
+        if (record && code === 'library_excluded') {
+            // The account excluded this library on another device. Refreshing the
+            // profile applies the exclusion here, which purges the library's
+            // processing state; the claim-time gate then retires this job. The
+            // retry covers the reverse case, a re-inclusion the server has not
+            // seen yet.
+            void Zotero.Beaver?.account?.refresh(true);
+            return {
+                kind: 'retry', error: `${code}: ${error.message}`, reason: code,
+                countsAsAttempt: false, retryAfterMs: 60_000,
+            };
+        }
         if (TERMINAL_CODES.has(code) || error.status === 400 || error.status === 413) {
             if (record && row) {
                 return this.terminal(record, row, code, error.message, ctx, accessChanged);

@@ -232,7 +232,9 @@ async function readRemoteAttachmentData(
     item: Zotero.Item,
     onRemoteFailure?: (error: unknown) => void,
 ): Promise<Uint8Array> {
-    const cacheKey = makeRemoteFilePath(item);
+    // The synced hash in the remote path can be stale for a file removed here before
+    // its server copy was replaced; the item version changes with that replacement.
+    const cacheKey = `${makeRemoteFilePath(item)}#v${item.version || 0}`;
     const itemRef = `${item.libraryID}-${item.key}`;
 
     const cached = remoteDataCache.get(cacheKey);

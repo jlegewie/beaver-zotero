@@ -658,6 +658,43 @@ describe('attachment change reconciliation', () => {
         expect(await db.peekBackgroundJobs()).toHaveLength(1);
     });
 
+    it('detects a server content replacement for a file this device never downloaded', async () => {
+        const cache = { version: 3, md5: 'b3cac481', mtime: 100 };
+        (Zotero as any).Sync = { Data: { Local: {
+            getLatestCacheObjectVersion: async () => cache.version,
+            getCacheObject: async () => ({ data: { md5: cache.md5, mtime: cache.mtime } }),
+        } } };
+        mocks.resolve.mockResolvedValue({ kind: 'ok', source: { filePath: 'remote:k:1-SNAPSHOT-v3', isRemoteOnly: true } });
+        item.attachmentSyncedHash = null;
+        await seed(false);
+        await notify();
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+
+        Object.assign(cache, { version: 4, md5: 'b4119f76', mtime: 200 });
+        mocks.resolve.mockResolvedValue({ kind: 'ok', source: { filePath: 'remote:k:1-SNAPSHOT-v4', isRemoteOnly: true } });
+        await notify();
+        expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'document_extract' })]);
+    });
+
+    it('adopts a remote identity recorded without the server md5 instead of re-extracting', async () => {
+        (Zotero as any).Sync = { Data: { Local: {
+            getLatestCacheObjectVersion: async () => 3,
+            getCacheObject: async () => ({ data: { md5: 'b3cac481', mtime: 100 } }),
+        } } };
+        mocks.resolve.mockResolvedValue({ kind: 'ok', source: { filePath: 'remote:k:1-SNAPSHOT-v3', isRemoteOnly: true } });
+        item.attachmentSyncedHash = null;
+        await seed(false);
+        const schema = expectedExtractionSchemaVersion(mocks.kind as any);
+        await connection.queryAsync('UPDATE attachment_processing_state SET extraction_source = ?',
+            [JSON.stringify([mocks.kind, schema, 'remote', null, null])]);
+
+        await notify();
+
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect((await db.getAttachmentProcessingState(1, item.key))?.extractionSource)
+            .toBe(JSON.stringify([mocks.kind, schema, 'remote', 'b3cac481', 100]));
+    });
+
     it('does not interpret a failed stat as changed content', async () => {
         await seed();
         mocks.stat.mockRejectedValue(new Error('temporarily inaccessible'));

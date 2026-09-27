@@ -29,6 +29,7 @@ import type { BeaverExtractResult } from '../../beaver-extract/schema';
 import type { PageGeometry } from '@beaver/agent-core/extract/types';
 import type { DocumentCacheExtractionMode } from '../database';
 import { buildExtractedDocumentCacheMetadata } from '../documentExtractionCore';
+import { getRemoteFileHash } from '../documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 /** Extraction modes populated so neither read path re-extracts the original. */
@@ -121,7 +122,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
     // artifact before allowing any old text to be stamped with that identity.
     const sourceStillMatches = async (): Promise<boolean> => {
         try {
-            const hash = args.isRemoteOnly ? item.attachmentSyncedHash : await item.attachmentHash;
+            const hash = args.isRemoteOnly ? await getRemoteFileHash(item) : await item.attachmentHash;
             return hash === args.expectedFileHash;
         } catch {
             return false;
