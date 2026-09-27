@@ -65,18 +65,29 @@ const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images
 //     zero-width boxes at its end, so `text` and `chars` stay in lockstep.
 //     Preserving them also loses the word space after a word-final ligature
 //     ("cutoffof"), because MuPDF adds no synthetic space after U+FB0x.
-//   - use-known-glyph-outlines (fork-local, like the next; older WASM builds
-//     ignore both): symbol fonts often draw a symbol in a slot
+//   - use-known-glyph-outlines (fork-local, like the three below; older WASM
+//     builds ignore them): symbol fonts often draw a symbol in a slot
 //     whose glyph name or ToUnicode says otherwise (an Elsevier font's "m"
 //     draws μ, so "20 μg" reads "20 mg"; its ToUnicode maps "=" to "¼"). No
 //     U+FFFD appears, so the recovery path below never sees it. MuPDF replaces
 //     the character when the glyph's outline is in a reviewed table of known
 //     symbol outlines.
+//     The table also repairs U+FFFD, control characters and Private Use Area
+//     values in fonts with a ToUnicode CMap and in CID fonts: a Calibri "ti"
+//     ligature with no ToUnicode entry, Elsevier's fi/fl ligatures and Adobe
+//     Pro figures at private-use values.
+//   - map-symbol-private-use: Word maps Symbol-font glyphs to U+F020-U+F0FF
+//     ("fold-change \uF0B11"); the Symbol encoding gives "±".
+//   - use-glyph-name-for-garbage: U+FFFD, control and Private Use values are
+//     repaired from an exact Adobe Glyph List glyph name ("Asmall" is a small
+//     capital a, "f_i" a ligature). Plain letter or digit names are not used,
+//     so unmapped text layers still reach the recovery path below.
 //   - space-after-symbols: MuPDF otherwise never turns a word gap after a math
 //     operator, arrow or geometric shape into a space ("○Lead contact").
 // Control characters are replaced in the final result under the same switch
 // (`replaceControlCharsInResult`, ops.ts).
-const TEXT_REPAIR_OPTIONS = "use-known-glyph-outlines,space-after-symbols";
+const TEXT_REPAIR_OPTIONS =
+    "use-known-glyph-outlines,map-symbol-private-use,use-glyph-name-for-garbage,space-after-symbols";
 function withTextRepair(options: string, textRepair: boolean): string {
     return textRepair ? `${options},${TEXT_REPAIR_OPTIONS}` : options;
 }
