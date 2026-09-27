@@ -3,6 +3,11 @@ import {
     CoordOrigin,
 } from "@beaver/agent-core/types/citations";
 import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+import type { PageLocation } from "@beaver/agent-core/types/citations";
+import type {
+    CreatedAnnotationResult,
+    HighlightAnnotationItem,
+} from "@beaver/agent-core/types/agentActions/createAnnotations";
 import { NotePosition } from "@beaver/agent-core/types/agentActions/annotations";
 import { PageGeometry } from "@beaver/agent-core/extract/types";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
@@ -94,6 +99,13 @@ export interface CreateHighlightInput {
     pageLabel?: string | null;
     /** Backend-supplied per-page cumulative character offset in reading order. */
     readingOrderOffset?: number | null;
+    /**
+     * Boxes on page `pageIndex + 1` for a highlight that continues across the
+     * page break. Stored as `position.nextPageRects`, the way Zotero's reader
+     * stores a selection spanning two pages. Any non-null value requests a
+     * continuation, which must convert to at least one rect.
+     */
+    nextPageBoxes?: BoundingBox[] | null;
     /** Tags applied to the created annotation. */
     tags?: string[];
 }
@@ -359,23 +371,67 @@ export async function getPageGeometryForAttachment(
     );
 }
 
+export type HighlightPageSpanErrorCode =
+    | "highlight_spans_too_many_pages"
+    | "highlight_pages_not_consecutive";
+
+/** A PDF highlight whose pages cannot be stored as one Zotero annotation. */
+export class HighlightPageSpanError extends Error {
+    readonly code: HighlightPageSpanErrorCode;
+
+    constructor(code: HighlightPageSpanErrorCode, message: string) {
+        super(message);
+        this.name = "HighlightPageSpanError";
+        this.code = code;
+    }
+}
+
+/** The pages one PDF highlight annotation covers. */
+export interface HighlightPageSpan {
+    /** The page the annotation lives on (`position.pageIndex`). */
+    first: PageLocation;
+    /** Its continuation on `first.page_idx + 1` (`position.nextPageRects`). */
+    next: PageLocation | null;
+}
+
 /**
- * Suffix the comment of a highlight that spans several pages with its part
- * position, e.g. "Key finding (2/3)".
+ * Fold a highlight's page locations into the pages of one Zotero annotation.
  *
- * A Zotero annotation cannot span pages, so one requested highlight becomes one
- * annotation per page it touches. Without the suffix those parts carry an
- * identical comment and read as duplicates in the annotation list. Returns the
- * comment unchanged for single-page highlights and for blank comments.
+ * Zotero stores a highlight on at most two consecutive pages: `rects` on
+ * `pageIndex` and `nextPageRects` on `pageIndex + 1`. Locations on the same
+ * page are merged; the first location seen on a page keeps its label and
+ * reading-order offset. Throws HighlightPageSpanError for three or more
+ * pages, or two pages that are not consecutive.
  */
-export function highlightPartComment(
-    comment: string | null | undefined,
-    partIndex: number,
-    partCount: number,
-): string {
-    const base = comment ?? "";
-    if (partCount <= 1 || !base.trim()) return base;
-    return `${base} (${partIndex + 1}/${partCount})`;
+export function highlightPageSpan(locations: readonly PageLocation[]): HighlightPageSpan {
+    const byPage = new Map<number, PageLocation>();
+    for (const location of locations) {
+        const existing = byPage.get(location.page_idx);
+        if (existing) {
+            existing.boxes = [...(existing.boxes ?? []), ...(location.boxes ?? [])];
+        } else {
+            byPage.set(location.page_idx, { ...location, boxes: [...(location.boxes ?? [])] });
+        }
+    }
+    const pages = [...byPage.values()].sort((a, b) => a.page_idx - b.page_idx);
+    if (pages.length === 0) {
+        throw new Error("A highlight needs at least one page location");
+    }
+    if (pages.length > 2) {
+        throw new HighlightPageSpanError(
+            "highlight_spans_too_many_pages",
+            `A highlight can cover at most two consecutive pages; this one covers ${pages.length} pages. `
+                + "Split it into separate highlights.",
+        );
+    }
+    if (pages.length === 2 && pages[1].page_idx !== pages[0].page_idx + 1) {
+        throw new HighlightPageSpanError(
+            "highlight_pages_not_consecutive",
+            `A highlight can cover at most two consecutive pages; pages ${pages[0].page_idx + 1} `
+                + `and ${pages[1].page_idx + 1} are not consecutive.`,
+        );
+    }
+    return { first: pages[0], next: pages[1] ?? null };
 }
 
 /**
@@ -411,18 +467,41 @@ export function applyAnnotationPlacement(
     item.annotationPosition = placement.position;
 }
 
-/** Placement of a PDF highlight over the given boxes. */
+/**
+ * Placement of a PDF highlight over the given boxes.
+ *
+ * `nextPageGeometry` is the geometry of page `pageIndex + 1`, required when
+ * `input.nextPageBoxes` is set. The position is always built from
+ * scratch, so a placement without a continuation never carries
+ * `nextPageRects` over from an annotation's previous position.
+ */
 export function buildHighlightPlacement(
     input: Pick<
         CreateHighlightInput,
-        "pageIndex" | "boxes" | "text" | "pageLabel" | "readingOrderOffset"
+        "pageIndex" | "boxes" | "text" | "pageLabel" | "readingOrderOffset" | "nextPageBoxes"
     >,
     geometry: PageGeometry,
+    nextPageGeometry?: PageGeometry | null,
 ): AnnotationPlacement {
     const rects = convertHighlightBoxesToRects(input.boxes, geometry);
     if (rects.length === 0) {
         throw new Error("Highlight annotation produced no rects");
     }
+    let nextPageRects: number[][] = [];
+    if (input.nextPageBoxes) {
+        if (!nextPageGeometry) {
+            throw new Error("Highlight continuation needs the next page's geometry");
+        }
+        nextPageRects = convertHighlightBoxesToRects(input.nextPageBoxes, nextPageGeometry);
+        // Saving without it would report a two-page highlight that covers
+        // only its first page.
+        if (nextPageRects.length === 0) {
+            throw new Error("Highlight continuation on the next page produced no rects");
+        }
+    }
+    const position = nextPageRects.length > 0
+        ? { pageIndex: input.pageIndex, rects, nextPageRects }
+        : { pageIndex: input.pageIndex, rects };
     return {
         text: input.text ?? "",
         pageLabel: resolvedAnnotationPageLabel(input.pageIndex, input.pageLabel),
@@ -432,7 +511,7 @@ export function buildHighlightPlacement(
             rect: rects[0],
             readingOrderOffset: input.readingOrderOffset,
         }),
-        position: JSON.stringify({ pageIndex: input.pageIndex, rects }),
+        position: JSON.stringify(position),
     };
 }
 
@@ -494,6 +573,9 @@ export async function createHighlightAnnotation(
         attachment,
         input.pageIndex,
     );
+    const nextPageGeometry = input.nextPageBoxes
+        ? await getPageGeometryForAttachment(attachment, input.pageIndex + 1)
+        : null;
 
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
@@ -501,10 +583,54 @@ export async function createHighlightAnnotation(
     item.annotationType = "highlight";
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    applyAnnotationPlacement(item, buildHighlightPlacement(input, geometry));
+    applyAnnotationPlacement(item, buildHighlightPlacement(input, geometry, nextPageGeometry));
     await saveBeaverAnnotation(item, input.tags);
 
     return createdAnnotationReference(attachment, item);
+}
+
+/**
+ * Create the one Zotero annotation for a PDF highlight item.
+ *
+ * A highlight crossing a page break becomes a single annotation on its first
+ * page with the continuation in `nextPageRects`. Its label, sort index and
+ * reading-order offset come from the first page. Throws
+ * HighlightPageSpanError when the item's pages cannot form one annotation.
+ */
+export async function createPdfHighlightForItem(
+    attachment: Zotero.Item,
+    item: Pick<
+        HighlightAnnotationItem,
+        "client_item_id" | "index" | "loc_raw" | "text" | "color" | "comment" | "title" | "page_locations" | "page_label"
+    >,
+    tags?: string[],
+): Promise<CreatedAnnotationResult> {
+    const { first, next } = highlightPageSpan(item.page_locations ?? []);
+    // The item-level label, when present, is the first page's label, which is
+    // the page the annotation lives on.
+    const pageLabel = first.page_label ?? item.page_label ?? null;
+    const ref = await createHighlightAnnotation(attachment, {
+        pageIndex: first.page_idx,
+        boxes: first.boxes ?? [],
+        nextPageBoxes: next?.boxes ?? null,
+        text: item.text ?? "",
+        color: item.color,
+        comment: item.comment ?? item.title,
+        pageLabel,
+        readingOrderOffset: first.reading_order_offset ?? null,
+        tags,
+    });
+    return {
+        client_item_id: item.client_item_id,
+        index: item.index,
+        loc_raw: item.loc_raw,
+        library_id: ref.library_id,
+        zotero_key: ref.zotero_key,
+        library_ref: ref.library_ref,
+        page_idx: first.page_idx,
+        page_label: resolvedAnnotationPageLabel(first.page_idx, pageLabel),
+        ...(next ? { page_count: 2 } : {}),
+    };
 }
 
 /**

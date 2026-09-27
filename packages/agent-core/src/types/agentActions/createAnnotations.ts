@@ -37,8 +37,8 @@ export interface BackendLocator {
 export interface HighlightAnnotationItem {
     index: number;
     /**
-     * Opaque backend correlation token. One token can produce multiple
-     * CreatedAnnotationResult rows when a highlight spans multiple pages.
+     * Opaque backend correlation token. Older clients wrote one annotation per
+     * page, so one token can map to several CreatedAnnotationResult rows.
      */
     client_item_id: string;
     title: string;
@@ -88,15 +88,21 @@ export interface CreatedAnnotationResult extends ZoteroItemReference {
     index: number;
     loc_raw: string;
     /**
-     * 0-based PDF page this annotation was written to. A highlight spanning
-     * several pages produces one row per page, all sharing `client_item_id`;
-     * these fields are what let a consumer tell those rows apart. Absent for
-     * EPUB / snapshot annotations, which are always 1:1, and absent on rows
-     * created before the fields existed.
+     * 0-based PDF page this annotation was written to (its first page when it
+     * continues onto the next one). Older clients wrote a highlight spanning
+     * several pages as one row per page, all sharing `client_item_id`; these
+     * fields are what let a consumer tell those rows apart. Absent for EPUB /
+     * snapshot annotations, which are always 1:1, and absent on rows created
+     * before the fields existed.
      */
     page_idx?: number;
     /** Page label Zotero stored on the annotation (PDF label, else page number). */
     page_label?: string | null;
+    /**
+     * PDF pages this annotation covers: 2 for a highlight that continues onto
+     * `page_idx + 1` (`position.nextPageRects`). Absent means one page.
+     */
+    page_count?: number;
 }
 
 export interface FailedAnnotationResult {
