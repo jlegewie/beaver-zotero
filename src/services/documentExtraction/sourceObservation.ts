@@ -71,3 +71,43 @@ export function isLegacyRemoteIdentity(stored: string, observed: string): boolea
         return false;
     }
 }
+
+/** Local file location and signature recorded in a source identity. */
+export interface LocalSourceLocation {
+    filePath: string;
+    mtimeMs: number;
+    sizeBytes: number;
+}
+
+function parseLocalIdentity(identity: string): { kind: unknown; schema: unknown; location: LocalSourceLocation } | null {
+    try {
+        const parts = JSON.parse(identity);
+        if (!Array.isArray(parts) || parts.length !== 5) return null;
+        const [kind, schema, filePath, mtimeMs, sizeBytes] = parts;
+        if (typeof filePath !== 'string' || filePath === 'remote') return null;
+        if (typeof mtimeMs !== 'number' || typeof sizeBytes !== 'number') return null;
+        return { kind, schema, location: { filePath, mtimeMs, sizeBytes } };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * The before/after locations when two local identities of the same kind and
+ * schema differ only in path and/or mtime, with the same size. Such a change
+ * (a rename, a move, or a rewritten mtime) may leave the bytes untouched, so the
+ * caller can compare content hashes before treating it as new content.
+ */
+export function relocatedLocalIdentity(
+    stored: string,
+    observed: string,
+): { from: LocalSourceLocation; to: LocalSourceLocation } | null {
+    const before = parseLocalIdentity(stored);
+    const after = parseLocalIdentity(observed);
+    if (!before || !after) return null;
+    if (before.kind !== after.kind || before.schema !== after.schema) return null;
+    if (before.location.sizeBytes !== after.location.sizeBytes) return null;
+    if (before.location.filePath === after.location.filePath
+        && before.location.mtimeMs === after.location.mtimeMs) return null;
+    return { from: before.location, to: after.location };
+}

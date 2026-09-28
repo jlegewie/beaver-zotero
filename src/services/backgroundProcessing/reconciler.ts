@@ -8,7 +8,11 @@ import { expectedExtractionSchemaVersion } from '../documentExtraction/shared/ex
 import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
 import { recordReadingOutcome } from '../documentExtraction/readingOutcome';
 import { loadAttachmentData, resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
-import { isLegacyRemoteIdentity, observeAttachmentSource } from '../documentExtraction/sourceObservation';
+import {
+    isLegacyRemoteIdentity,
+    observeAttachmentSource,
+    relocatedLocalIdentity,
+} from '../documentExtraction/sourceObservation';
 import { OCR_ENGINE_VERSION, OCR_PRIORITY_BACKFILL, OCR_PRIORITY_ON_DEMAND } from '../ocr/constants';
 import type { AttachmentRef } from './issues';
 import { enqueueOcrJob, maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
@@ -685,6 +689,14 @@ export class ReconcilerService {
                 if (!adopted) return;
                 row = { ...row, extractionSource: observation.identity };
             }
+            if (observation && row.extractionSource != null && !kindChanged
+                && observation.identity !== row.extractionSource) {
+                const relocation = await this.relocateUnchangedBytes(db, item, row, observation.identity, jobs);
+                if (relocation === 'stale') return;
+                if (relocation === 'relocated') {
+                    row = { ...row, extractionSource: observation.identity, fileMtimeMs: observation.signature!.mtime_ms };
+                }
+            }
             const changed = observation && row.extractionSource != null && observation.identity !== row.extractionSource;
             // Legacy successes can adopt a matching local signature without work.
             // Unknown failures are rechecked only by a deep pass, never by reading activity.
@@ -793,6 +805,70 @@ export class ReconcilerService {
                 now: Date.now(),
             });
         }
+    }
+
+    /**
+     * Keep a successful extraction when only the file's path or mtime changed:
+     * a rename, a move, or a rewritten mtime. The bytes are compared with the
+     * recorded hash; on a match the document cache and the ledger adopt the new
+     * location, so nothing is extracted, OCR'd or indexed again. `changed`
+     * leaves the attachment to the regular reset; `stale` means the row or the
+     * library scope moved on while the file was hashed.
+     *
+     * A cache entry already discarded before this check (a read after the move
+     * no longer matched it) is rebuilt by a cache-preparation job, which keeps
+     * the ledger and index state, including a retained OCR hash.
+     */
+    private async relocateUnchangedBytes(
+        db: QueueDB,
+        item: Zotero.Item,
+        row: AttachmentProcessingStateRecord,
+        observed: string,
+        jobs: BackgroundJobInput[],
+    ): Promise<'relocated' | 'changed' | 'stale'> {
+        if (row.extractStatus !== 'done' || !row.fileHash || row.extractionSource == null) return 'changed';
+        const relocation = relocatedLocalIdentity(row.extractionSource, observed);
+        if (!relocation) return 'changed';
+        let fileHash: string | null = null;
+        try {
+            fileHash = await item.attachmentHash || null;
+        } catch (error) {
+            logger(`ReconcilerService: attachmentHash failed for ${item.libraryID}-${item.key}: ${error}`, 2);
+        }
+        if (fileHash !== row.fileHash) return 'changed';
+        // Bytes replaced while they were hashed must not inherit the old verdict.
+        const after = await observeAttachmentSource(item, row.contentKind);
+        if (after?.identity !== observed) return 'changed';
+        if (!isBackgroundProcessingLibraryEnabled(item.libraryID)) return 'stale';
+        // The cache is relocated first: the verified bytes make it valid for the
+        // new location even if the ledger row changes before its own update.
+        const cached = await Zotero.Beaver?.documentCache?.relocateSource(
+            { libraryId: item.libraryID, zoteroKey: item.key }, relocation.from, relocation.to);
+        const relocated = await db.relocateAttachmentExtractionSource({
+            libraryId: item.libraryID,
+            zoteroKey: item.key,
+            expectedSource: row.extractionSource,
+            fileHash,
+            source: observed,
+            fileMtimeMs: relocation.to.mtimeMs,
+        });
+        if (!relocated) return 'stale';
+        const preparable = row.ocrStatus === 'na'
+            || (row.ocrStatus === 'done' && Zotero.Beaver?.hasOcrAccess === true);
+        if (cached === 'missing' && preparable) {
+            jobs.push({
+                jobType: 'document_extract',
+                libraryId: item.libraryID,
+                itemId: item.id,
+                zoteroKey: item.key,
+                contentKind: row.contentKind,
+                payloadKind: 'structured',
+                priority: BACKGROUND_EXTRACT_PRIORITY,
+                payload: { ...buildBackgroundExtractPayload(row.contentKind), prepare_cache: true },
+                now: Date.now(),
+            });
+        }
+        return 'relocated';
     }
 
     /**

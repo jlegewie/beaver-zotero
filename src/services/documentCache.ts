@@ -1055,6 +1055,38 @@ export class DocumentCache {
         }
     }
 
+    /**
+     * Keep one attachment's cached content, including a protected OCR
+     * preparation, after its file moved or its mtime changed. The caller must
+     * have verified that the bytes at `to` equal those cached for `from`.
+     *
+     * `current`: a structured payload already records `to` (a read after the
+     * move rebuilt it). `missing`: there is no structured payload for either
+     * location, for example because a read after the move discarded it.
+     */
+    async relocateSource(
+        ref: DocumentRef,
+        from: { filePath: string; mtimeMs: number; sizeBytes: number },
+        to: { filePath: string; mtimeMs: number },
+    ): Promise<'relocated' | 'current' | 'missing'> {
+        let outcome: 'relocated' | 'current' | 'missing' = 'missing';
+        await this.trackCacheWrite(async () => {
+            try {
+                if (await this.db.relocateDocumentCacheSource(ref.libraryId, ref.zoteroKey, from, to)) {
+                    const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+                    outcome = payload ? 'relocated' : 'missing';
+                    return;
+                }
+                const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+                if (payload?.sourceFilePath === to.filePath && payload.sourceFileSignature.mtime_ms === to.mtimeMs
+                    && payload.sourceFileSignature.size_bytes === from.sizeBytes) outcome = 'current';
+            } catch (error) {
+                logger(`DocumentCache.relocateSource error: ${error}`, 1);
+            }
+        }, true, { id: 0, libraryID: ref.libraryId, key: ref.zoteroKey });
+        return outcome;
+    }
+
     /** Discard a rejected native structured payload only if the inspected row is still current. */
     async discardRejectedStructuredPayload(
         ref: DocumentRef,
