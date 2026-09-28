@@ -18,10 +18,12 @@ One plugin-owned deadline covers attachment resolution and PDF extraction.
 Account or scope revocation rejects stale results; background extraction treats
 that rejection as cancellation and releases the job without consuming a retry.
 
-`addon.background` registers OCR (3 local jobs), cloud fulltext upsert (2 jobs),
-and untag (1 job) alongside the extraction lane (1 job). Backend OCR waits release
-their local slots. A shared background MuPDF mutex orders OCR re-extraction and
-document extraction at whole-job granularity; the bounded worker queue orders
+`addon.background` registers OCR (3 local jobs), cloud fulltext upsert, and untag
+(1 job) alongside the extraction lane (1 job). The upsert lane follows the per-user
+limit that `/index/requirements` advertises (4 when absent, at most 8), and keeps
+up to 4 jobs running while the user is active; the other lanes take backlog work
+only while the system is idle. Backend OCR waits release their local slots. A
+shared background MuPDF mutex orders OCR re-extraction and document extraction at whole-job granularity; the bounded worker queue orders
 individual operations within those jobs and interactive requests. The existing
 idle, sync, priority, startup-delay, busy,
 preference, access and entitlement gates still apply with zero main windows.

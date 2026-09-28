@@ -3,31 +3,56 @@ import { searchIndexApiClient } from "../searchIndex/searchIndexApiClient";
 import { INDEX_RECONCILE_INTERVAL_MS } from "../backgroundProcessing/constants";
 import { reconcileRemoteRefs } from "../backgroundProcessing/remoteRefsReconcile";
 import { logger } from "@beaver/agent-core/platform/logger";
+import type { LaneCapacity } from "../backgroundExtractor";
 
 /**
- * Concurrent cloud-index upserts. Sized to where THIS pipeline saturates, not
- * the backend's dependencies: the embedding and vector-store services both
- * scale well past this, but `document_extract` feeds this lane from a single
- * serial MuPDF worker, so slots beyond ~4 have nothing to do. Must stay in
- * sync with the backend's own per-user in-flight guard.
+ * Concurrent cloud-index upserts. The backend rejects a user's upserts beyond
+ * its own per-user in-flight guard and advertises that limit in
+ * `/index/requirements`; the lane follows it up to this ceiling. Upserts are
+ * network-bound, so the lane outpaces the single serial extraction worker
+ * only when it has several requests in flight.
  */
-const INDEX_LANE_MAX_IN_FLIGHT = 4;
+const INDEX_LANE_MAX_IN_FLIGHT = 8;
+/** Lane width until the backend advertises its limit, and for backends that don't. */
+const INDEX_LANE_DEFAULT_IN_FLIGHT = 4;
+/**
+ * Lane width while the user is active. Upserts are mostly network waits, so
+ * they keep running outside idle time. Half the idle width keeps their
+ * main-thread work (cache read, hashing, compression) small and leaves
+ * connections to the API host free for chat requests.
+ */
+const INDEX_LANE_ACTIVE_IN_FLIGHT = 4;
 const CLEANUP_RESTORE_INTERVAL_MS = 6 * 60 * 60_000;
+
+/** Upsert lane limits for a backend-advertised per-user limit. */
+export function indexLaneCapacity(advertised?: number | null): LaneCapacity {
+    const maxInFlight = typeof advertised === "number" && Number.isFinite(advertised) && advertised >= 1
+        ? Math.min(INDEX_LANE_MAX_IN_FLIGHT, Math.floor(advertised))
+        : INDEX_LANE_DEFAULT_IN_FLIGHT;
+    return {
+        maxInFlight,
+        activeMaxInFlight: Math.min(maxInFlight, INDEX_LANE_ACTIVE_IN_FLIGHT),
+    };
+}
 
 export function startFulltextUpsertLane(
     searchableLibraryIds: number[],
     hasAccess: boolean,
 ): () => Promise<void> {
     let cancelled = false;
-    const executor = new FulltextUpsertExecutor();
+    const dispatcher = Zotero.Beaver.backgroundExtractor!;
+    const executor = new FulltextUpsertExecutor(searchIndexApiClient, "fulltext_upsert", {
+        onRequirements: (requirements) => {
+            if (cancelled) return;
+            dispatcher.setLaneCapacity(executor.jobType, executor,
+                indexLaneCapacity(requirements.upsert_max_in_flight));
+        },
+    });
     const untagExecutor = new FulltextUpsertExecutor(
         searchIndexApiClient,
         "fulltext_untag",
     );
-    const dispatcher = Zotero.Beaver.backgroundExtractor!;
-    if (hasAccess) dispatcher.registerExecutor(executor, {
-        maxInFlight: INDEX_LANE_MAX_IN_FLIGHT,
-    });
+    if (hasAccess) dispatcher.registerExecutor(executor, indexLaneCapacity());
     dispatcher.registerExecutor(untagExecutor, { maxInFlight: 1, survivesLibraryExclusion: true });
     let sweeping = false;
     let sweep: Promise<void> | undefined;

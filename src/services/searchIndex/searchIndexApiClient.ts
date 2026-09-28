@@ -19,9 +19,20 @@ export const SEARCH_INDEX_API_PREFIX = '/api/v1/index';
  */
 const UPSERT_TIMEOUT_MS = 360_000;
 
+/**
+ * Compression for upload bodies. Uploads also run while the user is active, so
+ * a large document is deflated at the fastest level (about twice as fast as
+ * the default, for a body roughly a quarter larger) in short main-thread
+ * slices. This runs in the plugin realm, whose timers are not throttled, so
+ * the extra yields are cheap.
+ */
+const UPSERT_GZIP_OPTIONS = { level: 1, yieldAfterChars: 256 * 1024 };
+
 export interface IndexRequirements {
     index_version: number;
     extract_schema_versions: Record<'pdf' | 'epub' | 'snapshot', string[]>;
+    /** Per-user upsert in-flight limit; older backends omit it. */
+    upsert_max_in_flight?: number;
 }
 
 export interface IndexVerifyResponse {
@@ -130,7 +141,7 @@ export class SearchIndexApiClient extends ApiService {
             : request;
         return await this.postRaw<IndexUpsertResponse>(
             `${SEARCH_INDEX_API_PREFIX}/upsert`,
-            await gzipJsonValueChunked(wireRequest),
+            await gzipJsonValueChunked(wireRequest, UPSERT_GZIP_OPTIONS),
             { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
             { timeoutMs: UPSERT_TIMEOUT_MS },
         );
