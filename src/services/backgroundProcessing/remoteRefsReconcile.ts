@@ -1,6 +1,7 @@
 import type { BackgroundJobInput } from '../database';
 import { searchIndexApiClient, type IndexVerifyResponse } from '../searchIndex/searchIndexApiClient';
 import { getIndexScopeRef, getZoteroUserIdentifier } from '../../utils/zoteroUtils';
+import { expectedExtractionSchemaVersion } from '../documentExtraction/shared/extractionSchemaVersions';
 import {
     BACKGROUND_UPSERT_PRIORITY,
 } from './constants';
@@ -43,8 +44,14 @@ export async function reconcileRemoteRefs(
         // sweep will verify their completed result and still repair real drift.
         const pendingUpserts = await db.getPendingFulltextUpsertKeys();
         const local = await db.getAttachmentProcessingStatesByLibrary(libraryId);
-        const candidates = local.filter((row) => row.structuredDocumentHash && row.extractStatus === 'done'
-            && !pendingUpserts.has(`${libraryId}/${row.zoteroKey}`));
+        // Rows extracted under an earlier schema are never indexed: the
+        // reconciler resets them for re-extraction, which queues a fresh upsert.
+        const candidates = local.filter((row) => {
+            const expectedSchema = expectedExtractionSchemaVersion(row.contentKind);
+            return row.structuredDocumentHash && row.extractStatus === 'done'
+                && (!expectedSchema || row.extractSchemaVersion === expectedSchema)
+                && !pendingUpserts.has(`${libraryId}/${row.zoteroKey}`);
+        });
         const verified = new Map<string, IndexVerifyResponse['refs'][number]>();
         for (let offset = 0; offset < candidates.length; offset += INDEX_VERIFY_BATCH_SIZE) {
             if (isCancelled() || !isBackgroundProcessingLibraryEnabled(libraryId)) return;
