@@ -2682,6 +2682,28 @@ export class BeaverDB {
         );
     }
 
+    /**
+     * Move a successful extraction to a new path or mtime of the same bytes.
+     * Applies only while the row still records `expectedSource` and the
+     * verified `fileHash`, so every downstream stage stays as it is.
+     */
+    public async relocateAttachmentExtractionSource(input: {
+        libraryId: number;
+        zoteroKey: string;
+        expectedSource: string;
+        fileHash: string;
+        source: string;
+        fileMtimeMs: number;
+    }): Promise<boolean> {
+        return await this.executeChangedRow(
+            `UPDATE attachment_processing_state SET extraction_source = ?, file_mtime_ms = ?
+             WHERE library_id = ? AND zotero_key = ? AND extraction_source = ?
+               AND extract_status = 'done' AND file_hash = ?`,
+            [input.source, input.fileMtimeMs, input.libraryId, input.zoteroKey,
+                input.expectedSource, input.fileHash],
+        );
+    }
+
     public async resetAttachmentOcr(
         libraryId: number,
         zoteroKey: string,
@@ -4016,6 +4038,37 @@ export class BeaverDB {
             [libraryId, zoteroKey],
         );
         return payloads;
+    }
+
+    /**
+     * Point one attachment's cache metadata and payloads at a new path/mtime.
+     * Only rows that still record the `from` location are changed.
+     */
+    public async relocateDocumentCacheSource(
+        libraryId: number,
+        zoteroKey: string,
+        from: { filePath: string; mtimeMs: number; sizeBytes: number },
+        to: { filePath: string; mtimeMs: number },
+    ): Promise<boolean> {
+        let relocated = false;
+        await this.conn.executeTransaction(async () => {
+            const metadata = await this.getDocumentCacheMetadataByKey(libraryId, zoteroKey);
+            if (!metadata || metadata.filePath !== from.filePath
+                || metadata.fileSignature.mtime_ms !== from.mtimeMs
+                || metadata.fileSignature.size_bytes !== from.sizeBytes) return;
+            await this.queryAsync(
+                `UPDATE document_cache_payloads SET source_file_path = ?, source_file_mtime_ms = ?
+                 WHERE metadata_id = ? AND source_file_path = ?
+                   AND source_file_mtime_ms = ? AND source_file_size_bytes = ?`,
+                [to.filePath, to.mtimeMs, metadata.id, from.filePath, from.mtimeMs, from.sizeBytes],
+            );
+            relocated = await this.executeChangedRow(
+                `UPDATE document_cache_metadata SET file_path = ?, file_mtime_ms = ?
+                 WHERE id = ?`,
+                [to.filePath, to.mtimeMs, metadata.id],
+            );
+        });
+        return relocated;
     }
 
     /** Delete a metadata row only if it still matches the inspected record. */

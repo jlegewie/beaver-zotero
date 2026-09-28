@@ -235,6 +235,64 @@ describe('DocumentCache payloads', () => {
         });
     });
 
+    describe('relocated source', () => {
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const renamedPath = '/tmp/renamed.pdf';
+        const from = { filePath: sourcePath, mtimeMs: 10, sizeBytes: 3 };
+
+        it('serves the cached result from the new path and mtime', async () => {
+            await putStructured();
+            files.set(renamedPath, files.get(sourcePath)!);
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 20, size: 3 } as any);
+
+            expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 20 })).toBe('relocated');
+
+            expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+        });
+
+        it('keeps a protected OCR preparation servable and re-preparable after a rename', async () => {
+            await putStructured(structuredResult, 'ocr');
+            files.set(renamedPath, files.get(sourcePath)!);
+
+            await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 });
+
+            expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+            await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+            expect(await cache.getProtectedRepreparation(ref, renamedPath)).toEqual({ pageCount: 1, sourceSizeBytes: 3 });
+        });
+
+        it('leaves an entry recorded for a different source untouched', async () => {
+            await putStructured();
+
+            expect(await cache.relocateSource(ref, { ...from, mtimeMs: 9 },
+                { filePath: renamedPath, mtimeMs: 20 })).toBe('missing');
+
+            const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+            expect(metadata).toMatchObject({ filePath: sourcePath, fileSignature: { mtime_ms: 10, size_bytes: 3 } });
+            expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(structuredResult);
+        });
+
+        it('reports a payload already rebuilt for the new location as current', async () => {
+            files.set(renamedPath, files.get(sourcePath)!);
+            await cache.putResult({
+                item: createCacheAttachment(), filePath: renamedPath, mode: 'structured',
+                sourceSizeBytes: 3, contentType: 'application/pdf', result: structuredResult,
+                metadata: { pageCount: 1, pageLabels: { '0': '1' }, pages: onePageGeometry },
+            });
+
+            expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 })).toBe('current');
+        });
+
+        it('reports a discarded entry as missing', async () => {
+            await putStructured(structuredResult, 'ocr');
+            files.set(renamedPath, files.get(sourcePath)!);
+            // A read at the new path before relocation discards the entry.
+            expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+            expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 })).toBe('missing');
+        });
+    });
+
     it('does not claim a deletion succeeded when its compare-and-set fails', async () => {
         await putStructured();
         const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
