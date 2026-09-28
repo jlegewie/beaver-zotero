@@ -29,7 +29,9 @@ vi.mock('../../../src/services/documentExtraction/ocrReextract', () => ({
     extractPdfBytesAndCacheAsOriginalAttachment: vi.fn(async () => ({ kind: 'ok', pageCount: 5 })),
 }));
 
-vi.mock('../../../src/services/documentExtraction/attachmentSource', () => ({
+vi.mock('../../../src/services/documentExtraction/attachmentSource', async (importOriginal) => ({
+    isFileAccessDeniedError: (await importOriginal<typeof import('../../../src/services/documentExtraction/attachmentSource')>())
+        .isFileAccessDeniedError,
     resolveAttachmentFileSource: vi.fn(async () => ({
         kind: 'ok',
         source: { kind: 'local', filePath: '/scan.pdf', isRemoteOnly: false },
@@ -862,6 +864,22 @@ describe('OcrExecutor', () => {
 
         expect(outcome).toEqual({ kind: 'complete', reason: 'no_file_hash' });
         expect(api.requestOcr).not.toHaveBeenCalled();
+    });
+
+    it('retries a local scan the OS refuses to read with a permission code the issues list recognises', async () => {
+        (globalThis as any).IOUtils.read = vi.fn(async () => {
+            throw Object.assign(new Error("Could not open `/scan.pdf' (NS_ERROR_FILE_ACCESS_DENIED)"), { name: 'NotAllowedError' });
+        });
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-denied', put_url: 'https://gcs/put' });
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toMatchObject({
+            kind: 'retry',
+            reason: 'ocr_local_read_failed',
+            error: 'ocr_local_read_failed: file_permission_denied',
+        });
+        expect(mockedPut).not.toHaveBeenCalled();
     });
 
     it('retries when the remote scan download fails on the upload path', async () => {

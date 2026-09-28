@@ -12,6 +12,7 @@ export type ProcessingIssueReason =
     | 'scanned'
     | 'no_text'
     | 'file_unavailable'
+    | 'permission_denied'
     | 'encrypted'
     | 'too_large'
     | 'unsupported'
@@ -72,9 +73,9 @@ export type ProcessingIssueSummary = Pick<ProcessingIssueGroup, 'reason' | 'coun
 
 /** Shared SQL inventory for counts and pages; no attachment rows cross into JS for counts. */
 export function processingIssuesSql(entitlements: IssueEntitlements): string {
-    const hasCodeSql = (code: string) => `(last_error = '${code}'
-        OR instr(last_error, '${code}:') = 1 OR instr(last_error, ': ${code}') > 0)`;
-    const anyCodeSql = (codes: string[]) => codes.map(hasCodeSql).join(' OR ');
+    const hasCodeSql = (code: string, column = 'last_error') => `(${column} = '${code}'
+        OR instr(${column}, '${code}:') = 1 OR instr(${column}, ': ${code}') > 0)`;
+    const anyCodeSql = (codes: string[]) => codes.map((code) => hasCodeSql(code)).join(' OR ');
     return `WITH observed AS (
         SELECT s.library_id, s.zotero_key, COALESCE(r.content_kind, s.content_kind) AS content_kind,
             CASE WHEN r.library_id IS NULL THEN s.extract_status
@@ -106,6 +107,7 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
                 WHEN ${hasCodeSql('low_confidence')} THEN 'no_text'
                 WHEN extract_status IN ('failed', 'skipped') THEN CASE
                     WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
+                    WHEN ${hasCodeSql(PERMISSION_DENIED_CODE)} THEN 'permission_denied'
                     WHEN ${hasCodeSql('encrypted')} THEN 'encrypted'
                     WHEN ${anyCodeSql(TOO_LARGE_CODES)} THEN 'too_large'
                     WHEN instr(last_error, 'unsupported_') = 1 OR instr(last_error, ': unsupported_') > 0 THEN 'unsupported'
@@ -116,6 +118,7 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
                 WHEN ocr_status = 'failed' THEN CASE
                     WHEN ${hasCodeSql('ocr_page_cap')} THEN 'ocr_page_cap'
                     WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
+                    WHEN ${hasCodeSql(PERMISSION_DENIED_CODE)} THEN 'permission_denied'
                     ELSE 'ocr_failed' END
                 WHEN ocr_status = 'needed' AND ${hasCodeSql('ocr_service_unavailable')} THEN 'ocr_unavailable'
                 WHEN ocr_status = 'needed' AND ${entitlements.hasOcrAccess ? 0 : 1} THEN 'scanned'
@@ -124,8 +127,11 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
         FROM observed
     ), dead AS (
         SELECT d.library_id, d.zotero_key, d.last_error, d.died_at AS timestamp,
-            CASE d.job_type WHEN 'document_extract' THEN 'extract_failed'
-                WHEN 'document_ocr' THEN 'ocr_failed' WHEN 'fulltext_upsert' THEN 'index_failed' END AS reason,
+            CASE WHEN d.job_type IN ('document_extract', 'document_ocr')
+                    AND ${hasCodeSql(PERMISSION_DENIED_CODE, 'd.last_error')} THEN 'permission_denied'
+                WHEN d.job_type = 'document_extract' THEN 'extract_failed'
+                WHEN d.job_type = 'document_ocr' THEN 'ocr_failed'
+                WHEN d.job_type = 'fulltext_upsert' THEN 'index_failed' END AS reason,
             ROW_NUMBER() OVER (PARTITION BY d.library_id, d.zotero_key ORDER BY d.died_at DESC, d.id DESC) AS rank
         FROM background_jobs_dead d
         JOIN ledger s ON s.library_id = d.library_id AND s.zotero_key = d.zotero_key
@@ -145,6 +151,7 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
 export const PROCESSING_ISSUE_REASON_ORDER: ProcessingIssueReason[] = [
     'scanned',
     'file_unavailable',
+    'permission_denied',
     'extract_failed',
     'no_text',
     'ocr_failed',
@@ -171,6 +178,7 @@ export const PROCESSING_ISSUE_REASON_ORDER: ProcessingIssueReason[] = [
 export const RETRYABLE_PROCESSING_ISSUE_REASONS: readonly ProcessingIssueReason[] = [
     'ocr_page_cap',
     'file_unavailable',
+    'permission_denied',
     'extract_failed',
     'ocr_failed',
     'ocr_unavailable',
@@ -185,6 +193,7 @@ export function isRetryableProcessingIssue(reason: ProcessingIssueReason): boole
 }
 
 const FILE_UNAVAILABLE_CODES = ['file_missing', 'download_failed', 'read_failed'];
+const PERMISSION_DENIED_CODE = 'file_permission_denied';
 const TOO_LARGE_CODES = ['file_too_large', 'too_many_pages'];
 const NO_TEXT_CODES = ['no_text_layer', 'empty_document', 'insufficient_text'];
 
@@ -222,6 +231,7 @@ export function classifyProcessingIssue(
     if (extractTerminal) {
         const error = row.lastError;
         if (hasAnyCode(error, FILE_UNAVAILABLE_CODES)) return 'file_unavailable';
+        if (hasCode(error, PERMISSION_DENIED_CODE)) return 'permission_denied';
         if (hasCode(error, 'encrypted')) return 'encrypted';
         if (hasAnyCode(error, TOO_LARGE_CODES)) return 'too_large';
         if (error && /(^|: )unsupported_/.test(error)) return 'unsupported';
@@ -233,7 +243,8 @@ export function classifyProcessingIssue(
 
     if (row.ocrStatus === 'failed') {
         if (hasCode(row.lastError, 'ocr_page_cap')) return 'ocr_page_cap';
-        return hasAnyCode(row.lastError, FILE_UNAVAILABLE_CODES) ? 'file_unavailable' : 'ocr_failed';
+        if (hasAnyCode(row.lastError, FILE_UNAVAILABLE_CODES)) return 'file_unavailable';
+        return hasCode(row.lastError, PERMISSION_DENIED_CODE) ? 'permission_denied' : 'ocr_failed';
     }
     if (row.ocrStatus === 'needed' && hasCode(row.lastError, 'ocr_service_unavailable')) return 'ocr_unavailable';
     if (row.ocrStatus === 'needed' && !entitlements.hasOcrAccess) return 'scanned';
@@ -288,13 +299,14 @@ export function groupProcessingIssues(
     for (const dead of deadLetters) {
         if (dead.libraryId == null || !dead.zoteroKey) continue;
         if (dead.jobType === 'fulltext_upsert' && !entitlements.hasSearchIndexAccess) continue;
+        const readStage = dead.jobType === 'document_extract' || dead.jobType === 'document_ocr';
         const reason: ProcessingIssueReason | null = dead.jobType === 'fulltext_upsert'
             ? 'index_failed'
-            : dead.jobType === 'document_ocr'
-                ? 'ocr_failed'
-                : dead.jobType === 'document_extract'
-                    ? 'extract_failed'
-                    : null;
+            : !readStage
+                ? null
+                : hasCode(dead.lastError, PERMISSION_DENIED_CODE)
+                    ? 'permission_denied'
+                    : dead.jobType === 'document_ocr' ? 'ocr_failed' : 'extract_failed';
         if (!reason) continue;
         add(reason, {
             libraryId: dead.libraryId,

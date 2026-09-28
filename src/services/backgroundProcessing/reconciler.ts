@@ -51,12 +51,14 @@ const IDLE_THRESHOLD_MS = 30_000;
  * Terminal reasons that say "the bytes were not reachable", not "these bytes
  * are unusable". Every one of them can stop being true without the attachment
  * itself changing: metadata syncs ahead of the upload backing it, a WebDAV
- * share or its configuration comes back, a user downloads the file later.
+ * share or its configuration comes back, a user downloads the file later or
+ * grants Zotero access to the folder holding it.
  */
 const RECOVERABLE_AVAILABILITY_ERRORS = [
     'file_missing',
     'download_failed',
     'read_failed',
+    'file_permission_denied',
 ];
 
 /**
