@@ -622,7 +622,7 @@ export class OcrExecutor implements JobExecutor {
         switch (request.status) {
             case 'disabled':
                 // Keep the stage retryable, but record why it is not active work.
-                // A later reconciliation will request OCR again when admission returns.
+                // The reconciler's periodic admission probe requests OCR again.
                 await ctx.db.markAttachmentOcrUnavailable(
                     job.item.libraryID,
                     job.item.key,
@@ -638,7 +638,7 @@ export class OcrExecutor implements JobExecutor {
             case 'failed':
                 return { outcome: this.failureOutcome(job, request.error) };
             case 'ready':
-                await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
+                await this.markAdmitted(job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} OCR cache hit; downloading searchable PDF`, 3);
                 if (request.get_url) return { getUrl: request.get_url };
                 return { outcome: { kind: 'retry', error: 'ocr_ready_without_url', reason: 'ocr_ready_without_url' } };
@@ -646,7 +646,7 @@ export class OcrExecutor implements JobExecutor {
                 if (!request.job_id || !request.put_url) {
                     return { outcome: { kind: 'retry', error: 'ocr_pending_without_put_url', reason: 'ocr_pending_without_put_url' } };
                 }
-                await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
+                await this.markAdmitted(job, ctx);
                 await this.upload(request.put_url, job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} marking OCR upload complete for backend job ${request.job_id}`, 3);
                 await ocrApiClient.markUploaded(request.job_id);
@@ -657,9 +657,16 @@ export class OcrExecutor implements JobExecutor {
                 if (!request.job_id) {
                     return { outcome: { kind: 'retry', error: 'ocr_queued_without_job_id', reason: 'ocr_queued_without_job_id' } };
                 }
-                await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
+                await this.markAdmitted(job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} joined queued OCR backend job ${request.job_id}`, 3);
                 return this.defer(request.job_id, job, recordId);
+        }
+    }
+
+    /** Clear this attachment's unavailable marker and resume the others it was parked with. */
+    private async markAdmitted(job: ResolvedJob, ctx: JobExecutionContext): Promise<void> {
+        if (await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash)) {
+            Zotero.Beaver?.processingReconciler?.notifyOcrAdmissionReopened();
         }
     }
 
