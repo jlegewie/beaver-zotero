@@ -22,7 +22,10 @@ vi.mock('../../../src/services/agentDataProvider/actions/createHighlightAnnotati
 vi.mock('../../../src/services/agentDataProvider/actions/createNoteAnnotations', () => stub('executeCreateNoteAnnotationsAction'));
 vi.mock('../../../src/services/agentDataProvider/actions/editAnnotations', () => stub('executeEditAnnotationsAction'));
 
-import { handleAgentActionExecuteRequest } from '../../../src/services/agentDataProvider/handleAgentActionExecuteRequest';
+import {
+    handleAgentActionExecuteRequest,
+    QUEUED_BEHIND_WRITE_PHASE,
+} from '../../../src/services/agentDataProvider/handleAgentActionExecuteRequest';
 import { checkAborted } from '../../../src/services/agentDataProvider/timeout';
 
 const request = {
@@ -115,6 +118,44 @@ describe('handleAgentActionExecuteRequest deadline', () => {
         // Direct calls have no socket receipt, so prepare/queue must not be
         // billed as wait — even when they take a millisecond.
         expect(response.timing?.queued_ms).toBe(0);
+    });
+});
+
+describe('handleAgentActionExecuteRequest queue phase', () => {
+    beforeEach(() => {
+        executors.editMetadata.mockReset();
+        executors.editMetadata.mockResolvedValue({
+            type: 'agent_action_execute_response',
+            request_id: 'req-1',
+            success: true,
+        });
+    });
+
+    it('reports waiting behind another write until the queue lets it run', async () => {
+        let releaseWrite!: () => void;
+        const held = (globalThis as any).Zotero.Beaver.mutations.run(
+            () => new Promise<void>((resolve) => { releaseWrite = resolve; }),
+        );
+        const reportPhase = vi.fn();
+
+        const response = handleAgentActionExecuteRequest(request, { receivedAt: Date.now(), reportPhase });
+        await vi.waitFor(() => expect(reportPhase).toHaveBeenCalledWith(QUEUED_BEHIND_WRITE_PHASE));
+        expect(reportPhase).not.toHaveBeenCalledWith('running');
+        expect(executors.editMetadata).not.toHaveBeenCalled();
+
+        releaseWrite();
+        await held;
+        expect((await response).success).toBe(true);
+        expect(reportPhase.mock.calls.map(([phase]) => phase)).toEqual([QUEUED_BEHIND_WRITE_PHASE, 'running']);
+    });
+
+    it('does not report queueing when no other write is in progress', async () => {
+        const reportPhase = vi.fn();
+
+        await handleAgentActionExecuteRequest(request, { receivedAt: Date.now(), reportPhase });
+
+        expect(reportPhase).not.toHaveBeenCalledWith(QUEUED_BEHIND_WRITE_PHASE);
+        expect(reportPhase).toHaveBeenCalledWith('running');
     });
 });
 
