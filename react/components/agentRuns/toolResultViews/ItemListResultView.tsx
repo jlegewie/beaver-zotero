@@ -94,9 +94,13 @@ interface RowEventProps {
  */
 export type ItemRowAction = (row: ItemRowView) => React.ReactNode;
 
-const ItemRow: React.FC<{ row: ItemRowView; action?: ItemRowAction } & RowEventProps> = ({
+/** Optional right-click handler per item row; it decides whether to suppress the native menu. */
+export type ItemRowContextMenu = (row: ItemRowView, event: React.MouseEvent) => void;
+
+const ItemRow: React.FC<{ row: ItemRowView; action?: ItemRowAction; onContextMenu?: ItemRowContextMenu } & RowEventProps> = ({
     row,
     action,
+    onContextMenu,
     isHovered,
     onMouseEnter,
     onMouseLeave,
@@ -114,6 +118,7 @@ const ItemRow: React.FC<{ row: ItemRowView; action?: ItemRowAction } & RowEventP
         <div
             className={`display-flex flex-row items-start gap-25 p-2 cursor-pointer transition-colors ${isHovered ? 'bg-quinary' : ''} ${faded ? 'opacity-50' : ''}`}
             onClick={() => activateRow(row)}
+            onContextMenu={onContextMenu && ((event) => onContextMenu(row, event))}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
             title={isExternal ? 'Click to open the file' : 'Click to reveal in Zotero'}
@@ -169,7 +174,11 @@ const ItemRow: React.FC<{ row: ItemRowView; action?: ItemRowAction } & RowEventP
     );
 };
 
-export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: ItemRowAction }> = ({ view, rowAction }) => {
+export const ItemListResultView: React.FC<{
+    view: ItemListView;
+    rowAction?: ItemRowAction;
+    onRowContextMenu?: ItemRowContextMenu;
+}> = ({ view, rowAction, onRowContextMenu }) => {
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
 
     if (view.items.length === 0) {
@@ -193,7 +202,7 @@ export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: Item
                 return (
                     <div key={key} className={isLast ? '' : 'border-bottom-quinary'}>
                         {isItemRow(row) ? (
-                            <ItemRow row={row} action={rowAction} {...rowEvents} />
+                            <ItemRow row={row} action={rowAction} onContextMenu={onRowContextMenu} {...rowEvents} />
                         ) : (
                             <AnnotationResultRow row={row} variant="with-parent" {...rowEvents} />
                         )}

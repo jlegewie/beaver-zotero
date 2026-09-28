@@ -4,9 +4,11 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import ContextMenu, { type MenuItem, type MenuPosition } from '@beaver/agent-ui/primitives/ContextMenu';
 import { ArrowDownIcon, ArrowLeftIcon, ArrowRightIcon, Icon, SyncIcon } from '../icons/icons';
 import { hydrateItemListRows } from '../../compat/legacyToolResults';
 import ItemListResultView from '../agentRuns/toolResultViews/ItemListResultView';
+import { attachmentMenuItems } from '../../utils/attachmentMenuItems';
 import {
     isRetryableProcessingIssue,
     type AttachmentRef,
@@ -91,7 +93,8 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
 /**
  * One page of an issue group's attachments, rendered with the shared item-list
  * rows so they look and behave like items anywhere else in Beaver: parent
- * headline, title underneath, click to reveal in Zotero.
+ * headline, title underneath, click to reveal in Zotero, right-click for the
+ * library/open/show-file actions of Zotero's own item menu.
  *
  * Titles are resolved locally per page; this is a render path over persisted
  * ledger rows, so it is deliberately not gated on library exclusion.
@@ -111,6 +114,7 @@ const ProcessingIssuePage: React.FC<{
     const [errorKey, setErrorKey] = useState<string | null>(null);
     const rows = result?.queryKey === queryKey ? result.rows : null;
     const pageRef = useRef<HTMLDivElement>(null);
+    const [menu, setMenu] = useState<{ items: MenuItem[]; position: MenuPosition } | null>(null);
 
     useLayoutEffect(() => {
         const element = pageRef.current;
@@ -161,6 +165,13 @@ const ProcessingIssuePage: React.FC<{
                 ? <div className="p-2 text-sm font-color-tertiary">Loading…</div>
                 : <ItemListResultView
                     view={{ view_type: 'item_list', tool_name: 'background_processing', items: rows }}
+                    onRowContextMenu={(row, event) => {
+                        const items = attachmentMenuItems(row.library_id, row.zotero_key);
+                        if (items.length === 0) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setMenu({ items, position: { x: event.clientX, y: event.clientY } });
+                    }}
                     rowAction={onRetry && ((row) => (
                         <IconButton
                             icon={SyncIcon}
@@ -175,6 +186,17 @@ const ProcessingIssuePage: React.FC<{
                         />
                     ))}
                 />}
+            {menu && (
+                <ContextMenu
+                    menuItems={menu.items}
+                    isOpen={true}
+                    onClose={() => setMenu(null)}
+                    position={menu.position}
+                    useFixedPosition={true}
+                    itemLabelClassName="text-sm font-color-secondary truncate"
+                    itemIconClassName="font-color-secondary flex-shrink-0 scale-95"
+                />
+            )}
         </div>
     );
 };
