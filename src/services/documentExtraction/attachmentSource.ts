@@ -24,7 +24,8 @@ export type AttachmentSourceFailureCode =
     | 'file_missing'
     | 'file_too_large'
     | 'download_failed'
-    | 'read_failed';
+    | 'read_failed'
+    | 'file_permission_denied';
 
 export type AttachmentSourceResult =
     | { kind: 'ok'; source: AttachmentFileSource }
@@ -40,7 +41,10 @@ export type AttachmentDataResult =
     | { kind: 'ok'; data: Uint8Array }
     | {
           kind: 'error';
-          code: Extract<AttachmentSourceFailureCode, 'file_too_large' | 'download_failed' | 'read_failed'>;
+          code: Extract<
+              AttachmentSourceFailureCode,
+              'file_too_large' | 'download_failed' | 'read_failed' | 'file_permission_denied'
+          >;
           error?: unknown;
           /**
            * The server gave a definitive answer (missing file, no access), so
@@ -52,6 +56,35 @@ export type AttachmentDataResult =
           sizeMB?: number;
           maxMB?: number;
       };
+
+/**
+ * True when a local file read was refused by the operating system rather than
+ * failing on the file's contents: missing macOS Files & Folders / Full Disk
+ * Access, file-system permissions, or a file another program holds locked.
+ * `IOUtils` rejects these with a `NotAllowedError` DOMException; XPCOM calls
+ * throw with `NS_ERROR_FILE_ACCESS_DENIED`.
+ */
+export function isFileAccessDeniedError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const { name, message } = error as { name?: unknown; message?: unknown };
+    return name === 'NotAllowedError'
+        || name === 'NS_ERROR_FILE_ACCESS_DENIED'
+        || (typeof message === 'string' && message.includes('NS_ERROR_FILE_ACCESS_DENIED'));
+}
+
+/**
+ * Probe whether a local file refuses reads. For readers such as `nsIZipReader`
+ * that report a denied open only as a generic `NS_ERROR_FAILURE`; call it after
+ * such a read has already failed, never on the happy path.
+ */
+export async function isLocalFileReadDenied(filePath: string): Promise<boolean> {
+    try {
+        await IOUtils.read(filePath, { maxBytes: 1 });
+        return false;
+    } catch (error) {
+        return isFileAccessDeniedError(error);
+    }
+}
 
 function withDeadline<T>(
     promise: Promise<T>,
@@ -309,7 +342,11 @@ export async function loadAttachmentData(args: {
             if (error instanceof TimeoutError || error instanceof ExternalAbortError) {
                 throw error;
             }
-            return { kind: 'error', code: 'read_failed', error };
+            return {
+                kind: 'error',
+                code: isFileAccessDeniedError(error) ? 'file_permission_denied' : 'read_failed',
+                error,
+            };
         }
     } else {
         if (!item) {

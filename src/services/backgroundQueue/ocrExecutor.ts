@@ -18,9 +18,11 @@ import type {
     DocumentProcessingFailureInput,
 } from '../database';
 import {
+    isFileAccessDeniedError,
     isRemoteAccessAvailable,
     loadAttachmentData,
     resolveAttachmentFileSource,
+    type AttachmentDataResult,
     type AttachmentFileSource,
 } from '../documentExtraction/attachmentSource';
 import { ExternalAbortError } from '../agentDataProvider/timeout';
@@ -86,10 +88,18 @@ interface ResolvedJob {
     loadOriginalBytes: () => Promise<Uint8Array>;
 }
 
+/** Sentinel raised when the OS refuses to read the local scan for upload. */
+class OcrFileAccessDeniedError extends Error {
+    constructor() {
+        super('ocr_local_read_failed: file_permission_denied');
+        this.name = 'OcrFileAccessDeniedError';
+    }
+}
+
 /** Sentinel raised when the original remote scan cannot be loaded for upload. */
 class OcrRemoteLoadError extends Error {
     constructor(
-        public readonly code: 'file_too_large' | 'download_failed' | 'read_failed',
+        public readonly code: Extract<AttachmentDataResult, { kind: 'error' }>['code'],
         /** The server answered definitively; retrying cannot change the result. */
         public readonly permanent: boolean = false,
     ) {
@@ -160,6 +170,11 @@ export class OcrExecutor implements JobExecutor {
         } catch (error) {
             if (error instanceof OcrAbort || ctx.externalAbortSignal.aborted) {
                 return { kind: 'release', reason: 'aborted' };
+            }
+            if (error instanceof OcrFileAccessDeniedError) {
+                // Retried like any read failure; if it dead-letters, the ledger
+                // keeps the code so the issues list can explain the remedy.
+                return { kind: 'retry', error: error.message, reason: 'ocr_local_read_failed' };
             }
             if (error instanceof OcrRemoteLoadError) {
                 // Oversized scans are terminal-for-now (recoverable if limits change);
@@ -528,7 +543,13 @@ export class OcrExecutor implements JobExecutor {
     ): Promise<Uint8Array> {
         this.throwIfLibraryUnavailable(item.libraryID, ctx);
         if (source.kind === 'local') {
-            const data = await IOUtils.read(source.filePath);
+            let data: Uint8Array;
+            try {
+                data = await IOUtils.read(source.filePath);
+            } catch (error) {
+                if (isFileAccessDeniedError(error)) throw new OcrFileAccessDeniedError();
+                throw error;
+            }
             this.throwIfLibraryUnavailable(item.libraryID, ctx);
             return data;
         }

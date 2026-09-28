@@ -535,6 +535,15 @@ export async function handleZoteroDocumentRequest(
                         'text',
                     );
                 }
+                if (data.code === 'file_permission_denied') {
+                    return errorResponse(
+                        `Zotero does not have permission to read text attachment ${resolvedKey}. `
+                            + 'The user needs to grant Zotero access to the folder containing the file.',
+                        'file_permission_denied',
+                        null,
+                        'text',
+                    );
+                }
                 return errorResponse(
                     `Failed to read text attachment ${resolvedKey}.`,
                     'extraction_failed',
