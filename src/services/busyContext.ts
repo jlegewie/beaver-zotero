@@ -67,6 +67,14 @@ export type BusyContext = {
     window_hidden: number;
     /** How many ms the 1s heartbeat is currently overdue */
     event_loop_lag_ms: number;
+    /** 1 if a library write holds Beaver's instance mutation queue */
+    mutation_active: number;
+    /** Age in ms of the write holding the mutation queue, or 0 while idle */
+    mutation_active_ms: number;
+    /** Number of library writes queued behind the active one */
+    mutation_pending: number;
+    /** 1 if Beaver currently holds its pause on Zotero sync */
+    sync_paused: number;
 }
 
 const HEARTBEAT_INTERVAL_MS = 1000;
@@ -172,6 +180,10 @@ export function getBusyContext(): BusyContext {
     let extractingBackgroundSpawnCount = 0;
     let extractingBackgroundLeaseReapCount = 0;
     let windowHidden = 0;
+    let mutationActive = 0;
+    let mutationActiveMs = 0;
+    let mutationPending = 0;
+    let syncPaused = 0;
     try {
         // `as any`: syncInProgress is a defineProperty getter and may be
         // missing from zotero-types
@@ -218,6 +230,19 @@ export function getBusyContext(): BusyContext {
         // Window/document may be unavailable during startup/shutdown
     }
 
+    try {
+        // Beaver's own write queue: a write stuck here blocks every later one.
+        const queue = Zotero.Beaver?.mutations?.getSnapshot();
+        if (queue) {
+            mutationActive = queue.active !== null ? 1 : 0;
+            mutationActiveMs = queue.activeStartedAt ? Math.max(0, now - queue.activeStartedAt) : 0;
+            mutationPending = queue.pending;
+        }
+        syncPaused = Zotero.Beaver?.syncPause?.isSyncPaused() ? 1 : 0;
+    } catch {
+        // Plugin services may be unavailable during startup/shutdown
+    }
+
     const busyIndexing = now - lastIndexActivityAt < INDEXING_RECENCY_MS ? 1 : 0;
 
     return {
@@ -238,6 +263,10 @@ export function getBusyContext(): BusyContext {
         extracting_background_lease_reap_count: extractingBackgroundLeaseReapCount,
         window_hidden: windowHidden,
         event_loop_lag_ms: Math.max(0, now - lastTick - HEARTBEAT_INTERVAL_MS),
+        mutation_active: mutationActive,
+        mutation_active_ms: mutationActiveMs,
+        mutation_pending: mutationPending,
+        sync_paused: syncPaused,
     };
 }
 
