@@ -91,6 +91,7 @@ export class ReconcilerService {
     private pendingForce = false;
     private scheduledForce = false;
     private admissionScopes = new Map<number, string>();
+    private ocrAdmissionReopened = false;
     private generation = 0;
     private timer: ReturnType<typeof setTimeout> | null = null;
     private prefObservers: symbol[] = [];
@@ -148,6 +149,16 @@ export class ReconcilerService {
             return;
         }
         this.schedule(0);
+    }
+
+    /**
+     * The OCR API accepted work for an attachment parked while admission was
+     * closed. The next pass tickets every other parked attachment.
+     */
+    notifyOcrAdmissionReopened(): void {
+        if (this.stopped) return;
+        this.ocrAdmissionReopened = true;
+        this.notify();
     }
 
     /** Notifications are hints, never evidence that file content changed. */
@@ -435,20 +446,24 @@ export class ReconcilerService {
             const targeted = this.pendingAttachments.size > 0;
             await this.reconcileNotifiedAttachments(db, generation);
             if (this.cancelled(generation)) return;
+            if (this.ocrAdmissionReopened) {
+                this.ocrAdmissionReopened = false;
+                await this.resumeUnavailableOcr(db, this.listProcessingLibraryIds(), 'all', generation);
+                if (this.cancelled(generation)) return;
+            }
             Zotero.Beaver?.backgroundExtractor?.notify();
             // Reading activity needs an attachment check, not a whole-library enumeration.
             // Keep the periodic deadline independent of those notifications.
             if (targeted && !force && Date.now() < this.nextScanAt) return;
-            const libraries = Zotero.Libraries.getAll().filter((library) =>
-                (library.libraryType === 'user' || library.libraryType === 'group')
-                && isBackgroundProcessingLibraryEnabled(library.libraryID));
+            const libraries = this.listProcessingLibraryIds();
             for (const id of this.admissionScopes.keys()) {
-                if (!libraries.some((library) => library.libraryID === id)) this.admissionScopes.delete(id);
+                if (!libraries.includes(id)) this.admissionScopes.delete(id);
             }
-            for (const library of libraries) {
+            for (const libraryId of libraries) {
                 if (this.cancelled(generation)) return;
-                await this.reconcileLibrary(db, library.libraryID, force, generation);
+                await this.reconcileLibrary(db, libraryId, force, generation);
             }
+            await this.resumeUnavailableOcr(db, libraries, 'probe', generation);
             this.nextScanAt = Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;
             Zotero.Beaver?.backgroundExtractor?.notify();
         } catch (error) {
@@ -469,6 +484,63 @@ export class ReconcilerService {
                 this.schedule(wake ? 0 : this.nextScanAt > Date.now()
                     ? this.nextScanAt - Date.now() : PROCESSING_RECONCILE_INTERVAL_MS, forceNext);
             }
+        }
+    }
+
+    private listProcessingLibraryIds(): number[] {
+        return Zotero.Libraries.getAll()
+            .filter((library) => (library.libraryType === 'user' || library.libraryType === 'group')
+                && isBackgroundProcessingLibraryEnabled(library.libraryID))
+            .map((library) => library.libraryID);
+    }
+
+    /**
+     * Ticket OCR again for attachments parked because the OCR API was not
+     * accepting work (`ocr_service_unavailable`). A refused request creates no
+     * backend job, so nothing else retries them while the account, entitlement
+     * and library cursor stay unchanged.
+     *
+     * `probe` runs once per periodic pass and tickets only the attachment that
+     * has waited longest, and nothing while any parked attachment already has a
+     * ticket, so a long outage costs one OCR request per pass. When that request
+     * is accepted, the OCR executor calls {@link notifyOcrAdmissionReopened} and
+     * the next pass runs `all`, which tickets every remaining parked attachment.
+     */
+    private async resumeUnavailableOcr(
+        db: QueueDB,
+        libraryIds: number[],
+        mode: 'probe' | 'all',
+        generation: number,
+    ): Promise<void> {
+        if (!backgroundProcessingEnabled() || Zotero.Beaver?.hasOcrAccess !== true) return;
+        const parked = await db.getOcrUnavailableAttachments(libraryIds);
+        if (mode === 'probe' && parked.some((row) => row.ticketed)) return;
+        const targets = parked.filter((row) => !row.ticketed).slice(0, mode === 'probe' ? 1 : undefined);
+        let ticketed = 0;
+        for (const { libraryId, zoteroKey } of targets) {
+            if (this.cancelled(generation)) return;
+            if (!isBackgroundProcessingLibraryEnabled(libraryId)) continue;
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+            if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
+            if (!item || safeIsInTrash(item) !== false) continue;
+            try {
+                await enqueueOcrJob({
+                    item,
+                    libraryId,
+                    zoteroKey,
+                    itemId: item.id,
+                    pageCount: null,
+                    priority: OCR_PRIORITY_BACKFILL,
+                    requestContext: 'backfill',
+                });
+                ticketed += 1;
+            } catch (error) {
+                logger(`ReconcilerService: OCR retry enqueue failed for ${libraryId}-${zoteroKey}: ${error}`, 2);
+            }
+        }
+        if (ticketed > 0) {
+            logger(`ReconcilerService: ticketed ${ticketed} of ${parked.length} attachment(s) waiting for OCR admission (${mode})`, 3);
+            Zotero.Beaver?.backgroundExtractor?.notify();
         }
     }
 

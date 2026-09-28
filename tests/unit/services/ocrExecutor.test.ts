@@ -357,6 +357,33 @@ describe('OcrExecutor', () => {
         expect(dbStub.markAttachmentOcrUnavailable).toHaveBeenCalledOnce();
     });
 
+    it.each([
+        ['ready', { status: 'ready', get_url: 'https://gcs/get' }],
+        ['queued', { status: 'queued', job_id: 'job-2' }],
+        ['pending', { status: 'pending', job_id: 'job-1', put_url: 'https://gcs/put' }],
+    ])('resumes other parked attachments when a parked request is accepted as %s', async (_status, response) => {
+        const notifyOcrAdmissionReopened = vi.fn();
+        (Zotero.Beaver as any).processingReconciler = { notifyOcrAdmissionReopened };
+        api.requestOcr.mockResolvedValue(response);
+        fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
+
+        await executor.execute(record, makeCtx());
+        await executor.drainTracks();
+
+        expect(dbStub.clearAttachmentOcrUnavailable).toHaveBeenCalledWith(1, 'AAAAAAAA', 'hash123');
+        expect(notifyOcrAdmissionReopened).toHaveBeenCalledOnce();
+    });
+
+    it('does not resume parked attachments when the accepted request was not parked', async () => {
+        const notifyOcrAdmissionReopened = vi.fn();
+        (Zotero.Beaver as any).processingReconciler = { notifyOcrAdmissionReopened };
+        dbStub.clearAttachmentOcrUnavailable.mockResolvedValue(false);
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+
+        await expect(executor.execute(record, makeCtx())).resolves.toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(notifyOcrAdmissionReopened).not.toHaveBeenCalled();
+    });
+
     it('recovers legacy detection metadata through native extraction before requesting OCR', async () => {
         const metadata = Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>;
         metadata.mockResolvedValueOnce(null);
