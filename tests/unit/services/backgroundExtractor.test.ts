@@ -1019,6 +1019,7 @@ describe('BackgroundExtractor', () => {
         ['download_failed'],
         ['extraction_failed'],
         ['worker_unavailable'],
+        ['file_permission_denied'],
     ])('transient response_error %s bumps attempt_count and slides availability out', async (code: string) => {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract',

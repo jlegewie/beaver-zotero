@@ -47,6 +47,8 @@ import type {
 import { logger } from '@beaver/agent-core/platform/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import {
+    isFileAccessDeniedError,
+    isLocalFileReadDenied,
     loadAttachmentData,
     resolveAttachmentFileSource,
     resolveToReadableAttachment,
@@ -416,6 +418,13 @@ function isAbortError(error: unknown): boolean {
     return error instanceof Error && /abort/i.test(error.message);
 }
 
+function fileAccessDeniedMessage(fileKind: string, requestKey: string): string {
+    return `Zotero does not have permission to read the ${fileKind} file for ${requestKey}. `
+        + `The user needs to grant Zotero access to the folder containing the file `
+        + `(on macOS: System Settings > Privacy & Security > Files and Folders or Full Disk Access) `
+        + `or close any program that has the file locked.`;
+}
+
 async function extractAndCacheDocumentOwned(
     args: ExtractAndCacheArgs,
 ): Promise<ExtractAndCacheResult> {
@@ -724,6 +733,16 @@ async function extractAndCacheEpubDocumentImpl(
                 contentKind: 'epub',
             };
         }
+        // The EPUB zip reader reports a denied open as a generic failure.
+        if (isFileAccessDeniedError(error) || await isLocalFileReadDenied(extractionFilePath)) {
+            return {
+                kind: 'response_error',
+                code: 'file_permission_denied',
+                message: fileAccessDeniedMessage('EPUB', requestKey),
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
         return {
             kind: 'response_error',
             code: 'extraction_failed',
@@ -925,6 +944,15 @@ async function extractAndCacheSnapshotDocumentImpl(
                 kind: 'response_error',
                 code: 'timeout',
                 message: `Snapshot extraction interrupted for ${requestKey}`,
+                resolvedAttachment,
+                contentKind: 'snapshot',
+            };
+        }
+        if (isFileAccessDeniedError(error)) {
+            return {
+                kind: 'response_error',
+                code: 'file_permission_denied',
+                message: fileAccessDeniedMessage('snapshot', requestKey),
                 resolvedAttachment,
                 contentKind: 'snapshot',
             };
@@ -1231,6 +1259,15 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         resolvedAttachment,
                     };
                 }
+                if (loaded.code === 'file_permission_denied') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_permission_denied',
+                        message: fileAccessDeniedMessage('PDF', resolvedKeyStr),
+                        pageCount: null,
+                        resolvedAttachment,
+                    };
+                }
                 if (loaded.code === 'read_failed') {
                     return {
                         kind: 'response_error',
@@ -1293,6 +1330,15 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         kind: 'response_error',
                         code: 'file_too_large',
                         message: `The PDF file for ${resolvedKeyStr} has a file size of ${(loaded.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${loaded.maxMB}MB limit.`,
+                        pageCount: totalPages,
+                        resolvedAttachment,
+                    };
+                }
+                if (loaded.code === 'file_permission_denied') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_permission_denied',
+                        message: fileAccessDeniedMessage('PDF', resolvedKeyStr),
                         pageCount: totalPages,
                         resolvedAttachment,
                     };

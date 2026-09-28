@@ -17,6 +17,8 @@ export {
 
 export {
     checkAttachmentDataSize,
+    isFileAccessDeniedError,
+    isLocalFileReadDenied,
     loadAttachmentData,
     resolveAttachmentFileSource,
 } from './attachmentSource';
