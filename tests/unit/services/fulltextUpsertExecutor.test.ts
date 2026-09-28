@@ -844,6 +844,62 @@ describe('FulltextUpsertExecutor', () => {
         }));
     });
 
+    describe('hash-only probe skipping', () => {
+        const payloadRequired = () => new ApiError(409, 'Conflict', 'payload needed', 'payload_required');
+
+        async function buildPayloadStreak(executor: FulltextUpsertExecutor): Promise<void> {
+            for (let upload = 0; upload < 3; upload += 1) {
+                expect(await executor.execute(record, ctx)).toMatchObject({ reason: 'index_completed' });
+            }
+            expect(api.upsertHash).toHaveBeenCalledTimes(3);
+        }
+
+        beforeEach(() => {
+            api.upsertHash.mockRejectedValue(payloadRequired());
+        });
+
+        it('sends the payload directly after consecutive uploads that needed it', async () => {
+            const executor = new FulltextUpsertExecutor(api as any);
+            await buildPayloadStreak(executor);
+
+            expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'index_completed' });
+            expect(api.upsertHash).toHaveBeenCalledTimes(3);
+            expect(api.upsertPayload).toHaveBeenCalledTimes(4);
+        });
+
+        it('probes again once a payload upload finds the content already indexed', async () => {
+            const executor = new FulltextUpsertExecutor(api as any);
+            await buildPayloadStreak(executor);
+            api.upsertPayload.mockResolvedValueOnce({ ...response('completed'), chunks_upserted: 0, embed_tokens: 0 });
+            await executor.execute(record, ctx);
+            expect(api.upsertHash).toHaveBeenCalledTimes(3);
+
+            api.upsertHash.mockResolvedValueOnce(response('tagged'));
+            expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'index_tagged' });
+            expect(api.upsertHash).toHaveBeenCalledTimes(4);
+        });
+
+        it('falls back to the probe instead of re-extracting when the payload is not cached', async () => {
+            const executor = new FulltextUpsertExecutor(api as any);
+            await buildPayloadStreak(executor);
+            vi.mocked(Zotero.Beaver.documentCache!.getResult).mockResolvedValueOnce(null);
+            api.upsertHash.mockResolvedValueOnce(response('tagged'));
+
+            expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'index_tagged' });
+            expect(api.upsertHash).toHaveBeenCalledTimes(4);
+            expect(enqueue).not.toHaveBeenCalled();
+        });
+    });
+
+    it('reports each requirements response to the lane', async () => {
+        const onRequirements = vi.fn();
+        api.requirements.mockResolvedValue({
+            index_version: 3, extract_schema_versions: { pdf: [SCHEMA_VERSION] }, upsert_max_in_flight: 8,
+        });
+        await new FulltextUpsertExecutor(api as any, 'fulltext_upsert', { onRequirements }).execute(record, ctx);
+        expect(onRequirements).toHaveBeenCalledWith(expect.objectContaining({ upsert_max_in_flight: 8 }));
+    });
+
     it('discards a rejected payload and parks the upsert until extraction rebuilds it', async () => {
         api.upsertHash.mockRejectedValueOnce(new ApiError(409, 'Conflict', 'payload needed', 'payload_required'));
         vi.mocked(computeStructuredDocumentHash).mockResolvedValueOnce('b'.repeat(64));

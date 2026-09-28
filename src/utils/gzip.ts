@@ -12,6 +12,8 @@ export interface ChunkedGzipJsonOptions {
     yieldToEventLoop?: () => Promise<void>;
     /** Test hook called once per slice pushed to the deflator. */
     onDeflatePush?: (chars: number) => void;
+    /** zlib compression level (1 fastest, 9 smallest); pako's default is 6. */
+    level?: number;
 }
 
 /** Default slice size */
@@ -64,7 +66,10 @@ export async function gzipJsonValueChunked(
     }
 
     const encoder = new TextEncoder();
-    const deflator = new (pako as any).Deflate({ gzip: true });
+    const deflator = new (pako as any).Deflate({
+        gzip: true,
+        ...(options.level === undefined ? {} : { level: options.level }),
+    });
     const chunks: Uint8Array[] = [];
 
     deflator.onData = (chunk: Uint8Array | ArrayBuffer) => {
