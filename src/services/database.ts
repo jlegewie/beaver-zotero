@@ -2903,6 +2903,37 @@ export class BeaverDB {
         );
     }
 
+    /**
+     * Rows parked by a closed OCR admission gate, oldest marker first.
+     * `ticketed` is true while an OCR job for the attachment is queued, running
+     * or waiting on the backend.
+     */
+    public async getOcrUnavailableAttachments(
+        libraryIds: number[],
+    ): Promise<Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }>> {
+        if (libraryIds.length === 0) return [];
+        const rows: Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }> = [];
+        await this.queryAsync(
+            `SELECT s.library_id, s.zotero_key, EXISTS (
+                    SELECT 1 FROM background_jobs j
+                    WHERE j.job_type = 'document_ocr'
+                      AND j.library_id = s.library_id AND j.zotero_key = s.zotero_key
+                )
+             FROM attachment_processing_state s
+             WHERE s.library_id IN (${libraryIds.map(() => '?').join(',')})
+               AND s.content_kind = 'pdf' AND s.extract_status = 'done'
+               AND s.ocr_status = 'needed' AND s.last_error = ?
+             ORDER BY s.updated_at, s.library_id, s.zotero_key`,
+            [...libraryIds, OCR_SERVICE_UNAVAILABLE],
+            { onRow: (row: any) => rows.push({
+                libraryId: row.getResultByIndex(0),
+                zoteroKey: row.getResultByIndex(1),
+                ticketed: Boolean(row.getResultByIndex(2)),
+            }) },
+        );
+        return rows;
+    }
+
     private async enqueueReplacementUntag(previous: AttachmentProcessingStateRecord | null, newHash: string | null): Promise<void> {
         if (previous?.upsertRemoteIdentity && previous.structuredDocumentHash && previous.structuredDocumentHash !== newHash) {
             await this.enqueueBackgroundJobInTransaction(buildUntagJobInput(previous, Date.now(), { reason: 'replacement' }));
