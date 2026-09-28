@@ -166,6 +166,22 @@ export async function opGetMetadata(
     }
 }
 
+/** Info-dictionary fields only; skips the per-page walk of `opGetMetadata`. */
+export async function opGetDocumentInfo(
+    args: { pdfData: Uint8Array | ArrayBuffer },
+): Promise<OpReply<ReturnType<typeof collectDocumentInfo>>> {
+    const doc = await acquireDoc(args.pdfData);
+    let docFailed = false;
+    try {
+        return { result: collectDocumentInfo(doc) };
+    } catch (e) {
+        docFailed = true;
+        throw e;
+    } finally {
+        releaseDoc(doc, docFailed);
+    }
+}
+
 export async function opExtractRawPageDetailed(
     args: { pdfData: Uint8Array | ArrayBuffer; pageIndex: number; includeImages?: boolean },
 ): Promise<OpReply<RawPageDataDetailed>> {

@@ -31,6 +31,7 @@ import { createAbortController } from '../utils/abortController';
 import { UNRESOLVED_LIBRARY_ID } from '../utils/libraryIdentity';
 import { getPref } from '../utils/prefs';
 import { getSystemIdleTimeMs, registerIdleObserver } from '../utils/idleService';
+import { LOCAL_EXTRACT_PRIORITY_CEILING } from './backgroundProcessing/constants';
 
 const IDLE_INTERVAL_MS = 30_000;
 /** Re-tick delay after a pass that launched work, so a backlog keeps draining. */
@@ -546,12 +547,14 @@ export class BackgroundExtractor {
         const db = Zotero.Beaver?.db;
         if (!db || this.executors.size === 0) return inactive('empty');
 
-        const idleMs = getSystemIdleTimeMs();
+        const idle = getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;
         const processBacklog = getPref(PREF_PROCESSING_ENABLED) === true;
         const drainNow = processBacklog && this.drainNowRequested;
-        const maxPriority = processBacklog && (drainNow || idleMs >= IDLE_THRESHOLD_MS)
+        const maxPriority = processBacklog && (drainNow || idle)
             ? undefined
-            : LOW_PRIORITY_CEILING;
+            // Idle with processing off: admit the local extraction band, but
+            // not backlog work such as OCR.
+            : idle ? LOCAL_EXTRACT_PRIORITY_CEILING : LOW_PRIORITY_CEILING;
 
         const launched = await this.dispatchPass({
             db,

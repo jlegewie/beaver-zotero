@@ -1,14 +1,13 @@
-import { BeaverDB, EmbeddingRecord, MAX_EMBEDDING_FAILURES } from './database';
+import { BeaverDB, EmbeddingRecord, EmbeddingSource, MAX_EMBEDDING_FAILURES } from './database';
 import { embeddingsService } from '@beaver/agent-core/transport/clients/embeddingsService';
-import { getClientDateModifiedAsISOString, getClientDateModifiedBatch } from '../utils/zoteroUtils';
+import { getClientDateModifiedBatch } from '../utils/zoteroUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
-
-
-/**
- * Minimum combined length of title + abstract required for indexing.
- * Items with less content are skipped.
- */
-export const MIN_CONTENT_LENGTH = 40;
+import {
+    enqueueEmbeddingExtractions,
+    resolveUnitsBatch,
+    type ExtractionCandidate,
+    type FileIdentityCheck,
+} from './embeddingUnits';
 
 /**
  * Default batch size for embedding API requests (max 500)
@@ -39,8 +38,9 @@ export interface ItemIndexData {
     libraryId: number;
     zoteroKey: string;
     version: number;
-    title: string;
-    abstract: string;
+    text: string;
+    source: EmbeddingSource;
+    sourceAttachmentId: number | null;
     clientDateModified?: string;
 }
 
@@ -76,6 +76,8 @@ export interface IndexingResult {
      * before items could be sent to the API or persisted to failed_embeddings.
      */
     incomplete: boolean;
+    /** Loaded items that are not (or no longer) indexable; their embeddings should be removed. */
+    unindexable: number[];
 }
 
 /**
@@ -196,88 +198,6 @@ export class EmbeddingIndexer {
     }
 
     /**
-     * Build the text content for embedding from title and abstract.
-     * @param title Item title
-     * @param abstract Item abstract
-     * @returns Combined text for embedding
-     */
-    private buildEmbeddingText(title: string, abstract: string): string {
-        return `${title}\n\n${abstract}`.trim();
-    }
-
-    /**
-     * Extract indexable data from a Zotero item.
-     * @param item Zotero item
-     * @param minContentLength Minimum combined length of title + abstract (default: MIN_CONTENT_LENGTH)
-     * @returns ItemIndexData or null if the item cannot be indexed
-     */
-    async extractItemData(item: Zotero.Item, minContentLength: number = MIN_CONTENT_LENGTH): Promise<ItemIndexData | null> {
-        if (!item.isRegularItem()) {
-            return null;
-        }
-
-        const title = item.getField('title', false, true) as string || '';
-        const abstract = item.getField('abstractNote') as string || '';
-
-        // Skip items with insufficient content
-        const combinedLength = (title.trim() + abstract.trim()).length;
-        if (combinedLength < minContentLength) {
-            return null;
-        }
-
-        return {
-            itemId: item.id,
-            libraryId: item.libraryID,
-            zoteroKey: item.key,
-            version: item.version,
-            title,
-            abstract,
-        };
-    }
-
-    /**
-     * Check if an item meets the minimum content requirements for indexing.
-     * @param item Zotero item
-     * @param minContentLength Minimum combined length of title + abstract
-     * @returns true if the item can be indexed
-     */
-    isItemIndexable(item: Zotero.Item, minContentLength: number = MIN_CONTENT_LENGTH): boolean {
-        if (!item.isRegularItem()) {
-            return false;
-        }
-
-        const title = item.getField('title', false, true) as string || '';
-        const abstract = item.getField('abstractNote') as string || '';
-        const combinedLength = (title.trim() + abstract.trim()).length;
-
-        return combinedLength >= minContentLength;
-    }
-
-    /**
-     * Check which items need to be re-indexed based on content changes.
-     * Compares content hashes to detect changes in title or abstract.
-     * @param items Array of ItemIndexData to check
-     * @returns Array of items that need indexing (new or changed)
-     */
-    async filterItemsNeedingIndexing(items: ItemIndexData[]): Promise<ItemIndexData[]> {
-        if (items.length === 0) return [];
-
-        // Get existing content hashes from database
-        const itemIds = items.map(item => item.itemId);
-        const existingHashes = await this.db.getContentHashes(itemIds);
-
-        // Filter to items that are new or have changed content
-        return items.filter(item => {
-            const text = this.buildEmbeddingText(item.title, item.abstract);
-            const newHash = BeaverDB.computeContentHash(text);
-            const existingHash = existingHashes.get(item.itemId);
-
-            // Index if no existing hash or hash has changed
-            return existingHash === undefined || existingHash !== newHash;
-        });
-    }
-
-    /**
      * Get lightweight item metadata for a library using direct SQL query.
      * Only returns regular items (excludes notes, annotations, attachments).
      * Sorted by dateAdded DESC (most recently added first) so the earliest
@@ -323,16 +243,14 @@ export class EmbeddingIndexer {
     /**
      * Compute the full diff of what needs to be indexed and deleted for a library.
      * Uses lightweight SQL queries and per-batch item loading to avoid memory issues.
+     * Also re-checks the files behind stored derived text (they can change while
+     * Zotero is closed), enqueues extraction for units that need derived text and
+     * drops derived text of attachments that no longer exist.
      * @param libraryId The library to analyze
-     * @param minContentLength Minimum content length for indexing
      * @param batchSize Size of batches for loading items (default: 500)
      * @returns IndexingDiff with item IDs to index and delete
      */
-    async computeIndexingDiff(
-        libraryId: number, 
-        minContentLength: number = MIN_CONTENT_LENGTH,
-        batchSize: number = 500
-    ): Promise<IndexingDiff> {
+    async computeIndexingDiff(libraryId: number, batchSize: number = 500): Promise<IndexingDiff> {
         // Get all existing embeddings for this library
         const existingHashes = await this.db.getEmbeddingContentHashMap(libraryId);
         const existingItemIds = new Set(existingHashes.keys());
@@ -350,35 +268,37 @@ export class EmbeddingIndexer {
             const batchItemIds = batchMeta.map(m => m.itemId);
             
             // Load items for this batch
-            const items = await Zotero.Items.getAsync(batchItemIds);
+            const items = (await Zotero.Items.getAsync(batchItemIds)).filter(Boolean);
             
             // Load required data types
             if (items.length > 0) {
                 await Zotero.Items.loadDataTypes(items, ["primaryData", "itemData"]);
             }
 
-            for (const item of items) {
-                if (!item || !item.isRegularItem()) continue;
-                
-                const title = item.getField('title', false, true) as string || '';
-                const abstract = item.getField('abstractNote') as string || '';
-                const combinedLength = (title.trim() + abstract.trim()).length;
-
-                if (combinedLength < minContentLength) continue;
+            const resolutions = await resolveUnitsBatch(items, this.db, { checkFileIdentity: true });
+            const unchanged: Pick<ItemIndexData, 'itemId' | 'source' | 'sourceAttachmentId'>[] = [];
+            for (const { item, unit, error } of resolutions) {
+                if (error) {
+                    // Keep the existing embedding; indexing records the failure.
+                    currentItemIds.add(item.id);
+                    toIndex.push(item.id);
+                    continue;
+                }
+                if (!unit) continue;
 
                 currentItemIds.add(item.id);
                 totalIndexable++;
 
-                // Compute content hash
-                const text = this.buildEmbeddingText(title, abstract);
-                const newHash = BeaverDB.computeContentHash(text);
-                const existingHash = existingHashes.get(item.id);
-
                 // Add to index list if new or changed
-                if (existingHash === undefined || existingHash !== newHash) {
+                const existingHash = existingHashes.get(item.id);
+                if (existingHash === undefined || existingHash !== BeaverDB.computeContentHash(unit.text)) {
                     toIndex.push(item.id);
+                } else {
+                    unchanged.push({ itemId: item.id, source: unit.source, sourceAttachmentId: unit.sourceAttachmentId });
                 }
             }
+            await this.syncUnchangedSources(unchanged);
+            await this.enqueueExtractions(resolutions);
         }
 
         // Find orphaned embeddings (items that no longer exist or no longer meet criteria)
@@ -389,7 +309,51 @@ export class EmbeddingIndexer {
             }
         }
 
+        await this.cleanupOrphanedEmbeddingTexts(libraryId);
+
         return { toIndex, toDelete, totalIndexable };
+    }
+
+    /** Enqueue extraction for resolved units whose derived text is missing or outdated. */
+    private async enqueueExtractions(resolutions: { candidate: ExtractionCandidate | null }[]): Promise<void> {
+        const candidates = resolutions
+            .map(r => r.candidate)
+            .filter((c): c is ExtractionCandidate => c !== null);
+        if (candidates.length === 0) return;
+        try {
+            await enqueueEmbeddingExtractions(candidates, this.db);
+        } catch (error) {
+            // Units still index from metadata; the next diff or event retries.
+            logger(`EmbeddingIndexer: Failed to enqueue extractions: ${(error as Error).message}`, 2);
+        }
+    }
+
+    /**
+     * Identical text can come from a different attachment (e.g. a duplicate PDF
+     * replacing the original). Keep the reverse link current without re-embedding.
+     */
+    private async syncUnchangedSources(
+        units: Pick<ItemIndexData, 'itemId' | 'source' | 'sourceAttachmentId'>[],
+    ): Promise<void> {
+        if (units.length === 0) return;
+        const stored = await this.db.getEmbeddingSources(units.map(u => u.itemId));
+        const updates = units.filter(u => {
+            const current = stored.get(u.itemId);
+            return current && (current.source !== u.source || current.sourceAttachmentId !== u.sourceAttachmentId);
+        });
+        await this.db.updateEmbeddingSources(updates.map(u => ({
+            itemId: u.itemId, source: u.source, sourceAttachmentId: u.sourceAttachmentId,
+        })));
+    }
+
+    /** Remove derived text of attachments that no longer exist in the library. */
+    private async cleanupOrphanedEmbeddingTexts(libraryId: number): Promise<void> {
+        const keys = await this.db.getAttachmentEmbeddingTextKeys(libraryId);
+        const orphaned = keys.filter(key => !Zotero.Items.getIDFromLibraryAndKey(libraryId, key));
+        if (orphaned.length > 0) {
+            await this.db.deleteAttachmentEmbeddingTexts(orphaned.map(zoteroKey => ({ libraryId, zoteroKey })));
+            logger(`EmbeddingIndexer: Removed derived text of ${orphaned.length} deleted attachments in library ${libraryId}`, 3);
+        }
     }
 
     /**
@@ -408,6 +372,11 @@ export class EmbeddingIndexer {
             skipUnchanged?: boolean;    // Skip items with unchanged content hash (default: false)
             onProgress?: (indexed: number, total: number) => void;
             isCancelled?: () => boolean; // Optional cancellation check between batches
+            /**
+             * Also enqueue extraction for units whose derived text is missing or
+             * outdated, after checking the given attachments' files.
+             */
+            extractions?: FileIdentityCheck;
         } = {}
     ): Promise<IndexingResult> {
         const { batchSize = INDEX_BATCH_SIZE, skipUnchanged = false, onProgress, isCancelled } = options;
@@ -418,6 +387,7 @@ export class EmbeddingIndexer {
             failed: 0,
             errors: [],
             incomplete: false,
+            unindexable: [],
         };
 
         if (itemIds.length === 0) {
@@ -458,45 +428,41 @@ export class EmbeddingIndexer {
                     recordIndexingError(result, datesError);
                 }
 
+                // Derived-text lookups are batched; a failure here leaves the
+                // batch incomplete like any other pre-API failure.
+                const resolutions = new Map(
+                    (await resolveUnitsBatch(items.filter(Boolean), this.db, options.extractions))
+                        .map(r => [r.item.id, r]),
+                );
+                if (options.extractions) {
+                    await this.enqueueExtractions([...resolutions.values()]);
+                }
+
                 // ----- Phase 2: per-item validation (per-item try/catch) -----
                 // A poison item now fails alone instead of taking the whole batch down.
                 const itemsData: ItemIndexData[] = [];
-                const textsForHashCheck: Map<number, string> = new Map();
 
                 for (const item of items) {
                     try {
-                        if (!item || !item.isRegularItem()) {
+                        const resolution = item ? resolutions.get(item.id) : undefined;
+                        if (resolution?.error) throw resolution.error;
+                        const unit = resolution?.unit;
+                        if (!item || !unit) {
                             result.skipped++;
+                            if (item) result.unindexable.push(item.id);
                             continue;
                         }
 
-                        const title = item.getField('title', false, true) as string || '';
-                        const abstract = item.getField('abstractNote') as string || '';
-                        const combinedLength = (title.trim() + abstract.trim()).length;
-
-                        if (combinedLength < MIN_CONTENT_LENGTH) {
-                            result.skipped++;
-                            continue;
-                        }
-
-                        const clientDateModified = clientDatesMap.get(item.id) || new Date().toISOString();
-
-                        const itemData: ItemIndexData = {
+                        itemsData.push({
                             itemId: item.id,
                             libraryId: item.libraryID,
                             zoteroKey: item.key,
                             version: item.version,
-                            title,
-                            abstract,
-                            clientDateModified,
-                        };
-
-                        itemsData.push(itemData);
-
-                        // Pre-compute text for hash checking
-                        if (skipUnchanged) {
-                            textsForHashCheck.set(item.id, this.buildEmbeddingText(title, abstract));
-                        }
+                            text: unit.text,
+                            source: unit.source,
+                            sourceAttachmentId: unit.sourceAttachmentId,
+                            clientDateModified: clientDatesMap.get(item.id) || new Date().toISOString(),
+                        });
                     } catch (itemError) {
                         // Individual item blew up (corrupt field, type error, etc.).
                         // Count just this item, record it in the failed table, and keep going.
@@ -534,24 +500,24 @@ export class EmbeddingIndexer {
                 // we want the failure to land in the "incomplete" path, not the
                 // "API failed → mark items as failed" path. (P2 fix)
                 let candidates: ItemIndexData[] = itemsData;
-                if (skipUnchanged && textsForHashCheck.size > 0) {
+                if (skipUnchanged) {
                     const itemIdsToCheck = itemsData.map(d => d.itemId);
                     const existingHashes = await this.db.getContentHashes(itemIdsToCheck);
 
+                    const unchanged: ItemIndexData[] = [];
                     candidates = itemsData.filter(itemData => {
-                        const text = textsForHashCheck.get(itemData.itemId);
-                        if (!text) return true; // Shouldn't happen, but include if no text
-
-                        const newHash = BeaverDB.computeContentHash(text);
+                        const newHash = BeaverDB.computeContentHash(itemData.text);
                         const existingHash = existingHashes.get(itemData.itemId);
 
                         // Include if no existing hash (new item) or hash changed
                         const needsIndexing = existingHash === undefined || existingHash !== newHash;
                         if (!needsIndexing) {
                             result.skipped++;
+                            unchanged.push(itemData);
                         }
                         return needsIndexing;
                     });
+                    await this.syncUnchangedSources(unchanged);
                 }
 
                 if (candidates.length === 0) {
@@ -566,7 +532,7 @@ export class EmbeddingIndexer {
                 itemsToProcess = candidates;
 
                 // ----- Phase 4: API call -----
-                const texts = itemsToProcess.map(item => this.buildEmbeddingText(item.title, item.abstract));
+                const texts = itemsToProcess.map(item => item.text);
                 const ids = itemsToProcess.map(item => item.itemId);
 
                 if (isCancelled?.()) return result;
@@ -605,6 +571,8 @@ export class EmbeddingIndexer {
                         embedding: BeaverDB.embeddingToBlob(new Int8Array(embeddingData.embedding)),
                         dimensions: this.dimensions,
                         model_id: this.modelId,
+                        source: itemData.source,
+                        source_attachment_id: itemData.sourceAttachmentId,
                     });
                     
                     successfulItemIds.push(itemData.itemId);
@@ -841,212 +809,6 @@ export class EmbeddingIndexer {
     }
 
     /**
-     * Index a single Zotero item.
-     * Uses retry with exponential backoff for transient failures.
-     * @param item Zotero item to index
-     * @returns true if indexed successfully, false if skipped or failed
-     */
-    async indexItem(item: Zotero.Item): Promise<boolean> {
-        const itemData = await this.extractItemData(item);
-        if (!itemData) {
-            return false;
-        }
-
-        const text = this.buildEmbeddingText(itemData.title, itemData.abstract);
-        const contentHash = BeaverDB.computeContentHash(text);
-
-        // Check if content has changed
-        const existingEmbedding = await this.db.getEmbedding(itemData.itemId);
-        if (existingEmbedding && existingEmbedding.content_hash === contentHash) {
-            // Content unchanged, skip
-            return false;
-        }
-
-        try {
-            // Generate embedding via API with retry
-            const response = await embeddingsService.generateEmbeddingsWithRetry(
-                [text],
-                [itemData.itemId]
-            );
-
-            if (response.embeddings.length === 0) {
-                logger(`indexItem: No embedding returned for item ${itemData.itemId}`, 2);
-                await this.db.recordFailedEmbedding(itemData.itemId, itemData.libraryId, 'No embedding returned');
-                return false;
-            }
-
-            // Get clientDateModified
-            const clientDateModified = await getClientDateModifiedAsISOString(item);
-
-            // Store embedding
-            const embeddingBlob = BeaverDB.embeddingToBlob(new Int8Array(response.embeddings[0].embedding));
-            
-            await this.db.upsertEmbedding({
-                item_id: itemData.itemId,
-                library_id: itemData.libraryId,
-                zotero_key: itemData.zoteroKey,
-                version: itemData.version,
-                client_date_modified: clientDateModified,
-                content_hash: contentHash,
-                embedding: embeddingBlob,
-                dimensions: this.dimensions,
-                model_id: this.modelId,
-            });
-
-            // Remove from failed tracking on success
-            await this.db.removeFailedEmbedding(itemData.itemId);
-
-            return true;
-        } catch (error) {
-            const errorMessage = (error as Error).message;
-            logger(`indexItem: Failed to index item ${itemData.itemId}: ${errorMessage}`, 1);
-            await this.db.recordFailedEmbedding(itemData.itemId, itemData.libraryId, errorMessage);
-            return false;
-        }
-    }
-
-    /**
-     * Index multiple Zotero items in batch.
-     * Optimized for bulk indexing with batched API calls and database writes.
-     * Uses retry with exponential backoff for transient failures.
-     * @param items Array of Zotero items to index
-     * @param options Options for batch indexing
-     * @returns IndexingResult with counts of indexed/skipped/failed items
-     */
-    async indexItemsBatch(
-        items: Zotero.Item[],
-        options: {
-            batchSize?: number;         // Items per API batch (default: 500)
-            skipUnchanged?: boolean;    // Skip items with unchanged content (default: true)
-            onProgress?: (indexed: number, total: number) => void;
-        } = {}
-    ): Promise<IndexingResult> {
-        const { batchSize = 500, skipUnchanged = true, onProgress } = options;
-
-        const result: IndexingResult = {
-            indexed: 0,
-            skipped: 0,
-            failed: 0,
-            errors: [],
-            incomplete: false,
-        };
-
-        // Extract data from all items
-        const itemDataPromises = items.map(item => this.extractItemData(item));
-        const allItemData = (await Promise.all(itemDataPromises)).filter(
-            (data): data is ItemIndexData => data !== null
-        );
-
-        // Count items that couldn't be extracted
-        result.skipped += items.length - allItemData.length;
-
-        if (allItemData.length === 0) {
-            return result;
-        }
-
-        // Filter to items needing indexing if skipUnchanged is true
-        let itemsToIndex = allItemData;
-        if (skipUnchanged) {
-            itemsToIndex = await this.filterItemsNeedingIndexing(allItemData);
-            result.skipped += allItemData.length - itemsToIndex.length;
-        }
-
-        if (itemsToIndex.length === 0) {
-            return result;
-        }
-
-        // Get clientDateModified for all items
-        const clientDatesMap = new Map<number, string>();
-        for (const itemData of itemsToIndex) {
-            try {
-                const item = await Zotero.Items.getAsync(itemData.itemId);
-                if (item) {
-                    clientDatesMap.set(itemData.itemId, await getClientDateModifiedAsISOString(item));
-                }
-            } catch (e) {
-                clientDatesMap.set(itemData.itemId, new Date().toISOString());
-            }
-        }
-
-        // Process in batches
-        for (let i = 0; i < itemsToIndex.length; i += batchSize) {
-            const batch = itemsToIndex.slice(i, i + batchSize);
-            
-            // Build texts for embedding
-            const texts = batch.map(item => this.buildEmbeddingText(item.title, item.abstract));
-            const itemIds = batch.map(item => item.itemId);
-
-            try {
-                // Generate embeddings via API with retry
-                const response = await embeddingsService.generateEmbeddingsWithRetry(
-                    texts,
-                    itemIds
-                );
-
-                // Prepare embedding records
-                const embeddingRecords: Array<Omit<EmbeddingRecord, 'indexed_at'>> = [];
-                const successfulItemIds: number[] = [];
-
-                for (let j = 0; j < batch.length; j++) {
-                    const itemData = batch[j];
-                    const embeddingData = response.embeddings.find(e => e.item_id === itemData.itemId);
-
-                    if (!embeddingData) {
-                        result.failed++;
-                        continue;
-                    }
-
-                    const text = texts[j];
-                    const contentHash = BeaverDB.computeContentHash(text);
-                    const clientDateModified = clientDatesMap.get(itemData.itemId) || new Date().toISOString();
-
-                    embeddingRecords.push({
-                        item_id: itemData.itemId,
-                        library_id: itemData.libraryId,
-                        zotero_key: itemData.zoteroKey,
-                        version: itemData.version,
-                        client_date_modified: clientDateModified,
-                        content_hash: contentHash,
-                        embedding: BeaverDB.embeddingToBlob(new Int8Array(embeddingData.embedding)),
-                        dimensions: this.dimensions,
-                        model_id: this.modelId,
-                    });
-                    
-                    successfulItemIds.push(itemData.itemId);
-                }
-
-                // Store embeddings in batch
-                if (embeddingRecords.length > 0) {
-                    await this.db.upsertEmbeddingsBatch(embeddingRecords);
-                    result.indexed += embeddingRecords.length;
-                    
-                    // Remove successful items from failed tracking
-                    await this.db.removeFailedEmbeddingsBatch(successfulItemIds);
-                }
-
-            } catch (error) {
-                const errorMessage = (error as Error).message;
-                logger(`indexItemsBatch: Batch failed at offset ${i}: ${errorMessage}`, 1);
-                result.failed += batch.length;
-                
-                // Track all items in the failed batch
-                const failedItems = batch.map(item => ({ 
-                    itemId: item.itemId, 
-                    libraryId: item.libraryId 
-                }));
-                await this.db.recordFailedEmbeddingsBatch(failedItems, errorMessage);
-            }
-
-            // Report progress
-            if (onProgress) {
-                onProgress(result.indexed + result.failed, itemsToIndex.length);
-            }
-        }
-
-        return result;
-    }
-
-    /**
      * Remove embeddings for items that no longer exist in Zotero.
      * @param libraryId The library to clean up
      * @returns Number of embeddings removed
@@ -1103,6 +865,9 @@ export class EmbeddingIndexer {
         librariesRemoved: number; 
         embeddingsRemoved: number;
     }> {
+        // Derived attachment text follows the same scope as embeddings.
+        await this.db.deleteAttachmentEmbeddingTextsOutsideLibraries(syncedLibraryIds);
+
         // Get all library IDs that have embeddings
         const embeddedLibraryIds = await this.db.getEmbeddedLibraryIds();
         

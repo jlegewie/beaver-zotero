@@ -508,12 +508,26 @@ export interface WSExternalReferenceCheckResponse {
     timing?: FrontendTimingMetadata;
 }
 
+/** Topic text derived from an item's attachment, used for its embedding. */
+export interface DerivedText {
+    /** Derived body, capped for reranking. */
+    text: string;
+    keywords?: string | null;
+    source: 'abstract' | 'opening' | 'outline';
+    /** Model-facing id of the attachment the text came from. */
+    attachment_id: string;
+}
+
 /** Item search result with attachments (unified format) */
 export interface ItemSearchFrontendResultItem {
     item: ItemData;
     attachments: AttachmentInfo[];
     /** Semantic similarity score (0-1) for topic searches, undefined for metadata searches */
     similarity?: number;
+    /** Topic searches: what the item's embedding was built from. Absent means metadata. */
+    embedding_source?: 'metadata' | 'attachment_text';
+    /** Topic searches: the derived text, only when `embedding_source` is 'attachment_text'. */
+    derived_text?: DerivedText;
 }
 
 /**

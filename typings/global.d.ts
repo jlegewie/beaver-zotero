@@ -483,6 +483,8 @@ declare namespace Zotero {
             acknowledgeIndexCleanup(job: import('../src/services/database').BackgroundJobRecord): Promise<void>;
             markIndexCleanupReacquireAttempted: import('../src/services/database').BeaverDB['markIndexCleanupReacquireAttempted'];
             retireAttachmentProcessingStates: import('../src/services/database').BeaverDB['retireAttachmentProcessingStates'];
+            upsertAttachmentEmbeddingText: import('../src/services/database').BeaverDB['upsertAttachmentEmbeddingText'];
+            deleteAttachmentEmbeddingTextUnlessFile: import('../src/services/database').BeaverDB['deleteAttachmentEmbeddingTextUnlessFile'];
             hasPendingFulltextUpsert: import('../src/services/database').BeaverDB['hasPendingFulltextUpsert'];
             replaceAttachmentExtractionSource: import('../src/services/database').BeaverDB['replaceAttachmentExtractionSource'];
             adoptAttachmentExtractionSource(input: {

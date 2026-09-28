@@ -14,6 +14,12 @@ import type { DomDocument } from '@beaver/agent-core/extract/document/dom/schema
  * Pure function over the extraction schemas: no Zotero, DOM or I/O access.
  */
 
+/**
+ * Version of the derivation heuristics. Bump it when a change should re-derive
+ * stored embedding text; stale rows are re-derived lazily.
+ */
+export const EMBEDDING_TEXT_VERSION = 1;
+
 export type EmbeddingTextSource =
     | {
           contentKind: 'pdf';
@@ -207,7 +213,8 @@ function decodeEntities(text: string): string {
         .replace(/&amp;/g, '&');
 }
 
-function truncateAtSentence(text: string, maxChars: number): string {
+/** Cut text to `maxChars`, preferring a sentence end, then a word boundary. */
+export function truncateAtSentence(text: string, maxChars: number): string {
     if (text.length <= maxChars) return text;
     const cut = text.slice(0, maxChars);
     const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('。'), cut.lastIndexOf('? '), cut.lastIndexOf('! '));

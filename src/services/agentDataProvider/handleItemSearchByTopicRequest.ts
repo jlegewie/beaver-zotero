@@ -19,7 +19,9 @@ import {
     FrontendTimingMetadata,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
-import { BeaverDB } from '../database';
+import { attachmentRefKey, BeaverDB } from '../database';
+import { modelObjectId } from '../../utils/libraryIdentity';
+import { truncateAtSentence } from '../documentExtraction/embeddingText';
 import {
     collectionsFilterError,
     getCollectionScopeItemIds,
@@ -360,11 +362,12 @@ export async function handleItemSearchByTopicRequest(
     const batchAttachmentData = await prepareAttachmentInfoBatchData(candidateItems, ta);
 
     const resultItems: ItemSearchFrontendResultItem[] = [];
+    const resultItemIds: number[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
         const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
 
         const serialized = await Promise.all(
-            batch.map(async ({ item, similarity }): Promise<ItemSearchFrontendResultItem | null> => {
+            batch.map(async ({ item, similarity }): Promise<{ itemId: number; row: ItemSearchFrontendResultItem } | null> => {
                 try {
                     const [itemData, attachments] = await Promise.all([
                         ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
@@ -378,7 +381,7 @@ export async function handleItemSearchByTopicRequest(
                             },
                         )),
                     ]);
-                    return { item: itemData, attachments, similarity };
+                    return { itemId: item.id, row: { item: itemData, attachments, similarity } };
                 } catch (error) {
                     logger(`handleItemSearchByTopicRequest: Failed to serialize item ${item.key}: ${error}`, 1);
                     return null;
@@ -388,11 +391,15 @@ export async function handleItemSearchByTopicRequest(
 
         for (const result of serialized) {
             if (result !== null) {
-                resultItems.push(result);
+                resultItems.push(result.row);
+                resultItemIds.push(result.itemId);
                 if (resultItems.length >= targetLimit) break;
             }
         }
     }
+
+    const embeddingInfo = await ta.track('embedding_source_ms', () => loadEmbeddingInfo(db, resultItemIds));
+    resultItems.forEach((row, index) => Object.assign(row, embeddingInfo.get(resultItemIds[index])));
 
     // Record serialization completion time
     serializationEndTime = Date.now();
@@ -421,4 +428,55 @@ export async function handleItemSearchByTopicRequest(
     };
 
     return response;
+}
+
+/** Wire budget for derived text; the backend reranks on it. */
+const DERIVED_TEXT_WIRE_CHARS = 2000;
+
+type EmbeddingInfo = Required<Pick<ItemSearchFrontendResultItem, 'embedding_source'>>
+    & Pick<ItemSearchFrontendResultItem, 'derived_text'>;
+
+/**
+ * Items embedded from attachment text, with that text. Items embedded from
+ * metadata are omitted (absent means metadata). Best-effort: a failed read
+ * leaves every row unannotated.
+ */
+async function loadEmbeddingInfo(db: BeaverDB, itemIds: number[]): Promise<Map<number, EmbeddingInfo>> {
+    const result = new Map<number, EmbeddingInfo>();
+    try {
+        const sources = await db.getEmbeddingSources(itemIds);
+        const attachmentIds = [...sources.values()]
+            .map(s => s.source === 'attachment_text' ? s.sourceAttachmentId : null)
+            .filter((id): id is number => id !== null);
+        const attachments = attachmentIds.length > 0
+            ? (await Zotero.Items.getAsync(attachmentIds)).filter(Boolean)
+            : [];
+        const attachmentById = new Map(attachments.map(a => [a.id, a]));
+        const rows = await db.getAttachmentEmbeddingTexts(
+            attachments.map(a => ({ libraryId: a.libraryID, zoteroKey: a.key })),
+        );
+
+        for (const [itemId, { source, sourceAttachmentId }] of sources) {
+            if (source !== 'attachment_text') continue;
+            const attachment = sourceAttachmentId !== null ? attachmentById.get(sourceAttachmentId) : undefined;
+            // An attachment moved to another item since indexing no longer describes this one.
+            const row = attachment?.parentID === itemId
+                ? rows.get(attachmentRefKey(attachment.libraryID, attachment.key))
+                : undefined;
+            result.set(itemId, attachment && row?.body && row.bodySource !== 'none'
+                ? {
+                    embedding_source: 'attachment_text',
+                    derived_text: {
+                        text: truncateAtSentence(row.body, DERIVED_TEXT_WIRE_CHARS),
+                        keywords: row.keywords,
+                        source: row.bodySource,
+                        attachment_id: modelObjectId(attachment.libraryID, attachment.key),
+                    },
+                }
+                : { embedding_source: 'attachment_text' });
+        }
+    } catch (error) {
+        logger(`handleItemSearchByTopicRequest: Failed to load embedding sources: ${error}`, 2);
+    }
+    return result;
 }
