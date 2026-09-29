@@ -1,5 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ContextMenu, { MenuItem, MenuPosition } from '@beaver/agent-ui/primitives/ContextMenu';
+import { getHost } from '@beaver/agent-ui/host';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { beginMenuRequest, type PendingMenuRequest } from '@beaver/agent-ui/chat/pendingMenuRequest';
 import { CancelIcon, DeleteIcon } from '../components/icons/icons';
 
 interface UseRemoveContextMenuOptions {
@@ -30,6 +34,13 @@ interface UseRemoveContextMenuOptions {
      * editable, since revealing/navigating is non-destructive.
      */
     extraMenuItems?: MenuItem[];
+    /**
+     * The library item the button stands for. Its host item-menu entries
+     * ("Show in Library", "Open PDF in New Tab", …) are resolved on right-click
+     * and shown first, so a caller passing this should not also pass its own
+     * reveal/open entries.
+     */
+    itemRef?: ZoteroItemReference | null;
 }
 
 interface UseRemoveContextMenuResult {
@@ -68,18 +79,25 @@ export function useRemoveContextMenu({
     onMenuOpen,
     menuWidth,
     extraMenuItems,
+    itemRef,
 }: UseRemoveContextMenuOptions): UseRemoveContextMenuResult {
-    const hasExtraItems = !!extraMenuItems && extraMenuItems.length > 0;
+    const resolveItemEntries = itemRef ? getHost().navigation?.itemMenuItems : undefined;
+    const hasExtraItems = (!!extraMenuItems && extraMenuItems.length > 0) || !!resolveItemEntries;
     // The menu is available whenever the item is editable (so it can offer the
     // "Remove" actions) or whenever there are extra, non-destructive actions to
     // show, regardless of whether "Remove all" applies.
     const canShowRemoveMenu = !disabled && (canEdit || hasExtraItems);
     // Extra items use longer labels (e.g. "Filter Library by Tag"), so widen the
     // menu when present unless the caller overrides it explicitly.
-    const resolvedMenuWidth = menuWidth ?? (hasExtraItems ? '145px' : '110px');
+    // Host item entries are sized by their labels ("Open Snapshot in New Window").
+    const resolvedMenuWidth = menuWidth ?? (resolveItemEntries ? undefined : hasExtraItems ? '145px' : '110px');
 
     const [isRemoveMenuOpen, setIsRemoveMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const [itemEntries, setItemEntries] = useState<MenuItem[]>([]);
+    // Item entries resolve asynchronously; a dismissed or superseded request never opens.
+    const pendingRef = useRef<PendingMenuRequest | null>(null);
+    useEffect(() => () => pendingRef.current?.cancel(), []);
 
     const handleContextMenu = (e: React.MouseEvent) => {
         if (!canShowRemoveMenu) return;
@@ -88,7 +106,28 @@ export function useRemoveContextMenu({
         e.stopPropagation();
         onMenuOpen?.();
         setMenuPosition({ x: e.clientX, y: e.clientY });
-        setIsRemoveMenuOpen(true);
+        pendingRef.current?.cancel();
+        pendingRef.current = null;
+        if (!resolveItemEntries || !itemRef) {
+            setItemEntries([]);
+            setIsRemoveMenuOpen(true);
+            return;
+        }
+        setIsRemoveMenuOpen(false);
+        const request = beginMenuRequest(e.currentTarget.ownerDocument);
+        pendingRef.current = request;
+        void resolveItemEntries(itemRef)
+            .catch((error) => {
+                logger(`useRemoveContextMenu: failed to build item menu: ${error}`, 2);
+                return [] as MenuItem[];
+            })
+            .then((entries) => {
+                request.settle();
+                if (!request.isCurrent()) return;
+                setItemEntries(entries);
+                // A deleted item with nothing else to offer opens no empty menu.
+                if (entries.length > 0 || canEdit || extraMenuItems?.length) setIsRemoveMenuOpen(true);
+            });
     };
 
     const handleRemoveClick = (e: React.MouseEvent<HTMLSpanElement>) => {
@@ -98,7 +137,7 @@ export function useRemoveContextMenu({
 
     const removeItems: MenuItem[] = canEdit
         ? [
-            ...(hasExtraItems
+            ...(itemEntries.length > 0 || (extraMenuItems?.length ?? 0) > 0
                 ? [{ label: 'divider', isDivider: true, onClick: () => {} }]
                 : []),
             {
@@ -117,6 +156,7 @@ export function useRemoveContextMenu({
         : [];
 
     const menuItems: MenuItem[] = [
+        ...itemEntries,
         ...(extraMenuItems ?? []),
         ...removeItems,
     ];

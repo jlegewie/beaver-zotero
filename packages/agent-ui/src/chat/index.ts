@@ -17,6 +17,12 @@ export { useCitationMarker } from './useCitationMarker';
 export { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
 export type { AlternateActivation } from './useAlternateActivation';
 
+export { collectionMenuItems, useItemContextMenu } from './useItemContextMenu';
+export type { ItemContextMenu } from './useItemContextMenu';
+
+export { beginMenuRequest } from './pendingMenuRequest';
+export type { PendingMenuRequest } from './pendingMenuRequest';
+
 export { default as ChipWithPopup, ChipPopupCard, ChipWithListPopup } from './ChipPopup';
 export type {
     ChipPopupAction,
