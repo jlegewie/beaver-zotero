@@ -25,6 +25,7 @@ import {
     WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { libraryRefForLibraryID, modelObjectId, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
+import { removeTagFromLibrary } from '../../../utils/zoteroTags';
 import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
 import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 
@@ -370,11 +371,27 @@ export async function validateManageTagsAction(
     // at execute time — NOT here — so a re-apply after manual library edits
     // produces a fresh snapshot.
     let itemCount = 0;
+    let itemCountKnown = false;
     try {
         const ids = await Zotero.Tags.getTagItems(libraryID, tagID);
         itemCount = ids.length;
+        itemCountKnown = true;
     } catch (e) {
         logger(`validateManageTagsAction: getTagItems failed: ${e}`, 1);
+    }
+
+    // The tagID lookup is global, so the name may only exist in another
+    // library. A tag is in this library if an item carries it or the library
+    // assigns it a color (which keeps it in the tag selector).
+    if (itemCountKnown && itemCount === 0 && !Zotero.Tags.getColor(libraryID, resolvedName)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Tag not found in library '${library.name}': '${name}'.`,
+            error_code: 'tag_not_found',
+            preference: 'always_ask',
+        };
     }
 
     if (itemCount > MAX_SNAPSHOT_ITEMS) {
@@ -528,10 +545,10 @@ export async function executeManageTagsAction(
                 logger(`executeManageTagsAction: Tag '${name}' not found in library ${resolvedLibraryId}; treating as already deleted`, 1);
             } else {
                 checkAborted(ctx, 'manage_tags:before_delete');
-                // onProgress and types are optional at runtime (see Zotero.Tags.removeFromLibrary
-                // JSDoc in tags.js); the .d.ts in zotero-types marks them required. Pass undefined.
-                await (Zotero.Tags.removeFromLibrary as any)(resolvedLibraryId, [tagID]);
-                logger(`executeManageTagsAction: Deleted tag '${resolvedName}' from library ${resolvedLibraryId}`, 1);
+                const removed = await removeTagFromLibrary(resolvedLibraryId, tagID, resolvedName);
+                logger(removed
+                    ? `executeManageTagsAction: Deleted tag '${resolvedName}' from library ${resolvedLibraryId}`
+                    : `executeManageTagsAction: Tag '${resolvedName}' has no items in library ${resolvedLibraryId}; nothing to delete`, 1);
             }
         } else {
             return {
