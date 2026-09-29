@@ -16,6 +16,7 @@ import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatE
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { getHost, type ResolvedItemDisplay } from '../host';
+import { useItemContextMenu } from './useItemContextMenu';
 
 interface CitedSourcesListProps {
     citations: CitedSource[];
@@ -27,6 +28,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     const authorYearFormat = (getHost().config?.citationFormat() ?? 'author-year') !== 'numeric';
     const externalReferenceMapping = useAtomValue(externalReferenceMappingAtom);
     const externalItemMapping = useAtomValue(externalReferenceItemMappingAtom);
+    const { openItemMenu, itemMenu } = useItemContextMenu();
 
     // Per-citation display metadata (icon item type + attachment availability),
     // resolved via the host. Rows render from citation v2 metadata alone; this
@@ -116,6 +118,8 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
 
                     // Only show as external if there's no mapped Zotero item
                     const showAsExternal = isExternal && !mappedZoteroItem;
+                    // The library item a right-click acts on; none for unmapped external sources.
+                    const menuTarget = isExternalFile ? undefined : mappedZoteroItem || zoteroRef;
 
                     // Item type icon for mapped external citations comes from the
                     // host-resolved display meta (not a render-time Zotero read).
@@ -138,7 +142,11 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                         : mappedItemType ?? itemTypeToIconName(citation.item_type ?? resolvedItemType, citation.content_kind);
 
                     return (
-                        <div key={getCitationKey(citation)} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
+                        <div
+                            key={getCitationKey(citation)}
+                            className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}
+                            onContextMenu={menuTarget ? (event) => openItemMenu(menuTarget, event) : undefined}
+                        >
                             {/* Left column - numeric citation */}
                             {!authorYearFormat &&
                                 <div className="p-2">
@@ -254,6 +262,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                     );
                 })}
             </div>
+            {itemMenu}
         </div>
     );
 };

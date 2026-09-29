@@ -8,6 +8,7 @@ import {
     isItemRow,
 } from '@beaver/agent-core/run-state/toolResultViews';
 import { getHost } from '@beaver/agent-ui/host';
+import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import { AnnotationResultRow } from './AnnotationResultRow';
 
@@ -15,8 +16,9 @@ import { AnnotationResultRow } from './AnnotationResultRow';
  * Shared renderer for hydrated item and annotation rows.
  *
  * Each item row pairs its item-type icon (in a rounded tile) with a two-line
- * title/subtitle block; clicking reveals the item in the host library. Rows are
- * separated by a hairline divider.
+ * title/subtitle block; clicking reveals the item in the host library and
+ * right-clicking opens the host's item menu. Rows are separated by a hairline
+ * divider.
  */
 
 /** Right-aligned labels are capped so they never crowd out the primary text. */
@@ -94,10 +96,11 @@ interface RowEventProps {
  */
 export type ItemRowAction = (row: ItemRowView) => React.ReactNode;
 
-/** Optional right-click handler per item row; it decides whether to suppress the native menu. */
-export type ItemRowContextMenu = (row: ItemRowView, event: React.MouseEvent) => void;
-
-const ItemRow: React.FC<{ row: ItemRowView; action?: ItemRowAction; onContextMenu?: ItemRowContextMenu } & RowEventProps> = ({
+const ItemRow: React.FC<{
+    row: ItemRowView;
+    action?: ItemRowAction;
+    onContextMenu?: (event: React.MouseEvent) => void;
+} & RowEventProps> = ({
     row,
     action,
     onContextMenu,
@@ -118,7 +121,7 @@ const ItemRow: React.FC<{ row: ItemRowView; action?: ItemRowAction; onContextMen
         <div
             className={`display-flex flex-row items-start gap-25 p-2 cursor-pointer transition-colors ${isHovered ? 'bg-quinary' : ''} ${faded ? 'opacity-50' : ''}`}
             onClick={() => activateRow(row)}
-            onContextMenu={onContextMenu && ((event) => onContextMenu(row, event))}
+            onContextMenu={onContextMenu}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
             title={isExternal ? 'Click to open the file' : 'Click to reveal in Zotero'}
@@ -174,12 +177,9 @@ const ItemRow: React.FC<{ row: ItemRowView; action?: ItemRowAction; onContextMen
     );
 };
 
-export const ItemListResultView: React.FC<{
-    view: ItemListView;
-    rowAction?: ItemRowAction;
-    onRowContextMenu?: ItemRowContextMenu;
-}> = ({ view, rowAction, onRowContextMenu }) => {
+export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: ItemRowAction }> = ({ view, rowAction }) => {
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+    const { openItemMenu, itemMenu } = useItemContextMenu();
 
     if (view.items.length === 0) {
         return (
@@ -202,13 +202,25 @@ export const ItemListResultView: React.FC<{
                 return (
                     <div key={key} className={isLast ? '' : 'border-bottom-quinary'}>
                         {isItemRow(row) ? (
-                            <ItemRow row={row} action={rowAction} onContextMenu={onRowContextMenu} {...rowEvents} />
+                            <ItemRow
+                                row={row}
+                                action={rowAction}
+                                // External files have no library entry to reveal or open.
+                                onContextMenu={row.library_id === EXTERNAL_LIBRARY_ID ? undefined : (event) => openItemMenu(row, event)}
+                                {...rowEvents}
+                            />
                         ) : (
-                            <AnnotationResultRow row={row} variant="with-parent" {...rowEvents} />
+                            <AnnotationResultRow
+                                row={row}
+                                variant="with-parent"
+                                onContextMenu={(event) => openItemMenu(row, event)}
+                                {...rowEvents}
+                            />
                         )}
                     </div>
                 );
             })}
+            {itemMenu}
         </div>
     );
 };

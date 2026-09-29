@@ -7,6 +7,7 @@ import {
     AttachmentMatchView,
 } from '@beaver/agent-core/run-state/toolResultViews';
 import { getHost } from '@beaver/agent-ui/host';
+import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 
 /**
  * Shared renderer for the {@link AttachmentSearchView} view model
@@ -202,6 +203,7 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
     const phrases = React.useMemo(() => highlightPhrasesFor(view), [view]);
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
     const [showNoMatches, setShowNoMatches] = useState(false);
+    const { openItemMenu, itemMenu } = useItemContextMenu();
 
     const attachments = view.attachments;
 
@@ -257,6 +259,8 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
                 <div
                     className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 cursor-pointer transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
                     onClick={() => handleAttachmentClick(row)}
+                    // The item menu is for library attachments; match rows stay click-only.
+                    onContextMenu={row.is_external ? undefined : (event) => openItemMenu(row, event)}
                     onMouseEnter={() => setHoveredKey(attKey)}
                     onMouseLeave={() => setHoveredKey(null)}
                     title={title}
@@ -361,6 +365,7 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
                     </div>
                 </div>
             )}
+            {itemMenu}
         </div>
     );
 };

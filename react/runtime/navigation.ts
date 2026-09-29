@@ -219,6 +219,20 @@ export async function viewAttachment(
     }
 }
 
+/** Open a note in its own window; releases without note tabs only have note windows. */
+export async function openNoteWindow(itemID: number, origin?: Window): Promise<void> {
+    try {
+        const win = await resolveNavigationWindow(origin ?? getContextWindow());
+        if (typeof (Zotero as any).Notes?.open === 'function') {
+            await (win.ZoteroPane as any).openNote(itemID, { openInWindow: true });
+        } else {
+            await win.ZoteroPane.openNoteWindow(itemID);
+        }
+    } catch (error) {
+        logger(`openNoteWindow: ${error}`, 2);
+    }
+}
+
 /** Reveal an attachment's file in the OS file manager, or show Zotero's missing-file dialog. */
 export async function showAttachmentInFilesystem(itemID: number, origin?: Window): Promise<void> {
     try {
