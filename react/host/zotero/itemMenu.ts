@@ -69,7 +69,8 @@ async function annotationEntries(annotation: Zotero.Item): Promise<MenuItem[]> {
  * Right-click entries for a library item, mirroring Zotero's item context menu
  * with its English labels: "Show in Library"; "Open <PDF|EPUB|Snapshot|Note> in
  * New Tab / New Window" (a single "Open <type>" when an external viewer is set
- * for the type); and "Show in Finder" / "Show File". Regular items act on their
+ * for the type, "Open Attachment" for a file without a built-in reader); and
+ * "Show in Finder" / "Show File". Regular items act on their
  * best attachment, like Zotero. Annotations get {@link annotationEntries}.
  *
  * Local reveal/open actions over persisted history, so deliberately not gated
@@ -116,6 +117,7 @@ export async function itemMenuItems(ref: ZoteroItemReference): Promise<MenuItem[
     } catch (error) {
         logger(`itemMenuItems: attachment lookup failed for ${ref.zotero_key}: ${error}`, 2);
     }
+    const file = item.isRegularItem() ? candidates[0] : item.isFileAttachment() ? item : null;
     const attachment = candidates.find((candidate) => candidate.attachmentReaderType
         && candidate.attachmentLinkMode !== Zotero.Attachments.LINK_MODE_LINKED_URL);
     if (attachment) {
@@ -131,9 +133,12 @@ export async function itemMenuItems(ref: ZoteroItemReference): Promise<MenuItem[
                 attachment.id, undefined, { forceAlternateWindowBehavior: inWindow !== prefersWindow },
             )));
         }
+    } else if (file) {
+        // No built-in reader (a DOCX, an image, plain text): Zotero opens the file
+        // in its system application, as a double-click in the items tree does.
+        entries.push({ label: 'Open Attachment', icon: FileViewIcon, onClick: () => void viewAttachment(file.id) });
     }
 
-    const file = item.isRegularItem() ? candidates[0] : item.isFileAttachment() ? item : null;
     if (file) entries.push(showFileEntry(file));
     return entries;
 }

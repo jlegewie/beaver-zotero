@@ -5,13 +5,14 @@ declare const Zotero: any;
 const resolveLibraryRef = vi.hoisted(() => vi.fn());
 const revealSource = vi.hoisted(() => vi.fn());
 const selectItemById = vi.hoisted(() => vi.fn());
+const viewAttachment = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/utils/libraryIdentity', () => ({ resolveLibraryRef }));
 vi.mock('../../../react/runtime/navigation', () => ({
     openNote: vi.fn(),
     openNoteWindow: vi.fn(),
     showAttachmentInFilesystem: vi.fn(),
-    viewAttachment: vi.fn(),
+    viewAttachment,
 }));
 vi.mock('../../../react/utils/sourceUtils', () => ({ revealSource }));
 vi.mock('../../../react/utils/selectItem', () => ({ selectItemById }));
@@ -35,6 +36,22 @@ function pdfAttachment(id: number) {
         key: `ATT${id}`,
         attachmentReaderType: 'pdf',
         attachmentLinkMode: 0,
+        isFileAttachment: () => true,
+    };
+}
+
+/** A file with no built-in reader: Zotero hands it to the system application. */
+function docxAttachment(id: number) {
+    return {
+        id,
+        libraryID: 7,
+        key: `ATT${id}`,
+        attachmentReaderType: undefined,
+        attachmentLinkMode: 0,
+        isAnnotation: () => false,
+        isNote: () => false,
+        isAttachment: () => true,
+        isRegularItem: () => false,
         isFileAttachment: () => true,
     };
 }
@@ -159,6 +176,24 @@ describe('itemMenuItems', () => {
         entries.find((entry) => entry.label === 'Show in Library')!.onClick();
 
         await vi.waitFor(() => expect(revealSource).toHaveBeenCalledWith({ library_id: 7, zotero_key: 'ATT10' }));
+    });
+
+    it('offers "Open Attachment" for a file without a built-in reader', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(docxAttachment(20));
+
+        const entries = await itemMenuItems({ library_id: 7, zotero_key: 'ATT20' });
+
+        expect(labels(entries)).toEqual(['Show in Library', 'Open Attachment', 'Show in Finder']);
+        entries.find((entry) => entry.label === 'Open Attachment')!.onClick();
+        expect(viewAttachment).toHaveBeenCalledWith(20);
+    });
+
+    it('opens a regular item\'s best file when none has a built-in reader', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(lazyRegularItem([docxAttachment(20)]));
+
+        const entries = await itemMenuItems({ library_id: 7, zotero_key: 'ITEM0001' });
+
+        expect(labels(entries)).toEqual(['Show in Library', 'Open Attachment', 'Show in Finder']);
     });
 
     it('returns no entries for an item that no longer exists', async () => {
