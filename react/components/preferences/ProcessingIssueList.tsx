@@ -91,7 +91,8 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
 /**
  * One page of an issue group's attachments, rendered with the shared item-list
  * rows so they look and behave like items anywhere else in Beaver: parent
- * headline, title underneath, click to reveal in Zotero.
+ * headline, title underneath, click to reveal in Zotero, right-click for the
+ * library/open/show-file actions of Zotero's own item menu.
  *
  * Titles are resolved locally per page; this is a render path over persisted
  * ledger rows, so it is deliberately not gated on library exclusion.

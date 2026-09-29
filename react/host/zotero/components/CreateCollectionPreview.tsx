@@ -3,6 +3,8 @@ import { resolveObjectId } from '../../../../src/utils/libraryIdentity';
 import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, PlusSignIcon } from '../../../components/icons/icons';
 import { getHost } from '@beaver/agent-ui/host';
+import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 
@@ -56,6 +58,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
     // Resolved library id, used to reveal the collections in the library view.
     const [libraryId, setLibraryId] = useState<number | null>(null);
     const [hoveredRow, setHoveredRow] = useState<'new' | 'parent' | null>(null);
+    const { openCollectionMenu, itemMenu } = useItemContextMenu();
 
     useEffect(() => {
         if (typeof Zotero === 'undefined') return;
@@ -109,13 +112,22 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
     const canRevealNew = isApplied && !!newCollectionKey && libraryId != null;
     const canRevealParent = isApplied && !!parentKey && libraryId != null;
 
-    const revealCollection = (collectionKey: string) => {
-        if (libraryId == null) return;
-        getHost().navigation?.revealCollection(resolveObjectId(collectionKey) ?? {
+    const collectionRef = (collectionKey: string): ZoteroItemReference | null => {
+        if (libraryId == null) return null;
+        return resolveObjectId(collectionKey) ?? {
             library_id: libraryId,
             zotero_key: collectionKey,
             library_ref: libraryRef ?? resultData?.library_ref ?? libraryRefForLibraryID(libraryId) ?? undefined,
-        });
+        };
+    };
+    const revealCollection = (collectionKey: string) => {
+        const ref = collectionRef(collectionKey);
+        if (ref) getHost().navigation?.revealCollection(ref);
+    };
+    // Right-click offers the same reveal as a click, once the collection exists.
+    const collectionMenuHandler = (collectionKey: string) => (event: React.MouseEvent) => {
+        const ref = collectionRef(collectionKey);
+        if (ref) openCollectionMenu(ref, event);
     };
 
     const getNewItemStyles = () => {
@@ -139,6 +151,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
                             className={`display-flex flex-row items-center gap-2 py-1 transition-colors duration-150 ${canRevealParent ? 'cursor-pointer' : 'opacity-60'} ${canRevealParent && hoveredRow === 'parent' ? 'bg-quinary' : ''}`}
                             style={{ paddingLeft: ROW_PADDING, paddingRight: ROW_PADDING }}
                             onClick={canRevealParent ? () => revealCollection(parentKey) : undefined}
+                            onContextMenu={canRevealParent ? collectionMenuHandler(parentKey) : undefined}
                             onMouseEnter={canRevealParent ? () => setHoveredRow('parent') : undefined}
                             onMouseLeave={canRevealParent ? () => setHoveredRow(null) : undefined}
                             title={canRevealParent ? 'Click to reveal in Zotero' : undefined}
@@ -157,6 +170,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
                         className={`display-flex flex-row items-center gap-2 py-15 transition-colors duration-150 ${canRevealNew ? 'cursor-pointer' : ''} ${canRevealNew ? (hoveredRow === 'new' ? 'bg-quinary' : 'bg-transparent') : getNewItemStyles()}`}
                         style={{ paddingLeft: parentKey ? CHILD_ROW_PADDING : ROW_PADDING, paddingRight: ROW_PADDING }}
                         onClick={canRevealNew ? () => revealCollection(newCollectionKey!) : undefined}
+                        onContextMenu={canRevealNew ? collectionMenuHandler(newCollectionKey!) : undefined}
                         onMouseEnter={canRevealNew ? () => setHoveredRow('new') : undefined}
                         onMouseLeave={canRevealNew ? () => setHoveredRow(null) : undefined}
                         title={canRevealNew ? 'Click to reveal in Zotero' : undefined}
@@ -195,6 +209,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
                     </div>
                 )}
             </div>
+            {itemMenu}
         </div>
     );
 };

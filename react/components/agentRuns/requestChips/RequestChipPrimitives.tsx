@@ -8,6 +8,8 @@ import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
 import type { ValidAnnotationType, ExternalFileContentKind } from '@beaver/agent-core/types/attachments/apiTypes';
 import { ChipWithPopup, type ChipPopupContent, type ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
+import { collectionMenuItems } from '@beaver/agent-ui/chat/useItemContextMenu';
+import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { useRemoveContextMenu } from '../../../hooks/useRemoveContextMenu';
 import { ChipButton } from './ChipButton';
 import { ChipRemovableIcon } from './ChipRemovableIcon';
@@ -68,7 +70,11 @@ function attachmentIconName(contentKind?: ContentKind | ExternalFileContentKind 
     }
 }
 
-/** Shared chip body. `remove` adds the hover "x" and the Remove context menu. */
+/**
+ * Shared chip body. `remove` adds the hover "x" and the Remove context menu;
+ * `itemRef` adds the host's item menu (show in library, open, show file) and
+ * `menuItems` fixed entries for objects that are not items.
+ */
 function ChipShell({
     icon,
     label,
@@ -76,6 +82,8 @@ function ChipShell({
     popup,
     onClick,
     remove,
+    itemRef,
+    menuItems,
 }: {
     icon: React.ReactNode;
     label: string;
@@ -83,11 +91,15 @@ function ChipShell({
     popup?: ChipPopupContent | null;
     onClick?: () => void;
     remove?: ChipRemoveConfig;
+    itemRef?: ZoteroItemReference;
+    menuItems?: MenuItem[];
 }) {
     const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
         onRemove: () => remove?.onRemove(),
         onRemoveAll: remove?.onRemoveAll,
         canEdit: Boolean(remove),
+        itemRef,
+        extraMenuItems: menuItems,
     });
 
     const button = (
@@ -160,6 +172,7 @@ export function ItemChip({
             }}
             onClick={() => getHost().navigation?.revealInLibrary(itemRef)}
             remove={remove}
+            itemRef={itemRef}
         />
     );
 }
@@ -186,6 +199,7 @@ export function AnnotationChip({
             popup={buildAnnotationChipPopup({ annotationType, color, title })}
             onClick={() => getHost().navigation?.openAnnotation(annotationRef)}
             remove={remove}
+            itemRef={annotationRef}
         />
     );
 }
@@ -238,6 +252,7 @@ export function NoteChip({
             }}
             onClick={() => getHost().navigation?.openSource(noteRef)}
             remove={remove}
+            itemRef={noteRef}
         />
     );
 }
@@ -274,6 +289,7 @@ export function CollectionChip({
             }}
             onClick={() => getHost().navigation?.revealCollection(collectionRef)}
             remove={remove}
+            menuItems={collectionMenuItems(collectionRef)}
         />
     );
 }
