@@ -61,6 +61,16 @@ const TERMINAL_CODES = new Set([
  */
 const PROBE_SKIP_AFTER_PAYLOAD_UPLOADS = 3;
 
+/** Wait before retrying a job whose content another local job is indexing. */
+const DOCUMENT_BUSY_RETRY_MS = 2_000;
+
+/**
+ * Longest wait on a busy document claim. The holder is almost always a live
+ * request that finishes within seconds; the remaining lease the backend may
+ * report only bounds recovery from a holder that died.
+ */
+const CLAIM_BUSY_MAX_RETRY_MS = 15_000;
+
 export interface FulltextUpsertExecutorOptions {
     /** Called with each requirements response an upsert reads. */
     onRequirements?: (requirements: IndexRequirements) => void;
@@ -70,6 +80,17 @@ export interface FulltextUpsertExecutorOptions {
 export class FulltextUpsertExecutor implements JobExecutor {
     // Upsert and cleanup use separate lanes but mutate the same membership.
     private static activeAttachments = new Set<string>();
+    /**
+     * Document hashes with a request in flight. Attachments with identical
+     * content share one remote document and contend for its claim, so a
+     * second job for the hash waits locally instead of the server.
+     */
+    private static activeHashes = new Set<string>();
+    /**
+     * Hashes whose next upsert probes before uploading: content another job
+     * was indexing is usually already stored, which the probe tags cheaply.
+     */
+    private static probeFirstHashes = new Set<string>();
     readonly jobType: Extract<BackgroundJobType, 'fulltext_upsert' | 'fulltext_untag'>;
 
     private disposed = false;
@@ -112,11 +133,21 @@ export class FulltextUpsertExecutor implements JobExecutor {
         if (FulltextUpsertExecutor.activeAttachments.has(key)) {
             return { kind: 'retry', error: 'index_membership_busy', countsAsAttempt: false, retryAfterMs: 1_000 };
         }
+        const hash = record.payload?.doc_hash;
+        if (hash && FulltextUpsertExecutor.activeHashes.has(hash)) {
+            if (record.jobType === 'fulltext_upsert') FulltextUpsertExecutor.probeFirstHashes.add(hash);
+            return {
+                kind: 'retry', error: 'index_document_busy', countsAsAttempt: false,
+                retryAfterMs: DOCUMENT_BUSY_RETRY_MS,
+            };
+        }
         FulltextUpsertExecutor.activeAttachments.add(key);
+        if (hash) FulltextUpsertExecutor.activeHashes.add(hash);
         try {
             return await this.executeExclusive(record, ctx);
         } finally {
             FulltextUpsertExecutor.activeAttachments.delete(key);
+            if (hash) FulltextUpsertExecutor.activeHashes.delete(hash);
         }
     }
 
@@ -329,7 +360,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
         // During a bulk upload of new content nearly every probe answers
         // `payload_required`; skip that round trip until one upload shows the
         // index already had the content.
-        if (this.payloadUploadStreak >= PROBE_SKIP_AFTER_PAYLOAD_UPLOADS) {
+        const probeFirst = FulltextUpsertExecutor.probeFirstHashes.delete(row.structuredDocumentHash);
+        if (!probeFirst && this.payloadUploadStreak >= PROBE_SKIP_AFTER_PAYLOAD_UPLOADS) {
             const result = await upsertWithPayload('probe');
             if (result && 'kind' in result) return result;
             if (result) response = result;
@@ -530,11 +562,16 @@ export class FulltextUpsertExecutor implements JobExecutor {
                 return { kind: 'retry', error: 'index_untag_failed' };
             }
             if (result.outcome === 'busy') {
+                const retryAfterMs = Math.max(1, result.retry_after_seconds ?? 1) * 1_000;
                 return {
                     kind: 'retry',
                     error: 'index_untag_busy',
                     countsAsAttempt: false,
-                    retryAfterMs: Math.max(1, result.retry_after_seconds ?? 1) * 1_000,
+                    retryAfterMs,
+                    // A document claim frees within seconds. A longer wait means the
+                    // account takes no cleanup claims right now, which holds for
+                    // every queued cleanup, so the whole lane waits with this one.
+                    ...(retryAfterMs > CLAIM_BUSY_MAX_RETRY_MS ? { laneCooldownMs: retryAfterMs } : {}),
                 };
             }
             return { kind: 'complete', reason: 'index_untagged' };
@@ -639,7 +676,14 @@ export class FulltextUpsertExecutor implements JobExecutor {
             ? Math.max(1, error.retryAfterSeconds!) * 1_000 : undefined;
         const message = `${code}: ${error.message}`;
         if (code === 'claim_busy' || code === 'lease_lost' || code === 'index_untag_busy') {
-            return { kind: 'retry', error: message, countsAsAttempt: false, retryAfterMs: retryAfterMs ?? 5_000 };
+            if (code === 'claim_busy' && row?.structuredDocumentHash) {
+                // Another writer holds this content, so it is likely indexed by the retry.
+                FulltextUpsertExecutor.probeFirstHashes.add(row.structuredDocumentHash);
+            }
+            return {
+                kind: 'retry', error: message, countsAsAttempt: false,
+                retryAfterMs: Math.min(retryAfterMs ?? 5_000, CLAIM_BUSY_MAX_RETRY_MS),
+            };
         }
         if (record && (error.status === 429 || [500, 502, 503, 504].includes(error.status)
             || isSessionRefreshError(error)

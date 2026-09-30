@@ -655,7 +655,7 @@ describe('DocumentCache payloads', () => {
         expect(await cache.getResult({ libraryId: input.item.libraryID, zoteroKey: input.item.key }, 'structured', sourcePath)).not.toBeNull();
     });
 
-    it.each(['replacement', 'deletion', 'exclusion'])('invalidates protected text for explicit %s', async reason => {
+    it.each(['replacement', 'deletion', 'library invalidation'])('invalidates protected text for explicit %s', async reason => {
         const item = createCacheAttachment();
         await cache.putResult({ item, filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
             contentType: 'application/pdf', result: structuredResult,
@@ -669,6 +669,30 @@ describe('DocumentCache payloads', () => {
         } else await cache.invalidateByLibrary(item.libraryID);
         expect(await db.getDocumentCachePayloadCount()).toBe(0);
         expect(await db.getDocumentCacheMetadataCount()).toBe(0);
+    });
+
+    it('keeps OCR text and drops native text when an excluded library is invalidated', async () => {
+        const scanned = createCacheAttachment();
+        const native = createMockAttachment({ id: 101, key: 'EFGH5678', libraryID: 1 }) as unknown as CacheAttachmentItem;
+        const other = createMockAttachment({ id: 102, key: 'IJKL9012', libraryID: 2 }) as unknown as CacheAttachmentItem;
+        for (const [item, extractionSource] of [[scanned, 'ocr'], [native, undefined], [other, undefined]] as const) {
+            await cache.putResult({ item, filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
+                contentType: 'application/pdf', result: structuredResult,
+                metadata: { pageCount: 1, pageLabels: null, pages: onePageGeometry,
+                    ...(extractionSource ? { extractionSource } : {}) } });
+        }
+        const nativePayload = await db.getDocumentCachePayload(1, native.key, 'structured');
+
+        await cache.invalidateByLibrary(1, { retainProtectedOcr: true });
+
+        expect(await db.getDocumentCachePayload(1, native.key, 'structured')).toBeNull();
+        expect(await db.getDocumentCacheMetadataByKey(1, native.key)).toBeNull();
+        expect(files.has(nativePayload!.payloadPath)).toBe(false);
+        expect(await db.getDocumentCachePayload(2, other.key, 'structured')).not.toBeNull();
+        const retained = await db.getDocumentCachePayload(1, scanned.key, 'structured');
+        expect(retained).toMatchObject({ extractionSource: 'ocr' });
+        expect(files.has(retained!.payloadPath)).toBe(true);
+        expect(await cache.getResult({ libraryId: 1, zoteroKey: scanned.key }, 'structured', sourcePath)).not.toBeNull();
     });
 
     it('retains incompatible OCR bytes without serving them', async () => {

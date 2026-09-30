@@ -4140,6 +4140,30 @@ export class BeaverDB {
         return payloads;
     }
 
+    /**
+     * Delete a library's cached content except OCR payloads and their metadata,
+     * returning the deleted payload rows for file cleanup.
+     */
+    public async deleteUnprotectedDocumentCacheByLibrary(libraryId: number): Promise<DocumentCachePayloadRecord[]> {
+        let payloads: DocumentCachePayloadRecord[] = [];
+        await this.conn.executeTransaction(async () => {
+            payloads = await this.selectDocumentCachePayloads(
+                `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ? AND extraction_source != 'ocr'`,
+                [libraryId],
+            );
+            await this.queryAsync(
+                `DELETE FROM document_cache_payloads WHERE library_id = ? AND extraction_source != 'ocr'`,
+                [libraryId],
+            );
+            await this.queryAsync(
+                `DELETE FROM document_cache_metadata WHERE library_id = ? AND id NOT IN
+                    (SELECT metadata_id FROM document_cache_payloads WHERE extraction_source = 'ocr')`,
+                [libraryId],
+            );
+        });
+        return payloads;
+    }
+
     /** Insert or update a document-cache payload by metadata/payload kind. */
     public async upsertDocumentCachePayload(record: DocumentCachePayloadInput): Promise<DocumentCachePayloadRecord> {
         await this.queryAsync(

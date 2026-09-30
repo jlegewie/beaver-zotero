@@ -1109,13 +1109,21 @@ export class DocumentCache {
         return await this.deletePayload(before) ? 'discarded' : 'changed';
     }
 
-    /** Invalidate all document-cache state for a library. */
-    async invalidateByLibrary(libraryId: number): Promise<void> {
+    /**
+     * Invalidate all document-cache state for a library. `retainProtectedOcr`
+     * keeps OCR payloads and their metadata, as `clearAll` does: they cannot
+     * be rebuilt locally, and a later read revalidates them against the file.
+     */
+    async invalidateByLibrary(libraryId: number, options: { retainProtectedOcr?: boolean } = {}): Promise<void> {
         this.libraryGenerations.set(libraryId, (this.libraryGenerations.get(libraryId) ?? 0) + 1);
         await Promise.allSettled([...this.itemWriteLocks]
             .filter(([key]) => key.startsWith(`${libraryId}/`))
             .map(([, write]) => write));
         try {
+            if (options.retainProtectedOcr) {
+                await this.removePayloadFiles(await this.db.deleteUnprotectedDocumentCacheByLibrary(libraryId));
+                return;
+            }
             const payloads = await this.db.deleteDocumentCacheMetadataByLibrary(libraryId);
             await this.removePayloadFiles(payloads);
             if (this.payloadCacheDir) {

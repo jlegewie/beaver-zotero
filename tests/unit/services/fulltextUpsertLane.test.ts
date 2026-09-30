@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/services/backgroundProcessing/remoteRefsReconcile', () => ({
     reconcileRemoteRefs: vi.fn(async () => undefined),
 }));
 
-import { indexLaneCapacity } from '../../../src/services/backgroundProcessing/fulltextUpsertLane';
+import { indexLaneCapacity, startFulltextUpsertLane } from '../../../src/services/backgroundProcessing/fulltextUpsertLane';
 
 describe('indexLaneCapacity', () => {
     it('uses four slots, all of them while the user is active, until the backend advertises a limit', () => {
@@ -26,5 +26,25 @@ describe('indexLaneCapacity', () => {
             expect(indexLaneCapacity(advertised)).toEqual({ maxInFlight: 4, activeMaxInFlight: 4 });
         }
         expect(indexLaneCapacity(6.7)).toEqual({ maxInFlight: 6, activeMaxInFlight: 4 });
+    });
+});
+
+describe('startFulltextUpsertLane', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('drains cleanup several requests at a time, fewer while the user is active', async () => {
+        vi.useFakeTimers();
+        const registerExecutor = vi.fn();
+        (globalThis as any).Zotero.Beaver = {
+            backgroundExtractor: { registerExecutor, unregisterExecutor: vi.fn(), setLaneCapacity: vi.fn(), notify: vi.fn() },
+        };
+        const stop = startFulltextUpsertLane([1], false);
+
+        expect(registerExecutor).toHaveBeenCalledTimes(1);
+        expect(registerExecutor).toHaveBeenCalledWith(expect.objectContaining({ jobType: 'fulltext_untag' }),
+            { maxInFlight: 8, activeMaxInFlight: 4, survivesLibraryExclusion: true });
+        await stop();
     });
 });
