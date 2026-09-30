@@ -6,7 +6,7 @@
  */
 import { REGION_FEATURES, REGION_FEATURE_VERSION } from "./features";
 
-export type RegionClass = "other" | "picture" | "decoration" | "table";
+export type RegionClass = "other" | "picture" | "decoration" | "table" | "formula";
 
 interface RegionModelBase {
     featureVersion: number;
@@ -87,7 +87,7 @@ export function predictRegionClass(model: RegionModelWeights, x: readonly number
     const max = Math.max(...logits);
     const exps = logits.map((z) => Math.exp(z - max));
     const total = exps.reduce((a, b) => a + b, 0);
-    const probs: Record<RegionClass, number> = { other: 0, picture: 0, decoration: 0, table: 0 };
+    const probs: Record<RegionClass, number> = { other: 0, picture: 0, decoration: 0, table: 0, formula: 0 };
     model.classes.forEach((cls, k) => {
         probs[cls] = exps[k] / total;
     });

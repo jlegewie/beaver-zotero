@@ -16,21 +16,36 @@ export const GRID_CLUSTER_MIN = 2000;
 /** Occupancy-grid cells per page stay near this, so oversized pages get coarser cells. */
 const GRID_TARGET_CELLS = 500_000;
 
-export function clusterRects(rects: readonly Rect[], gap: number): number[][] {
-    if (rects.length > GRID_CLUSTER_MIN) return gridCluster(rects, gap);
-    const parent = rects.map((_, i) => i);
-    const find = (x: number): number => {
+/** Disjoint sets over 0..n-1 with path halving. */
+export class UnionFind {
+    private readonly parent: Int32Array;
+
+    constructor(n: number) {
+        this.parent = new Int32Array(n);
+        for (let i = 0; i < n; i++) this.parent[i] = i;
+    }
+
+    find(x: number): number {
+        const parent = this.parent;
         while (parent[x] !== x) {
             parent[x] = parent[parent[x]];
             x = parent[x];
         }
         return x;
-    };
-    const join = (a: number, b: number) => {
-        const ra = find(a);
-        const rb = find(b);
-        if (ra !== rb) parent[rb] = ra;
-    };
+    }
+
+    union(a: number, b: number): void {
+        const ra = this.find(a);
+        const rb = this.find(b);
+        if (ra !== rb) this.parent[rb] = ra;
+    }
+}
+
+export function clusterRects(rects: readonly Rect[], gap: number): number[][] {
+    if (rects.length > GRID_CLUSTER_MIN) return gridCluster(rects, gap);
+    const uf = new UnionFind(rects.length);
+    const find = (x: number) => uf.find(x);
+    const join = (a: number, b: number) => uf.union(a, b);
 
     const half = gap / 2;
     const grown = rects.map((r) => dilate(r, half));

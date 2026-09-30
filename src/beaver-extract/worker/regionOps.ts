@@ -35,6 +35,8 @@ export interface RegionPageResult {
     detectMs: number;
     graphics: { records: number; overflow: boolean };
     candidates: DetectedRegion[];
+    /** With `includeLines`: [x0, y0, x1, y1, chars, flags] per text line. */
+    lines?: number[][];
     error?: string;
 }
 
@@ -74,6 +76,8 @@ export async function opDetectRegions(args: {
     pageIndices: number[];
     contextPages?: number;
     classify?: boolean;
+    /** Also return each page's text lines with routing flags (see `RegionDetection.lines`). */
+    includeLines?: boolean;
 }): Promise<OpReply<RegionDetectionResult>> {
     const api = await ensureApi();
     if (!api.supportsGraphicsSummary) {
@@ -96,8 +100,11 @@ export async function opDetectRegions(args: {
             const start = performance.now();
             try {
                 let graphics: GraphicsSummary | null = null;
-                const page = extractRawPageDetailedFromDoc(doc, i, false, api.Font, undefined, (g) => {
-                    graphics = g;
+                const page = extractRawPageDetailedFromDoc(doc, i, false, api.Font, undefined, {
+                    onGraphics: (g) => {
+                        graphics = g;
+                    },
+                    fontSpans: true,
                 });
                 if (!graphics) throw new Error("graphics summary missing");
                 walked.set(i, { page, graphics, ms: performance.now() - start });
@@ -134,7 +141,12 @@ export async function opDetectRegions(args: {
                     graphics: { records: 0, overflow: false }, candidates: [], error: errors.get(i),
                 };
             }
-            const detection = detectRegions(w.page, w.graphics, { pageIndex: i, doc: docContext, model });
+            const detection = detectRegions(w.page, w.graphics, {
+                pageIndex: i,
+                doc: docContext,
+                model,
+                includeLines: args.includeLines,
+            });
             return {
                 pageIndex: i,
                 width: w.page.width,
@@ -145,6 +157,7 @@ export async function opDetectRegions(args: {
                 detectMs: detection.ms,
                 graphics: { records: w.graphics.count, overflow: w.graphics.overflow },
                 candidates: detection.candidates,
+                ...(detection.lines ? { lines: detection.lines } : {}),
             };
         });
         return {

@@ -413,6 +413,14 @@ export interface RawChar {
     bbox: BoundingBox;
 }
 
+/** A run of consecutive characters in one font at one size. */
+export interface RawFontSpan {
+    /** Index of the run's first character in the line's `chars`. */
+    start: number;
+    /** Font of the run; `size` is the exact (untruncated) font size. */
+    font: RawFont;
+}
+
 /** A line enriched with per-character quads. */
 export interface RawLineDetailed extends RawLine {
     /**
@@ -420,6 +428,11 @@ export interface RawLineDetailed extends RawLine {
      * INVARIANT: `text.length === chars.length` and `text[i] === chars[i].c`.
      */
     chars: RawChar[];
+    /**
+     * Font runs covering `chars` in order, present only when the walk was asked
+     * for them (region detection). The line-level `font` is the first run's.
+     */
+    spans?: RawFontSpan[];
 }
 
 /** A block enriched with detailed lines. */

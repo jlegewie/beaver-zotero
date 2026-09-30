@@ -718,8 +718,9 @@ function extractRawPageDetailedOnce(
     fontApi?: FontApi,
     recoverUnmappedGlyphs?: boolean,
     textRepair = CURRENT_PDF_EXTRACTION_PRESET.textRepair,
-    onGraphics?: (graphics: GraphicsSummary) => void,
+    extras: DetailedWalkExtras = {},
 ): RawPageDataDetailed {
+    const { onGraphics, fontSpans } = extras;
     const page = doc.loadPage(pageIndex);
     try {
         const pb = page.getBounds("CropBox");
@@ -781,6 +782,8 @@ function extractRawPageDetailedOnce(
             return entry;
         };
 
+        // Font pointer of the current line's last span (region walks only).
+        let spanFontPtr = 0;
         try {
             stext.walk({
                 beginTextBlock: (bbox) => {
@@ -825,6 +828,20 @@ function extractRawPageDetailedOnce(
                     }
                     currentLine = null;
                 },
+                onCharFont: fontSpans
+                    ? (fontPtr, size) => {
+                          if (!currentLine) return;
+                          const spans = (currentLine.spans ??= []);
+                          const last = spans[spans.length - 1];
+                          if (last && spanFontPtr === fontPtr && last.font.size === size) return;
+                          const f = lookupFont(fontPtr);
+                          spanFontPtr = fontPtr;
+                          spans.push({
+                              start: currentLine.chars.length,
+                              font: { name: f.name, family: f.family, weight: f.weight, style: f.style, size },
+                          });
+                      }
+                    : undefined,
                 onLineFont: (fontPtr, size) => {
                     if (!currentLine) return;
                     const f = lookupFont(typeof fontPtr === "number" ? fontPtr : 0);
@@ -1364,11 +1381,21 @@ export function extractRawPageFromDoc(
     return recovered;
 }
 
-/** Extract a page's detailed-walk data, recovering an unmapped text layer when present. */
+/** Optional extras collected by the detailed walk (region detection). */
+export interface DetailedWalkExtras {
+    /**
+     * Receives the page's graphics summary, collected in the same pass as the
+     * text (requires `MuPDFApi.supportsGraphicsSummary`).
+     */
+    onGraphics?: (graphics: GraphicsSummary) => void;
+    /** Record per-line font runs (`RawLineDetailed.spans`). */
+    fontSpans?: boolean;
+}
+
 /**
- * `onGraphics` receives the page's graphics summary, collected in the same pass
- * as the text (requires `MuPDFApi.supportsGraphicsSummary`). The summary does
- * not depend on text options, so the unmapped-glyph retry does not re-collect it.
+ * Extract a page's detailed-walk data, recovering an unmapped text layer when
+ * present. The graphics summary does not depend on text options, so the
+ * unmapped-glyph retry does not re-collect it.
  */
 export function extractRawPageDetailedFromDoc(
     doc: DocumentLike,
@@ -1376,11 +1403,13 @@ export function extractRawPageDetailedFromDoc(
     includeImages: boolean,
     fontApi?: FontApi,
     textRepair?: boolean,
-    onGraphics?: (graphics: GraphicsSummary) => void,
+    extras: DetailedWalkExtras = {},
 ): RawPageDataDetailed {
-    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair, onGraphics);
+    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair, extras);
     if (!isUnmappedTextLayer(page)) return page;
-    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair);
+    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair, {
+        fontSpans: extras.fontSpans,
+    });
     if (!recoveredTextIsAcceptable(recovered)) return page;
     postLog("info", `Recovered unmapped text layer on page ${pageIndex}`);
     return recovered;

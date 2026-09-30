@@ -9,8 +9,9 @@
 import type { Candidate, PageCandidates } from "./candidates";
 import { hgap, intersect, overlapFrac, rectArea, vgap, type Rect } from "./geometry";
 import { NUMERIC_RE, isProse, type RegionLine } from "./pageSignals";
+import { spansColumn } from "./textCandidates";
 
-export const REGION_FEATURE_VERSION = 2;
+export const REGION_FEATURE_VERSION = 5;
 
 export const REGION_FEATURES = [
     // geometry
@@ -24,6 +25,10 @@ export const REGION_FEATURES = [
     // context
     "fig_caption", "tab_caption", "caption_dist", "top_band", "bottom_band", "anchored",
     "scanned_page", "img_repeat_pages",
+    // text candidates, equations and tables
+    "src_text", "rotated_text", "rect_frac", "math_frac", "eq_numbers", "alpha_word_frac", "size_spread", "running_frac",
+    "col_offset", "col_left", "col_width_frac", "iso_above", "iso_below", "margin_lines_frac", "full_width_lines_frac",
+    "n_rows", "n_cols", "multi_cell_rows", "tab_cap_above", "fig_cap_below",
 ] as const;
 
 export type RegionFeatureName = (typeof REGION_FEATURES)[number];
@@ -44,6 +49,49 @@ function captionDistance(caps: readonly RegionLine[], bbox: Rect, bs: number): n
         }
     }
     return best;
+}
+
+/** Caption block directly above (dir -1) or below (dir 1) the box, overlapping it horizontally. */
+function captionAdjacent(caps: readonly RegionLine[], bbox: Rect, dir: -1 | 1, bs: number): number {
+    for (const cap of caps) {
+        const cb = cap.bbox;
+        if (hgap(cb, bbox) > 0) continue;
+        const gap = dir < 0 ? bbox[1] - cb[3] : cb[1] - bbox[3];
+        if (gap >= -bs && gap <= 4 * bs) return 1;
+    }
+    return 0;
+}
+
+/** Text column around `x`: median extent of running lines crossing it, else the running text extent. */
+function columnAt(running: readonly RegionLine[], x: number, W: number): [number, number] {
+    const crossing = running.filter((l) => l.bbox[0] <= x && l.bbox[2] >= x);
+    const pool = crossing.length ? crossing : running;
+    if (!pool.length) return [0, W];
+    const med = (v: number[]) => v.sort((a, b) => a - b)[Math.floor(v.length / 2)];
+    return crossing.length
+        ? [med(pool.map((l) => l.bbox[0])), med(pool.map((l) => l.bbox[2]))]
+        : [Math.min(...pool.map((l) => l.bbox[0])), Math.max(...pool.map((l) => l.bbox[2]))];
+}
+
+/** Rows (lines grouped by vertical overlap) and left-edge columns shared by at least two lines. */
+function gridShape(lines: readonly RegionLine[]): { rows: number; cols: number; multiRows: number } {
+    const sorted = [...lines].sort((a, b) => a.bbox[1] - b.bbox[1]);
+    const rows: RegionLine[][] = [];
+    for (const l of sorted) {
+        const row = rows[rows.length - 1];
+        const cy = (l.bbox[1] + l.bbox[3]) / 2;
+        if (row && row.some((r) => cy >= r.bbox[1] && cy <= r.bbox[3])) row.push(l);
+        else rows.push([l]);
+    }
+    const lefts = lines.map((l) => l.bbox[0]).sort((a, b) => a - b);
+    let cols = 0;
+    for (let i = 0; i < lefts.length; ) {
+        let j = i;
+        while (j + 1 < lefts.length && lefts[j + 1] - lefts[i] <= 3) j++;
+        if (j > i) cols++;
+        i = j + 1;
+    }
+    return { rows: rows.length, cols, multiRows: rows.filter((r) => r.length > 1).length };
 }
 
 /** Feature vector in `REGION_FEATURES` order. */
@@ -100,6 +148,28 @@ export function candidateFeatures(
     const figDist = captionDistance(page.figureCaptions, bbox, bs);
     const tabDist = captionDistance(page.tableCaptions, bbox, bs);
 
+    // Text candidates describe their own lines (rotated text in its reading frame).
+    const horiz = c.source === "text" && c.lines ? c.lines : inside.filter((l) => !l.rot);
+    const sum = (f: (l: RegionLine) => number) => horiz.reduce((t, l) => t + f(l), 0);
+    const ink = Math.max(1, sum((l) => l.inkChars));
+    const words = Math.max(1, sum((l) => l.words));
+    const minSize = horiz.length ? Math.min(...horiz.map((l) => l.minSize)) : 0;
+    const maxSize = horiz.length ? Math.max(...horiz.map((l) => l.maxSize)) : 0;
+    // Column geometry comes from upright running text.
+    const running = [...page.running].filter((l) => !l.rot);
+    const [colL, colR] = columnAt(running, (bbox[0] + bbox[2]) / 2, W);
+    const colW = Math.max(1, colR - colL);
+    const isolation = (dir: -1 | 1) => {
+        let best = 20;
+        for (const l of running) {
+            if (hgap(l.bbox, bbox) > 0 || overlapFrac(l.bbox, bbox) > 0.5) continue;
+            const gap = dir < 0 ? bbox[1] - l.bbox[3] : l.bbox[1] - bbox[3];
+            if (gap >= -1) best = Math.min(best, Math.max(0, gap) / bs);
+        }
+        return best;
+    };
+    const grid = gridShape(horiz);
+
     const values: Record<RegionFeatureName, number> = {
         area_frac: boxArea / (W * H),
         w_frac: bw / W,
@@ -138,6 +208,28 @@ export function candidateFeatures(
         anchored: c.anchored ? 1 : 0,
         scanned_page: page.scanned ? 1 : 0,
         img_repeat_pages: Math.min(10, imgRepeat),
+        src_text: c.source === "text" ? 1 : 0,
+        rotated_text: c.rotated ? 1 : 0,
+        rect_frac: members.filter((m) => m.rect).length / n,
+        math_frac: sum((l) => l.mathChars) / ink,
+        eq_numbers: Math.min(5, horiz.filter((l) => l.eqNumber).length),
+        alpha_word_frac: sum((l) => l.alphaWords) / words,
+        size_spread: horiz.length ? Math.min(3, (maxSize - minSize) / bs) : 0,
+        running_frac: inside.filter((l) => page.running.has(l)).length / nIn,
+        col_offset: ((bbox[0] + bbox[2]) / 2 - (colL + colR) / 2) / colW,
+        col_left: (bbox[0] - colL) / colW,
+        col_width_frac: bw / colW,
+        iso_above: isolation(-1),
+        iso_below: isolation(1),
+        margin_lines_frac: horiz.length ? horiz.filter((l) => running.some((r) => Math.abs(r.bbox[0] - l.bbox[0]) <= 2)).length / horiz.length : 0,
+        full_width_lines_frac: horiz.length
+            ? horiz.filter((l) => spansColumn(l, running, 2.5 * Math.max(l.size, 1))).length / horiz.length
+            : 0,
+        n_rows: Math.min(60, grid.rows),
+        n_cols: Math.min(20, grid.cols),
+        multi_cell_rows: grid.rows ? grid.multiRows / grid.rows : 0,
+        tab_cap_above: captionAdjacent(page.tableCaptions, bbox, -1, bs),
+        fig_cap_below: captionAdjacent(page.figureCaptions, bbox, 1, bs),
     };
     return REGION_FEATURES.map((name) => values[name]);
 }

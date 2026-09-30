@@ -147,6 +147,12 @@ export interface StructuredTextWalker {
     onLineFont?(fontPtr: number, size: number): void;
     endLine?(): void;
     onChar?(rune: string, quad: QuadTuple): void;
+    /**
+     * Per-character font pointer and exact size, fired before each `onChar`.
+     * Opt-in: it costs two more WASM calls per character, so the default walk
+     * reads fonts only once per line (`onLineFont`).
+     */
+    onCharFont?(fontPtr: number, size: number): void;
     onImageBlock?(bbox: RectTuple, transform: unknown, image: unknown): void;
 }
 
@@ -1284,6 +1290,12 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                                     // never reaches the wire. See its docstring.
                                     const rune = sanitizeRune(runeCode);
                                     const quad = fromQuad(libmupdf._wasm_stext_char_get_quad(ch));
+                                    if (walker.onCharFont) {
+                                        walker.onCharFont(
+                                            libmupdf._wasm_stext_char_get_font(ch),
+                                            libmupdf._wasm_stext_char_get_size(ch),
+                                        );
+                                    }
                                     walker.onChar(rune, quad);
                                     ch = libmupdf._wasm_stext_char_get_next(ch);
                                 }

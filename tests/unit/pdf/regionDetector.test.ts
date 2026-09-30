@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { findCandidates } from "../../../src/beaver-extract/regions/candidates";
-import { markContainedPictures, type DetectedRegion } from "../../../src/beaver-extract/regions/RegionDetector";
+import {
+    LINE_CAPTION,
+    LINE_RUNNING,
+    REGION_MIN_PROB,
+    detectRegions,
+    resolveOverlaps,
+    routeLines,
+    type DetectedRegion,
+} from "../../../src/beaver-extract/regions/RegionDetector";
 import { GRID_CLUSTER_MIN, clusterRects, gridCluster } from "../../../src/beaver-extract/regions/cluster";
 import { EMPTY_DOC_CONTEXT, REGION_FEATURES, REGION_FEATURE_VERSION, candidateFeatures } from "../../../src/beaver-extract/regions/features";
 import type { Rect } from "../../../src/beaver-extract/regions/geometry";
@@ -11,7 +19,15 @@ import {
     type LogisticRegionModel,
     type TreeRegionModel,
 } from "../../../src/beaver-extract/regions/model";
-import { pagePrimitives, type RegionLine } from "../../../src/beaver-extract/regions/pageSignals";
+import {
+    NOTE_CAPTION_RE,
+    isFigureCaption,
+    isTableCaption,
+    pageLines,
+    pagePrimitives,
+    type RegionLine,
+} from "../../../src/beaver-extract/regions/pageSignals";
+import type { RawPageData } from "@beaver/agent-core/extract/types";
 import {
     GRAPHICS_SUMMARY_STRIDE,
     GS_FLAG,
@@ -57,12 +73,36 @@ function summary(recs: Rec[], grid?: { size: number; cells: number[] }): Graphic
     };
 }
 
-function line(bbox: Rect, text: string, size = BS): RegionLine {
-    return { bbox, text, size, rot: false, words: text.split(/\s+/).length, nchar: text.length };
+/** A text line as `pageLines` derives it from a structured-text line in `font`. */
+function line(bbox: Rect, text: string, size = BS, font = "Times-Roman", rotation = 0): RegionLine {
+    const page: RawPageData = {
+        pageIndex: 0,
+        pageNumber: 1,
+        width: W,
+        height: H,
+        blocks: [
+            {
+                type: "text",
+                bbox: { l: bbox[0], t: bbox[1], r: bbox[2], b: bbox[3] },
+                lines: [
+                    {
+                        wmode: 0,
+                        bbox: { l: bbox[0], t: bbox[1], r: bbox[2], b: bbox[3] },
+                        font: { name: font, family: font, weight: "normal", style: "normal", size },
+                        x: bbox[0],
+                        y: bbox[3],
+                        text,
+                        rotation,
+                    },
+                ],
+            },
+        ],
+    } as unknown as RawPageData;
+    return pageLines(page)[0];
 }
 
-const prose = (y: number, x0 = 72, x1 = 540) =>
-    line([x0, y, x1, y + 11], "the quick brown fox jumps over the lazy dog again and again");
+const PROSE_TEXT = "the quick brown fox jumps over the lazy dog again and again";
+const prose = (y: number, x0 = 72, x1 = 540) => line([x0, y, x1, y + 11], PROSE_TEXT);
 
 /** A plot: a stroked frame plus curve strokes inside `box`. */
 function plot(box: Rect): Rec[] {
@@ -133,6 +173,19 @@ describe("pagePrimitives", () => {
         expect(prims[0].imageHash).toBe(7);
     });
 
+    it("reads long, thin images as rules", () => {
+        const prims = pagePrimitives(
+            summary([
+                { kind: GS_KIND.image, bbox: [202, 50, 214, 714] }, // column separator bitmap
+                { kind: GS_KIND.image, bbox: [72, 100, 300, 250] },
+            ]),
+            W,
+            H,
+            BS,
+        );
+        expect(prims.map((p) => p.kind)).toEqual(["vrule", "image"]);
+    });
+
     it("turns runs of overflow-grid cells into coarse marks", () => {
         const size = 32;
         const prims = pagePrimitives(summary([], { size, cells: [3 * size + 4, 3 * size + 5, 3 * size + 9] }), W, H, BS);
@@ -155,7 +208,7 @@ describe("findCandidates", () => {
             prose(400),
         ];
         const found = findCandidates(lines, pagePrimitives(g, W, H, BS), W, H, BS);
-        const boxes = found.candidates.filter((c) => !c.anchored).map((c) => c.bbox);
+        const boxes = found.candidates.filter((c) => c.source === "graphics").map((c) => c.bbox);
         expect(boxes).toHaveLength(2);
         expect(boxes[0][3]).toBeLessThan(206);
         expect(boxes[1][1]).toBeGreaterThan(216);
@@ -183,7 +236,29 @@ describe("findCandidates", () => {
         const lines = [prose(100), prose(200), prose(300)];
         const found = findCandidates(lines, pagePrimitives(summary(strips), W, H, BS), W, H, BS);
         expect(found.scanned).toBe(true);
-        expect(found.candidates.filter((c) => !c.anchored)).toHaveLength(0);
+        expect(found.candidates.filter((c) => c.source === "graphics")).toHaveLength(0);
+    });
+
+    it("does not let a text box chain its contents into one cluster", () => {
+        // A shaded sidebar holding prose and a small plot: the box is page furniture,
+        // so the plot stays a candidate of its own.
+        const g = summary([
+            { kind: GS_KIND.fillPath, bbox: [300, 60, 560, 500], flags: GS_FLAG.isRect, rgb: 0xdde4ee },
+            ...plot([320, 300, 540, 450]),
+        ]);
+        const sidebar = (y: number) => line([310, y, 550, y + 11], PROSE_TEXT);
+        const lines = [sidebar(80), sidebar(92), sidebar(104), prose(600)];
+        const found = findCandidates(lines, pagePrimitives(g, W, H, BS), W, H, BS);
+        const boxes = found.candidates.filter((c) => c.source === "graphics").map((c) => c.bbox);
+        expect(boxes).toEqual([[320, 300, 540, 450]]);
+    });
+
+    it("does not grow a figure over a page-long margin stamp", () => {
+        const g = summary(plot([300, 60, 560, 200]));
+        const stamp = line([565, 20, 573, 780], "Downloaded from https://example.org on 1 January 2026", 5, "Arial", 90);
+        const found = findCandidates([stamp, prose(300), prose(312)], pagePrimitives(g, W, H, BS), W, H, BS);
+        const boxes = found.candidates.filter((c) => c.source === "graphics").map((c) => c.bbox);
+        expect(boxes).toEqual([[300, 60, 560, 200]]);
     });
 
     it("keeps a full-width photo on a born-digital page", () => {
@@ -194,7 +269,41 @@ describe("findCandidates", () => {
     });
 });
 
-describe("markContainedPictures", () => {
+describe("captions", () => {
+    it("recognizes figure, table and note captions but not prose that starts with the word", () => {
+        const figures = ["Fig. 5 Numerical", "Figure S2. x", "Supplementary Figure 2", "Extended Data Fig. 3 x", "Box 2 Perspectives", "Video 6. aPS1", "图 1", "Graphique 1. Résultats", "Figura 2: x"];
+        const tables = ["Table 1", "TABLE I.", "Table  A.3 Age", "TABLE 1 (Continued)", "Appendix Table A1", "Tableau 1. Résultats"];
+        const prose = ["Tablet computers are", "Figures show that", "Box plots of", "Table of contents", "Tables 1 and 2 show"];
+        for (const t of figures) expect(isFigureCaption(t), t).toBe(true);
+        for (const t of tables) expect(isTableCaption(t), t).toBe(true);
+        for (const t of prose) expect(isFigureCaption(t) || isTableCaption(t), t).toBe(false);
+        for (const t of ["Note. x", "Source: OECD", "* p < .05", "Credit: X"]) expect(NOTE_CAPTION_RE.test(t), t).toBe(true);
+        expect(NOTE_CAPTION_RE.test("Sources of bias are")).toBe(false);
+    });
+});
+
+describe("routeLines", () => {
+    it("routes lines to the smallest region holding them, never running text or captions", () => {
+        const region = (bbox: Rect, label: DetectedRegion["label"]): DetectedRegion => ({ bbox, anchored: false, features: [], label });
+        const regions = [
+            region([50, 50, 400, 400], "picture"),
+            region([100, 100, 200, 200], "table"), // a table drawn inside the figure area
+            region([450, 50, 550, 100], "other"),
+        ];
+        const lines = [
+            line([110, 110, 150, 120], "cell"), // inside both: the smaller region wins
+            line([60, 300, 120, 310], "axis label"),
+            line([60, 320, 390, 330], PROSE_TEXT), // running text inside the figure box
+            line([60, 340, 200, 350], "Figure 1. A caption"),
+            line([460, 60, 500, 70], "unclassified"),
+            line([60, 500, 300, 510], "prose outside"),
+        ];
+        const flags = [0, 0, LINE_RUNNING, LINE_CAPTION, 0, 0];
+        expect(routeLines(lines, flags, regions)).toEqual([1, 0, -1, -1, -1, -1]);
+    });
+});
+
+describe("resolveOverlaps", () => {
     const region = (bbox: Rect, label: DetectedRegion["label"]): DetectedRegion => ({
         bbox,
         anchored: false,
@@ -202,17 +311,23 @@ describe("markContainedPictures", () => {
         label,
     });
 
-    it("turns pictures inside a larger picture into fragments of it", () => {
+    it("keeps the largest of competing regions, whatever their class", () => {
         const regions = [
             region([110, 110, 200, 200], "picture"), // panel inside the figure
             region([100, 100, 400, 400], "picture"), // the figure
             region([350, 100, 500, 200], "picture"), // overlaps by a third: kept
-            region([120, 300, 180, 380], "table"), // not a picture: untouched
+            region([120, 300, 180, 380], "formula"), // inside the figure: a fragment
+            region([100, 450, 400, 600], "table"), // graphics candidate of a table
+            region([105, 455, 400, 610], "table"), // text candidate of the same table
+            region([100, 700, 400, 720], "other"), // unclassified: untouched
         ];
-        markContainedPictures(regions);
-        expect(regions.map((r) => r.label)).toEqual(["other", "picture", "picture", "table"]);
+        resolveOverlaps(regions);
+        expect(regions.map((r) => r.label)).toEqual(["other", "picture", "picture", "other", "other", "table", "other"]);
         expect(regions[0].containedIn).toBe(1);
+        expect(regions[3].containedIn).toBe(1);
+        expect(regions[4].containedIn).toBe(5);
         expect(regions[2].containedIn).toBeUndefined();
+        expect(regions[6].containedIn).toBeUndefined();
     });
 });
 
@@ -253,6 +368,23 @@ describe("region model", () => {
         expect(predictRegionClass(trees, x).picture).toBeCloseTo(1 / 3);
         x[1] = 1;
         expect(predictRegionClass(trees, x).picture).toBeCloseTo(Math.exp(2.5) / (Math.exp(2.5) + 2));
+    });
+
+    it("reports a region only when its class is at least REGION_MIN_PROB probable", () => {
+        const page = { pageIndex: 0, pageNumber: 1, width: W, height: H, blocks: [] } as unknown as RawPageData;
+        const g = summary([{ kind: GS_KIND.image, bbox: [72, 72, 400, 300] }]);
+        const labelFor = (pictureLogit: number) => {
+            const five: LogisticRegionModel = model({
+                classes: ["other", "picture", "decoration", "table", "formula"],
+                coef: [0, 1, 2, 3, 4].map(() => REGION_FEATURES.map(() => 0)),
+                intercept: [0, pictureLogit, -20, -20, -20],
+            });
+            return detectRegions(page, g, { pageIndex: 0, model: five }).candidates[0].label;
+        };
+        // picture probability = e^a / (e^a + 1)
+        const floor = REGION_MIN_PROB.picture;
+        expect(labelFor(Math.log(floor / (1 - floor)) + 0.05)).toBe("picture");
+        expect(labelFor(Math.log(0.6 / 0.4))).toBe("other");
     });
 
     it("rejects weights trained on another feature set", () => {

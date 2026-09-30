@@ -38,6 +38,7 @@ const LABEL_COLORS: Record<string, string> = {
     picture: "#1f6feb",
     decoration: "#bf3989",
     table: "#1a7f37",
+    formula: "#8250df",
     other: "#8b949e",
     unclassified: "#d29922",
 };
@@ -49,6 +50,7 @@ interface RegionsOptions {
     out?: string;
     contextPages?: string;
     classify?: boolean;
+    lines?: boolean;
     overlayDir?: string;
     json?: boolean;
     pretty?: boolean;
@@ -74,6 +76,7 @@ export function buildRegionsCommand(deps: CliDeps): Command {
         .option("--out <jsonl>", "batch output file (appended; pages already present are skipped)")
         .option("--context-pages <n>", "extra pages scanned for recurring images", "12")
         .option("--no-classify", "skip the classifier (export unclassified candidates)")
+        .option("--lines", "include each page's text lines with running-text/caption flags")
         .option("--overlay-dir <dir>", "single-PDF mode: write one overlay PNG per page")
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
@@ -104,6 +107,7 @@ async function runSingle(deps: CliDeps, pdfPath: string, opts: RegionsOptions): 
             pageIndices,
             contextPages: Number(opts.contextPages ?? 12),
             classify: opts.classify !== false,
+            includeLines: opts.lines === true,
         });
         if (opts.overlayDir) await writeOverlays(deps, bytes, pdfPath, result, opts.overlayDir);
         if (opts.json) {
@@ -248,6 +252,7 @@ async function runBatch(deps: CliDeps, opts: RegionsOptions): Promise<void> {
                     pageIndices: pdfRows.map((r) => r.pageIndex),
                     contextPages,
                     classify: opts.classify !== false,
+                    includeLines: opts.lines === true,
                 });
                 const sha = pdfSha256(bytes);
                 lines = pdfRows.map((row) => {

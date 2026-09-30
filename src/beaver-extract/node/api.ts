@@ -180,6 +180,8 @@ export interface DetectRegionsInput {
     contextPages?: number;
     /** false: return unclassified candidates (training-data export). */
     classify?: boolean;
+    /** Also return each page's text lines with routing flags. */
+    includeLines?: boolean;
 }
 
 /** Region detection (detection mode): picture/decoration candidates per page. */
@@ -191,6 +193,7 @@ export async function detectRegions(input: DetectRegionsInput): Promise<RegionDe
             pageIndices: input.pageIndices,
             contextPages: input.contextPages,
             classify: input.classify,
+            includeLines: input.includeLines,
         }),
     );
     return reply.result;

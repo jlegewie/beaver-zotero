@@ -55,9 +55,9 @@ function makeDoc(contextErrors: Record<number, () => Error> = {}) {
 /** Make the page walk fail (or succeed) per target page index. */
 function walkResults(errors: Record<number, () => Error>) {
     mocks.extractRawPageDetailedFromDoc.mockImplementation(
-        (_doc: unknown, i: number, _b: boolean, _f: unknown, _o: unknown, onGraphics: (g: unknown) => void) => {
+        (_doc: unknown, i: number, _b: boolean, _f: unknown, _o: unknown, extras: { onGraphics: (g: unknown) => void }) => {
             if (errors[i]) throw errors[i]();
-            onGraphics({ count: 1, overflow: false });
+            extras.onGraphics({ count: 1, overflow: false });
             return { width: 100, height: 200 };
         },
     );
