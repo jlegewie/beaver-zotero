@@ -74,8 +74,26 @@ export interface ProcessOnceResult {
 }
 
 export type BackgroundLaneStatus = Partial<
-    Record<BackgroundJobType, { inFlight: number; capacity: number; remoteWaiting?: number; pauseUntil?: number; pauseReason?: string }>
+    Record<BackgroundJobType, {
+        inFlight: number;
+        capacity: number;
+        /** True when the lane keeps claiming backlog work while the user is active. */
+        runsWhileActive?: boolean;
+        remoteWaiting?: number;
+        pauseUntil?: number;
+        pauseReason?: string;
+    }>
 >;
+
+/** Claim limits for one lane. */
+export interface LaneCapacity {
+    maxInFlight: number;
+    /**
+     * Backlog slots while the user is active. Lanes without it claim only
+     * work below the low-priority ceiling until the system is idle.
+     */
+    activeMaxInFlight?: number;
+}
 
 type LaneEntry = {
     promise: Promise<void>;
@@ -88,6 +106,7 @@ type LaneEntry = {
 type ExecutorRegistration = {
     executor: JobExecutor;
     maxInFlight: number;
+    activeMaxInFlight?: number;
     survivesLibraryExclusion: boolean;
     pauseUntil?: number;
     pauseReason?: string;
@@ -119,6 +138,11 @@ export class BackgroundExtractor {
     private drainNowRequested = false;
     private readonly executors = new Map<BackgroundJobType, ExecutorRegistration>();
     private readonly laneInFlight = new Map<BackgroundJobType, Map<number, LaneEntry>>();
+    /**
+     * When each lane's recently freed slots opened, oldest first. The claim
+     * log reports how long a slot sat empty before the next job took it.
+     */
+    private readonly laneFreedAt = new Map<BackgroundJobType, number[]>();
     private readonly muPDFLane = new MuPDFSerialLane();
 
     constructor() {
@@ -157,10 +181,11 @@ export class BackgroundExtractor {
     }
 
     /**
-     * Whether a dispatch pass right now may claim backlog work: a one-off
-     * drain is pending, or Zotero has been idle long enough. Mirrors the gate
-     * {@link processOnce} applies, so the status UI can tell "queued and
-     * running" from "queued behind the idle timer".
+     * Whether a dispatch pass right now may claim backlog work in every lane:
+     * a one-off drain is pending, or Zotero has been idle long enough. Mirrors
+     * the gate {@link processOnce} applies, so the status UI can tell "queued
+     * and running" from "queued behind the idle timer". Lanes registered with
+     * an `activeMaxInFlight` also claim backlog work while this is closed.
      */
     isBacklogGateOpen(): boolean {
         if (this.getDispatchBlocker() !== null) return false;
@@ -192,6 +217,7 @@ export class BackgroundExtractor {
             status[jobType] = {
                 inFlight: this.laneInFlight.get(jobType)?.size ?? 0,
                 capacity: registration.maxInFlight,
+                runsWhileActive: registration.activeMaxInFlight !== undefined,
                 pauseUntil: registration.pauseUntil,
                 pauseReason: registration.pauseReason,
                 remoteWaiting: registration.executor.getRemoteWaitingCount?.() ?? 0,
@@ -214,9 +240,8 @@ export class BackgroundExtractor {
     /** Register a queue executor and activate its lane. */
     registerExecutor(
         executor: JobExecutor,
-        options: { maxInFlight: number; survivesLibraryExclusion?: boolean },
+        options: LaneCapacity & { survivesLibraryExclusion?: boolean },
     ): void {
-        const maxInFlight = Math.max(1, Math.floor(options.maxInFlight));
         // Releasing a replaced executor stops any background work it owns (e.g.
         // slot-free trackers behind a `defer`). The lane re-registers on window
         // reload, so the previous instance must not keep polling.
@@ -224,10 +249,29 @@ export class BackgroundExtractor {
         if (previous && previous.executor !== executor) {
             this.disposeExecutor(previous.executor);
         }
-        this.executors.set(executor.jobType, { executor, maxInFlight, survivesLibraryExclusion: options.survivesLibraryExclusion ?? false });
+        this.executors.set(executor.jobType, {
+            executor,
+            ...normalizeLaneCapacity(options),
+            survivesLibraryExclusion: options.survivesLibraryExclusion ?? false,
+        });
         if (!this.laneInFlight.has(executor.jobType)) {
             this.laneInFlight.set(executor.jobType, new Map());
         }
+        this.notify();
+    }
+
+    /**
+     * Resize a registered lane. Running jobs are never interrupted; a smaller
+     * limit only stops new claims until the lane drains below it.
+     */
+    setLaneCapacity(jobType: BackgroundJobType, executor: JobExecutor, capacity: LaneCapacity): void {
+        const registration = this.executors.get(jobType);
+        if (!registration || registration.executor !== executor) return;
+        const next = normalizeLaneCapacity(capacity);
+        if (next.maxInFlight === registration.maxInFlight
+            && next.activeMaxInFlight === registration.activeMaxInFlight) return;
+        registration.maxInFlight = next.maxInFlight;
+        registration.activeMaxInFlight = next.activeMaxInFlight;
         this.notify();
     }
 
@@ -524,11 +568,13 @@ export class BackgroundExtractor {
     /**
      * Drive one dispatcher pass. Tests can pass `awaitLaunchedJobs: true` to
      * await IO lanes; the dev endpoint uses the default non-blocking behavior.
+     * A launched extraction is awaited unless `awaitExtraction` is false.
      */
     async processOnce(
         options: {
             keepRunningAfterJob?: boolean;
             awaitLaunchedJobs?: boolean;
+            awaitExtraction?: boolean;
         } = {},
     ): Promise<ProcessOnceResult> {
         if (getPref(PREF_PROCESSING_ENABLED) !== true) {
@@ -550,16 +596,14 @@ export class BackgroundExtractor {
         const idle = getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;
         const processBacklog = getPref(PREF_PROCESSING_ENABLED) === true;
         const drainNow = processBacklog && this.drainNowRequested;
-        const maxPriority = processBacklog && (drainNow || idle)
-            ? undefined
-            // Idle with processing off: admit the local extraction band, but
-            // not backlog work such as OCR.
-            : idle ? LOCAL_EXTRACT_PRIORITY_CEILING : LOW_PRIORITY_CEILING;
 
         const launched = await this.dispatchPass({
             db,
-            maxPriority,
+            processBacklog,
+            backlogGateOpen: processBacklog && (drainNow || idle),
+            idle,
             awaitLaunchedJobs: options.awaitLaunchedJobs === true,
+            awaitExtraction: options.awaitExtraction !== false,
         });
 
         if (launched === 0) {
@@ -584,23 +628,41 @@ export class BackgroundExtractor {
 
     private async dispatchPass(options: {
         db: QueueDB;
-        maxPriority?: number;
+        processBacklog: boolean;
+        backlogGateOpen: boolean;
+        idle: boolean;
         awaitLaunchedJobs: boolean;
+        awaitExtraction: boolean;
     }): Promise<number> {
         let launched = 0;
         const waits: Promise<void>[] = [];
         for (const [jobType, registration] of this.executors) {
             if (jobType === 'document_ocr' && Zotero.Beaver?.hasOcrAccess !== true) continue;
             if (jobType === 'fulltext_upsert' && Zotero.Beaver?.hasSearchIndexAccess !== true) continue;
-            const freeSlots = this.laneCapacityFree(jobType);
+            // Lanes with an active-use capacity keep draining their backlog
+            // while the user works, at that reduced width. Every other lane
+            // takes only low-priority-ceiling work until the system is idle.
+            // Idle with processing off still admits the local extraction band
+            // and leaves backlog work such as OCR queued.
+            const runsWhileActive = !options.backlogGateOpen && options.processBacklog
+                && registration.activeMaxInFlight !== undefined;
+            const maxPriority = options.backlogGateOpen || runsWhileActive
+                ? undefined
+                : options.idle && !options.processBacklog
+                    ? LOCAL_EXTRACT_PRIORITY_CEILING
+                    : LOW_PRIORITY_CEILING;
+            const capacity = runsWhileActive
+                ? registration.activeMaxInFlight!
+                : registration.maxInFlight;
+            const freeSlots = this.laneCapacityFree(jobType, capacity);
             for (let slot = 0; slot < freeSlots; slot += 1) {
                 if (this.stopRequested) return launched;
                 if (!isLibraryScopeKnown()) break;
-                if (this.executors.get(jobType) !== registration || this.laneCapacityFree(jobType) === 0) break;
+                if (this.executors.get(jobType) !== registration || this.laneCapacityFree(jobType, capacity) === 0) break;
                 const record = await options.db.claimNextBackgroundJob(
                     Date.now(),
                     VISIBILITY_TIMEOUT_MS,
-                    options.maxPriority,
+                    maxPriority,
                     [jobType],
                 );
                 if (!record) break;
@@ -611,7 +673,7 @@ export class BackgroundExtractor {
                     return launched;
                 }
 
-                if (this.executors.get(jobType) !== registration || this.laneCapacityFree(jobType) === 0) {
+                if (this.executors.get(jobType) !== registration || this.laneCapacityFree(jobType, capacity) === 0) {
                     if (!this.shouldSkipDbWrites()) await options.db.releaseBackgroundJob(record.id, Date.now());
                     break;
                 }
@@ -642,17 +704,21 @@ export class BackgroundExtractor {
                     continue;
                 }
 
+                const freedAt = this.laneFreedAt.get(jobType)?.shift();
                 logger(
-                    `BackgroundExtractor: claimed job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} content_kind=${record.contentKind} payload_kind=${record.payloadKind} attempt=${record.attemptCount + 1}`,
+                    `BackgroundExtractor: claimed job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} content_kind=${record.contentKind} payload_kind=${record.payloadKind} attempt=${record.attemptCount + 1}`
+                        + (freedAt === undefined ? '' : ` slot_idle=${Date.now() - freedAt}ms`),
                     3,
                 );
                 launched += 1;
-                const shouldAwait =
-                    jobType === 'document_extract' || options.awaitLaunchedJobs;
+                const shouldAwait = options.awaitLaunchedJobs
+                    || (jobType === 'document_extract' && options.awaitExtraction);
+                // An awaited job is followed up by the caller's next pass; any
+                // other job wakes the dispatcher when its slot frees.
                 const promise = this.launchJob(
                     record,
                     registration.executor,
-                    jobType !== 'document_extract',
+                    !shouldAwait,
                 );
                 if (shouldAwait) {
                     waits.push(promise);
@@ -682,7 +748,15 @@ export class BackgroundExtractor {
             })
             .finally(() => {
                 lane.delete(record.id);
-                if (this.totalInFlight() === 0 && !this.tickRunning) {
+                const freed = this.laneFreedAt.get(record.jobType) ?? [];
+                freed.push(Date.now());
+                // No more slots than the lane has can be waiting.
+                if (freed.length > (this.executors.get(record.jobType)?.maxInFlight ?? 1)) freed.shift();
+                this.laneFreedAt.set(record.jobType, freed);
+                // A settle that wakes a running dispatcher leaves the status to
+                // its next pass, so a backlog does not flicker idle between jobs.
+                const wakesDispatcher = notifyOnSettle && this.started && !this.stopRequested;
+                if (!wakesDispatcher && this.totalInFlight() === 0 && !this.tickRunning) {
                     this.setWorkerRunning(false);
                 }
                 if (notifyOnSettle) {
@@ -707,7 +781,25 @@ export class BackgroundExtractor {
 
         const ctx: JobExecutionContext = {
             db,
-            runOnMuPDFWorker: (fn) => this.muPDFLane.run(fn),
+            // Logs how long the job queued for the shared worker and held it,
+            // which with the settle time gives the worker's share of the job.
+            runOnMuPDFWorker: async (fn) => {
+                const requestedAt = Date.now();
+                let acquiredAt: number | undefined;
+                try {
+                    return await this.muPDFLane.run(() => {
+                        acquiredAt = Date.now();
+                        return fn();
+                    });
+                } finally {
+                    const now = Date.now();
+                    logger(
+                        `BackgroundExtractor: job id=${record.id} type=${record.jobType} MuPDF lane`
+                            + ` wait=${(acquiredAt ?? now) - requestedAt}ms held=${acquiredAt === undefined ? 0 : now - acquiredAt}ms`,
+                        3,
+                    );
+                }
+            },
             externalAbortSignal,
             shouldSkipDbWrites: () => this.shouldSkipDbWrites(),
             enqueue: async (input: BackgroundJobInput) => {
@@ -754,7 +846,7 @@ export class BackgroundExtractor {
                     await db.completeBackgroundJob(record.id);
                 }
                 logger(
-                    `BackgroundExtractor: job id=${record.id} settled (${reason})`,
+                    `BackgroundExtractor: job id=${record.id} settled (${reason}) after ${Date.now() - attemptedAt}ms`,
                     3,
                 );
                 dispatchBackgroundEvent('background-job:done', {
@@ -927,7 +1019,12 @@ export class BackgroundExtractor {
         if (this.tickRunning) return;
         this.tickRunning = true;
         try {
-            const result = await this.processOnce({ keepRunningAfterJob: true });
+            // Extraction is not awaited here: while one file is being read,
+            // IO lanes must keep refilling the slots their settled jobs free.
+            const result = await this.processOnce({
+                keepRunningAfterJob: true,
+                awaitExtraction: false,
+            });
             if (this.stopRequested) return;
 
             const wakeNow = this.pendingWake;
@@ -969,7 +1066,7 @@ export class BackgroundExtractor {
             && !isLibraryInScope(record.libraryId);
     }
 
-    private laneCapacityFree(jobType: BackgroundJobType): number {
+    private laneCapacityFree(jobType: BackgroundJobType, capacity?: number): number {
         const registration = this.executors.get(jobType);
         if (!registration) return 0;
         if (registration.pauseUntil) {
@@ -979,7 +1076,7 @@ export class BackgroundExtractor {
             registration.pauseReason = undefined;
         }
         const inFlight = this.laneInFlight.get(jobType)?.size ?? 0;
-        return Math.max(0, registration.maxInFlight - inFlight);
+        return Math.max(0, (capacity ?? registration.maxInFlight) - inFlight);
     }
 
     private totalInFlight(): number {
@@ -989,6 +1086,17 @@ export class BackgroundExtractor {
         }
         return total;
     }
+}
+
+function normalizeLaneCapacity(capacity: LaneCapacity): Pick<ExecutorRegistration, 'maxInFlight' | 'activeMaxInFlight'> {
+    const maxInFlight = Math.max(1, Math.floor(capacity.maxInFlight));
+    const active = capacity.activeMaxInFlight;
+    return {
+        maxInFlight,
+        activeMaxInFlight: active === undefined
+            ? undefined
+            : Math.min(maxInFlight, Math.max(1, Math.floor(active))),
+    };
 }
 
 function dispatchBackgroundEvent(name: string, detail: unknown): void {

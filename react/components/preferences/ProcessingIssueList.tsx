@@ -44,6 +44,13 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
                 title: 'File not available',
                 description: 'The attachment is missing on this computer or could not be downloaded. Retry after restoring the file.',
             };
+        case 'permission_denied':
+            return {
+                title: 'No permission to read',
+                description: Zotero.isMac
+                    ? 'Zotero is not allowed to read these files. Grant Zotero access to their folders in System Settings → Privacy & Security → Files and Folders or Full Disk Access, restart Zotero if asked, then retry.'
+                    : 'Zotero could not open these files. Check that your user account can read them and that no other program has them locked, then retry.',
+            };
         case 'encrypted':
             return {
                 title: 'Password protected',
@@ -91,7 +98,8 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
 /**
  * One page of an issue group's attachments, rendered with the shared item-list
  * rows so they look and behave like items anywhere else in Beaver: parent
- * headline, title underneath, click to reveal in Zotero.
+ * headline, title underneath, click to reveal in Zotero, right-click for the
+ * library/open/show-file actions of Zotero's own item menu.
  *
  * Titles are resolved locally per page; this is a render path over persisted
  * ledger rows, so it is deliberately not gated on library exclusion.

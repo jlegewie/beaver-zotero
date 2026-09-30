@@ -961,6 +961,7 @@ export type ZoteroDocumentErrorCode =
     | 'is_linked_url'       // Attachment is a linked URL, not a stored file
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'no_text_layer'       // PDF needs OCR
     | 'invalid_pdf'         // Invalid/corrupted PDF

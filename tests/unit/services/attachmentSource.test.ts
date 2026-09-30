@@ -22,6 +22,8 @@ vi.mock('../../../src/utils/webAPI', async () => {
 });
 
 import {
+    isFileAccessDeniedError,
+    isLocalFileReadDenied,
     loadAttachmentData,
     resolveAttachmentFileSource,
 } from '../../../src/services/documentExtraction/attachmentSource';
@@ -243,6 +245,38 @@ describe('attachmentSource', () => {
             source: { kind: 'remote', filePath: 'remote:k:1-REMOTE03-v1', isRemoteOnly: true },
         });
         expect(remote).toMatchObject({ kind: 'error', code: 'download_failed' });
+    });
+
+    it('returns file_permission_denied when the OS refuses to open a local file', async () => {
+        const denied = Object.assign(new Error('Could not open the file at /Dropbox/paper.pdf'), { name: 'NotAllowedError' });
+        (globalThis as any).IOUtils.read.mockRejectedValue(denied);
+        const local = await loadAttachmentData({
+            item: makeAttachment(),
+            source: { kind: 'local', filePath: '/Dropbox/paper.pdf', isRemoteOnly: false },
+        });
+        expect(local).toMatchObject({ kind: 'error', code: 'file_permission_denied', error: denied });
+    });
+
+    it('recognises access denial from IOUtils and XPCOM readers only', () => {
+        expect(isFileAccessDeniedError(Object.assign(new Error('Could not open'), { name: 'NotAllowedError' }))).toBe(true);
+        expect(isFileAccessDeniedError(new Error(
+            'Component returned failure code: 0x80520015 (NS_ERROR_FILE_ACCESS_DENIED) [nsIZipReader.open]',
+        ))).toBe(true);
+        expect(isFileAccessDeniedError({ name: 'NS_ERROR_FILE_ACCESS_DENIED', message: '' })).toBe(true);
+        expect(isFileAccessDeniedError(Object.assign(new Error('File not found'), { name: 'NotFoundError' }))).toBe(false);
+        expect(isFileAccessDeniedError(new Error('disk failure'))).toBe(false);
+        expect(isFileAccessDeniedError('NotAllowedError')).toBe(false);
+        expect(isFileAccessDeniedError(null)).toBe(false);
+    });
+
+    it('probes a local file for read denial with a one-byte read', async () => {
+        const read = (globalThis as any).IOUtils.read;
+        read.mockRejectedValueOnce(Object.assign(new Error('Could not open'), { name: 'NotAllowedError' }));
+        expect(await isLocalFileReadDenied('/Dropbox/book.epub')).toBe(true);
+        expect(read).toHaveBeenLastCalledWith('/Dropbox/book.epub', { maxBytes: 1 });
+        read.mockRejectedValueOnce(Object.assign(new Error('File not found'), { name: 'NotFoundError' }));
+        expect(await isLocalFileReadDenied('/Dropbox/book.epub')).toBe(false);
+        expect(await isLocalFileReadDenied('/storage/book.epub')).toBe(false);
     });
 
     it('classifies timeouts for path lookup, size check, local read, and remote download', async () => {

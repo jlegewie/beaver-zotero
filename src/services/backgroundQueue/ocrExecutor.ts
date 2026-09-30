@@ -18,9 +18,11 @@ import type {
     DocumentProcessingFailureInput,
 } from '../database';
 import {
+    isFileAccessDeniedError,
     isRemoteAccessAvailable,
     loadAttachmentData,
     resolveAttachmentFileSource,
+    type AttachmentDataResult,
     type AttachmentFileSource,
 } from '../documentExtraction/attachmentSource';
 import { ExternalAbortError } from '../agentDataProvider/timeout';
@@ -91,10 +93,18 @@ interface ResolvedJob {
     loadOriginalBytes: () => Promise<Uint8Array>;
 }
 
+/** Sentinel raised when the OS refuses to read the local scan for upload. */
+class OcrFileAccessDeniedError extends Error {
+    constructor() {
+        super('ocr_local_read_failed: file_permission_denied');
+        this.name = 'OcrFileAccessDeniedError';
+    }
+}
+
 /** Sentinel raised when the original remote scan cannot be loaded for upload. */
 class OcrRemoteLoadError extends Error {
     constructor(
-        public readonly code: 'file_too_large' | 'download_failed' | 'read_failed',
+        public readonly code: Extract<AttachmentDataResult, { kind: 'error' }>['code'],
         /** The server answered definitively; retrying cannot change the result. */
         public readonly permanent: boolean = false,
     ) {
@@ -165,6 +175,11 @@ export class OcrExecutor implements JobExecutor {
         } catch (error) {
             if (error instanceof OcrAbort || ctx.externalAbortSignal.aborted) {
                 return { kind: 'release', reason: 'aborted' };
+            }
+            if (error instanceof OcrFileAccessDeniedError) {
+                // Retried like any read failure; if it dead-letters, the ledger
+                // keeps the code so the issues list can explain the remedy.
+                return { kind: 'retry', error: error.message, reason: 'ocr_local_read_failed' };
             }
             if (error instanceof OcrRemoteLoadError) {
                 // Oversized scans are terminal-for-now (recoverable if limits change);
@@ -581,7 +596,13 @@ export class OcrExecutor implements JobExecutor {
     ): Promise<Uint8Array> {
         this.throwIfLibraryUnavailable(item.libraryID, ctx);
         if (source.kind === 'local') {
-            const data = await IOUtils.read(source.filePath);
+            let data: Uint8Array;
+            try {
+                data = await IOUtils.read(source.filePath);
+            } catch (error) {
+                if (isFileAccessDeniedError(error)) throw new OcrFileAccessDeniedError();
+                throw error;
+            }
             this.throwIfLibraryUnavailable(item.libraryID, ctx);
             return data;
         }
@@ -625,7 +646,7 @@ export class OcrExecutor implements JobExecutor {
         switch (request.status) {
             case 'disabled':
                 // Keep the stage retryable, but record why it is not active work.
-                // A later reconciliation will request OCR again when admission returns.
+                // The reconciler's periodic admission probe requests OCR again.
                 await ctx.db.markAttachmentOcrUnavailable(
                     job.item.libraryID,
                     job.item.key,
@@ -641,7 +662,7 @@ export class OcrExecutor implements JobExecutor {
             case 'failed':
                 return { outcome: this.failureOutcome(job, request.error) };
             case 'ready':
-                await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
+                await this.markAdmitted(job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} OCR cache hit; downloading searchable PDF`, 3);
                 if (request.get_url) return { getUrl: request.get_url };
                 return { outcome: { kind: 'retry', error: 'ocr_ready_without_url', reason: 'ocr_ready_without_url' } };
@@ -649,7 +670,7 @@ export class OcrExecutor implements JobExecutor {
                 if (!request.job_id || !request.put_url) {
                     return { outcome: { kind: 'retry', error: 'ocr_pending_without_put_url', reason: 'ocr_pending_without_put_url' } };
                 }
-                await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
+                await this.markAdmitted(job, ctx);
                 await this.upload(request.put_url, job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} marking OCR upload complete for backend job ${request.job_id}`, 3);
                 await ocrApiClient.markUploaded(request.job_id);
@@ -660,9 +681,16 @@ export class OcrExecutor implements JobExecutor {
                 if (!request.job_id) {
                     return { outcome: { kind: 'retry', error: 'ocr_queued_without_job_id', reason: 'ocr_queued_without_job_id' } };
                 }
-                await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
+                await this.markAdmitted(job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} joined queued OCR backend job ${request.job_id}`, 3);
                 return this.defer(request.job_id, job, recordId);
+        }
+    }
+
+    /** Clear this attachment's unavailable marker and resume the others it was parked with. */
+    private async markAdmitted(job: ResolvedJob, ctx: JobExecutionContext): Promise<void> {
+        if (await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash)) {
+            Zotero.Beaver?.processingReconciler?.notifyOcrAdmissionReopened();
         }
     }
 

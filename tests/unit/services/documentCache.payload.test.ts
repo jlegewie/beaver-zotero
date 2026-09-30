@@ -235,6 +235,64 @@ describe('DocumentCache payloads', () => {
         });
     });
 
+    describe('relocated source', () => {
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const renamedPath = '/tmp/renamed.pdf';
+        const from = { filePath: sourcePath, mtimeMs: 10, sizeBytes: 3 };
+
+        it('serves the cached result from the new path and mtime', async () => {
+            await putStructured();
+            files.set(renamedPath, files.get(sourcePath)!);
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 20, size: 3 } as any);
+
+            expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 20 })).toBe('relocated');
+
+            expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+        });
+
+        it('keeps a protected OCR preparation servable and re-preparable after a rename', async () => {
+            await putStructured(structuredResult, 'ocr');
+            files.set(renamedPath, files.get(sourcePath)!);
+
+            await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 });
+
+            expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+            await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+            expect(await cache.getProtectedRepreparation(ref, renamedPath)).toEqual({ pageCount: 1, sourceSizeBytes: 3 });
+        });
+
+        it('leaves an entry recorded for a different source untouched', async () => {
+            await putStructured();
+
+            expect(await cache.relocateSource(ref, { ...from, mtimeMs: 9 },
+                { filePath: renamedPath, mtimeMs: 20 })).toBe('missing');
+
+            const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+            expect(metadata).toMatchObject({ filePath: sourcePath, fileSignature: { mtime_ms: 10, size_bytes: 3 } });
+            expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(structuredResult);
+        });
+
+        it('reports a payload already rebuilt for the new location as current', async () => {
+            files.set(renamedPath, files.get(sourcePath)!);
+            await cache.putResult({
+                item: createCacheAttachment(), filePath: renamedPath, mode: 'structured',
+                sourceSizeBytes: 3, contentType: 'application/pdf', result: structuredResult,
+                metadata: { pageCount: 1, pageLabels: { '0': '1' }, pages: onePageGeometry },
+            });
+
+            expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 })).toBe('current');
+        });
+
+        it('reports a discarded entry as missing', async () => {
+            await putStructured(structuredResult, 'ocr');
+            files.set(renamedPath, files.get(sourcePath)!);
+            // A read at the new path before relocation discards the entry.
+            expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+            expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 })).toBe('missing');
+        });
+    });
+
     it('does not claim a deletion succeeded when its compare-and-set fails', async () => {
         await putStructured();
         const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
@@ -597,7 +655,7 @@ describe('DocumentCache payloads', () => {
         expect(await cache.getResult({ libraryId: input.item.libraryID, zoteroKey: input.item.key }, 'structured', sourcePath)).not.toBeNull();
     });
 
-    it.each(['replacement', 'deletion', 'exclusion'])('invalidates protected text for explicit %s', async reason => {
+    it.each(['replacement', 'deletion', 'library invalidation'])('invalidates protected text for explicit %s', async reason => {
         const item = createCacheAttachment();
         await cache.putResult({ item, filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
             contentType: 'application/pdf', result: structuredResult,
@@ -611,6 +669,30 @@ describe('DocumentCache payloads', () => {
         } else await cache.invalidateByLibrary(item.libraryID);
         expect(await db.getDocumentCachePayloadCount()).toBe(0);
         expect(await db.getDocumentCacheMetadataCount()).toBe(0);
+    });
+
+    it('keeps OCR text and drops native text when an excluded library is invalidated', async () => {
+        const scanned = createCacheAttachment();
+        const native = createMockAttachment({ id: 101, key: 'EFGH5678', libraryID: 1 }) as unknown as CacheAttachmentItem;
+        const other = createMockAttachment({ id: 102, key: 'IJKL9012', libraryID: 2 }) as unknown as CacheAttachmentItem;
+        for (const [item, extractionSource] of [[scanned, 'ocr'], [native, undefined], [other, undefined]] as const) {
+            await cache.putResult({ item, filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
+                contentType: 'application/pdf', result: structuredResult,
+                metadata: { pageCount: 1, pageLabels: null, pages: onePageGeometry,
+                    ...(extractionSource ? { extractionSource } : {}) } });
+        }
+        const nativePayload = await db.getDocumentCachePayload(1, native.key, 'structured');
+
+        await cache.invalidateByLibrary(1, { retainProtectedOcr: true });
+
+        expect(await db.getDocumentCachePayload(1, native.key, 'structured')).toBeNull();
+        expect(await db.getDocumentCacheMetadataByKey(1, native.key)).toBeNull();
+        expect(files.has(nativePayload!.payloadPath)).toBe(false);
+        expect(await db.getDocumentCachePayload(2, other.key, 'structured')).not.toBeNull();
+        const retained = await db.getDocumentCachePayload(1, scanned.key, 'structured');
+        expect(retained).toMatchObject({ extractionSource: 'ocr' });
+        expect(files.has(retained!.payloadPath)).toBe(true);
+        expect(await cache.getResult({ libraryId: 1, zoteroKey: scanned.key }, 'structured', sourcePath)).not.toBeNull();
     });
 
     it('retains incompatible OCR bytes without serving them', async () => {

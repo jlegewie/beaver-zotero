@@ -138,6 +138,12 @@ async function loadProcessor() {
     return await import('../../../src/services/backgroundExtractor');
 }
 
+/** Wait for every job the dispatcher has launched to settle. */
+async function settleLanes(proc: unknown): Promise<void> {
+    const lanes = (proc as { laneInFlight: Map<string, Map<number, { promise: Promise<void> }>> }).laneInFlight;
+    await Promise.all([...lanes.values()].flatMap((lane) => [...lane.values()].map((entry) => entry.promise)));
+}
+
 describe('BackgroundExtractor', () => {
     let conn: MockDBConnection;
     let db: BeaverDB;
@@ -1013,6 +1019,7 @@ describe('BackgroundExtractor', () => {
         ['download_failed'],
         ['extraction_failed'],
         ['worker_unavailable'],
+        ['file_permission_denied'],
     ])('transient response_error %s bumps attempt_count and slides availability out', async (code: string) => {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract',
@@ -1167,12 +1174,18 @@ describe('BackgroundExtractor', () => {
 
         const { BackgroundExtractor } = await loadProcessor();
         const proc = new BackgroundExtractor();
+        // A started dispatcher's settles wake it; drive those ticks by hand.
+        (proc as any).started = true;
+        vi.spyOn(proc as any, 'scheduleTick').mockImplementation(() => {});
         try {
             await (proc as any).tick();
+            expect(proc.getStatus()).toEqual({ running: true });
+            await settleLanes(proc);
             expect(proc.getStatus()).toEqual({ running: true });
             expect(events).toEqual([true]);
 
             await (proc as any).tick();
+            await settleLanes(proc);
             expect(proc.getStatus()).toEqual({ running: true });
             expect(events).toEqual([true]);
 
@@ -1573,7 +1586,7 @@ describe('BackgroundExtractor', () => {
         proc.registerExecutor(second, { maxInFlight: 1 });
 
         proc.unregisterExecutor('document_ocr', first);
-        expect(proc.getLaneStatus().document_ocr).toEqual({ inFlight: 0, capacity: 1, remoteWaiting: 0 });
+        expect(proc.getLaneStatus().document_ocr).toEqual({ inFlight: 0, capacity: 1, runsWhileActive: false, remoteWaiting: 0 });
 
         proc.unregisterExecutor('document_ocr', second);
         expect(proc.getLaneStatus().document_ocr).toBeUndefined();
@@ -2159,48 +2172,24 @@ describe('BackgroundExtractor', () => {
         });
 
         it('re-entrant tick() bails out cleanly so two ticks do not run processOnce in parallel', async () => {
-            await db.enqueueBackgroundJob({
-                jobType: 'document_extract',
-                libraryId: 1,
-                zoteroKey: 'AAAAAAAA',
-                contentKind: 'pdf',
-            payloadKind: 'structured',
-                payload: payload(),
-                now: 0,
-            });
-            // Suspend the first tick mid-extract so we can launch a
-            // second one against the same processor instance.
-            mockState.nextResult = new Promise<any>((resolve) => {
-                mockState.extractResolve = resolve;
-            });
-
             const { BackgroundExtractor } = await loadProcessor();
             const proc = new BackgroundExtractor();
+            // Suspend the first tick's pass so a second tick can start
+            // against the same processor instance.
+            let resolvePass!: (result: { processed: boolean; reason: string }) => void;
+            const processOnce = vi.spyOn(proc, 'processOnce').mockImplementation(
+                () => new Promise((resolve) => { resolvePass = resolve as typeof resolvePass; }),
+            );
 
-            // First tick: enters tickRunning=true, claims a job, awaits.
             const t1 = (proc as any).tick();
-            // Yield enough microtasks for tick to enter processOnce and
-            // park on the suspended extract promise.
-            await new Promise((r) => setTimeout(r, 0));
             expect((proc as any).tickRunning).toBe(true);
-            expect(mockState.extractCalls).toHaveLength(1);
 
             // Second tick fires concurrently — must short-circuit via
             // the re-entrancy guard without entering processOnce.
-            const t2 = (proc as any).tick();
-            await t2;
-            // No second extract invocation: the second tick bailed out.
-            expect(mockState.extractCalls).toHaveLength(1);
+            await (proc as any).tick();
+            expect(processOnce).toHaveBeenCalledTimes(1);
 
-            // Resolve the suspended extract so the first tick can finish.
-            mockState.extractResolve!({
-                kind: 'ok',
-                cached: false,
-                result: {} as any,
-                totalPages: 1,
-                resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
-                contentType: 'application/pdf',
-            });
+            resolvePass({ processed: false, reason: 'empty' });
             await t1;
             expect((proc as any).tickRunning).toBe(false);
             // The finished tick armed the next one; leaving it running would
@@ -2438,6 +2427,125 @@ describe('BackgroundExtractor', () => {
                     Number.MAX_SAFE_INTEGER,
                 );
                 claimSpy.mockRestore();
+            }
+        });
+
+        it('keeps an active-use lane claiming backlog at its reduced width while the user is active', async () => {
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValue(0);
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const settles: Array<() => void> = [];
+            const execute = vi.fn(() => new Promise<JobOutcome>((resolve) => {
+                settles.push(() => resolve({ kind: 'complete', reason: 'done' }));
+            }));
+            proc.registerExecutor({ jobType: 'fulltext_upsert', execute },
+                { maxInFlight: 4, activeMaxInFlight: 2 });
+            try {
+                for (const zoteroKey of ['AAAAAAA1', 'AAAAAAA2', 'AAAAAAA3', 'AAAAAAA4', 'AAAAAAA5']) {
+                    await db.enqueueBackgroundJob({ jobType: 'fulltext_upsert', libraryId: 1, zoteroKey,
+                        contentKind: 'pdf', payloadKind: 'structured', priority: 115, now: 0 });
+                }
+                await db.enqueueBackgroundJob({ jobType: 'document_extract', libraryId: 1,
+                    zoteroKey: 'BBBBBBBB', contentKind: 'pdf', payloadKind: 'structured',
+                    priority: 110, payload: payload(), now: 0 });
+
+                expect(proc.isBacklogGateOpen()).toBe(false);
+                await proc.processOnce();
+                expect(execute).toHaveBeenCalledTimes(2);
+                expect(mockState.extractCalls).toHaveLength(0);
+                expect(proc.getLaneStatus().fulltext_upsert).toMatchObject({
+                    inFlight: 2, capacity: 4, runsWhileActive: true,
+                });
+
+                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(Number.MAX_SAFE_INTEGER);
+                await proc.processOnce();
+                expect(execute).toHaveBeenCalledTimes(4);
+                expect(mockState.extractCalls).toHaveLength(1);
+            } finally {
+                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(Number.MAX_SAFE_INTEGER);
+                for (const settle of settles) settle();
+                await settleLanes(proc);
+                await proc.stop();
+            }
+        });
+
+        it('keeps active-use lanes paused when backlog processing is turned off', async () => {
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValue(0);
+            (Zotero.Prefs.get as any).mockImplementation((pref: string) =>
+                pref === 'extensions.zotero.beaver.backgroundProcessingEnabled' ? false : undefined);
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const execute = vi.fn(async (): Promise<JobOutcome> => ({ kind: 'complete', reason: 'done' }));
+            proc.registerExecutor({ jobType: 'fulltext_upsert', execute },
+                { maxInFlight: 4, activeMaxInFlight: 2 });
+            try {
+                await db.enqueueBackgroundJob({ jobType: 'fulltext_upsert', libraryId: 1, zoteroKey: 'AAAAAAAA',
+                    contentKind: 'pdf', payloadKind: 'structured', priority: 115, now: 0 });
+                await proc.processOnce({ awaitLaunchedJobs: true });
+                expect(execute).not.toHaveBeenCalled();
+            } finally {
+                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(Number.MAX_SAFE_INTEGER);
+                await proc.stop();
+            }
+        });
+
+        it('resizes a lane only for the executor that owns it', async () => {
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const owner = { jobType: 'fulltext_upsert' as const, execute: vi.fn() };
+            proc.registerExecutor(owner, { maxInFlight: 4 });
+
+            proc.setLaneCapacity('fulltext_upsert', { jobType: 'fulltext_upsert', execute: vi.fn() },
+                { maxInFlight: 8, activeMaxInFlight: 4 });
+            expect(proc.getLaneStatus().fulltext_upsert).toMatchObject({ capacity: 4, runsWhileActive: false });
+
+            proc.setLaneCapacity('fulltext_upsert', owner, { maxInFlight: 8, activeMaxInFlight: 12 });
+            expect(proc.getLaneStatus().fulltext_upsert).toMatchObject({ capacity: 8, runsWhileActive: true });
+            // The active width never exceeds the lane's full width.
+            expect((proc as any).executors.get('fulltext_upsert').activeMaxInFlight).toBe(8);
+            await proc.stop();
+        });
+
+        it('refills IO lane slots while an extraction is still running', async () => {
+            await db.enqueueBackgroundJob({ jobType: 'document_extract', libraryId: 1,
+                zoteroKey: 'AAAAAAAA', contentKind: 'pdf', payloadKind: 'structured',
+                payload: payload(), now: 0 });
+            mockState.nextResult = new Promise<any>((resolve) => {
+                mockState.extractResolve = resolve;
+            });
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            (proc as any).started = true;
+            vi.spyOn(proc as any, 'scheduleTick').mockImplementation(() => {});
+            const execute = vi.fn(async (): Promise<JobOutcome> => ({ kind: 'complete', reason: 'done' }));
+            proc.registerExecutor({ jobType: 'fulltext_upsert', execute }, { maxInFlight: 1 });
+            for (const zoteroKey of ['BBBBBBB1', 'BBBBBBB2']) {
+                await db.enqueueBackgroundJob({ jobType: 'fulltext_upsert', libraryId: 1, zoteroKey,
+                    contentKind: 'pdf', payloadKind: 'structured', now: 0 });
+            }
+            try {
+                // The tick returns while the extraction is still parked.
+                await (proc as any).tick();
+                await vi.waitFor(() => expect(proc.getLaneStatus().fulltext_upsert?.inFlight).toBe(0));
+                expect(execute).toHaveBeenCalledTimes(1);
+
+                await (proc as any).tick();
+                await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+                expect(mockState.extractCalls).toHaveLength(1);
+                expect(proc.getLaneStatus().document_extract?.inFlight).toBe(1);
+            } finally {
+                mockState.extractResolve!({
+                    kind: 'ok',
+                    cached: false,
+                    result: {} as any,
+                    totalPages: 1,
+                    resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+                    contentType: 'application/pdf',
+                });
+                await settleLanes(proc);
+                await proc.stop();
             }
         });
 

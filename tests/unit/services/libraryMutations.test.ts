@@ -55,4 +55,26 @@ describe('instance library mutations', () => {
         expect(release).toHaveBeenCalledTimes(1);
         await expect(queue.run(async () => {})).rejects.toMatchObject({ code: 'operation_cancelled' });
     });
+
+    it('reports when the active write started and calls onStart as it leaves the queue', async () => {
+        vi.useFakeTimers();
+        try {
+            vi.setSystemTime(10_000);
+            const queue = new LibraryMutations();
+            const gate = deferred();
+            const first = queue.run(() => gate.promise);
+            const onStart = vi.fn();
+            const second = queue.run(async () => {}, { onStart });
+
+            expect(queue.getSnapshot()).toMatchObject({ activeStartedAt: 10_000, pending: 1 });
+            expect(onStart).not.toHaveBeenCalled();
+
+            gate.resolve();
+            await Promise.all([first, second]);
+            expect(onStart).toHaveBeenCalledOnce();
+            expect(queue.getSnapshot()).toMatchObject({ active: null, activeStartedAt: null, pending: 0 });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });

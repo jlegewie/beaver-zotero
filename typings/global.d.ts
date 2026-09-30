@@ -487,6 +487,7 @@ declare namespace Zotero {
             deleteAttachmentEmbeddingTextUnlessFile: import('../src/services/database').BeaverDB['deleteAttachmentEmbeddingTextUnlessFile'];
             hasPendingFulltextUpsert: import('../src/services/database').BeaverDB['hasPendingFulltextUpsert'];
             replaceAttachmentExtractionSource: import('../src/services/database').BeaverDB['replaceAttachmentExtractionSource'];
+            relocateAttachmentExtractionSource: import('../src/services/database').BeaverDB['relocateAttachmentExtractionSource'];
             adoptAttachmentExtractionSource(input: {
                 libraryId: number; zoteroKey: string; source: string;
                 contentKind: import("../src/services/database").AttachmentProcessingStateRecord['contentKind'];
@@ -522,6 +523,7 @@ declare namespace Zotero {
             markAttachmentOcrFailed(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<void>;
             markAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<boolean>;
             clearAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string): Promise<boolean>;
+            getOcrUnavailableAttachments(libraryIds: number[]): Promise<Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }>>;
             recordAttachmentIndexIdentity: import('../src/services/database').BeaverDB['recordAttachmentIndexIdentity'];
             markAttachmentUpsertDone: import('../src/services/database').BeaverDB['markAttachmentUpsertDone'];
             markAttachmentUpsertFailed(libraryId: number, zoteroKey: string, structuredDocumentHash: string, error: string): Promise<void>;

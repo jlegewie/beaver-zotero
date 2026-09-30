@@ -3,7 +3,7 @@ import { BeaverDB } from '../../../src/services/database';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 const mocks = vi.hoisted(() => ({
-    resolve: vi.fn(), stat: vi.fn(), invalidate: vi.fn(), extract: vi.fn(),
+    resolve: vi.fn(), stat: vi.fn(), invalidate: vi.fn(), relocate: vi.fn(), extract: vi.fn(),
     kind: 'snapshot', backgroundEnabled: true,
 }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -31,6 +31,7 @@ import { DocumentExtractExecutor } from '../../../src/services/backgroundQueue/d
 import { BackgroundExtractor } from '../../../src/services/backgroundExtractor';
 import { maybeEnqueueOcrJob } from '../../../src/services/ocr/enqueueOcr';
 import { expectedExtractionSchemaVersion } from '../../../src/services/documentExtraction/shared/extractionSchemaVersions';
+import { OCR_ENGINE_VERSION } from '../../../src/services/ocr/constants';
 
 const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: true };
 
@@ -67,7 +68,7 @@ describe('attachment change reconciliation', () => {
             Libraries: { getAll: () => [] },
             Notifier: { registerObserver: vi.fn((value) => { observer = value; return 'watch'; }), unregisterObserver: vi.fn() },
             Beaver: { db, processingReconciler: reconciler, libraryScopeInitialized: true,
-                searchableLibraryIds: [1], ...entitlements, documentCache: { invalidate: mocks.invalidate, getStats: vi.fn(async () => undefined) },
+                searchableLibraryIds: [1], ...entitlements, documentCache: { invalidate: mocks.invalidate, relocateSource: mocks.relocate, getStats: vi.fn(async () => undefined) },
                 backgroundExtractor: { notify: vi.fn() } },
         });
         reconciler.start();
@@ -417,6 +418,154 @@ describe('attachment change reconciliation', () => {
         expect(mocks.invalidate).not.toHaveBeenCalled();
         expect(await db.getAttachmentProcessingState(1, item.key)).toEqual(before);
         expect(await db.peekBackgroundJobs()).toEqual([]);
+    });
+
+    describe('path- or mtime-only changes', () => {
+        const renamedPath = '/renamed.pdf';
+
+        async function seedHashedPdf(ocr = false) {
+            mocks.kind = 'pdf';
+            item.attachmentHash = 'md5-original';
+            await seed(false);
+            await connection.queryAsync('UPDATE attachment_processing_state SET file_hash = ?', ['md5-original']);
+            if (ocr) {
+                await connection.queryAsync(`UPDATE attachment_processing_state
+                    SET ocr_status = 'done', ocr_engine_version = ?`, [OCR_ENGINE_VERSION]);
+            }
+            return (await db.getAttachmentProcessingState(1, item.key))!;
+        }
+
+        function move(change: 'path' | 'mtime' | 'both') {
+            if (change !== 'mtime') {
+                mocks.resolve.mockResolvedValue({ kind: 'ok', source: { filePath: renamedPath, isRemoteOnly: false } });
+            }
+            if (change !== 'path') mocks.stat.mockResolvedValue({ lastModified: 11, size: 20 });
+            return { filePath: change === 'mtime' ? '/a.html' : renamedPath, mtimeMs: change === 'path' ? 10 : 11, sizeBytes: 20 };
+        }
+
+        it.each(['path', 'mtime', 'both'] as const)(
+            'keeps an indexed PDF and moves its cache when the %s changes and the bytes do not',
+            async (change) => {
+                const before = await seedHashedPdf();
+                const to = move(change);
+
+                await notify();
+
+                const observed = (await observeAttachmentSource(item, 'pdf'))!.identity;
+                expect(await db.getAttachmentProcessingState(1, item.key)).toEqual({
+                    ...before, extractionSource: observed, fileMtimeMs: to.mtimeMs,
+                });
+                expect(await db.peekBackgroundJobs()).toEqual([]);
+                expect(mocks.invalidate).not.toHaveBeenCalled();
+                expect(mocks.relocate).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: item.key },
+                    { filePath: '/a.html', mtimeMs: 10, sizeBytes: 20 }, to);
+
+                // The adopted identity is the new baseline, not a pending change.
+                await notify();
+                expect(await db.peekBackgroundJobs()).toEqual([]);
+                expect(mocks.relocate).toHaveBeenCalledTimes(1);
+            },
+        );
+
+        it('keeps a renamed OCR scan prepared and indexed without untagging it', async () => {
+            const before = await seedHashedPdf(true);
+            move('path');
+
+            await notify();
+
+            expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+                ocrStatus: 'done', structuredDocumentHash: before.structuredDocumentHash,
+                upsertStatus: 'done', upsertRemoteIdentity: before.upsertRemoteIdentity,
+            });
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+            expect(maybeEnqueueOcrJob).not.toHaveBeenCalled();
+        });
+
+        it('queues cache preparation when a read after the move already discarded the cache', async () => {
+            const before = await seedHashedPdf();
+            move('path');
+            mocks.relocate.mockResolvedValue('missing');
+
+            await notify();
+
+            expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+                extractStatus: 'done', structuredDocumentHash: before.structuredDocumentHash, upsertStatus: 'done',
+            });
+            expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({
+                jobType: 'document_extract', payload: expect.objectContaining({ prepare_cache: true }),
+            })]);
+            expect(mocks.invalidate).not.toHaveBeenCalled();
+        });
+
+        it('does not queue cache preparation when a read after the move already rebuilt it', async () => {
+            await seedHashedPdf();
+            move('path');
+            mocks.relocate.mockResolvedValue('current');
+
+            await notify();
+
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+        });
+
+        it('rebuilds a discarded OCR preparation without untagging the renamed scan', async () => {
+            item.attachmentContentType = 'application/pdf';
+            mocks.extract.mockResolvedValue({ kind: 'cached_error', code: 'no_text_layer', message: 'No text' });
+            const before = await seedHashedPdf(true);
+            move('both');
+            mocks.relocate.mockResolvedValue('missing');
+            await notify();
+
+            const job = await db.claimNextBackgroundJob(Date.now(), 60_000);
+            expect(job?.payload).toMatchObject({ prepare_cache: true });
+            const outcome = await new DocumentExtractExecutor().execute(job!, {
+                db: db as any, runOnMuPDFWorker: async (fn) => fn(), externalAbortSignal: new AbortController().signal,
+                shouldSkipDbWrites: () => false, enqueue: async () => {},
+            });
+
+            expect(outcome).toMatchObject({ kind: 'complete', reason: 'needs_ocr' });
+            expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+                extractStatus: 'done', ocrStatus: 'done', structuredDocumentHash: before.structuredDocumentHash,
+                upsertStatus: 'done', upsertRemoteIdentity: before.upsertRemoteIdentity,
+            });
+            expect((await db.peekBackgroundJobs()).some(queued => queued.jobType === 'fulltext_untag')).toBe(false);
+        });
+
+        it.each([
+            ['different bytes of the same size', () => { item.attachmentHash = 'md5-replaced'; }],
+            ['an unreadable hash', () => {
+                Object.defineProperty(item, 'attachmentHash', { configurable: true,
+                    get: () => Promise.reject(new Error('locked')) });
+            }],
+            ['bytes replaced while hashing', () => {
+                Object.defineProperty(item, 'attachmentHash', { configurable: true, get: () => {
+                    mocks.stat.mockResolvedValue({ lastModified: 12, size: 20 });
+                    return Promise.resolve('md5-original');
+                } });
+            }],
+        ])('re-extracts a renamed file with %s', async (_label, arrange) => {
+            await seedHashedPdf();
+            move('both');
+            arrange();
+
+            await notify();
+
+            expect((await db.getAttachmentProcessingState(1, item.key))?.extractStatus).toBeNull();
+            expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'document_extract' })]);
+            expect(mocks.invalidate).toHaveBeenCalledWith(1, item.key);
+            expect(mocks.relocate).not.toHaveBeenCalled();
+        });
+
+        it('does not hash the file when its size changed', async () => {
+            await seedHashedPdf();
+            const hash = vi.fn(async () => 'md5-original');
+            Object.defineProperty(item, 'attachmentHash', { configurable: true, get: hash });
+            mocks.stat.mockResolvedValue({ lastModified: 11, size: 21 });
+
+            await notify();
+
+            expect(hash).not.toHaveBeenCalled();
+            expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'document_extract' })]);
+        });
     });
 
     it.each(['mtime', 'size', 'path', 'kind'])('rechecks changed %s while preserving the last failure until a new read', async (change) => {

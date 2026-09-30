@@ -658,11 +658,13 @@ export class DocumentExtractExecutor implements JobExecutor {
  * Codes worth another attempt. Deliberately a coarse guess: `extraction_failed`
  * covers both a transient extractor fault and a permanently unreadable file, so
  * an extractor that knows the difference says so via `permanent` on the result
- * and that answer wins over this table.
+ * and that answer wins over this table. A permission denial is retried because
+ * the same error also reports a file another program briefly holds locked.
  */
 function isTransientResponseError(code: string): boolean {
     return code === 'download_failed'
         || code === 'extraction_failed'
+        || code === 'file_permission_denied'
         || code === 'worker_unavailable';
 }
 

@@ -29,7 +29,9 @@ vi.mock('../../../src/services/documentExtraction/ocrReextract', () => ({
     extractPdfBytesAndCacheAsOriginalAttachment: vi.fn(async () => ({ kind: 'ok', pageCount: 5 })),
 }));
 
-vi.mock('../../../src/services/documentExtraction/attachmentSource', () => ({
+vi.mock('../../../src/services/documentExtraction/attachmentSource', async (importOriginal) => ({
+    isFileAccessDeniedError: (await importOriginal<typeof import('../../../src/services/documentExtraction/attachmentSource')>())
+        .isFileAccessDeniedError,
     resolveAttachmentFileSource: vi.fn(async () => ({
         kind: 'ok',
         source: { kind: 'local', filePath: '/scan.pdf', isRemoteOnly: false },
@@ -370,6 +372,33 @@ describe('OcrExecutor', () => {
         await expect(executor.execute(record, makeCtx())).resolves.toEqual({ kind: 'complete', reason: 'ocr_ok' });
         expect(dbStub.clearAttachmentOcrUnavailable).toHaveBeenCalledWith(1, 'AAAAAAAA', 'hash123');
         expect(dbStub.markAttachmentOcrUnavailable).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+        ['ready', { status: 'ready', get_url: 'https://gcs/get' }],
+        ['queued', { status: 'queued', job_id: 'job-2' }],
+        ['pending', { status: 'pending', job_id: 'job-1', put_url: 'https://gcs/put' }],
+    ])('resumes other parked attachments when a parked request is accepted as %s', async (_status, response) => {
+        const notifyOcrAdmissionReopened = vi.fn();
+        (Zotero.Beaver as any).processingReconciler = { notifyOcrAdmissionReopened };
+        api.requestOcr.mockResolvedValue(response);
+        fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
+
+        await executor.execute(record, makeCtx());
+        await executor.drainTracks();
+
+        expect(dbStub.clearAttachmentOcrUnavailable).toHaveBeenCalledWith(1, 'AAAAAAAA', 'hash123');
+        expect(notifyOcrAdmissionReopened).toHaveBeenCalledOnce();
+    });
+
+    it('does not resume parked attachments when the accepted request was not parked', async () => {
+        const notifyOcrAdmissionReopened = vi.fn();
+        (Zotero.Beaver as any).processingReconciler = { notifyOcrAdmissionReopened };
+        dbStub.clearAttachmentOcrUnavailable.mockResolvedValue(false);
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+
+        await expect(executor.execute(record, makeCtx())).resolves.toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(notifyOcrAdmissionReopened).not.toHaveBeenCalled();
     });
 
     it('recovers legacy detection metadata through native extraction before requesting OCR', async () => {
@@ -850,6 +879,22 @@ describe('OcrExecutor', () => {
 
         expect(outcome).toEqual({ kind: 'complete', reason: 'no_file_hash' });
         expect(api.requestOcr).not.toHaveBeenCalled();
+    });
+
+    it('retries a local scan the OS refuses to read with a permission code the issues list recognises', async () => {
+        (globalThis as any).IOUtils.read = vi.fn(async () => {
+            throw Object.assign(new Error("Could not open `/scan.pdf' (NS_ERROR_FILE_ACCESS_DENIED)"), { name: 'NotAllowedError' });
+        });
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-denied', put_url: 'https://gcs/put' });
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toMatchObject({
+            kind: 'retry',
+            reason: 'ocr_local_read_failed',
+            error: 'ocr_local_read_failed: file_permission_denied',
+        });
+        expect(mockedPut).not.toHaveBeenCalled();
     });
 
     it('retries when the remote scan download fails on the upload path', async () => {

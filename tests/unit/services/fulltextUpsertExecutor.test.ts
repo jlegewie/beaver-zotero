@@ -844,6 +844,62 @@ describe('FulltextUpsertExecutor', () => {
         }));
     });
 
+    describe('hash-only probe skipping', () => {
+        const payloadRequired = () => new ApiError(409, 'Conflict', 'payload needed', 'payload_required');
+
+        async function buildPayloadStreak(executor: FulltextUpsertExecutor): Promise<void> {
+            for (let upload = 0; upload < 3; upload += 1) {
+                expect(await executor.execute(record, ctx)).toMatchObject({ reason: 'index_completed' });
+            }
+            expect(api.upsertHash).toHaveBeenCalledTimes(3);
+        }
+
+        beforeEach(() => {
+            api.upsertHash.mockRejectedValue(payloadRequired());
+        });
+
+        it('sends the payload directly after consecutive uploads that needed it', async () => {
+            const executor = new FulltextUpsertExecutor(api as any);
+            await buildPayloadStreak(executor);
+
+            expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'index_completed' });
+            expect(api.upsertHash).toHaveBeenCalledTimes(3);
+            expect(api.upsertPayload).toHaveBeenCalledTimes(4);
+        });
+
+        it('probes again once a payload upload finds the content already indexed', async () => {
+            const executor = new FulltextUpsertExecutor(api as any);
+            await buildPayloadStreak(executor);
+            api.upsertPayload.mockResolvedValueOnce({ ...response('completed'), chunks_upserted: 0, embed_tokens: 0 });
+            await executor.execute(record, ctx);
+            expect(api.upsertHash).toHaveBeenCalledTimes(3);
+
+            api.upsertHash.mockResolvedValueOnce(response('tagged'));
+            expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'index_tagged' });
+            expect(api.upsertHash).toHaveBeenCalledTimes(4);
+        });
+
+        it('falls back to the probe instead of re-extracting when the payload is not cached', async () => {
+            const executor = new FulltextUpsertExecutor(api as any);
+            await buildPayloadStreak(executor);
+            vi.mocked(Zotero.Beaver.documentCache!.getResult).mockResolvedValueOnce(null);
+            api.upsertHash.mockResolvedValueOnce(response('tagged'));
+
+            expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'index_tagged' });
+            expect(api.upsertHash).toHaveBeenCalledTimes(4);
+            expect(enqueue).not.toHaveBeenCalled();
+        });
+    });
+
+    it('reports each requirements response to the lane', async () => {
+        const onRequirements = vi.fn();
+        api.requirements.mockResolvedValue({
+            index_version: 3, extract_schema_versions: { pdf: [SCHEMA_VERSION] }, upsert_max_in_flight: 8,
+        });
+        await new FulltextUpsertExecutor(api as any, 'fulltext_upsert', { onRequirements }).execute(record, ctx);
+        expect(onRequirements).toHaveBeenCalledWith(expect.objectContaining({ upsert_max_in_flight: 8 }));
+    });
+
     it('discards a rejected payload and parks the upsert until extraction rebuilds it', async () => {
         api.upsertHash.mockRejectedValueOnce(new ApiError(409, 'Conflict', 'payload needed', 'payload_required'));
         vi.mocked(computeStructuredDocumentHash).mockResolvedValueOnce('b'.repeat(64));
@@ -1074,6 +1130,87 @@ describe('FulltextUpsertExecutor', () => {
         expect(outcome).not.toHaveProperty('laneCooldownMs');
     });
 
+    it.each([[330, 15_000], [3, 3_000]])('waits at most a short poll on a busy claim with a %is hint', async (hint, wait) => {
+        api.upsertHash.mockRejectedValue(new ApiError(409, 'busy', 'busy', 'claim_busy', { retry_after_seconds: hint }));
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+            .toMatchObject({ kind: 'retry', countsAsAttempt: false, retryAfterMs: wait });
+    });
+
+    it.each([[5, false], [120, true]])('pauses the cleanup lane only for a long busy hint (%is)', async (hint, pausesLane) => {
+        Zotero.Beaver.account = { getGeneration: () => 1,
+            getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        record.jobType = 'fulltext_untag';
+        record.payload = { ...record.payload!, index_action: 'untag', doc_hash: 'a'.repeat(64),
+            index_account_id: 'owner', index_scope_ref: 'g123', index_local_id: 'OLDDEVICE' };
+        api.untag.mockResolvedValue({ results: [{ outcome: 'busy', retry_after_seconds: hint }] });
+        const outcome = await new FulltextUpsertExecutor(api as any, 'fulltext_untag').execute(record, ctx);
+        expect(outcome).toMatchObject({ kind: 'retry', error: 'index_untag_busy', countsAsAttempt: false,
+            retryAfterMs: hint * 1_000 });
+        if (pausesLane) expect(outcome).toMatchObject({ laneCooldownMs: hint * 1_000 });
+        else expect(outcome).not.toHaveProperty('laneCooldownMs');
+    });
+
+    describe('attachments sharing one document hash', () => {
+        const hash = 'a'.repeat(64);
+        let twin: BackgroundJobRecord;
+
+        /** Start `job` and hold it inside `call` until the returned release runs. */
+        async function holdInFlight(
+            call: ReturnType<typeof vi.fn>, job: BackgroundJobRecord, executor: FulltextUpsertExecutor, result: unknown,
+        ): Promise<() => Promise<unknown>> {
+            let release!: () => void;
+            let entered!: () => void;
+            const started = new Promise<void>(resolve => { entered = resolve; });
+            call.mockImplementationOnce(async () => {
+                entered();
+                await new Promise<void>(resolve => { release = resolve; });
+                return result;
+            });
+            const running = executor.execute(job, ctx);
+            await started;
+            return async () => { release(); return running; };
+        }
+
+        beforeEach(async () => {
+            record.payload = { ...record.payload!, doc_hash: hash };
+            twin = { ...record, id: 2, itemId: 11, zoteroKey: 'IJKLMNOP' };
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: twin.zoteroKey, itemId: 11, contentKind: 'pdf' });
+            await db.markAttachmentExtracted({
+                libraryId: 1, zoteroKey: twin.zoteroKey, expectedFileMtimeMs: null, expectedFileSizeBytes: null,
+                previousDocumentHash: null, expectedExtractStatus: null, fileMtimeMs: 1, fileSizeBytes: 2,
+                fileHash: 'file-md5', structuredDocumentHash: hash, extractSchemaVersion: SCHEMA_VERSION, ocrStatus: 'na',
+            });
+        });
+
+        it('waits locally while another attachment uploads the content, then tags it with a probe', async () => {
+            const executor = new FulltextUpsertExecutor(api as any);
+            api.upsertHash.mockRejectedValue(new ApiError(409, 'Conflict', 'payload needed', 'payload_required'));
+            for (let upload = 0; upload < 3; upload += 1) await executor.execute(record, ctx);
+            const finish = await holdInFlight(api.upsertPayload, record, executor, response('completed'));
+
+            expect(await executor.execute(twin, ctx)).toEqual({ kind: 'retry', error: 'index_document_busy',
+                countsAsAttempt: false, retryAfterMs: 2_000 });
+            expect(await finish()).toMatchObject({ reason: 'index_completed' });
+
+            // The upload streak would otherwise skip the probe and send the payload again.
+            api.upsertHash.mockResolvedValueOnce(response('tagged'));
+            expect(await executor.execute(twin, ctx)).toEqual({ kind: 'complete', reason: 'index_tagged' });
+            expect(api.upsertHash).toHaveBeenCalledTimes(4);
+            expect(api.upsertPayload).toHaveBeenCalledTimes(4);
+        });
+
+        it('holds cleanup of the content while another attachment indexes it', async () => {
+            const finish = await holdInFlight(api.upsertHash, record, new FulltextUpsertExecutor(api as any), response('tagged'));
+            const cleanup: BackgroundJobRecord = { ...twin, jobType: 'fulltext_untag', payload: { ...twin.payload!,
+                index_action: 'untag', index_account_id: 'owner', index_scope_ref: 'g123', index_local_id: 'OLDDEVICE' } };
+
+            expect(await new FulltextUpsertExecutor(api as any, 'fulltext_untag').execute(cleanup, ctx))
+                .toMatchObject({ kind: 'retry', error: 'index_document_busy', countsAsAttempt: false });
+            expect(api.untag).not.toHaveBeenCalled();
+            await finish();
+        });
+    });
+
     it.each(['accepted', 'requirements'])('waits without spending attempts for %s', async (kind) => {
         api.upsertHash.mockResolvedValue({ ...response('completed'),
             ...(kind === 'accepted' ? { status: 'accepted' } : { index_version: 99 }) });
@@ -1231,12 +1368,14 @@ describe('FulltextUpsertExecutor', () => {
         await db.configureProcessingProgress(scope);
         const keys = Array.from({ length: 40 }, (_, i) => `RETRY${String(i).padStart(3, '0')}`);
         for (const key of keys) {
+            // Distinct content, so jobs contend only for lane slots.
+            const hash = key.toLowerCase().padEnd(64, '0');
             await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: key, contentKind: 'pdf' });
             await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status = 'done',
                 ocr_status = 'na', structured_document_hash = ?, extract_schema_version = ? WHERE zotero_key = ?`,
-                ['a'.repeat(64), SCHEMA_VERSION, key]);
+                [hash, SCHEMA_VERSION, key]);
             const queued = await db.enqueueBackgroundJob({ ...record, zoteroKey: key, now,
-                payload: { ...record.payload!, doc_hash: 'a'.repeat(64) } });
+                payload: { ...record.payload!, doc_hash: hash } });
             for (let attempt = 0; attempt < 2; attempt++) {
                 await db.failBackgroundJob(queued.id, 'earlier local failure', { maxAttempts: 3, backoffMs: () => 0, now });
             }

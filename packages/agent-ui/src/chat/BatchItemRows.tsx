@@ -6,6 +6,7 @@ import { itemTypeToIconName } from '@beaver/agent-core/types/citations';
 import { ArrowUpRightIcon, FileIcon, Icon, SearchIcon } from '../icons';
 import { getHost } from '../host';
 import type { ResolvedItemDisplay } from '../host/types';
+import { useItemContextMenu } from './useItemContextMenu';
 
 /**
  * The item rows a batch outcome row opens to, and the item-first row a
@@ -83,6 +84,10 @@ interface ItemRowModel {
     iconName: string | null;
     /** Reveal the item in the library. Absent when the host cannot, or the id is not an item. */
     activate?: (e: React.SyntheticEvent) => void;
+    /** Open the host's item menu. Absent when the id is not an item. */
+    openMenu?: (e: React.MouseEvent) => void;
+    /** The open item menu, rendered beside (not inside) the row so its keys and clicks stay its own. */
+    menu: React.ReactNode;
 }
 
 /** The row as the population record describes it; nothing is looked up. */
@@ -124,6 +129,7 @@ function useItemRowModel(itemId: string, population?: BatchPopulationLookup): It
     const stamped = batchPopulationItemFor(population, itemId);
     // Always called, so the hook order is stable; asked nothing when stamped.
     const display = useItemDisplay(stamped ? null : ref);
+    const { openItemMenu, itemMenu } = useItemContextMenu();
     // Bind so a host object with state still gets its `this`.
     const navigation = getHost().navigation;
     const reveal = navigation?.revealObject ? navigation.revealObject.bind(navigation) : null;
@@ -135,7 +141,8 @@ function useItemRowModel(itemId: string, population?: BatchPopulationLookup): It
               void reveal(ref);
           }
         : undefined;
-    return { ...drawn, activate };
+    const openMenu = ref ? (e: React.MouseEvent) => openItemMenu(ref, e) : undefined;
+    return { ...drawn, activate, openMenu, menu: itemMenu };
 }
 
 /** The identity line: type icon, name, title, and the reveal glyph. */
@@ -174,18 +181,22 @@ export const BatchItemRow: React.FC<{
     const model = useItemRowModel(itemId, population);
     const { activate } = model;
     return (
-        <div
-            className={['batch-item-row display-flex flex-row items-center gap-1 text-sm min-w-0', activate && 'batch-item-row-link']
-                .filter(Boolean)
-                .join(' ')}
-            role={activate ? 'button' : undefined}
-            tabIndex={activate ? 0 : undefined}
-            title={model.title ? `${model.name} · ${model.title}` : model.name}
-            onClick={activate}
-            onKeyDown={activate ? activateOnKey(activate) : undefined}
-        >
-            <ItemIdentity model={model} />
-        </div>
+        <>
+            <div
+                className={['batch-item-row display-flex flex-row items-center gap-1 text-sm min-w-0', activate && 'batch-item-row-link']
+                    .filter(Boolean)
+                    .join(' ')}
+                role={activate ? 'button' : undefined}
+                tabIndex={activate ? 0 : undefined}
+                title={model.title ? `${model.name} · ${model.title}` : model.name}
+                onClick={activate}
+                onContextMenu={model.openMenu}
+                onKeyDown={activate ? activateOnKey(activate) : undefined}
+            >
+                <ItemIdentity model={model} />
+            </div>
+            {model.menu}
+        </>
     );
 };
 
@@ -283,21 +294,25 @@ export const BatchItemFindingRow: React.FC<{
     const model = useItemRowModel(group.item_ids[0], population);
     const { activate } = model;
     return (
-        <div
-            className={['batch-item-finding display-flex flex-col min-w-0', activate && 'batch-item-finding-link']
-                .filter(Boolean)
-                .join(' ')}
-            role={activate ? 'button' : undefined}
-            tabIndex={activate ? 0 : undefined}
-            title={model.title ? `${model.name} · ${model.title}` : model.name}
-            onClick={activate}
-            onKeyDown={activate ? activateOnKey(activate) : undefined}
-        >
-            <div className="batch-item-row display-flex flex-row items-center gap-1 text-sm min-w-0">
-                <ItemIdentity model={model} />
+        <>
+            <div
+                className={['batch-item-finding display-flex flex-col min-w-0', activate && 'batch-item-finding-link']
+                    .filter(Boolean)
+                    .join(' ')}
+                role={activate ? 'button' : undefined}
+                tabIndex={activate ? 0 : undefined}
+                title={model.title ? `${model.name} · ${model.title}` : model.name}
+                onClick={activate}
+                onContextMenu={model.openMenu}
+                onKeyDown={activate ? activateOnKey(activate) : undefined}
+            >
+                <div className="batch-item-row display-flex flex-row items-center gap-1 text-sm min-w-0">
+                    <ItemIdentity model={model} />
+                </div>
+                <div className="batch-item-finding-text text-sm font-color-primary">{group.label}</div>
             </div>
-            <div className="batch-item-finding-text text-sm font-color-primary">{group.label}</div>
-        </div>
+            {model.menu}
+        </>
     );
 };
 

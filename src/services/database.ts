@@ -3031,6 +3031,28 @@ export class BeaverDB {
         );
     }
 
+    /**
+     * Move a successful extraction to a new path or mtime of the same bytes.
+     * Applies only while the row still records `expectedSource` and the
+     * verified `fileHash`, so every downstream stage stays as it is.
+     */
+    public async relocateAttachmentExtractionSource(input: {
+        libraryId: number;
+        zoteroKey: string;
+        expectedSource: string;
+        fileHash: string;
+        source: string;
+        fileMtimeMs: number;
+    }): Promise<boolean> {
+        return await this.executeChangedRow(
+            `UPDATE attachment_processing_state SET extraction_source = ?, file_mtime_ms = ?
+             WHERE library_id = ? AND zotero_key = ? AND extraction_source = ?
+               AND extract_status = 'done' AND file_hash = ?`,
+            [input.source, input.fileMtimeMs, input.libraryId, input.zoteroKey,
+                input.expectedSource, input.fileHash],
+        );
+    }
+
     public async resetAttachmentOcr(
         libraryId: number,
         zoteroKey: string,
@@ -3300,6 +3322,37 @@ export class BeaverDB {
                AND last_error = ?`,
             [libraryId, zoteroKey, fileHash, OCR_SERVICE_UNAVAILABLE],
         );
+    }
+
+    /**
+     * Rows parked by a closed OCR admission gate, oldest marker first.
+     * `ticketed` is true while an OCR job for the attachment is queued, running
+     * or waiting on the backend.
+     */
+    public async getOcrUnavailableAttachments(
+        libraryIds: number[],
+    ): Promise<Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }>> {
+        if (libraryIds.length === 0) return [];
+        const rows: Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }> = [];
+        await this.queryAsync(
+            `SELECT s.library_id, s.zotero_key, EXISTS (
+                    SELECT 1 FROM background_jobs j
+                    WHERE j.job_type = 'document_ocr'
+                      AND j.library_id = s.library_id AND j.zotero_key = s.zotero_key
+                )
+             FROM attachment_processing_state s
+             WHERE s.library_id IN (${libraryIds.map(() => '?').join(',')})
+               AND s.content_kind = 'pdf' AND s.extract_status = 'done'
+               AND s.ocr_status = 'needed' AND s.last_error = ?
+             ORDER BY s.updated_at, s.library_id, s.zotero_key`,
+            [...libraryIds, OCR_SERVICE_UNAVAILABLE],
+            { onRow: (row: any) => rows.push({
+                libraryId: row.getResultByIndex(0),
+                zoteroKey: row.getResultByIndex(1),
+                ticketed: Boolean(row.getResultByIndex(2)),
+            }) },
+        );
+        return rows;
     }
 
     private async enqueueReplacementUntag(previous: AttachmentProcessingStateRecord | null, newHash: string | null): Promise<void> {
@@ -4367,6 +4420,37 @@ export class BeaverDB {
         return payloads;
     }
 
+    /**
+     * Point one attachment's cache metadata and payloads at a new path/mtime.
+     * Only rows that still record the `from` location are changed.
+     */
+    public async relocateDocumentCacheSource(
+        libraryId: number,
+        zoteroKey: string,
+        from: { filePath: string; mtimeMs: number; sizeBytes: number },
+        to: { filePath: string; mtimeMs: number },
+    ): Promise<boolean> {
+        let relocated = false;
+        await this.conn.executeTransaction(async () => {
+            const metadata = await this.getDocumentCacheMetadataByKey(libraryId, zoteroKey);
+            if (!metadata || metadata.filePath !== from.filePath
+                || metadata.fileSignature.mtime_ms !== from.mtimeMs
+                || metadata.fileSignature.size_bytes !== from.sizeBytes) return;
+            await this.queryAsync(
+                `UPDATE document_cache_payloads SET source_file_path = ?, source_file_mtime_ms = ?
+                 WHERE metadata_id = ? AND source_file_path = ?
+                   AND source_file_mtime_ms = ? AND source_file_size_bytes = ?`,
+                [to.filePath, to.mtimeMs, metadata.id, from.filePath, from.mtimeMs, from.sizeBytes],
+            );
+            relocated = await this.executeChangedRow(
+                `UPDATE document_cache_metadata SET file_path = ?, file_mtime_ms = ?
+                 WHERE id = ?`,
+                [to.filePath, to.mtimeMs, metadata.id],
+            );
+        });
+        return relocated;
+    }
+
     /** Delete a metadata row only if it still matches the inspected record. */
     public async deleteDocumentCacheMetadataIfUnchanged(
         metadata: DocumentCacheMetadataRecord,
@@ -4402,6 +4486,30 @@ export class BeaverDB {
             `DELETE FROM document_cache_metadata WHERE library_id = ?`,
             [libraryId],
         );
+        return payloads;
+    }
+
+    /**
+     * Delete a library's cached content except OCR payloads and their metadata,
+     * returning the deleted payload rows for file cleanup.
+     */
+    public async deleteUnprotectedDocumentCacheByLibrary(libraryId: number): Promise<DocumentCachePayloadRecord[]> {
+        let payloads: DocumentCachePayloadRecord[] = [];
+        await this.conn.executeTransaction(async () => {
+            payloads = await this.selectDocumentCachePayloads(
+                `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ? AND extraction_source != 'ocr'`,
+                [libraryId],
+            );
+            await this.queryAsync(
+                `DELETE FROM document_cache_payloads WHERE library_id = ? AND extraction_source != 'ocr'`,
+                [libraryId],
+            );
+            await this.queryAsync(
+                `DELETE FROM document_cache_metadata WHERE library_id = ? AND id NOT IN
+                    (SELECT metadata_id FROM document_cache_payloads WHERE extraction_source = 'ocr')`,
+                [libraryId],
+            );
+        });
         return payloads;
     }
 

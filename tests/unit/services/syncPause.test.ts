@@ -288,7 +288,7 @@ it('closing one window retains another run and an executing write', async () => 
         await vi.advanceTimersByTimeAsync(service.RELEASE_DEBOUNCE_MS);
         expect(resume).not.toHaveBeenCalled();
         service.releaseWindow('B');
-        await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS);
+        await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS - service.RELEASE_DEBOUNCE_MS - 1);
         expect(resume).not.toHaveBeenCalled();
         service.scheduleResumeAfterRun('mutation:1');
         await vi.advanceTimersByTimeAsync(service.RELEASE_DEBOUNCE_MS);
@@ -297,4 +297,91 @@ it('closing one window retains another run and an executing write', async () => 
         vi.clearAllTimers();
         vi.useRealTimers();
     }
+});
+
+describe('syncPause leases', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+        vi.resetModules();
+        (globalThis as any).Zotero.Sync.Runner = { syncInProgress: false };
+    });
+
+    it('releases sync when a write never settles', async () => {
+        const resume = vi.fn();
+        const service = await loadSyncPause(() => resume);
+        service.pauseSyncForMutatingRun('mutation:1');
+
+        await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS - 1);
+        expect(resume).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(resume).toHaveBeenCalledOnce();
+        expect(service.isSyncPaused()).toBe(false);
+    });
+
+    it('keeps sync paused for a run that keeps writing after a stuck write lapses', async () => {
+        const resume = vi.fn();
+        const service = await loadSyncPause(() => resume);
+        service.pauseSyncForMutatingRun('mutation:1');
+        service.pauseSyncForMutatingRun('chat:A:run-1');
+
+        await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS / 2);
+        service.pauseSyncForMutatingRun('chat:A:run-1');
+        await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS / 2);
+        expect(resume).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS / 2);
+        expect(resume).toHaveBeenCalledOnce();
+    });
+
+    it('caps a continuously renewed hold and pushes its edits', async () => {
+        const resume = vi.fn();
+        const service = await loadSyncPause(() => resume);
+        const step = service.SAFETY_IDLE_MS / 2;
+
+        for (let elapsed = 0; elapsed < service.MAX_HOLD_MS; elapsed += step) {
+            service.pauseSyncForMutatingRun('chat:A:run-1');
+            expect(resume).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(step);
+        }
+
+        expect(resume).toHaveBeenCalledOnce();
+        expect(runner().setSyncTimeout).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts a fresh hold when a capped run writes again', async () => {
+        const first = vi.fn();
+        const second = vi.fn();
+        const delayIndefinite = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+        const service = await loadSyncPause(delayIndefinite);
+        const step = service.SAFETY_IDLE_MS / 2;
+
+        for (let elapsed = 0; elapsed < service.MAX_HOLD_MS; elapsed += step) {
+            service.pauseSyncForMutatingRun('chat:A:run-1');
+            await vi.advanceTimersByTimeAsync(step);
+        }
+        expect(first).toHaveBeenCalledOnce();
+
+        service.pauseSyncForMutatingRun('chat:A:run-1');
+        expect(delayIndefinite).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS);
+        expect(second).toHaveBeenCalledOnce();
+    });
+
+    it('ignores the late release of a write whose lease already lapsed', async () => {
+        const resume = vi.fn();
+        const service = await loadSyncPause(() => resume);
+        service.pauseSyncForMutatingRun('mutation:1');
+        await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS);
+        expect(resume).toHaveBeenCalledOnce();
+
+        service.scheduleResumeAfterRun('mutation:1');
+        await vi.advanceTimersByTimeAsync(service.RELEASE_DEBOUNCE_MS);
+        expect(resume).toHaveBeenCalledOnce();
+    });
 });

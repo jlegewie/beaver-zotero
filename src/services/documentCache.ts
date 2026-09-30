@@ -1055,6 +1055,38 @@ export class DocumentCache {
         }
     }
 
+    /**
+     * Keep one attachment's cached content, including a protected OCR
+     * preparation, after its file moved or its mtime changed. The caller must
+     * have verified that the bytes at `to` equal those cached for `from`.
+     *
+     * `current`: a structured payload already records `to` (a read after the
+     * move rebuilt it). `missing`: there is no structured payload for either
+     * location, for example because a read after the move discarded it.
+     */
+    async relocateSource(
+        ref: DocumentRef,
+        from: { filePath: string; mtimeMs: number; sizeBytes: number },
+        to: { filePath: string; mtimeMs: number },
+    ): Promise<'relocated' | 'current' | 'missing'> {
+        let outcome: 'relocated' | 'current' | 'missing' = 'missing';
+        await this.trackCacheWrite(async () => {
+            try {
+                if (await this.db.relocateDocumentCacheSource(ref.libraryId, ref.zoteroKey, from, to)) {
+                    const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+                    outcome = payload ? 'relocated' : 'missing';
+                    return;
+                }
+                const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+                if (payload?.sourceFilePath === to.filePath && payload.sourceFileSignature.mtime_ms === to.mtimeMs
+                    && payload.sourceFileSignature.size_bytes === from.sizeBytes) outcome = 'current';
+            } catch (error) {
+                logger(`DocumentCache.relocateSource error: ${error}`, 1);
+            }
+        }, true, { id: 0, libraryID: ref.libraryId, key: ref.zoteroKey });
+        return outcome;
+    }
+
     /** Discard a rejected native structured payload only if the inspected row is still current. */
     async discardRejectedStructuredPayload(
         ref: DocumentRef,
@@ -1077,13 +1109,21 @@ export class DocumentCache {
         return await this.deletePayload(before) ? 'discarded' : 'changed';
     }
 
-    /** Invalidate all document-cache state for a library. */
-    async invalidateByLibrary(libraryId: number): Promise<void> {
+    /**
+     * Invalidate all document-cache state for a library. `retainProtectedOcr`
+     * keeps OCR payloads and their metadata, as `clearAll` does: they cannot
+     * be rebuilt locally, and a later read revalidates them against the file.
+     */
+    async invalidateByLibrary(libraryId: number, options: { retainProtectedOcr?: boolean } = {}): Promise<void> {
         this.libraryGenerations.set(libraryId, (this.libraryGenerations.get(libraryId) ?? 0) + 1);
         await Promise.allSettled([...this.itemWriteLocks]
             .filter(([key]) => key.startsWith(`${libraryId}/`))
             .map(([, write]) => write));
         try {
+            if (options.retainProtectedOcr) {
+                await this.removePayloadFiles(await this.db.deleteUnprotectedDocumentCacheByLibrary(libraryId));
+                return;
+            }
             const payloads = await this.db.deleteDocumentCacheMetadataByLibrary(libraryId);
             await this.removePayloadFiles(payloads);
             if (this.payloadCacheDir) {

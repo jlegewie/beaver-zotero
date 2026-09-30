@@ -482,7 +482,7 @@ describe('MuPDFWorkerClient', () => {
             const background = new MuPDFWorkerClient({ slotName: 'background' });
             try {
                 expect(hot.getStats().recycleDataOperationThreshold).toBe(32);
-                expect(background.getStats().recycleDataOperationThreshold).toBe(8);
+                expect(background.getStats().recycleDataOperationThreshold).toBe(64);
             } finally {
                 hot.dispose();
                 background.dispose();
@@ -495,7 +495,7 @@ describe('MuPDFWorkerClient', () => {
             try {
                 expect(client.getStats()).toMatchObject({
                     recycleHeapThresholdBytes: 512 * 1024 * 1024,
-                    recycleDataOperationThreshold: 8,
+                    recycleDataOperationThreshold: 64,
                 });
 
                 const op = client.getPageCount(new Uint8Array([1]));
@@ -2011,7 +2011,7 @@ describe('MuPDFWorkerClient', () => {
             });
             expect(bg.getStats()).toMatchObject({
                 recycleHeapThresholdBytes: 512 * 1024 * 1024,
-                recycleDataOperationThreshold: 8,
+                recycleDataOperationThreshold: 64,
             });
         });
 

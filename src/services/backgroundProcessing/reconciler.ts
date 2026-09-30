@@ -8,7 +8,11 @@ import { expectedExtractionSchemaVersion } from '../documentExtraction/shared/ex
 import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
 import { recordReadingOutcome } from '../documentExtraction/readingOutcome';
 import { loadAttachmentData, resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
-import { isLegacyRemoteIdentity, observeAttachmentSource } from '../documentExtraction/sourceObservation';
+import {
+    isLegacyRemoteIdentity,
+    observeAttachmentSource,
+    relocatedLocalIdentity,
+} from '../documentExtraction/sourceObservation';
 import { OCR_ENGINE_VERSION, OCR_PRIORITY_BACKFILL, OCR_PRIORITY_ON_DEMAND } from '../ocr/constants';
 import type { AttachmentRef } from './issues';
 import { enqueueOcrJob, maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
@@ -51,12 +55,14 @@ const IDLE_THRESHOLD_MS = 30_000;
  * Terminal reasons that say "the bytes were not reachable", not "these bytes
  * are unusable". Every one of them can stop being true without the attachment
  * itself changing: metadata syncs ahead of the upload backing it, a WebDAV
- * share or its configuration comes back, a user downloads the file later.
+ * share or its configuration comes back, a user downloads the file later or
+ * grants Zotero access to the folder holding it.
  */
 const RECOVERABLE_AVAILABILITY_ERRORS = [
     'file_missing',
     'download_failed',
     'read_failed',
+    'file_permission_denied',
 ];
 
 /**
@@ -91,6 +97,7 @@ export class ReconcilerService {
     private pendingForce = false;
     private scheduledForce = false;
     private admissionScopes = new Map<number, string>();
+    private ocrAdmissionReopened = false;
     private generation = 0;
     private timer: ReturnType<typeof setTimeout> | null = null;
     private prefObservers: symbol[] = [];
@@ -148,6 +155,16 @@ export class ReconcilerService {
             return;
         }
         this.schedule(0);
+    }
+
+    /**
+     * The OCR API accepted work for an attachment parked while admission was
+     * closed. The next pass tickets every other parked attachment.
+     */
+    notifyOcrAdmissionReopened(): void {
+        if (this.stopped) return;
+        this.ocrAdmissionReopened = true;
+        this.notify();
     }
 
     /** Notifications are hints, never evidence that file content changed. */
@@ -435,20 +452,24 @@ export class ReconcilerService {
             const targeted = this.pendingAttachments.size > 0;
             await this.reconcileNotifiedAttachments(db, generation);
             if (this.cancelled(generation)) return;
+            if (this.ocrAdmissionReopened) {
+                this.ocrAdmissionReopened = false;
+                await this.resumeUnavailableOcr(db, this.listProcessingLibraryIds(), 'all', generation);
+                if (this.cancelled(generation)) return;
+            }
             Zotero.Beaver?.backgroundExtractor?.notify();
             // Reading activity needs an attachment check, not a whole-library enumeration.
             // Keep the periodic deadline independent of those notifications.
             if (targeted && !force && Date.now() < this.nextScanAt) return;
-            const libraries = Zotero.Libraries.getAll().filter((library) =>
-                (library.libraryType === 'user' || library.libraryType === 'group')
-                && isBackgroundProcessingLibraryEnabled(library.libraryID));
+            const libraries = this.listProcessingLibraryIds();
             for (const id of this.admissionScopes.keys()) {
-                if (!libraries.some((library) => library.libraryID === id)) this.admissionScopes.delete(id);
+                if (!libraries.includes(id)) this.admissionScopes.delete(id);
             }
-            for (const library of libraries) {
+            for (const libraryId of libraries) {
                 if (this.cancelled(generation)) return;
-                await this.reconcileLibrary(db, library.libraryID, force, generation);
+                await this.reconcileLibrary(db, libraryId, force, generation);
             }
+            await this.resumeUnavailableOcr(db, libraries, 'probe', generation);
             this.nextScanAt = Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;
             Zotero.Beaver?.backgroundExtractor?.notify();
         } catch (error) {
@@ -469,6 +490,63 @@ export class ReconcilerService {
                 this.schedule(wake ? 0 : this.nextScanAt > Date.now()
                     ? this.nextScanAt - Date.now() : PROCESSING_RECONCILE_INTERVAL_MS, forceNext);
             }
+        }
+    }
+
+    private listProcessingLibraryIds(): number[] {
+        return Zotero.Libraries.getAll()
+            .filter((library) => (library.libraryType === 'user' || library.libraryType === 'group')
+                && isBackgroundProcessingLibraryEnabled(library.libraryID))
+            .map((library) => library.libraryID);
+    }
+
+    /**
+     * Ticket OCR again for attachments parked because the OCR API was not
+     * accepting work (`ocr_service_unavailable`). A refused request creates no
+     * backend job, so nothing else retries them while the account, entitlement
+     * and library cursor stay unchanged.
+     *
+     * `probe` runs once per periodic pass and tickets only the attachment that
+     * has waited longest, and nothing while any parked attachment already has a
+     * ticket, so a long outage costs one OCR request per pass. When that request
+     * is accepted, the OCR executor calls {@link notifyOcrAdmissionReopened} and
+     * the next pass runs `all`, which tickets every remaining parked attachment.
+     */
+    private async resumeUnavailableOcr(
+        db: QueueDB,
+        libraryIds: number[],
+        mode: 'probe' | 'all',
+        generation: number,
+    ): Promise<void> {
+        if (!backgroundProcessingEnabled() || Zotero.Beaver?.hasOcrAccess !== true) return;
+        const parked = await db.getOcrUnavailableAttachments(libraryIds);
+        if (mode === 'probe' && parked.some((row) => row.ticketed)) return;
+        const targets = parked.filter((row) => !row.ticketed).slice(0, mode === 'probe' ? 1 : undefined);
+        let ticketed = 0;
+        for (const { libraryId, zoteroKey } of targets) {
+            if (this.cancelled(generation)) return;
+            if (!isBackgroundProcessingLibraryEnabled(libraryId)) continue;
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+            if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
+            if (!item || safeIsInTrash(item) !== false) continue;
+            try {
+                await enqueueOcrJob({
+                    item,
+                    libraryId,
+                    zoteroKey,
+                    itemId: item.id,
+                    pageCount: null,
+                    priority: OCR_PRIORITY_BACKFILL,
+                    requestContext: 'backfill',
+                });
+                ticketed += 1;
+            } catch (error) {
+                logger(`ReconcilerService: OCR retry enqueue failed for ${libraryId}-${zoteroKey}: ${error}`, 2);
+            }
+        }
+        if (ticketed > 0) {
+            logger(`ReconcilerService: ticketed ${ticketed} of ${parked.length} attachment(s) waiting for OCR admission (${mode})`, 3);
+            Zotero.Beaver?.backgroundExtractor?.notify();
         }
     }
 
@@ -611,6 +689,14 @@ export class ReconcilerService {
                 if (!adopted) return;
                 row = { ...row, extractionSource: observation.identity };
             }
+            if (observation && row.extractionSource != null && !kindChanged
+                && observation.identity !== row.extractionSource) {
+                const relocation = await this.relocateUnchangedBytes(db, item, row, observation.identity, jobs);
+                if (relocation === 'stale') return;
+                if (relocation === 'relocated') {
+                    row = { ...row, extractionSource: observation.identity, fileMtimeMs: observation.signature!.mtime_ms };
+                }
+            }
             const changed = observation && row.extractionSource != null && observation.identity !== row.extractionSource;
             // Legacy successes can adopt a matching local signature without work.
             // Unknown failures are rechecked only by a deep pass, never by reading activity.
@@ -719,6 +805,70 @@ export class ReconcilerService {
                 now: Date.now(),
             });
         }
+    }
+
+    /**
+     * Keep a successful extraction when only the file's path or mtime changed:
+     * a rename, a move, or a rewritten mtime. The bytes are compared with the
+     * recorded hash; on a match the document cache and the ledger adopt the new
+     * location, so nothing is extracted, OCR'd or indexed again. `changed`
+     * leaves the attachment to the regular reset; `stale` means the row or the
+     * library scope moved on while the file was hashed.
+     *
+     * A cache entry already discarded before this check (a read after the move
+     * no longer matched it) is rebuilt by a cache-preparation job, which keeps
+     * the ledger and index state, including a retained OCR hash.
+     */
+    private async relocateUnchangedBytes(
+        db: QueueDB,
+        item: Zotero.Item,
+        row: AttachmentProcessingStateRecord,
+        observed: string,
+        jobs: BackgroundJobInput[],
+    ): Promise<'relocated' | 'changed' | 'stale'> {
+        if (row.extractStatus !== 'done' || !row.fileHash || row.extractionSource == null) return 'changed';
+        const relocation = relocatedLocalIdentity(row.extractionSource, observed);
+        if (!relocation) return 'changed';
+        let fileHash: string | null = null;
+        try {
+            fileHash = await item.attachmentHash || null;
+        } catch (error) {
+            logger(`ReconcilerService: attachmentHash failed for ${item.libraryID}-${item.key}: ${error}`, 2);
+        }
+        if (fileHash !== row.fileHash) return 'changed';
+        // Bytes replaced while they were hashed must not inherit the old verdict.
+        const after = await observeAttachmentSource(item, row.contentKind);
+        if (after?.identity !== observed) return 'changed';
+        if (!isBackgroundProcessingLibraryEnabled(item.libraryID)) return 'stale';
+        // The cache is relocated first: the verified bytes make it valid for the
+        // new location even if the ledger row changes before its own update.
+        const cached = await Zotero.Beaver?.documentCache?.relocateSource(
+            { libraryId: item.libraryID, zoteroKey: item.key }, relocation.from, relocation.to);
+        const relocated = await db.relocateAttachmentExtractionSource({
+            libraryId: item.libraryID,
+            zoteroKey: item.key,
+            expectedSource: row.extractionSource,
+            fileHash,
+            source: observed,
+            fileMtimeMs: relocation.to.mtimeMs,
+        });
+        if (!relocated) return 'stale';
+        const preparable = row.ocrStatus === 'na'
+            || (row.ocrStatus === 'done' && Zotero.Beaver?.hasOcrAccess === true);
+        if (cached === 'missing' && preparable) {
+            jobs.push({
+                jobType: 'document_extract',
+                libraryId: item.libraryID,
+                itemId: item.id,
+                zoteroKey: item.key,
+                contentKind: row.contentKind,
+                payloadKind: 'structured',
+                priority: BACKGROUND_EXTRACT_PRIORITY,
+                payload: { ...buildBackgroundExtractPayload(row.contentKind), prepare_cache: true },
+                now: Date.now(),
+            });
+        }
+        return 'relocated';
     }
 
     /**

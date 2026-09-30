@@ -3,6 +3,7 @@ import {
     AnnotationListView,
     AnnotationRowView,
 } from '@beaver/agent-core/run-state/toolResultViews';
+import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 import { AnnotationResultRow } from './AnnotationResultRow';
 
 /**
@@ -14,6 +15,7 @@ export const AnnotationResultList: React.FC<{
     emptyMessage?: string | null;
 }> = ({ annotations, variant, emptyMessage = 'No annotations found' }) => {
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+    const { openItemMenu, itemMenu } = useItemContextMenu();
 
     if (annotations.length === 0) {
         return emptyMessage ? (
@@ -35,9 +37,11 @@ export const AnnotationResultList: React.FC<{
                         isHovered={hoveredKey === key}
                         onMouseEnter={() => setHoveredKey(key)}
                         onMouseLeave={() => setHoveredKey(null)}
+                        onContextMenu={(event) => openItemMenu(row, event)}
                     />
                 );
             })}
+            {itemMenu}
         </div>
     );
 };

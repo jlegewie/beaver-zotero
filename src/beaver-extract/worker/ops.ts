@@ -323,6 +323,27 @@ class PageWalkCache {
 }
 
 /**
+ * OCR-gate page provider over an op's shared page walks.
+ *
+ * Structured extraction decides whether a document is queued for OCR from
+ * the detailed walk (with the schema preset's text repair), so standalone
+ * OCR analysis uses the same walk and every OCR verdict judges identical text.
+ */
+function ocrGateProvider(
+    pageCache: PageWalkCache,
+    pageCount: number,
+    detailed: boolean,
+): RawPageProvider {
+    return {
+        getPageCount: () => pageCount,
+        extractRawPage: (i) =>
+            detailed
+                ? (pageCache.getDetailed(i, true) as unknown as RawPageData)
+                : pageCache.getPlain(i, true),
+    };
+}
+
+/**
  * Shared analysis-context prefix for `runExtractFromIndices` and
  * `opAnalyzeLayout`. Walks the analysis-window pages once and runs the
  * cross-page `buildPageAnalysisContext` (StyleAnalyzer + MarginFilter)
@@ -1412,13 +1433,7 @@ export async function opExtract(
             // Run the gate over the SAME walk the pipeline will reuse —
             // detailed for structured, JSON for markdown — so a sampled
             // page is never re-walked by the extraction below.
-            const ocrProvider: RawPageProvider = {
-                getPageCount: () => pageCount,
-                extractRawPage: (i) =>
-                    isStructured
-                        ? (pageCache.getDetailed(i, true) as unknown as RawPageData)
-                        : pageCache.getPlain(i, true),
-            };
+            const ocrProvider = ocrGateProvider(pageCache, pageCount, isStructured);
             const ocr = new DocumentAnalyzer(ocrProvider).getDetailedOCRAnalysis({
                 minTextPerPage: opts.minTextPerPage,
             });
@@ -1539,11 +1554,7 @@ export async function opStructuredExtractWithDebug(
         const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair);
 
         if (opts.checkTextLayer) {
-            const ocrProvider: RawPageProvider = {
-                getPageCount: () => pageCount,
-                extractRawPage: (i) =>
-                    pageCache.getDetailed(i, true) as unknown as RawPageData,
-            };
+            const ocrProvider = ocrGateProvider(pageCache, pageCount, true);
             const ocr = new DocumentAnalyzer(ocrProvider).getDetailedOCRAnalysis({
                 minTextPerPage: opts.minTextPerPage,
             });
@@ -1749,12 +1760,14 @@ export async function opAnalyzeOCRNeeds(
     try {
         // Classify a 0-page document up front — `getDetailedOCRAnalysis`
         // would otherwise throw a raw, unclassified `Error`. The second
-        // check covers `resolveTruePageCount` (inside `rawPageProviderFromDoc`)
-        // correcting an advertised count down to 0.
+        // check covers `resolveTruePageCount` correcting an advertised count
+        // down to 0.
         assertDocumentHasPages(doc.countPages());
-        const provider = rawPageProviderFromDoc(doc);
-        assertDocumentHasPages(provider.getPageCount());
-        const analyzer = new DocumentAnalyzer(provider);
+        const pageCount = resolveTruePageCount(doc);
+        assertDocumentHasPages(pageCount);
+        const fontApi = (await ensureApi()).Font;
+        const pageCache = new PageWalkCache(doc, fontApi, CURRENT_PDF_EXTRACTION_PRESET.textRepair);
+        const analyzer = new DocumentAnalyzer(ocrGateProvider(pageCache, pageCount, true));
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };
     } catch (e) {

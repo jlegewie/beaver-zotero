@@ -41,6 +41,7 @@ import { ToolDisplayFooter } from '../../../components/messages/ToolDisplayFoote
 import AgentActionItemButtons from './AgentActionItemButtons';
 import ReferenceMetadataDisplay from '../../../components/externalReferences/ReferenceMetadataDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 
 interface CreateItemListItemProps {
     action: CreateItemAgentAction;
@@ -81,6 +82,13 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
         onExistingMatch(action, itemRef);
     }, [action, onExistingMatch]);
 
+    // Applied actions (imported, or matched to an existing item) name a library item.
+    const { openItemMenu, itemMenu } = useItemContextMenu();
+    const result = action.status === 'applied' ? action.result_data : undefined;
+    const libraryItem: ZoteroItemReference | null = result?.zotero_key
+        ? { library_id: result.library_id, zotero_key: result.zotero_key, library_ref: result.library_ref }
+        : null;
+
     const baseClasses = [
         'px-3',
         'py-2',
@@ -110,9 +118,11 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
     return (
         <div
             className={`${baseClasses.join(' ')} ${className}`}
+            onContextMenu={libraryItem ? (event) => openItemMenu(libraryItem, event) : undefined}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >
+            {itemMenu}
             <div className={metadataWrapperClasses.join(' ')}>
                 <ReferenceMetadataDisplay
                     title={item.title}
