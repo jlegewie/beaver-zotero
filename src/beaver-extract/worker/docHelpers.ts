@@ -31,7 +31,9 @@ import type {
     PageLike,
     QuadTuple,
     RectTuple,
+    StructuredTextLike,
 } from "./mupdfApi";
+import type { GraphicsSummary } from "./graphicsSummary";
 import { ERROR_CODES, postLog, workerError } from "./errors";
 import { isRecoverablePageError } from "../wasmFatal";
 import { isUnmappedTextLayer, recoveredTextIsAcceptable } from "../unmappedGlyphRecovery";
@@ -716,6 +718,7 @@ function extractRawPageDetailedOnce(
     fontApi?: FontApi,
     recoverUnmappedGlyphs?: boolean,
     textRepair = CURRENT_PDF_EXTRACTION_PRESET.textRepair,
+    onGraphics?: (graphics: GraphicsSummary) => void,
 ): RawPageDataDetailed {
     const page = doc.loadPage(pageIndex);
     try {
@@ -734,7 +737,16 @@ function extractRawPageDetailedOnce(
 
         let stextOptions = detailedStructuredTextOptions(includeImages, textRepair);
         if (recoverUnmappedGlyphs) stextOptions = withRecoveryFlags(stextOptions);
-        const stext = page.toStructuredText(stextOptions);
+        // With `onGraphics`, the graphics summary comes from the same pass over the
+        // page contents; the structured text is identical either way.
+        let stext: StructuredTextLike;
+        if (onGraphics) {
+            const both = page.toStructuredTextWithGraphics(stextOptions);
+            stext = both.stext;
+            onGraphics(both.graphics);
+        } else {
+            stext = page.toStructuredText(stextOptions);
+        }
 
         const blocks: RawBlock[] = [];
         let currentBlock: (RawBlock & { type: "text"; lines: RawLineDetailed[] }) | null = null;
@@ -1353,14 +1365,20 @@ export function extractRawPageFromDoc(
 }
 
 /** Extract a page's detailed-walk data, recovering an unmapped text layer when present. */
+/**
+ * `onGraphics` receives the page's graphics summary, collected in the same pass
+ * as the text (requires `MuPDFApi.supportsGraphicsSummary`). The summary does
+ * not depend on text options, so the unmapped-glyph retry does not re-collect it.
+ */
 export function extractRawPageDetailedFromDoc(
     doc: DocumentLike,
     pageIndex: number,
     includeImages: boolean,
     fontApi?: FontApi,
     textRepair?: boolean,
+    onGraphics?: (graphics: GraphicsSummary) => void,
 ): RawPageDataDetailed {
-    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair);
+    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair, onGraphics);
     if (!isUnmappedTextLayer(page)) return page;
     const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair);
     if (!recoveredTextIsAcceptable(recovered)) return page;
