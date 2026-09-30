@@ -275,6 +275,20 @@ describe('embedding extraction queue', () => {
             expect(second).toMatchObject({ unit: { source: 'metadata' }, candidate: null });
         });
 
+        it('embeds metadata instead of stored text that fails the quality gate, without re-extracting', async () => {
+            mocks.bestAttachments.set(1, 9);
+            await db.upsertAttachmentEmbeddingText({
+                libraryId: 1, zoteroKey: 'ATT9', itemId: 9, contentKind: 'pdf', fileMtimeMs: 10, fileSizeBytes: 20,
+                fileHash: 'hash', extractionSource: 'ocr', textVersion: EMBEDDING_TEXT_VERSION, title: null,
+                titleSource: null, keywords: null, body: 'Receipt. Store 15. Subtotal. Total', bodySource: 'outline',
+            });
+            const [resolution] = await resolveUnitsBatch([regularItem({ title: 'A descriptive title without any abstract' })], db);
+
+            expect(resolution.unit?.source).toBe('metadata');
+            expect(resolution.candidate?.row).not.toBeNull();
+            expect(await enqueueEmbeddingExtractions([resolution.candidate!], db)).toBe(0);
+        });
+
         it('offers a candidate without text while the unit indexes from metadata', async () => {
             mocks.bestAttachments.set(1, 9);
             const item = regularItem({ title: 'A descriptive title without any abstract' });

@@ -7,9 +7,8 @@ import { EMBEDDING_TEXT_VERSION } from '../../../src/services/documentExtraction
 
 const mocks = vi.hoisted(() => ({
     extractAndCacheDocument: vi.fn(),
-    getDocumentInfo: vi.fn(async () => ({ title: '  Info Title  ' })),
     markDirty: vi.fn(),
-    onFileRead: null as null | (() => void),
+    duringExtraction: null as null | (() => void),
 }));
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -41,9 +40,6 @@ vi.mock('../../../src/services/documentExtractionCore', () => ({
     extractAndCacheSnapshotDocument: vi.fn(),
 }));
 vi.mock('../../../src/services/ocr/enqueueOcr', () => ({ enqueueOcrJob: vi.fn(), maybeEnqueueOcrJob: vi.fn() }));
-vi.mock('../../../src/beaver-extract/MuPDFWorkerClient', () => ({
-    getMuPDFWorkerClient: () => ({ getDocumentInfo: mocks.getDocumentInfo }),
-}));
 
 import { DocumentExtractExecutor } from '../../../src/services/backgroundQueue/documentExtractExecutor';
 import { resolveAttachmentFileSource } from '../../../src/services/documentExtraction/attachmentSource';
@@ -51,6 +47,7 @@ import { resolveAttachmentFileSource } from '../../../src/services/documentExtra
 const structuredResult = {
     schemaVersion: SCHEMA_VERSION,
     mode: 'structured',
+    infoTitle: 'Neighborhood Conditions and Educational Outcomes',
     document: {
         pageCount: 1, bboxOrigin: 'top-left', bboxPrecision: 1, citationIndex: {},
         pages: [{
@@ -87,15 +84,14 @@ describe('DocumentExtractExecutor derived embedding text', () => {
             searchableLibraryIds: [1],
             background: { markEmbeddingDirty: mocks.markDirty },
         };
-        (globalThis as any).IOUtils.read.mockImplementation(async () => {
-            mocks.onFileRead?.();
-            return new Uint8Array([1, 2, 3]);
+        mocks.extractAndCacheDocument.mockImplementation(async () => {
+            mocks.duringExtraction?.();
+            return { kind: 'ok', cached: true, result: structuredResult };
         });
-        mocks.extractAndCacheDocument.mockResolvedValue({ kind: 'ok', cached: true, result: structuredResult });
     });
 
     afterEach(async () => {
-        mocks.onFileRead = null;
+        mocks.duringExtraction = null;
         await connection.closeDatabase();
         delete (globalThis as any).Zotero.Beaver;
     });
@@ -127,7 +123,9 @@ describe('DocumentExtractExecutor derived embedding text', () => {
             extractionSource: 'native', textVersion: EMBEDDING_TEXT_VERSION, bodySource: 'opening',
         });
         expect(row!.body).toContain('neighborhood conditions');
-        expect(mocks.getDocumentInfo).toHaveBeenCalledOnce();
+        // The PDF Info title comes with the extraction result; no second file read.
+        expect(row).toMatchObject({ title: 'Neighborhood Conditions and Educational Outcomes', titleSource: 'pdf_metadata' });
+        expect((globalThis as any).IOUtils.read).not.toHaveBeenCalled();
         expect(mocks.markDirty).toHaveBeenCalledWith([7]);
         expect(await db.getAttachmentProcessingState(1, 'PAPER001')).toMatchObject({ extractStatus: 'done' });
     });
@@ -142,7 +140,7 @@ describe('DocumentExtractExecutor derived embedding text', () => {
     });
 
     it('does not store text for a completion the ledger rejects as stale', async () => {
-        mocks.onFileRead = () => {
+        mocks.duringExtraction = () => {
             // Another producer advances the ledger while this extraction runs.
             void db.markAttachmentExtractFailure({
                 libraryId: 1, zoteroKey: 'PAPER001', status: 'failed', error: 'other', attemptedAt: 0,
@@ -154,7 +152,7 @@ describe('DocumentExtractExecutor derived embedding text', () => {
     });
 
     it('does not store text for a library excluded during extraction', async () => {
-        mocks.onFileRead = () => { (globalThis as any).Zotero.Beaver.searchableLibraryIds = []; };
+        mocks.duringExtraction = () => { (globalThis as any).Zotero.Beaver.searchableLibraryIds = []; };
         await runJob();
         expect(await db.getAttachmentEmbeddingTextKeys(1)).toEqual([]);
         expect(mocks.markDirty).not.toHaveBeenCalled();

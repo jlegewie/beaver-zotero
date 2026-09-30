@@ -70,9 +70,6 @@ const PROACTIVE_RECYCLE_FOLLOWUP_DATA_OPERATIONS = 1;
 
 export type ProactiveRecycleReason = "heap_limit" | "data_operation_limit";
 
-/** PDF Info dictionary fields returned by `getDocumentInfo`. */
-export type PDFDocumentInfo = Omit<PDFMetadata, "pageCount" | "pageLabels" | "pages">;
-
 function defaultIdleTimeoutForSlot(name: PDFWorkerSlotName): number {
     return name === "background"
         ? DEFAULT_IDLE_TIMEOUT_MS_BACKGROUND
@@ -1643,16 +1640,6 @@ export class MuPDFWorkerClient {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         return this.call<PDFMetadata>("getMetadata", { pdfData: bytes }, { signal });
-    }
-
-    /** Info-dictionary fields (title, author, …) without the per-page label pass. */
-    async getDocumentInfo(
-        pdfData: Uint8Array | ArrayBuffer,
-        signal?: AbortSignal,
-    ): Promise<PDFDocumentInfo> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<PDFDocumentInfo>("getDocumentInfo", { pdfData: bytes }, { signal });
     }
 
     /**

@@ -27,7 +27,7 @@ import { ExternalAbortError } from '../agentDataProvider/timeout';
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../documentExtraction/ocrReextract';
 import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
 import { getFileSignature, getRemoteFileHash } from '../documentFileIdentity';
-import { readPdfInfoTitle, storeEmbeddingText } from '../documentExtraction/embeddingTextStore';
+import { storeEmbeddingText } from '../documentExtraction/embeddingTextStore';
 import { isLibraryInScope } from '../libraryScope';
 import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 import type { ProtectedRepreparation } from '../documentCache';
@@ -793,10 +793,9 @@ export class OcrExecutor implements JobExecutor {
         // Hand the MuPDF extraction to the serialized background lane.
         logger(`OcrExecutor: ${job.sourceKey} re-extracting OCR searchable PDF`, 3);
         const attemptedAt = Date.now();
-        let pdfTitle: string | null = null;
         const result = await ctx.runOnMuPDFWorker(async () => {
             if (await shouldStopCachePreparation(record)) return null;
-            const extracted = await extractPdfBytesAndCacheAsOriginalAttachment({
+            return extractPdfBytesAndCacheAsOriginalAttachment({
                 item: job.item,
                 filePath: job.filePath,
                 ocrBytes,
@@ -807,11 +806,6 @@ export class OcrExecutor implements JobExecutor {
                 workerName: 'background',
                 abortSignal: ctx.externalAbortSignal,
             });
-            // Read while the worker still holds the OCR'd document.
-            if (extracted.kind === 'ok') {
-                pdfTitle = await readPdfInfoTitle(ocrBytes, ctx.externalAbortSignal);
-            }
-            return extracted;
         });
         if (!result) return { kind: 'complete', reason: 'cache_budget_reached' };
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
@@ -871,7 +865,6 @@ export class OcrExecutor implements JobExecutor {
                                 fileSignature: await getFileSignature(job.filePath),
                                 fileHash: job.fileHash,
                                 extractionSource: 'ocr',
-                                pdfTitle,
                             });
                         } catch (error) {
                             logger(`OcrExecutor: ${job.sourceKey} storing embedding text failed: ${error}`, 2);

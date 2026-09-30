@@ -38,6 +38,7 @@ vi.mock(
     }),
 );
 import { InstanceBackground } from "../../../src/services/instanceBackground";
+import { EMBEDDING_TEXT_VERSION } from "../../../src/services/documentExtraction/embeddingText";
 
 const zoteroItems = new Map<number, any>();
 const regular = (id: number, libraryID = 1) => ({
@@ -87,7 +88,7 @@ describe("instance embedding events across background generations", () => {
                 deleteAttachmentEmbeddingTextsByItemIds: vi.fn(),
                 getUnitIdsBySourceAttachment: vi.fn(async () => []),
                 getPendingAttachmentEmbeddingTextIds: vi.fn(async () => []),
-                getEmbeddingTextIndexVersion: vi.fn(async () => 1),
+                getEmbeddingTextIndexVersion: vi.fn(async () => EMBEDDING_TEXT_VERSION),
                 setEmbeddingTextIndexVersion: vi.fn(),
                 deleteEmbeddingIndexState: vi.fn(),
                 clearAttachmentEmbeddingTextPending: vi.fn(),
@@ -269,7 +270,7 @@ describe("instance embedding events across background generations", () => {
             await vi.advanceTimersByTimeAsync(500);
             expect(owner.db.deleteEmbeddingIndexState).toHaveBeenCalledWith(1);
             expect(owner.db.deleteEmbeddingIndexState).toHaveBeenCalledWith(2);
-            expect(owner.db.setEmbeddingTextIndexVersion).toHaveBeenCalledWith(1);
+            expect(owner.db.setEmbeddingTextIndexVersion).toHaveBeenCalledWith(EMBEDDING_TEXT_VERSION);
         });
 
         it("catches up on derived text stored while no generation ran", async () => {

@@ -51,7 +51,6 @@ import {
     opExtractSerialized,
     opExtractRawPageDetailed,
     opExtractSentenceDebug,
-    opGetDocumentInfo,
     opGetMetadata,
     opGetPageCount,
     opRenderPages,
@@ -93,8 +92,6 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opGetPageCount(a as Parameters<typeof opGetPageCount>[0]);
         case "getMetadata":
             return await opGetMetadata(a as Parameters<typeof opGetMetadata>[0]);
-        case "getDocumentInfo":
-            return await opGetDocumentInfo(a as Parameters<typeof opGetDocumentInfo>[0]);
         case "extractRawPageDetailed":
             return await opExtractRawPageDetailed(a as Parameters<typeof opExtractRawPageDetailed>[0]);
         case "renderPages":

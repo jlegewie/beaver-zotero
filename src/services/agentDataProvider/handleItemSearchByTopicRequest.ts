@@ -21,7 +21,7 @@ import {
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { attachmentRefKey, BeaverDB } from '../database';
 import { modelObjectId } from '../../utils/libraryIdentity';
-import { truncateAtSentence } from '../documentExtraction/embeddingText';
+import { isUsableEmbeddingBody, truncateAtSentence } from '../documentExtraction/embeddingText';
 import {
     collectionsFilterError,
     getCollectionScopeItemIds,
@@ -463,7 +463,7 @@ async function loadEmbeddingInfo(db: BeaverDB, itemIds: number[]): Promise<Map<n
             const row = attachment?.parentID === itemId
                 ? rows.get(attachmentRefKey(attachment.libraryID, attachment.key))
                 : undefined;
-            result.set(itemId, attachment && row?.body && row.bodySource !== 'none'
+            result.set(itemId, attachment && row && isUsableEmbeddingBody(row) && row.bodySource !== 'none'
                 ? {
                     embedding_source: 'attachment_text',
                     derived_text: {

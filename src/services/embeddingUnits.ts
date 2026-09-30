@@ -18,7 +18,7 @@ import {
 } from './database';
 import { getBestAttachmentBatch } from './documentExtraction/attachmentInfoBatch';
 import { liveAttachmentContentKind } from './documentExtraction/attachmentResolution';
-import { EMBEDDING_TEXT_VERSION } from './documentExtraction/embeddingText';
+import { EMBEDDING_TEXT_VERSION, isUsableEmbeddingBody } from './documentExtraction/embeddingText';
 import { observeAttachmentSource } from './documentExtraction/sourceObservation';
 import { getFileSignature, getRemoteFileHash } from './documentFileIdentity';
 import { EMBEDDING_EXTRACT_PRIORITY } from './backgroundProcessing/constants';
@@ -211,7 +211,8 @@ export async function resolveUnitsBatch(
                 row: rows.get(attachmentRefKey(attachment.libraryID, attachment.key)) ?? null,
             }
             : null;
-        const derived = candidate?.row
+        // Unusable text stays stored (it is current) but the unit embeds its metadata.
+        const derived = candidate?.row && isUsableEmbeddingBody(candidate.row)
             ? { attachmentId: candidate.attachment.id, keywords: candidate.row.keywords, body: candidate.row.body }
             : null;
         try {

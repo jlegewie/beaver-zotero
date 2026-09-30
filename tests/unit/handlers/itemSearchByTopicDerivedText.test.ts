@@ -56,8 +56,8 @@ describe('handleItemSearchByTopicRequest derived text', () => {
                 [13, { source: 'attachment_text', sourceAttachmentId: 23 }],
             ])),
             getAttachmentEmbeddingTexts: vi.fn(async () => new Map([
-                ['1/ATT21', { body: LONG_BODY, bodySource: 'opening', keywords: 'schools, poverty' }],
-                ['1/ATT23', { body: 'Other text', bodySource: 'abstract', keywords: null }],
+                ['1/ATT21', { body: LONG_BODY, bodySource: 'opening', extractionSource: 'native', keywords: 'schools, poverty' }],
+                ['1/ATT23', { body: 'Other text', bodySource: 'abstract', extractionSource: 'native', keywords: null }],
             ])),
         };
         (globalThis as any).Zotero = {
@@ -83,6 +83,15 @@ describe('handleItemSearchByTopicRequest derived text', () => {
         expect(second.derived_text).toBeUndefined();
         expect(third).toMatchObject({ embedding_source: 'attachment_text' });
         expect(third.derived_text).toBeUndefined();
+    });
+
+    it('does not send text that fails the quality gate', async () => {
+        db.getAttachmentEmbeddingTexts.mockResolvedValue(new Map([
+            ['1/ATT21', { body: 'WELCOME 15. OUR STORE. LONG WHARF. TOTAL 25 -00.', bodySource: 'outline', extractionSource: 'ocr', keywords: null }],
+        ]));
+        const [first] = (await handleItemSearchByTopicRequest(request)).items;
+        expect(first.embedding_source).toBe('attachment_text');
+        expect(first.derived_text).toBeUndefined();
     });
 
     it('still returns results when the embedding sources cannot be read', async () => {

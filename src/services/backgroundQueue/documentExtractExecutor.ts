@@ -18,7 +18,7 @@ import type {
     BackgroundJobRecord,
 } from '../database';
 import { observeAttachmentSource } from '../documentExtraction/sourceObservation';
-import { clearStaleEmbeddingText, readPdfInfoTitle, storeEmbeddingText } from '../documentExtraction/embeddingTextStore';
+import { clearStaleEmbeddingText, storeEmbeddingText } from '../documentExtraction/embeddingTextStore';
 import { getFileSignature, getRemoteFileHash } from '../documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
@@ -48,8 +48,6 @@ interface ExtractSuccess {
     document: DocumentExtractResult | null;
     ocrStatus: 'na' | 'needed';
     reason: string;
-    /** PDF Info dictionary title, read while the worker still holds the file. */
-    pdfTitle?: string | null;
 }
 
 /** Executes local document extraction jobs and advances the durable ledger. */
@@ -149,10 +147,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                     if (await shouldStopCachePreparation(record)) {
                         return { kind: 'complete', reason: 'cache_budget_reached' };
                     }
-                    return this.extractPdf(
-                        record, ctx, attemptedAt, extractionSource,
-                        source.source.isRemoteOnly ? null : source.source.filePath,
-                    );
+                    return this.extractPdf(record, ctx, attemptedAt, extractionSource);
                 })
                 : await this.extractDom(record, item, kind, source.source, ctx, attemptedAt, extractionSource);
         } catch (error) {
@@ -263,7 +258,6 @@ export class DocumentExtractExecutor implements JobExecutor {
                         fileHash,
                         extractionSource: previous.ocrStatus === 'done' && previous.fileHash === fileHash
                             ? 'ocr' : 'native',
-                        pdfTitle: extracted.pdfTitle,
                     });
                 } else {
                     await clearStaleEmbeddingText({ db: ctx.db, item, fileSignature: afterSignature, fileHash });
@@ -497,7 +491,6 @@ export class DocumentExtractExecutor implements JobExecutor {
         ctx: JobExecutionContext,
         attemptedAt: number,
         extractionSource: string | null,
-        localFilePath: string | null,
     ): Promise<ExtractSuccess | JobOutcome> {
         const payload = record.payload;
         if (!payload || payload.content_kind !== 'pdf') {
@@ -519,9 +512,6 @@ export class DocumentExtractExecutor implements JobExecutor {
                     document: result.result as DocumentExtractResult,
                     ocrStatus: 'na',
                     reason: 'ok',
-                    pdfTitle: localFilePath
-                        ? await readPdfInfoTitle(localFilePath, ctx.externalAbortSignal)
-                        : null,
                 };
             case 'cached_error':
                 if (result.code === 'no_text_layer') {
