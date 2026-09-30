@@ -335,10 +335,11 @@ export class AccountService extends ApiService {
     }
 
     /**
-     * Fetches available subscription plans with live Stripe pricing
+     * Fetches available plans with live Stripe pricing: monthly and yearly
+     * subscriptions (`interval` 'month' / 'year') and credit packs (`interval` null).
      */
     async getPlans(): Promise<PlansResponse> {
-        return this.get<PlansResponse>('/api/v1/billing/plans');
+        return this.get<PlansResponse>('/api/v1/billing/plans?include_annual=true');
     }
 
     async getScheduledChange(): Promise<ScheduledChangeResponse> {
