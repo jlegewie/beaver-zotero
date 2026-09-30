@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PlanInfo } from '@beaver/agent-core/transport/clients/accountService';
 import {
     findIntervalCounterpart,
+    formatTimeRemaining,
     getMonthsFree,
     getPlanChangeOptions,
     getPlanTier,
@@ -104,5 +105,46 @@ describe('getPlanChangeOptions', () => {
 
     it('never offers a credit pack as a plan change', () => {
         expect(getPlanChangeOptions([pack], 'plus', 0)).toEqual({ upgradePlan: null, yearlyPlan: null });
+    });
+});
+
+describe('formatTimeRemaining', () => {
+    // Local-time dates so results do not depend on the machine's timezone.
+    const now = new Date(2026, 8, 30, 15, 0);
+
+    it('says today when the period ends later today', () => {
+        expect(formatTimeRemaining(new Date(2026, 8, 30, 23, 59), false, now)).toBe('today');
+    });
+
+    it('says today once the period end has passed', () => {
+        expect(formatTimeRemaining(new Date(2026, 8, 29, 8, 0), false, now)).toBe('today');
+    });
+
+    it('says tomorrow for the next calendar date even when under 24 hours away', () => {
+        expect(formatTimeRemaining(new Date(2026, 9, 1, 2, 0), false, now)).toBe('tomorrow');
+    });
+
+    it('counts calendar days for several days out', () => {
+        expect(formatTimeRemaining(new Date(2026, 9, 5, 1, 0), false, now)).toBe('5 days');
+        expect(formatTimeRemaining(new Date(2026, 9, 5, 1, 0), false, now, true)).toBe('5 days remaining');
+    });
+
+    it('reports months for yearly plans more than 60 days out', () => {
+        const end = new Date(2027, 2, 30, 12, 0);
+        expect(formatTimeRemaining(end, true, now)).toBe('6 months');
+        expect(formatTimeRemaining(end, true, now, true)).toBe('6 months remaining');
+    });
+
+    it('reports days for yearly plans within 60 days', () => {
+        expect(formatTimeRemaining(new Date(2026, 10, 29, 12, 0), true, now)).toBe('60 days');
+    });
+
+    it('reports days for monthly plans regardless of distance', () => {
+        expect(formatTimeRemaining(new Date(2027, 2, 30, 12, 0), false, now)).toMatch(/ days$/);
+    });
+
+    it('accepts ISO strings and millisecond timestamps', () => {
+        const end = new Date(2026, 9, 1, 12, 0).toISOString();
+        expect(formatTimeRemaining(end, false, now.getTime())).toBe('tomorrow');
     });
 });

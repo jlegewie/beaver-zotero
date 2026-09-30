@@ -20,6 +20,7 @@ import {
     findIntervalCounterpart,
     formatMonthsFree,
     formatPrice,
+    formatTimeRemaining,
     getMonthsFree,
     getPlanChangeOptions,
     getPlanTier,
@@ -39,10 +40,7 @@ const OfferCard: React.FC<{
     const { label, title, actionLabel, onAction, disabled } = props;
     return (
         <div
-            className="display-flex flex-row items-center rounded-md p-1"
-            style={{
-                border: '1px dashed var(--border-quarternary)',
-            }}
+            className="display-flex flex-row items-center"
         >
             <div className="display-flex flex-col" style={{ minWidth: 0 }}>
                 <span className="text-base font-color-secondary">
@@ -68,7 +66,7 @@ const OfferCard: React.FC<{
 const MonthsFreeBadge: React.FC<{ months: number }> = ({ months }) => (
     <span
         className="text-xs px-15 py-05 rounded-md"
-        style={{ color: 'var(--tag-green-secondary)', border: '1px solid var(--tag-green-quarternary)', background: 'var(--tag-green-quinary)' }}
+        style={{ color: 'var(--tag-green-primary)', border: '1px solid var(--tag-green-tertiary)', background: 'var(--tag-green-quinary)' }}
     >
         {formatMonthsFree(months)}
     </span>
@@ -84,7 +82,7 @@ const BillingIntervalToggle: React.FC<{
             role="group"
             aria-label="Billing interval"
             className="display-flex flex-row items-center gap-1 rounded-md"
-            style={{ border: '1px solid var(--border-quarternary)', padding: '2px' }}
+            style={{ border: '1px solid var(--beaver-border-default)', background: 'var(--fill-quinary)', padding: '2px' }}
         >
             {(['month', 'year'] as const).map((interval) => (
                 <Button
@@ -201,11 +199,9 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
                             <div className="text-xl font-color-primary font-bold">
                                 {price}<span className="text-sm font-normal font-color-secondary">/month</span>
                             </div>
-                            {isAnnual && (
-                                <div className="text-sm font-color-secondary">
-                                    {formatPrice(plan.unit_amount, plan.currency)} billed yearly
-                                </div>
-                            )}
+                            <div className="text-sm font-color-secondary">
+                                {formatPrice(plan.unit_amount, plan.currency)} billed {isAnnual ? 'yearly' : 'monthly'}
+                            </div>
                             <div className="text-sm font-color-secondary" style={{ marginBottom: '8px' }}>
                                 {plan.monthly_credits} credits per month
                             </div>
@@ -249,15 +245,6 @@ export const formatPlanName = (plan: string | undefined): string => {
     const isAnnual = isAnnualPlanId(plan);
     const base = getPlanTier(plan).split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     return isAnnual ? `${base} (Annual)` : base;
-};
-
-const formatTimeRemaining = (periodEnd: string, isAnnual: boolean): string => {
-    const days = Math.max(0, Math.ceil((new Date(periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
-    if (isAnnual && days > 60) {
-        const months = Math.round(days / 30);
-        return `${months} month${months !== 1 ? 's' : ''}`;
-    }
-    return `${days} day${days !== 1 ? 's' : ''}`;
 };
 
 const ScheduledChangeNotice: React.FC<{
@@ -322,8 +309,12 @@ const BillingSection: React.FC = () => {
     const profileBalance = useAtomValue(profileBalanceAtom);
     const isPastDue = useAtomValue(isCreditPlanPastDueAtom);
     const hasPlan = useAtomValue(hasCreditPlanAtom);
-    const { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
+    const { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading: isBillingLoading, error: billingError, errorAction: billingErrorAction, plans, plansLoading, plansError, fetchPlans } = useBilling();
     const creditPacks = plans.filter(p => !p.interval);
+    // A failed "Buy Credits" click is reported in the Credits section; every
+    // other failed action is reported in the plan card.
+    const creditsError = hasPlan && billingErrorAction === 'buyCredits' ? billingError : null;
+    const planCardError = creditsError ? null : billingError;
     // One control drives both stored values: a number is the limit, an empty
     // field means never ask. `confirmCredits` is what carries "never" — the
     // limit itself keeps its last value so clearing and refilling the field
@@ -463,7 +454,7 @@ const BillingSection: React.FC = () => {
                                 {creditPlan.cancelAtPeriodEnd && creditPlan.periodEnd && (
                                     <span className="text-base font-color-secondary">
                                         Your plan ends {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                                        {' '}({formatTimeRemaining(creditPlan.periodEnd, isAnnual)} remaining)
+                                        {' '}({formatTimeRemaining(creditPlan.periodEnd, isAnnual, Date.now(), true)})
                                     </span>
                                 )}
                             </div>
@@ -514,6 +505,12 @@ const BillingSection: React.FC = () => {
                             />
                         )}
 
+                    </div>
+                )}
+
+                {planCardError && (
+                    <div className="font-color-red text-sm mt-3" role="alert">
+                        {planCardError}
                     </div>
                 )}
             </div>
@@ -611,6 +608,11 @@ const BillingSection: React.FC = () => {
                     />
                 )}
             </SettingsGroup>
+            {creditsError && (
+                <div className="font-color-red text-sm ml-1" role="alert">
+                    {creditsError}
+                </div>
+            )}
 
             <SectionLabel>Credit Limit</SectionLabel>
             <SettingsGroup>

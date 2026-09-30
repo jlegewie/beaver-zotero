@@ -53,3 +53,35 @@ export function getPlanChangeOptions(
         : null;
     return { upgradePlan, yearlyPlan };
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Local calendar days from `now` to `periodEnd`, clamped to zero once it has passed. */
+const calendarDaysUntil = (periodEnd: Date, now: Date): number => {
+    const end = Date.UTC(periodEnd.getFullYear(), periodEnd.getMonth(), periodEnd.getDate());
+    const start = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.max(0, Math.round((end - start) / DAY_MS));
+};
+
+/**
+ * Countdown to a period end, counted in local calendar days so it agrees with
+ * the locally formatted end date: "today", "tomorrow", "5 days", or, for a
+ * yearly plan more than 60 days out, "4 months". `remainingSuffix` appends
+ * " remaining" to the day and month counts ("5 days remaining").
+ */
+export const formatTimeRemaining = (
+    periodEnd: string | Date,
+    isAnnual: boolean,
+    now: Date | number = Date.now(),
+    remainingSuffix = false,
+): string => {
+    const days = calendarDaysUntil(new Date(periodEnd), new Date(now));
+    if (days === 0) return 'today';
+    if (days === 1) return 'tomorrow';
+    const suffix = remainingSuffix ? ' remaining' : '';
+    if (isAnnual && days > 60) {
+        const months = Math.round(days / 30);
+        return `${months} month${months !== 1 ? 's' : ''}${suffix}`;
+    }
+    return `${days} days${suffix}`;
+};
