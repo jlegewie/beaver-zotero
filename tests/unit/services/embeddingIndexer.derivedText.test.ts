@@ -176,21 +176,83 @@ describe('EmbeddingIndexer with derived attachment text', () => {
         expect((await indexer.computeIndexingDiff(1)).toIndex).toEqual([1]);
     });
 
-    it('re-checks stored text against the files on every full diff', async () => {
+    it('does not check files behind stored text on a full diff', async () => {
         items.set(1, regular(1, TITLE)).set(9, pdf(9, 'PDF00009'));
         mocks.bestAttachments.set(1, 9);
         await storeText('PDF00009', 9);
         vi.spyOn(indexer, 'getItemMetadataForLibrary').mockResolvedValue([
             { itemId: 1, libraryId: 1, clientDateModified: '' },
         ]);
-        await indexer.computeIndexingDiff(1);
-        expect(await db.getAttachmentEmbeddingTextKeys(1)).toEqual(['PDF00009']);
+        (globalThis as any).IOUtils.stat.mockClear();
 
-        // The file was edited while Zotero was closed.
-        (globalThis as any).IOUtils.stat.mockResolvedValueOnce({ lastModified: 5, size: 0 });
         await indexer.computeIndexingDiff(1);
+
+        expect((globalThis as any).IOUtils.stat).not.toHaveBeenCalled();
+        expect(await db.getAttachmentEmbeddingTextKeys(1)).toEqual(['PDF00009']);
+    });
+
+    it('checks the file of an attachment modified since the last saved scan', async () => {
+        items.set(1, regular(1, TITLE)).set(9, pdf(9, 'PDF00009'));
+        mocks.bestAttachments.set(1, 9);
+        await storeText('PDF00009', 9);
+        await indexer.indexItemIdsBatch([1]);
+        await db.upsertEmbeddingIndexState({
+            library_id: 1, last_scan_timestamp: '2024-06-01T00:00:00Z',
+            max_client_date_modified: '2024-06-01T00:00:00Z', item_count: 1, embedding_count: 1,
+        });
+        vi.spyOn(indexer, 'getItemMetadataForLibrary').mockResolvedValue([
+            { itemId: 1, libraryId: 1, clientDateModified: '2024-05-01T00:00:00Z' },
+        ]);
+        // The file was replaced by a sync no generation observed.
+        vi.spyOn(indexer, 'getAttachmentsModifiedSince').mockResolvedValue([{ attachmentId: 9, parentId: 1 }]);
+        (globalThis as any).IOUtils.stat.mockResolvedValueOnce({ lastModified: 5, size: 0 });
+
+        // A forced rebuild widens extraction but keeps the check.
+        const diff = await indexer.computeIndexingDiff(1, { enqueueAllExtractions: true });
+
         expect(await db.getAttachmentEmbeddingTextKeys(1)).toEqual([]);
+        expect(diff.toIndex).toEqual([1]);
         expect((await db.peekBackgroundJobs()).map((job) => job.zoteroKey)).toEqual(['PDF00009']);
+    });
+
+    it('enqueues extraction only for units modified since the last saved scan, unless asked for all', async () => {
+        const unindexable = regular(2, 'Short');
+        items.set(1, regular(1, TITLE)).set(2, unindexable)
+            .set(9, pdf(9, 'PDF00009')).set(10, pdf(10, 'PDF00010'));
+        mocks.bestAttachments.set(1, 9).set(2, 10);
+        await indexer.indexItemIdsBatch([1]);
+        await db.upsertEmbeddingIndexState({
+            library_id: 1, last_scan_timestamp: '2024-06-01T00:00:00Z',
+            max_client_date_modified: '2024-06-01T00:00:00Z', item_count: 2, embedding_count: 1,
+        });
+        const metadata = vi.spyOn(indexer, 'getItemMetadataForLibrary').mockResolvedValue([
+            { itemId: 1, libraryId: 1, clientDateModified: '2024-05-01T00:00:00Z' },
+            { itemId: 2, libraryId: 1, clientDateModified: '2024-05-01T00:00:00Z' },
+        ]);
+        const modifiedAttachments = vi.spyOn(indexer, 'getAttachmentsModifiedSince').mockResolvedValue([]);
+
+        await indexer.computeIndexingDiff(1);
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(modifiedAttachments).toHaveBeenCalledWith(1, new Date('2024-06-01T00:00:00Z'));
+
+        // An attachment synced while no generation observed it.
+        modifiedAttachments.mockResolvedValueOnce([{ attachmentId: 9, parentId: 1 }]);
+        await indexer.computeIndexingDiff(1);
+        expect((await db.peekBackgroundJobs()).map((job) => job.zoteroKey)).toEqual(['PDF00009']);
+        await connection.queryAsync('DELETE FROM background_jobs');
+
+        // Modified in the scan's last second or later: considered even though
+        // it is not indexable yet.
+        metadata.mockResolvedValue([
+            { itemId: 1, libraryId: 1, clientDateModified: '2024-05-01T00:00:00Z' },
+            { itemId: 2, libraryId: 1, clientDateModified: '2024-06-01T00:00:00Z' },
+        ]);
+        await indexer.computeIndexingDiff(1);
+        expect((await db.peekBackgroundJobs()).map((job) => job.zoteroKey)).toEqual(['PDF00010']);
+
+        await connection.queryAsync('DELETE FROM background_jobs');
+        await indexer.computeIndexingDiff(1, { enqueueAllExtractions: true });
+        expect((await db.peekBackgroundJobs()).map((job) => job.zoteroKey).sort()).toEqual(['PDF00009', 'PDF00010']);
     });
 
     it('retries an outdated terminal verdict once, not on every full diff', async () => {
@@ -220,6 +282,39 @@ describe('EmbeddingIndexer with derived attachment text', () => {
         });
         await indexer.computeIndexingDiff(1);
         expect(await db.peekBackgroundJobs()).toEqual([]);
+    });
+
+    it('reconsiders an unchanged unit whose extraction failed under an older extractor', async () => {
+        items.set(1, regular(1, TITLE))
+            .set(9, { ...pdf(9, 'PDF00009'), parentID: 1, attachmentContentType: 'application/pdf' });
+        mocks.bestAttachments.set(1, 9);
+        await indexer.indexItemIdsBatch([1]);
+        await db.upsertEmbeddingIndexState({
+            library_id: 1, last_scan_timestamp: '2024-06-01T00:00:00Z',
+            max_client_date_modified: '2024-06-01T00:00:00Z', item_count: 1, embedding_count: 1,
+        });
+        vi.spyOn(indexer, 'getItemMetadataForLibrary').mockResolvedValue([
+            { itemId: 1, libraryId: 1, clientDateModified: '2024-05-01T00:00:00Z' },
+        ]);
+        vi.spyOn(indexer, 'getAttachmentsModifiedSince').mockResolvedValue([]);
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'PDF00009', itemId: 9, contentKind: 'pdf' });
+        const { observeAttachmentSource } = await import('../../../src/services/documentExtraction/sourceObservation');
+        const current = (await observeAttachmentSource(items.get(9), 'pdf'))!.identity;
+        const fail = (extractionSource: string) => db.markAttachmentExtractFailure({
+            libraryId: 1, zoteroKey: 'PDF00009', status: 'skipped', error: 'too_many_pages',
+            attemptedAt: 0, extractionSource,
+        });
+
+        // A verdict of the current extractor stands.
+        await fail(current);
+        await indexer.computeIndexingDiff(1);
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+
+        await db.resetAttachmentExtraction(1, 'PDF00009', 'test');
+        const [kind, , ...rest] = JSON.parse(current);
+        await fail(JSON.stringify([kind, 'an-older-schema', ...rest]));
+        await indexer.computeIndexingDiff(1);
+        expect((await db.peekBackgroundJobs()).map((job) => job.zoteroKey)).toEqual(['PDF00009']);
     });
 
     it('removes derived text of libraries that left the searchable scope', async () => {

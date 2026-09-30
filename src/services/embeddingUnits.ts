@@ -112,14 +112,8 @@ export function resolveUnitText(item: Zotero.Item, derived: DerivedUnitText | nu
 }
 
 export interface FileIdentityCheck {
-    /** Stat the files of these attachments (or all, when true) and drop stored text of changed files. */
-    checkFileIdentity?: boolean | ReadonlySet<number>;
-}
-
-
-function shouldCheckFile(options: FileIdentityCheck, attachmentId: number): boolean {
-    const check = options.checkFileIdentity;
-    return check === true || (typeof check === 'object' && check.has(attachmentId));
+    /** Stat the files of these attachments and drop stored text of changed files. */
+    checkFileIdentity?: ReadonlySet<number>;
 }
 
 async function attachmentContentHash(attachment: Zotero.Item): Promise<string | null> {
@@ -141,7 +135,7 @@ async function dropChangedFileTexts(
     for (const attachment of attachments) {
         const refKey = attachmentRefKey(attachment.libraryID, attachment.key);
         const row = rows.get(refKey);
-        if (!row || !shouldCheckFile(options, attachment.id)) continue;
+        if (!row || !options.checkFileIdentity?.has(attachment.id)) continue;
         const path = await attachment.getFilePathAsync();
         if (path) {
             const signature = await getFileSignature(path).catch(() => null);
@@ -196,7 +190,7 @@ export async function resolveUnitsBatch(
     const rows = await db.getAttachmentEmbeddingTexts(
         [...attachments.values()].map((a) => ({ libraryId: a.libraryID, zoteroKey: a.key })),
     );
-    if (options.checkFileIdentity) {
+    if (options.checkFileIdentity?.size) {
         await dropChangedFileTexts(attachments.values(), rows, db, options);
     }
 

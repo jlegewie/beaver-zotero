@@ -137,6 +137,8 @@ beforeEach(() => {
         clearAttachmentOcrUnavailable: vi.fn(async () => true),
         recordAttachmentReadingOutcome: vi.fn(async () => undefined),
         upsertAttachmentEmbeddingText: vi.fn(async () => undefined),
+        getAttachmentEmbeddingTexts: vi.fn(async () => new Map()),
+        getUnitIdsBySourceAttachment: vi.fn(async () => []),
     };
 
     (globalThis as any).Zotero.Items = {
@@ -300,7 +302,7 @@ describe('OcrExecutor', () => {
 
         expect(dbStub.upsertAttachmentEmbeddingText).toHaveBeenCalledWith(expect.objectContaining({
             libraryId: 1, zoteroKey: 'AAAAAAAA', contentKind: 'pdf', extractionSource: 'ocr', fileHash: 'hash123',
-        }));
+        }), expect.any(Number), false);
     });
 
     it('uploads, confirms, defers (slot-free), then finishes on re-claim (pending)', async () => {

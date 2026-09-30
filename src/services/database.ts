@@ -1,5 +1,6 @@
 import type { SearchPreparationRow } from './searchIndexState';
 import { buildUntagJobInput, indexCleanupIdentity } from './backgroundProcessing/utils';
+import { LOCAL_EXTRACT_PRIORITY_CEILING } from './backgroundProcessing/constants';
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
 import { ThreadData } from '../../react/atoms/threads';
@@ -2081,17 +2082,23 @@ export class BeaverDB {
     // Attachment Embedding Text Methods
     // =============================================
 
-    /** Insert or replace the derived text of one attachment and mark it for re-indexing. */
+    /**
+     * Insert or replace the derived text of one attachment. With `markPending`
+     * the row waits for the embedding index; without it, a new row is stored as
+     * applied and an existing row keeps its pending state.
+     */
     public async upsertAttachmentEmbeddingText(
         record: Omit<AttachmentEmbeddingTextRecord, 'updatedAt'>,
         now: number = Date.now(),
+        markPending: boolean = true,
     ): Promise<void> {
+        const pending = markPending ? 1 : 0;
         await this.queryAsync(
             `INSERT INTO attachment_embedding_text (
                 library_id, zotero_key, item_id, content_kind, file_mtime_ms, file_size_bytes, file_hash,
                 extraction_source, text_version, title, title_source, keywords, body, body_source,
                 index_pending, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(library_id, zotero_key) DO UPDATE SET
                 item_id = excluded.item_id, content_kind = excluded.content_kind,
                 file_mtime_ms = excluded.file_mtime_ms, file_size_bytes = excluded.file_size_bytes,
@@ -2099,11 +2106,11 @@ export class BeaverDB {
                 extraction_source = excluded.extraction_source, text_version = excluded.text_version,
                 title = excluded.title, title_source = excluded.title_source,
                 keywords = excluded.keywords, body = excluded.body, body_source = excluded.body_source,
-                index_pending = 1, updated_at = excluded.updated_at`,
+                index_pending = MAX(index_pending, excluded.index_pending), updated_at = excluded.updated_at`,
             [
                 record.libraryId, record.zoteroKey, record.itemId, record.contentKind,
                 record.fileMtimeMs, record.fileSizeBytes, record.fileHash, record.extractionSource, record.textVersion,
-                record.title, record.titleSource, record.keywords, record.body, record.bodySource, now,
+                record.title, record.titleSource, record.keywords, record.body, record.bodySource, pending, now,
             ],
         );
     }
@@ -2814,6 +2821,28 @@ export class BeaverDB {
             [libraryId, zoteroKey],
         );
         return rows[0] ?? null;
+    }
+
+    /**
+     * Attachments whose final extraction verdict (failed, skipped, OCR needed or
+     * failed) was recorded for an extraction schema other than the expected one
+     * for their content kind, read from the stored source identity.
+     */
+    public async getAttachmentIdsWithOutdatedTerminalVerdicts(
+        libraryId: number,
+        expectedSchemas: { pdf: string | null; epub: string | null; snapshot: string | null },
+    ): Promise<number[]> {
+        const ids: number[] = [];
+        await this.queryAsync(
+            `SELECT item_id FROM attachment_processing_state
+             WHERE library_id = ? AND item_id IS NOT NULL AND extraction_source IS NOT NULL
+               AND (extract_status IN ('failed', 'skipped') OR ocr_status IN ('needed', 'failed'))
+               AND (CASE WHEN json_valid(extraction_source) THEN json_extract(extraction_source, '$[1]') END)
+                   IS NOT (CASE content_kind WHEN 'pdf' THEN ? WHEN 'epub' THEN ? WHEN 'snapshot' THEN ? END)`,
+            [libraryId, expectedSchemas.pdf, expectedSchemas.epub, expectedSchemas.snapshot],
+            { onRow: (row: any) => ids.push(row.getResultByIndex(0)) },
+        );
+        return ids;
     }
 
     /** Ledger rows for specific attachments. */
@@ -5248,6 +5277,8 @@ export class BeaverDB {
         enqueued = (changesRows[0] ?? 0) === 1;
 
         if (!enqueued) {
+            // A request that replaces the queued payload keeps an explicit
+            // cache-preparation request of the same content kind.
             await this.queryAsync(
                 `UPDATE background_jobs SET
                     priority      = MIN(priority, ?),
@@ -5264,7 +5295,11 @@ export class BeaverDB {
                                          WHEN priority >= 100 AND ? >= 100
                                               AND json_extract(?, '$.prepare_cache') = 1 THEN ?
                                          WHEN content_kind != ? OR ? < priority OR ? = 'fulltext_upsert'
-                                         THEN ? ELSE payload_json END,
+                                         THEN CASE WHEN content_kind = ?
+                                                        AND json_extract(payload_json, '$.prepare_cache') = 1
+                                                   THEN json_set(?, '$.prepare_cache', json('true'))
+                                                   ELSE ? END
+                                         ELSE payload_json END,
                     attempt_count = CASE WHEN content_kind != ? OR ? < priority
                                          THEN 0 ELSE attempt_count END,
                     last_error    = CASE WHEN content_kind != ? OR ? < priority
@@ -5282,7 +5317,7 @@ export class BeaverDB {
                     priority, payloadJson, payloadJson,
                     input.contentKind, priority,
                     input.jobType,
-                    payloadJson,
+                    input.contentKind, payloadJson, payloadJson,
                     input.contentKind, priority,
                     input.contentKind, priority,
                     input.jobType,
@@ -5580,14 +5615,24 @@ export class BeaverDB {
         );
     }
 
-    /** Retire budget-limited work only while it is still background priority. */
+    /**
+     * Retire budget-limited work only while it is still background priority,
+     * above the local extraction band the budget does not apply to.
+     */
     public async completeBackgroundPreparationJob(id: number, now: number): Promise<boolean> {
         let retired = true;
         await this.conn.executeTransaction(async () => {
-            if (await this.executeChangedRow(`DELETE FROM background_jobs WHERE id = ? AND priority >= 100`, [id])) return;
-            // A foreground request may have promoted the claimed ticket while
-            // its executor was waiting. Make that work immediately claimable.
-            retired = !(await this.executeChangedRow(`UPDATE background_jobs SET available_at = ? WHERE id = ? AND priority < 100`, [now, id]));
+            if (await this.executeChangedRow(
+                `DELETE FROM background_jobs WHERE id = ? AND priority >= ?`,
+                [id, LOCAL_EXTRACT_PRIORITY_CEILING],
+            )) return;
+            // A foreground request or the embedding index may have promoted the
+            // claimed ticket while its executor was waiting. Make that work
+            // immediately claimable.
+            retired = !(await this.executeChangedRow(
+                `UPDATE background_jobs SET available_at = ? WHERE id = ? AND priority < ?`,
+                [now, id, LOCAL_EXTRACT_PRIORITY_CEILING],
+            ));
         });
         return retired;
     }

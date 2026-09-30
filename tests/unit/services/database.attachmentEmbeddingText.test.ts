@@ -44,6 +44,15 @@ describe('BeaverDB - derived attachment embedding text', () => {
         expect(rows.get('1/ATTACH01')).toEqual({ ...row({ body: 'Replaced', bodySource: 'opening' }), updatedAt: 200 });
     });
 
+    it('stores a row without marking it pending when asked, keeping an existing pending state', async () => {
+        await db.upsertAttachmentEmbeddingText(row(), 100, false);
+        expect(await db.getPendingAttachmentEmbeddingTextIds([1])).toEqual([]);
+
+        await db.upsertAttachmentEmbeddingText(row({ body: 'Replaced' }), 200, true);
+        await db.upsertAttachmentEmbeddingText(row({ body: 'Replaced' }), 300, false);
+        expect(await db.getPendingAttachmentEmbeddingTextIds([1])).toEqual([9]);
+    });
+
     it('keeps a row pending until the index applies it, unless it is re-derived meanwhile', async () => {
         await db.upsertAttachmentEmbeddingText(row(), 100);
         await db.upsertAttachmentEmbeddingText(row({ zoteroKey: 'ATTACH02', itemId: 10 }), 300);

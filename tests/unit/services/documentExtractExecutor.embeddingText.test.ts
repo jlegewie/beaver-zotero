@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     extractAndCacheDocument: vi.fn(),
     markDirty: vi.fn(),
     duringExtraction: null as null | (() => void),
+    parentAbstract: '',
 }));
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -70,13 +71,20 @@ describe('DocumentExtractExecutor derived embedding text', () => {
         connection = new MockDBConnection();
         db = new BeaverDB(connection);
         await db.initDatabase('0.99.0');
+        mocks.parentAbstract = '';
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKeyAsync: vi.fn(async () => ({
-                id: 7, libraryID: 1, key: 'PAPER001',
+                id: 7, libraryID: 1, key: 'PAPER001', parentID: 3,
                 loadAllData: async () => undefined,
                 isRegularItem: () => false,
                 attachmentHash: Promise.resolve('a'.repeat(32)),
             })),
+            getAsync: vi.fn(async (id: number) => id === 3 && {
+                id: 3, libraryID: 1, key: 'PARENT01', deleted: false,
+                loadDataType: async () => undefined,
+                isRegularItem: () => true,
+                getField: (field: string) => field === 'abstractNote' ? mocks.parentAbstract : '',
+            }),
         };
         (globalThis as any).Zotero.Beaver = {
             db,
@@ -128,6 +136,41 @@ describe('DocumentExtractExecutor derived embedding text', () => {
         expect((globalThis as any).IOUtils.read).not.toHaveBeenCalled();
         expect(mocks.markDirty).toHaveBeenCalledWith([7]);
         expect(await db.getAttachmentProcessingState(1, 'PAPER001')).toMatchObject({ extractStatus: 'done' });
+    });
+
+    it('does not wake the index when a re-extraction yields the same text', async () => {
+        await runJob();
+        await db.clearAttachmentEmbeddingTextPending([7], Date.now() + 1);
+        mocks.markDirty.mockClear();
+
+        await runJob();
+
+        expect(mocks.markDirty).not.toHaveBeenCalled();
+        expect(await db.getPendingAttachmentEmbeddingTextIds([1])).toEqual([]);
+    });
+
+    it('stores text without waking the index when no unit can use it', async () => {
+        mocks.parentAbstract = 'x'.repeat(400);
+
+        await runJob();
+
+        expect(await db.getAttachmentEmbeddingTextKeys(1)).toEqual(['PAPER001']);
+        expect(await db.getPendingAttachmentEmbeddingTextIds([1])).toEqual([]);
+        expect(mocks.markDirty).not.toHaveBeenCalled();
+    });
+
+    it('wakes the index for a unit that already embeds this attachment\'s text', async () => {
+        mocks.parentAbstract = 'x'.repeat(400);
+        await db.upsertEmbedding({
+            item_id: 12, library_id: 1, zotero_key: 'OTHER001', version: 1,
+            client_date_modified: '2024-01-01 00:00:00', content_hash: 'h',
+            embedding: new Uint8Array([1, 2, 3, 4]), dimensions: 4, model_id: 'test-model',
+            source: 'attachment_text', source_attachment_id: 7,
+        });
+
+        await runJob();
+
+        expect(mocks.markDirty).toHaveBeenCalledWith([7]);
     });
 
     it('never downloads a file that became remote-only with background processing off', async () => {

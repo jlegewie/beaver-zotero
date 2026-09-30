@@ -28,6 +28,11 @@ export const initialEmbeddingState: EmbeddingIndexState = {
     failedItems: 0,
 };
 const EVENT_DEBOUNCE_MS = 4000;
+/**
+ * Longest a change waits while events keep arriving (e.g. a backlog of
+ * extractions each marking a unit dirty) before a pass runs anyway.
+ */
+const EVENT_MAX_WAIT_MS = 30_000;
 
 /** Pending item changes outlive an indexing generation's observer and timer. */
 export interface PendingEmbeddingEvents {
@@ -83,6 +88,10 @@ export function startEmbeddingIndex(
     const events = {
         ...pendingEvents,
         timer: null as ReturnType<typeof setTimeout> | null,
+        /** When the oldest change still waiting for a pass was scheduled. */
+        firstScheduledAt: null as number | null,
+        /** A pass is waiting for its turn and will drain everything pending. */
+        flushQueued: false,
     };
     let currentIndexer: EmbeddingIndexer | null = null;
     let observerId: string | null = null;
@@ -185,8 +194,8 @@ export function startEmbeddingIndex(
             for (const id of pendingTextIds) events.modifiedItemIds.add(id);
 
             // Check for upgrade-triggered full diff (clears stored index state so shouldRunFullDiff returns true).
-            // A new derived-text version also needs one: only a full diff finds
-            // the units whose attachments lack current text.
+            // A new derived-text version also needs one: without a saved scan,
+            // the diff considers every unit for extraction.
             const textVersionChanged =
                 (await getDB()?.getEmbeddingTextIndexVersion()) !==
                 EMBEDDING_TEXT_VERSION;
@@ -314,7 +323,10 @@ export function startEmbeddingIndex(
                     `EmbeddingIndex: Computing diff for library ${libraryId}`,
                     4,
                 );
-                const diff = await indexer.computeIndexingDiff(libraryId);
+                // A forced rebuild also retries extraction for every unit.
+                const diff = await indexer.computeIndexingDiff(libraryId, {
+                    enqueueAllExtractions: forceFullDiff,
+                });
 
                 // Filter out items that are still in backoff period
                 const filteredToIndex = await indexer.filterItemsNotInBackoff(
@@ -568,6 +580,8 @@ export function startEmbeddingIndex(
      * sequences Zotero emits (recognition, reparenting) settle in any order.
      */
     const processEvents = async () => {
+        events.firstScheduledAt = null;
+        events.flushQueued = false;
         if (isCancelled()) return;
         const indexer = getIndexer();
         const db = getDB();
@@ -579,7 +593,6 @@ export function startEmbeddingIndex(
         // Clear collections immediately
         events.modifiedItemIds.clear();
         events.deletedItemIds.clear();
-        events.timer = null;
 
         if (modifiedIds.length === 0 && deletedIds.length === 0) return;
         const startedAt = Date.now();
@@ -616,7 +629,14 @@ export function startEmbeddingIndex(
                 `EmbeddingIndex: Processing events: ${modifiedItems.length} modified, ${deletedIds.length} deleted, ${unitIds.length} units affected`,
                 3,
             );
-            setIndexStatus({ status: "updating", phase: "incremental" });
+            // Most passes only confirm unchanged units; show "updating" only
+            // once one re-embeds, so background extraction does not flicker it.
+            let announced = false;
+            const announceUpdating = () => {
+                if (announced) return;
+                announced = true;
+                setIndexStatus({ status: "updating", phase: "incremental" });
+            };
 
             // Handle deletions first
             if (deletedIds.length > 0) {
@@ -637,6 +657,7 @@ export function startEmbeddingIndex(
                     batchSize: INDEX_BATCH_SIZE,
                     skipUnchanged: true,
                     isCancelled,
+                    onEmbed: announceUpdating,
                     extractions: { checkFileIdentity: new Set(attachmentIds) },
                 });
                 incomplete = result.incomplete;
@@ -677,16 +698,26 @@ export function startEmbeddingIndex(
     };
 
     /**
-     * Schedule event processing with debounce
+     * Schedule event processing with debounce, bounded by EVENT_MAX_WAIT_MS.
      */
     const scheduleEventProcessing = () => {
+        // A queued pass reads the pending sets when it starts, so it covers this change.
+        if (events.flushQueued) return;
+        const now = Date.now();
+        events.firstScheduledAt ??= now;
         if (events.timer !== null) {
             clearTimeout(events.timer);
         }
 
+        const delay = Math.min(
+            EVENT_DEBOUNCE_MS,
+            Math.max(0, events.firstScheduledAt + EVENT_MAX_WAIT_MS - now),
+        );
         events.timer = setTimeout(() => {
+            events.timer = null;
+            events.flushQueued = true;
             void serialize(processEvents);
-        }, EVENT_DEBOUNCE_MS);
+        }, delay);
     };
 
     logger("EmbeddingIndex: Setting up embedding index", 3);

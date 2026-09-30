@@ -2,6 +2,7 @@ import { BeaverDB, EmbeddingRecord, EmbeddingSource, MAX_EMBEDDING_FAILURES } fr
 import { embeddingsService } from '@beaver/agent-core/transport/clients/embeddingsService';
 import { getClientDateModifiedBatch } from '../utils/zoteroUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { expectedExtractionSchemaVersion } from './documentExtraction/shared/extractionSchemaVersions';
 import {
     enqueueEmbeddingExtractions,
     resolveUnitsBatch,
@@ -241,19 +242,71 @@ export class EmbeddingIndexer {
     }
 
     /**
+     * Child attachments added or modified at or after `since`, e.g. by a sync
+     * while no index generation was observing. Adding or replacing an attachment
+     * does not change its parent's modification date. The boundary second is
+     * included because Zotero timestamps have second precision.
+     */
+    async getAttachmentsModifiedSince(
+        libraryId: number,
+        since: Date,
+    ): Promise<{ attachmentId: number; parentId: number }[]> {
+        const sqlDate = since.toISOString().replace('T', ' ').slice(0, 19);
+        const attachments: { attachmentId: number; parentId: number }[] = [];
+        await Zotero.DB.queryAsync(
+            `SELECT IA.itemID, IA.parentItemID
+             FROM itemAttachments IA
+             JOIN items I ON I.itemID = IA.itemID
+             WHERE I.libraryID = ? AND IA.parentItemID IS NOT NULL AND I.clientDateModified >= ?`,
+            [libraryId, sqlDate],
+            {
+                onRow: (row: any) => {
+                    attachments.push({ attachmentId: row.getResultByIndex(0), parentId: row.getResultByIndex(1) });
+                },
+            },
+        );
+        return attachments;
+    }
+
+    /**
      * Compute the full diff of what needs to be indexed and deleted for a library.
      * Uses lightweight SQL queries and per-batch item loading to avoid memory issues.
-     * Also re-checks the files behind stored derived text (they can change while
-     * Zotero is closed), enqueues extraction for units that need derived text and
-     * drops derived text of attachments that no longer exist.
+     * Also enqueues extraction for units that need derived text and drops derived
+     * text of attachments that no longer exist. Only units whose text changed,
+     * that (or whose attachments) were modified since the last saved scan, or
+     * whose attachment holds a final extraction verdict from an older extractor
+     * are considered for extraction, and only the files of attachments modified
+     * since that scan are checked against their stored text, so a routine diff
+     * does no per-item file I/O. Without a saved scan (first run, derived-text
+     * version change) every unit is considered.
      * @param libraryId The library to analyze
-     * @param batchSize Size of batches for loading items (default: 500)
+     * @param options.batchSize Size of batches for loading items (default: 500)
+     * @param options.enqueueAllExtractions Consider every unit for extraction
      * @returns IndexingDiff with item IDs to index and delete
      */
-    async computeIndexingDiff(libraryId: number, batchSize: number = 500): Promise<IndexingDiff> {
+    async computeIndexingDiff(
+        libraryId: number,
+        options: { batchSize?: number; enqueueAllExtractions?: boolean } = {},
+    ): Promise<IndexingDiff> {
+        const { batchSize = 500, enqueueAllExtractions = false } = options;
         // Get all existing embeddings for this library
         const existingHashes = await this.db.getEmbeddingContentHashMap(libraryId);
         const existingItemIds = new Set(existingHashes.keys());
+
+        const lastScan = await this.db.getEmbeddingIndexState(libraryId);
+        const scannedUntil = lastScan ? Date.parse(lastScan.max_client_date_modified) : NaN;
+        // Inclusive: a change in the watermark's second may postdate the scan.
+        const modifiedSinceScan = (clientDateModified: string) => enqueueAllExtractions
+            || Number.isNaN(scannedUntil) || !(Date.parse(clientDateModified) < scannedUntil);
+        const modifiedAttachments = Number.isNaN(scannedUntil)
+            ? []
+            : await this.getAttachmentsModifiedSince(libraryId, new Date(scannedUntil));
+        // A replaced file keeps its stored text until its identity is checked.
+        const checkFileIdentity = new Set(modifiedAttachments.map(a => a.attachmentId));
+        const extractionParents = new Set(modifiedAttachments.map(a => a.parentId));
+        for (const parentId of await this.getParentsWithOutdatedExtractionVerdicts(libraryId)) {
+            extractionParents.add(parentId);
+        }
 
         // Get lightweight metadata for all regular items via SQL
         const itemMetadata = await this.getItemMetadataForLibrary(libraryId);
@@ -275,8 +328,11 @@ export class EmbeddingIndexer {
                 await Zotero.Items.loadDataTypes(items, ["primaryData", "itemData"]);
             }
 
-            const resolutions = await resolveUnitsBatch(items, this.db, { checkFileIdentity: true });
+            const resolutions = await resolveUnitsBatch(items, this.db, { checkFileIdentity });
             const unchanged: Pick<ItemIndexData, 'itemId' | 'source' | 'sourceAttachmentId'>[] = [];
+            const extractionIds = new Set(batchMeta
+                .filter(m => modifiedSinceScan(m.clientDateModified) || extractionParents.has(m.itemId))
+                .map(m => m.itemId));
             for (const { item, unit, error } of resolutions) {
                 if (error) {
                     // Keep the existing embedding; indexing records the failure.
@@ -293,12 +349,15 @@ export class EmbeddingIndexer {
                 const existingHash = existingHashes.get(item.id);
                 if (existingHash === undefined || existingHash !== BeaverDB.computeContentHash(unit.text)) {
                     toIndex.push(item.id);
+                    extractionIds.add(item.id);
                 } else {
                     unchanged.push({ itemId: item.id, source: unit.source, sourceAttachmentId: unit.sourceAttachmentId });
                 }
             }
             await this.syncUnchangedSources(unchanged);
-            await this.enqueueExtractions(resolutions);
+            // Other units were considered when they last changed; text for them
+            // arrives through extraction and attachment events.
+            await this.enqueueExtractions(resolutions.filter(r => extractionIds.has(r.item.id)));
         }
 
         // Find orphaned embeddings (items that no longer exist or no longer meet criteria)
@@ -312,6 +371,23 @@ export class EmbeddingIndexer {
         await this.cleanupOrphanedEmbeddingTexts(libraryId);
 
         return { toIndex, toDelete, totalIndexable };
+    }
+
+    /**
+     * Parents of attachments whose failed or skipped extraction was recorded by
+     * an older extractor. A newer extractor may succeed, and the enqueue step
+     * reopens such verdicts for the current source.
+     */
+    private async getParentsWithOutdatedExtractionVerdicts(libraryId: number): Promise<number[]> {
+        const attachmentIds = await this.db.getAttachmentIdsWithOutdatedTerminalVerdicts(libraryId, {
+            pdf: expectedExtractionSchemaVersion('pdf'),
+            epub: expectedExtractionSchemaVersion('epub'),
+            snapshot: expectedExtractionSchemaVersion('snapshot'),
+        });
+        if (attachmentIds.length === 0) return [];
+        return (await Zotero.Items.getAsync(attachmentIds))
+            .map(attachment => attachment ? attachment.parentID : false)
+            .filter((parentId): parentId is number => typeof parentId === 'number');
     }
 
     /** Enqueue extraction for resolved units whose derived text is missing or outdated. */
@@ -372,6 +448,8 @@ export class EmbeddingIndexer {
             skipUnchanged?: boolean;    // Skip items with unchanged content hash (default: false)
             onProgress?: (indexed: number, total: number) => void;
             isCancelled?: () => boolean; // Optional cancellation check between batches
+            /** Called before each embedding API request, i.e. only when something is re-embedded. */
+            onEmbed?: () => void;
             /**
              * Also enqueue extraction for units whose derived text is missing or
              * outdated, after checking the given attachments' files.
@@ -536,6 +614,7 @@ export class EmbeddingIndexer {
                 const ids = itemsToProcess.map(item => item.itemId);
 
                 if (isCancelled?.()) return result;
+                options.onEmbed?.();
                 const response = await embeddingsService.generateEmbeddingsWithRetry(texts, ids);
                 if (isCancelled?.()) return result;
 

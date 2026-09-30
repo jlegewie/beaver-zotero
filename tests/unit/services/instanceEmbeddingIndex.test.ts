@@ -260,6 +260,48 @@ describe("instance embedding events across background generations", () => {
             expect(mocks.index).toHaveBeenCalledExactlyOnceWith([10], expect.anything());
         });
 
+        it("runs a pass after the max wait while changes keep arriving", async () => {
+            await vi.advanceTimersByTimeAsync(500);
+            for (let i = 0; i < 29; i++) {
+                service.markEmbeddingDirty([1]);
+                await vi.advanceTimersByTimeAsync(1000);
+            }
+            expect(mocks.index).not.toHaveBeenCalled();
+            service.markEmbeddingDirty([1]);
+            await vi.advanceTimersByTimeAsync(1500);
+            expect(mocks.index).toHaveBeenCalledExactlyOnceWith([1], expect.anything());
+
+            // The next change starts a fresh window with the normal debounce.
+            service.markEmbeddingDirty([1]);
+            await drain();
+            expect(mocks.index).toHaveBeenCalledTimes(2);
+        });
+
+        it("reports updating only for a pass that re-embeds", async () => {
+            const statuses: string[] = [];
+            owner.runtime = {
+                publish: vi.fn((topic: string, state: { status: string }) => {
+                    if (topic === "embedding-index:status") statuses.push(state.status);
+                }),
+            };
+            await vi.advanceTimersByTimeAsync(500);
+            statuses.length = 0;
+            mocks.index.mockResolvedValue({ indexed: 0, skipped: 1, failed: 0, unindexable: [] });
+            service.markEmbeddingDirty([1]);
+            await drain();
+            expect(statuses).not.toContain("updating");
+
+            mocks.index.mockImplementation(async (_ids: number[], options: { onEmbed?: () => void }) => {
+                options.onEmbed?.();
+                return { indexed: 1, skipped: 0, failed: 0, unindexable: [] };
+            });
+            statuses.length = 0;
+            service.markEmbeddingDirty([1]);
+            await drain();
+            expect(statuses).toContain("updating");
+            expect(statuses.at(-1)).toBe("idle");
+        });
+
         it("runs one full diff for a new derived-text version", async () => {
             await vi.runAllTimersAsync();
             await service.dispose();

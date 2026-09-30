@@ -305,7 +305,7 @@ describe('embedding extraction queue', () => {
             mocks.signature = { mtime_ms: 99, size_bytes: 20 };
             const item = regularItem({ title: 'A descriptive title without any abstract' });
 
-            const [resolution] = await resolveUnitsBatch([item], db, { checkFileIdentity: true });
+            const [resolution] = await resolveUnitsBatch([item], db, { checkFileIdentity: new Set([9]) });
 
             expect(resolution.unit?.source).toBe('attachment_text');
             const [row] = (await db.getAttachmentEmbeddingTexts([{ libraryId: 1, zoteroKey: 'ATT9' }])).values();
@@ -323,7 +323,7 @@ describe('embedding extraction queue', () => {
             expect((await resolveUnitsBatch([item], db, { checkFileIdentity: new Set([8]) }))[0]
                 .unit?.source).toBe('attachment_text');
             mocks.signature = { mtime_ms: 10, size_bytes: 20 };
-            expect((await resolveUnitsBatch([item], db, { checkFileIdentity: true }))[0]
+            expect((await resolveUnitsBatch([item], db, { checkFileIdentity: new Set([9]) }))[0]
                 .unit?.source).toBe('attachment_text');
 
             mocks.signature = { mtime_ms: 11, size_bytes: 20 };
@@ -341,7 +341,7 @@ describe('embedding extraction queue', () => {
                 ids.map((id) => attachment({ id, key: `ATT${id}`, getFilePathAsync: async () => false })));
             const resolve = async () => (await resolveUnitsBatch(
                 [regularItem({ title: 'A descriptive title without any abstract' })], db,
-                { checkFileIdentity: true },
+                { checkFileIdentity: new Set([9]) },
             ))[0];
 
             expect((await resolve()).unit?.source).toBe('attachment_text');
