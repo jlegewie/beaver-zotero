@@ -22,6 +22,14 @@ const INDEX_LANE_DEFAULT_IN_FLIGHT = 4;
  * connections to the API host free for chat requests.
  */
 const INDEX_LANE_ACTIVE_IN_FLIGHT = 4;
+/**
+ * Cloud-index cleanup. Each untag is a short sequence of server round trips
+ * that reads no local content, and the backend applies no per-user in-flight
+ * limit to it. Excluding a library queues one untag per indexed document, so
+ * the lane needs several in flight to drain that backlog in minutes. The
+ * active width leaves connections to the API host free for chat requests.
+ */
+const UNTAG_LANE_CAPACITY = { maxInFlight: 8, activeMaxInFlight: 4 };
 const CLEANUP_RESTORE_INTERVAL_MS = 6 * 60 * 60_000;
 
 /** Upsert lane limits for a backend-advertised per-user limit. */
@@ -53,7 +61,7 @@ export function startFulltextUpsertLane(
         "fulltext_untag",
     );
     if (hasAccess) dispatcher.registerExecutor(executor, indexLaneCapacity());
-    dispatcher.registerExecutor(untagExecutor, { maxInFlight: 1, survivesLibraryExclusion: true });
+    dispatcher.registerExecutor(untagExecutor, { ...UNTAG_LANE_CAPACITY, survivesLibraryExclusion: true });
     let sweeping = false;
     let sweep: Promise<void> | undefined;
     let restoration: Promise<unknown> | undefined;
