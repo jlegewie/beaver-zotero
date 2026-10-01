@@ -69,6 +69,7 @@ import {
     translatePageNumberToLabel,
 } from './pageLabelTranslation';
 import { extractItemKeyFromUri } from './zoteroUri';
+import { isPdfDocument } from './attachmentFiles';
 import {
     modelObjectId,
     modelObjectIdFromReference,
@@ -416,7 +417,7 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
                 : null;
             if (!attachmentItem) { unresolved.push(describe); continue; }
 
-            const schemaVersion = locatorSchemaVersion(loc, !!attachmentItem.isPDFAttachment?.());
+            const schemaVersion = locatorSchemaVersion(loc, isPdfDocument(attachmentItem));
             if (!producibleExtractionSchemaVersions('pdf').includes(schemaVersion)) {
                 unavailable.push(describe);
                 continue;

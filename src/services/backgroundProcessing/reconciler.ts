@@ -14,6 +14,7 @@ import type { AttachmentRef } from './issues';
 import { enqueueOcrJob, maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
 import { getSystemIdleTimeMs } from '../../utils/idleService';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
+import { processableAttachmentSql } from '../../utils/attachmentFiles';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     ATTACHMENT_SCAN_BATCH_SIZE,
@@ -46,6 +47,8 @@ interface LibraryCursor {
 }
 
 const IDLE_THRESHOLD_MS = 30_000;
+/** Attachments a library scan enumerates; `getReadableContentKind()` makes the final call. */
+const PROCESSABLE_ATTACHMENT_SQL = processableAttachmentSql('IA.contentType', 'IA.path');
 
 /**
  * Terminal reasons that say "the bytes were not reachable", not "these bytes
@@ -825,10 +828,7 @@ export class ReconcilerService {
                 MAX(I.clientDateModified),
                 SUM(CASE WHEN IA.itemID IS NOT NULL
                     AND IA.linkMode != ?
-                    AND (LOWER(COALESCE(IA.contentType, '')) IN (
-                        'application/pdf', 'application/epub+zip',
-                        'text/html', 'application/xhtml+xml'
-                    )) THEN 1 ELSE 0 END)
+                    AND ${PROCESSABLE_ATTACHMENT_SQL} THEN 1 ELSE 0 END)
              FROM items I
              LEFT JOIN itemAttachments IA USING (itemID)
              WHERE I.libraryID = ?
@@ -855,10 +855,7 @@ export class ReconcilerService {
                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
                AND NOT EXISTS (SELECT 1 FROM deletedItems D WHERE D.itemID = IA.parentItemID)
                AND IA.linkMode != ?
-               AND LOWER(COALESCE(IA.contentType, '')) IN (
-                    'application/pdf', 'application/epub+zip',
-                    'text/html', 'application/xhtml+xml'
-               )
+               AND ${PROCESSABLE_ATTACHMENT_SQL}
              ORDER BY I.itemID`,
             [libraryId, Zotero.Attachments.LINK_MODE_LINKED_URL],
             { onRow: (row: any) => ids.push(row.getResultByIndex(0)) },

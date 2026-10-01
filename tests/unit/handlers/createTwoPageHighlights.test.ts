@@ -37,7 +37,8 @@ import { convertHighlightBoxesToRects } from "../../../src/services/annotations/
 import type { PageGeometry } from "@beaver/agent-core/extract/types";
 
 const attachment = {
-  isPDFAttachment: () => true,
+  isAttachment: () => true,
+  attachmentContentType: "application/pdf",
   libraryID: 1,
   id: 42,
   key: "ATT00001",
@@ -123,6 +124,7 @@ describe("two-page PDF highlights", () => {
     previousZotero = (globalThis as any).Zotero;
     (globalThis as any).Zotero = {
       Item: MockAnnotationItem,
+      Attachments: { LINK_MODE_LINKED_URL: 3 },
       DB: { inTransaction: () => false },
       Prefs: { get: vi.fn() },
       Beaver: {
@@ -239,6 +241,27 @@ describe("two-page PDF highlights", () => {
     );
 
     expect(response.valid).toBe(true);
+  });
+
+  it("rejects a mislabelled attachment whose file is not a PDF at validation", async () => {
+    attachment.attachmentContentType = "application/octet-stream";
+    attachment.attachmentFilename = "paper.pdf";
+    Object.assign((globalThis as any).Zotero, {
+      File: { getSample: vi.fn(async () => "PK\u0003\u0004") },
+      MIME: { sniffForMIMEType: vi.fn(() => false) },
+    });
+    try {
+      const response = await validateCreateHighlightAnnotationsAction(
+        request(actionData([location(4)])),
+      );
+
+      expect(response.valid).toBe(false);
+      expect(response.error_code).toBe("invalid_attachment");
+      expect(response.error).toContain("application/octet-stream");
+    } finally {
+      attachment.attachmentContentType = "application/pdf";
+      delete attachment.attachmentFilename;
+    }
   });
 
   it("creates one annotation from the manual apply path too", async () => {

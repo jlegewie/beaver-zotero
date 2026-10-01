@@ -30,6 +30,7 @@ import type { TimingAccumulator } from '../../utils/timing';
 import type { AttachmentResolvedPayload } from '../attachmentResolved';
 import { assertLibraryWritable, recheckExistingCollections } from '../collections/collectionMutations';
 import { coordinateLibraryMutation } from '../libraryMutations';
+import { isPdfDocument } from '../../utils/attachmentFiles';
 import { WEB_CONTENT_ITEM_TYPES } from './duplicates';
 import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
 import { BEAVER_PROVENANCE_MARKER, stampBeaverProvenanceExtra } from './provenance';

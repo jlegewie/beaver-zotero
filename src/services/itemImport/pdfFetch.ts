@@ -6,6 +6,7 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
+import { isPdfDocument } from '../../utils/attachmentFiles';
 import { generateTaskId, scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { buildPdfResolvers, type PdfFetchOptions } from '../../utils/pdfResolvers';
 import { fetchPdfAttachment } from '../pdfAttachmentFetch';
@@ -21,7 +22,7 @@ export async function filterPdfAttachments(attachmentIds: number[]): Promise<Zot
     );
     
     return attachments.filter((a): a is Zotero.Item => 
-        a && !a.deleted && a.isPDFAttachment()
+        a && !a.deleted && isPdfDocument(a)
     );
 }
 

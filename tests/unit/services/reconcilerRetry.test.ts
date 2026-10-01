@@ -151,10 +151,10 @@ describe('ReconcilerService.retryAttachments', () => {
 
     it('excludes trashed parents from enumeration and cursor counts even when item trash checks cannot load parents', async () => {
         await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT, clientDateModified TEXT)');
-        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT)');
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
         await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
         await connection.queryAsync("INSERT INTO items VALUES (10,1,'PARENT01','2026'), (11,1,'CHILD001','2026'), (12,1,'LIVE0001','2026')");
-        await connection.queryAsync("INSERT INTO itemAttachments VALUES (11,10,0,'application/pdf'), (12,NULL,0,'application/pdf')");
+        await connection.queryAsync("INSERT INTO itemAttachments VALUES (11,10,0,'application/pdf','storage:a.pdf'), (12,NULL,0,'application/pdf','storage:b.pdf')");
         await connection.queryAsync('INSERT INTO deletedItems VALUES (10)');
         const getAsync = vi.fn(async (ids: number[]) => ids.map(id => ({ id, isInTrash() { throw new Error('parent unloaded'); } })));
         vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: connection.queryAsync.bind(connection) },
@@ -162,6 +162,28 @@ describe('ReconcilerService.retryAttachments', () => {
         expect(await (reconciler as any).readLibraryCursor(1)).toMatchObject({ attachmentCount: 1 });
         expect(await (reconciler as any).listProcessableAttachments(1)).toHaveLength(1);
         expect(getAsync).toHaveBeenCalledWith([12]);
+    });
+
+    it('enumerates and counts mislabelled PDFs and EPUBs that item classification admits', async () => {
+        await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT, clientDateModified TEXT)');
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
+        await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
+        for (const [id, contentType, path] of [
+            [1, 'application/octet-stream', 'storage:paper.pdf'],
+            [2, '', 'storage:Book.EPUB'],
+            [3, 'application/x-pdf', 'storage:download'],
+            [4, 'application/octet-stream', 'storage:data.bin'],
+            [5, 'application/msword', 'storage:report.pdf'],
+        ] as const) {
+            await connection.queryAsync('INSERT INTO items VALUES (?, 1, ?, ?)', [id, `ITEM000${id}`, '2026']);
+            await connection.queryAsync('INSERT INTO itemAttachments VALUES (?, NULL, 0, ?, ?)', [id, contentType, path]);
+        }
+        const getAsync = vi.fn(async (ids: number[]) => ids.map(id => ({ id, isInTrash: () => false })));
+        vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: connection.queryAsync.bind(connection) },
+            Attachments: { LINK_MODE_LINKED_URL: 3 }, Items: { getAsync } });
+        expect(await (reconciler as any).readLibraryCursor(1)).toMatchObject({ attachmentCount: 3 });
+        expect(await (reconciler as any).listProcessableAttachments(1)).toHaveLength(3);
+        expect(getAsync).toHaveBeenCalledWith([1, 2, 3]);
     });
 
     it('revisits unchanged libraries once when OCR access changes without replaying native successes', async () => {

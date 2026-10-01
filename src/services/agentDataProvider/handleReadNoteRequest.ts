@@ -28,6 +28,7 @@ import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
 import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
 import { getNoteContentPreviewText } from '../../utils/noteText';
 import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { isPdfDocument } from '../../utils/attachmentFiles';
 import { checkLibraryExcluded, getAttachmentInfoForItem, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
 
 const CITED_NOTE_PREVIEW_LENGTH = 500;
@@ -267,7 +268,7 @@ export async function handleReadNoteRequest(
 
         // 3. Verify item is a note
         if (!item.isNote()) {
-            if (item.isPDFAttachment()) {
+            if (isPdfDocument(item)) {
                 return errorResponse(
                     `Item ${note_id} is a PDF attachment and not a note. You can read PDF attachments with the read_pages tool.`
                 );
