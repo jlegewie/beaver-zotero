@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
     collectionReferenceKey,
@@ -22,10 +22,16 @@ describe('collectionReferenceKey', () => {
 });
 
 describe('collectionToReference', () => {
+    beforeEach(() => {
+        vi.stubGlobal('Zotero', { Libraries: { userLibraryID: 1 }, Groups: { getGroupIDFromLibraryID: () => 12345 } });
+    });
     it('builds a canonical CollectionReference from a live Zotero collection', () => {
         const collection = { libraryID: 3, key: 'EFGH5678', name: 'Theory', parentKey: 'ROOT0000' };
         expect(collectionToReference(collection as any)).toEqual({
             library_id: 3,
+            library_ref: 'g12345',
+            collection_id: 'g12345-EFGH5678',
+            parent_collection_id: 'g12345-ROOT0000',
             zotero_key: 'EFGH5678',
             name: 'Theory',
             parent_key: 'ROOT0000',

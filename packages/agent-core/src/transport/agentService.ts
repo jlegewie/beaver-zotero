@@ -25,7 +25,7 @@ import {
     type AgentDataRequestContext,
     type RequestKeepalive,
 } from './agentDataDispatch';
-import { AgentRunRequest, ZoteroInstanceWire } from '../protocol/agentProtocol';
+import { AgentRunRequest, ExtractSchemaVersionsWire, ZoteroInstanceWire } from '../protocol/agentProtocol';
 import {
     WSEvent,
     WSErrorEvent,
@@ -291,6 +291,7 @@ export class AgentService {
         clientFeatures?: string[],
         zoteroInstance?: ZoteroInstanceWire,
         connectRecovery?: ConnectRecoveryAuthFields,
+        extractSchemaVersions?: ExtractSchemaVersionsWire,
     ): Promise<void> {
         const connectTelemetry = connectRecovery ?? connectRecoveryAuthFields(1, null);
         // Guard: Don't allow overlapping connect attempts
@@ -359,6 +360,7 @@ export class AgentService {
                     clientFeatures,
                     zoteroInstance,
                     connectTelemetry,
+                    extractSchemaVersions,
                 ),
                 connectTimeout,
             ]);
@@ -391,6 +393,7 @@ export class AgentService {
         clientFeatures?: string[],
         zoteroInstance?: ZoteroInstanceWire,
         connectTelemetry?: ConnectRecoveryAuthFields,
+        extractSchemaVersions?: ExtractSchemaVersionsWire,
     ): Promise<void> {
         let token: string;
         try {
@@ -423,6 +426,7 @@ export class AgentService {
             ...(clientType ? { client_type: clientType } : {}),
             ...(clientFeatures ? { client_features: clientFeatures } : {}),
             ...(zoteroInstance ? { zotero_instance: zoteroInstance } : {}),
+            ...(extractSchemaVersions ? { extract_schema_versions: extractSchemaVersions } : {}),
             ...wireTelemetry,
         };
 

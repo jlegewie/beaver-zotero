@@ -9,6 +9,7 @@ import { ArrowUpRightIcon } from '../../../components/icons/icons';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { usePdfFetchStatus } from '../../../hooks/useBackgroundTasks';
+import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -79,6 +80,13 @@ const CreateItemPreviewRow: React.FC<{
         actionStatus === 'applied' ? resultData?.library_id : undefined,
         actionStatus === 'applied' ? resultData?.zotero_key : undefined
     );
+    const { openItemMenu, itemMenu } = useItemContextMenu();
+    // Only an applied action has created a library item for the menu to act on.
+    const createdRef = actionStatus === 'applied' && resultData?.zotero_key ? {
+        library_id: resultData.library_id,
+        zotero_key: resultData.zotero_key,
+        library_ref: resultData.library_ref,
+    } : null;
 
     if (!item) {
         return (
@@ -89,7 +97,11 @@ const CreateItemPreviewRow: React.FC<{
     }
 
     return (
-        <div className="display-flex flex-row items-start gap-2 py-1 border-bottom-quinary last:border-b-0">
+        <div
+            className="display-flex flex-row items-start gap-2 py-1 border-bottom-quinary last:border-b-0"
+            onContextMenu={createdRef ? (event) => openItemMenu(createdRef, event) : undefined}
+        >
+            {itemMenu}
             {/* Status indicator - only show if enabled */}
             {shouldShowStatusIcons && (
                 <div className="mt-015 flex-shrink-0 w-4">
@@ -131,7 +143,7 @@ const CreateItemPreviewRow: React.FC<{
                                 zotero_key: resultData.zotero_key,
                                 library_ref: resultData.library_ref,
                             },
-                            proposedData.collection_keys?.[0]
+                            proposedData.collection_ids?.[0] ?? proposedData.collection_keys?.[0]
                         )}
                     />
                 </Tooltip>

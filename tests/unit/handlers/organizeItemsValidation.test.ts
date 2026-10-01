@@ -67,10 +67,11 @@ describe("validateOrganizeItemsAction", () => {
         getLibraryIDFromGroupID: vi.fn((groupId: number) => (groupId === 12345 ? 100 : false)),
       },
       Items: {
-        getByLibraryAndKeyAsync: vi.fn(async (libId: number, key: string) => makeItem(itemKind, libId, key)),
+        getByLibraryAndKeyAsync: vi.fn((libId: number, key: string) => makeItem(itemKind, libId, key)),
       },
       ItemTypes: { getName: vi.fn(() => "annotation") },
-      Collections: { getByLibraryAndKeyAsync: vi.fn() },
+      Collections: {
+                getByLibrary: vi.fn(() => []), getByLibraryAndKey: vi.fn() },
     };
 
     installMutationInstance();
@@ -83,7 +84,8 @@ describe("validateOrganizeItemsAction", () => {
 
   it.each(['add', 'remove'])('rejects trashed collection %s targets before approval', async (operation) => {
     (Zotero.Libraries as any).getAll = () => [{ libraryID: 1 }, { libraryID: 100 }];
-    vi.mocked(Zotero.Collections.getByLibraryAndKeyAsync).mockResolvedValue({ deleted: true, name: 'Trash' } as any);
+    vi.mocked(Zotero.Collections.getByLibraryAndKey).mockImplementation((_lib: number, key: string) =>
+      key === 'TRASH001' ? { deleted: true, name: 'Trash', libraryID: 1, key, id: 1 } as any : null);
     const response = await validateOrganizeItemsAction(buildRequest({
       item_ids: ['1-ITEM0001'], collections: { [operation]: ['TRASH001'] },
     }));
@@ -215,8 +217,8 @@ describe("validateOrganizeItemsAction", () => {
       { libraryID: 100, name: "Group" },
       { libraryID: 200, name: "Secret Group" },
     ]);
-    zotero.Collections.getByLibraryAndKeyAsync = vi.fn(
-      async (libId: number, key: string) =>
+    zotero.Collections.getByLibraryAndKey = vi.fn(
+      (libId: number, key: string) =>
         libId === 200 && key === "EXCLKEY1" ? { key } : null,
     );
 
@@ -238,11 +240,11 @@ describe("validateOrganizeItemsAction", () => {
 
   it("reports a nonexistent item and a nonexistent collection key together in one error", async () => {
     const zotero = (globalThis as any).Zotero;
-    zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (libId: number, key: string) =>
+    zotero.Items.getByLibraryAndKeyAsync = vi.fn((libId: number, key: string) =>
       key === "GOODITEM" ? makeItem("regular", libId, key) : false,
     );
     zotero.Libraries.getAll = vi.fn(() => [{ libraryID: 1, name: "My Library" }]);
-    zotero.Collections.getByLibraryAndKeyAsync = vi.fn(async () => null);
+    zotero.Collections.getByLibraryAndKey = vi.fn(() => null);
 
     const res = await validateOrganizeItemsAction(
       buildRequest({
@@ -265,7 +267,7 @@ describe("validateOrganizeItemsAction", () => {
     // Library 100 is normally searchable per the module-level store mock —
     // exclude it for this test only so "100-EXCLKEY1" hits library_not_searchable.
     zotero.Beaver.searchableLibraryIds = [1];
-    zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (libId: number, key: string) =>
+    zotero.Items.getByLibraryAndKeyAsync = vi.fn((libId: number, key: string) =>
       key === "MISSING01" ? false : makeItem("regular", libId, key),
     );
 
@@ -301,7 +303,7 @@ describe("validateOrganizeItemsAction", () => {
 
   it("reports every nonexistent item id in one error instead of only the first", async () => {
     const zotero = (globalThis as any).Zotero;
-    zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (libId: number, key: string) =>
+    zotero.Items.getByLibraryAndKeyAsync = vi.fn((libId: number, key: string) =>
       key === "GOODKEY1" ? makeItem("regular", libId, key) : false,
     );
 
@@ -326,8 +328,8 @@ describe("validateOrganizeItemsAction", () => {
       COLLADD1: "3.5 Learning, Prediction, Control",
       COLLREM1: "Inbox",
     };
-    zotero.Collections.getByLibraryAndKeyAsync = vi.fn(async (_libId: number, key: string) =>
-      names[key] ? { key, name: names[key] } : false,
+    zotero.Collections.getByLibraryAndKey = vi.fn((_libId: number, key: string) =>
+      names[key] ? { key, name: names[key], libraryID: 1 } : false,
     );
 
     const res = await validateOrganizeItemsAction(
@@ -339,7 +341,7 @@ describe("validateOrganizeItemsAction", () => {
     );
 
     expect(res.valid).toBe(true);
-    expect(res.collection_names).toEqual({
+    expect(res.collection_names).toMatchObject({
       COLLADD1: "3.5 Learning, Prediction, Control",
       COLLREM1: "Inbox",
     });

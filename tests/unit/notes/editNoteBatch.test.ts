@@ -511,6 +511,34 @@ describe('local edit_note_batch mutation guards', () => {
         );
         expect(item.saveTx).toHaveBeenCalledTimes(1);
     });
+
+    it.each([
+        ['insert_before', 'Inserted. '],
+        ['str_replace', 'BRAVO PASSAGE 2.'],
+    ] as const)('undoes a %s edit whose absent undo fields come back from the backend as null', async (operation, newString) => {
+        const item = useNote(NOTE_HTML);
+        const edits = [{ index: 0, operation, old_string: 'Bravo passage two.', new_string: newString }];
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest(edits));
+        expect(response.success).toBe(true);
+        item.getNote.mockReturnValue(item.setNote.mock.calls[0][0]);
+        const resultData = response.result_data as any;
+        const storedUndo = resultData.undo.map((record: any) => ({
+            client_item_id: null,
+            undo_before_context: null,
+            undo_after_context: null,
+            undo_occurrence_contexts: null,
+            ...JSON.parse(JSON.stringify(record)),
+        }));
+
+        await undoLocalEditNoteBatchAction({
+            id: `batch-local-null-undo-${operation}`,
+            action_type: 'edit_note_batch',
+            proposed_data: { library_id: 1, zotero_key: 'NOTE0001', edits },
+            result_data: { ...resultData, undo: storedUndo },
+        } as any);
+
+        expect(item.setNote).toHaveBeenLastCalledWith(NOTE_HTML);
+    });
 });
 
 

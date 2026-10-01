@@ -41,6 +41,8 @@ import {
 } from './documentExtraction/shared/extractionSchemaVersions';
 import { validateEpubDocument, type EpubDocument } from './documentExtraction/epub';
 import { validateSnapshotDocument, type SnapshotDocument } from './documentExtraction/snapshot';
+import { computeStructuredDocumentHash } from './documentExtraction/structuredDocumentHash';
+import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 
 export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
@@ -85,6 +87,13 @@ export interface DocumentCacheStats {
 }
 
 type DocumentRef = { libraryId: number; zoteroKey: string };
+
+/** A retained OCR preparation that must be prepared again before it is served. */
+export interface ProtectedRepreparation {
+    /** Page count recorded when the scan was prepared. */
+    pageCount: number | null;
+    sourceSizeBytes: number;
+}
 
 /**
  * Minimal item identity the cache stores with each entry. Zotero.Item
@@ -161,6 +170,8 @@ export class DocumentCache {
     private itemWriteLocks = new Map<string, Promise<void>>();
     private writeLocks = new Map<string, Promise<void>>();
     private extractionLocks = new Map<string, ExtractionLockEntry<CacheablePayload>>();
+    /** In-flight uncached extractions; clearing the cache leaves them running. */
+    private uncachedExtractions = new Map<string, ExtractionLockEntry<CacheablePayload>>();
     /** Wall-clock time of the last size-budget pass; 0 = never run. */
     private lastBudgetPassAt = 0;
     /** Payload bytes written since the last size-budget pass. */
@@ -223,6 +234,41 @@ export class DocumentCache {
             return record;
         } catch (error) {
             logger(`DocumentCache.getMetadata error: ${error}`, 1);
+            return null;
+        }
+    }
+
+    /**
+     * Describe a retained OCR preparation of the current source that can no
+     * longer be served because a metadata, payload or extraction version moved
+     * on. Its bytes stay on disk until a compatible OCR preparation replaces
+     * them, and the retained record is evidence that this exact source is a
+     * scan. Returns `null` for compatible, native, or replaced sources.
+     */
+    async getProtectedRepreparation(
+        ref: DocumentRef,
+        filePath: string,
+    ): Promise<ProtectedRepreparation | null> {
+        try {
+            const record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
+            if (!record || record.contentKind !== 'pdf' || record.filePath !== filePath) return null;
+            const payloads = (await this.db.getDocumentCachePayloadsForMetadata(record.id))
+                .filter(p => p.extractionSource === 'ocr');
+            if (payloads.length === 0) return null;
+            // Mirrors the incompatible count reported by getStats().
+            const schemaVersion = expectedExtractionSchemaVersion('pdf');
+            const compatible = record.metadataFormatVersion === DOCUMENT_METADATA_FORMAT_VERSION
+                && record.extractionSchemaVersion === schemaVersion
+                && payloads.every(p => p.cacheFormatVersion === DOCUMENT_PAYLOAD_FORMAT_VERSION
+                    && p.extractionSchemaVersion === schemaVersion);
+            if (compatible) return null;
+            const source = await this.getSourceIdentity(filePath, record.sourceSizeBytes);
+            if (!this.sourceIdentityMatches(source, {
+                filePath: record.filePath, fileSignature: record.fileSignature, sourceSizeBytes: record.sourceSizeBytes,
+            })) return null;
+            return { pageCount: record.pageCount, sourceSizeBytes: record.sourceSizeBytes };
+        } catch (error) {
+            logger(`DocumentCache.getProtectedRepreparation error: ${error}`, 1);
             return null;
         }
     }
@@ -723,6 +769,58 @@ export class DocumentCache {
         return this.waitForSharedExtraction(entry, input.abortSignal, input.sharedTimeoutMs);
     }
 
+    /**
+     * Run one shared extraction that is never read from or written to the
+     * cache, for results in a non-current schema version.
+     *
+     * Concurrent callers with the same `key` join the same extraction and get
+     * the same waiter deadlines and last-waiter abort as cached extractions.
+     * Callers must put everything that distinguishes results (attachment,
+     * source file, mode, schema version, result form, worker slot) in `key`.
+     */
+    async getOrCreateUncachedResult<T extends CacheablePayload>(input: {
+        key: string;
+        sharedTimeoutMs?: number;
+        abortSignal?: AbortSignal;
+        create: (signal: AbortSignal) => Promise<T>;
+    }): Promise<T | null> {
+        const existing = this.uncachedExtractions.get(input.key) as ExtractionLockEntry<T> | undefined;
+        if (existing) {
+            return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
+        }
+        const controller = createAbortController();
+        const entry: ExtractionLockEntry<T> = {
+            controller,
+            waiters: new Map(),
+            settled: false,
+            promise: Promise.resolve(null),
+            sharedTimer: null,
+            createdAt: Date.now(),
+        };
+        entry.promise = (async () => {
+            try {
+                const result = await input.create(controller.signal);
+                return controller.signal.aborted ? null : result;
+            } finally {
+                this.clearSharedExtractionTimer(entry);
+            }
+        })()
+            .catch((error) => {
+                logger(`DocumentCache.getOrCreateUncachedResult error: ${error}`, 1);
+                throw error;
+            })
+            .finally(() => {
+                entry.settled = true;
+                this.clearSharedExtractionTimer(entry);
+                if (this.uncachedExtractions.get(input.key) === entry) {
+                    this.uncachedExtractions.delete(input.key);
+                }
+            });
+
+        this.uncachedExtractions.set(input.key, entry);
+        return this.waitForSharedExtraction(entry, input.abortSignal, input.sharedTimeoutMs);
+    }
+
     private clearSharedExtractionTimer<T extends CacheablePayload>(entry: ExtractionLockEntry<T>): void {
         if (entry.sharedTimer) {
             clearTimeout(entry.sharedTimer);
@@ -957,13 +1055,75 @@ export class DocumentCache {
         }
     }
 
-    /** Invalidate all document-cache state for a library. */
-    async invalidateByLibrary(libraryId: number): Promise<void> {
+    /**
+     * Keep one attachment's cached content, including a protected OCR
+     * preparation, after its file moved or its mtime changed. The caller must
+     * have verified that the bytes at `to` equal those cached for `from`.
+     *
+     * `current`: a structured payload already records `to` (a read after the
+     * move rebuilt it). `missing`: there is no structured payload for either
+     * location, for example because a read after the move discarded it.
+     */
+    async relocateSource(
+        ref: DocumentRef,
+        from: { filePath: string; mtimeMs: number; sizeBytes: number },
+        to: { filePath: string; mtimeMs: number },
+    ): Promise<'relocated' | 'current' | 'missing'> {
+        let outcome: 'relocated' | 'current' | 'missing' = 'missing';
+        await this.trackCacheWrite(async () => {
+            try {
+                if (await this.db.relocateDocumentCacheSource(ref.libraryId, ref.zoteroKey, from, to)) {
+                    const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+                    outcome = payload ? 'relocated' : 'missing';
+                    return;
+                }
+                const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+                if (payload?.sourceFilePath === to.filePath && payload.sourceFileSignature.mtime_ms === to.mtimeMs
+                    && payload.sourceFileSignature.size_bytes === from.sizeBytes) outcome = 'current';
+            } catch (error) {
+                logger(`DocumentCache.relocateSource error: ${error}`, 1);
+            }
+        }, true, { id: 0, libraryID: ref.libraryId, key: ref.zoteroKey });
+        return outcome;
+    }
+
+    /** Discard a rejected native structured payload only if the inspected row is still current. */
+    async discardRejectedStructuredPayload(
+        ref: DocumentRef,
+        kind: Extract<ExtractContentKind, 'pdf' | 'epub' | 'snapshot'>,
+        filePath: string,
+        rejectedHash: string,
+    ): Promise<'discarded' | 'changed' | 'protected'> {
+        const before = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+        if (!before) return 'changed';
+        const result = kind === 'pdf'
+            ? await this.getResult(ref, 'structured', filePath)
+            : kind === 'epub'
+                ? await this.getEpubResult(ref, filePath)
+                : await this.getSnapshotResult(ref, filePath);
+        if (!result || await computeStructuredDocumentHash(kind, result as DocumentExtractResult) !== rejectedHash) return 'changed';
+        const after = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+        if (!after || after.id !== before.id || after.payloadSha256 !== before.payloadSha256
+            || after.payloadPath !== before.payloadPath) return 'changed';
+        if (before.extractionSource === 'ocr') return 'protected';
+        return await this.deletePayload(before) ? 'discarded' : 'changed';
+    }
+
+    /**
+     * Invalidate all document-cache state for a library. `retainProtectedOcr`
+     * keeps OCR payloads and their metadata, as `clearAll` does: they cannot
+     * be rebuilt locally, and a later read revalidates them against the file.
+     */
+    async invalidateByLibrary(libraryId: number, options: { retainProtectedOcr?: boolean } = {}): Promise<void> {
         this.libraryGenerations.set(libraryId, (this.libraryGenerations.get(libraryId) ?? 0) + 1);
         await Promise.allSettled([...this.itemWriteLocks]
             .filter(([key]) => key.startsWith(`${libraryId}/`))
             .map(([, write]) => write));
         try {
+            if (options.retainProtectedOcr) {
+                await this.removePayloadFiles(await this.db.deleteUnprotectedDocumentCacheByLibrary(libraryId));
+                return;
+            }
             const payloads = await this.db.deleteDocumentCacheMetadataByLibrary(libraryId);
             await this.removePayloadFiles(payloads);
             if (this.payloadCacheDir) {
@@ -1103,10 +1263,7 @@ export class DocumentCache {
 
     /** Return compact document-cache counts and directory information. */
     async getStats(): Promise<DocumentCacheStats> {
-        const protectedStats = await this.db.getProtectedDocumentCacheStats({
-            metadata: DOCUMENT_METADATA_FORMAT_VERSION, payload: DOCUMENT_PAYLOAD_FORMAT_VERSION,
-            pdf: expectedExtractionSchemaVersion('pdf'),
-        });
+        const protectedStats = await this.db.getProtectedDocumentCacheStats(this.pdfCompatibilityVersions());
         // Polling uses registered cache state. Reads and startup GC reconcile external
         // file changes; cache writes, eviction, and clearing update these rows directly.
         return {
@@ -1125,6 +1282,20 @@ export class DocumentCache {
             ocr_repreparation_required_count: protectedStats.incompatible,
             payload_budget_bytes: DocumentCache.budgetBytes(),
         };
+    }
+
+    /** Versions a PDF cache entry must carry to be served. */
+    pdfCompatibilityVersions(): { metadata: number; payload: number; pdf: string | null } {
+        return {
+            metadata: DOCUMENT_METADATA_FORMAT_VERSION,
+            payload: DOCUMENT_PAYLOAD_FORMAT_VERSION,
+            pdf: expectedExtractionSchemaVersion('pdf'),
+        };
+    }
+
+    /** Attachments in a library whose retained OCR preparation must be prepared again. */
+    async getProtectedRepreparationKeys(libraryId: number): Promise<string[]> {
+        return this.db.getIncompatibleProtectedDocumentKeys(libraryId, this.pdfCompatibilityVersions());
     }
 
     /**

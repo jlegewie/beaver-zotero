@@ -23,6 +23,7 @@ import type {
     HighlightAnnotationItem,
     NoteAnnotationItem,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
+import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -118,6 +119,9 @@ function formatAnnotationFailureMessage(
             return 'Could not create annotation because the cited passage was not found in the EPUB.';
         case 'epub_math_section_unsupported':
             return 'Could not create annotation because the passage follows a math equation, which is not yet supported.';
+        case 'highlight_spans_too_many_pages':
+        case 'highlight_pages_not_consecutive':
+            return 'Could not create annotation because a highlight can cover at most two consecutive pages.';
         case 'attachment_file_unavailable':
             return 'Could not create annotation because the attachment file is not available locally.';
         case 'apply_failed':
@@ -189,6 +193,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
         library_id: resolvedRef?.library_id,
     });
     const noun = kind === 'highlight' ? 'highlight' : 'note';
+    const { openItemMenu, itemMenu } = useItemContextMenu();
 
     // Resolve the attachment's content kind once
     const [contentKind, setContentKind] = useState<'pdf' | 'epub' | null>(null);
@@ -365,6 +370,8 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                             <div
                                 className={`create-annotations-preview-row display-flex flex-row items-start gap-2 py-15 cursor-pointer ${isDimmed ? 'opacity-60' : ''}`}
                                 onClick={() => handleItemClick(item, createdEntries)}
+                                // Only a created annotation is a library item with a menu.
+                                onContextMenu={createdEntries[0] ? (event) => openItemMenu(createdEntries[0], event) : undefined}
                             >
                                 {isFailed ? (
                                     <Icon icon={AlertIcon} size={14} className="font-color-red" style={{ marginTop: 2 }} />
@@ -406,6 +413,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                             </AnnotationTooltip>
                         );
                     })}
+                    {itemMenu}
                 </div>
 
                 {tags.length > 0 && (

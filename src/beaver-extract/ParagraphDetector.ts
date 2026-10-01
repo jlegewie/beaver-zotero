@@ -469,8 +469,9 @@ function isOcrTextLayerFont(font: string | undefined | null): boolean {
  *   ◗ U+25D7 RIGHT HALF BLACK CIRCLE — design-heavy bullet glyph
  *           (e.g. ZapfDingbatsITC, common in marketing/report PDFs).
  *   ▶ U+25B6 / ► U+25BA / ➤ U+27A4 — right-pointing arrow bullets.
- *      Symbol-font private-use bullet that survives MuPDF extraction
- *            verbatim (the codepoint Symbol-bulleted PDFs typically emit).
+ *      U+F0B7, the Symbol-font private-use bullet Symbol-bulleted PDFs
+ *            typically emit. Schema-4 extraction keeps it verbatim; schema 5
+ *            maps it to • (`map-symbol-private-use`).
  */
 const BULLET_LEAD_CHAR_RE = /^\s*[•◦▪▫‣⁃●○◆◇■□∙◗▶►➤]/u;
 
@@ -493,8 +494,8 @@ const ICON_FONT_ANY_LEAD_RE = /^\s*\S\s+\S/u;
  * use substituted leading codepoints; dual-use symbol/math fonts require an
  * explicit bullet glyph.
  *
- * The Symbol-font private-use bullet (U+F0B7) survives MuPDF extraction as
- * a single codepoint, so YDMSJ83R-style lines (`Teacher's aid: …` led by
+ * The Symbol-font private-use bullet (U+F0B7, kept by schema-4 extraction)
+ * is a single codepoint, so YDMSJ83R-style lines (`Teacher's aid: …` led by
  * U+F0B7 in Symbol) are still recognized.
  */
 function isIconBulletLine(line: PageLine): boolean {

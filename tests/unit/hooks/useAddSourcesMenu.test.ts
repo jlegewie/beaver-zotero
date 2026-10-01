@@ -24,19 +24,25 @@ const EDITOR = editorElement();
  * Renders the hook and exposes its latest return value, plus the editor seams
  * it drives (content mirror, trailing-query delete, focus).
  */
-function mount(options?: { goBack?: () => boolean }) {
+function mount(options?: { goBack?: () => boolean; caret?: number }) {
     const contentRef: React.MutableRefObject<string> = { current: '' };
     const menuRef: React.MutableRefObject<AddSourcesMenuHandle | null> = {
         current: options?.goBack ? { goBack: options.goBack } : null,
     };
     const deleted: number[] = [];
+    const keptAfter: number[] = [];
+    const caretRef = { current: options?.caret ?? 0 };
     const focused = { count: 0 };
     let latest: Hook;
 
     const Harness: React.FC = () => {
         latest = useAddSourcesMenu({
             verticalPosition: 'above',
-            deleteTrailingQuery: (length) => deleted.push(length),
+            deleteTrailingQuery: (length, keepAfter) => {
+                deleted.push(length);
+                keptAfter.push(keepAfter);
+            },
+            getCaretOffset: options?.caret === undefined ? undefined : () => caretRef.current,
             focusEditor: () => { focused.count++; },
             setMessageContent: (value) => { contentRef.current = value; },
             menuRef,
@@ -53,6 +59,8 @@ function mount(options?: { goBack?: () => boolean }) {
         get hook() { return latest!; },
         contentRef,
         deleted,
+        keptAfter,
+        caretRef,
         focused,
         /** Run an interaction and let React flush the state it produced. */
         run<T>(fn: (hook: Hook) => T): T {
@@ -135,6 +143,79 @@ describe('useAddSourcesMenu', () => {
             expect(harness.contentRef.current).toBe('find @');
             expect(harness.deleted).toEqual([]);
         });
+    });
+
+    describe('an @ typed at the end of a line with more lines after it', () => {
+        const AFTER = '\nthen compare';
+
+        beforeEach(() => {
+            harness = mount({ caret: 'find @'.length });
+            harness.run(h => h.handleTrigger(`find @${AFTER}`, EDITOR));
+        });
+
+        it('opens with the editor as its search box', () => {
+            expect(harness.hook.isOpen).toBe(true);
+            expect(harness.hook.querySource).toBe('editor');
+        });
+
+        it('reads the query up to the following lines', () => {
+            harness.run(h => h.handleChange(`find @smith${AFTER}`));
+            expect(harness.hook.query).toBe('smith');
+        });
+
+        it('keeps the caret at the end of the query, not the end of the content', () => {
+            const value = `find @smith${AFTER}`;
+            harness.run(h => h.handleChange(value));
+            expect(harness.hook.caretOffsetFor(value)).toBe('find @smith'.length);
+        });
+
+        it('leaves the caret where the @ was when deleting it closes the menu', () => {
+            const value = `find ${AFTER}`;
+            harness.caretRef.current = 'find '.length; // where Backspace left it
+            harness.run(h => h.handleChange(value));
+            expect(harness.hook.isOpen).toBe(false);
+            expect(harness.hook.caretOffsetFor(value)).toBe('find '.length);
+        });
+
+        it('takes back only the @ and the query when something is picked', () => {
+            harness.run(h => h.handleChange(`find @smith${AFTER}`));
+            harness.run(h => h.commit());
+            expect(harness.deleted).toEqual(['@smith'.length]);
+            expect(harness.keptAfter).toEqual([AFTER.length]);
+        });
+    });
+
+    describe('an @ typed in front of existing text', () => {
+        beforeEach(() => {
+            harness = mount({ caret: 1 });
+            harness.run(h => h.handleTrigger('@sdfsdf', EDITOR));
+        });
+
+        it('opens, reporting the text after the query', () => {
+            expect(harness.hook.isOpen).toBe(true);
+            expect(harness.hook.hasTextAfterQuery).toBe(true);
+        });
+
+        it('reads the query up to that text', () => {
+            harness.run(h => h.handleChange('@smisdfsdf'));
+            expect(harness.hook.query).toBe('smi');
+        });
+
+        it('stops reporting text after the query once closed', () => {
+            harness.run(h => h.dismiss());
+            expect(harness.hook.hasTextAfterQuery).toBe(false);
+        });
+    });
+
+    it('does not open on an @ typed inside a word', () => {
+        harness = mount({ caret: 'sdfsdf@'.length });
+        expect(harness.run(h => h.handleTrigger('sdfsdf@DSdsd', EDITOR))).toBe(false);
+    });
+
+    it('reports no text after the query for an @ typed at the end', () => {
+        harness = mount();
+        harness.run(h => h.handleTrigger('find @', EDITOR));
+        expect(harness.hook.hasTextAfterQuery).toBe(false);
     });
 
     describe('typing the query', () => {

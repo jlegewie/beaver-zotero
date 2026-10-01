@@ -1,4 +1,5 @@
 import { ID_PREFIXES } from '../extract/schema';
+import { parseExtractId, parseExtractIdValue, type ExtractIdScheme } from '../extract/ids';
 import { resolveObjectIdReference } from '../identity/libraryRef';
 import type { ZoteroItemReference } from '../types/zotero';
 
@@ -114,19 +115,76 @@ function locPrefixFor(raw: string): { prefix: string; kind: LocatorKind; value: 
     for (const entry of LOC_PREFIXES) {
         if (raw.startsWith(entry.prefix) && raw.length > entry.prefix.length) {
             const value = raw.slice(entry.prefix.length);
-            if (entry.numericOnly && !/^\d+(?:-.+)?$/.test(value)) continue;
+            if (entry.numericOnly && !/^\d+(?:\.\d+)?(?:-.+)?$/.test(value)) continue;
             return { prefix: entry.prefix, kind: entry.kind, value };
         }
     }
     return null;
 }
 
+/** Id scheme of a record-id locator value: `243` → document, `5.6` → page. */
+function idValueScheme(value: string): ExtractIdScheme | null {
+    return parseExtractIdValue(value)?.scheme ?? null;
+}
+
 /**
- * Parse compact page locators and Beaver Extract record ids.
+ * Parse compact page locators, Beaver Extract record ids, and sentence lists.
+ *
+ * Record ids come in two schemes (see `ExtractIdScheme`): document-wide
+ * (`s243`, range `s243-s250`) and page-scoped (`s5.6`, ranges `s5.6-s5.9` and
+ * `s5.30-s6.2`). The page-scoped same-page shorthand `s5.6-9` is normalized to
+ * the value `5.6-5.9`. A range whose ends use different schemes names no
+ * document version and parses as `unknown`.
+ *
+ * A comma-separated list of page-scoped sentence ids or ranges
+ * (`s7.45,s8.1-s8.2`, `s2.36,s2.42-s2.43`) parses as one sentence locator
+ * naming every piece; see `parseSentenceList`.
  */
 export function parseLoc(token: string | undefined): Locator | undefined {
     if (token == null) return undefined;
-    const raw = token;
+    const sentences = /[,;]/.test(token) ? parseSentenceList(token) : null;
+    return sentences ?? parseSingleLoc(token);
+}
+
+/** Whether a locator is a page-scoped sentence id or forward range. */
+function isPageScopedSentence(locator: Locator): boolean {
+    if (locator.kind !== 'sentence' || locatorIdScheme(locator) !== 'page') return false;
+    const [startValue, endValue = startValue] = locator.value.split('-');
+    const start = parseExtractIdValue(startValue);
+    const end = parseExtractIdValue(endValue);
+    if (start?.page === undefined || end?.page === undefined) return false;
+    return end.page > start.page || (end.page === start.page && end.n >= start.n);
+}
+
+/**
+ * Parse `s7.45,s8.1-s8.2` into one sentence locator valued `7.45,8.1-8.2`.
+ *
+ * Every piece is kept, in the order given: a passage continuing on the next
+ * page, or parts of one page's text interrupted by a figure or footnote.
+ *
+ * Returns `null` unless every piece is a page-scoped sentence id or range;
+ * other comma-joined locators keep parsing as one token. Mirrors the
+ * backend's `parse_loc`.
+ */
+function parseSentenceList(raw: string): Locator | null {
+    const values: string[] = [];
+    for (const token of raw.split(/[,;]/).map((part) => part.trim())) {
+        if (!token) continue;
+        const locator = parseSingleLoc(token);
+        if (!isPageScopedSentence(locator)) return null;
+        values.push(locator.value);
+    }
+    if (values.length === 0) return null;
+    return { kind: 'sentence', value: values.join(','), raw };
+}
+
+/** The values a locator names: its value, or each piece of a sentence list. */
+export function locatorValues(locator: Locator): string[] {
+    return locator.kind === 'sentence' ? locator.value.split(',') : [locator.value];
+}
+
+/** Parse one compact locator token (no lists). */
+function parseSingleLoc(raw: string): Locator {
     if (!raw) return { kind: 'unknown', value: raw, raw };
 
     const first = locPrefixFor(raw);
@@ -140,7 +198,19 @@ export function parseLoc(token: string | undefined): Locator | undefined {
         const left = first.value.slice(0, rangeDash);
         const rightRaw = first.value.slice(rangeDash + 1);
         const right = locPrefixFor(rightRaw);
-        if (left && right && right.kind === first.kind && right.prefix === first.prefix && right.value) {
+        const rightValue = right && right.kind === first.kind && right.prefix === first.prefix
+            ? right.value
+            : rightRaw;
+        // Id schemes only apply to record-id locators, not to page numbers.
+        const recordId = !!CITATION_INDEX_PREFIXES[first.kind];
+        const leftId = recordId ? parseExtractIdValue(left) : null;
+        const rightId = recordId ? parseExtractIdValue(rightValue) : null;
+        const pageShorthand = leftId?.scheme === 'page' && rightId?.scheme === 'document' && rightValue === rightRaw;
+        if (pageShorthand) {
+            value = `${left}-${leftId.page}.${rightValue}`;
+        } else if (leftId && rightId && leftId.scheme !== rightId.scheme) {
+            return { kind: 'unknown', value: raw, raw };
+        } else if (left && right && right.kind === first.kind && right.prefix === first.prefix && right.value) {
             value = `${left}-${right.value}`;
         }
     }
@@ -148,44 +218,92 @@ export function parseLoc(token: string | undefined): Locator | undefined {
     return { kind: first.kind, value, raw };
 }
 
+/** True when both ends of a range are extraction ids of different schemes. */
+function isMixedSchemeRange(left: string, right: string): boolean {
+    const leftScheme = parseExtractId(left)?.scheme;
+    const rightScheme = parseExtractId(right)?.scheme;
+    return !!leftScheme && !!rightScheme && leftScheme !== rightScheme;
+}
+
 function rawRangeCandidateIds(raw: string): string[] {
-    const ids = new Set<string>([raw]);
     const parts = raw.split('-');
     if (parts.length === 2 && parts[0] && parts[1]) {
         const left = parts[0];
-        const right = parts[1];
-        ids.add(left);
-        if (/^[A-Za-z_]/.test(right)) {
-            ids.add(right);
-        } else {
-            const prefix = left.match(/^[A-Za-z_]+/)?.[0];
-            ids.add(prefix ? `${prefix}${right}` : right);
-        }
+        const right = /^[A-Za-z_]/.test(parts[1])
+            ? parts[1]
+            : `${left.match(/^[A-Za-z_]+/)?.[0] ?? ''}${parts[1]}`;
+        if (isMixedSchemeRange(left, right)) return [];
+        return [...new Set([raw, left, right])];
     }
-    return [...ids];
+    return [raw];
 }
 
 /**
- * Return structured extraction citation-index ids addressed by a locator.
+ * Return structured extraction citation-index ids addressed by a locator: the
+ * id itself, both ends of a range, or those of each piece of a sentence list.
+ * A range covers everything between its ends in reading order, never an
+ * arithmetic span of the id suffixes.
  */
 export function citationIndexCandidateIdsForLocator(locator: Locator): string[] {
     const prefix = CITATION_INDEX_PREFIXES[locator.kind];
     if (!prefix) return rawRangeCandidateIds(locator.raw);
 
     const ids = new Set<string>();
-    const values = locator.value.split('-');
     const addValue = (value: string) => {
-        if (/^\d+$/.test(value)) ids.add(`${prefix}${value}`);
+        if (idValueScheme(value)) ids.add(`${prefix}${value}`);
     };
 
-    if (values.length === 1) {
-        addValue(values[0]);
-    } else if (values.length === 2) {
-        addValue(values[0]);
-        addValue(values[1]);
+    for (const piece of locatorValues(locator)) {
+        const values = piece.split('-');
+        if (values.length === 1) {
+            addValue(values[0]);
+        } else if (values.length === 2) {
+            addValue(values[0]);
+            addValue(values[1]);
+        }
     }
 
     return ids.size > 0 ? [...ids] : rawRangeCandidateIds(locator.raw);
+}
+
+/**
+ * True when a non-page locator spans one run of ids: an id range (`12-15`,
+ * `5.6-6.2`) or a sentence list whose pages leave no gap (`7.45,8.1`). A list
+ * that skips pages (`5.2,9.4`) names separate pages, not a range.
+ */
+export function isRecordIdRange(locator: Locator): boolean {
+    if (locator.kind === 'page') return false;
+    const pieces = locatorValues(locator);
+    if (pieces.length > 1) return sentenceListPagesAreContiguous(pieces);
+    const ends = locator.value.split('-');
+    return ends.length === 2 && ends.every((end) => idValueScheme(end) !== null);
+}
+
+/** Whether each piece starts on the page the previous piece ends on, or the next one. */
+function sentenceListPagesAreContiguous(pieces: string[]): boolean {
+    let previousEndPage: number | null = null;
+    for (const piece of pieces) {
+        const [startValue, endValue = startValue] = piece.split('-');
+        const start = parseExtractIdValue(startValue)?.page;
+        const end = parseExtractIdValue(endValue)?.page;
+        if (start === undefined || end === undefined) return false;
+        if (previousEndPage !== null && start !== previousEndPage && start !== previousEndPage + 1) {
+            return false;
+        }
+        previousEndPage = end;
+    }
+    return true;
+}
+
+/**
+ * The id scheme of a PDF record-id locator (`s243` → `document`, `s5.6` →
+ * `page`), which names the PDF schema version it resolves against. `null` for
+ * page locators, line locators (text documents are unversioned), and
+ * locators that are not record ids.
+ */
+export function locatorIdScheme(locator: Locator): ExtractIdScheme | null {
+    if (locator.kind === 'line' || !CITATION_INDEX_PREFIXES[locator.kind]) return null;
+    return idValueScheme(locatorValues(locator)[0].split('-')[0]);
 }
 
 /**

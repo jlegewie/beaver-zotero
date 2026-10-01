@@ -47,6 +47,8 @@ import type {
 import { logger } from '@beaver/agent-core/platform/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import {
+    isFileAccessDeniedError,
+    isLocalFileReadDenied,
     loadAttachmentData,
     resolveAttachmentFileSource,
     resolveToReadableAttachment,
@@ -55,6 +57,10 @@ import {
     type AttachmentFileSource,
 } from './documentExtraction';
 import { readableToExtractKind, type ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
+import {
+    isCurrentExtractionSchemaVersion,
+    unsupportedSchemaVersionMessage,
+} from './documentExtraction/shared/extractionSchemaVersions';
 import { recordReadingOutcome } from './documentExtraction/readingOutcome';
 import {
     EpubStructureError,
@@ -186,6 +192,12 @@ export interface ExtractAndCacheArgs {
     onRemoteDownloadFailure?: (error: unknown) => void;
     /** Carry explicit cache preparation through fresh no-text-layer detection. */
     prepareCache?: boolean;
+    /**
+     * PDF schema version to produce; absent means the current version. A
+     * producible non-current version is extracted without the document cache
+     * (no reads, no writes, no reading outcome), structured mode only.
+     */
+    schemaVersion?: string | null;
 }
 
 export interface ExtractAndCacheResolvedPdfArgs
@@ -404,6 +416,13 @@ export type ExtractAndCacheEpubResult =
 
 function isAbortError(error: unknown): boolean {
     return error instanceof Error && /abort/i.test(error.message);
+}
+
+function fileAccessDeniedMessage(fileKind: string, requestKey: string): string {
+    return `Zotero does not have permission to read the ${fileKind} file for ${requestKey}. `
+        + `The user needs to grant Zotero access to the folder containing the file `
+        + `(on macOS: System Settings > Privacy & Security > Files and Folders or Full Disk Access) `
+        + `or close any program that has the file locked.`;
 }
 
 async function extractAndCacheDocumentOwned(
@@ -714,6 +733,16 @@ async function extractAndCacheEpubDocumentImpl(
                 contentKind: 'epub',
             };
         }
+        // The EPUB zip reader reports a denied open as a generic failure.
+        if (isFileAccessDeniedError(error) || await isLocalFileReadDenied(extractionFilePath)) {
+            return {
+                kind: 'response_error',
+                code: 'file_permission_denied',
+                message: fileAccessDeniedMessage('EPUB', requestKey),
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
         return {
             kind: 'response_error',
             code: 'extraction_failed',
@@ -919,6 +948,15 @@ async function extractAndCacheSnapshotDocumentImpl(
                 contentKind: 'snapshot',
             };
         }
+        if (isFileAccessDeniedError(error)) {
+            return {
+                kind: 'response_error',
+                code: 'file_permission_denied',
+                message: fileAccessDeniedMessage('snapshot', requestKey),
+                resolvedAttachment,
+                contentKind: 'snapshot',
+            };
+        }
         return {
             kind: 'response_error',
             code: 'extraction_failed',
@@ -939,11 +977,20 @@ async function extractAndCacheResolvedPdfDocumentOwned(
     const attemptedAt = Date.now();
     const result = await extractAndCacheResolvedPdfDocumentImpl(args);
     if (args.source.kind === 'zotero' && !args.externalAbortSignal?.aborted
+        && uncachedPdfSchemaVersion(args.schemaVersion) === null
         && !(result.kind === 'response_error' && result.code === 'too_many_pages'
             && args.maxPages != null && args.maxPages < effectiveMaxPageCount())) {
         await recordReadingOutcome(args.source.item, 'pdf', result, attemptedAt);
     }
     return result;
+}
+
+/**
+ * The requested PDF schema version when it is not the current one, i.e. when
+ * the extraction must bypass the document cache; `null` for the current one.
+ */
+function uncachedPdfSchemaVersion(schemaVersion: string | null | undefined): string | null {
+    return isCurrentExtractionSchemaVersion('pdf', schemaVersion) ? null : schemaVersion ?? null;
 }
 
 async function extractAndCacheResolvedPdfDocumentImpl(
@@ -955,6 +1002,19 @@ async function extractAndCacheResolvedPdfDocumentImpl(
     } = args;
     const workerName: PDFWorkerSlotName = args.workerName ?? 'hot';
     const requestKey = args.resolvedKey;
+    const uncachedSchemaVersion = uncachedPdfSchemaVersion(args.schemaVersion);
+    const unsupportedVersion = unsupportedSchemaVersionMessage('pdf', args.schemaVersion, mode);
+    if (unsupportedVersion) {
+        const cacheRef = args.source.kind === 'zotero' ? args.source.item : args.source.itemRef;
+        return {
+            kind: 'response_error',
+            code: 'unsupported_schema_version',
+            message: unsupportedVersion,
+            pageCount: null,
+            resolvedAttachment: { libraryId: cacheRef.libraryID, zoteroKey: cacheRef.key },
+            contentKind: 'pdf',
+        };
+    }
 
     const maxFileSizeMB = effectiveMaxFileSizeMB();
     const maxPages = effectiveMaxPageCount(args.maxPages);
@@ -1071,10 +1131,13 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         const isRemoteOnly = attachmentSource.isRemoteOnly;
         resolvedFilePath = effectiveFilePath;
 
-        const cache = Zotero.Beaver?.documentCache;
-        if (!cache) {
+        // A non-current schema version never touches the cache; the cache
+        // object only lends it single-flight for concurrent requests.
+        const documentCache = Zotero.Beaver?.documentCache;
+        if (!documentCache) {
             logger(`extractAndCacheDocument: document cache not available for ${requestKey}`, 1);
         }
+        const cache = uncachedSchemaVersion === null ? documentCache : undefined;
         const docRef = {
             libraryId: cacheItemRef.libraryID,
             zoteroKey: cacheItemRef.key,
@@ -1115,7 +1178,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     return {
                         kind: 'cached_error',
                         code: 'no_text_layer',
-                        message: `The PDF file for ${resolvedKeyStr} is not prepared (no text layer). Enable cloud preparation in Beaver Preferences; reading does not start OCR`,
+                        message: `The PDF file for ${resolvedKeyStr} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`,
                         pageCount: preflight.pageCount,
                         resolvedAttachment,
                     };
@@ -1196,6 +1259,15 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         resolvedAttachment,
                     };
                 }
+                if (loaded.code === 'file_permission_denied') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_permission_denied',
+                        message: fileAccessDeniedMessage('PDF', resolvedKeyStr),
+                        pageCount: null,
+                        resolvedAttachment,
+                    };
+                }
                 if (loaded.code === 'read_failed') {
                     return {
                         kind: 'response_error',
@@ -1262,6 +1334,15 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         resolvedAttachment,
                     };
                 }
+                if (loaded.code === 'file_permission_denied') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_permission_denied',
+                        message: fileAccessDeniedMessage('PDF', resolvedKeyStr),
+                        pageCount: totalPages,
+                        resolvedAttachment,
+                    };
+                }
                 if (loaded.code === 'read_failed') {
                     return {
                         kind: 'response_error',
@@ -1294,7 +1375,11 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         if (!pdfBytes) {
             throw new Error('PDF data was not loaded before extraction');
         }
-        const extractSettings = { checkTextLayer: true as const };
+        const extractArgs = {
+            mode,
+            settings: { checkTextLayer: true as const },
+            schemaVersion: uncachedSchemaVersion ?? undefined,
+        };
         const createSharedResult = async (extractSignal: AbortSignal) => {
             // Set only when this request's own extraction actually dispatches to the worker.
             // A timeout during cache pre-work (metadata/payload reads, decompression) or while
@@ -1303,28 +1388,25 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             // response carries the worker snapshot for that episode.
             workerDispatched = true;
             return args.serializedResult
-                ? client.extractSerialized(pdfBytes, { mode, settings: extractSettings }, extractSignal)
-                : client.extract(pdfBytes, { mode, settings: extractSettings }, extractSignal);
+                ? client.extractSerialized(pdfBytes, extractArgs, extractSignal)
+                : client.extract(pdfBytes, extractArgs, extractSignal);
         };
 
         const createUnsharedResult = async () => {
             workerDispatched = true;
             const extracted = args.serializedResult
                 ? serializedWorkerResultToCacheResult(
-                    await client.extractSerialized(
-                        pdfBytes,
-                        { mode, settings: extractSettings },
-                        signal,
-                    ),
+                    await client.extractSerialized(pdfBytes, extractArgs, signal),
                 )
-                : await client.extract(
-                    pdfBytes,
-                    { mode, settings: extractSettings },
-                    signal,
-                );
+                : await client.extract(pdfBytes, extractArgs, signal);
             throwIfTimedOut('pdf_extract');
             return extracted;
         };
+
+        const createUncachedSharedResult = (extractSignal: AbortSignal) =>
+            createSharedResult(extractSignal).then((extracted) => args.serializedResult
+                ? serializedWorkerResultToCacheResult(extracted as SerializedBeaverExtractResult)
+                : extracted as BeaverExtractResult);
 
         const resultPromise = cache
             ? args.serializedResult
@@ -1355,11 +1437,31 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 create: createSharedResult as (extractSignal: AbortSignal) => Promise<BeaverExtractResult>,
                 metadata: buildExtractedDocumentCacheMetadata,
             })
-            : createUnsharedResult();
-        const result = cache
+            : uncachedSchemaVersion !== null && documentCache
+                ? documentCache.getOrCreateUncachedResult<SerializedDocumentCacheResult | BeaverExtractResult>({
+                    key: [
+                        cacheItemRef.libraryID,
+                        cacheItemRef.key,
+                        effectiveFilePath,
+                        mode,
+                        `schema:${uncachedSchemaVersion}`,
+                        args.serializedResult ? 'serialized' : 'object',
+                        `scope:${workerName}`,
+                    ].join('/'),
+                    sharedTimeoutMs,
+                    abortSignal: signal,
+                    create: createUncachedSharedResult,
+                })
+                : createUnsharedResult();
+        const result = documentCache
             ? await awaitWithRequestAbort(resultPromise, signal, throwIfTimedOut, 'pdf_extract')
             : await resultPromise;
         throwIfTimedOut('document_result_ready');
+
+        if (!result && uncachedSchemaVersion !== null) {
+            // The shared uncached extraction was aborted after it finished.
+            throw new WorkerAbortError();
+        }
 
         if (!result) {
             return {
@@ -1445,9 +1547,21 @@ async function extractAndCacheResolvedPdfDocumentImpl(
 
         const extractionError = asExtractionError(error);
         if (extractionError) {
+            // A retained OCR preparation of this source is unservable after an
+            // extraction update; background processing prepares it again.
+            const repreparing = extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER
+                && resolvedCacheRef !== null && resolvedFilePath !== null
+                && await Zotero.Beaver?.documentCache?.getProtectedRepreparation(
+                    { libraryId: resolvedCacheRef.libraryID, zoteroKey: resolvedCacheRef.key },
+                    resolvedFilePath,
+                ) != null;
+            const noTextLayerMessage = repreparing
+                ? `The PDF file for ${errorKey} is a prepared scan that must be prepared again after an extraction update. Its text is unavailable until background preparation finishes`
+                : `The PDF file for ${errorKey} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`;
             if (
                 resolvedCacheRef
                 && resolvedFilePath
+                && uncachedSchemaVersion === null
                 && (extractionError.code === ExtractionErrorCode.ENCRYPTED
                     || extractionError.code === ExtractionErrorCode.INVALID_PDF
                     || extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER)
@@ -1482,7 +1596,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         ? `The PDF file for ${errorKey} is password-protected`
                         : cachedCode === 'invalid_pdf'
                             ? `The PDF file for ${errorKey} is invalid or corrupted`
-                            : `The PDF file for ${errorKey} is not prepared (no text layer). Enable cloud preparation in Beaver Preferences; reading does not start OCR`,
+                            : noTextLayerMessage,
                     pageCount: extractionError.pageCount ?? totalPages,
                     resolvedAttachment,
                 };
@@ -1502,7 +1616,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     return {
                         kind: 'response_error',
                         code: 'no_text_layer',
-                        message: `The PDF file for ${errorKey} is not prepared (no text layer). Enable cloud preparation in Beaver Preferences; reading does not start OCR`,
+                        message: noTextLayerMessage,
                         pageCount: totalPagesForError,
                         resolvedAttachment,
                     };

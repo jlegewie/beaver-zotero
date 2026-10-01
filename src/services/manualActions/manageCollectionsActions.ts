@@ -24,17 +24,19 @@
  *     too (no `includeTrashed` filter on primary lookup) — check the
  *     `deleted` property to detect trash state.
  */
-
+import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
+import { CollectionResolutionError, formatCollectionId } from '../collections/collectionIdentity';
+import { assertLibraryWritable, recheckCollectionForUndo, recheckCollectionIfPresent, recheckCollectionParent } from '../collections/collectionMutations';
 import { AgentAction, ManageCollectionsAgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../utils/libraryIdentity';
 
-
 export async function executeManageCollectionsAction(
     action: AgentAction
 ): Promise<ManageCollectionsResultData> {
-    const data = action.proposed_data as ManageCollectionsProposedData;
+    const raw = action.proposed_data;
+    const data = readCollectionActionData(raw) as ManageCollectionsProposedData;
     const { action: op, collection_key, new_name, new_parent_key, library_id, library_ref } = data;
     // A destructive write must carry an explicit target. Reject a
     // stale/malformed action (e.g. library_id: 0 with no library_ref) instead
@@ -51,10 +53,11 @@ export async function executeManageCollectionsAction(
     if (!resolution.ok) throw new Error(resolution.message);
     const resolvedLibraryID = resolution.libraryID;
 
-    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
-    if (!collection) {
-        throw new Error(`Collection not found: ${collection_key}`);
-    }
+    // Keep the typed code, but restate the message: the resolver's text is
+    // model-facing recovery guidance, and this one is read on an apply card.
+    const lookup = recheckCollectionIfPresent(collection_key, resolvedLibraryID);
+    if (!lookup) throw new CollectionResolutionError('collection_not_found', `Collection not found: ${collection_key}`);
+    const collection = lookup.collection;
 
     // Snapshot the authoritative pre-apply state RIGHT BEFORE the op.
     const oldName: string = collection.name;
@@ -87,7 +90,7 @@ export async function executeManageCollectionsAction(
         await collection.saveTx();
         logger(`executeManageCollectionsAction: Renamed collection ${resolvedLibraryID}-${collection_key}`, 1);
     } else if (op === 'move') {
-        (collection as any).parentKey = new_parent_key ? new_parent_key : false;
+        (collection as any).parentKey = recheckCollectionParent(collection, new_parent_key) || false;
         await collection.saveTx();
         logger(`executeManageCollectionsAction: Moved collection ${resolvedLibraryID}-${collection_key}`, 1);
     } else if (op === 'delete') {
@@ -102,15 +105,17 @@ export async function executeManageCollectionsAction(
         library_id: resolvedLibraryID,
         library_ref: libraryRefForLibraryID(resolvedLibraryID) ?? undefined,
         action: op,
-        collection_key,
+        collection_key: collection.key,
+        collection_id: lookup.collectionId,
         new_name: new_name ?? null,
-        new_parent_key: new_parent_key ?? null,
+        new_parent_key: new_parent_key ? collection.parentKey || null : null,
+        new_parent_collection_id: new_parent_key && collection.parentKey ? formatCollectionId(resolvedLibraryID, collection.parentKey) : null,
         items_affected: itemsAffected,
         old_name: oldName,
+        old_parent_collection_id: oldParentKey ? formatCollectionId(resolvedLibraryID, oldParentKey) : null,
         old_parent_key: oldParentKey,
     };
 }
-
 
 /**
  * Undo a manage_collections action.
@@ -125,7 +130,8 @@ export async function executeManageCollectionsAction(
 export async function undoManageCollectionsAction(
     action: AgentAction,
 ): Promise<void> {
-    const data = action.proposed_data as ManageCollectionsProposedData;
+    const raw = action.proposed_data;
+    const data = readCollectionActionData(raw) as ManageCollectionsProposedData;
     const { library_id, action: op, collection_key } = data;
     if ((!library_id || typeof library_id !== 'number') && !data.library_ref) {
         logger(`undoManageCollectionsAction: missing target library (${collection_key}); skipping`, 1);
@@ -137,12 +143,13 @@ export async function undoManageCollectionsAction(
         return;
     }
     const resolvedLibraryID = resolution.libraryID;
-    const result = (action.result_data ?? {}) as Partial<ManageCollectionsResultData>;
+    assertLibraryWritable(resolvedLibraryID);
+    const result = readCollectionActionData(action.result_data ?? {}) as Partial<ManageCollectionsResultData>;
     const old_name = result.old_name ?? null;
     const old_parent_key = result.old_parent_key ?? null;
 
     if (op === 'rename') {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
+        const collection = recheckCollectionForUndo(collection_key, resolvedLibraryID)?.collection;
         if (!collection) {
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
             return;
@@ -156,19 +163,19 @@ export async function undoManageCollectionsAction(
     }
 
     if (op === 'move') {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
+        const collection = recheckCollectionForUndo(collection_key, resolvedLibraryID)?.collection;
         if (!collection) {
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
             return;
         }
-        (collection as any).parentKey = old_parent_key ? old_parent_key : false;
+        (collection as any).parentKey = recheckCollectionParent(collection, old_parent_key) || false;
         await collection.saveTx();
         logger(`undoManageCollectionsAction: Restored parent '${old_parent_key ?? 'top-level'}'`, 1);
         return;
     }
 
     if (op === 'delete') {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
+        const collection = recheckCollectionForUndo(collection_key, resolvedLibraryID)?.collection;
         if (!collection) {
             // Trash was emptied (manually or by auto-empty). The collection
             // is gone from the DB and its key is unrecoverable.
@@ -183,6 +190,7 @@ export async function undoManageCollectionsAction(
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} already restored; skipping`, 1);
             return;
         }
+        recheckCollectionParent(collection, collection.parentKey || null);
         (collection as any).deleted = false;
         await collection.saveTx();
         logger(`undoManageCollectionsAction: Restored collection '${collection.name}' from trash`, 1);
@@ -191,7 +199,6 @@ export async function undoManageCollectionsAction(
 
     throw new Error(`Unsupported manage_collections action: ${op}`);
 }
-
 
 /**
  * Undo a batch of manage_collections actions in reverse-chronological order.

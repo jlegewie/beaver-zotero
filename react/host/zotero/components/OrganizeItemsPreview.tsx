@@ -1,3 +1,4 @@
+import { resolveCollection } from '../../../../src/services/collections/collectionIdentity';
 import React, { useEffect, useState } from 'react';
 import { CSSIcon } from '../../../components/icons/icons';
 import type { TagChanges, CollectionChanges, OrganizeItemsResultData } from '@beaver/agent-core/types/agentActions/base';
@@ -81,7 +82,7 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
             if (libraryId) {
                 for (const key of keys) {
                     try {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, key);
+                        const collection = resolveCollection(key, { libraryID: libraryId, access: 'local' }).collection;
                         if (collection) {
                             names[key] = collection.name;
                         }

@@ -5,7 +5,7 @@ import {
 } from '../../../src/utils/pageLabelTranslation';
 import { formatExternalFileCitationHTML } from '../../../src/utils/externalFileCitation';
 import { getPageLabelsForItem } from './itemData';
-import { getPageLocator } from '@beaver/agent-core/citations/citationGrammar';
+import { getPageLocator, isRecordIdRange } from '@beaver/agent-core/citations/citationGrammar';
 import { translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
 import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
@@ -45,8 +45,7 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
             const page = requestedPage
                 ? translatePageNumberToLabel(labels, requestedPage)
                 : formatCitationPages(pages, labels, {
-                    inclusiveRange: requestedRef?.loc?.kind !== 'page'
-                        && /^\d+-\d+$/.test(requestedRef?.loc?.value ?? ''),
+                    inclusiveRange: !!requestedRef?.loc && isRecordIdRange(requestedRef.loc),
                 });
             // The visible locator is a display label; the link navigates by
             // physical page, which is what the cited pages already are.

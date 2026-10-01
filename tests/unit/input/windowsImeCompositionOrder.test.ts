@@ -3,6 +3,7 @@
 import React, { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setHost } from '@beaver/agent-ui/host';
 
 vi.mock('@beaver/agent-ui/composer/SlashCommandHoverCardPlugin', () => ({
     SlashCommandHoverCardPlugin: () => null,
@@ -16,12 +17,20 @@ const deferral = vi.hoisted(() => ({
     register: vi.fn(),
     dispose: vi.fn(),
 }));
+const startCharSuppression = vi.hoisted(() => ({
+    register: vi.fn(),
+    dispose: vi.fn(),
+}));
 
 vi.mock('@beaver/agent-ui/composer/imeComposition', async (importOriginal) => {
     const actual = await importOriginal<
         typeof import('@beaver/agent-ui/composer/imeComposition')
     >();
-    return { ...actual, registerCompositionEndDeferral: deferral.register };
+    return {
+        ...actual,
+        registerCompositionEndDeferral: deferral.register,
+        registerCompositionStartCharSuppression: startCharSuppression.register,
+    };
 });
 
 type SavedDescriptor = {
@@ -58,6 +67,9 @@ describe('windows IME composition-order gate', () => {
         deferral.register.mockReset();
         deferral.dispose.mockReset();
         deferral.register.mockReturnValue(deferral.dispose);
+        startCharSuppression.register.mockReset();
+        startCharSuppression.dispose.mockReset();
+        startCharSuppression.register.mockReturnValue(startCharSuppression.dispose);
         patchProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
         patchProperty(InputEvent.prototype, 'getTargetRanges', () => []);
         patchProperty(Node.prototype, 'getBoundingClientRect', () => new DOMRect());
@@ -77,7 +89,21 @@ describe('windows IME composition-order gate', () => {
             else Reflect.deleteProperty(target, key);
         }
         savedDescriptors = [];
+        setHost({});
     });
+
+    /** Shadows jsdom's user agent with a Gecko one (Zotero's shape). */
+    const patchGeckoUserAgent = () => {
+        patchProperty(
+            globalThis.window.navigator,
+            'userAgent',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Zotero/10.0',
+        );
+    };
+
+    const optInToStartCharSuppression = () => {
+        setHost({ config: { isImeCompositionStartCharSuppressionEnabled: () => true } });
+    };
 
     const mountEditor = async () => {
         const { LexicalEditorInput } = await import(
@@ -120,6 +146,33 @@ describe('windows IME composition-order gate', () => {
 
         expect(deferral.register).toHaveBeenCalledTimes(1);
         expect(deferral.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves start-character suppression off unless the host opts in', async () => {
+        patchPlatform('Win32');
+        patchGeckoUserAgent();
+        await mountEditor();
+
+        expect(startCharSuppression.register).not.toHaveBeenCalled();
+    });
+
+    it('installs opted-in start-character suppression on Windows Gecko and disposes it on unmount', async () => {
+        patchPlatform('Win32');
+        patchGeckoUserAgent();
+        optInToStartCharSuppression();
+        await mountEditor();
+        expect(startCharSuppression.register).toHaveBeenCalledTimes(1);
+
+        await unmount();
+        expect(startCharSuppression.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps opted-in start-character suppression off outside Gecko', async () => {
+        patchPlatform('Win32');
+        optInToStartCharSuppression();
+        await mountEditor();
+
+        expect(startCharSuppression.register).not.toHaveBeenCalled();
     });
 
     it('leaves the workaround off every other platform', async () => {

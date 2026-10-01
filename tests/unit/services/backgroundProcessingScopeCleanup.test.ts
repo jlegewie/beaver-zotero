@@ -63,7 +63,7 @@ describe('background processing scope cleanup', () => {
                 payload: expect.objectContaining({ doc_hash: 'b'.repeat(64), index_account_id: 'account-a', index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' }),
             }),
         ]));
-        expect(invalidateByLibrary).toHaveBeenCalledWith(1);
+        expect(invalidateByLibrary).toHaveBeenCalledWith(1, { retainProtectedOcr: true });
         expect(db.deleteAttachmentProcessingStatesByLibrary).toHaveBeenCalledWith(1);
         expect(db.deleteProcessingIndexState).toHaveBeenCalledWith(1);
     });

@@ -91,11 +91,15 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // duplicates_request and the merge_items action: a build that predates them
 // drops the unknown event and never answers, so the backend withholds the
 // duplicate tools instead of inferring support from a version.
+// two_page_highlights is declaration-only because it gates a relocation shape
+// the client must apply: a build that predates it refuses a two-page highlight
+// destination, so the backend keeps rejecting those unless it is declared.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
     'ask_user_question',
     'portable_ids',
+    'collection_ids',
     'list_items_include_children',
     'create_note_tags_collections',
     'edit_note_batch',
@@ -114,6 +118,7 @@ const DECLARATION_ONLY_FEATURES = [
     'item_links',
     'continuation_new_run',
     'zotero_duplicates',
+    'two_page_highlights',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
@@ -186,7 +191,7 @@ describe('client feature declaration (Lane C)', () => {
         expect(ZOTERO_PLUGIN_CLIENT_TYPE).toBe('zotero-plugin');
     });
 
-    it('feature vocabulary matches the backend FEAT_* string values exactly', () => {
+    it('feature vocabulary includes the negotiated declaration-only contracts', () => {
         expect(Object.values(CLIENT_FEATURES).slice().sort()).toEqual(ALL_BACKEND_FEATURES);
     });
 

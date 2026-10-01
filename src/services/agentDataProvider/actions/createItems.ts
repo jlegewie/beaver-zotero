@@ -1,3 +1,4 @@
+import { resolveCollectionMemberships } from '../../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     FrontendTimingMetadata,
@@ -118,27 +119,8 @@ async function validateCreateItemAction(
         };
     }
 
-    // Validate collections exist (if specified)
-    const resolvedCollections: Array<{ key: string; name: string }> = [];
-    if (collections && collections.length > 0) {
-        for (const collectionKey of collections) {
-            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(targetLibraryId, collectionKey);
-            if (!collection) {
-                return {
-                    type: 'agent_action_validate_response',
-                    request_id: request.request_id,
-                    valid: false,
-                    error: `Collection not found: ${collectionKey}`,
-                    error_code: 'collection_not_found',
-                    preference: 'always_ask',
-                };
-            }
-            resolvedCollections.push({
-                key: collectionKey,
-                name: collection.name,
-            });
-        }
-    }
+    const resolvedCollections = resolveCollectionMemberships(collections ?? [], targetLibraryId)
+        .map(entry => ({ key: entry.key, name: entry.name, collection_id: entry.collectionId }));
 
     // Check which items already exist in the library using batch reference checking
     const batchItems: BatchReferenceCheckItem[] = items.map(item => ({
@@ -183,6 +165,12 @@ async function validateCreateItemAction(
             existing_items: existingItems,
             resolved_collections: resolvedCollections,
             tags: tags || [],
+        },
+        normalized_action_data: {
+            library_id: targetLibraryId, library_ref: libraryRefForLibraryID(targetLibraryId),
+            collections: resolvedCollections.map(entry => entry.key),
+            collection_keys: resolvedCollections.map(entry => entry.key),
+            collection_ids: resolvedCollections.map(entry => entry.collection_id),
         },
         preference,
     };
@@ -296,7 +284,7 @@ async function executeCreateItemAction(
             request_id: request.request_id,
             success: false,
             error: errorMsg,
-            error_code: 'create_failed',
+            error_code: error?.code ?? 'create_failed',
             timing: buildTiming(),
         };
     }

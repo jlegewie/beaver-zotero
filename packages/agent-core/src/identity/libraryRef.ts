@@ -235,3 +235,8 @@ export function writeTargetLibraryError(
         error_code: resolution.code === 'library_unavailable' ? 'library_unavailable' : 'library_not_found',
     };
 }
+
+/** Whether a value is a bare Zotero object key rather than a qualified reference. */
+export function isZoteroKey(value: string): boolean {
+    return /^[A-Z0-9]{8}$/.test(value);
+}

@@ -341,6 +341,13 @@ export interface WSZoteroDocumentRequest extends WSBaseEvent {
     timeout_seconds?: number;
     /** Maximum uncompressed serialized size of payload. */
     max_payload_bytes?: number | null;
+    /**
+     * Extraction schema version to produce for the resolved content kind.
+     * Absent means the current version. A producible version that is not
+     * current is extracted on demand without the document cache (structured
+     * mode only); any other version fails with `unsupported_schema_version`.
+     */
+    schema_version?: string | null;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -941,6 +948,7 @@ export type ZoteroDocumentErrorCode =
     | 'is_linked_url'       // Attachment is a linked URL, not a stored file
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'no_text_layer'       // PDF needs OCR
     | 'invalid_pdf'         // Invalid/corrupted PDF
@@ -959,6 +967,7 @@ export type ZoteroDocumentErrorCode =
     | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
     | 'beaver_table'        // The item is a Beaver table; `error` names its portable id so the backend can redirect to read_table
     | 'schema_version_mismatch'
+    | 'unsupported_schema_version' // Requested `schema_version` is not producible for this content kind and mode
     | 'mode_mismatch';
 
 /**
@@ -2636,6 +2645,10 @@ export interface WSAuthMessage {
      * home both open) and show the user a recognizable label. Absent for
      * non-Zotero clients. */
     zotero_instance?: ZoteroInstanceWire;
+    /** Extraction schema versions this client serves document requests in.
+     * Absent for clients that serve no documents; the backend treats a missing
+     * PDF entry as current "4", producible ["4"]. */
+    extract_schema_versions?: ExtractSchemaVersionsWire;
     /** Provider-mode handshakes only: echo of the `wake_id` from the
      * provider-wake broadcast that triggered this connection. Absent for chat
      * connections and for provider connections opened without a wake. */
@@ -2660,6 +2673,19 @@ export interface WSAuthMessage {
         timed_out?: boolean;
     };
 }
+
+/** Extraction schema versions of one content kind a client can produce. */
+export interface ExtractSchemaVersionDeclaration {
+    /** Version served when a document request names none. */
+    current: string;
+    /** Every version a document request may name, including `current`. */
+    producible: string[];
+}
+
+/** Per-content-kind extraction schema versions, declared at connect. */
+export type ExtractSchemaVersionsWire = Partial<
+    Record<Exclude<ExtractContentKind, 'text'>, ExtractSchemaVersionDeclaration>
+>;
 
 /**
  * Wire shape (snake_case) identifying a Zotero install. `local_user_key` is always
@@ -2713,6 +2739,8 @@ export const CLIENT_FEATURES = {
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
     PORTABLE_IDS: 'portable_ids',
+    /** Scoped collection resolution, stable mutation targets, and portable result readers. */
+    COLLECTION_IDS: 'collection_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */
@@ -2803,6 +2831,13 @@ export const CLIENT_FEATURES = {
      * write them.
      */
     ITEM_LINKS: 'item_links',
+    /**
+     * A PDF highlight covering two consecutive pages is one annotation with
+     * `position.nextPageRects`, and `edit_annotations` can move a highlight to
+     * such a destination. Without it the backend keeps rejecting two-page
+     * relocation targets, which an older client refuses.
+     */
+    TWO_PAGE_HIGHLIGHTS: 'two_page_highlights',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2855,6 +2890,8 @@ export interface CurrentLibrary {
 
 /** Current collection context for application state */
 export interface CurrentCollection {
+    collection_id?: string;
+    parent_collection_id?: string;
     /** Collection key */
     collection_key: string;
     /** Collection name */
@@ -2946,6 +2983,11 @@ export interface ApplicationStateInput {
     indexing_status?: IndexingStatus;
     /** Per-library summary stats (counts) for searchable libraries. */
     libraries?: LibrarySummary[];
+    /**
+     * Locale of the host application's user interface, as a BCP 47 tag
+     * (e.g. 'en-US', 'de', 'zh-CN'). Omitted when the host does not report one.
+     */
+    interface_language?: string;
 }
 
 /** Frontend embedding index status reported with each agent run. */

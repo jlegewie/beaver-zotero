@@ -197,6 +197,25 @@ describe('ProviderConnection', () => {
             expect(auth.client_features).toEqual(['note_support', 'view_page_images']);
             expect(auth.zotero_instance).toEqual({ local_user_key: 'user-key-1', account_name: 'test-account' });
             expect(auth.connect_attempts).toBe(1);
+            expect(auth).not.toHaveProperty('extract_schema_versions');
+        });
+
+        it('declares the extraction schema versions the provider serves documents in', async () => {
+            const extractSchemaVersions = {
+                pdf: { current: '4', producible: ['4'] },
+                epub: { current: '2', producible: ['2'] },
+            };
+            setClientIdentityProvider(() => ({
+                frontendVersion: '0.22.5',
+                clientType: 'zotero-plugin',
+                clientFeatures: [],
+                extractSchemaVersions,
+            }));
+
+            const conn = new ProviderConnection('https://api.example.com', {});
+            const auth = await captureAuthMessage(() => conn.connect());
+
+            expect(auth.extract_schema_versions).toEqual(extractSchemaVersions);
         });
 
         it('re-resolves the identity provider on a second connect attempt', async () => {

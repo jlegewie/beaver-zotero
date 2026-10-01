@@ -668,7 +668,7 @@ function computeMainLabel(
                 return `${baseLabel}: "${truncate(text, 40)}"`;
             }
 
-            const collection = args.collection as string | undefined;
+            const collection = (args.collection_id ?? args.collection) as string | undefined;
             if (collection) {
                 return `${baseLabel}: ${truncate(collection, 40)}`;
             }
@@ -805,7 +805,7 @@ function computeMainLabel(
         case 'list_collections': {
             const libraryParam = args.library as string | number | undefined;
 
-            const parentKey = args.parent_collection as string | undefined;
+            const parentKey = (args.parent_collection_id ?? args.parent_collection) as string | undefined;
             if (parentKey) {
                 if (opts?.enrich?.collectionName) {
                     return `${baseLabel} in "${opts.enrich.collectionName}"`;
@@ -825,7 +825,7 @@ function computeMainLabel(
         case 'list_tags': {
             const libraryParam = args.library as string | number | undefined;
 
-            const collectionKey = args.collection_key as string | undefined;
+            const collectionKey = (args.collection_id ?? args.collection_key) as string | undefined;
             if (collectionKey) {
                 if (opts?.enrich?.collectionName) {
                     return `${baseLabel} in "${opts.enrich.collectionName}"`;
@@ -851,7 +851,7 @@ function computeMainLabel(
         }
 
         case 'manage_collections': {
-            const collection = args.collection as string | undefined;
+            const collection = (args.collection_id ?? args.collection) as string | undefined;
             if (collection) {
                 return `${baseLabel}: "${truncate(collection, 20)}"`;
             }

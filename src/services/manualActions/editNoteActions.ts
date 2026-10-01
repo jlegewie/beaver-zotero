@@ -633,7 +633,10 @@ export async function executeEditNoteAction(
     //     citations keep a page locator instead of dropping it on save.
     const structuralLocators = await preloadStructuralLocatorPages(new_string);
     const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    const locatorWarning = buildUnresolvedLocatorWarning(
+        structuralLocators.unresolved,
+        structuralLocators.unavailable,
+    );
 
     // ── rewrite mode: replace entire note body ──
     if (operation === 'rewrite') {
@@ -1131,8 +1134,9 @@ export async function undoEditNoteAction(
         let undoOldHtml = expandedOld!;
         let undoNewHtml = expandedNew!;
 
-        let beforeCtx = resultData?.undo_before_context;
-        let afterCtx = resultData?.undo_after_context;
+        // Absent fields arrive from the backend as null.
+        let beforeCtx = resultData?.undo_before_context ?? undefined;
+        let afterCtx = resultData?.undo_after_context ?? undefined;
 
         // PM may have decoded HTML entities (e.g. &#x27; → ') in the note
         // since the undo data was stored. If the stored new_html isn't found,
@@ -1207,8 +1211,8 @@ export async function undoEditNoteAction(
             strippedHtml,
             undoOldHtml: expandedOld!,
             undoNewHtml: isDeletion ? '' : expandedNew!,
-            beforeCtx: resultData?.undo_before_context,
-            afterCtx: resultData?.undo_after_context,
+            beforeCtx: resultData?.undo_before_context ?? undefined,
+            afterCtx: resultData?.undo_after_context ?? undefined,
             libraryId: library_id,
             logPrefix: 'undoEditNoteAction',
             logLabel: `note ${noteId}`,
@@ -1289,7 +1293,10 @@ async function executeBatchSingleRewrite(
     const newPageLabels = await preloadPageLabelsForNewCitations(edit.new_string);
     const structuralLocators = await preloadStructuralLocatorPages(edit.new_string);
     const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    const locatorWarning = buildUnresolvedLocatorWarning(
+        structuralLocators.unresolved,
+        structuralLocators.unavailable,
+    );
 
     let expandedNew: string;
     try {
@@ -1596,9 +1603,12 @@ function applyBatchUndoRecord(
         return undoOldHtml;
     }
 
+    // Undo records round-trip through the backend, which sends absent optional
+    // fields as null; treat those like missing fields.
+    const occCtxs = record.undo_occurrence_contexts ?? undefined;
+
     // ── str_replace_all: per-occurrence context replay ──
-    if (record.undo_occurrence_contexts !== undefined) {
-        const occCtxs = record.undo_occurrence_contexts;
+    if (occCtxs !== undefined) {
         if (occCtxs.length === 0) {
             throw new Error(`Cannot undo edit ${record.index}: no occurrence context data recorded for a str_replace_all edit.`);
         }
@@ -1643,8 +1653,8 @@ function applyBatchUndoRecord(
         strippedHtml,
         undoOldHtml,
         undoNewHtml,
-        beforeCtx: record.undo_before_context,
-        afterCtx: record.undo_after_context,
+        beforeCtx: record.undo_before_context ?? undefined,
+        afterCtx: record.undo_after_context ?? undefined,
         libraryId,
         logPrefix: 'undoEditNoteBatchAction',
         logLabel: `edit ${record.index}`,

@@ -102,7 +102,7 @@ describe("createZoteroItem import target", () => {
     { tab: "reader", libraryId: 8, explicitCollection: 43, expectedCollection: 43 },
   ])("targets $tab imports in library $libraryId with explicit collection $explicitCollection", async ({ tab, libraryId, explicitCollection, expectedCollection }) => {
     const addItem = vi.fn();
-    const collection = { id: 42, libraryID: 7, addItem };
+    const collection = { id: 42, libraryID: 7, key: 'COLLKEY1', name: 'Inbox', addItem };
     const createdItem = {
       id: 99,
       key: "NEWITEM1",
@@ -130,8 +130,9 @@ describe("createZoteroItem import target", () => {
     (globalThis as any).Zotero.ItemTypes.getName = vi.fn(() => "journalArticle");
     (globalThis as any).Zotero.ItemFields.isValidForType = vi.fn(() => true);
     (globalThis as any).Zotero.Item = vi.fn(() => createdItem);
+    (globalThis as any).Zotero.Groups = { getGroupIDFromLibraryID: (id: number) => id + 100 };
     (globalThis as any).Zotero.Collections = {
-      get: vi.fn((id: number) => id === 43 ? { id: 43, libraryID: libraryId, addItem } : collection),
+      get: vi.fn((id: number) => id === 43 ? { id: 43, libraryID: libraryId, key: 'COLLKEY2', name: 'Inbox', addItem } : collection),
     };
     (globalThis as any).Zotero.DB = {
       executeTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),

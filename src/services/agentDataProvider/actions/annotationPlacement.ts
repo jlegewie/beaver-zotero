@@ -8,6 +8,8 @@ import {
     buildHighlightPlacement,
     buildNotePlacement,
     getPageGeometryForAttachment,
+    HighlightPageSpanError,
+    highlightPageSpan,
     prepareEpubAnnotationTarget,
     prepareSnapshotAnnotationTarget,
     type AnnotationPlacement,
@@ -56,7 +58,7 @@ function assertSameAttachment(
     }
 }
 
-function toBoundingBoxes(location: RelocationPageLocation): BoundingBox[] {
+function toBoundingBoxes(location: Pick<RelocationPageLocation, "boxes"> | { boxes?: BoundingBox[] }): BoundingBox[] {
     return (location.boxes ?? []) as BoundingBox[];
 }
 
@@ -85,13 +87,7 @@ export async function prepareRelocation(
 
     if (contentKind === "pdf") {
         if (annotationType === "highlight") {
-            if ((relocation.page_locations?.length ?? 0) > 1) {
-                throw new RelocationMismatchError(
-                    "cannot be moved to a destination that spans multiple pages",
-                );
-            }
-            const location = relocation.page_locations?.[0];
-            if (!location) {
+            if (!relocation.page_locations?.length) {
                 // The only destination that resolves for a note but not a
                 // highlight is a page locator, so name that rather than the
                 // absent field.
@@ -99,29 +95,55 @@ export async function prepareRelocation(
                     "cannot be moved to a whole page; a highlight needs a locator naming text",
                 );
             }
+            let span;
+            try {
+                span = highlightPageSpan(relocation.page_locations);
+            } catch (error) {
+                if (error instanceof HighlightPageSpanError) {
+                    throw new RelocationMismatchError(
+                        "cannot be moved there; a highlight covers one page or two consecutive pages",
+                    );
+                }
+                throw error;
+            }
             if (!relocation.text?.trim()) {
                 throw new RelocationMismatchError(
                     "cannot be moved there; the destination has no text to highlight",
                 );
             }
+            const { first, next } = span;
             const geometry = await getPageGeometryForAttachment(
                 attachment,
-                location.page_idx,
+                first.page_idx,
             );
+            const nextPageGeometry = next
+                ? await getPageGeometryForAttachment(attachment, next.page_idx)
+                : null;
+            // The placement is built from scratch, so a one-page destination
+            // drops any `nextPageRects` the annotation had before the move.
             return buildHighlightPlacement(
                 {
-                    pageIndex: location.page_idx,
-                    boxes: toBoundingBoxes(location),
+                    pageIndex: first.page_idx,
+                    boxes: toBoundingBoxes(first),
+                    nextPageBoxes: next ? toBoundingBoxes(next) : null,
                     text: relocation.text,
-                    pageLabel: location.page_label ?? relocation.page_label,
+                    pageLabel: first.page_label ?? relocation.page_label,
                     readingOrderOffset:
-                        location.reading_order_offset ??
+                        first.reading_order_offset ??
                         relocation.reading_order_offset,
                 },
                 geometry,
+                nextPageGeometry,
             );
         }
         if (!relocation.note_position) {
+            // A passage continuing on the next page resolves for highlights
+            // only, so name that rather than the absent note position.
+            if (/[,;]/.test(relocation.loc_raw ?? "")) {
+                throw new RelocationMismatchError(
+                    "cannot be moved there; a sticky note takes a single locator, and a comma-separated passage is for highlights only",
+                );
+            }
             throw new RelocationMismatchError(
                 "cannot be moved there; the destination has no position for a note",
             );

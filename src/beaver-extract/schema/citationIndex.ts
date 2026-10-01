@@ -56,12 +56,27 @@ export function buildCitationIndex(pages: StructuredPage[]): CitationIndex {
     return index;
 }
 
+const citationIndexes = new WeakMap<StructuredDocument, CitationIndex>();
+
+/**
+ * Citation index for a document. The index is derived data and is not stored
+ * in the document; it is built on first use and memoized per document object.
+ */
+export function getCitationIndex(document: StructuredDocument): CitationIndex {
+    let index = citationIndexes.get(document);
+    if (!index) {
+        index = buildCitationIndex(document.pages);
+        citationIndexes.set(document, index);
+    }
+    return index;
+}
+
 /** Resolve a citable id to its page, owning item, optional sentence, and bboxes. */
 export function resolveCitation(
     document: StructuredDocument,
     id: string,
 ): ResolvedCitation | undefined {
-    const entry = document.citationIndex[id];
+    const entry = getCitationIndex(document)[id];
     if (!entry) return undefined;
     const page = document.pages.find((p) => p.index === entry.pageIndex);
     if (!page) return undefined;

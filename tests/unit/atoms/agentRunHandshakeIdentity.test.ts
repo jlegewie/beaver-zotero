@@ -11,6 +11,7 @@ const FIXTURE_IDENTITY = {
         local_user_key: 'test-local-key',
         index_scope_refs: [{ library_id: 1 }],
     },
+    extractSchemaVersions: { pdf: { current: '4', producible: ['4'] } },
 };
 const { connectMock, resolveClientIdentityMock } = vi.hoisted(() => ({
     connectMock: vi.fn().mockResolvedValue(undefined),
@@ -78,5 +79,7 @@ describe('sendWSMessageAtom connect() identity', () => {
         // Same reference as resolveClientIdentity() returned — no defensive
         // copy needed since the seam already builds a fresh object per call.
         expect(zoteroInstance).toBe(FIXTURE_IDENTITY.zoteroInstance);
+        // Trails the connect-recovery telemetry argument.
+        expect(connectMock.mock.calls[0][7]).toBe(FIXTURE_IDENTITY.extractSchemaVersions);
     });
 });

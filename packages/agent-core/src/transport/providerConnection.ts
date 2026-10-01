@@ -190,6 +190,9 @@ export class ProviderConnection {
                 client_type: identity.clientType,
                 client_features: identity.clientFeatures,
                 zotero_instance: identity.zoteroInstance,
+                ...(identity.extractSchemaVersions
+                    ? { extract_schema_versions: identity.extractSchemaVersions }
+                    : {}),
                 connect_attempts: 1,
                 ...(options.wakeId ? { wake_id: options.wakeId } : {}),
                 ...(options.wakeInstanceId ? { wake_instance_id: options.wakeInstanceId } : {}),

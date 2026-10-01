@@ -67,6 +67,8 @@ export interface ExtractInput {
     analysisWindow?: number;
     /** Attach the opt-in `diagnostics` block */
     includeDiagnostics?: boolean;
+    /** PDF schema version to produce (its extraction preset); default current. */
+    schemaVersion?: string;
 }
 
 export interface AnalyzeLayoutInput {

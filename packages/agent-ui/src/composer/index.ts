@@ -34,7 +34,13 @@ export { SlashCommandsPlugin } from './SlashCommandsPlugin';
 export { SlashCommandHoverCardPlugin } from './SlashCommandHoverCardPlugin';
 export type { SlashCommandHoverCardPluginProps } from './SlashCommandHoverCardPlugin';
 
-export { useAddSourcesMenu, matchSourcesTrigger, queryForOpenTrigger } from './useAddSourcesMenu';
+export {
+    useAddSourcesMenu,
+    matchSourcesTrigger,
+    queryForOpenTrigger,
+    matchMenuTrigger,
+    queryForMenuTrigger,
+} from './useAddSourcesMenu';
 export type {
     AddSourcesMenuHandle,
     AddSourcesQuerySource,

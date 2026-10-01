@@ -8,18 +8,26 @@ import type {
 import { resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
 import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
 import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
-import { expectedExtractionSchemaVersion } from '../documentExtraction/shared/extractionSchemaVersions';
+import {
+    expectedExtractionSchemaVersion,
+    isCurrentExtractionSchemaVersion,
+} from '../documentExtraction/shared/extractionSchemaVersions';
 import {
     type IndexDocumentRef,
+    type IndexRequirements,
     type IndexUpsertRequest,
+    type IndexUpsertResponse,
     type SearchIndexApiClient,
     searchIndexApiClient,
 } from '../searchIndex/searchIndexApiClient';
 import {
     BACKGROUND_EXTRACT_PRIORITY,
+    BACKGROUND_UPSERT_PRIORITY,
 } from '../backgroundProcessing/constants';
 import {
+    backgroundProcessingEnabled,
     buildBackgroundExtractPayload,
+    buildIndexJobPayload,
     buildUntagJobInput,
     isBackgroundProcessingLibraryEnabled,
 } from '../backgroundProcessing/utils';
@@ -46,21 +54,94 @@ const TERMINAL_CODES = new Set([
     'payload_too_large',
 ]);
 
+/**
+ * After this many consecutive uploads that needed their payload, the lane
+ * sends payloads without the hash-only probe first. A response showing the
+ * content was already indexed turns probing back on.
+ */
+const PROBE_SKIP_AFTER_PAYLOAD_UPLOADS = 3;
+
+/** Wait before retrying a job whose content another local job is indexing. */
+const DOCUMENT_BUSY_RETRY_MS = 2_000;
+
+/**
+ * Longest wait on a busy document claim. The holder is almost always a live
+ * request that finishes within seconds; the remaining lease the backend may
+ * report only bounds recovery from a holder that died.
+ */
+const CLAIM_BUSY_MAX_RETRY_MS = 15_000;
+
+/**
+ * Probe hints are consumed by the hash's next upsert. Hints whose upsert never
+ * runs (cancelled by an exclusion or account change) are dropped oldest first.
+ */
+const PROBE_FIRST_HASH_LIMIT = 1_000;
+
+/** Wait after the server reports a cleanup ref failed on its side. */
+const UNTAG_FAILED_RETRY_MS = 5_000;
+
+export interface FulltextUpsertExecutorOptions {
+    /** Called with each requirements response an upsert reads. */
+    onRequirements?: (requirements: IndexRequirements) => void;
+}
+
 /** Authenticated cloud-index work owned by the background runtime. */
 export class FulltextUpsertExecutor implements JobExecutor {
     // Upsert and cleanup use separate lanes but mutate the same membership.
     private static activeAttachments = new Set<string>();
+    /**
+     * Document hashes with a request in flight. Attachments with identical
+     * content share one remote document and contend for its claim, so a
+     * second job for the hash waits locally instead of the server.
+     */
+    private static activeHashes = new Set<string>();
+    /**
+     * Hashes whose next upsert probes before uploading: content another job
+     * was indexing is usually already stored, which the probe tags cheaply.
+     */
+    private static probeFirstHashes = new Set<string>();
+
+    private static markProbeFirst(hash: string): void {
+        const hashes = FulltextUpsertExecutor.probeFirstHashes;
+        hashes.delete(hash);
+        hashes.add(hash);
+        if (hashes.size > PROBE_FIRST_HASH_LIMIT) {
+            hashes.delete(hashes.values().next().value as string);
+        }
+    }
+
     readonly jobType: Extract<BackgroundJobType, 'fulltext_upsert' | 'fulltext_untag'>;
 
     private disposed = false;
+    /** Consecutive uploads the hash-only probe could not complete. */
+    private payloadUploadStreak = 0;
 
     dispose(): void { this.disposed = true; }
 
     constructor(
         private readonly api: SearchIndexApiClient = searchIndexApiClient,
         jobType: Extract<BackgroundJobType, 'fulltext_upsert' | 'fulltext_untag'> = 'fulltext_upsert',
+        private readonly options: FulltextUpsertExecutorOptions = {},
     ) {
         this.jobType = jobType;
+    }
+
+    /**
+     * Record whether an upload needed its payload. `null` leaves the streak
+     * unchanged when the response cannot tell.
+     */
+    private recordPayloadNeed(needed: boolean | null): void {
+        if (needed === null) return;
+        this.payloadUploadStreak = needed ? this.payloadUploadStreak + 1 : 0;
+    }
+
+    /**
+     * Whether a payload upload found content the index already had at the
+     * current generation, which a hash-only probe would have tagged.
+     */
+    private static payloadWasNeeded(response: IndexUpsertResponse): boolean | null {
+        if (response.status !== 'completed' || response.chunks_total === 0) return null;
+        return response.chunks_upserted > 0 || response.embed_tokens > 0;
     }
 
     async execute(
@@ -71,11 +152,21 @@ export class FulltextUpsertExecutor implements JobExecutor {
         if (FulltextUpsertExecutor.activeAttachments.has(key)) {
             return { kind: 'retry', error: 'index_membership_busy', countsAsAttempt: false, retryAfterMs: 1_000 };
         }
+        const hash = record.payload?.doc_hash;
+        if (hash && FulltextUpsertExecutor.activeHashes.has(hash)) {
+            if (record.jobType === 'fulltext_upsert') FulltextUpsertExecutor.markProbeFirst(hash);
+            return {
+                kind: 'retry', error: 'index_document_busy', countsAsAttempt: false,
+                retryAfterMs: DOCUMENT_BUSY_RETRY_MS,
+            };
+        }
         FulltextUpsertExecutor.activeAttachments.add(key);
+        if (hash) FulltextUpsertExecutor.activeHashes.add(hash);
         try {
             return await this.executeExclusive(record, ctx);
         } finally {
             FulltextUpsertExecutor.activeAttachments.delete(key);
+            if (hash) FulltextUpsertExecutor.activeHashes.delete(hash);
         }
     }
 
@@ -111,6 +202,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
+        const startedAt = Date.now();
         const accountId = Zotero.Beaver?.account?.getSnapshot().session?.user.id;
         const accountIsCurrent = captureAccountGuard(accountId);
         const accessChanged = () => this.disposed || ctx.externalAbortSignal.aborted
@@ -158,19 +250,25 @@ export class FulltextUpsertExecutor implements JobExecutor {
         };
         const initialEligibility = await checkEligibility();
         if (initialEligibility) return initialEligibility;
+        // A row extracted under an earlier schema is never indexed; the
+        // reconciler re-extracts it, which queues a fresh upsert.
+        if (!isCurrentExtractionSchemaVersion(row.contentKind, row.extractSchemaVersion)) {
+            return { kind: 'complete', reason: 'extract_schema_changed' };
+        }
         const scopeRef = getIndexScopeRef(record.libraryId);
         if (!scopeRef) return { kind: 'complete', reason: 'invalid_scope_ref' };
         const { localUserKey } = getZoteroUserIdentifier();
         const remoteIdentity = accountId ? { index_account_id: accountId, index_scope_ref: scopeRef, index_local_id: localUserKey } : undefined;
+        const timings = { probeMs: 0, readMs: 0, hashMs: 0, sendMs: 0 };
         let requirements;
         try {
             requirements = await this.api.requirements();
         } catch (error) {
             return this.mapApiError(record, row, error, ctx, accessChanged);
         }
+        this.options.onRequirements?.(requirements);
         if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-        const schemaVersion = row.extractSchemaVersion
-            ?? expectedExtractionSchemaVersion(row.contentKind);
+        const schemaVersion = expectedExtractionSchemaVersion(row.contentKind);
         if (!schemaVersion || !requirements.extract_schema_versions[row.contentKind]?.includes(schemaVersion)) {
             return this.terminal(record, row, 'unsupported_schema_version', undefined, ctx, accessChanged);
         }
@@ -192,15 +290,12 @@ export class FulltextUpsertExecutor implements JobExecutor {
             ...(row.fileHash ? { file_hash: row.fileHash } : {}),
         };
 
-        const upsertWithPayload = async (): Promise<
-            Awaited<ReturnType<SearchIndexApiClient['upsertPayload']>> | JobOutcome
-        > => {
-            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-            const eligibility = await checkEligibility();
-            if (eligibility) return eligibility;
-            const payload = await this.readCachedPayload(record, row);
-            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-            if (!payload) {
+        const enqueueCacheRecovery = async (): Promise<JobOutcome> => {
+            const armed = accountId
+                ? await ctx.db.beginFulltextCacheRecovery(
+                    record, accountId, row.structuredDocumentHash, row.extractionSource)
+                : false;
+            try {
                 await ctx.enqueue({
                     jobType: 'document_extract',
                     libraryId: record.libraryId,
@@ -213,43 +308,105 @@ export class FulltextUpsertExecutor implements JobExecutor {
                     payload: buildBackgroundExtractPayload(row.contentKind),
                     now: Date.now(),
                 });
-                return { kind: 'defer', reason: 'payload_cache_miss' };
+            } catch (error) {
+                if (armed) await ctx.db.cancelFulltextCacheRecovery(record.id, record.availableAt);
+                throw error;
             }
+            return { kind: 'defer', reason: 'payload_cache_miss' };
+        };
+
+        /**
+         * Upload the cached payload. On a cache miss, `recover` re-extracts the
+         * document and `probe` returns null so the caller can try the
+         * hash-only request, which needs no local payload.
+         */
+        const upsertWithPayload = async (
+            onCacheMiss: 'recover' | 'probe' = 'recover',
+        ): Promise<IndexUpsertResponse | JobOutcome | null> => {
+            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+            const eligibility = await checkEligibility();
+            if (eligibility) return eligibility;
+            let phaseStart = Date.now();
+            const cached = await this.readCachedPayload(record, row);
+            timings.readMs += Date.now() - phaseStart;
+            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+            if (!cached) {
+                return onCacheMiss === 'probe' ? null : enqueueCacheRecovery();
+            }
+            const { payload, filePath } = cached;
+            phaseStart = Date.now();
             const liveHash = await computeStructuredDocumentHash(row.contentKind, payload);
+            timings.hashMs += Date.now() - phaseStart;
             if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
             if (liveHash !== row.structuredDocumentHash) {
-                await ctx.db.resetAttachmentExtraction(
-                    record.libraryId,
-                    record.zoteroKey,
-                    'cached_payload_hash_mismatch',
+                const discarded = await Zotero.Beaver?.documentCache?.discardRejectedStructuredPayload(
+                    { libraryId: row.libraryId, zoteroKey: row.zoteroKey },
+                    row.contentKind,
+                    filePath,
+                    liveHash,
                 );
-                return { kind: 'complete', reason: 'stale_payload' };
+                if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                if (discarded === 'protected') {
+                    return this.terminal(record, row, 'cached_payload_hash_mismatch',
+                        'Protected OCR payload differs from recorded document hash', ctx, accessChanged);
+                }
+                if (discarded !== 'discarded') {
+                    return { kind: 'retry', error: 'cached_payload_changed', countsAsAttempt: false,
+                        retryAfterMs: 1_000 };
+                }
+                return enqueueCacheRecovery();
             }
             try {
                 if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
                 const eligibility = await checkEligibility();
                 if (eligibility) return eligibility;
-                return await this.api.upsertPayload({ ...baseRequest, payload });
+                phaseStart = Date.now();
+                const response = await this.api.upsertPayload({ ...baseRequest, payload });
+                timings.sendMs += Date.now() - phaseStart;
+                this.recordPayloadNeed(FulltextUpsertExecutor.payloadWasNeeded(response));
+                return response;
             } catch (payloadError) {
                 return this.mapApiError(record, row, payloadError, ctx, accessChanged);
             }
         };
 
-        let response;
-        try {
-            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-            const eligibility = await checkEligibility();
-            if (eligibility) return eligibility;
-            response = await this.api.upsertHash(baseRequest);
-        } catch (error) {
-            if (!(isApiError(error))
-                || error.status !== 409
-                || error.code !== 'payload_required') {
-                return this.mapApiError(record, row, error, ctx, accessChanged);
+        // Recovery mode never returns null; the fallback only narrows the type.
+        const uploadPayload = async (): Promise<IndexUpsertResponse | JobOutcome> =>
+            await upsertWithPayload('recover') ?? enqueueCacheRecovery();
+
+        let response: IndexUpsertResponse | undefined;
+        let probed = false;
+        // During a bulk upload of new content nearly every probe answers
+        // `payload_required`; skip that round trip until one upload shows the
+        // index already had the content.
+        const probeFirst = FulltextUpsertExecutor.probeFirstHashes.delete(row.structuredDocumentHash);
+        if (!probeFirst && this.payloadUploadStreak >= PROBE_SKIP_AFTER_PAYLOAD_UPLOADS) {
+            const result = await upsertWithPayload('probe');
+            if (result && 'kind' in result) return result;
+            if (result) response = result;
+        }
+        if (!response) {
+            probed = true;
+            try {
+                if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                const eligibility = await checkEligibility();
+                if (eligibility) return eligibility;
+                const probeStart = Date.now();
+                try {
+                    response = await this.api.upsertHash(baseRequest);
+                } finally {
+                    timings.probeMs += Date.now() - probeStart;
+                }
+            } catch (error) {
+                if (!(isApiError(error))
+                    || error.status !== 409
+                    || error.code !== 'payload_required') {
+                    return this.mapApiError(record, row, error, ctx, accessChanged);
+                }
+                const result = await uploadPayload();
+                if ('kind' in result) return result;
+                response = result;
             }
-            const result = await upsertWithPayload();
-            if ('kind' in result) return result;
-            response = result;
         }
 
         const completedEligibility = await checkEligibility();
@@ -265,9 +422,11 @@ export class FulltextUpsertExecutor implements JobExecutor {
                 || response.extract_schema_version !== schemaVersion
             )
         ) {
-            const result = await upsertWithPayload();
+            const result = await uploadPayload();
             if ('kind' in result) return result;
             response = result;
+        } else if (response.status === 'tagged') {
+            this.recordPayloadNeed(false);
         }
 
         if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
@@ -296,11 +455,18 @@ export class FulltextUpsertExecutor implements JobExecutor {
             expectedUpsertStatus: row.upsertStatus,
             expectedUpsertIndexVersion: row.upsertIndexVersion,
             expectedExtractStatus: row.extractStatus,
+            supersedeIndexCleanup: true,
         });
         if (!applied) {
             await ctx.enqueue(buildUntagJobInput({ ...row, upsertRemoteIdentity: remoteIdentity },
                 Date.now(), { reason: 'stale_completion' }));
         }
+        logger(
+            `FulltextUpsertExecutor: ${row.libraryId}-${row.zoteroKey} ${response.status}`
+            + ` probe=${probed ? `${timings.probeMs}ms` : 'skipped'} read=${timings.readMs}ms`
+            + ` hash=${timings.hashMs}ms send=${timings.sendMs}ms total=${Date.now() - startedAt}ms`,
+            3,
+        );
         return {
             kind: 'complete',
             reason: applied ? `index_${response.status}` : 'stale_completion_ignored',
@@ -326,18 +492,61 @@ export class FulltextUpsertExecutor implements JobExecutor {
         if (isBackgroundProcessingLibraryEnabled(record.libraryId)) {
             const current = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
             if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-            if (isBackgroundProcessingLibraryEnabled(record.libraryId) && current?.structuredDocumentHash === hash
-                && current.extractStatus === 'done'
-                && current.upsertRemoteIdentity?.index_account_id === accountId
-                && current.upsertRemoteIdentity?.index_scope_ref === scopeRef
-                && current.upsertRemoteIdentity?.index_local_id === record.payload?.index_local_id) {
-                // Ownership is recorded before upload. Its response can still be
-                // pending even after the remote membership has been restored.
-                if (current.upsertStatus !== 'done') {
-                    return { kind: 'defer', reason: 'index_acquisition_pending' };
+            const unchanged = current?.structuredDocumentHash === hash && current.extractStatus === 'done'
+                ? current : null;
+            const owner = unchanged?.upsertRemoteIdentity;
+            if (unchanged && owner && isBackgroundProcessingLibraryEnabled(record.libraryId)
+                && owner.index_scope_ref === scopeRef
+                && owner.index_local_id === record.payload?.index_local_id) {
+                if (owner.index_account_id === accountId) {
+                    // Ownership is recorded before upload. Its response can still be
+                    // pending even after the remote membership has been restored.
+                    if (unchanged.upsertStatus === null) {
+                        return { kind: 'defer', reason: 'index_acquisition_pending' };
+                    }
+                    // A failed upload still leaves the ledger tracking this
+                    // membership; retiring the ledger later re-queues its cleanup.
+                    await ctx.db.acknowledgeIndexCleanup(record);
+                    return { kind: 'complete', reason: 'cleanup_superseded' };
                 }
-                await ctx.db.acknowledgeIndexCleanup(record);
-                return { kind: 'complete', reason: 'cleanup_superseded' };
+                // Only cleanups with a complete identity have a durable intent to
+                // hand over, and only an entitled lane can recreate that identity.
+                if (record.payload?.index_scope_ref && this.canReacquire(record, scopeRef)) {
+                    // Another account took over this unchanged document while this
+                    // account was signed out. Removing this account's membership
+                    // first would delete remote rows that the returning account
+                    // still needs and force a fresh embedding. Reacquire it with a
+                    // hash-only upsert instead. Its completion retires this cleanup;
+                    // until then the durable intent stays in the outbox and is
+                    // re-evaluated on the lane's next cleanup restore.
+                    const pending = await ctx.db.hasPendingFulltextUpsert(record.libraryId, record.zoteroKey);
+                    if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                    // The other account's upload may have failed, which is no reason
+                    // to drop this account's membership. A failure after this
+                    // account's own attempt is: it failed before ownership moved,
+                    // and retrying it would only repeat the failure.
+                    const attemptFailed = record.payload.index_reacquire_attempted === true
+                        && unchanged.upsertStatus === 'failed' && !pending;
+                    if (!attemptFailed) {
+                        if (!pending) {
+                            await ctx.enqueue({
+                                jobType: 'fulltext_upsert',
+                                libraryId: record.libraryId,
+                                itemId: unchanged.itemId ?? record.itemId,
+                                zoteroKey: record.zoteroKey,
+                                contentKind: unchanged.contentKind,
+                                payloadKind: 'structured',
+                                priority: BACKGROUND_UPSERT_PRIORITY,
+                                payload: buildIndexJobPayload(unchanged.contentKind, { docHash: hash }),
+                                now: Date.now(),
+                            });
+                            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                            await ctx.db.markIndexCleanupReacquireAttempted(record);
+                        }
+                        if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                        return { kind: 'complete', reason: 'cleanup_reacquiring' };
+                    }
+                }
             }
         }
         const outcome = await this.untagOne({
@@ -352,20 +561,38 @@ export class FulltextUpsertExecutor implements JobExecutor {
         return outcome;
     }
 
+    /**
+     * True when this account's upsert lane would recreate exactly the cleanup's
+     * remote identity, so a later pass can confirm the cleanup as superseded.
+     */
+    private canReacquire(record: BackgroundJobRecord, scopeRef: string): boolean {
+        return Zotero.Beaver?.hasSearchIndexAccess === true
+            && backgroundProcessingEnabled()
+            && scopeRef === getIndexScopeRef(record.libraryId)
+            && record.payload?.index_local_id === getZoteroUserIdentifier().localUserKey;
+    }
+
     private async untagOne(ref: IndexDocumentRef, storedLocalId: string | undefined, accessChanged: () => boolean): Promise<JobOutcome> {
         const { localUserKey } = getZoteroUserIdentifier();
         try {
             const response = await this.api.untag(storedLocalId ?? localUserKey, [ref]);
             const result = response.results[0];
             if (!result || result.outcome === 'failed') {
-                return { kind: 'retry', error: 'index_untag_failed' };
+                // The server reports a ref it could not process (a database or
+                // connection failure) as `failed`; nothing is wrong with the ref.
+                return this.remoteRetry('index_untag_failed', UNTAG_FAILED_RETRY_MS);
             }
             if (result.outcome === 'busy') {
+                const retryAfterMs = Math.max(1, result.retry_after_seconds ?? 1) * 1_000;
                 return {
                     kind: 'retry',
                     error: 'index_untag_busy',
                     countsAsAttempt: false,
-                    retryAfterMs: Math.max(1, result.retry_after_seconds ?? 1) * 1_000,
+                    retryAfterMs,
+                    // A document claim frees within seconds. A longer wait means the
+                    // account takes no cleanup claims right now, which holds for
+                    // every queued cleanup, so the whole lane waits with this one.
+                    ...(retryAfterMs > CLAIM_BUSY_MAX_RETRY_MS ? { laneCooldownMs: retryAfterMs } : {}),
                 };
             }
             return { kind: 'complete', reason: 'index_untagged' };
@@ -377,7 +604,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
     private async readCachedPayload(
         record: BackgroundJobRecord,
         row: AttachmentProcessingStateRecord,
-    ): Promise<DocumentExtractResult | null> {
+    ): Promise<{ payload: DocumentExtractResult; filePath: string } | null> {
         let item: Zotero.Item | null = null;
         try {
             item = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -395,22 +622,25 @@ export class FulltextUpsertExecutor implements JobExecutor {
         const cache = Zotero.Beaver?.documentCache;
         if (!cache) return null;
         if (row.contentKind === 'pdf') {
-            return await cache.getResult(
+            const payload = await cache.getResult(
                 { libraryId: row.libraryId, zoteroKey: row.zoteroKey },
                 'structured',
                 source.source.filePath,
             ) as DocumentExtractResult | null;
+            return payload ? { payload, filePath: source.source.filePath } : null;
         }
         if (row.contentKind === 'epub') {
-            return await cache.getEpubResult(
+            const payload = await cache.getEpubResult(
                 { libraryId: row.libraryId, zoteroKey: row.zoteroKey },
                 source.source.filePath,
             );
+            return payload ? { payload, filePath: source.source.filePath } : null;
         }
-        return await cache.getSnapshotResult(
+        const payload = await cache.getSnapshotResult(
             { libraryId: row.libraryId, zoteroKey: row.zoteroKey },
             source.source.filePath,
         );
+        return payload ? { payload, filePath: source.source.filePath } : null;
     }
 
     private async mapApiError(
@@ -428,7 +658,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
         // Session recovery is asynchronous; keep this claim parked while the
         // account owner refreshes instead of immediately reclaiming it.
         if (isSessionExpiredError(error)) return { kind: 'defer', reason: 'session_expired' };
-        if (record && isServerError(error)) {
+        if (isServerError(error)) {
             return this.remoteRetry(error.message);
         }
         if (!(isApiError(error))) {
@@ -445,6 +675,18 @@ export class FulltextUpsertExecutor implements JobExecutor {
             Zotero.Beaver.account?.revokeSearchIndexAccess();
             return { kind: 'release', reason: 'not_entitled' };
         }
+        if (record && code === 'library_excluded') {
+            // The account excluded this library on another device. Refreshing the
+            // profile applies the exclusion here, which purges the library's
+            // processing state; the claim-time gate then retires this job. The
+            // retry covers the reverse case, a re-inclusion the server has not
+            // seen yet.
+            void Zotero.Beaver?.account?.refresh(true);
+            return {
+                kind: 'retry', error: `${code}: ${error.message}`, reason: code,
+                countsAsAttempt: false, retryAfterMs: 60_000,
+            };
+        }
         if (TERMINAL_CODES.has(code) || error.status === 400 || error.status === 413) {
             if (record && row) {
                 return this.terminal(record, row, code, error.message, ctx, accessChanged);
@@ -455,11 +697,18 @@ export class FulltextUpsertExecutor implements JobExecutor {
             ? Math.max(1, error.retryAfterSeconds!) * 1_000 : undefined;
         const message = `${code}: ${error.message}`;
         if (code === 'claim_busy' || code === 'lease_lost' || code === 'index_untag_busy') {
-            return { kind: 'retry', error: message, countsAsAttempt: false, retryAfterMs: retryAfterMs ?? 5_000 };
+            if (code === 'claim_busy' && row?.structuredDocumentHash) {
+                // Another writer holds this content, so it is likely indexed by the retry.
+                FulltextUpsertExecutor.markProbeFirst(row.structuredDocumentHash);
+            }
+            return {
+                kind: 'retry', error: message, countsAsAttempt: false,
+                retryAfterMs: Math.min(retryAfterMs ?? 5_000, CLAIM_BUSY_MAX_RETRY_MS),
+            };
         }
-        if (record && (error.status === 429 || [500, 502, 503, 504].includes(error.status)
+        if (error.status === 429 || [500, 502, 503, 504].includes(error.status)
             || isSessionRefreshError(error)
-            || code === 'embedding_unavailable' || code === 'index_write_ambiguous')) {
+            || code === 'embedding_unavailable' || code === 'index_write_ambiguous') {
             return this.remoteRetry(message, retryAfterMs ?? (error.status === 429 ? 5_000 : undefined));
         }
         return { kind: 'retry', error: message, retryAfterMs };

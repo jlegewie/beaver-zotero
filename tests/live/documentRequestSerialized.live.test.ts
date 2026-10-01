@@ -19,7 +19,8 @@
  *     `document_too_large` without parsing the result graph
  *   - the response `timing` breakdown (`cache_hit`/`cache_miss`, worker +
  *     payload metrics)
- *   - non-PDF (EPUB) and error outcomes fall back to a plain object response
+ *   - an EPUB success is a prepared backend projection; error outcomes fall back
+ *     to a plain object response
  *   - the external-file branch of the serialized path
  *
  * Prerequisites (per tests/README.md):
@@ -307,19 +308,21 @@ describe('serialized document request — payload-size guard', () => {
     });
 });
 
-describe('serialized document request — non-PDF and error fallbacks', () => {
+describe('serialized document request — EPUB and error responses', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
-    it('falls back to a plain object response for an EPUB attachment', async () => {
+    it('sends an EPUB attachment as a prepared backend projection', async () => {
         await invalidateCache(NON_PDF.library_id, NON_PDF.zotero_key);
         const res = await fetchDocumentSerialized(NON_PDF, { mode: 'markdown' }, EXTRACT_OPTS);
 
-        // The serialized path is PDF-only; EPUB extraction returns a plain object.
-        expect(res.prepared).toBe(false);
-        expect(res.response?.content_kind).toBe('epub');
-        const result = res.response?.result as any;
+        // EPUB documents are serialized once in their backend projection,
+        // which omits the locally derived citation index.
+        expect(res.prepared).toBe(true);
+        expect((res.wire as any)?.content_kind).toBe('epub');
+        const result = res.wire?.result as any;
         expect(result?.content_kind).toBe('epub');
         expect(result?.sectionCount).toBeGreaterThan(0);
+        expect(result).not.toHaveProperty('citationIndex');
     });
 
     it('returns a plain error response for an encrypted PDF', async () => {

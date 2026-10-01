@@ -30,6 +30,7 @@ import {
 } from "./epubPageMapping";
 import { effectiveMaxFileSizeMB } from "@beaver/agent-core/transport/attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
+import { isEpubDocument } from "../../../utils/attachmentFiles";
 import { logger } from "@beaver/agent-core/platform/logger";
 
 // Coverage below this fraction means the walk dropped a meaningful share of the
@@ -96,7 +97,7 @@ function formatMB(value: number): string {
 
 /** Extract a local Zotero EPUB attachment into Beaver's section-based schema. */
 export async function extractEpubDocument(item: Zotero.Item): Promise<EpubDocument> {
-    if (!isEpubAttachment(item)) {
+    if (!isEpubDocument(item)) {
         throw new Error("Item is not an EPUB attachment");
     }
 
@@ -478,7 +479,7 @@ export async function preflightEpubFile(
 ): Promise<EpubPreflightResult> {
     let isEpub = false;
     try {
-        isEpub = isEpubAttachment(item);
+        isEpub = isEpubDocument(item);
     } catch (error) {
         return preflightResponseError(
             "unsupported_type",
@@ -546,13 +547,3 @@ export async function preflightEpubFile(
     return { kind: "ok", filePath };
 }
 
-function isEpubAttachment(item: Zotero.Item): boolean {
-    const maybeItem = item as Zotero.Item & {
-        isEPUBAttachment?: () => boolean;
-        attachmentContentType?: string;
-    };
-    if (typeof maybeItem.isEPUBAttachment === "function") {
-        return maybeItem.isEPUBAttachment();
-    }
-    return maybeItem.attachmentContentType === "application/epub+zip";
-}

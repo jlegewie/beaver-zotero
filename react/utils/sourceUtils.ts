@@ -1,3 +1,4 @@
+import { resolveCollection } from '../../src/services/collections/collectionIdentity';
 import {
     getPageLocator,
     normalizeCitationTag,
@@ -211,12 +212,12 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment, col
         notifyReferenceUnavailable('item');
         return;
     }
-    // Convert collection key to collection ID if provided
     let collectionId: number | undefined;
     if (collectionKey) {
-        const id = Zotero.Collections.getIDFromLibraryAndKey(libraryID, collectionKey);
-        if (id !== false) {
-            collectionId = id;
+        try {
+            collectionId = resolveCollection(collectionKey, { libraryID, access: 'local' }).collection.id;
+        } catch {
+            // The item remains navigable when its historical collection is gone.
         }
     }
     // A standalone with no context lets navigation open and await a main window.

@@ -65,7 +65,7 @@ export const DEFAULT_BUSY_LEASE_MS_BACKGROUND = 240_000;
 const BUSY_LEASE_WATCHDOG_SLACK_MS = 1_000;
 const DEFAULT_RECYCLE_HEAP_BYTES = 512 * 1024 * 1024;
 const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT = 32;
-const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_BACKGROUND = 8;
+const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_BACKGROUND = 64;
 const PROACTIVE_RECYCLE_FOLLOWUP_DATA_OPERATIONS = 1;
 
 export type ProactiveRecycleReason = "heap_limit" | "data_operation_limit";
@@ -90,9 +90,11 @@ function defaultRecycleHeapBytesForSlot(
 
 /**
  * Both slots retire the worker after a fixed number of completed data
- * operations. The background threshold is lower because background jobs are
- * whole-document extractions, so each operation accumulates far more WASM
- * heap than a single interactive page read.
+ * operations. The WASM heap does not grow per extraction: it rises to the
+ * largest document seen so far and stays there, and the heap guard retires a
+ * worker an outlier pushes past it. Each respawn recompiles the WASM module,
+ * so the background slot, which runs whole-document extractions back to back,
+ * uses a limit high enough to keep that cost small.
  */
 function defaultRecycleDataOperationsForSlot(
     name: PDFWorkerSlotName,
@@ -1736,6 +1738,8 @@ export class MuPDFWorkerClient {
              * per-page timings) to the result. Default false.
              */
             includeDiagnostics?: boolean;
+            /** PDF schema version to produce. Default: the current version. */
+            schemaVersion?: string;
         },
         signal?: AbortSignal,
     ): Promise<BeaverExtractResult> {
@@ -1752,6 +1756,7 @@ export class MuPDFWorkerClient {
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
             includeDiagnostics: args?.includeDiagnostics,
+            schemaVersion: args?.schemaVersion,
         }, { signal });
     }
 
@@ -1773,6 +1778,7 @@ export class MuPDFWorkerClient {
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
             includeDiagnostics: args?.includeDiagnostics,
+            schemaVersion: args?.schemaVersion,
         }, { signal });
     }
 
@@ -1788,6 +1794,8 @@ export class MuPDFWorkerClient {
             analysisWindow?: number;
             capturePages: number[];
             debugMode?: "triage" | "full";
+            /** PDF schema version to produce. Default: the current version. */
+            schemaVersion?: string;
         },
         signal?: AbortSignal,
     ): Promise<StructuredExtractWithDebugResult> {
@@ -1804,6 +1812,7 @@ export class MuPDFWorkerClient {
                 analysisWindow: args.analysisWindow,
                 capturePages: args.capturePages,
                 debugMode: args.debugMode,
+                schemaVersion: args.schemaVersion,
             },
             { signal },
         );

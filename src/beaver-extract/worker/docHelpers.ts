@@ -36,6 +36,7 @@ import { ERROR_CODES, postLog, workerError } from "./errors";
 import { isRecoverablePageError } from "../wasmFatal";
 import { isUnmappedTextLayer, recoveredTextIsAcceptable } from "../unmappedGlyphRecovery";
 import { ensureApi } from "./wasmInit";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "../schema/presets";
 import {
     aspectRatioRotation,
     dirToRotation,
@@ -50,11 +51,104 @@ import {
 // documents ~7x slower to walk. `dedupOverlappingLines` (below) does the same
 // collapse as a cheap O(n) post-pass instead, so `collect-styles` is
 // intentionally NOT set here.
-const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace";
+const STRUCTURED_TEXT_OPTIONS ="preserve-whitespace";
 const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images";
-const STRUCTURED_TEXT_OPTIONS_DETAILED = "preserve-whitespace,preserve-ligatures";
-const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
-    "preserve-whitespace,preserve-ligatures,preserve-images";
+
+// Text repair, set by the PDF schema preset (`textRepair`). Walks default to
+// the current preset; an extraction for another schema version passes its own.
+// Each switch changes extracted text and therefore ids, so all are off in the
+// schema-4 preset:
+//   - ligature expansion (detailed walk only; the JSON walk always expands):
+//     without `preserve-ligatures`, MuPDF writes a ligature glyph (U+FB00–FB06)
+//     as its letters, so "identiﬁed" reads "identified" and matches plain-letter
+//     queries. The first letter carries the glyph's box and the rest get
+//     zero-width boxes at its end, so `text` and `chars` stay in lockstep.
+//     Preserving them also loses the word space after a word-final ligature
+//     ("cutoffof"), because MuPDF adds no synthetic space after U+FB0x.
+//   - use-known-glyph-outlines (fork-local, like the three below; older WASM
+//     builds ignore them): symbol fonts often draw a symbol in a slot
+//     whose glyph name or ToUnicode says otherwise (an Elsevier font's "m"
+//     draws μ, so "20 μg" reads "20 mg"; its ToUnicode maps "=" to "¼"). No
+//     U+FFFD appears, so the recovery path below never sees it. MuPDF replaces
+//     the character when the glyph's outline is in a reviewed table of known
+//     symbol outlines.
+//     The table also repairs U+FFFD, control characters and Private Use Area
+//     values in fonts with a ToUnicode CMap and in CID fonts: a Calibri "ti"
+//     ligature with no ToUnicode entry, Elsevier's fi/fl ligatures and Adobe
+//     Pro figures at private-use values.
+//   - map-symbol-private-use: Word maps Symbol-font glyphs to U+F020-U+F0FF
+//     ("fold-change \uF0B11"); the Symbol encoding gives "±".
+//   - use-glyph-name-for-garbage: U+FFFD, control and Private Use values are
+//     repaired from an exact Adobe Glyph List glyph name ("Asmall" is a small
+//     capital a, "f_i" a ligature). Plain letter or digit names are not used,
+//     so unmapped text layers still reach the recovery path below.
+//   - space-after-symbols: MuPDF otherwise never turns a word gap after a math
+//     operator, arrow or geometric shape into a space ("○Lead contact").
+//   - sentence terminators inside a run of unmapped glyphs become U+FFFD
+//     (`maskTerminatorsInUnmappedRuns`, applied by both walks).
+// Control characters are replaced in the final result under the same switch
+// (`replaceControlCharsInResult`, ops.ts).
+const TEXT_REPAIR_OPTIONS =
+    "use-known-glyph-outlines,map-symbol-private-use,use-glyph-name-for-garbage,space-after-symbols";
+function withTextRepair(options: string, textRepair: boolean): string {
+    return textRepair ? `${options},${TEXT_REPAIR_OPTIONS}` : options;
+}
+
+const UNMAPPED_GLYPH = "\uFFFD";
+const SENTENCE_TERMINAL_RE = /^\p{Sentence_Terminal}$/u;
+
+/**
+ * Replace sentence terminators that sit between two unmapped glyphs with
+ * U+FFFD, in place. Returns whether anything changed.
+ *
+ * Text repair can map single glyphs of an otherwise unmappable font: the
+ * period's outline is in the known-outline table, its digits are not, so a
+ * number in such a font reads "�.����". The splitter then ends a sentence at
+ * every one of those periods, turning one garbled figure line into a string
+ * of one-word pseudo-sentences, and the periods make the noise look like
+ * numbers. A terminator with no readable text on either side ends nothing,
+ * so it is folded back into the unmapped run.
+ */
+export function maskTerminatorsInUnmappedRuns(chars: string[]): boolean {
+    let changed = false;
+    let i = 1;
+    while (i < chars.length - 1) {
+        if (chars[i - 1] !== UNMAPPED_GLYPH || !SENTENCE_TERMINAL_RE.test(chars[i])) {
+            i++;
+            continue;
+        }
+        let end = i;
+        while (end < chars.length && SENTENCE_TERMINAL_RE.test(chars[end])) end++;
+        if (chars[end] === UNMAPPED_GLYPH) {
+            for (let k = i; k < end; k++) chars[k] = UNMAPPED_GLYPH;
+            changed = true;
+        }
+        i = end;
+    }
+    return changed;
+}
+
+/** `maskTerminatorsInUnmappedRuns` for a JSON-walk line's text. */
+function maskLineTextTerminators(text: string): string {
+    if (!text.includes(UNMAPPED_GLYPH)) return text;
+    const chars = Array.from(text);
+    return maskTerminatorsInUnmappedRuns(chars) ? chars.join("") : text;
+}
+
+/** `maskTerminatorsInUnmappedRuns` for a detailed-walk line, keeping `chars` and `text` in lockstep. */
+function maskDetailedLineTerminators(line: RawLineDetailed): void {
+    if (!line.text.includes(UNMAPPED_GLYPH)) return;
+    const runes = line.chars.map((ch) => ch.c);
+    if (!maskTerminatorsInUnmappedRuns(runes)) return;
+    for (let k = 0; k < runes.length; k++) line.chars[k].c = runes[k];
+    line.text = runes.join("");
+}
+
+/** Structured-text options for the detailed (per-character) walk. */
+export function detailedStructuredTextOptions(includeImages: boolean, textRepair: boolean): string {
+    const base = includeImages ? STRUCTURED_TEXT_OPTIONS_WITH_IMAGES : STRUCTURED_TEXT_OPTIONS;
+    return textRepair ? withTextRepair(base, true) : `${base},preserve-ligatures`;
+}
 
 // Recovery flags for unmapped glyphs. When MuPDF cannot resolve a glyph to a
 // Unicode codepoint it emits U+FFFD. These two stext options recover such
@@ -288,7 +382,7 @@ export const openDocUncached = openDocSafe;
 function extractRawPageOnce(
     doc: DocumentLike,
     pageIndex: number,
-    opts?: { includeImages?: boolean; recoverUnmappedGlyphs?: boolean },
+    opts?: { includeImages?: boolean; recoverUnmappedGlyphs?: boolean; textRepair?: boolean },
 ): RawPageData {
     const page = doc.loadPage(pageIndex);
     try {
@@ -305,9 +399,11 @@ function extractRawPageOnce(
             // label not available
         }
 
-        let stextOptions = opts?.includeImages
-            ? STRUCTURED_TEXT_OPTIONS_WITH_IMAGES
-            : STRUCTURED_TEXT_OPTIONS;
+        const textRepair = opts?.textRepair ?? CURRENT_PDF_EXTRACTION_PRESET.textRepair;
+        let stextOptions = withTextRepair(
+            opts?.includeImages ? STRUCTURED_TEXT_OPTIONS_WITH_IMAGES : STRUCTURED_TEXT_OPTIONS,
+            textRepair,
+        );
         if (opts?.recoverUnmappedGlyphs) stextOptions = withRecoveryFlags(stextOptions);
         const stext = page.toStructuredText(stextOptions);
         try {
@@ -350,6 +446,7 @@ function extractRawPageOnce(
                     const line = lines[i];
                     const fromDir = dirs?.[i];
                     line.rotation = fromDir ?? aspectRatioRotation(line.bbox);
+                    if (textRepair) line.text = maskLineTextTerminators(line.text);
                 }
             }
 
@@ -618,6 +715,7 @@ function extractRawPageDetailedOnce(
     includeImages: boolean,
     fontApi?: FontApi,
     recoverUnmappedGlyphs?: boolean,
+    textRepair = CURRENT_PDF_EXTRACTION_PRESET.textRepair,
 ): RawPageDataDetailed {
     const page = doc.loadPage(pageIndex);
     try {
@@ -634,9 +732,7 @@ function extractRawPageDetailedOnce(
             // label not available
         }
 
-        let stextOptions = includeImages
-            ? STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES
-            : STRUCTURED_TEXT_OPTIONS_DETAILED;
+        let stextOptions = detailedStructuredTextOptions(includeImages, textRepair);
         if (recoverUnmappedGlyphs) stextOptions = withRecoveryFlags(stextOptions);
         const stext = page.toStructuredText(stextOptions);
 
@@ -712,6 +808,7 @@ function extractRawPageDetailedOnce(
                 },
                 endLine: () => {
                     if (currentLine && currentBlock) {
+                        if (textRepair) maskDetailedLineTerminators(currentLine);
                         currentBlock.lines.push(currentLine);
                     }
                     currentLine = null;
@@ -1242,7 +1339,7 @@ export function resolveTruePageCount(doc: DocumentLike): number {
 export function extractRawPageFromDoc(
     doc: DocumentLike,
     pageIndex: number,
-    opts?: { includeImages?: boolean },
+    opts?: { includeImages?: boolean; textRepair?: boolean },
 ): RawPageData {
     const page = extractRawPageOnce(doc, pageIndex, opts);
     if (!isUnmappedTextLayer(page)) return page;
@@ -1261,10 +1358,11 @@ export function extractRawPageDetailedFromDoc(
     pageIndex: number,
     includeImages: boolean,
     fontApi?: FontApi,
+    textRepair?: boolean,
 ): RawPageDataDetailed {
-    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi);
+    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair);
     if (!isUnmappedTextLayer(page)) return page;
-    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true);
+    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair);
     if (!recoveredTextIsAcceptable(recovered)) return page;
     postLog("info", `Recovered unmapped text layer on page ${pageIndex}`);
     return recovered;

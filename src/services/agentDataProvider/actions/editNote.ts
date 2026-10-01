@@ -683,7 +683,10 @@ async function validateEditNoteAction(
     //     any matcher rewrite. mergeInsertNewString is a no-op for
     //     str_replace / str_replace_all.
     const warnings: string[] = [...(externalRefContext.externalFileWarnings ?? [])];
-    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    const locatorWarning = buildUnresolvedLocatorWarning(
+        structuralLocators.unresolved,
+        structuralLocators.unavailable,
+    );
     if (locatorWarning) warnings.push(locatorWarning);
     if (operation === 'insert_after' || operation === 'insert_before') {
         const dedupWarning = buildInsertDedupWarning(
@@ -828,7 +831,10 @@ async function executeEditNoteAction(
     //     citations keep a page locator instead of dropping it on save.
     const structuralLocators = await preloadStructuralLocatorPages(new_string);
     const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    const locatorWarning = buildUnresolvedLocatorWarning(
+        structuralLocators.unresolved,
+        structuralLocators.unavailable,
+    );
 
     // 4. Pre-seed page labels before the final note snapshot. The final
     //    cache-only preload below keeps extraction out of the read/write window.

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
 
 // Mock createCitationHTML before importing the module under test
 vi.mock('../../../src/utils/zoteroUtils', () => ({
@@ -911,17 +912,15 @@ describe('expandToRawHtml', () => {
         (Zotero.Libraries as any).get = vi.fn(() => ({ isGroup: false }));
         (Zotero as any).Beaver = { documentCache: {
             getMetadata: async () => ({ pageLabels: { 1: 'iv', 2: 'v' } }),
-            getResult: async () => ({ mode: 'structured', document: { citationIndex: {
-                s1: { pageIndex: 1, ...(withLabels ? { pageLabel: 'iv' } : {}) },
-                s2: { pageIndex: 1, pageLabel: 'iv' },
-                s3: { pageIndex: 2, pageLabel: 'v' },
-                s4: { pageIndex: 2, pageLabel: 'v' },
-                s5: { pageIndex: 3, ...(withLabels ? { pageLabel: 'vi' } : {}) },
-            } } }),
+            getResult: async () => structuredResultWithCitablePages(4, [
+                { index: 1, label: withLabels ? 'iv' : undefined, items: [{ id: 'p2.1', sentences: ['s2.1', 's2.2'] }] },
+                { index: 2, label: 'v', items: [{ id: 'p3.1', sentences: ['s3.1', 's3.2'] }] },
+                { index: 3, label: withLabels ? 'vi' : undefined, items: [{ id: 'p4.1', sentences: ['s4.1'] }] },
+            ]),
         } };
         try {
             for (const attribute of ['id', 'att_id']) {
-                const input = `<citation ${attribute}="1-ATTACH12" loc="s1-s5"/>`;
+                const input = `<citation ${attribute}="1-ATTACH12" loc="s2.1-s4.1"/>`;
                 const resolved = await preloadStructuralLocatorPages(input);
                 expect(resolved.unresolved).toEqual([]);
                 const html = expandToRawHtml(input, { elements: new Map() }, 'new', undefined, undefined, resolved.pages);
@@ -3892,6 +3891,15 @@ describe('buildUnresolvedLocatorWarning', () => {
         expect(warning).toContain('id="1-AAA" loc="s4"');
         expect(warning).toContain('id="2-BBB" loc="p7"');
         expect(warning).toMatch(/only support page locators/i);
+        expect(warning).not.toMatch(/can't be loaded/);
+    });
+
+    it('tells the model to re-read pages for locators that can never resolve', () => {
+        const warning = buildUnresolvedLocatorWarning(['id="1-AAA" loc="s4"'], ['id="1-AAA" loc="s5.6"']);
+        expect(warning).toContain('extraction is available');
+        expect(warning).toContain('can\'t be loaded, so they were saved without a locator: id="1-AAA" loc="s5.6"');
+        expect(warning).toContain('Re-read the cited pages');
+        expect(buildUnresolvedLocatorWarning([], ['id="1-AAA" loc="s5.6"'])).not.toContain('extraction is available');
     });
 });
 

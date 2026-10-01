@@ -337,7 +337,7 @@ describe("create_highlight_annotations: execute", () => {
         expect(created.zotero_key.length).toBeGreaterThan(0);
     }, 60000);
 
-    it("explodes a multi-page item into one created entry per page", async () => {
+    it("writes a two-page item as one annotation continuing onto the next page", async () => {
         await triggerFileStatus(
             NORMAL_PDF.library_id,
             NORMAL_PDF.zotero_key,
@@ -359,14 +359,42 @@ describe("create_highlight_annotations: execute", () => {
         });
 
         expect(res.success).toBe(true);
-        expect(res.result_data?.total_created).toBe(2);
-        expect(res.result_data?.created.every((c) => c.client_item_id === "hl-multipage"))
-            .toBe(true);
-        // The per-page fields are the only thing distinguishing these rows: they
-        // share a client_item_id, a title, and a loc, so without them the backend
-        // cannot tell a page-spanning highlight from a duplicated one.
-        expect(res.result_data?.created.map((c) => c.page_idx)).toEqual([0, 1]);
-        expect(res.result_data?.created.map((c) => c.page_label)).toEqual(["1", "2"]);
+        expect(res.result_data?.total_created).toBe(1);
+        expect(res.result_data?.total_failed).toBe(0);
+        // One annotation on its first page; page_count tells the backend it
+        // covers both pages, so the item is not read as partly written.
+        const created = res.result_data!.created[0];
+        expect(created.client_item_id).toBe("hl-multipage");
+        expect(created.page_idx).toBe(0);
+        expect(created.page_label).toBe("1");
+        expect(created.page_count).toBe(2);
+    }, 60000);
+
+    it("fails an item covering three pages without writing anything", async () => {
+        await triggerFileStatus(
+            NORMAL_PDF.library_id,
+            NORMAL_PDF.zotero_key,
+            false,
+        );
+
+        const res = await executeHighlight({
+            requested_ref: ref(NORMAL_PDF),
+            resolved_ref: ref(NORMAL_PDF),
+            items: [
+                highlightItem({
+                    client_item_id: "hl-threepage",
+                    page_locations: [
+                        { page_idx: 0, boxes: [HIGHLIGHT_BOX] },
+                        { page_idx: 1, boxes: [HIGHLIGHT_BOX] },
+                        { page_idx: 2, boxes: [HIGHLIGHT_BOX] },
+                    ],
+                }),
+            ],
+        });
+
+        expect(res.success).toBe(true);
+        expect(res.result_data?.total_created).toBe(0);
+        expect(res.result_data?.failed[0].error_code).toBe("highlight_spans_too_many_pages");
     }, 60000);
 
     it("creates highlights for multiple items in a single execute", async () => {

@@ -1,3 +1,4 @@
+import { readCollectionActionData } from '../identity/collectionActionData';
 import { ZoteroItemReference } from '../types/zotero';
 import { hasLibraryIdentity } from '../identity/libraryRef';
 import {
@@ -584,6 +585,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             downloaded_url: proposedData.downloaded_url ?? proposedData.downloadedUrl,
             storage_path: proposedData.storage_path ?? proposedData.storagePath,
             text_path: proposedData.text_path ?? proposedData.textPath,
+            collection_ids: proposedData.collection_ids,
             collection_keys: proposedData.collection_keys ?? proposedData.collectionKeys,
             suggested_tags: proposedData.suggested_tags ?? proposedData.suggestedTags,
         } as CreateItemProposedData;
@@ -622,6 +624,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
             library_ref: proposedData.library_ref ?? proposedData.libraryRef,
             name: proposedData.name ?? '',
+            parent_collection_id: proposedData.parent_collection_id,
             parent_key: proposedData.parent_key ?? proposedData.parentKey ?? null,
             item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
         };
@@ -631,6 +634,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
             tags: proposedData.tags ?? null,
             collections: proposedData.collections ?? null,
+            collection_ids: proposedData.collection_ids,
             current_state: proposedData.current_state ?? proposedData.currentState ?? null,
         };
     } else if (actionType === 'confirm_extraction') {
@@ -742,11 +746,18 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 zotero_key: String(zoteroKey),
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
                 ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
+                collection_ids: resultData.collection_ids,
+                collection_keys: resultData.collection_keys,
                 attachment_status: resultData.attachment_status ?? resultData.attachmentStatus ?? 'none',
                 attachment_key: resultData.attachment_key ?? resultData.attachmentKey,
                 attachment_resolved_at: resultData.attachment_resolved_at ?? resultData.attachmentResolvedAt,
             };
         }
+    }
+
+    if (['create_collection', 'manage_collections'].includes(actionType)) {
+        proposedData = readCollectionActionData(proposedData);
+        if (resultData) resultData = readCollectionActionData(resultData);
     }
 
     return {

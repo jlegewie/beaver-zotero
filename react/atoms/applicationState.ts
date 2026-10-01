@@ -7,7 +7,7 @@
  * a different host can supply its own document state via
  * `setApplicationStateProvider` without changing the run-start path.
  */
-
+import { serializeCollectionReadIdentity } from '../../src/services/collections/collectionIdentity';
 import { getContextWindow } from '../runtime/windowRuntime';
 
 import { Getter } from 'jotai';
@@ -216,9 +216,8 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 const counts = countsFor(itemCounts, collection.id);
                 return {
                     collection_key: collection.key,
-                    name: collection.name,
+                    ...serializeCollectionReadIdentity(collection),
                     library_id: collection.libraryID,
-                    library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
                     parent_key: collection.parentKey || null,
                     item_count: counts.itemCount,
                     standalone_attachment_count: counts.standaloneAttachmentCount,
@@ -310,6 +309,9 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         ? await getLibrarySummaries(searchableLibraryIds)
         : undefined;
 
+    // Resolved by Zotero from the requested and available UI locales.
+    const interfaceLanguage = typeof Zotero.locale === 'string' && Zotero.locale ? Zotero.locale : undefined;
+
     return {
         current_view: currentView,
         ...(readerState ? { reader_state: readerState } : {}),
@@ -330,6 +332,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
             : {}),
         ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
         ...(libraries ? { libraries } : {}),
+        ...(interfaceLanguage ? { interface_language: interfaceLanguage } : {}),
     };
 }
 

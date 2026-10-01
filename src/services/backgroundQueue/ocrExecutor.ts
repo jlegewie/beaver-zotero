@@ -18,14 +18,18 @@ import type {
     DocumentProcessingFailureInput,
 } from '../database';
 import {
+    isFileAccessDeniedError,
     isRemoteAccessAvailable,
     loadAttachmentData,
     resolveAttachmentFileSource,
+    type AttachmentDataResult,
     type AttachmentFileSource,
 } from '../documentExtraction/attachmentSource';
 import { ExternalAbortError } from '../agentDataProvider/timeout';
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../documentExtraction/ocrReextract';
 import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
+import { getRemoteFileHash } from '../documentFileIdentity';
+import type { ProtectedRepreparation } from '../documentCache';
 import {
     backgroundProcessingEnabled,
     buildIndexJobPayload,
@@ -51,6 +55,7 @@ import {
 import {
     OCR_ENGINE_VERSION,
     OCR_OUTCOME_DETAIL_MAX,
+    OCR_SERVICE_UNAVAILABLE,
     OCR_TRACK_BUDGET_MS,
     OCR_TERMINAL_FAILED,
     OCR_TERMINAL_GEOMETRY,
@@ -85,10 +90,18 @@ interface ResolvedJob {
     loadOriginalBytes: () => Promise<Uint8Array>;
 }
 
+/** Sentinel raised when the OS refuses to read the local scan for upload. */
+class OcrFileAccessDeniedError extends Error {
+    constructor() {
+        super('ocr_local_read_failed: file_permission_denied');
+        this.name = 'OcrFileAccessDeniedError';
+    }
+}
+
 /** Sentinel raised when the original remote scan cannot be loaded for upload. */
 class OcrRemoteLoadError extends Error {
     constructor(
-        public readonly code: 'file_too_large' | 'download_failed' | 'read_failed',
+        public readonly code: Extract<AttachmentDataResult, { kind: 'error' }>['code'],
         /** The server answered definitively; retrying cannot change the result. */
         public readonly permanent: boolean = false,
     ) {
@@ -159,6 +172,11 @@ export class OcrExecutor implements JobExecutor {
         } catch (error) {
             if (error instanceof OcrAbort || ctx.externalAbortSignal.aborted) {
                 return { kind: 'release', reason: 'aborted' };
+            }
+            if (error instanceof OcrFileAccessDeniedError) {
+                // Retried like any read failure; if it dead-letters, the ledger
+                // keeps the code so the issues list can explain the remedy.
+                return { kind: 'retry', error: error.message, reason: 'ocr_local_read_failed' };
             }
             if (error instanceof OcrRemoteLoadError) {
                 // Oversized scans are terminal-for-now (recoverable if limits change);
@@ -435,11 +453,11 @@ export class OcrExecutor implements JobExecutor {
         const filePath = fileSource.filePath;
 
         // attachmentHash hashes the local file and is undefined for remote-only
-        // items; the synced server MD5 is the same content hash, so backend OCR
+        // items; the server MD5 is the same content hash, so backend OCR
         // dedup stays consistent across machines.
         let fileHash: string | undefined;
         if (isRemoteOnly) {
-            fileHash = resolvedItem.attachmentSyncedHash || undefined;
+            fileHash = (await getRemoteFileHash(resolvedItem)) || undefined;
         } else {
             try {
                 fileHash = await resolvedItem.attachmentHash;
@@ -452,33 +470,65 @@ export class OcrExecutor implements JobExecutor {
             return { outcome: { kind: 'complete', reason: 'no_file_hash' } };
         }
 
-        // Page count and the original byte length both come from the cached
-        // NO_TEXT_LAYER metadata written at detection. For remote the row is keyed
-        // by the same synthetic path and stores the original byteLength, so no extra
-        // download is needed here to learn the cache key.
+        // A page count alone does not establish that OCR is still needed: a
+        // replacement PDF with native text has one too. The cache validates the
+        // current source identity, and its no-text verdict must agree with the
+        // processing ledger for the file hash we are about to send to OCR.
+        // A retained OCR preparation of this exact source that an extraction
+        // update made unservable is the same evidence: the source is a scan,
+        // and a processed scan (`done`) is prepared again from its artifact.
         let meta = await this.resolveSourceMetadata(resolvedItem, filePath);
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
-        if (!Number.isInteger(meta?.pageCount) || (meta?.pageCount ?? 0) < 1) {
-            // Recover through normal detection so valid native text stays native.
+        let repreparation = await this.resolveProtectedRepreparation(resolvedItem, filePath);
+        this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        let state = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
+        this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        const currentDetection = () => state?.fileHash === fileHash
+            && state.extractStatus === 'done';
+        const detectedScan = () => meta?.errorCode === 'no_text_layer' || repreparation !== null;
+        const needsOcr = () => detectedScan()
+            && currentDetection()
+            && (state?.ocrStatus === 'needed'
+                || ((record.payload?.prepare_cache === true || repreparation !== null)
+                    && state?.ocrStatus === 'done'));
+        const detectedPageCount = () => meta?.pageCount ?? repreparation?.pageCount ?? null;
+        const hasDetectionMetadata = () => needsOcr()
+            && Number.isInteger(detectedPageCount()) && (detectedPageCount() ?? 0) >= 1;
+
+        if (!hasDetectionMetadata()) {
+            if (currentDetection() && state?.ocrStatus === 'na' && meta && meta.errorCode === null) {
+                return { outcome: { kind: 'complete', reason: 'ocr_not_needed' } };
+            }
+            // Missing or conflicting evidence needs normal detection. It can
+            // recognize a new scan as well as a native-text replacement.
             const recovery = await new DocumentExtractExecutor().execute({
                 ...record, jobType: 'document_extract', contentKind: 'pdf', payloadKind: 'structured',
                 payload: { ...record.payload, content_kind: 'pdf', maxPages: null, timeoutSeconds: 120 },
             }, ctx);
             this.throwIfLibraryUnavailable(record.libraryId, ctx);
             if (recovery.kind !== 'complete') return { outcome: recovery };
-            const state = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
+            state = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
             this.throwIfLibraryUnavailable(record.libraryId, ctx);
-            if (state?.ocrStatus !== 'needed') return { outcome: recovery };
             meta = await this.resolveSourceMetadata(resolvedItem, filePath);
             this.throwIfLibraryUnavailable(record.libraryId, ctx);
+            repreparation = await this.resolveProtectedRepreparation(resolvedItem, filePath);
+            this.throwIfLibraryUnavailable(record.libraryId, ctx);
+            if (recovery.reason !== 'needs_ocr' || !currentDetection()
+                || (state?.ocrStatus !== 'needed'
+                    && !((record.payload?.prepare_cache === true || repreparation !== null)
+                        && state?.ocrStatus === 'done'))
+                || (meta !== null && !detectedScan())) {
+                return { outcome: recovery };
+            }
         }
-        const pageCount = meta?.pageCount ?? null;
+        const pageCount = detectedPageCount();
         if (!Number.isInteger(pageCount) || pageCount == null || pageCount < 1) {
             await ctx.db.markAttachmentOcrFailed(record.libraryId, record.zoteroKey, fileHash,
                 'ocr_metadata_unavailable: Detection could not recover a page count');
             return { outcome: { kind: 'complete', reason: 'ocr_metadata_unavailable' } };
         }
-        const sourceSizeBytes = isRemoteOnly ? (meta?.sourceSizeBytes ?? 0) : 0;
+        const sourceSizeBytes = isRemoteOnly
+            ? (meta?.sourceSizeBytes ?? repreparation?.sourceSizeBytes ?? 0) : 0;
 
         // Lazy, memoized: only the first-time `pending` upload path reads/downloads
         // bytes; a cache hit (`ready`) or rejoin (`queued`) never loads the original.
@@ -501,18 +551,34 @@ export class OcrExecutor implements JobExecutor {
         };
     }
 
-    /** Page count + original byte length from the cached NO_TEXT_LAYER metadata. */
+    /** Detection verdict, page count, and byte length for the current source. */
     private async resolveSourceMetadata(
         item: Zotero.Item,
         filePath: string,
-    ): Promise<{ pageCount: number | null; sourceSizeBytes: number } | null> {
+    ): Promise<{ pageCount: number | null; sourceSizeBytes: number; errorCode: string | null } | null> {
         const cache = Zotero.Beaver?.documentCache;
         if (!cache) return null;
         const meta = await cache
             .getMetadata({ libraryId: item.libraryID, zoteroKey: item.key }, filePath)
             .catch(() => null);
         if (!meta) return null;
-        return { pageCount: meta.pageCount ?? null, sourceSizeBytes: meta.sourceSizeBytes ?? 0 };
+        return {
+            pageCount: meta.pageCount ?? null,
+            sourceSizeBytes: meta.sourceSizeBytes ?? 0,
+            errorCode: meta.errorCode ?? null,
+        };
+    }
+
+    /** Retained OCR preparation of the current source that must be prepared again. */
+    private async resolveProtectedRepreparation(
+        item: Zotero.Item,
+        filePath: string,
+    ): Promise<ProtectedRepreparation | null> {
+        const cache = Zotero.Beaver?.documentCache;
+        if (!cache) return null;
+        return cache
+            .getProtectedRepreparation({ libraryId: item.libraryID, zoteroKey: item.key }, filePath)
+            .catch(() => null);
     }
 
     /**
@@ -527,7 +593,13 @@ export class OcrExecutor implements JobExecutor {
     ): Promise<Uint8Array> {
         this.throwIfLibraryUnavailable(item.libraryID, ctx);
         if (source.kind === 'local') {
-            const data = await IOUtils.read(source.filePath);
+            let data: Uint8Array;
+            try {
+                data = await IOUtils.read(source.filePath);
+            } catch (error) {
+                if (isFileAccessDeniedError(error)) throw new OcrFileAccessDeniedError();
+                throw error;
+            }
             this.throwIfLibraryUnavailable(item.libraryID, ctx);
             return data;
         }
@@ -570,8 +642,15 @@ export class OcrExecutor implements JobExecutor {
         logger(`OcrExecutor: ${job.sourceKey} OCR request response: ${request.status}`, 3);
         switch (request.status) {
             case 'disabled':
-                // Backend says the user lacks OCR entitlement (gate backstop).
-                logger(`OcrExecutor: ${job.sourceKey} OCR disabled by backend entitlement gate`, 3);
+                // Keep the stage retryable, but record why it is not active work.
+                // The reconciler's periodic admission probe requests OCR again.
+                await ctx.db.markAttachmentOcrUnavailable(
+                    job.item.libraryID,
+                    job.item.key,
+                    job.fileHash,
+                    OCR_SERVICE_UNAVAILABLE,
+                );
+                logger(`OcrExecutor: ${job.sourceKey} OCR service is temporarily unavailable`, 3);
                 return { outcome: { kind: 'complete', reason: 'ocr_disabled' } };
             case 'rejected':
                 logger(`OcrExecutor: ${job.sourceKey} rejected (${request.reason}; ${request.page_count}/${request.limit})`, 2);
@@ -580,6 +659,7 @@ export class OcrExecutor implements JobExecutor {
             case 'failed':
                 return { outcome: this.failureOutcome(job, request.error) };
             case 'ready':
+                await this.markAdmitted(job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} OCR cache hit; downloading searchable PDF`, 3);
                 if (request.get_url) return { getUrl: request.get_url };
                 return { outcome: { kind: 'retry', error: 'ocr_ready_without_url', reason: 'ocr_ready_without_url' } };
@@ -587,6 +667,7 @@ export class OcrExecutor implements JobExecutor {
                 if (!request.job_id || !request.put_url) {
                     return { outcome: { kind: 'retry', error: 'ocr_pending_without_put_url', reason: 'ocr_pending_without_put_url' } };
                 }
+                await this.markAdmitted(job, ctx);
                 await this.upload(request.put_url, job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} marking OCR upload complete for backend job ${request.job_id}`, 3);
                 await ocrApiClient.markUploaded(request.job_id);
@@ -597,8 +678,16 @@ export class OcrExecutor implements JobExecutor {
                 if (!request.job_id) {
                     return { outcome: { kind: 'retry', error: 'ocr_queued_without_job_id', reason: 'ocr_queued_without_job_id' } };
                 }
+                await this.markAdmitted(job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} joined queued OCR backend job ${request.job_id}`, 3);
                 return this.defer(request.job_id, job, recordId);
+        }
+    }
+
+    /** Clear this attachment's unavailable marker and resume the others it was parked with. */
+    private async markAdmitted(job: ResolvedJob, ctx: JobExecutionContext): Promise<void> {
+        if (await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash)) {
+            Zotero.Beaver?.processingReconciler?.notifyOcrAdmissionReopened();
         }
     }
 
@@ -771,7 +860,7 @@ export class OcrExecutor implements JobExecutor {
                         document as any,
                     );
                     const currentHash = job.source.isRemoteOnly
-                        ? job.item.attachmentSyncedHash : await job.item.attachmentHash;
+                        ? await getRemoteFileHash(job.item) : await job.item.attachmentHash;
                     this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
                     if (currentHash !== job.fileHash) {
                         return { kind: 'retry', error: 'ocr_source_changed', reason: 'source_changed' };

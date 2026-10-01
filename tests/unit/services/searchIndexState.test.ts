@@ -30,9 +30,34 @@ describe('search preparation classification', () => {
     it.each(['download_failed', 'read_failed', 'extraction_failed', 'ocr_required', 'unsupported_schema_version', 'wrapper: encrypted_extra', 'ocr_backend_failed: download_failed'])('does not shrink the denominator for %s', error => {
         expect(classifySearchPreparation(row({ extractStatus: 'failed', error }), identity)).toBe('pending');
     });
+    it('excludes settled EPUB limitations without changing PDF retry semantics', () => {
+        expect(classifySearchPreparation(row({
+            contentKind: 'epub', extractStatus: 'failed', error: 'no_text_layer',
+        }), identity)).toBe('unavailable');
+        expect(classifySearchPreparation(row({
+            contentKind: 'snapshot', extractStatus: 'failed', error: 'no_text_layer',
+        }), identity)).toBe('unavailable');
+        expect(classifySearchPreparation(row({
+            contentKind: 'epub', extractStatus: 'failed', error: 'permanent_epub:extraction_failed',
+        }), identity)).toBe('unavailable');
+        expect(classifySearchPreparation(row({
+            contentKind: 'epub', extractStatus: 'failed', error: 'extraction_failed',
+        }), identity)).toBe('pending');
+        expect(classifySearchPreparation(row({
+            contentKind: 'pdf', extractStatus: 'failed', error: 'no_text_layer',
+        }), identity)).toBe('pending');
+    });
     it('keeps retries and superseded reading failures pending', () => {
         expect(classifySearchPreparation(row({ extractStatus: null, error: 'encrypted' }), identity)).toBe('pending');
         expect(classifySearchPreparation(row({ extractStatus: 'failed', error: 'encrypted', readingSucceeded: true }), identity)).toBe('pending');
+    });
+    it('counts recoverable OCR admission closure as unavailable while preserving stronger evidence', () => {
+        const unavailable = row({
+            ocrStatus: 'needed', upsertStatus: null, error: 'ocr_service_unavailable',
+        });
+        expect(classifySearchPreparation(unavailable, identity)).toBe('unavailable');
+        expect(classifySearchPreparation({ ...unavailable, readingSucceeded: true }, identity)).toBe('pending');
+        expect(classifySearchPreparation(row({ error: 'ocr_service_unavailable' }), identity)).toBe('indexed');
     });
 });
 
@@ -44,7 +69,7 @@ describe('send-time search snapshot', () => {
         ledger = new MockDBConnection(); inventory = new MockDBConnection();
         db = new BeaverDB(ledger); await db.initDatabase('0.99.0');
         await inventory.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT)');
-        await inventory.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT)');
+        await inventory.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
         await inventory.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
         Object.assign(Zotero, {
             DB: inventory,
@@ -56,10 +81,10 @@ describe('send-time search snapshot', () => {
         });
     });
     afterEach(async () => { await ledger.closeDatabase(); await inventory.closeDatabase(); vi.restoreAllMocks(); });
-    async function add(id: number, options: { mode?: number; mime?: string; parent?: number } = {}) {
+    async function add(id: number, options: { mode?: number; mime?: string; parent?: number; path?: string } = {}) {
         const key = String(id).padStart(8, '0');
         await inventory.queryAsync('INSERT INTO items VALUES (?, ?, ?)', [id, 1, key]);
-        await inventory.queryAsync('INSERT INTO itemAttachments VALUES (?, ?, ?, ?)', [id, options.parent ?? 0, options.mode ?? 0, options.mime ?? 'application/pdf']);
+        await inventory.queryAsync('INSERT INTO itemAttachments VALUES (?, ?, ?, ?, ?)', [id, options.parent ?? 0, options.mode ?? 0, options.mime ?? 'application/pdf', options.path ?? 'storage:file.pdf']);
         return key;
     }
     it('counts undiscovered attachments and ignores stale successes, URLs, trash and unsupported files', async () => {
@@ -69,6 +94,14 @@ describe('send-time search snapshot', () => {
         expect(await getSearchIndexState()).toEqual({ version: 1, libraries: [{ library_ref: 'u', total: 1, indexed: 0, unavailable: 0 }] });
         await add(6);
         expect((await getSearchIndexState())?.libraries[0].total).toBe(2);
+    });
+    it('counts mislabelled documents under the kind their processing rows use', async () => {
+        const pdf = await add(1, { mime: 'application/octet-stream', path: 'storage:paper.pdf' });
+        await add(2, { mime: '', path: 'storage:Book.epub' });
+        await add(3, { mime: 'application/octet-stream', path: 'storage:data.bin' });
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: pdf, contentKind: 'pdf' });
+        await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: pdf, status: 'failed', error: 'encrypted', attemptedAt: 1 });
+        expect(await getSearchIndexState()).toEqual({ version: 1, libraries: [{ library_ref: 'u', total: 2, indexed: 0, unavailable: 1 }] });
     });
     it('joins reading success and does not reuse unavailable outcomes after reset', async () => {
         const key = await add(1);
@@ -101,7 +134,7 @@ describe('send-time search snapshot', () => {
     it('reads a 20,000-attachment inventory without per-attachment queries', async () => {
         await inventory.queryAsync(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
             INSERT INTO items SELECT x, 1, printf('%08d', x) FROM n`);
-        await inventory.queryAsync("INSERT INTO itemAttachments SELECT itemID, 0, 0, 'application/pdf' FROM items");
+        await inventory.queryAsync("INSERT INTO itemAttachments SELECT itemID, 0, 0, 'application/pdf', 'storage:file.pdf' FROM items");
         await ledger.queryAsync(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
             INSERT INTO attachment_processing_state (library_id, zotero_key, content_kind, extract_status,
                 extract_schema_version, upsert_status, upsert_index_version, upsert_remote_identity)

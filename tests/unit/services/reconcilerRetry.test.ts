@@ -45,6 +45,7 @@ describe('ReconcilerService.retryAttachments', () => {
     const notify = vi.fn();
     const invalidate = vi.fn(async () => undefined);
     const getMetadata = vi.fn(async () => ({ pageCount: 5 }));
+    const getProtectedRepreparationKeys = vi.fn(async (): Promise<string[]> => []);
 
     beforeEach(async () => {
         vi.clearAllMocks();
@@ -69,7 +70,7 @@ describe('ReconcilerService.retryAttachments', () => {
             hasOcrAccess: true,
             hasSearchIndexAccess: true,
             backgroundExtractor: { requestImmediateDrain, notify },
-            documentCache: { invalidate, getMetadata },
+            documentCache: { invalidate, getMetadata, getProtectedRepreparationKeys },
         };
         mocks.resolveAttachmentFileSource.mockResolvedValue({
             kind: 'ok', source: { kind: 'local', filePath: '/tmp/a.pdf', isRemoteOnly: false },
@@ -151,10 +152,10 @@ describe('ReconcilerService.retryAttachments', () => {
 
     it('excludes trashed parents from enumeration and cursor counts even when item trash checks cannot load parents', async () => {
         await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT, clientDateModified TEXT)');
-        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT)');
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
         await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
         await connection.queryAsync("INSERT INTO items VALUES (10,1,'PARENT01','2026'), (11,1,'CHILD001','2026'), (12,1,'LIVE0001','2026')");
-        await connection.queryAsync("INSERT INTO itemAttachments VALUES (11,10,0,'application/pdf'), (12,NULL,0,'application/pdf')");
+        await connection.queryAsync("INSERT INTO itemAttachments VALUES (11,10,0,'application/pdf','storage:a.pdf'), (12,NULL,0,'application/pdf','storage:b.pdf')");
         await connection.queryAsync('INSERT INTO deletedItems VALUES (10)');
         const getAsync = vi.fn(async (ids: number[]) => ids.map(id => ({ id, isInTrash() { throw new Error('parent unloaded'); } })));
         vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: connection.queryAsync.bind(connection) },
@@ -162,6 +163,28 @@ describe('ReconcilerService.retryAttachments', () => {
         expect(await (reconciler as any).readLibraryCursor(1)).toMatchObject({ attachmentCount: 1 });
         expect(await (reconciler as any).listProcessableAttachments(1)).toHaveLength(1);
         expect(getAsync).toHaveBeenCalledWith([12]);
+    });
+
+    it('enumerates and counts mislabelled PDFs and EPUBs that item classification admits', async () => {
+        await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT, clientDateModified TEXT)');
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
+        await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
+        for (const [id, contentType, path] of [
+            [1, 'application/octet-stream', 'storage:paper.pdf'],
+            [2, '', 'storage:Book.EPUB'],
+            [3, 'application/x-pdf', 'storage:download'],
+            [4, 'application/octet-stream', 'storage:data.bin'],
+            [5, 'application/msword', 'storage:report.pdf'],
+        ] as const) {
+            await connection.queryAsync('INSERT INTO items VALUES (?, 1, ?, ?)', [id, `ITEM000${id}`, '2026']);
+            await connection.queryAsync('INSERT INTO itemAttachments VALUES (?, NULL, 0, ?, ?)', [id, contentType, path]);
+        }
+        const getAsync = vi.fn(async (ids: number[]) => ids.map(id => ({ id, isInTrash: () => false })));
+        vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: connection.queryAsync.bind(connection) },
+            Attachments: { LINK_MODE_LINKED_URL: 3 }, Items: { getAsync } });
+        expect(await (reconciler as any).readLibraryCursor(1)).toMatchObject({ attachmentCount: 3 });
+        expect(await (reconciler as any).listProcessableAttachments(1)).toHaveLength(3);
+        expect(getAsync).toHaveBeenCalledWith([1, 2, 3]);
     });
 
     it('revisits unchanged libraries once when OCR access changes without replaying native successes', async () => {
@@ -189,13 +212,67 @@ describe('ReconcilerService.retryAttachments', () => {
         expect(invalidate).not.toHaveBeenCalled();
     });
 
+    it('tickets OCR for processed scans whose retained preparation became incompatible', async () => {
+        const scan = items.get('1-MISSING1')!;
+        const native = items.get('1-INDEXED1')!;
+        const reset = items.get('1-CRASHED1')!;
+        for (const item of [scan, native, reset]) {
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: item.key, itemId: item.id, contentKind: 'pdf' });
+        }
+        await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status='done', extract_schema_version=?,
+            ocr_status='done', ocr_engine_version=?, upsert_status='done', upsert_index_version='99', structured_document_hash='indexed'`,
+        [expectedExtractionSchemaVersion('pdf'), OCR_ENGINE_VERSION]);
+        await connection.queryAsync("UPDATE attachment_processing_state SET ocr_status='na' WHERE zotero_key='INDEXED1'");
+        // An extraction reset is re-detected by its extract job, which tickets OCR itself.
+        await connection.queryAsync("UPDATE attachment_processing_state SET extract_schema_version='old' WHERE zotero_key='CRASHED1'");
+        getProtectedRepreparationKeys.mockResolvedValue(['CRASHED1', 'INDEXED1', 'MISSING1', 'REMOVED1']);
+        vi.spyOn(reconciler as any, 'reconcileReadingState').mockResolvedValue(undefined);
+        vi.spyOn(reconciler as any, 'readLibraryCursor').mockResolvedValue({ maxClientDateModified: 'same', attachmentCount: 3 });
+        vi.spyOn(reconciler as any, 'listProcessableAttachments').mockResolvedValue([scan, native, reset]);
+        mocks.resolveAttachmentFileSource.mockResolvedValue({
+            kind: 'ok', source: { kind: 'local', filePath: '/tmp/a.pdf', isRemoteOnly: false },
+        });
+        reconciler.start();
+
+        await (reconciler as any).reconcileLibrary(db, 1, false, (reconciler as any).generation);
+
+        expect(mocks.enqueueOcrJob).toHaveBeenCalledOnce();
+        expect(mocks.enqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({
+            libraryId: 1, zoteroKey: scan.key, itemId: scan.id, requestContext: 'backfill',
+        }));
+        expect(await db.getAttachmentProcessingState(1, scan.key)).toMatchObject({
+            ocrStatus: 'done', structuredDocumentHash: 'indexed', upsertStatus: 'done',
+        });
+        expect(await db.peekBackgroundJobs()).toEqual([
+            expect.objectContaining({ jobType: 'document_extract', zoteroKey: reset.key }),
+        ]);
+    });
+
+    it('does not ticket re-preparation without OCR access', async () => {
+        const scan = items.get('1-MISSING1')!;
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: scan.key, itemId: scan.id, contentKind: 'pdf' });
+        await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status='done', extract_schema_version=?,
+            ocr_status='done', ocr_engine_version=?`, [expectedExtractionSchemaVersion('pdf'), OCR_ENGINE_VERSION]);
+        getProtectedRepreparationKeys.mockResolvedValue([scan.key]);
+        vi.spyOn(reconciler as any, 'reconcileReadingState').mockResolvedValue(undefined);
+        vi.spyOn(reconciler as any, 'readLibraryCursor').mockResolvedValue({ maxClientDateModified: 'same', attachmentCount: 1 });
+        vi.spyOn(reconciler as any, 'listProcessableAttachments').mockResolvedValue([scan]);
+        Zotero.Beaver.hasOcrAccess = false;
+        reconciler.start();
+
+        await (reconciler as any).reconcileLibrary(db, 1, false, (reconciler as any).generation);
+
+        expect(mocks.enqueueOcrJob).not.toHaveBeenCalled();
+        expect(getProtectedRepreparationKeys).not.toHaveBeenCalled();
+    });
+
     it('retains both records when persisting deletion cleanup fails while paused', async () => {
         mocks.backgroundEnabled = false;
         await failedExtraction('INDEXED1', 'file_missing');
         await connection.queryAsync(`UPDATE attachment_processing_state
             SET upsert_status = 'done', upsert_remote_identity='{"index_account_id":"account-a","index_scope_ref":"lLOCAL123","index_local_id":"LOCAL123"}', structured_document_hash = ?`, ['a'.repeat(64)]);
         vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: vi.fn(async () => undefined) } });
-        vi.spyOn(db, 'enqueueBackgroundJob').mockRejectedValueOnce(new Error('disk full'));
+        vi.spyOn(db as any, 'enqueueBackgroundJobInTransaction').mockRejectedValueOnce(new Error('disk full'));
 
         reconciler.start();
         await expect((reconciler as any).reconcileReadingState(db, 1, (reconciler as any).generation))

@@ -11,6 +11,9 @@ export const OCR_TERMINAL_NO_TEXT = 'ocr_no_text';
 export const OCR_TERMINAL_GEOMETRY = 'ocr_geometry_mismatch';
 export const OCR_TERMINAL_FAILED = 'ocr_failed_permanent';
 
+/** Recoverable ledger marker when the OCR API is not accepting work. */
+export const OCR_SERVICE_UNAVAILABLE = 'ocr_service_unavailable';
+
 /** Max length of the diagnostic detail sent with a terminal-outcome report. */
 export const OCR_OUTCOME_DETAIL_MAX = 500;
 

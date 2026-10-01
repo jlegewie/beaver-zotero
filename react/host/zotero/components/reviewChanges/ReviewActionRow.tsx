@@ -331,7 +331,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                             <IconButton
                                 icon={TickIcon}
                                 variant="ghost-secondary"
-                                iconClassName="font-color-green scale-14"
+                                iconClassName={`${isBusy && activeButton === 'approve' ? 'font-color-secondary' : 'font-color-green'} scale-14`}
                                 onClick={handleApply}
                                 disabled={isDisabled}
                                 loading={isBusy && activeButton === 'approve'}

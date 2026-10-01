@@ -16,37 +16,61 @@ const TRIGGER = '@';
 export type AddSourcesQuerySource = 'editor' | 'menu';
 
 /**
- * Where an editor-driven menu's query starts inside the editor content.
+ * Where an editor-driven menu's query sits inside the editor content.
  *
- * `prefix` is the text that preceded the `@`; everything after `prefix@` is the
- * typed query.
+ * `prefix` is the text that preceded the trigger character and `suffix` the
+ * text after the caret when it was typed (empty at the end of the content).
+ * Everything between them, after the trigger character, is the query.
  */
 export interface OpenTrigger {
     prefix: string;
+    suffix: string;
 }
 
 /**
- * Whether a trailing `@` in `value` opens the menu, and the text it follows.
+ * Whether the `triggerChar` just typed before `caret` opens its menu, and the
+ * text around it. Shared by the `@` (Add Sources) and `/` (actions) menus.
  *
- * Only a word-initial `@` counts, so an email address typed into the composer
- * stays plain text. Returns null when the value does not end in such an `@`.
+ * The trigger counts when it starts the content or follows a space or line
+ * break, so an email address or a path stays plain text. What follows the
+ * caret does not matter. `baseline` relaxes that guard for the first
+ * keystroke into an editor seeded with text the user did not type: a trigger
+ * inserted into it anywhere counts. `caret` defaults to the end of `value`.
  */
-export function matchSourcesTrigger(value: string, baseline = ''): { prefix: string } | null {
-    if (!value.endsWith(TRIGGER)) return null;
-    const prefix = value.slice(0, -1);
-    if (prefix === baseline) return { prefix };
+export function matchMenuTrigger(
+    triggerChar: string,
+    value: string,
+    baseline = '',
+    caret = value.length,
+): OpenTrigger | null {
+    if (caret < 1 || caret > value.length || value[caret - 1] !== triggerChar) return null;
+    const prefix = value.slice(0, caret - 1);
+    const suffix = value.slice(caret);
+    if (prefix + suffix === baseline) return { prefix, suffix };
     const charBefore = prefix.length > 0 ? prefix[prefix.length - 1] : null;
     if (charBefore !== null && charBefore !== ' ' && charBefore !== '\n') return null;
-    return { prefix };
+    return { prefix, suffix };
 }
 
 /**
  * The query an open menu reads out of the editor's current text, or null when
  * the edit moved outside the query and the menu should close.
  */
+export function queryForMenuTrigger(triggerChar: string, value: string, trigger: OpenTrigger): string | null {
+    const prefix = trigger.prefix + triggerChar;
+    if (value.length < prefix.length + trigger.suffix.length) return null;
+    if (!value.startsWith(prefix) || !value.endsWith(trigger.suffix)) return null;
+    return value.slice(prefix.length, value.length - trigger.suffix.length);
+}
+
+/** {@link matchMenuTrigger} for the Add Sources `@`. */
+export function matchSourcesTrigger(value: string, baseline = '', caret = value.length): OpenTrigger | null {
+    return matchMenuTrigger(TRIGGER, value, baseline, caret);
+}
+
+/** {@link queryForMenuTrigger} for the Add Sources `@`. */
 export function queryForOpenTrigger(value: string, trigger: OpenTrigger): string | null {
-    const prefix = trigger.prefix + TRIGGER;
-    return value.startsWith(prefix) ? value.slice(prefix.length) : null;
+    return queryForMenuTrigger(TRIGGER, value, trigger);
 }
 
 /** Imperative surface the open menu exposes for keyboard handling. */
@@ -57,8 +81,13 @@ export interface AddSourcesMenuHandle {
 
 interface UseAddSourcesMenuOptions {
     verticalPosition: 'above' | 'below';
-    /** Removes `length` characters from the end of the editor content. */
-    deleteTrailingQuery: (length: number) => void;
+    /**
+     * Removes `length` characters from the editor content, ending `keepAfter`
+     * characters before its end (the lines after an `@` typed mid-content).
+     */
+    deleteTrailingQuery: (length: number, keepAfter: number) => void;
+    /** The caret's offset in the editor content, when known. */
+    getCaretOffset?: () => number | null;
     focusEditor: () => void;
     setMessageContent: (value: string) => void;
     /** The rendered menu, for back-navigation out of a submenu. */
@@ -82,6 +111,7 @@ interface UseAddSourcesMenuOptions {
 export function useAddSourcesMenu({
     verticalPosition,
     deleteTrailingQuery,
+    getCaretOffset,
     focusEditor,
     setMessageContent,
     menuRef,
@@ -90,6 +120,10 @@ export function useAddSourcesMenu({
     const [position, setPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [query, setQueryValue] = useState('');
     const [querySource, setQuerySourceValue] = useState<AddSourcesQuerySource>('editor');
+    // Content after the `@` query when the menu opened, e.g. an `@` typed in
+    // front of existing text. Inline ghost text is anchored at the end of the
+    // content, so callers suppress it while this is true.
+    const [hasTextAfterQuery, setHasTextAfterQuery] = useState(false);
 
     // Mirrors of the state above, so handlers that run within a single event
     // (keydown closing the menu, the input event that follows it) see the
@@ -110,6 +144,7 @@ export function useAddSourcesMenu({
         isOpenRef.current = true;
         updateQuery('');
         setQuerySourceValue(source);
+        setHasTextAfterQuery((trigger?.suffix.length ?? 0) > 0);
         setPosition(at);
         setIsOpen(true);
     }, [updateQuery]);
@@ -120,6 +155,7 @@ export function useAddSourcesMenu({
         isOpenRef.current = false;
         updateQuery('');
         setQuerySourceValue('editor');
+        setHasTextAfterQuery(false);
         setIsOpen(false);
     }, [updateQuery]);
 
@@ -144,8 +180,9 @@ export function useAddSourcesMenu({
     const commit = useCallback(() => {
         // +1 for the `@` itself.
         const removeLength = querySourceRef.current === 'editor' ? queryRef.current.length + 1 : 0;
+        const keepAfter = triggerRef.current?.suffix.length ?? 0;
         close();
-        if (removeLength > 0) deleteTrailingQuery(removeLength);
+        if (removeLength > 0) deleteTrailingQuery(removeLength, keepAfter);
         // The click that picked the item may have taken DOM focus out of the
         // editor; restore it once the menu has actually unmounted.
         setTimeout(() => focusEditor(), 0);
@@ -156,7 +193,7 @@ export function useAddSourcesMenu({
         const length = queryRef.current.length;
         const isEditorQuery = querySourceRef.current === 'editor';
         updateQuery('');
-        if (isEditorQuery && length > 0) deleteTrailingQuery(length);
+        if (isEditorQuery && length > 0) deleteTrailingQuery(length, triggerRef.current?.suffix.length ?? 0);
     }, [deleteTrailingQuery, updateQuery]);
 
     /** Open from the "+" button, with the menu's own search field. */
@@ -185,7 +222,7 @@ export function useAddSourcesMenu({
      * {@link matchSourcesTrigger}.
      */
     const handleTrigger = useCallback((value: string, editorRoot: HTMLElement, baseline?: string): boolean => {
-        const match = matchSourcesTrigger(value, baseline);
+        const match = matchSourcesTrigger(value, baseline, getCaretOffset?.() ?? value.length);
         if (!match) return false;
         const rect = editorRoot.getBoundingClientRect();
         const caretRect = getCaretRectWithin(editorRoot);
@@ -193,10 +230,10 @@ export function useAddSourcesMenu({
             ? Math.min(Math.max(caretRect.left, rect.left), rect.right)
             : rect.left;
         const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
-        open('editor', { prefix: match.prefix }, { x, y });
+        open('editor', match, { x, y });
         setMessageContent(value);
         return true;
-    }, [open, setMessageContent, verticalPosition]);
+    }, [getCaretOffset, open, setMessageContent, verticalPosition]);
 
     /** Handle an editor change while the menu is open. Returns true if handled. */
     const handleChange = useCallback((value: string): boolean => {
@@ -252,11 +289,25 @@ export function useAddSourcesMenu({
         return false;
     }, [dismiss, menuRef]);
 
+    /**
+     * Where the caret belongs after an editor change: the end of the query
+     * while an editor-driven menu is open. Once the change has closed the
+     * menu (the `@` was deleted, the edit moved elsewhere), the caret stays
+     * where the edit left it, which need not be the end of `value`.
+     */
+    const caretOffsetFor = useCallback((value: string): number => {
+        if (isOpenRef.current && querySourceRef.current === 'editor') {
+            return value.length - (triggerRef.current?.suffix.length ?? 0);
+        }
+        return getCaretOffset?.() ?? value.length;
+    }, [getCaretOffset]);
+
     return {
         isOpen,
         position,
         query,
         querySource,
+        hasTextAfterQuery,
         setQuery,
         openFromButton,
         handleTrigger,
@@ -265,5 +316,6 @@ export function useAddSourcesMenu({
         dismiss,
         commit,
         resetQuery,
+        caretOffsetFor,
     };
 }

@@ -12,7 +12,7 @@
 
 import { isRunActive } from '../agents/types';
 import type { AgentRun, ModelMessage } from '../agents/types';
-import { parseItemReference, UNRESOLVED_LIBRARY_ID } from '../identity/libraryRef';
+import { isZoteroKey, parseItemReference, UNRESOLVED_LIBRARY_ID } from '../identity/libraryRef';
 import type { ZoteroItemReference } from '../types/zotero';
 
 /** How far a batch got, and how it ended. */
@@ -484,7 +484,9 @@ export function batchOutcomeTarget(
     if (operation === 'sort') {
         // Name alone cannot address a collection.
         const key = row.reference?.trim();
-        return key ? { kind: 'collection', key, name, libraryRef: library } : null;
+        if (!key) return null;
+        const ref = parseItemReference(key);
+        return { kind: 'collection', key, name, libraryRef: ref?.library_ref ?? library };
     }
     if (operation === 'tag') return { kind: 'tag', name, libraryRef: library };
     return null;
@@ -612,12 +614,18 @@ export function batchItemGroupFor(
     record: BatchItemsRecord | undefined,
     block: Pick<BatchOutcomeBlock, 'kind'>,
     row: Pick<BatchOutcomeTally, 'label' | 'reference'>,
+    collectionLibraryRef?: string,
 ): BatchItemGroup | null {
     if (!record) return null;
-    const reference = row.reference?.trim();
+    const identity = (value?: string) => {
+        const ref = value?.trim();
+        return ref && collectionLibraryRef && isZoteroKey(ref)
+            ? `${collectionLibraryRef}-${ref}` : ref;
+    };
+    const reference = identity(row.reference);
     for (const group of record.groups) {
         if (group.kind !== block.kind) continue;
-        if (reference ? group.reference === reference : (!group.reference && group.label === row.label)) {
+        if (reference ? identity(group.reference) === reference : (!group.reference && group.label === row.label)) {
             return group;
         }
     }

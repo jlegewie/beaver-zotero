@@ -11,6 +11,7 @@ import {
     loadJsonFile,
     parseAnalysisWindow,
     parsePageInt,
+    parseSchemaVersion,
 } from "../options";
 import { projectTracePage, type TraceVerbosity } from "../../debug/traceProjection";
 import type { StructuredTraceInput } from "../../node/api";
@@ -33,6 +34,7 @@ export function buildTraceCommand(deps: CliDeps): Command {
         .option("--settings <path>", "path to JSON file with ExtractionSettings")
         .option("--graphics-layer-mode <mode>", "graphics layer probe mode: off | auto | on")
         .option("--paragraph-settings <path>", "path to JSON file with ParagraphDetectionSettings")
+        .option("--schema-version <v>", "PDF schema version to extract (its preset); default current")
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output")
         .action(async (pdfPath: string, opts: Record<string, string | undefined>) => {
@@ -73,6 +75,10 @@ export function buildTraceCommand(deps: CliDeps): Command {
                 );
                 if (opts.paragraphSettings) {
                     input.paragraphSettings = await loadJsonFile(opts.paragraphSettings);
+                }
+                if (opts.schemaVersion) {
+                    input.schemaVersion = parseSchemaVersion(opts.schemaVersion);
+                    effective.schemaVersion = input.schemaVersion;
                 }
 
                 const out = await deps.api.structuredExtractWithDebug(input);

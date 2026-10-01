@@ -22,6 +22,10 @@ export const zoteroConfig: ConfigHost = {
         // unset pref) leaves the workaround on.
         return getPref('imeCompositionOrderFix') !== false;
     },
+    isImeCompositionStartCharSuppressionEnabled() {
+        // Opt-in pref: only an explicit `true` enables the suppression.
+        return getPref('imeSuppressCompositionStartChar') === true;
+    },
     isImeTracingEnabled() {
         return getPref('debugImeTrace') === true;
     },

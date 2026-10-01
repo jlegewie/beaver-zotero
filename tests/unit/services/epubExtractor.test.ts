@@ -79,7 +79,8 @@ describe("extractEpubDocument", () => {
         (globalThis as any).ChromeUtils = { importESModule };
 
         const doc = await extractEpubDocument({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue("/tmp/book.epub"),
         } as any);
 
@@ -115,7 +116,8 @@ describe("extractEpubDocument", () => {
         };
 
         await expect(extractEpubDocument({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue("/tmp/book.epub"),
         } as any)).rejects.toThrow("iteration failed");
         expect(close).toHaveBeenCalledTimes(1);
@@ -123,11 +125,13 @@ describe("extractEpubDocument", () => {
 
     it("rejects non-EPUB attachments and missing local files", async () => {
         await expect(extractEpubDocument({
-            isEPUBAttachment: () => false,
+            isAttachment: () => true,
+            attachmentContentType: "application/pdf",
             getFilePathAsync: vi.fn(),
         } as any)).rejects.toThrow("Item is not an EPUB attachment");
 
         await expect(extractEpubDocument({
+            isAttachment: () => true,
             attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue(""),
         } as any)).rejects.toThrow("EPUB attachment has no local file");
@@ -333,7 +337,8 @@ describe("extractEpubDocumentSafe", () => {
         ]);
 
         const result = await extractEpubDocumentSafe({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue("/tmp/book.epub"),
         } as any);
 
@@ -350,7 +355,8 @@ describe("extractEpubDocumentSafe", () => {
         const onFileNotSyncedLocally = vi.fn();
 
         const result = await extractEpubDocumentSafe({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue(""),
         } as any, { onFileNotSyncedLocally });
 
@@ -366,7 +372,8 @@ describe("extractEpubDocumentSafe", () => {
         const onFileNotSyncedLocally = vi.fn();
 
         const result = await extractEpubDocumentSafe({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue(""),
         } as any, { onFileNotSyncedLocally });
 
@@ -380,7 +387,8 @@ describe("extractEpubDocumentSafe", () => {
 
     it("returns extraction_failed when file path resolution throws", async () => {
         const result = await extractEpubDocumentSafe({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockRejectedValue(new Error("lookup failed")),
         } as any);
 
@@ -396,7 +404,8 @@ describe("extractEpubDocumentSafe", () => {
         (globalThis as any).IOUtils.stat.mockRejectedValue(error);
 
         const result = await extractEpubDocumentSafe({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue("/tmp/book.epub"),
         } as any);
 
@@ -410,7 +419,8 @@ describe("extractEpubDocumentSafe", () => {
         (globalThis as any).IOUtils.stat.mockRejectedValue(new Error("permission denied"));
 
         const result = await extractEpubDocumentSafe({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue("/tmp/book.epub"),
         } as any);
 
@@ -431,7 +441,8 @@ describe("extractEpubDocumentSafe", () => {
         ) as any;
 
         const result = await extractEpubDocumentSafe({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue("/tmp/book.epub"),
         } as any);
 
@@ -457,7 +468,8 @@ describe("extractEpubDocumentSafe", () => {
         };
 
         const result = await extractEpubDocumentSafe({
-            isEPUBAttachment: () => true,
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue("/tmp/book.epub"),
         } as any);
 
@@ -470,7 +482,8 @@ describe("extractEpubDocumentSafe", () => {
 
     it("returns unsupported_type for non-EPUB attachments", async () => {
         const result = await extractEpubDocumentSafe({
-            isEPUBAttachment: () => false,
+            isAttachment: () => true,
+            attachmentContentType: "application/pdf",
             getFilePathAsync: vi.fn(),
         } as any);
 

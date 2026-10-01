@@ -73,9 +73,11 @@ import {
     bboxWidth,
 } from "@beaver/agent-core/extract/types";
 import {
+    CURRENT_PDF_EXTRACTION_PRESET,
     SCHEMA_VERSION,
     assignDocumentIds,
-    buildCitationIndex,
+    pdfExtractionPreset,
+    type PdfExtractionPreset,
     projectStructuredPage,
     type BeaverExtractResult,
     type ExtractionDebug,
@@ -287,13 +289,18 @@ class PageWalkCache {
 
     constructor(
         private readonly doc: DocumentLike,
-        private readonly fontApi?: FontApi,
+        private readonly fontApi: FontApi | undefined,
+        /** Text repair of the op's schema preset; applies to every walk. */
+        private readonly textRepair: boolean,
     ) {}
 
     getPlain(pageIndex: number, includeImages: boolean): RawPageData {
         let page = this.plain.get(pageIndex);
         if (!page) {
-            page = extractRawPageFromDoc(this.doc, pageIndex, { includeImages });
+            page = extractRawPageFromDoc(this.doc, pageIndex, {
+                includeImages,
+                textRepair: this.textRepair,
+            });
             this.plain.set(pageIndex, page);
         }
         return page;
@@ -307,11 +314,33 @@ class PageWalkCache {
                 pageIndex,
                 includeImages,
                 this.fontApi,
+                this.textRepair,
             );
             this.detailed.set(pageIndex, page);
         }
         return page;
     }
+}
+
+/**
+ * OCR-gate page provider over an op's shared page walks.
+ *
+ * Structured extraction decides whether a document is queued for OCR from
+ * the detailed walk (with the schema preset's text repair), so standalone
+ * OCR analysis uses the same walk and every OCR verdict judges identical text.
+ */
+function ocrGateProvider(
+    pageCache: PageWalkCache,
+    pageCount: number,
+    detailed: boolean,
+): RawPageProvider {
+    return {
+        getPageCount: () => pageCount,
+        extractRawPage: (i) =>
+            detailed
+                ? (pageCache.getDetailed(i, true) as unknown as RawPageData)
+                : pageCache.getPlain(i, true),
+    };
 }
 
 /**
@@ -961,13 +990,69 @@ function translateDegradationItemIds(
     };
 }
 
+// C0/C1 control characters never belong in extracted text; Type 3 fonts in
+// some Word exports emit U+0007 for list tabs ("23. \x07Heer"). Each is
+// replaced by one character so text offsets stay aligned: C1 codes 0x91-0x97,
+// which some PDFs use as their Windows-1252 punctuation, become that
+// punctuation; every other control becomes a space. Other C1 codes (0x80,
+// 0x85, ...) mean different things in different fonts and are not mapped.
+// This runs on the final result, not on raw pages: page analysis (the OCR
+// gate, unmapped-glyph recovery) relies on control characters counting as
+// non-letters. It is part of text repair, so it is off in the schema-4 preset.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
+const CONTROL_CHAR_TEST = new RegExp(CONTROL_CHARS.source);
+const CP1252_PUNCTUATION: Record<string, string> = {
+    "\u0091": "‘", // ‘
+    "\u0092": "’", // ’
+    "\u0093": "“", // “
+    "\u0094": "”", // ”
+    "\u0095": "•", // •
+    "\u0096": "–", // –
+    "\u0097": "—", // —
+};
+function replaceControlChars(text: string): string {
+    return CONTROL_CHAR_TEST.test(text)
+        ? text.replace(CONTROL_CHARS, (c) => CP1252_PUNCTUATION[c] ?? " ")
+        : text;
+}
+
+/**
+ * Replace control characters in every text field of the result, in place,
+ * when the PDF schema preset enables text repair.
+ */
+function replaceControlCharsInResult(
+    result: InternalExtractionResult,
+    preset: PdfExtractionPreset,
+): void {
+    if (!preset.textRepair) return;
+    result.fullText = replaceControlChars(result.fullText);
+    for (const page of result.pages) {
+        page.content = replaceControlChars(page.content);
+        for (const item of page.items) {
+            if (!("text" in item)) continue;
+            item.text = replaceControlChars(item.text);
+            for (const line of item.lines) line.text = replaceControlChars(line.text);
+            if (!("sentences" in item) || !item.sentences) continue;
+            for (const sentence of item.sentences) {
+                sentence.text = replaceControlChars(sentence.text);
+                for (const fragment of sentence.fragments ?? []) {
+                    fragment.text = replaceControlChars(fragment.text);
+                }
+            }
+        }
+    }
+}
+
 function toMarkdownExtractResult(
     result: InternalExtractionResult,
+    preset: PdfExtractionPreset,
     includeDiagnostics = false,
 ): MarkdownExtractResult {
+    replaceControlCharsInResult(result, preset);
     return {
         mode: "markdown",
-        schemaVersion: SCHEMA_VERSION,
+        schemaVersion: preset.schemaVersion,
         createdAt: result.metadata.extractedAt,
         // Profiling/diagnostics payload is opt-in.
         ...(includeDiagnostics
@@ -997,14 +1082,23 @@ function toMarkdownExtractResult(
 
 function toStructuredExtractResult(
     result: InternalExtractionResult,
+    preset: PdfExtractionPreset,
     bboxPrecision: number,
     includeDiagnostics = false,
     debug?: ExtractionDebug,
 ): StructuredExtractResult {
+    replaceControlCharsInResult(result, preset);
+    // Margin items stay internal: no consumer reads them, and watermarks drawn
+    // glyph by glyph can make them a large share of a document. They are
+    // appended after all other items, so dropping them leaves the other items'
+    // order and ids unchanged. Debug output keeps them as `marginDecisions`.
     const pages = result.pages.map((page) =>
-        projectStructuredPage(page, bboxPrecision),
+        projectStructuredPage(
+            { ...page, items: page.items.filter((item) => item.kind !== "margin") },
+            bboxPrecision,
+        ),
     );
-    assignDocumentIds(pages);
+    assignDocumentIds(pages, preset.idScheme);
     const degradation = degradationSummary(result);
     const pageDegradation = degradationByPage(result);
     const mergedDebug: ExtractionDebug | undefined = pageDegradation
@@ -1018,7 +1112,7 @@ function toStructuredExtractResult(
         : debug;
     return {
         mode: "structured",
-        schemaVersion: SCHEMA_VERSION,
+        schemaVersion: preset.schemaVersion,
         createdAt: result.metadata.extractedAt,
         // Profiling/diagnostics payload is opt-in.
         ...(includeDiagnostics
@@ -1037,7 +1131,6 @@ function toStructuredExtractResult(
             bboxOrigin: "top-left",
             bboxPrecision,
             pages,
-            citationIndex: buildCitationIndex(pages),
         },
         ...(mergedDebug ? { debug: mergedDebug } : {}),
     };
@@ -1207,6 +1300,13 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
     };
 }
 
+function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtractionPreset {
+    if (schemaVersion == null) return CURRENT_PDF_EXTRACTION_PRESET;
+    const preset = pdfExtractionPreset(schemaVersion);
+    if (!preset) throw new Error(`No extraction preset for PDF schema ${schemaVersion}`);
+    return preset;
+}
+
 /**
  * Strict, fused extract op for the agent handlers.
  *
@@ -1256,6 +1356,8 @@ export async function opExtract(
         analysisWindow?: number;
         /** Attach the opt-in `diagnostics` block */
         includeDiagnostics?: boolean;
+        /** PDF schema version to produce; defaults to the current version. */
+        schemaVersion?: string;
     },
 ): Promise<OpReply<BeaverExtractResult>> {
     // Defense in depth: the facade enforces this too, but the worker is
@@ -1282,6 +1384,7 @@ export async function opExtract(
     const engine: "block" | "paragraph" | "structured" = isStructured
         ? "structured"
         : (explicitEngine ?? "paragraph");
+    const preset = resolvePdfExtractionPreset(args.schemaVersion);
 
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
@@ -1324,19 +1427,13 @@ export async function opExtract(
         // spread of pages and the pipeline walks them again; sharing the
         // walk here keeps an expensive-to-walk page from being processed
         // twice (gate + extraction).
-        const pageCache = new PageWalkCache(doc, fontApi);
+        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair);
 
         if (opts.checkTextLayer) {
             // Run the gate over the SAME walk the pipeline will reuse —
             // detailed for structured, JSON for markdown — so a sampled
             // page is never re-walked by the extraction below.
-            const ocrProvider: RawPageProvider = {
-                getPageCount: () => pageCount,
-                extractRawPage: (i) =>
-                    isStructured
-                        ? (pageCache.getDetailed(i, true) as unknown as RawPageData)
-                        : pageCache.getPlain(i, true),
-            };
+            const ocrProvider = ocrGateProvider(pageCache, pageCount, isStructured);
             const ocr = new DocumentAnalyzer(ocrProvider).getDetailedOCRAnalysis({
                 minTextPerPage: opts.minTextPerPage,
             });
@@ -1394,10 +1491,11 @@ export async function opExtract(
         const result = isStructured
             ? toStructuredExtractResult(
                 internal,
+                preset,
                 args.structured?.bboxPrecision ?? 1,
                 args.includeDiagnostics ?? false,
               )
-            : toMarkdownExtractResult(internal, args.includeDiagnostics ?? false);
+            : toMarkdownExtractResult(internal, preset, args.includeDiagnostics ?? false);
         return { result };
     } catch (e) {
         docFailed = true;
@@ -1431,8 +1529,11 @@ export async function opStructuredExtractWithDebug(
         analysisWindow?: number;
         capturePages: number[];
         debugMode?: "triage" | "full";
+        /** PDF schema version to produce; defaults to the current version. */
+        schemaVersion?: string;
     },
 ): Promise<OpReply<StructuredExtractWithDebugResult>> {
+    const preset = resolvePdfExtractionPreset(args.schemaVersion);
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
     const doc = await acquireDoc(args.pdfData);
@@ -1446,14 +1547,10 @@ export async function opStructuredExtractWithDebug(
         assertDocumentHasPages(pageCount);
         const pageLabels = collectPageLabels(doc);
         const fontApi = (await ensureApi()).Font;
-        const pageCache = new PageWalkCache(doc, fontApi);
+        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair);
 
         if (opts.checkTextLayer) {
-            const ocrProvider: RawPageProvider = {
-                getPageCount: () => pageCount,
-                extractRawPage: (i) =>
-                    pageCache.getDetailed(i, true) as unknown as RawPageData,
-            };
+            const ocrProvider = ocrGateProvider(pageCache, pageCount, true);
             const ocr = new DocumentAnalyzer(ocrProvider).getDetailedOCRAnalysis({
                 minTextPerPage: opts.minTextPerPage,
             });
@@ -1494,7 +1591,7 @@ export async function opStructuredExtractWithDebug(
             internal.metadata.timings.totalMs = performance.now() - tOpStart;
         }
         const bboxPrecision = args.structured?.bboxPrecision ?? 1;
-        const result = toStructuredExtractResult(internal, bboxPrecision);
+        const result = toStructuredExtractResult(internal, preset, bboxPrecision);
         const debug = buildDebugProjection(
             internal,
             result,
@@ -1659,12 +1756,14 @@ export async function opAnalyzeOCRNeeds(
     try {
         // Classify a 0-page document up front — `getDetailedOCRAnalysis`
         // would otherwise throw a raw, unclassified `Error`. The second
-        // check covers `resolveTruePageCount` (inside `rawPageProviderFromDoc`)
-        // correcting an advertised count down to 0.
+        // check covers `resolveTruePageCount` correcting an advertised count
+        // down to 0.
         assertDocumentHasPages(doc.countPages());
-        const provider = rawPageProviderFromDoc(doc);
-        assertDocumentHasPages(provider.getPageCount());
-        const analyzer = new DocumentAnalyzer(provider);
+        const pageCount = resolveTruePageCount(doc);
+        assertDocumentHasPages(pageCount);
+        const fontApi = (await ensureApi()).Font;
+        const pageCache = new PageWalkCache(doc, fontApi, CURRENT_PDF_EXTRACTION_PRESET.textRepair);
+        const analyzer = new DocumentAnalyzer(ocrGateProvider(pageCache, pageCount, true));
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };
     } catch (e) {
