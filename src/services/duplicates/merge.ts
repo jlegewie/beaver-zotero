@@ -323,6 +323,129 @@ export async function executeMergeItemsRequest(
         result_data,
     };
 }
+/** The "predicate object" pairs of an item JSON `relations` value. */
+function relationPairs(value: unknown): Set<string> {
+    const pairs = new Set<string>();
+    for (const [predicate, objects] of Object.entries(
+        (value ?? {}) as Record<string, string | string[]>,
+    ))
+        for (const object of [objects].flat()) pairs.add(`${predicate} ${object}`);
+    return pairs;
+}
+/** Zotero's merge-tracking predicate (`Zotero.Relations.replacedItemPredicate`). */
+const MERGE_TRACKING_PREDICATE = "dc:replaces";
+
+function sameSet(a: Set<string>, b: Set<string>): boolean {
+    return a.size === b.size && [...a].every((x) => b.has(x));
+}
+
+/**
+ * Whether relations sit between their pre-merge and merged states in the one
+ * way Zotero produces on its own: restoring a duplicate this merge trashed
+ * drops the merge-tracking relation that points at it. Only those pairs may
+ * each be in either state. Tracking inherited from an earlier merge must not
+ * be missing: its target was not trashed by this merge, so undo could not
+ * restore it consistently. All other relations, such as related-item links the
+ * merge rewrote, must match one state as a whole; judged pair by pair, a link
+ * the user deleted after the merge would pass and undo would recreate it.
+ */
+function relationsBetween(
+    current: unknown,
+    before: unknown,
+    after: unknown,
+    trashedByMerge: Set<string>,
+): boolean {
+    const split = (value: unknown) => {
+        const tracking = new Set<string>();
+        const other = new Set<string>();
+        for (const pair of relationPairs(value))
+            (pair.startsWith(`${MERGE_TRACKING_PREDICATE} `) ? tracking : other).add(pair);
+        return { tracking, other };
+    };
+    const [now, was, merged] = [current, before, after].map(split);
+    if (!sameSet(now.other, was.other) && !sameSet(now.other, merged.other))
+        return false;
+    for (const pair of new Set([...now.tracking, ...was.tracking, ...merged.tracking])) {
+        if (now.tracking.has(pair) === merged.tracking.has(pair)) continue;
+        const target = pair.slice(MERGE_TRACKING_PREDICATE.length + 1);
+        if (now.tracking.has(pair) !== was.tracking.has(pair) || !trashedByMerge.has(target))
+            return false;
+    }
+    return true;
+}
+
+/** Targets of the merge-tracking relations in an item JSON `relations` value. */
+function trackingTargets(value: unknown): Set<string> {
+    const objects = ((value ?? {}) as Record<string, string | string[]>)[MERGE_TRACKING_PREDICATE];
+    return new Set(objects == null ? [] : [objects].flat());
+}
+
+/**
+ * Refuse to write back a merge-tracking relation whose target has moved on.
+ * Undo restores pre-merge relations, which can re-add tracking inherited from
+ * an earlier merge (B replaced D before B was merged away). If D has since been
+ * restored from the trash, or merged into an item outside this merge, the
+ * relation would mark a live or re-merged item as replaced. A target that no
+ * longer exists is fine: Zotero keeps tracking for purged items.
+ */
+async function assertTrackingRestorable(
+    before: unknown,
+    current: unknown,
+    mergeItemIDs: Set<number>,
+): Promise<void> {
+    const present = trackingTargets(current);
+    for (const target of trackingTargets(before)) {
+        if (present.has(target)) continue;
+        const item = await (Zotero.URI as any).getURIItem(target);
+        if (!item) continue;
+        const replacers = (await (Zotero as any).Relations.getByPredicateAndObject(
+            "item",
+            MERGE_TRACKING_PREDICATE,
+            target,
+        )) as Zotero.Item[];
+        if (!item.deleted || replacers.some((r) => !mergeItemIDs.has(r.id)))
+            throw duplicateError(
+                "An item replaced by a record in this merge was restored or merged again afterwards. Undo was not applied.",
+                "undo_conflict",
+            );
+    }
+}
+/**
+ * Refuse to undo when an item this merge trashed now belongs to another merge.
+ *
+ * Undo restores those items from the trash, and Zotero's undelete removes
+ * every merge-tracking relation that points at a restored item, including one
+ * from a newer merge. The native merge tracks each item it trashes (records and
+ * merged attachments alike) from an item of this merge, so each trashed item
+ * must be tracked by no item outside it. When nothing tracks it, the only
+ * legitimate cause is Zotero dropping the relation on restore: the item must
+ * be out of the trash now. Otherwise it was restored and merged again (or the
+ * relation was removed by hand), and undoing would disrupt that later state.
+ */
+async function assertDuplicatesRestorable(
+    loaded: { item: Zotero.Item; change: MergeItemSnapshot }[],
+    mergeItemIDs: Set<number>,
+): Promise<Set<string>> {
+    const trashed = new Set<string>();
+    for (const { item, change } of loaded) {
+        if (!change.after?.deleted || change.before?.deleted) continue;
+        const uri = Zotero.URI.getItemURI(item);
+        trashed.add(uri);
+        const replacers = (await (Zotero as any).Relations.getByPredicateAndObject(
+            "item",
+            MERGE_TRACKING_PREDICATE,
+            uri,
+        )) as Zotero.Item[];
+        const conflict = replacers.some((r) => !mergeItemIDs.has(r.id))
+            ? "A record from this merge was merged into another item afterwards."
+            : !replacers.length && item.deleted
+              ? "A record from this merge was changed after the merge."
+              : null;
+        if (conflict)
+            throw duplicateError(`${conflict} Undo was not applied.`, "undo_conflict");
+    }
+    return trashed;
+}
 export async function executeMergeItemsAction(
     action: AgentAction,
 ): Promise<MergeItemsResultData> {
@@ -376,6 +499,8 @@ export async function undoMergeItemsAction(action: AgentAction): Promise<void> {
                 if (!(Zotero.Libraries.get(item.libraryID) as any)?.editable)
                     throw duplicateError("Library is read-only.");
             }
+            const mergeItemIDs = new Set(loaded.map(({ item }) => item.id));
+            const trashedByMerge = await assertDuplicatesRestorable(loaded, mergeItemIDs);
             const restores: {
                 item: Zotero.Item;
                 json: Record<string, unknown>;
@@ -394,26 +519,45 @@ export async function undoMergeItemsAction(action: AgentAction): Promise<void> {
                     ...Object.keys(change.before),
                     ...Object.keys(change.after),
                 ]);
+                let restored = false;
                 for (const field of fields) {
                     if (OMIT.has(field)) continue;
+                    const before = stableJSON(change.before[field]);
+                    if (before === stableJSON(change.after[field])) continue;
+                    // A field already back at its pre-merge value needs no
+                    // write. This covers a merge reverted outside Beaver, such
+                    // as with Zotero's Edit → Undo or by restoring an item from
+                    // the trash.
+                    const now = stableJSON(current[field]);
+                    if (now === before) continue;
                     if (
-                        stableJSON(change.before[field]) ===
-                        stableJSON(change.after[field])
-                    )
-                        continue;
-                    if (
-                        stableJSON(current[field]) !==
-                        stableJSON(change.after[field])
+                        now !== stableJSON(change.after[field]) &&
+                        !(
+                            field === "relations" &&
+                            relationsBetween(
+                                current[field],
+                                change.before[field],
+                                change.after[field],
+                                trashedByMerge,
+                            )
+                        )
                     )
                         throw duplicateError(
                             `An affected ${field} changed after the merge. Undo was not applied.`,
                             "undo_conflict",
                         );
+                    if (field === "relations")
+                        await assertTrackingRestorable(
+                            change.before[field],
+                            current[field],
+                            mergeItemIDs,
+                        );
                     if (field in change.before)
                         current[field] = change.before[field];
                     else delete current[field];
+                    restored = true;
                 }
-                restores.push({ item, json: current });
+                if (restored) restores.push({ item, json: current });
             }
             // Restore regular parents before restoring their children.
             restores.sort(

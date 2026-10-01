@@ -82,6 +82,19 @@ async function proposal() {
         } as any)
     ).normalized_action_data as any;
 }
+/** Native merge that moves a related-item relation and records the replaced item. */
+function mergeWithRelatedItem() {
+    vi.mocked(Zotero.Items.merge).mockImplementation((master: any, others: any[]) =>
+        Zotero.DB.executeTransaction(async () => {
+            master.json.tags = [{ tag: "test" }];
+            master.json.relations = {
+                "dc:relation": ["uri:CCCC3333"],
+                "dc:replaces": [`uri:${others[0].key}`],
+            };
+            for (const i of others) i.deleted = true;
+        }),
+    );
+}
 beforeEach(() => {
     state.excluded = false;
     state.bodyRan = false;
@@ -107,8 +120,16 @@ beforeEach(() => {
     ];
     vi.stubGlobal("Zotero", {
         Libraries: { get: () => ({ editable: true }) },
-        Relations: { getByObject: async () => [] },
-        URI: { getItemURI: (i: any) => `uri:${i.key}` },
+        Relations: {
+            getByObject: async () => [],
+            // Items whose relations hold `predicate object`, as Zotero's index answers.
+            getByPredicateAndObject: async (_: string, predicate: string, object: string) =>
+                items.filter((i) => [i.json.relations?.[predicate] ?? []].flat().includes(object)),
+        },
+        URI: {
+            getItemURI: (i: any) => `uri:${i.key}`,
+            getURIItem: async (uri: string) => items.find((i) => `uri:${i.key}` === uri) ?? false,
+        },
         ItemFields: { getID: () => 1, isValidForType: () => true },
         Items: {
             loadDataTypes: async () => {},
@@ -120,7 +141,7 @@ beforeEach(() => {
                 Zotero.DB.executeTransaction(async () => {
                     state.bodyRan = true;
                     master.json.tags = [{ tag: "test" }];
-                    master.json.relations = { replaces: others[0].key };
+                    master.json.relations = { "dc:replaces": [`uri:${others[0].key}`] };
                     for (const i of others) i.deleted = true;
                 }),
             ),
@@ -165,6 +186,179 @@ describe("native merge action", () => {
         await undoMergeItemsAction({ result_data: result } as any);
         expect(items[0].json.title).toBe("Later title");
         expect(items[1].deleted).toBe(false);
+    });
+    it("completes without writing when the merge was already reverted outside Beaver", async () => {
+        const before = items.map((i) => clone(i.json));
+        const result = await applyMerge(await proposal());
+        items.forEach((i, n) => (i.json = clone(before[n])));
+        await undoMergeItemsAction({ result_data: result } as any);
+        expect(items.map((i) => i.json)).toEqual(before);
+        for (const item of items) expect(item.save).not.toHaveBeenCalled();
+    });
+    it("restores the rest after the user restored the duplicate from the trash", async () => {
+        mergeWithRelatedItem();
+        const before = items.map((i) => clone(i.json));
+        const result = await applyMerge(await proposal());
+        // Zotero drops the master's merge-tracking relation on restore.
+        items[1].deleted = false;
+        delete items[0].json.relations["dc:replaces"];
+        await undoMergeItemsAction({ result_data: result } as any);
+        expect(items.map((i) => i.json)).toEqual(before);
+        expect(items[0].save).toHaveBeenCalledOnce();
+        expect(items[1].save).not.toHaveBeenCalled();
+    });
+    it("refuses a relation added after the merge", async () => {
+        mergeWithRelatedItem();
+        const result = await applyMerge(await proposal());
+        items[0].json.relations["dc:relation"].push("uri:LATER");
+        await expect(
+            undoMergeItemsAction({ result_data: result } as any),
+        ).rejects.toThrow("relations changed after");
+        expect(items[1].deleted).toBe(true);
+    });
+    it("refuses undo when the restored duplicate was since merged into another item", async () => {
+        const result = await applyMerge(await proposal());
+        // Restoring B drops A's tracking; B is then merged into C.
+        delete items[0].json.relations["dc:replaces"];
+        items.push(
+            makeItem(3, "CCCC3333", {
+                itemType: "journalArticle",
+                title: "Paper",
+                relations: { "dc:replaces": ["uri:BBBB2222"] },
+                deleted: false,
+            }),
+        );
+        await expect(
+            undoMergeItemsAction({ result_data: result } as any),
+        ).rejects.toThrow("merged into another item afterwards");
+        expect(items[1].deleted).toBe(true);
+        expect(items[2].json.relations).toEqual({ "dc:replaces": ["uri:BBBB2222"] });
+        for (const item of items) expect(item.save).not.toHaveBeenCalled();
+    });
+    it("refuses undo when the merge tracking is gone but the duplicate is still in the trash", async () => {
+        const result = await applyMerge(await proposal());
+        delete items[0].json.relations["dc:replaces"];
+        await expect(
+            undoMergeItemsAction({ result_data: result } as any),
+        ).rejects.toThrow("changed after the merge");
+        expect(items[1].deleted).toBe(true);
+    });
+    describe("merge tracking inherited from an earlier merge", () => {
+        // D was merged into B earlier; merging B into A moves "B replaces D" to A.
+        beforeEach(() => {
+            items[1].json.relations = { "dc:replaces": ["uri:DDDD4444"] };
+            items.push(
+                makeItem(4, "DDDD4444", {
+                    itemType: "journalArticle",
+                    title: "Paper",
+                    relations: {},
+                    deleted: true,
+                }),
+            );
+            vi.mocked(Zotero.Items.merge).mockImplementation((master: any, others: any[]) =>
+                Zotero.DB.executeTransaction(async () => {
+                    master.json.relations = {
+                        "dc:replaces": ["uri:DDDD4444", `uri:${others[0].key}`],
+                    };
+                    others[0].json.relations = {};
+                    for (const i of others) i.deleted = true;
+                }),
+            );
+        });
+        it("hands the inherited tracking back to the restored duplicate", async () => {
+            const result = await applyMerge(await proposal());
+            await undoMergeItemsAction({ result_data: result } as any);
+            expect(items[0].json.relations).toEqual({});
+            expect(items[1].json.relations).toEqual({ "dc:replaces": ["uri:DDDD4444"] });
+            expect(items[1].deleted).toBe(false);
+        });
+        it("refuses undo after the inherited duplicate was restored from the trash", async () => {
+            const result = await applyMerge(await proposal());
+            // Zotero's undelete drops every tracking relation that points at D.
+            items[2].deleted = false;
+            items[0].json.relations = { "dc:replaces": ["uri:BBBB2222"] };
+            await expect(
+                undoMergeItemsAction({ result_data: result } as any),
+            ).rejects.toThrow("relations changed after");
+            expect(items[1].json.relations).toEqual({});
+        });
+        it("refuses undo when both duplicates were restored, so the master looks unmerged", async () => {
+            const result = await applyMerge(await proposal());
+            items[2].deleted = false;
+            items[1].deleted = false;
+            items[0].json.relations = {};
+            await expect(
+                undoMergeItemsAction({ result_data: result } as any),
+            ).rejects.toThrow("restored or merged again afterwards");
+            expect(items[1].json.relations).toEqual({});
+        });
+        it("refuses undo after the inherited duplicate was merged into another item", async () => {
+            const result = await applyMerge(await proposal());
+            items[0].json.relations = { "dc:replaces": ["uri:BBBB2222"] };
+            items.push(
+                makeItem(5, "EEEE5555", {
+                    itemType: "journalArticle",
+                    title: "Paper",
+                    relations: { "dc:replaces": ["uri:DDDD4444"] },
+                    deleted: false,
+                }),
+            );
+            await expect(
+                undoMergeItemsAction({ result_data: result } as any),
+            ).rejects.toThrow("changed after");
+            expect(items.find((i) => i.key === "EEEE5555").json.relations).toEqual({
+                "dc:replaces": ["uri:DDDD4444"],
+            });
+        });
+    });
+    describe("a related-item link the merge rewrote", () => {
+        beforeEach(() => {
+            // The item linked to the duplicate; the merge points the link at the master.
+            items[0].json.relations = { "dc:relation": ["uri:DUPLICATE"] };
+            vi.mocked(Zotero.Items.merge).mockImplementation((master: any, others: any[]) =>
+                Zotero.DB.executeTransaction(async () => {
+                    master.json.relations = {
+                        "dc:relation": ["uri:MASTER"],
+                        "dc:replaces": [`uri:${others[0].key}`],
+                    };
+                    for (const i of others) i.deleted = true;
+                }),
+            );
+        });
+        it("refuses undo when the user removed the link after the merge", async () => {
+            const result = await applyMerge(await proposal());
+            delete items[0].json.relations["dc:relation"];
+            await expect(
+                undoMergeItemsAction({ result_data: result } as any),
+            ).rejects.toThrow("relations changed after");
+            expect(items[0].json.relations).toEqual({ "dc:replaces": ["uri:BBBB2222"] });
+            expect(items[1].deleted).toBe(true);
+        });
+        it("refuses undo when the link was removed and the duplicate restored from the trash", async () => {
+            const result = await applyMerge(await proposal());
+            items[0].json.relations = {};
+            items[1].deleted = false;
+            await expect(
+                undoMergeItemsAction({ result_data: result } as any),
+            ).rejects.toThrow("relations changed after");
+            expect(items[0].json.relations).toEqual({});
+        });
+        it("restores the link when only the merge-tracking relation was dropped", async () => {
+            const result = await applyMerge(await proposal());
+            items[1].deleted = false;
+            delete items[0].json.relations["dc:replaces"];
+            await undoMergeItemsAction({ result_data: result } as any);
+            expect(items[0].json.relations).toEqual({ "dc:relation": ["uri:DUPLICATE"] });
+        });
+    });
+    it("still refuses a field that holds neither the merged nor the original value", async () => {
+        const result = await applyMerge(await proposal());
+        items[0].json.tags = [{ tag: "later" }];
+        items[1].deleted = false;
+        await expect(
+            undoMergeItemsAction({ result_data: result } as any),
+        ).rejects.toThrow("changed after");
+        expect(items[0].json.tags).toEqual([{ tag: "later" }]);
     });
     it("refuses conflicting undo atomically", async () => {
         const result = await applyMerge(await proposal());
