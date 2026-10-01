@@ -18,6 +18,7 @@
 import { ToolReturnPart, isUnsuccessfulToolReturn } from "@beaver/agent-core/agents/types";
 import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import { logger } from "@beaver/agent-core/platform/logger";
+import { attachmentDocumentType } from "../../src/utils/attachmentFiles";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { safeAttachmentFilename } from "../../src/utils/attachmentFiles";
 import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
@@ -186,12 +187,9 @@ function bibSubtitle(parent: Zotero.Item): string | null {
 function deriveContentKind(item: Zotero.Item): string | undefined {
     if (!item.isAttachment?.()) return undefined;
     try {
-        if (item.isPDFAttachment?.()) return "pdf";
+        const documentType = attachmentDocumentType(item);
+        if (documentType) return documentType;
         const contentType = (item.attachmentContentType || "").toLowerCase();
-        const isEpub = (item as unknown as { isEPUBAttachment?: () => boolean }).isEPUBAttachment;
-        if ((typeof isEpub === "function" && isEpub.call(item)) || contentType === "application/epub+zip") {
-            return "epub";
-        }
         const isImage = (item as unknown as { isImageAttachment?: () => boolean }).isImageAttachment;
         if ((typeof isImage === "function" && isImage.call(item)) || contentType.startsWith("image/")) {
             return "image";

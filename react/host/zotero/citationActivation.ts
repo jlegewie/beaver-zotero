@@ -39,6 +39,7 @@ import {
 } from '../../../src/utils/zoteroItemHelpers';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
 import { libraryRefForLibraryID, resolveItemReference } from '../../../src/utils/libraryIdentity';
+import { isPdfDocument } from '../../../src/utils/attachmentFiles';
 import type { CitationActivation } from '@beaver/agent-ui/host/types';
 
 /**
@@ -316,10 +317,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
     if (item.isRegularItem()) {
         if (hasPdfLocator) {
             const attachment = await getBestPDFAttachmentAsync(item);
-            const isPdfAttachment = !!attachment && (
-                attachment.isPDFAttachment?.() ||
-                attachment.attachmentContentType === 'application/pdf'
-            );
+            const isPdfAttachment = !!attachment && isPdfDocument(attachment);
             if (isPdfAttachment) {
                 logger(`Citation activation: Regular item locator resolved to PDF attachment (${attachment.id})`);
                 pdfItem = attachment;

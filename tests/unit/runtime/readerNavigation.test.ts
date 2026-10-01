@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AttachmentFileUnavailableError, openReader, openNote, viewAttachment } from '../../../react/runtime/navigation';
+import { runWindowOperation } from '../../../react/runtime/libraryMutation';
 vi.mock('../../../react/utils/navigationNotice', () => ({ notifyNavigationUnavailable: vi.fn() }));
+vi.mock('../../../react/runtime/libraryMutation', () => ({ runWindowOperation: vi.fn() }));
 let a: any, b: any;
 beforeEach(() => {
     const main = () => ({ closed: false, focus: vi.fn(), ZoteroPane: { itemsView: { waitForLoad: vi.fn(async () => {}) }, collectionsView: { waitForLoad: vi.fn(async () => {}) } }, Zotero_Tabs: { _tabs: [], select: vi.fn(), isOwnTabEvent: vi.fn() } });
@@ -221,6 +223,8 @@ describe('file availability before opening the reader', () => {
         item = {
             libraryID: 1,
             attachmentSyncState: TO_DOWNLOAD,
+            attachmentContentType: 'application/pdf',
+            isAttachment: () => true,
             isFileAttachment: () => true,
             isStoredFileAttachment: () => true,
             getFilePath: () => '/storage/ABC/file.pdf',
@@ -243,6 +247,7 @@ describe('file availability before opening the reader', () => {
                 },
             },
             Notifier: { trigger: vi.fn() },
+            Attachments: { LINK_MODE_LINKED_URL: 3 },
             logError: vi.fn(),
         });
     });
@@ -298,5 +303,55 @@ describe('file availability before opening the reader', () => {
         await openReader(42, undefined, {}, a);
         expect(Zotero.Reader.open).toHaveBeenCalledOnce();
         expect((Zotero.Sync.Runner as any).alert).not.toHaveBeenCalled();
+    });
+});
+
+describe('content type before opening the reader', () => {
+    let item: any;
+
+    beforeEach(() => {
+        vi.mocked(runWindowOperation).mockReset();
+        item = {
+            libraryID: 1,
+            attachmentSyncState: 0,
+            attachmentContentType: 'application/pdf',
+            attachmentFilename: 'paper.pdf',
+            isAttachment: () => true,
+            isFileAttachment: () => true,
+            isStoredFileAttachment: () => true,
+            getFilePath: () => '/storage/ABC/paper.pdf',
+            getFilePathAsync: vi.fn(async () => '/storage/ABC/paper.pdf'),
+        };
+        vi.stubGlobal('IOUtils', { exists: vi.fn(async () => true) });
+        Object.assign(Zotero as any, {
+            Items: { getAsync: vi.fn(async () => item) },
+            Sync: { Storage: { Local: {
+                getEnabledForLibrary: vi.fn(() => true),
+                SYNC_STATE_TO_DOWNLOAD: 2,
+                SYNC_STATE_FORCE_DOWNLOAD: 5,
+            } } },
+            Attachments: { LINK_MODE_LINKED_URL: 3 },
+        });
+    });
+
+    it('corrects a mislabelled PDF in the plugin realm before the reader opens it', async () => {
+        item.attachmentContentType = 'application/octet-stream';
+        await openReader(42, undefined, {}, a);
+        expect(runWindowOperation).toHaveBeenCalledWith('ensureReaderContentType', [42]);
+        expect(vi.mocked(runWindowOperation).mock.invocationCallOrder[0])
+            .toBeLessThan(vi.mocked(Zotero.Reader.open).mock.invocationCallOrder[0]);
+    });
+
+    it('opens a correctly typed PDF without a library write', async () => {
+        await openReader(42, undefined, {}, a);
+        expect(runWindowOperation).not.toHaveBeenCalled();
+        expect(Zotero.Reader.open).toHaveBeenCalledOnce();
+    });
+
+    it('still opens the reader when the correction fails', async () => {
+        item.attachmentContentType = '';
+        vi.mocked(runWindowOperation).mockRejectedValue(new Error('library locked') as never);
+        await openReader(42, undefined, {}, a);
+        expect(Zotero.Reader.open).toHaveBeenCalledOnce();
     });
 });

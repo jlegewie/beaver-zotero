@@ -61,8 +61,9 @@ describe('agentItemSupport', () => {
             expect(isAgentSupportedItem(pdfAttachment())).toBe(true);
         });
 
-        it('accepts EPUB attachments via isEPUBAttachment()', () => {
-            const item = withTrash(createMockAttachment({ contentType: '', isEPUB: true }));
+        it('accepts EPUB attachments stored under a generic content type', () => {
+            const item = withTrash(createMockAttachment({ contentType: 'application/octet-stream' }));
+            (item as any).attachmentFilename = 'book.epub';
             expect(isAgentSupportedItem(item)).toBe(true);
         });
 

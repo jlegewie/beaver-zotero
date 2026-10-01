@@ -11,6 +11,7 @@ import { getPref } from '../utils/prefs';
 import { TimingAccumulator } from '../utils/timing';
 import type { AttachmentResolvedPayload } from './attachmentResolved';
 import { fetchPdfAttachment } from './pdfAttachmentFetch';
+import { isPdfDocument } from '../utils/attachmentFiles';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
@@ -610,7 +611,7 @@ async function filterPdfAttachments(attachmentIds: number[]): Promise<Zotero.Ite
     );
     
     return attachments.filter((a): a is Zotero.Item => 
-        a && !a.deleted && a.isPDFAttachment()
+        a && !a.deleted && isPdfDocument(a)
     );
 }
 

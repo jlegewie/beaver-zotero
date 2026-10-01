@@ -93,7 +93,7 @@ function makeRequest(overrides: Partial<WSReadNoteRequest> = {}): WSReadNoteRequ
 function makeMockItem(overrides: any = {}) {
     return {
         isNote: vi.fn(() => true),
-        isPDFAttachment: vi.fn(() => false),
+        isAttachment: vi.fn(() => false),
         itemType: 'note',
         libraryID: 1,
         key: 'ABCD1234',

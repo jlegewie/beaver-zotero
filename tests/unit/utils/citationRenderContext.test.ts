@@ -53,6 +53,8 @@ describe('citation render context', () => {
             id: 42,
             key: 'ATTACH01',
             libraryID: 1,
+            isAttachment: () => true,
+            attachmentContentType: '',
         };
         cache = {
             getResult: vi.fn().mockResolvedValue(structuredResult()),

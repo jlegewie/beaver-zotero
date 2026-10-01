@@ -1,6 +1,7 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import { refuseCaptchaChallengeUrls } from '../utils/pdfChallengeUrls';
 import { getSystemTimers } from '../utils/systemTimers';
+import { isPdfDocument } from '../utils/attachmentFiles';
 import { coordinateLibraryMutation } from './libraryMutations';
 
 const PDF_FETCH_BUDGET_MS = 60_000;
@@ -81,7 +82,7 @@ export async function fetchPdfAttachment(
             const ids = await current.getAttachments();
             const existing = await Promise.all(ids.map(id => Zotero.Items.getAsync(id)));
             assertCurrent();
-            const pdf = existing.find(candidate => candidate && !candidate.deleted && candidate.isPDFAttachment());
+            const pdf = existing.find(candidate => candidate && !candidate.deleted && isPdfDocument(candidate));
             if (pdf) return { attachment: pdf };
             const attachment = await attachments.createURLAttachmentFromTemporaryStorageDirectory({
                 directory, libraryID: current.libraryID, parentItemID: current.id,

@@ -71,7 +71,7 @@ describe('locator resolution by id scheme', () => {
             key: 'ATTACH12',
             libraryID: 1,
             isAttachment: () => true,
-            isPDFAttachment: () => true,
+            attachmentContentType: 'application/pdf',
             getFilePathAsync: vi.fn().mockResolvedValue(FILE_PATH),
         };
         getResult = vi.fn().mockResolvedValue(currentResult());
@@ -150,7 +150,7 @@ describe('locator resolution by id scheme', () => {
     });
 
     it('reads non-PDF attachments from the cache whatever the id scheme', async () => {
-        attachment.isPDFAttachment = () => false;
+        attachment.attachmentContentType = 'application/epub+zip';
         await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s12"/>');
         expect(getResult).toHaveBeenCalledOnce();
         expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();

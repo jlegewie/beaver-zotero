@@ -22,6 +22,7 @@ import {
     structuredPdfResultForSchema,
 } from '../../src/services/documentExtraction/structuredPdfResult';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
+import { isPdfDocument } from '../../src/utils/attachmentFiles';
 import type { ExternalFileRecord } from '../../src/services/database';
 
 function citationLocationsFromEntries(entries: CitationIndexEntry[]): PartLocation[] {
@@ -109,7 +110,7 @@ export async function buildLocalCitationDataMapForContent(
 
             const schemaVersion = locatorSchemaVersion(
                 normalized.ref.loc,
-                !!preloadPath.item.isPDFAttachment?.(),
+                isPdfDocument(preloadPath.item),
             );
             const cacheKey = `${preloadPath.item.libraryID}:${preloadPath.item.key}:${preloadPath.filePath}:${schemaVersion}`;
             let resultPromise = structuredResultsByFile.get(cacheKey);
