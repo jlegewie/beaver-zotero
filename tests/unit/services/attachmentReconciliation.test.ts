@@ -695,6 +695,33 @@ describe('attachment change reconciliation', () => {
         ]);
     });
 
+    it.each([['cache preparation', 'done'], ['re-extraction', null]] as const)(
+        'lists a previously read attachment whose %s is denied until the job dies', async (_, extractStatus) => {
+        await seed(false);
+        await db.recordAttachmentReadingOutcome({ libraryId: 1, zoteroKey: item.key,
+            contentKind: 'snapshot', errorCode: null, attemptedAt: 100 });
+        if (extractStatus === null) await db.resetAttachmentExtraction(1, item.key, 'source_recheck');
+        mocks.resolve.mockResolvedValue({ kind: 'error', code: 'file_permission_denied' });
+        await db.enqueueBackgroundJob({ jobType: 'document_extract', libraryId: 1, zoteroKey: item.key,
+            itemId: item.id, contentKind: 'snapshot', payloadKind: 'structured', priority: 110,
+            payload: { content_kind: 'snapshot', prepare_cache: extractStatus === 'done' }, now: 0 });
+        await connection.queryAsync('UPDATE background_jobs SET attempt_count = 1, available_at = 0');
+        const processor = new BackgroundExtractor();
+
+        expect(await processor.processOnce({ awaitLaunchedJobs: true })).toMatchObject({ processed: true });
+        // A queued retry is pending work, not an issue.
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([]);
+
+        await connection.queryAsync('UPDATE background_jobs SET available_at = 0');
+        expect(await processor.processOnce({ awaitLaunchedJobs: true })).toMatchObject({ processed: true });
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(await db.getAttachmentProcessingState(1, item.key))
+            .toMatchObject({ extractStatus: extractStatus ?? 'failed' });
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'permission_denied', count: 1 }]);
+        expect((await db.getProcessingIssuePage(entitlements, 'permission_denied')).map((issue) => issue.zoteroKey))
+            .toEqual([item.key]);
+    });
+
     it.each([
         ['missing', 'notification'], ['invalid', 'notification'],
         ['missing', 'deep'], ['invalid', 'deep'],

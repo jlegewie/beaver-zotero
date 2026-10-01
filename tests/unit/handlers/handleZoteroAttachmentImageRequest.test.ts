@@ -325,6 +325,17 @@ describe('handleZoteroAttachmentImageRequest', () => {
         expect(response.error).toContain('does not have permission to read the image file');
     });
 
+    it('does not report a NotAllowedError from image processing as a refused file', async () => {
+        setupZoteroEnv();
+        vi.mocked(processImageBytes).mockRejectedValue(
+            Object.assign(new Error('Operation not allowed'), { name: 'NotAllowedError' }));
+
+        const response = await handleZoteroAttachmentImageRequest(baseRequest() as any);
+
+        expect(response.error_code).toBe('image_processing_failed');
+        expect(response.error).toContain('Operation not allowed');
+    });
+
     it('maps unexpected processing errors to image_processing_failed', async () => {
         setupZoteroEnv();
         vi.mocked(processImageBytes).mockRejectedValue(new Error('canvas exploded'));

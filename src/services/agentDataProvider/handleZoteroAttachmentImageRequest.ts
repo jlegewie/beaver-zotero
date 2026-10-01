@@ -25,7 +25,11 @@ import {
     checkRemotePdfSize,
     isRemoteAccessAvailable,
 } from './utils';
-import { fileAccessDeniedMessage, isFileAccessDeniedError } from '../documentExtraction/attachmentSource';
+import {
+    FileAccessDeniedError,
+    classifyFileAccess,
+    fileAccessDeniedMessage,
+} from '../documentExtraction/attachmentSource';
 import {
     DEFAULT_ATTACHMENT_IMAGE_TIMEOUT_SECONDS,
     TimeoutError,
@@ -153,7 +157,7 @@ export async function handleZoteroAttachmentImageRequest(
         // 4. Check file size limit (remote files are checked after download)
         const maxFileSizeMB = effectiveMaxFileSizeMB();
         if (!isRemoteOnly) {
-            const fileSize = await Zotero.Attachments.getTotalFileSize(imageItem);
+            const fileSize = await classifyFileAccess(Zotero.Attachments.getTotalFileSize(imageItem));
             throwIfTimedOut('file_size_check');
 
             if (fileSize) {
@@ -170,7 +174,7 @@ export async function handleZoteroAttachmentImageRequest(
         // 5. Load the image bytes (local file or remote download)
         let imageBytes: Uint8Array;
         try {
-            imageBytes = await loadPdfData(imageItem, effectiveFilePath, isRemoteOnly);
+            imageBytes = await classifyFileAccess(loadPdfData(imageItem, effectiveFilePath, isRemoteOnly));
             throwIfTimedOut('image_data_load');
         } catch (error) {
             if (!isRemoteOnly) throw error;
@@ -250,7 +254,7 @@ export async function handleZoteroAttachmentImageRequest(
         }
 
         logger(`handleZoteroAttachmentImageRequest: Processing failed: ${error}`, 1);
-        if (isFileAccessDeniedError(error)) {
+        if (error instanceof FileAccessDeniedError) {
             return errorResponse(fileAccessDeniedMessage('image', errorKey), 'file_permission_denied');
         }
         return errorResponse(
