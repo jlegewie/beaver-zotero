@@ -1,3 +1,4 @@
+import { handleDuplicatesRequest } from '../duplicates/discovery';
 import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCacheHandlers';
 import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
@@ -830,6 +831,8 @@ export function registerEndpoints(): (() => void) | undefined {
         createEndpoint(handleListTagsHttpRequest);
 
     // Deferred tool endpoints
+    endpoints['/beaver/library/duplicates'] = createEndpoint((request: any) => handleDuplicatesRequest({ ...request, event: 'duplicates_request', request_id: generateRequestId() }));
+
     endpoints['/beaver/agent-action/validate'] =
         createEndpoint(handleAgentActionValidateHttpRequest);
 

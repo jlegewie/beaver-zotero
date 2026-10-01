@@ -1,4 +1,5 @@
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
+import { getMergedItemReference } from '../../../atoms/mergeItemsChoices';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { navigateToAnnotation } from '../../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -63,7 +64,9 @@ import {
     getCreateAnnotationsDisplayStatus,
     getAgentActionToolIcon,
     inFlightProgressMessage,
+    hasFailedUndo,
 } from './agentActionViewHelpers';
+import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
 import {
@@ -310,7 +313,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const baseConfig = STATUS_CONFIGS[status];
     const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
-        : baseConfig;
+        : actions.some(isStaleMergeProposal)
+            ? { ...baseConfig, showRetry: false }
+            : baseConfig;
+    // Read off the records, like the Library changes row, so the choice between
+    // re-applying and retrying undo survives a remount.
+    const isUndoRetry = isUndoError || hasFailedUndo(actions);
 
     // Every action on this card has settled, but the tool call has not returned:
     // the backend is still working on it (`create_items` holds its result while
@@ -430,13 +438,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [action, actions, isProcessing, undoAgentActions]);
 
     const handleRetry = useCallback(async () => {
-        if (isUndoError) {
+        if (isUndoRetry) {
             setIsUndoError(false);
             await handleUndo();
         } else {
             await handleApplyPending();
         }
-    }, [isUndoError, handleUndo, handleApplyPending]);
+    }, [isUndoRetry, handleUndo, handleApplyPending]);
 
     const handleRevealNote = useCallback(async () => {
         const libraryId = action?.result_data?.library_id;
@@ -480,7 +488,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const bulkAnnotationRevealRef = action && isCreateAnnotationsAgentAction(action)
         ? action.proposed_data.resolved_ref
         : null;
+    const mergedItemReference = action ? getMergedItemReference(action) : null;
     const headerLinkActionRules: HeaderLinkActionRule[] = [
+        {
+            matches: () => !!mergedItemReference,
+            tooltip: 'Reveal merged item',
+            onClick: async () => {
+                const ref = mergedItemReference!;
+                // The collection lookup is a local query, so it needs this
+                // device's rowid; `revealSource` resolves the reference itself.
+                const libraryId = resolveLibraryRef(ref);
+                const collectionKey = libraryId
+                    ? await getCurrentCollectionKeyForItem(libraryId, ref.zotero_key)
+                    : undefined;
+                revealSource(ref, collectionKey);
+            },
+        },
         {
             matches: () => (
                 toolName === 'create_note' &&
@@ -697,6 +720,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <ActionPreview
                             toolName={toolName}
                             previewData={previewData}
+                            disabled={isProcessing}
                             status={status}
                             actions={actions}
                         />
@@ -784,7 +808,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 loading={isProcessing}
                                 className="flex-none whitespace-nowrap"
                             >
-                                {isUndoError ? 'Retry Undo' : 'Try Again'}
+                                {isUndoRetry ? 'Retry Undo' : 'Try Again'}
                             </Button>
                         )}
 

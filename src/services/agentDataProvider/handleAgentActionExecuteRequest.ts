@@ -1,3 +1,4 @@
+import { executeMergeItemsRequest } from '../duplicates/merge';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { WSAgentActionExecuteResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AgentDataRequestContext } from '@beaver/agent-core/transport/agentDataDispatch';
@@ -82,7 +83,9 @@ export async function executeRequest(
 
         let result: WSAgentActionExecuteResponse;
 
-        if (request.action_type === 'edit_metadata') {
+        if (request.action_type === 'merge_items') {
+            result = await executeMergeItemsRequest(request, ctx);
+        } else if (request.action_type === 'edit_metadata') {
             result = await executeEditMetadataAction(request, ctx);
         } else if (request.action_type === 'create_collection') {
             result = await executeCreateCollectionAction(request, ctx);

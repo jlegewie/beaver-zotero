@@ -103,6 +103,13 @@ const PermissionsSection: React.FC = () => {
                 </div>
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                     <DeferredToolPreferenceSetting
+                        toolName="merge_items"
+                        label="Duplicate Merges"
+                        description="Combining duplicate records with undo support"
+                    />
+                </div>
+                <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
+                    <DeferredToolPreferenceSetting
                         toolName="manage_tags"
                         label="Tag & Collection Management"
                         description="Library-wide tag and collection rename, move, merge, and delete operations"

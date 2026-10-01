@@ -87,6 +87,10 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // markdown renderer does with object-id hrefs; a client that predates it would
 // treat `[Smith 2004](u-KEY)` as a broken relative link, so the backend only
 // tells the model to write those when this feature is declared.
+// zotero_duplicates is declaration-only because it gates an inbound
+// duplicates_request and the merge_items action: a build that predates them
+// drops the unknown event and never answers, so the backend withholds the
+// duplicate tools instead of inferring support from a version.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -110,6 +114,7 @@ const DECLARATION_ONLY_FEATURES = [
     'batch_item_display',
     'item_links',
     'continuation_new_run',
+    'zotero_duplicates',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

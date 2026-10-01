@@ -1,3 +1,4 @@
+import { DuplicatesResultView } from './toolResultViews/DuplicatesResultView';
 import React from 'react';
 import { ToolReturnPart } from '@beaver/agent-core/agents/types';
 import { isToolResultView, ToolResultView as ToolResultViewModel } from '@beaver/agent-core/run-state/toolResultViews';
@@ -26,6 +27,7 @@ interface ToolResultViewProps {
  */
 function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
     switch (view.view_type) {
+        case 'duplicates': return <DuplicatesResultView view={view} />;
         case 'table':
             return <TableResultView view={view} />;
         case 'item_list':

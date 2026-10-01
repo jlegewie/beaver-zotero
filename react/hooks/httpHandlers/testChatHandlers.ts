@@ -1,3 +1,5 @@
+import { undoMergeItemsAction } from '../../utils/mergeItemsActions';
+import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
 /**
  * Dev-only HTTP handlers for driving the chat/run lifecycle headlessly.
  *
@@ -370,6 +372,7 @@ export async function handleTestApproveActionHttpRequest(request: any) {
     }
 
     for (const actionId of targetIds) {
+        if (request?.actionChanges) store.set(mergeItemsChoicesAtom, { ...store.get(mergeItemsChoicesAtom), [actionId]: request.actionChanges });
         store.set(sendApprovalResponseAtom, {
             actionId,
             approved,
@@ -451,6 +454,9 @@ export async function handleTestUndoActionHttpRequest(request: any) {
                 reverted = { fieldsReverted: result.fieldsReverted };
                 break;
             }
+            case 'merge_items':
+                await undoMergeItemsAction(action);
+                break;
             case 'create_collection':
                 await undoCreateCollectionAction(action);
                 break;

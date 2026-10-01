@@ -39,6 +39,8 @@ import {
 } from '../../../../components/icons/icons';
 import { getZoteroItemReferenceFromAgentAction } from '../../../../agents/agentActions';
 import { getCurrentCollectionKeyForItem, openNoteByKey, revealSource } from '../../../../utils/sourceUtils';
+import { getMergedItemReference } from '../../../../atoms/mergeItemsChoices';
+import { isStaleMergeProposal } from '../mergeItemsErrors';
 import { resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -117,7 +119,11 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         : row.actions.length > 1
             ? getOverallStatus(row.actions)
             : (getCreateAnnotationsDisplayStatus(firstAction) ?? firstAction.status);
-    const config = STATUS_CONFIGS[status];
+    // A merge refused because its records changed since the proposal fails the
+    // same way on every retry; only a new proposal helps.
+    const config = row.actions.some(isStaleMergeProposal)
+        ? { ...STATUS_CONFIGS[status], showRetry: false }
+        : STATUS_CONFIGS[status];
     const headerIcon = isBusy
         ? config.icon ?? ClockIcon
         : isHovered
@@ -184,7 +190,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     // which already toggles the preview. Only a single-action row has one item to
     // reveal; a multi-item create_items row does not.
     const revealReference = row.actions.length === 1
-        ? getZoteroItemReferenceFromAgentAction(firstAction)
+        ? getZoteroItemReferenceFromAgentAction(firstAction) ?? getMergedItemReference(firstAction)
         : null;
 
     // See `getOpenNoteTarget`: a created note is opened, not revealed, on the
@@ -204,10 +210,10 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         if (!revealReference) return;
         // Reveal within the current collection when the item belongs to it,
         // instead of switching to the library root.
-        const collectionKey = await getCurrentCollectionKeyForItem(
-            revealReference.library_id,
-            revealReference.zotero_key,
-        );
+        // The collection lookup needs this device's rowid; a reference may
+        // carry only the portable library_ref.
+        const libraryId = resolveLibraryRef(revealReference) ?? revealReference.library_id;
+        const collectionKey = await getCurrentCollectionKeyForItem(libraryId, revealReference.zotero_key);
         revealSource(revealReference, collectionKey);
     }, [revealReference]);
 
@@ -347,6 +353,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                     previewData={previewData}
                     status={status}
                     actions={row.actions}
+                    disabled={isDisabled || isBusy}
                     compact
                 />
             )}
