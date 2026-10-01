@@ -2975,6 +2975,16 @@ export class BeaverDB {
         );
     }
 
+    /** Move a parked attachment behind the others waiting for OCR admission. */
+    public async touchAttachmentOcrUnavailable(libraryId: number, zoteroKey: string): Promise<void> {
+        await this.queryAsync(
+            `UPDATE attachment_processing_state SET updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?
+               AND extract_status = 'done' AND ocr_status = 'needed' AND last_error = ?`,
+            [libraryId, zoteroKey, OCR_SERVICE_UNAVAILABLE],
+        );
+    }
+
     /**
      * Rows parked by a closed OCR admission gate, oldest marker first.
      * `ticketed` is true while an OCR job for the attachment is queued, running

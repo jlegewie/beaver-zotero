@@ -8,7 +8,12 @@ import type {
     DocumentCachePayloadKind,
     DocumentCachePayloadRecord,
 } from './database';
-import { getFileSignature, isRemoteFilePath, type FileSignature } from './documentFileIdentity';
+import {
+    getFileSignature,
+    isRemoteFilePath,
+    parseLocalSourceIdentity,
+    type FileSignature,
+} from './documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     gzipJsonValueChunked,
@@ -210,24 +215,23 @@ export class DocumentCache {
         filePath: string,
     ): Promise<DocumentCacheMetadata | null> {
         try {
-            const record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
+            let record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
             if (!record) return null;
 
             if (await this.isMetadataStale(record, filePath)) {
-                const protectedPayload = (await this.db.getDocumentCachePayloadsForMetadata(record.id))
-                    .some(p => p.extractionSource === 'ocr');
-                const source = protectedPayload ? await this.getSourceIdentity(filePath, record.sourceSizeBytes) : null;
-                if (source && this.sourceIdentityMatches(source, {
-                    filePath: record.filePath, fileSignature: record.fileSignature, sourceSizeBytes: record.sourceSizeBytes,
-                })) {
+                const retained = await this.retainProtectedSource(ref, record, filePath);
+                if (retained === 'unservable') {
                     logger('Prepared OCR cache requires re-preparation for this extraction version; retained on disk.', 1);
                     return null;
                 }
-                const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(record);
-                if (deletedPayloads) {
-                    await this.removePayloadFiles(deletedPayloads);
+                if (!retained) {
+                    const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(record);
+                    if (deletedPayloads) {
+                        await this.removePayloadFiles(deletedPayloads);
+                    }
+                    return null;
                 }
-                return null;
+                record = retained;
             }
 
             await this.db.touchDocumentCacheMetadata(record.id).catch(() => undefined);
@@ -1585,6 +1589,72 @@ export class DocumentCache {
             cleanup.filter((payload) => payload.payloadPath !== payloadWrite.path),
         );
         this.scheduleSizeBudgetPass(payloadWrite.size);
+    }
+
+    /**
+     * Keep a stale entry holding a protected OCR preparation whose file bytes
+     * are unchanged: OCR text cannot be rebuilt locally, so a rename, a move or
+     * a rewritten mtime must not discard it.
+     *
+     * Returns the entry, relocated to `filePath` when only the path or mtime
+     * changed; `unservable` when a metadata, payload or extraction version
+     * moved on, so the entry is retained until it is prepared again; `null`
+     * when the entry may be discarded.
+     */
+    private async retainProtectedSource(
+        ref: DocumentRef,
+        record: DocumentCacheMetadataRecord,
+        filePath: string,
+    ): Promise<DocumentCacheMetadataRecord | 'unservable' | null> {
+        const payloads = await this.db.getDocumentCachePayloadsForMetadata(record.id);
+        if (!payloads.some(p => p.extractionSource === 'ocr')) return null;
+        const source = await this.getSourceIdentity(filePath, record.sourceSizeBytes);
+        let current: DocumentCacheMetadataRecord | null = record;
+        if (!this.sourceIdentityMatches(source, DocumentCache.recordedSource(record))) {
+            current = await this.relocateUnchangedSource(ref, record, source);
+            if (!current || !this.sourceIdentityMatches(source, DocumentCache.recordedSource(current))) return null;
+        }
+        return await this.isMetadataStale(current, filePath) ? 'unservable' : current;
+    }
+
+    /**
+     * Move an entry to `source` when only the file's path or mtime changed and
+     * the bytes still hash to the processing ledger's hash for the recorded
+     * location. The reconciler performs the same move for the ledger; doing it
+     * here keeps a read that lands first from discarding the entry. Returns the
+     * updated entry, or `null` when the bytes cannot be verified.
+     */
+    private async relocateUnchangedSource(
+        ref: DocumentRef,
+        record: DocumentCacheMetadataRecord,
+        source: DocumentCacheSourceIdentity,
+    ): Promise<DocumentCacheMetadataRecord | null> {
+        if (isRemoteFilePath(record.filePath) || isRemoteFilePath(source.filePath)) return null;
+        if (source.fileSignature.size_bytes !== record.fileSignature.size_bytes
+            || source.sourceSizeBytes !== record.sourceSizeBytes) return null;
+        const row = await this.db.getAttachmentProcessingState(ref.libraryId, ref.zoteroKey);
+        const hashed = row?.extractionSource ? parseLocalSourceIdentity(row.extractionSource)?.location : null;
+        if (!row?.fileHash || row.extractStatus !== 'done' || !hashed
+            || hashed.filePath !== record.filePath
+            || hashed.mtimeMs !== record.fileSignature.mtime_ms
+            || hashed.sizeBytes !== record.fileSignature.size_bytes) return null;
+        const fileHash = await Zotero.Utilities.Internal.md5Async(source.filePath).catch(() => null);
+        if (fileHash !== row.fileHash) return null;
+        // Bytes replaced while they were hashed must not inherit the cached text.
+        const after = await getFileSignature(source.filePath);
+        if (after.mtime_ms !== source.fileSignature.mtime_ms || after.size_bytes !== source.fileSignature.size_bytes) {
+            return null;
+        }
+        await this.relocateSource(
+            ref,
+            { filePath: record.filePath, mtimeMs: record.fileSignature.mtime_ms, sizeBytes: record.fileSignature.size_bytes },
+            { filePath: source.filePath, mtimeMs: source.fileSignature.mtime_ms },
+        );
+        return this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
+    }
+
+    private static recordedSource(record: DocumentCacheMetadataRecord): DocumentCacheSourceIdentity {
+        return { filePath: record.filePath, fileSignature: record.fileSignature, sourceSizeBytes: record.sourceSizeBytes };
     }
 
     private async isMetadataStale(record: DocumentCacheMetadataRecord, filePath: string): Promise<boolean> {
