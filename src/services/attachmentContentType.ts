@@ -1,6 +1,5 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import { canonicalContentTypeCorrection } from '../utils/attachmentFiles';
-import { isLibrarySearchable } from './agentDataProvider/utils';
 
 /** Sniff the file's leading bytes the way Zotero does before opening it. */
 async function fileConfirmsContentType(item: Zotero.Item, contentType: string): Promise<boolean> {
@@ -32,18 +31,19 @@ export async function canUseReaderContentType(item: Zotero.Item): Promise<boolea
  * leading bytes confirm it. Call only from paths that are about to open or
  * annotate the attachment on the user's behalf.
  *
+ * This does not check library exclusions. Opening a file the user clicked is
+ * allowed in an excluded library, as Zotero applies the same correction there;
+ * agent writes must reject excluded libraries before calling this.
+ *
  * Callers must already hold the library mutation queue when one applies.
  *
  * @returns true when the attachment now carries (or already carried) a type
- *   Zotero can open, false when the library is excluded from Beaver or
- *   read-only, or the file could not confirm the type.
+ *   Zotero can open, false when the library is read-only or the file could
+ *   not confirm the type.
  */
 export async function ensureReaderContentType(item: Zotero.Item): Promise<boolean> {
     const canonical = canonicalContentTypeCorrection(item);
     if (canonical === null) return true;
-    // Beaver never modifies an excluded library, even when the user opened the
-    // file; the caller still opens or reveals it without the correction.
-    if (!isLibrarySearchable(item.libraryID)) return false;
     const library = Zotero.Libraries.get(item.libraryID);
     if (!library || !library.editable) return false;
     if (!await fileConfirmsContentType(item, canonical)) return false;

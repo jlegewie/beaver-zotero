@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
-vi.mock('../../../src/services/agentDataProvider/utils', () => ({ isLibrarySearchable: vi.fn() }));
 
 import {
     canUseReaderContentType,
     ensureReaderContentType,
 } from '../../../src/services/attachmentContentType';
 import { canonicalContentTypeCorrection } from '../../../src/utils/attachmentFiles';
-import { isLibrarySearchable } from '../../../src/services/agentDataProvider/utils';
 
 type Item = Parameters<typeof ensureReaderContentType>[0];
 
@@ -32,7 +30,6 @@ describe('attachment content type correction', () => {
     beforeEach(() => {
         sniffed = 'application/pdf';
         editable = true;
-        vi.mocked(isLibrarySearchable).mockReset().mockReturnValue(true);
         (globalThis as any).Zotero.Attachments = { LINK_MODE_LINKED_URL: 3 };
         (globalThis as any).Zotero.Libraries = { get: vi.fn(() => ({ editable })) };
         (globalThis as any).Zotero.File = { getSample: vi.fn(async () => '%PDF-1.7 sample') };
@@ -94,16 +91,6 @@ describe('attachment content type correction', () => {
         expect(item.saveTx).not.toHaveBeenCalled();
     });
 
-    it('does not write to a library excluded from Beaver', async () => {
-        vi.mocked(isLibrarySearchable).mockReturnValue(false);
-        const item = makeAttachment('application/octet-stream', 'paper.pdf');
-
-        await expect(ensureReaderContentType(item as unknown as Item)).resolves.toBe(false);
-        expect(isLibrarySearchable).toHaveBeenCalledWith(1);
-        expect(Zotero.File.getSample).not.toHaveBeenCalled();
-        expect(item.attachmentContentType).toBe('application/octet-stream');
-        expect(item.saveTx).not.toHaveBeenCalled();
-    });
 
     it('treats a missing local file as unconfirmed', async () => {
         const item = makeAttachment('application/octet-stream', 'paper.pdf');

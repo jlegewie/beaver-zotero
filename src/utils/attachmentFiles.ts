@@ -84,6 +84,9 @@ const DOCUMENT_EXTENSIONS: Record<string, AttachmentDocumentType> = {
     epub: 'epub',
 };
 
+/** Content types of browser snapshots (HTML/XHTML), matched exactly. */
+const SNAPSHOT_CONTENT_TYPES = ['text/html', 'application/xhtml+xml'];
+
 /**
  * Classify a stored or linked file attachment as a PDF or EPUB.
  *
@@ -99,12 +102,65 @@ const DOCUMENT_EXTENSIONS: Record<string, AttachmentDocumentType> = {
  */
 export function attachmentDocumentType(item: Zotero.Item): AttachmentDocumentType | null {
     if (!item.isAttachment() || isLinkedUrlAttachment(item)) return null;
-    const contentType = (item.attachmentContentType || '').split(';', 1)[0].trim().toLowerCase();
-    const aliased = DOCUMENT_CONTENT_TYPE_ALIASES[contentType];
+    return documentTypeFromStoredFields(item.attachmentContentType, safeAttachmentFilename(item));
+}
+
+/**
+ * Classify stored attachment fields as a PDF or EPUB, with the rules of
+ * `attachmentDocumentType()`. `filename` may also be the raw stored path
+ * (`storage:paper.pdf` or an absolute path), since only its extension is read.
+ */
+export function documentTypeFromStoredFields(
+    contentType: string | null | undefined,
+    filename: string | null | undefined,
+): AttachmentDocumentType | null {
+    const normalized = (contentType || '').split(';', 1)[0].trim().toLowerCase();
+    const aliased = DOCUMENT_CONTENT_TYPE_ALIASES[normalized];
     if (aliased) return aliased;
-    if (!GENERIC_CONTENT_TYPES.has(contentType)) return null;
-    const extension = safeAttachmentFilename(item)?.match(/\.([^.]+)$/)?.[1]?.toLowerCase();
+    if (!GENERIC_CONTENT_TYPES.has(normalized)) return null;
+    const extension = filename?.match(/\.([^.]+)$/)?.[1]?.toLowerCase();
     return extension ? DOCUMENT_EXTENSIONS[extension] ?? null : null;
+}
+
+/** Attachment kinds the background pipeline extracts and indexes. */
+export type ProcessableContentKind = AttachmentDocumentType | 'snapshot';
+
+/**
+ * Classify stored attachment fields as a PDF, EPUB or snapshot, matching what
+ * `getReadableContentKind()` returns for those kinds on a loaded item.
+ */
+export function processableKindFromStoredFields(
+    contentType: string | null | undefined,
+    filename: string | null | undefined,
+): ProcessableContentKind | null {
+    return documentTypeFromStoredFields(contentType, filename)
+        ?? (SNAPSHOT_CONTENT_TYPES.includes((contentType || '').toLowerCase()) ? 'snapshot' : null);
+}
+
+const sqlStringList = (values: Iterable<string>): string => [...values].map((value) => `'${value}'`).join(', ');
+
+/**
+ * SQL condition selecting the attachments `processableKindFromStoredFields()`
+ * accepts, for queries over Zotero's `itemAttachments` table. Library scans
+ * must enumerate exactly the attachments that item-level classification
+ * admits; otherwise a scan retires what a notifier event just queued.
+ *
+ * Built only from the constant type lists above, so it is safe to inline.
+ *
+ * @param contentTypeColumn - qualified `contentType` column, e.g. `IA.contentType`
+ * @param pathColumn - qualified `path` column, e.g. `IA.path`
+ */
+export function processableAttachmentSql(contentTypeColumn: string, pathColumn: string): string {
+    const raw = `COALESCE(${contentTypeColumn}, '')`;
+    // Mirrors the JS normalization: drop MIME parameters, trim, lowercase.
+    const normalized = `LOWER(TRIM(CASE WHEN INSTR(${raw}, ';') > 0 `
+        + `THEN SUBSTR(${raw}, 1, INSTR(${raw}, ';') - 1) ELSE ${raw} END))`;
+    const documentExtension = Object.keys(DOCUMENT_EXTENSIONS)
+        .map((extension) => `LOWER(COALESCE(${pathColumn}, '')) LIKE '%.${extension}'`)
+        .join(' OR ');
+    return `(LOWER(${raw}) IN (${sqlStringList(SNAPSHOT_CONTENT_TYPES)})`
+        + ` OR ${normalized} IN (${sqlStringList(Object.keys(DOCUMENT_CONTENT_TYPE_ALIASES))})`
+        + ` OR (${normalized} IN (${sqlStringList(GENERIC_CONTENT_TYPES)}) AND (${documentExtension})))`;
 }
 
 /** Check whether an attachment is a PDF, including mislabelled ones. */
@@ -151,7 +207,5 @@ export function isLinkedUrlAttachment(item: Zotero.Item): boolean {
  */
 export function hasSnapshotContentType(item: Zotero.Item): boolean {
     return item.isAttachment()
-        && ['text/html', 'application/xhtml+xml'].includes(
-            (item.attachmentContentType || '').toLowerCase(),
-        );
+        && SNAPSHOT_CONTENT_TYPES.includes((item.attachmentContentType || '').toLowerCase());
 }

@@ -87,6 +87,7 @@ async function ensureAttachmentFileForReader(itemID: number, win: ReturnType<typ
  * Give a mislabelled PDF/EPUB the content type Zotero's reader requires, as
  * `ZoteroPane.viewAttachment` does when the user opens the file. Without it
  * the reader cannot open an attachment stored as, e.g., `application/octet-stream`.
+ * Applies in libraries excluded from Beaver too: opening is user-initiated.
  */
 async function ensureContentTypeForReader(itemID: number): Promise<void> {
     const item = await Zotero.Items.getAsync(itemID);

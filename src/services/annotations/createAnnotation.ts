@@ -48,7 +48,8 @@ const NOTE_SIDE_MARGIN = 12;
  *
  * Zotero only saves annotations on attachments with a canonical PDF, EPUB or
  * snapshot content type, so a mislabelled parent is corrected first (see
- * `ensureReaderContentType`).
+ * `ensureReaderContentType`). Callers must already have rejected attachments
+ * in libraries excluded from Beaver.
  */
 async function saveBeaverAnnotation(
     attachment: Zotero.Item,
