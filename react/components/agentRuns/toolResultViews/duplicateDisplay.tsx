@@ -149,42 +149,81 @@ export function memberLines(
     showByline: boolean,
     withType: boolean,
     withTime = false,
+    contents = memberContents(member),
 ): MemberLines {
     const primary = [showByline ? memberByline(member, withType) : null, memberDateAdded(member, withTime)]
         .filter(Boolean)
         .join(' · ');
-    return primary
-        ? { primary, secondary: memberContents(member) }
-        : { primary: memberContents(member), secondary: null };
+    return primary ? { primary, secondary: contents } : { primary: contents, secondary: null };
 }
 
 function linesDistinct(lines: MemberLines[]): boolean {
     return new Set(lines.map((l) => `${l.primary}\n${l.secondary ?? ''}`)).size === lines.length;
 }
 
+/** Longest value shown when a field is what tells records apart. */
+const DISTINGUISHING_VALUE_MAX = 48;
+
+/**
+ * The first differing field whose values are all present and still all
+ * different once shortened for display, as "Field: value" per record, or null
+ * when no field separates every record. Uniqueness is checked on the shortened
+ * text: values that differ only past the cut would otherwise label two records
+ * identically.
+ */
+function distinguishingField(group: DuplicateGroup): string[] | null {
+    for (const field of comparableFields(group)) {
+        if (field === 'title') continue;
+        const texts = group.members.map((m) => duplicateFieldText(m.fields[field]));
+        if (texts.some((t) => t == null)) continue;
+        const shown = texts.map((t) =>
+            t!.length > DISTINGUISHING_VALUE_MAX ? `${t!.slice(0, DISTINGUISHING_VALUE_MAX - 1)}…` : t!,
+        );
+        if (new Set(shown).size !== shown.length) continue;
+        return shown.map((text) => `${formatFieldName(field)}: ${text}`);
+    }
+    return null;
+}
+
 /**
  * `memberLines` for every record of a group, guaranteed distinct so a reader
  * can tell which record they are choosing. Records imported on the same day
  * with the same contents would otherwise read alike; the first detail that
- * separates them is added to every row: time added, then title, then the
- * item key.
+ * separates them is added to every row: time added, then title, then a field
+ * whose values differ (URL, publication, …), and only then the item key.
  */
-export function groupMemberLines(group: DuplicateGroup): MemberLines[] {
+export function groupMemberLines(group: DuplicateGroup, contents?: string[]): MemberLines[] {
     const showByline = showsBylines(group);
     const withType = hasMixedItemTypes(group);
-    const base = group.members.map((m) => memberLines(m, showByline, withType));
-    if (linesDistinct(base)) return base;
+    // How records are told apart is decided on the reviewed contents; `contents`
+    // (an applied merge's) only replaces what is shown, so a card keeps the same
+    // distinguishing detail before and after the merge.
+    const lines = (withTime: boolean, shown: boolean) =>
+        group.members.map((m, i) =>
+            memberLines(m, showByline, withType, withTime, shown && contents ? contents[i] : undefined),
+        );
+    const base = lines(false, false);
+    if (linesDistinct(base)) return lines(false, true);
 
-    const timed = group.members.map((m) => memberLines(m, showByline, withType, true));
-    if (linesDistinct(timed)) return timed;
+    const timed = lines(true, false);
+    if (linesDistinct(timed)) return lines(true, true);
 
-    const titled = group.members.map((m, i) => ({
-        primary: m.title || base[i].primary,
-        secondary: [base[i].primary, base[i].secondary].filter(Boolean).join(' · ') || null,
-    }));
-    if (linesDistinct(titled)) return titled;
+    const titled = (rows: MemberLines[]) =>
+        group.members.map((m, i) => ({
+            primary: m.title || rows[i].primary,
+            secondary: [rows[i].primary, rows[i].secondary].filter(Boolean).join(' · ') || null,
+        }));
+    if (linesDistinct(titled(base))) return titled(lines(false, true));
 
-    return group.members.map((m, i) => ({ ...timed[i], primary: `${timed[i].primary} · ${m.zotero_key}` }));
+    const shownTimed = lines(true, true);
+    const fieldLines = distinguishingField(group);
+    if (fieldLines)
+        return group.members.map((_, i) => ({
+            primary: shownTimed[i].primary,
+            secondary: [shownTimed[i].secondary, fieldLines[i]].filter(Boolean).join(' · ') || null,
+        }));
+
+    return group.members.map((m, i) => ({ ...shownTimed[i], primary: `${shownTimed[i].primary} · ${m.zotero_key}` }));
 }
 
 /** Record letter; announced as "Record A" since it links values to their record. */

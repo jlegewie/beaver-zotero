@@ -263,6 +263,9 @@ export async function handleDuplicatesRequest(
         if (!scope.valid) throw duplicateError(scope.error!, scope.error_code);
         const libraryID = scope.library!.libraryID;
         let population = await nativeGroups(libraryID);
+        // Pages are bound to the resolved collection, so a key and a name for
+        // the same collection share one snapshot.
+        let collectionKey: string | null = null;
         if (request.collection) {
             const collection = getCollectionByIdOrName(
                 request.collection,
@@ -275,7 +278,8 @@ export async function handleDuplicatesRequest(
                 );
             const search = new Zotero.Search();
             (search as any).libraryID = libraryID;
-            search.addCondition("collection", "is", collection.collection.key);
+            collectionKey = collection.collection.key;
+            search.addCondition("collection", "is", collectionKey);
             search.addCondition("recursive", "true");
             const scopeIDs = new Set<number>((await search.search()) || []);
             population = population.filter((group) =>
@@ -294,7 +298,7 @@ export async function handleDuplicatesRequest(
         groups.sort((a, b) => a[0].key.localeCompare(b[0].key));
         const signature = stableJSON([
             libraryRefForLibraryID(libraryID),
-            request.collection ?? null,
+            collectionKey,
             groups.map((g) => g.map((i) => i.key)),
         ]);
         const snapshot_id = Zotero.Utilities.Internal.md5(signature);

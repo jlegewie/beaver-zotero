@@ -64,7 +64,9 @@ import {
     getCreateAnnotationsDisplayStatus,
     getAgentActionToolIcon,
     inFlightProgressMessage,
+    hasFailedUndo,
 } from './agentActionViewHelpers';
+import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
 import {
@@ -311,7 +313,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const baseConfig = STATUS_CONFIGS[status];
     const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
-        : baseConfig;
+        : actions.some(isStaleMergeProposal)
+            ? { ...baseConfig, showRetry: false }
+            : baseConfig;
+    // Read off the records, like the Library changes row, so the choice between
+    // re-applying and retrying undo survives a remount.
+    const isUndoRetry = isUndoError || hasFailedUndo(actions);
 
     // Every action on this card has settled, but the tool call has not returned:
     // the backend is still working on it (`create_items` holds its result while
@@ -431,13 +438,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [action, actions, isProcessing, undoAgentActions]);
 
     const handleRetry = useCallback(async () => {
-        if (isUndoError) {
+        if (isUndoRetry) {
             setIsUndoError(false);
             await handleUndo();
         } else {
             await handleApplyPending();
         }
-    }, [isUndoError, handleUndo, handleApplyPending]);
+    }, [isUndoRetry, handleUndo, handleApplyPending]);
 
     const handleRevealNote = useCallback(async () => {
         const libraryId = action?.result_data?.library_id;
@@ -801,7 +808,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 loading={isProcessing}
                                 className="flex-none whitespace-nowrap"
                             >
-                                {isUndoError ? 'Retry Undo' : 'Try Again'}
+                                {isUndoRetry ? 'Retry Undo' : 'Try Again'}
                             </Button>
                         )}
 

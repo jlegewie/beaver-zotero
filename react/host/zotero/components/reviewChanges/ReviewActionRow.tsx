@@ -40,6 +40,7 @@ import {
 import { getZoteroItemReferenceFromAgentAction } from '../../../../agents/agentActions';
 import { getCurrentCollectionKeyForItem, openNoteByKey, revealSource } from '../../../../utils/sourceUtils';
 import { getMergedItemReference } from '../../../../atoms/mergeItemsChoices';
+import { isStaleMergeProposal } from '../mergeItemsErrors';
 import { resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -118,7 +119,11 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         : row.actions.length > 1
             ? getOverallStatus(row.actions)
             : (getCreateAnnotationsDisplayStatus(firstAction) ?? firstAction.status);
-    const config = STATUS_CONFIGS[status];
+    // A merge refused because its records changed since the proposal fails the
+    // same way on every retry; only a new proposal helps.
+    const config = row.actions.some(isStaleMergeProposal)
+        ? { ...STATUS_CONFIGS[status], showRetry: false }
+        : STATUS_CONFIGS[status];
     const headerIcon = isBusy
         ? config.icon ?? ClockIcon
         : isHovered

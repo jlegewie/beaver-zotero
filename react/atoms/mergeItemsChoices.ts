@@ -63,12 +63,15 @@ export function updateMergeItemsChoices(
 }
 
 /**
- * The record an applied merge kept, for revealing the combined item. Read from
- * the persisted result, so it needs no live lookup. `library_id` is left
- * unresolved: callers resolve the portable `library_ref` on this device.
+ * The record a merge kept while the merge is in the library, for revealing the
+ * combined item: once applied, and after a failed undo, which leaves the merge
+ * in place with its result saved. Read from the persisted result, so it needs
+ * no live lookup. `library_id` is left unresolved: callers resolve the portable
+ * `library_ref` on this device.
  */
 export function getMergedItemReference(action: AgentAction): ZoteroItemReference | null {
-    if (action.action_type !== "merge_items" || action.status !== "applied") return null;
+    const merged = action.status === "applied" || (action.status === "error" && action.result_data != null);
+    if (action.action_type !== "merge_items" || !merged) return null;
     const result = action.result_data as MergeItemsResultData | undefined;
     const kept = result?.preview?.members.find((m) => m.item_id === result.master_item_id);
     if (!kept?.library_ref || !kept.zotero_key) return null;

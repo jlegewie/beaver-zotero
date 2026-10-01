@@ -134,6 +134,18 @@ it("retains out-of-collection members of a matching group", async () => {
         "u-ITEM0002",
     ]);
 });
+it("continues paging when the collection is named one way, then the other", async () => {
+    // A key and a name that resolve to the same collection share one snapshot.
+    const first = await find({ collection: "COLL1234", limit: 1 });
+    const second = await find({
+        collection: "Policing",
+        limit: 1,
+        offset: 1,
+        snapshot_id: first.snapshot_id,
+    });
+    expect(second.error).toBeUndefined();
+    expect(second.snapshot_id).toBe(first.snapshot_id);
+});
 it("releases native temporary tables on success and failure", async () => {
     await find();
     state.failSearch = true;

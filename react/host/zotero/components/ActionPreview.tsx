@@ -37,7 +37,21 @@ export const ActionPreview: React.FC<{
     compact?: boolean;
     disabled?: boolean;
 }> = ({ toolName, previewData, status, actions, isStreaming, compact = false, disabled = false }) => {
-    if (toolName === 'merge_items') return <MergeItemsPreview compact={compact} actionId={actions?.[0]?.id} data={previewData.actionData as any} result={status === 'applied' ? previewData.resultData as any : undefined} editable={!disabled && (status === 'pending' || status === 'awaiting' || status === 'undone' || status === 'rejected')} />;
+    if (toolName === 'merge_items') {
+        // A failed undo leaves the merge in place, and the action keeps its
+        // result: show it as merged, not as the proposal.
+        const merged = status === 'applied' || (status === 'error' && previewData.resultData != null);
+        return (
+            <MergeItemsPreview
+                compact={compact}
+                action={actions?.[0]}
+                actionId={actions?.[0]?.id}
+                data={previewData.actionData as any}
+                result={merged ? previewData.resultData as any : undefined}
+                editable={!disabled && (status === 'pending' || status === 'awaiting' || status === 'undone' || status === 'rejected')}
+            />
+        );
+    }
     const editNotePreviewKind = getEditNotePreviewKind(toolName, previewData.actionType);
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];

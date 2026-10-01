@@ -106,3 +106,8 @@ it("offers no merged item before the merge is applied or after it is undone", ()
     expect(getMergedItemReference(appliedMerge("undone"))).toBeNull();
     expect(getMergedItemReference({ ...appliedMerge("applied"), action_type: "edit_metadata" })).toBeNull();
 });
+
+it("still reveals the kept record while a failed undo leaves the merge in place", () => {
+    expect(getMergedItemReference({ ...appliedMerge("error") })?.zotero_key).toBe("BBBB2222");
+    expect(getMergedItemReference({ ...appliedMerge("error"), result_data: null })).toBeNull();
+});

@@ -415,3 +415,325 @@ describe("groupMemberLines", () => {
         ]);
     });
 });
+
+describe("merge card after the merge or its undo fails", () => {
+    const data = {
+        master_item_id: members[0].item_id,
+        other_item_ids: [members[1].item_id],
+        preview: group,
+    };
+    const result = {
+        master_item_id: members[0].item_id,
+        merged_item_ids: [members[1].item_id],
+        // The service describes the result with the kept record first.
+        preview: { ...group, members: [members[0], members[1]] },
+        changes: [],
+    };
+    const render = (props: Record<string, unknown>) =>
+        renderToStaticMarkup(
+            React.createElement(MergeItemsPreview, { actionId: "a", editable: false, data, ...props } as any),
+        );
+
+    it("shows a failed undo as still merged, with the reason", () => {
+        const html = render({
+            result,
+            action: {
+                id: "a",
+                action_type: "merge_items",
+                status: "error",
+                result_data: result,
+                error_message: "An affected tags changed after the merge. Undo was not applied.",
+                error_details: { error_code: "undo_conflict" },
+            },
+        });
+        expect(html).toContain("Kept record");
+        expect(html).toContain("In Trash");
+        expect(html).toContain("Undo not applied. Tags changed after the merge, and undo would overwrite that change.");
+        expect(html).not.toContain("Undo was not applied");
+    });
+
+    it("explains a merge refused because the records changed since the proposal", () => {
+        const html = render({
+            action: {
+                id: "a",
+                action_type: "merge_items",
+                status: "error",
+                error_message: "Items changed since this merge was proposed. Inspect and propose the merge again.",
+            },
+        });
+        expect(html).toContain("Record to keep");
+        expect(html).toContain(
+            "Not merged. The records changed after this merge was proposed. Ask Beaver to propose it again.",
+        );
+    });
+
+    it("keeps the error in the compact Changes row", () => {
+        const html = render({
+            compact: true,
+            result,
+            action: {
+                id: "a",
+                action_type: "merge_items",
+                status: "error",
+                result_data: result,
+                error_message: "An affected DOI changed after the merge. Undo was not applied.",
+            },
+        });
+        expect(html).toContain("Kept the record");
+        expect(html).toContain("Undo not applied. DOI changed after the merge");
+    });
+
+    it("shows no error line for a clean merge", () => {
+        expect(render({ result, action: { id: "a", action_type: "merge_items", status: "applied" } })).not.toContain(
+            'role="status"',
+        );
+    });
+});
+
+describe("applied merge card", () => {
+    const dated = [
+        { ...members[0], date_added: "2025-01-01", attachment_count: 0, note_count: 0, children: [] },
+        { ...members[1], date_added: "2025-02-01", attachment_count: 1, note_count: 1 },
+    ];
+    const proposal = { ...group, members: dated };
+    const render = (changes: unknown[]) =>
+        renderToStaticMarkup(
+            React.createElement(MergeItemsPreview, {
+                actionId: "applied",
+                editable: false,
+                data: { master_item_id: dated[1].item_id, other_item_ids: [dated[0].item_id], preview: proposal },
+                result: {
+                    master_item_id: dated[1].item_id,
+                    merged_item_ids: [dated[0].item_id],
+                    preview: { ...proposal, members: [dated[1], dated[0]] },
+                    changes,
+                },
+            } as any),
+        );
+
+    it("keeps the reviewed record order instead of listing the kept record first", () => {
+        const html = render([]);
+        expect(html.indexOf("Added Jan 1, 2025")).toBeLessThan(html.indexOf("Added Feb 1, 2025"));
+    });
+
+    it("credits the kept record with everything it now holds", () => {
+        const g = { ...group, members: [members[0], members[1]] };
+        const html = renderToStaticMarkup(
+            React.createElement(MergeItemsPreview, {
+                actionId: "totals",
+                editable: false,
+                data: { master_item_id: members[0].item_id, other_item_ids: [members[1].item_id], preview: g },
+                result: {
+                    master_item_id: members[0].item_id,
+                    merged_item_ids: [members[1].item_id],
+                    preview: g,
+                    // Zotero consolidated the trashed record's identical PDF into the kept one.
+                    changes: [
+                        {
+                            item_id: "u-PDF00002",
+                            before: { itemType: "attachment", parentItem: "BBBB2222" },
+                            after: { itemType: "attachment", parentItem: "BBBB2222", deleted: true },
+                        },
+                    ],
+                },
+            } as any),
+        );
+        expect(html).toContain("1 attachment · 2 notes");
+        // Only the note moved; the PDF was a copy of the kept record's.
+        expect(html).toContain(
+            "Moved to the kept record: 1 note · 1 matching attachment consolidated into the kept record",
+        );
+        expect(html).not.toContain("Moved to the kept record: 1 attachment");
+    });
+});
+
+it("tells same-time records apart by a differing field before falling back to the key", () => {
+    const g = {
+        ...group,
+        differing_fields: ["url"],
+        members: [
+            { ...members[0], fields: { url: "https://journal.example/a" } },
+            { ...members[1], fields: { url: "https://doi.example/b" } },
+        ],
+    };
+    const lines = groupMemberLines(g).map((l) => `${l.primary}|${l.secondary}`);
+    expect(lines[0]).toContain("URL: https://journal.example/a");
+    expect(lines[1]).toContain("URL: https://doi.example/b");
+    expect(lines.join()).not.toContain("AAAA1111");
+});
+
+it("keeps the detail that tells same-time records apart once the merge is applied", () => {
+    const same = members.map((m, i) => ({
+        ...m,
+        date_added: "2026-10-01 13:24:00",
+        attachment_count: 0,
+        note_count: 0,
+        children: [],
+        fields: { url: i ? "https://doi.example/b" : "https://journal.example/a" },
+    }));
+    const g = { ...group, differing_fields: ["url"], members: same };
+    const html = renderToStaticMarkup(
+        React.createElement(MergeItemsPreview, {
+            actionId: "same-time",
+            editable: false,
+            data: { master_item_id: same[0].item_id, other_item_ids: [same[1].item_id], preview: g },
+            result: { master_item_id: same[0].item_id, merged_item_ids: [same[1].item_id], preview: g, changes: [] },
+        } as any),
+    );
+    expect(html).toContain("URL: https://journal.example/a");
+    expect(html).toContain("URL: https://doi.example/b");
+});
+
+it("says only that an attachment was consolidated when nothing else moved", () => {
+    const g = {
+        ...group,
+        members: [members[0], { ...members[1], note_count: 0, children: [] }],
+    };
+    const html = renderToStaticMarkup(
+        React.createElement(MergeItemsPreview, {
+            actionId: "dedup",
+            editable: false,
+            data: { master_item_id: members[0].item_id, other_item_ids: [members[1].item_id], preview: g },
+            result: {
+                master_item_id: members[0].item_id,
+                merged_item_ids: [members[1].item_id],
+                preview: g,
+                changes: [
+                    {
+                        item_id: "u-PDF00002",
+                        before: { itemType: "attachment", parentItem: "BBBB2222" },
+                        after: { itemType: "attachment", parentItem: "BBBB2222", deleted: true },
+                    },
+                ],
+            },
+        } as any),
+    );
+    expect(html).toContain("1 matching attachment consolidated into the kept record");
+    expect(html).not.toContain("Moved to the kept record");
+});
+
+it("words a merge that failed to apply conditionally", () => {
+    const html = renderToStaticMarkup(
+        React.createElement(MergeItemsPreview, {
+            actionId: "stale",
+            compact: true,
+            editable: false,
+            action: {
+                id: "stale",
+                action_type: "merge_items",
+                status: "error",
+                error_message: "Items changed since this merge was proposed. Inspect and propose the merge again.",
+            },
+            data: { master_item_id: members[0].item_id, other_item_ids: [members[1].item_id], preview: group },
+        } as any),
+    );
+    expect(html).toContain("Would keep the record");
+    expect(html).toContain("would move to the Trash");
+    expect(html).not.toContain("Keeps the record");
+});
+
+it("falls back to the key when distinguishing values only differ past the shortened text", () => {
+    const prefix = "https://journal.example/articles/2026/policing-schooling-";
+    const g = {
+        ...group,
+        differing_fields: ["url"],
+        members: [
+            { ...members[0], fields: { url: `${prefix}a` } },
+            { ...members[1], fields: { url: `${prefix}b` } },
+        ],
+    };
+    const lines = groupMemberLines(g).map((l) => `${l.primary}|${l.secondary}`);
+    expect(new Set(lines).size).toBe(2);
+    expect(lines.join()).not.toContain("URL:");
+    expect(lines[0]).toContain("AAAA1111");
+});
+
+it("counts notes the merge created on the kept record", () => {
+    const html = renderToStaticMarkup(
+        React.createElement(MergeItemsPreview, {
+            actionId: "embedded-notes",
+            editable: false,
+            data: { master_item_id: members[0].item_id, other_item_ids: [members[1].item_id], preview: group },
+            result: {
+                master_item_id: members[0].item_id,
+                merged_item_ids: [members[1].item_id],
+                preview: group,
+                changes: [
+                    {
+                        item_id: "u-PDF00002",
+                        before: { itemType: "attachment", parentItem: "BBBB2222" },
+                        after: { itemType: "attachment", parentItem: "BBBB2222", deleted: true },
+                    },
+                    // Both PDFs carried an embedded note, so Zotero made a new child note.
+                    {
+                        item_id: "u-NEWNOTE1",
+                        before: null,
+                        after: { itemType: "note", parentItem: "AAAA1111" },
+                        created_by_merge: true,
+                    },
+                ],
+            },
+        } as any),
+    );
+    expect(html).toContain("1 attachment · 3 notes");
+});
+
+describe("annotations on consolidated attachments", () => {
+    // B's only attachment matched one on the kept record A and was trashed.
+    const withAttachment = (key: string) => [
+        { ...members[0], attachment_count: 1, note_count: 0, children: [] },
+        {
+            ...members[1],
+            attachment_count: 1,
+            note_count: 0,
+            children: [{ item_id: `u-${key}`, title: "Copy", item_type: "attachment", annotation_count: 2 }],
+        },
+    ];
+    const render = (g: typeof group, changes: unknown[]) =>
+        renderToStaticMarkup(
+            React.createElement(MergeItemsPreview, {
+                actionId: "annotations",
+                editable: false,
+                data: { master_item_id: g.members[0].item_id, other_item_ids: [g.members[1].item_id], preview: g },
+                result: {
+                    master_item_id: g.members[0].item_id,
+                    merged_item_ids: [g.members[1].item_id],
+                    preview: g,
+                    changes,
+                },
+            } as any),
+        );
+    const trashed = (key: string) => ({
+        item_id: `u-${key}`,
+        before: { itemType: "attachment", parentItem: "BBBB2222" },
+        after: { itemType: "attachment", parentItem: "BBBB2222", deleted: true },
+    });
+
+    it("leaves a web snapshot's annotations on the trashed copy", () => {
+        // Zotero trashes a matching snapshot without moving its annotations.
+        const g = { ...group, members: withAttachment("SNAP0002") };
+        const html = render(g, [trashed("SNAP0002")]);
+        expect(html).toContain(
+            "1 matching attachment consolidated into the kept record · 2 annotations stayed on the trashed attachment",
+        );
+        expect(html).not.toContain("Moved to the kept record");
+        // The kept record holds one attachment and none of the snapshot's annotations.
+        expect(html).not.toContain("1 attachment · 2 annotations");
+        expect(html).toContain(">1 attachment<");
+    });
+
+    it("credits a PDF's annotations to the kept record once Zotero moved them", () => {
+        const g = { ...group, members: withAttachment("PDF00002") };
+        const moved = (n: number) => ({
+            item_id: `u-ANNO000${n}`,
+            before: { itemType: "annotation", parentItem: "PDF00002" },
+            after: { itemType: "annotation", parentItem: "PDF00001" },
+        });
+        const html = render(g, [trashed("PDF00002"), moved(1), moved(2)]);
+        expect(html).toContain("1 attachment · 2 annotations");
+        expect(html).toContain(
+            "Moved to the kept record: 2 annotations · 1 matching attachment consolidated into the kept record",
+        );
+        expect(html).not.toContain("stayed on the trashed attachment");
+    });
+});
