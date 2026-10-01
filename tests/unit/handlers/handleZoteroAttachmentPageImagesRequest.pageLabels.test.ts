@@ -125,7 +125,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', async () => {
 });
 
 import { handleZoteroAttachmentPageImagesRequest } from '../../../src/services/agentDataProvider/handleZoteroAttachmentPageImagesRequest';
-import { resolveToPdfAttachment } from '../../../src/services/agentDataProvider/utils';
+import { loadPdfData, resolveToPdfAttachment } from '../../../src/services/agentDataProvider/utils';
 
 describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
     const mockIOUtils = (globalThis as any).IOUtils as {
@@ -213,6 +213,26 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
 
         return { cache };
     }
+
+    it.each([
+        ['stat', () => { (globalThis as any).Zotero.Attachments.getTotalFileSize = vi.fn().mockRejectedValue(
+            Object.assign(new Error('Could not stat'), { name: 'NotAllowedError' })); }],
+        ['read', () => { vi.mocked(loadPdfData).mockRejectedValueOnce(
+            Object.assign(new Error('Could not open'), { name: 'NotAllowedError' })); }],
+    ])('maps a local file the OS refuses to %s to file_permission_denied', async (_label, deny) => {
+        setupRequestScenario({ cachedPageCount: null });
+        deny();
+
+        const response = await handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-denied',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: [1],
+        });
+
+        expect(response.error_code).toBe('file_permission_denied');
+        expect(response.error).toContain('does not have permission to read the PDF file for 1-ABCD1234');
+    });
 
     it('hydrates page_label on cold caches even when prefer_page_labels is false', async () => {
         // Cached page_count present, labels: null → handler should call render

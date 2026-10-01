@@ -22,6 +22,7 @@ import {
 } from '../documentExtractionCore';
 import {
     extractTextDocument,
+    fileAccessDeniedMessage,
     loadAttachmentData,
     resolveToReadableAttachment,
     resolveAttachmentFileSource,
@@ -498,6 +499,14 @@ export async function handleZoteroDocumentRequest(
                     return errorResponse(
                         `Attachment ${resolvedKey} file is missing. ${detail}`,
                         'file_missing',
+                        null,
+                        'text',
+                    );
+                }
+                if (source.code === 'file_permission_denied') {
+                    return errorResponse(
+                        fileAccessDeniedMessage('text', resolvedKey),
+                        'file_permission_denied',
                         null,
                         'text',
                     );

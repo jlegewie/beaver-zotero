@@ -137,3 +137,32 @@ it('disables Clear when the cache cannot be read and keeps retrying through repe
         vi.useRealTimers();
     }
 });
+
+it('pauses the size poll while the window is hidden and resumes it each time it is shown again', async () => {
+    vi.useFakeTimers();
+    let hidden = false;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    const setHidden = async (value: boolean) => {
+        hidden = value;
+        await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    };
+    try {
+        await render(async () => {
+            expect(getStats).toHaveBeenCalledTimes(1);
+            for (let cycle = 1; cycle <= 2; cycle++) {
+                const before = getStats.mock.calls.length;
+                await setHidden(true);
+                await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+                expect(getStats).toHaveBeenCalledTimes(before);
+                // Shown again: one immediate read, then the regular cadence.
+                await setHidden(false);
+                expect(getStats).toHaveBeenCalledTimes(before + 1);
+                await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+                expect(getStats).toHaveBeenCalledTimes(before + 2);
+            }
+        });
+    } finally {
+        delete (document as any).hidden;
+        vi.useRealTimers();
+    }
+});

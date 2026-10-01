@@ -31,7 +31,7 @@ export type AttachmentSourceResult =
     | { kind: 'ok'; source: AttachmentFileSource }
     | {
           kind: 'error';
-          code: Extract<AttachmentSourceFailureCode, 'file_missing' | 'file_too_large'>;
+          code: Extract<AttachmentSourceFailureCode, 'file_missing' | 'file_too_large' | 'file_permission_denied'>;
           remoteAvailable?: boolean;
           sizeMB?: number;
           maxMB?: number;
@@ -58,18 +58,32 @@ export type AttachmentDataResult =
       };
 
 /**
- * True when a local file read was refused by the operating system rather than
- * failing on the file's contents: missing macOS Files & Folders / Full Disk
- * Access, file-system permissions, or a file another program holds locked.
- * `IOUtils` rejects these with a `NotAllowedError` DOMException; XPCOM calls
- * throw with `NS_ERROR_FILE_ACCESS_DENIED`.
+ * True when a local file access was refused by the operating system rather
+ * than failing on the file's contents: missing macOS Files & Folders / Full
+ * Disk Access, file-system permissions, or a file another program holds
+ * locked. `IOUtils` rejects these with a `NotAllowedError` DOMException; XPCOM
+ * calls throw with `NS_ERROR_FILE_ACCESS_DENIED` or `NS_ERROR_FILE_IS_LOCKED`;
+ * Zotero's `OS.File` shim errors set `becauseAccessDenied`.
  */
 export function isFileAccessDeniedError(error: unknown): boolean {
     if (!error || typeof error !== 'object') return false;
-    const { name, message } = error as { name?: unknown; message?: unknown };
+    const { name, message, becauseAccessDenied } = error as {
+        name?: unknown; message?: unknown; becauseAccessDenied?: unknown;
+    };
     return name === 'NotAllowedError'
         || name === 'NS_ERROR_FILE_ACCESS_DENIED'
-        || (typeof message === 'string' && message.includes('NS_ERROR_FILE_ACCESS_DENIED'));
+        || name === 'NS_ERROR_FILE_IS_LOCKED'
+        || becauseAccessDenied === true
+        || (typeof message === 'string' && (message.includes('NS_ERROR_FILE_ACCESS_DENIED')
+            || message.includes('NS_ERROR_FILE_IS_LOCKED')));
+}
+
+/** Agent-facing explanation for a `file_permission_denied` failure. */
+export function fileAccessDeniedMessage(fileKind: string, requestKey: string): string {
+    return `Zotero does not have permission to read the ${fileKind} file for ${requestKey}. `
+        + `The user needs to grant Zotero access to the folder containing the file `
+        + `(on macOS: System Settings > Privacy & Security > Files and Folders or Full Disk Access) `
+        + `or close any program that has the file locked.`;
 }
 
 /**
@@ -183,13 +197,21 @@ export async function resolveAttachmentFileSource(args: {
     }
 
     if (!isRemoteFilePath(filePath)) {
-        const sizeBytes = await getLocalSizeBytes(
-            item,
-            filePath,
-            localSizeStrategy,
-            signal,
-            throwIfTimedOut,
-        );
+        let sizeBytes: number | null;
+        try {
+            sizeBytes = await getLocalSizeBytes(
+                item,
+                filePath,
+                localSizeStrategy,
+                signal,
+                throwIfTimedOut,
+            );
+        } catch (error) {
+            // A folder Zotero may not list or a file it may not stat is refused
+            // here, before any read; report it like a refused read.
+            if (isFileAccessDeniedError(error)) return { kind: 'error', code: 'file_permission_denied' };
+            throw error;
+        }
         if (sizeBytes != null) {
             const sizeMB = sizeBytes / 1024 / 1024;
             if (sizeMB > maxFileSizeMB) {

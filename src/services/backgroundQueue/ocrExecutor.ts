@@ -437,6 +437,9 @@ export class OcrExecutor implements JobExecutor {
             localSizeStrategy: 'zotero-total',
         });
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        if (source.kind === 'error' && source.code === 'file_permission_denied') {
+            throw new OcrFileAccessDeniedError();
+        }
         if (source.kind === 'error') {
             await ctx.db.recordAttachmentReadingOutcome({
                 libraryId: record.libraryId, zoteroKey: record.zoteroKey,

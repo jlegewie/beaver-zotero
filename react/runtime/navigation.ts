@@ -252,12 +252,36 @@ export async function openNoteWindow(itemID: number, origin?: Window): Promise<v
     }
 }
 
-/** Reveal an attachment's file in the OS file manager, or show Zotero's missing-file dialog. */
+/**
+ * Reveal an attachment's file in the OS file manager, or show Zotero's
+ * missing-file dialog. Revealing an existing file needs no Zotero window, so
+ * only the dialog may bring one up (from the standalone Beaver window or
+ * Settings when no main window is open).
+ */
 export async function showAttachmentInFilesystem(itemID: number, origin?: Window): Promise<void> {
     try {
+        if (await revealExistingAttachmentFile(itemID)) return;
         const win = await resolveNavigationWindow(origin ?? getContextWindow());
         await (win.ZoteroPane as any).showAttachmentInFilesystem(itemID);
     } catch (error) {
         logger(`showAttachmentInFilesystem: ${error}`, 2);
     }
+}
+
+/** Reveal a file attachment whose file exists, as `ZoteroPane` does; `false` otherwise. */
+async function revealExistingAttachmentFile(itemID: number): Promise<boolean> {
+    const attachment = await Zotero.Items.getAsync(itemID);
+    if (!attachment?.isFileAttachment()) return false;
+    const path = await attachment.getFilePathAsync();
+    if (!path) return false;
+    const file = Zotero.File.pathToFile(path);
+    try {
+        file.reveal();
+    } catch {
+        // Platforms without nsIFile.reveal() (e.g. Linux) open the parent folder.
+        Zotero.launchFile(file.parent!.path);
+    }
+    // Zotero's own reveal notification; the typings omit the 'reveal' event.
+    void Zotero.Notifier.trigger('reveal' as _ZoteroTypes.Notifier.Event, 'file', attachment.id);
+    return true;
 }

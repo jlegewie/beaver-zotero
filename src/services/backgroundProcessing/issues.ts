@@ -76,11 +76,16 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
     const hasCodeSql = (code: string, column = 'last_error') => `(${column} = '${code}'
         OR instr(${column}, '${code}:') = 1 OR instr(${column}, ': ${code}') > 0)`;
     const anyCodeSql = (codes: string[]) => codes.map((code) => hasCodeSql(code)).join(' OR ');
+    // A read failure whose read-stage job is queued for another attempt is
+    // pending work, not an issue: the retry may still succeed.
+    const retryPendingSql = `EXISTS (SELECT 1 FROM background_jobs j
+        WHERE j.library_id = r.library_id AND j.zotero_key = r.zotero_key
+        AND j.job_type IN ('document_extract', 'document_ocr') AND j.attempt_count > 0)`;
     return `WITH observed AS (
         SELECT s.library_id, s.zotero_key, COALESCE(r.content_kind, s.content_kind) AS content_kind,
             CASE WHEN r.library_id IS NULL THEN s.extract_status
-                WHEN r.error_code = 'retry_pending' THEN NULL
-                WHEN r.error_code IS NULL OR (r.content_kind = 'pdf' AND r.error_code = 'ocr_required') THEN 'done' ELSE 'failed' END AS extract_status,
+                WHEN r.error_code IS NULL OR (r.content_kind = 'pdf' AND r.error_code = 'ocr_required') THEN 'done'
+                WHEN ${retryPendingSql} THEN NULL ELSE 'failed' END AS extract_status,
             CASE WHEN r.library_id IS NULL THEN s.ocr_status
                 WHEN r.content_kind = 'pdf' AND r.error_code = 'ocr_required' THEN CASE WHEN s.ocr_status IN ('done', 'failed') THEN s.ocr_status ELSE 'needed' END
                 WHEN r.error_code IS NULL THEN 'na' ELSE NULL END AS ocr_status,
@@ -93,8 +98,8 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
         LEFT JOIN attachment_reading_state r USING (library_id, zotero_key)
         UNION ALL
         SELECT r.library_id, r.zotero_key, r.content_kind,
-            CASE WHEN r.error_code = 'retry_pending' THEN NULL
-                WHEN r.error_code IS NULL OR (r.content_kind = 'pdf' AND r.error_code = 'ocr_required') THEN 'done' ELSE 'failed' END,
+            CASE WHEN r.error_code IS NULL OR (r.content_kind = 'pdf' AND r.error_code = 'ocr_required') THEN 'done'
+                WHEN ${retryPendingSql} THEN NULL ELSE 'failed' END,
             CASE WHEN r.content_kind = 'pdf' AND r.error_code = 'ocr_required' THEN 'needed' WHEN r.error_code IS NULL THEN 'na' ELSE NULL END,
             NULL, r.error_code, NULL, r.attempted_at, CASE WHEN r.error_code IS NULL THEN 1 ELSE 0 END
         FROM attachment_reading_state r

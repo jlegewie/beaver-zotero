@@ -203,7 +203,12 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
                 item, filePath, mode, sourceSizeBytes,
                 contentType: item.attachmentContentType || 'application/pdf',
                 result: extracted,
-                metadata: { ...buildExtractedDocumentCacheMetadata(extracted), extractionSource: 'ocr' },
+                metadata: {
+                    ...buildExtractedDocumentCacheMetadata(extracted),
+                    extractionSource: 'ocr',
+                    // Lets a rename or touch be verified when no processing ledger row vouches for the bytes.
+                    sourceMd5: args.isRemoteOnly ? null : args.expectedFileHash,
+                },
                 expectedSourceIdentity: sourceIdentity,
             });
             if (abortSignal?.aborted) return { kind: 'aborted' };

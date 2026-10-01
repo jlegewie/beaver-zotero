@@ -310,6 +310,21 @@ describe('handleZoteroAttachmentImageRequest', () => {
         expect(response.error).toContain('bad bytes');
     });
 
+    it.each([
+        ['size check', () => { (globalThis as any).Zotero.Attachments.getTotalFileSize = vi.fn().mockRejectedValue(
+            Object.assign(new Error('Could not stat'), { name: 'NotAllowedError' })); }],
+        ['read', () => { vi.mocked(loadPdfData).mockRejectedValue(
+            Object.assign(new Error('Could not open'), { name: 'NotAllowedError' })); }],
+    ])('maps a local %s the OS refuses to file_permission_denied', async (_label, deny) => {
+        setupZoteroEnv();
+        deny();
+
+        const response = await handleZoteroAttachmentImageRequest(baseRequest() as any);
+
+        expect(response.error_code).toBe('file_permission_denied');
+        expect(response.error).toContain('does not have permission to read the image file');
+    });
+
     it('maps unexpected processing errors to image_processing_failed', async () => {
         setupZoteroEnv();
         vi.mocked(processImageBytes).mockRejectedValue(new Error('canvas exploded'));

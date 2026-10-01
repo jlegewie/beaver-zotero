@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AttachmentFileUnavailableError, openReader, openNote, viewAttachment } from '../../../react/runtime/navigation';
+import {
+    AttachmentFileUnavailableError, openReader, openNote, showAttachmentInFilesystem, viewAttachment,
+} from '../../../react/runtime/navigation';
 import { runWindowOperation } from '../../../react/runtime/libraryMutation';
 vi.mock('../../../react/utils/navigationNotice', () => ({ notifyNavigationUnavailable: vi.fn() }));
 vi.mock('../../../react/runtime/libraryMutation', () => ({ runWindowOperation: vi.fn() }));
@@ -353,5 +355,42 @@ describe('content type before opening the reader', () => {
         vi.mocked(runWindowOperation).mockRejectedValue(new Error('library locked') as never);
         await openReader(42, undefined, {}, a);
         expect(Zotero.Reader.open).toHaveBeenCalledOnce();
+    });
+});
+describe('showing an attachment file', () => {
+    const reveal = vi.fn();
+    const attachment = (path: string | false) => ({
+        id: 42, isFileAttachment: () => true, getFilePathAsync: vi.fn(async () => path),
+    });
+    beforeEach(() => {
+        reveal.mockReset();
+        Object.assign(Zotero, {
+            File: { pathToFile: vi.fn((path: string) => ({ path, reveal, parent: { path: '/Dropbox' } })) },
+            Notifier: { trigger: vi.fn(async () => undefined) },
+            launchFile: vi.fn(),
+            openMainWindow: vi.fn(),
+        });
+        a.ZoteroPane.showAttachmentInFilesystem = vi.fn(async () => undefined);
+    });
+
+    it('reveals an existing file without opening a main window when none is open', async () => {
+        vi.mocked(Zotero.getMainWindow).mockReturnValue(null as any);
+        vi.mocked(Zotero.Items.getAsync).mockResolvedValue(attachment('/Dropbox/paper.pdf') as any);
+
+        await showAttachmentInFilesystem(42);
+
+        expect(Zotero.File.pathToFile).toHaveBeenCalledWith('/Dropbox/paper.pdf');
+        expect(reveal).toHaveBeenCalledOnce();
+        expect(Zotero.Notifier.trigger).toHaveBeenCalledWith('reveal', 'file', 42);
+        expect((Zotero as any).openMainWindow).not.toHaveBeenCalled();
+    });
+
+    it("leaves a missing file to Zotero's not-found dialog in a main window", async () => {
+        vi.mocked(Zotero.Items.getAsync).mockResolvedValue(attachment(false) as any);
+
+        await showAttachmentInFilesystem(42, a);
+
+        expect(reveal).not.toHaveBeenCalled();
+        expect(a.ZoteroPane.showAttachmentInFilesystem).toHaveBeenCalledWith(42);
     });
 });

@@ -257,7 +257,29 @@ describe('attachmentSource', () => {
         expect(local).toMatchObject({ kind: 'error', code: 'file_permission_denied', error: denied });
     });
 
+    it.each([
+        ['zotero-total', () => { Zotero.Attachments.getTotalFileSize = vi.fn().mockRejectedValue(
+            Object.assign(new Error('Could not get info for /Dropbox'), { name: 'NotAllowedError' })) as any; }],
+        ['stat', () => { (globalThis as any).IOUtils.stat.mockRejectedValue(
+            Object.assign(new Error('Could not stat /Dropbox/paper.pdf'), { name: 'NotAllowedError' })); }],
+    ] as const)('returns file_permission_denied when the OS refuses the %s size check', async (strategy, deny) => {
+        deny();
+
+        const result = await resolveAttachmentFileSource({ item: makeAttachment(), localSizeStrategy: strategy });
+
+        expect(result).toEqual({ kind: 'error', code: 'file_permission_denied' });
+    });
+
+    it('still throws a size-check failure that is not an access denial', async () => {
+        (globalThis as any).IOUtils.stat.mockRejectedValue(new Error('disk failure'));
+
+        await expect(resolveAttachmentFileSource({ item: makeAttachment(), localSizeStrategy: 'stat' }))
+            .rejects.toThrow('disk failure');
+    });
+
     it('recognises access denial from IOUtils and XPCOM readers only', () => {
+        expect(isFileAccessDeniedError(Object.assign(new Error('Access denied'), { becauseAccessDenied: true }))).toBe(true);
+        expect(isFileAccessDeniedError({ name: 'NS_ERROR_FILE_IS_LOCKED', message: '' })).toBe(true);
         expect(isFileAccessDeniedError(Object.assign(new Error('Could not open'), { name: 'NotAllowedError' }))).toBe(true);
         expect(isFileAccessDeniedError(new Error(
             'Component returned failure code: 0x80520015 (NS_ERROR_FILE_ACCESS_DENIED) [nsIZipReader.open]',

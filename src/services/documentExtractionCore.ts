@@ -47,6 +47,7 @@ import type {
 import { logger } from '@beaver/agent-core/platform/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import {
+    fileAccessDeniedMessage,
     isFileAccessDeniedError,
     isLocalFileReadDenied,
     loadAttachmentData,
@@ -416,13 +417,6 @@ export type ExtractAndCacheEpubResult =
 
 function isAbortError(error: unknown): boolean {
     return error instanceof Error && /abort/i.test(error.message);
-}
-
-function fileAccessDeniedMessage(fileKind: string, requestKey: string): string {
-    return `Zotero does not have permission to read the ${fileKind} file for ${requestKey}. `
-        + `The user needs to grant Zotero access to the folder containing the file `
-        + `(on macOS: System Settings > Privacy & Security > Files and Folders or Full Disk Access) `
-        + `or close any program that has the file locked.`;
 }
 
 async function extractAndCacheDocumentOwned(
@@ -1111,6 +1105,15 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         kind: 'response_error',
                         code: 'file_too_large',
                         message: `The PDF file for ${resolvedKeyStr} has a file size of ${(source.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${source.maxMB}MB limit.`,
+                        pageCount: null,
+                        resolvedAttachment,
+                    };
+                }
+                if (source.code === 'file_permission_denied') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_permission_denied',
+                        message: fileAccessDeniedMessage('PDF', resolvedKeyStr),
                         pageCount: null,
                         resolvedAttachment,
                     };
