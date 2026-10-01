@@ -42,6 +42,7 @@ import {
     FlowConnectionIcon,
     WrenchIcon,
     TableIcon,
+    BookCopyIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
@@ -115,6 +116,10 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Organize items tool
     organize_items: TaskDoneIcon,
+
+    // Duplicate tools
+    find_duplicates: BookCopyIcon,
+    merge_items: BookCopyIcon,
 
     // Read tool result
     read_file: TextAlignLeftIcon,

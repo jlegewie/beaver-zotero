@@ -121,10 +121,11 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     organize_items: 'Organize items',
     create_collection: 'Create collection',
 
+    // Duplicate tools
+    find_duplicates: 'Find duplicates',
+    merge_items: 'Merge duplicates',
+
     // Tag tools
-    merge_items: 'Merge items',
-    find_duplicates: 'Finding duplicate items',
-    inspect_duplicates: 'Comparing duplicate items',
     manage_tags: 'Manage tags',
     manage_collections: 'Manage collections',
 

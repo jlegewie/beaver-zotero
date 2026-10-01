@@ -1,8 +1,8 @@
 import React from "react";
 
-type CopyIconProps = React.SVGProps<SVGSVGElement>;
+type BookCopyIconProps = React.SVGProps<SVGSVGElement>;
 
-const CopyIcon: React.FC<CopyIconProps> = (props) => (
+const BookCopyIcon: React.FC<BookCopyIconProps> = (props) => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" color="currentColor" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
         <path d="M21 16H11C9.89543 16 9 15.1046 9 14M9 14C9 12.8954 9.89543 12 11 12H21V5C21 3.58579 21 2.87868 20.5607 2.43934C20.1213 2 19.4142 2 18 2H11C9.89543 2 9 2.89543 9 4V14Z"></path>
         <path d="M20.5 12C20.5 12 19.5 12.7628 19.5 14C19.5 15.2372 20.5 16 20.5 16"></path>
@@ -11,4 +11,4 @@ const CopyIcon: React.FC<CopyIconProps> = (props) => (
     </svg>
 );
 
-export default CopyIcon;
+export default BookCopyIcon;

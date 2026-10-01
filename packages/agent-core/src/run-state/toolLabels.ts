@@ -183,6 +183,15 @@ export function getToolResultLabelSuffix(
             }
             return view.scope_primary ? ` (${view.scope_primary})` : null;
         }
+        case 'duplicates': {
+            const shown = view.groups.length;
+            const total = view.total_count;
+            if (!shown) return null;
+            if (total <= shown) return ` (${plural(shown, 'group')})`;
+            // The view carries no offset; recover it from where the page ends.
+            const start = (view.next_offset ?? total) - shown + 1;
+            return ` (groups ${start}–${start + shown - 1} of ${total})`;
+        }
         case 'user_question': {
             // The backend omits the default status — treat absent as answered.
             const status = view.status ?? 'answered';

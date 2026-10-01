@@ -14,6 +14,7 @@ import {
     FolderDetailIcon,
     TaskDoneIcon,
     TagIcon,
+    BookCopyIcon,
     HighlighterIcon,
     DocumentValidationIcon,
     DollarCircleIcon,
@@ -162,6 +163,7 @@ export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProp
     if (toolName === 'edit_annotations' || toolName === 'delete_annotations') return HighlighterIcon;
     if (toolName === 'create_collection') return FolderAddIcon;
     if (toolName === 'organize_items') return TaskDoneIcon;
+    if (toolName === 'merge_items') return BookCopyIcon;
     if (toolName === 'manage_tags') return TagIcon;
     if (toolName === 'manage_collections') return FolderDetailIcon;
     if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
@@ -287,7 +289,8 @@ export function getActionLabel(
             return completed ? 'Created Collection' : 'Create Collection';
         case 'organize_items':
             return completed ? 'Organized' : 'Organize';
-        case 'merge_items': return completed ? 'Merged Items' : 'Merge Items';
+        case 'merge_items':
+            return completed ? 'Merged Duplicates' : 'Merge Duplicates';
         case 'manage_tags':
             return 'Tag';
         case 'manage_collections':
@@ -335,7 +338,8 @@ export function getActionTitle(
                 ? itemTitle
                 : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
         }
-        case 'merge_items': return actionData?.preview?.members?.find((m: any) => m.item_id === actionData.master_item_id)?.title ?? null;
+        case 'merge_items':
+            return actionData?.preview?.members?.find((m: any) => m.item_id === actionData.master_item_id)?.title ?? null;
         case 'manage_tags': {
             const name = actionData?.name;
             const op = actionData?.action;
