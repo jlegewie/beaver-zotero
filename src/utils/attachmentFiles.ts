@@ -155,8 +155,10 @@ export function processableAttachmentSql(contentTypeColumn: string, pathColumn: 
     // Mirrors the JS normalization: drop MIME parameters, trim, lowercase.
     const normalized = `LOWER(TRIM(CASE WHEN INSTR(${raw}, ';') > 0 `
         + `THEN SUBSTR(${raw}, 1, INSTR(${raw}, ';') - 1) ELSE ${raw} END))`;
+    // A suffix comparison rather than `LIKE '%.pdf'`: Firefox's SQLite layer
+    // rejects any LIKE whose pattern is not a bound parameter.
     const documentExtension = Object.keys(DOCUMENT_EXTENSIONS)
-        .map((extension) => `LOWER(COALESCE(${pathColumn}, '')) LIKE '%.${extension}'`)
+        .map((extension) => `SUBSTR(LOWER(COALESCE(${pathColumn}, '')), -${extension.length + 1}) = '.${extension}'`)
         .join(' OR ');
     return `(LOWER(${raw}) IN (${sqlStringList(SNAPSHOT_CONTENT_TYPES)})`
         + ` OR ${normalized} IN (${sqlStringList(Object.keys(DOCUMENT_CONTENT_TYPE_ALIASES))})`
