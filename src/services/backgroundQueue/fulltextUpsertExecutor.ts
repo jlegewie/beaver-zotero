@@ -71,6 +71,15 @@ const DOCUMENT_BUSY_RETRY_MS = 2_000;
  */
 const CLAIM_BUSY_MAX_RETRY_MS = 15_000;
 
+/**
+ * Probe hints are consumed by the hash's next upsert. Hints whose upsert never
+ * runs (cancelled by an exclusion or account change) are dropped oldest first.
+ */
+const PROBE_FIRST_HASH_LIMIT = 1_000;
+
+/** Wait after the server reports a cleanup ref failed on its side. */
+const UNTAG_FAILED_RETRY_MS = 5_000;
+
 export interface FulltextUpsertExecutorOptions {
     /** Called with each requirements response an upsert reads. */
     onRequirements?: (requirements: IndexRequirements) => void;
@@ -91,6 +100,16 @@ export class FulltextUpsertExecutor implements JobExecutor {
      * was indexing is usually already stored, which the probe tags cheaply.
      */
     private static probeFirstHashes = new Set<string>();
+
+    private static markProbeFirst(hash: string): void {
+        const hashes = FulltextUpsertExecutor.probeFirstHashes;
+        hashes.delete(hash);
+        hashes.add(hash);
+        if (hashes.size > PROBE_FIRST_HASH_LIMIT) {
+            hashes.delete(hashes.values().next().value as string);
+        }
+    }
+
     readonly jobType: Extract<BackgroundJobType, 'fulltext_upsert' | 'fulltext_untag'>;
 
     private disposed = false;
@@ -135,7 +154,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
         }
         const hash = record.payload?.doc_hash;
         if (hash && FulltextUpsertExecutor.activeHashes.has(hash)) {
-            if (record.jobType === 'fulltext_upsert') FulltextUpsertExecutor.probeFirstHashes.add(hash);
+            if (record.jobType === 'fulltext_upsert') FulltextUpsertExecutor.markProbeFirst(hash);
             return {
                 kind: 'retry', error: 'index_document_busy', countsAsAttempt: false,
                 retryAfterMs: DOCUMENT_BUSY_RETRY_MS,
@@ -559,7 +578,9 @@ export class FulltextUpsertExecutor implements JobExecutor {
             const response = await this.api.untag(storedLocalId ?? localUserKey, [ref]);
             const result = response.results[0];
             if (!result || result.outcome === 'failed') {
-                return { kind: 'retry', error: 'index_untag_failed' };
+                // The server reports a ref it could not process (a database or
+                // connection failure) as `failed`; nothing is wrong with the ref.
+                return this.remoteRetry('index_untag_failed', UNTAG_FAILED_RETRY_MS);
             }
             if (result.outcome === 'busy') {
                 const retryAfterMs = Math.max(1, result.retry_after_seconds ?? 1) * 1_000;
@@ -637,7 +658,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
         // Session recovery is asynchronous; keep this claim parked while the
         // account owner refreshes instead of immediately reclaiming it.
         if (isSessionExpiredError(error)) return { kind: 'defer', reason: 'session_expired' };
-        if (record && isServerError(error)) {
+        if (isServerError(error)) {
             return this.remoteRetry(error.message);
         }
         if (!(isApiError(error))) {
@@ -678,16 +699,16 @@ export class FulltextUpsertExecutor implements JobExecutor {
         if (code === 'claim_busy' || code === 'lease_lost' || code === 'index_untag_busy') {
             if (code === 'claim_busy' && row?.structuredDocumentHash) {
                 // Another writer holds this content, so it is likely indexed by the retry.
-                FulltextUpsertExecutor.probeFirstHashes.add(row.structuredDocumentHash);
+                FulltextUpsertExecutor.markProbeFirst(row.structuredDocumentHash);
             }
             return {
                 kind: 'retry', error: message, countsAsAttempt: false,
                 retryAfterMs: Math.min(retryAfterMs ?? 5_000, CLAIM_BUSY_MAX_RETRY_MS),
             };
         }
-        if (record && (error.status === 429 || [500, 502, 503, 504].includes(error.status)
+        if (error.status === 429 || [500, 502, 503, 504].includes(error.status)
             || isSessionRefreshError(error)
-            || code === 'embedding_unavailable' || code === 'index_write_ambiguous')) {
+            || code === 'embedding_unavailable' || code === 'index_write_ambiguous') {
             return this.remoteRetry(message, retryAfterMs ?? (error.status === 429 ? 5_000 : undefined));
         }
         return { kind: 'retry', error: message, retryAfterMs };

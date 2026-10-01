@@ -1150,6 +1150,46 @@ describe('FulltextUpsertExecutor', () => {
         else expect(outcome).not.toHaveProperty('laneCooldownMs');
     });
 
+    describe('cleanup against a failing server', () => {
+        beforeEach(() => {
+            Zotero.Beaver.account = { getGeneration: () => 1,
+                getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+            record.jobType = 'fulltext_untag';
+            record.payload = { ...record.payload!, index_action: 'untag', doc_hash: 'a'.repeat(64),
+                index_account_id: 'owner', index_scope_ref: 'g123', index_local_id: 'OLDDEVICE' };
+        });
+
+        it('retries a ref the server failed to process without spending attempts', async () => {
+            api.untag.mockResolvedValue({ results: [{ outcome: 'failed' }] });
+            expect(await new FulltextUpsertExecutor(api as any, 'fulltext_untag').execute(record, ctx))
+                .toEqual({ kind: 'retry', error: 'index_untag_failed', countsAsAttempt: false,
+                    retryAfterMs: 5_000, laneCooldownMs: 5_000 });
+        });
+
+        it.each([
+            new ApiError(503, 'Unavailable', 'retry shortly', 'upstream_unavailable', { retry_after_seconds: 5 }),
+            ...[500, 502, 504].map((status) => new ApiError(status, 'Unavailable')),
+            new ApiError(429, 'busy', 'busy', 'too_many_requests'), new ServerError(),
+        ])('pauses the cleanup lane without spending attempts on %s', async (error) => {
+            api.untag.mockRejectedValue(error);
+            const outcome = await new FulltextUpsertExecutor(api as any, 'fulltext_untag').execute(record, ctx);
+            expect(outcome).toMatchObject({ kind: 'retry', countsAsAttempt: false, laneCooldownMs: expect.any(Number) });
+            if (error instanceof ApiError && error.code === 'upstream_unavailable') {
+                expect(outcome).toMatchObject({ retryAfterMs: 5_000, laneCooldownMs: 5_000 });
+            }
+        });
+    });
+
+    it('keeps a bounded number of probe hints', () => {
+        const hints = (FulltextUpsertExecutor as any).probeFirstHashes as Set<string>;
+        hints.clear();
+        for (let i = 0; i <= 1_000; i += 1) (FulltextUpsertExecutor as any).markProbeFirst(`hash-${i}`);
+        expect(hints.size).toBe(1_000);
+        expect(hints.has('hash-0')).toBe(false);
+        expect(hints.has('hash-1000')).toBe(true);
+        hints.clear();
+    });
+
     describe('attachments sharing one document hash', () => {
         const hash = 'a'.repeat(64);
         let twin: BackgroundJobRecord;
