@@ -18,6 +18,8 @@ import {
     resolveBeaverAnnotationColor,
 } from "../../constants/annotations";
 import { markBeaverAnnotationWrite } from "./beaverAnnotationRegistry";
+import { isPdfDocument } from "../../utils/attachmentFiles";
+import { ensureReaderContentType } from "../attachmentContentType";
 import {
     displayBoxToZoteroRect,
     sourceBboxesToZoteroRects,
@@ -43,8 +45,22 @@ const NOTE_SIDE_MARGIN = 12;
 /**
  * Persist an annotation Beaver is creating: stamp the configured author, apply
  * tags, and record the write before `saveTx()` (observers run inside it).
+ *
+ * Zotero only saves annotations on attachments with a canonical PDF, EPUB or
+ * snapshot content type, so a mislabelled parent is corrected first (see
+ * `ensureReaderContentType`).
  */
-async function saveBeaverAnnotation(item: Zotero.Item, tags?: string[]): Promise<void> {
+async function saveBeaverAnnotation(
+    attachment: Zotero.Item,
+    item: Zotero.Item,
+    tags?: string[],
+): Promise<void> {
+    if (!await ensureReaderContentType(attachment)) {
+        throw new Error(
+            `Zotero cannot annotate this attachment: it is stored as '${attachment.attachmentContentType || "unknown"}' `
+            + "and its file could not be confirmed as a PDF or EPUB.",
+        );
+    }
     item.annotationAuthorName = getBeaverAnnotationAuthorName();
     // addTag calls setTags internally, so tags persist in the same write.
     if (tags?.length) {
@@ -289,7 +305,7 @@ export async function getPageGeometryForAttachment(
     attachment: Zotero.Item,
     pageIndex: number,
 ): Promise<PageGeometry> {
-    if (!attachment.isPDFAttachment()) {
+    if (!isPdfDocument(attachment)) {
         throw new Error("getPageGeometryForAttachment: attachment is not a PDF");
     }
     if (!Number.isInteger(pageIndex) || pageIndex < 0) {
@@ -565,7 +581,7 @@ export async function createHighlightAnnotation(
     attachment: Zotero.Item,
     input: CreateHighlightInput,
 ): Promise<ZoteroItemReference> {
-    if (!attachment.isPDFAttachment()) {
+    if (!isPdfDocument(attachment)) {
         throw new Error("createHighlightAnnotation: attachment is not a PDF");
     }
 
@@ -584,7 +600,7 @@ export async function createHighlightAnnotation(
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
     applyAnnotationPlacement(item, buildHighlightPlacement(input, geometry, nextPageGeometry));
-    await saveBeaverAnnotation(item, input.tags);
+    await saveBeaverAnnotation(attachment, item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -640,7 +656,7 @@ export async function createNoteAnnotation(
     attachment: Zotero.Item,
     input: CreateNoteInput,
 ): Promise<ZoteroItemReference> {
-    if (!attachment.isPDFAttachment()) {
+    if (!isPdfDocument(attachment)) {
         throw new Error("createNoteAnnotation: attachment is not a PDF");
     }
 
@@ -662,7 +678,7 @@ export async function createNoteAnnotation(
     const pageLabel = firstNonBlankPageLabel(input.pageLabel)
         ?? metadata?.pageLabels?.[input.notePosition.page_index];
     applyAnnotationPlacement(item, buildNotePlacement({ ...input, pageLabel }, geometry));
-    await saveBeaverAnnotation(item, input.tags);
+    await saveBeaverAnnotation(attachment, item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -781,7 +797,7 @@ export async function createEpubHighlightAnnotation(
             pageLabel: input.pageLabel,
         }),
     );
-    await saveBeaverAnnotation(item, input.tags);
+    await saveBeaverAnnotation(attachment, item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -817,7 +833,7 @@ export async function createEpubNoteAnnotation(
             pageLabel: input.pageLabel,
         }),
     );
-    await saveBeaverAnnotation(item, input.tags);
+    await saveBeaverAnnotation(attachment, item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -956,7 +972,7 @@ export async function createSnapshotHighlightAnnotation(
         item,
         buildDomPlacement(resolved, { isHighlight: true }),
     );
-    await saveBeaverAnnotation(item, input.tags);
+    await saveBeaverAnnotation(attachment, item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -987,7 +1003,7 @@ export async function createSnapshotNoteAnnotation(
         item,
         buildDomPlacement(resolved, { isHighlight: false }),
     );
-    await saveBeaverAnnotation(item, input.tags);
+    await saveBeaverAnnotation(attachment, item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }

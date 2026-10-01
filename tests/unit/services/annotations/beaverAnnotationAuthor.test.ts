@@ -99,7 +99,8 @@ class MockAnnotationItem {
 
 function mockAttachment() {
   return {
-    isPDFAttachment: () => true,
+    isAttachment: () => true,
+    attachmentContentType: "application/pdf",
     libraryID: 1,
     id: 42,
     key: "ATT123",
@@ -129,6 +130,7 @@ describe("Beaver annotation authorship", () => {
     previousZotero = (globalThis as any).Zotero;
     (globalThis as any).Zotero = {
       Item: MockAnnotationItem,
+      Attachments: { LINK_MODE_LINKED_URL: 3 },
       DB: { inTransaction: () => false },
       Prefs: { get: (key: string) => prefs[key] },
       Users: { getCurrentName: () => currentUserName },

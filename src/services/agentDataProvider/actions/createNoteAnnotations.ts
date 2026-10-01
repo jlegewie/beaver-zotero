@@ -25,6 +25,7 @@ import {
     SnapshotAnnotationError,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
+import { canUseReaderContentType } from '../../attachmentContentType';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
 import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
@@ -225,6 +226,18 @@ export async function validateCreateNoteAnnotationsAction(
             valid: false,
             error: 'Attachment file is not available locally',
             error_code: 'attachment_file_unavailable',
+            preference: 'always_ask',
+        };
+    }
+    // Zotero only annotates attachments with a canonical content type; a
+    // mislabelled PDF/EPUB is corrected at execution once its file confirms it.
+    if (!await canUseReaderContentType(attachment)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Zotero cannot annotate this attachment: it is stored as '${attachment.attachmentContentType || 'unknown'}' and its file could not be confirmed as a PDF or EPUB.`,
+            error_code: 'invalid_attachment',
             preference: 'always_ask',
         };
     }

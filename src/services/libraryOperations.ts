@@ -1,4 +1,5 @@
 import { executeRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
+import { ensureReaderContentTypeForItem } from './attachmentContentType';
 import type { OperationContext } from './agentDataProvider/operationContext';
 import { hydrateOperationRendering } from './agentDataProvider/prepareOperationRendering';
 import * as tables from './artifacts/tableStore';
@@ -21,6 +22,7 @@ const operations = {
     artifact_request: handleArtifactRequestUncoordinated,
     executeRequest,
     savePreparedNote,
+    ensureReaderContentType: ensureReaderContentTypeForItem,
     createZoteroItem: imports.createZoteroItem,
     applyCreateItemData: imports.applyCreateItemData,
     deleteAddedItem: imports.deleteAddedItem,

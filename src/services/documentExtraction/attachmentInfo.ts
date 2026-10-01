@@ -259,10 +259,16 @@ async function resolvePdfInfo(
             options.skipWorkerFallback ?? false,
         );
         if (pageCount === null) {
-            if (options.skipWorkerFallback || isRemoteFilePath(availability.filePath)) {
+            if (
+                options.skipWorkerFallback
+                || isRemoteFilePath(availability.filePath)
+                || !attachment.isPDFAttachment()
+            ) {
                 // Optimistic: the file exists and is the right type; it is
                 // just not fulltext-indexed yet (or remote-only, so the page
-                // count is determined on download).
+                // count is determined on download). Zotero's probes also
+                // reject a PDF stored under a nonstandard content type, so
+                // their failure says nothing about the file itself.
                 return { page_count: null, status: 'readable' };
             }
             // Both cheap probes failed — the PDF is likely encrypted,

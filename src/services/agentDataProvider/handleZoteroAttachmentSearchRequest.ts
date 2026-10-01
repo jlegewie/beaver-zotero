@@ -41,6 +41,7 @@ import {
     createTimeoutController,
 } from './timeout';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
+import { isPdfDocument } from '../../utils/attachmentFiles';
 
 
 /**
@@ -118,7 +119,7 @@ export async function handleZoteroAttachmentSearchRequest(
             );
         }
 
-        if (!zoteroItem.isPDFAttachment()) {
+        if (!isPdfDocument(zoteroItem)) {
             const contentType = zoteroItem.attachmentContentType || 'unknown';
             throwIfTimedOut('not_pdf_response');
             return errorResponse(

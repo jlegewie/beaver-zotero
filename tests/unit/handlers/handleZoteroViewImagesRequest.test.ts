@@ -67,7 +67,7 @@ function makeItem(opts: FakeItemOptions = {}) {
         libraryID: opts.libraryID ?? 1,
         key: opts.key ?? 'ATTACH01',
         deleted: opts.deleted ?? false,
-        attachmentContentType: opts.attachmentContentType ?? '',
+        attachmentContentType: opts.attachmentContentType ?? (opts.isPdf ? 'application/pdf' : ''),
         attachmentLinkMode: opts.attachmentLinkMode ?? 0,
         isAttachment: vi.fn(() => opts.isAttachment ?? false),
         isRegularItem: vi.fn(() => opts.isRegularItem ?? false),

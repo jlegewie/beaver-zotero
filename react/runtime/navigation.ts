@@ -1,6 +1,8 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveNavigationWindow, WindowUnavailableError } from '../../src/runtime/navigation';
 import { getContextWindow } from './windowRuntime';
+import { runWindowOperation } from './libraryMutation';
+import { canonicalContentTypeCorrection } from '../../src/utils/attachmentFiles';
 
 /** Legacy APIs read the active main window synchronously when opening a tab. */
 function assertLegacyTarget(win: ReturnType<typeof Zotero.getMainWindow>): void {
@@ -81,6 +83,21 @@ async function ensureAttachmentFileForReader(itemID: number, win: ReturnType<typ
     Zotero.Notifier.trigger('redraw', 'item', []);
 }
 
+/**
+ * Give a mislabelled PDF/EPUB the content type Zotero's reader requires, as
+ * `ZoteroPane.viewAttachment` does when the user opens the file. Without it
+ * the reader cannot open an attachment stored as, e.g., `application/octet-stream`.
+ */
+async function ensureContentTypeForReader(itemID: number): Promise<void> {
+    const item = await Zotero.Items.getAsync(itemID);
+    if (!item || !canonicalContentTypeCorrection(item)) return;
+    try {
+        await runWindowOperation('ensureReaderContentType', [itemID]);
+    } catch (error) {
+        logger(`openReader: could not correct content type for ${itemID}: ${error}`, 2);
+    }
+}
+
 /** Pin a real main window before any reader initialization awaits. */
 export async function openReader(
     itemID: number, location?: any, options: Record<string, any> = {},
@@ -88,6 +105,7 @@ export async function openReader(
 ): Promise<any> {
     const win = await resolveNavigationWindow(origin);
     await ensureAttachmentFileForReader(itemID, win);
+    await ensureContentTypeForReader(itemID);
     if (win.closed || win.__beaverRuntime?.status === 'closing') throw new WindowUnavailableError();
     // Older Zotero releases ignore the window option and use the focused main window.
     // Recheck activation immediately before each native call that uses global focus.

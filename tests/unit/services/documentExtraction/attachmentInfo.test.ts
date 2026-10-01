@@ -51,6 +51,7 @@ type MockAttachmentOptions = {
     filePath?: string | null;
     linkMode?: number;
     itemDataLoaded?: boolean;
+    filename?: string;
 };
 
 function makeAttachment(options: MockAttachmentOptions = {}): AttachmentItem {
@@ -62,7 +63,7 @@ function makeAttachment(options: MockAttachmentOptions = {}): AttachmentItem {
         libraryID: 1,
         key: options.key ?? 'ATTACH1',
         parentKey: 'PARENT1',
-        attachmentFilename: 'paper.pdf',
+        attachmentFilename: options.filename ?? 'paper.pdf',
         attachmentContentType: contentType,
         attachmentLinkMode: options.linkMode ?? 0,
         _loaded: { itemData: options.itemDataLoaded ?? true },
@@ -677,5 +678,71 @@ describe('getAttachmentInfo PDF analysis retry', () => {
         await getAttachmentInfo(makeAttachment(), { signal: callerController.signal });
 
         expect(capturedSignal?.aborted).toBe(true);
+    });
+});
+
+describe('getAttachmentInfo for mislabelled documents', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockGetMetadata.mockReset();
+        mockAnalyzeOCRNeeds.mockReset();
+        (globalThis as any).Zotero.Beaver = {};
+        (globalThis as any).Zotero.Fulltext = { getPages: vi.fn(async () => null) };
+        (globalThis as any).Zotero.PDFWorker = {
+            getFullText: vi.fn(async () => { throw new Error('Item must be a PDF attachment'); }),
+        };
+        (globalThis as any).IOUtils.stat = vi.fn().mockResolvedValue({ size: 1024 });
+        (globalThis as any).IOUtils.read = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+        vi.mocked(getPref).mockReturnValue(false);
+        vi.mocked(isAttachmentAvailableRemotely).mockReturnValue(false);
+    });
+
+    it('analyzes a PDF stored as application/octet-stream like any other PDF', async () => {
+        mockGetMetadata.mockResolvedValue({ pageCount: 12, pageLabels: {}, pages: null });
+        mockAnalyzeOCRNeeds.mockResolvedValue({ needsOCR: false });
+
+        const info = await getAttachmentInfo(makeAttachment({ contentType: 'application/octet-stream' }));
+
+        expect(info).toMatchObject({ content_kind: 'pdf', status: 'readable', page_count: 12 });
+        expect(info.status_reason).toBeUndefined();
+    });
+
+    it('reports a mislabelled PDF as readable when Zotero page-count probes reject its type', async () => {
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: '' }),
+            { pdfAnalysis: 'lightweight' },
+        );
+
+        expect(info).toMatchObject({ content_kind: 'pdf', status: 'readable', page_count: null });
+        expect(info.status_code).toBeUndefined();
+    });
+
+    it('still reports a canonical PDF as unreadable when both page-count probes fail', async () => {
+        const info = await getAttachmentInfo(makeAttachment(), { pdfAnalysis: 'lightweight' });
+
+        expect(info).toMatchObject({ content_kind: 'pdf', status: 'unreadable', status_code: 'pdf_unreadable' });
+    });
+
+    it('classifies an EPUB stored as application/epub as an EPUB', async () => {
+        const info = await getAttachmentInfo(makeAttachment({
+            contentType: 'application/epub',
+            filename: 'book.epub',
+            filePath: null,
+        }));
+
+        expect(info).toMatchObject({ content_kind: 'epub', status: 'unreadable', status_code: 'file_not_local' });
+    });
+
+    it('keeps a generic file without a document extension unreadable as other', async () => {
+        const info = await getAttachmentInfo(makeAttachment({
+            contentType: 'application/octet-stream',
+            filename: 'data.bin',
+        }));
+
+        expect(info).toMatchObject({
+            content_kind: 'other',
+            status: 'unreadable',
+            status_reason: 'Beaver cannot read other attachments.',
+        });
     });
 });
