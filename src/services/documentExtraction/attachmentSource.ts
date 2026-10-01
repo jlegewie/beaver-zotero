@@ -78,6 +78,29 @@ export function isFileAccessDeniedError(error: unknown): boolean {
             || message.includes('NS_ERROR_FILE_IS_LOCKED')));
 }
 
+/**
+ * A local file access the operating system refused, raised by
+ * `classifyFileAccess`. Handlers whose outer catch also sees decoding or
+ * rendering failures match this class rather than `isFileAccessDeniedError`,
+ * which would also accept an unrelated `NotAllowedError`.
+ */
+export class FileAccessDeniedError extends Error {
+    constructor(readonly original: unknown) {
+        super('Local file access was refused');
+        this.name = 'FileAccessDeniedError';
+    }
+}
+
+/** Await one file stat or read, rethrowing a refused access as `FileAccessDeniedError`. */
+export async function classifyFileAccess<T>(access: Promise<T>): Promise<T> {
+    try {
+        return await access;
+    } catch (error) {
+        if (isFileAccessDeniedError(error)) throw new FileAccessDeniedError(error);
+        throw error;
+    }
+}
+
 /** Agent-facing explanation for a `file_permission_denied` failure. */
 export function fileAccessDeniedMessage(fileKind: string, requestKey: string): string {
     return `Zotero does not have permission to read the ${fileKind} file for ${requestKey}. `
@@ -162,6 +185,8 @@ export async function resolveAttachmentFileSource(args: {
     const maxFileSizeMB = effectiveMaxFileSizeMB();
 
     throwIfTimedOut?.('file_path_lookup');
+    // Does not throw on refused access: Zotero's existence check reports a file
+    // in a folder it may not search as absent, so that case is `file_missing`.
     const rawFilePath = await withDeadline(
         item.getFilePathAsync(),
         'file_path_lookup',

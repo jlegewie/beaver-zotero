@@ -34,7 +34,11 @@ import {
     isRemoteAccessAvailable,
     preflightCachedPdfMeta,
 } from './utils';
-import { fileAccessDeniedMessage, isFileAccessDeniedError } from '../documentExtraction/attachmentSource';
+import {
+    FileAccessDeniedError,
+    classifyFileAccess,
+    fileAccessDeniedMessage,
+} from '../documentExtraction/attachmentSource';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
@@ -149,7 +153,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 4. Check file size limit (remote files are checked after download)
         const maxFileSizeMB = effectiveMaxFileSizeMB();
         if (!isRemoteOnly) {
-            const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
+            const fileSize = await classifyFileAccess(Zotero.Attachments.getTotalFileSize(pdfItem));
             throwIfTimedOut('file_size_check');
 
             if (fileSize) {
@@ -240,7 +244,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         if (needsUpfrontPageCount) {
             if (!pdfData) {
                 try {
-                    pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                    pdfData = await classifyFileAccess(loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly));
                     throwIfTimedOut('pdf_data_load_for_page_count');
                 } catch (error) {
                     if (!isRemoteOnly) throw error;
@@ -332,7 +336,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 8. Ensure PDF bytes are loaded before render.
         if (!pdfData) {
             try {
-                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                pdfData = await classifyFileAccess(loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly));
                 throwIfTimedOut('pdf_data_load_for_render');
             } catch (error) {
                 if (!isRemoteOnly) throw error;
@@ -429,7 +433,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         logger(`handleZoteroAttachmentPageImagesRequest: Rendering failed: ${error}`, 1);
 
-        if (isFileAccessDeniedError(error)) {
+        if (error instanceof FileAccessDeniedError) {
             return errorResponse(fileAccessDeniedMessage('PDF', errorKey), 'file_permission_denied');
         }
 

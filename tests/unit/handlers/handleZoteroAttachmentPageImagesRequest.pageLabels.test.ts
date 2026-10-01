@@ -234,6 +234,24 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
         expect(response.error).toContain('does not have permission to read the PDF file for 1-ABCD1234');
     });
 
+    it('does not report a NotAllowedError from rendering as a refused file', async () => {
+        setupRequestScenario({ cachedPageCount: 3 });
+        mockState.renderImpl = async () => {
+            throw Object.assign(new Error('Operation not allowed'), { name: 'NotAllowedError' });
+        };
+
+        const response = await handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-render-not-allowed',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: [1],
+        });
+
+        expect(mockState.renderCalls).toHaveLength(1);
+        expect(response.error_code).toBeDefined();
+        expect(response.error_code).not.toBe('file_permission_denied');
+    });
+
     it('hydrates page_label on cold caches even when prefer_page_labels is false', async () => {
         // Cached page_count present, labels: null → handler should call render
         // (with-meta) and read pageLabels back from the result.

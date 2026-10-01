@@ -939,6 +939,19 @@ export class BackgroundExtractor {
                     attemptedAt,
                     extractionSource: outcome.attemptedExtractionSource,
                 });
+                // A denied stat ends the attempt before any read records an
+                // outcome, and the ledger keeps the status of an attachment that
+                // was already extracted. Record the denial as the latest read so
+                // the issues list reports it instead of the earlier success.
+                if (outcome.error === 'file_permission_denied' && record.payloadKind === 'structured') {
+                    await db.recordAttachmentReadingOutcome({
+                        libraryId: record.libraryId,
+                        zoteroKey: record.zoteroKey,
+                        contentKind: record.contentKind,
+                        errorCode: outcome.error,
+                        attemptedAt,
+                    });
+                }
             } else if (record.jobType === 'fulltext_upsert' && record.payload?.doc_hash) {
                 await db.markAttachmentUpsertFailed(
                     record.libraryId,
