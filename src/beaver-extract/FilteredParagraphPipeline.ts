@@ -23,6 +23,7 @@ import {
     bboxFromXYWH,
     bboxHeight,
     bboxWidth,
+    type BoundingBox,
     type MarginItem,
     type MarginRemovalResult,
     type MarginSettings,
@@ -99,6 +100,19 @@ export interface FilteredParagraphContext {
         end: number;
         thickness: number;
     }>;
+    /**
+     * Boxes of regions (tables, figures, equations) whose lines were removed
+     * from the target page, in raw MuPDF frame. Each acts as a horizontal
+     * layout divider through its middle in the reading frame, so text above
+     * a region that spans columns is read before text below it.
+     */
+    regionBarriers?: ReadonlyArray<BoundingBox>;
+    /**
+     * Dominant text orientation of the target page, when the caller detected
+     * it before removing lines from the page (e.g. region text). Without it,
+     * orientation is detected on the supplied page.
+     */
+    pageRotation?: RotationAngle;
 }
 
 /**
@@ -239,7 +253,8 @@ export function detectFilteredParagraphs(
     // against the raw bboxes so the marginZone exclusion uses the
     // original page geometry.
     const tRotation = performance.now();
-    const pageRotation = detectDominantTextOrientation(rawTargetPage, marginZone);
+    const pageRotation =
+        ctx.pageRotation ?? detectDominantTextOrientation(rawTargetPage, marginZone);
     const rotated = rotateRawPage(rawTargetPage, pageRotation);
     const targetPage = rotated.page;
     const rotationMs = performance.now() - tRotation;
@@ -351,6 +366,18 @@ export function detectFilteredParagraphs(
                   };
               })
             : ctx.dividerLines;
+    const regionDividers = (ctx.regionBarriers ?? []).map((box) => {
+        const upright = rotateBBox(box, pageRotation, rotated.sourceWidth, rotated.sourceHeight);
+        return {
+            orientation: "horizontal" as const,
+            position: (upright.t + upright.b) / 2,
+            start: upright.l,
+            end: upright.r,
+            thickness: 0,
+        };
+    });
+    const layoutDividers =
+        regionDividers.length > 0 ? [...(dividerLines ?? []), ...regionDividers] : dividerLines;
 
     const tColumnDetect = performance.now();
     const columnResult = detectColumns(filteredPage, {
@@ -358,7 +385,7 @@ export function detectFilteredParagraphs(
         footerMargin: margins.bottom,
         bodyStyles: styleProfile.bodyStyles,
         fillBoundaries,
-        dividerLines,
+        dividerLines: layoutDividers,
         debug: isAnalyzerLoggingEnabled(),
     });
     const columnDetectMs = performance.now() - tColumnDetect;

@@ -2,7 +2,7 @@
  * Page signals for region detection: text lines (from the structured-text walk)
  * and typed drawing primitives (from the MuPDF graphics summary).
  */
-import type { RawLineDetailed, RawPageData } from "@beaver/agent-core/extract/types";
+import type { RawLine, RawLineDetailed, RawPageData } from "@beaver/agent-core/extract/types";
 
 import { GRAPHICS_SUMMARY_STRIDE, GS_FIELD, GS_FLAG, GS_KIND, type GraphicsSummary } from "../worker/graphicsSummary";
 import type { Rect } from "./geometry";
@@ -78,6 +78,11 @@ export interface RegionLine {
      * writing mode), 270 reads up it; 0 for horizontal text.
      */
     rot: 0 | 90 | 270;
+    /**
+     * Horizontal text set upside down (rotated 180 degrees). Its `rot` is 0, as
+     * detection treats it like any horizontal line; only reading order differs.
+     */
+    turned?: true;
     /** Whitespace-separated words; each two CJK characters count as one word. */
     words: number;
     nchar: number;
@@ -92,9 +97,16 @@ export interface RegionLine {
     maxSize: number;
     /** The line is only an equation number. */
     eqNumber: boolean;
-    /** Index of the structured-text line this piece was split from, and that line's piece count. */
+    /**
+     * 1-based index of the structured-text line this piece was split from (among
+     * its non-blank lines, see `sourceLines`), and that line's piece count.
+     */
     source: number;
     pieces: number;
+    /** Character range [start, end) of the piece in its source line's text. */
+    range: [number, number];
+    /** The pieces `mergeRowFragments` joined into this line; absent for a single piece. */
+    parts?: RegionLine[];
 }
 
 const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/g;
@@ -190,6 +202,16 @@ function linePieces(line: RawLineDetailed, chars: readonly string[], em: number)
     return pieces;
 }
 
+/** The structured-text lines that `RegionLine.source` numbers (1-based), in page order. */
+export function sourceLines(page: RawPageData): RawLine[] {
+    const out: RawLine[] = [];
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) if (line.text.trim()) out.push(line);
+    }
+    return out;
+}
+
 export function pageLines(page: RawPageData): RegionLine[] {
     const lines: RegionLine[] = [];
     let source = 0;
@@ -228,6 +250,7 @@ export function pageLines(page: RawPageData): RegionLine[] {
                     text,
                     size,
                     rot,
+                    ...(line.rotation === 180 ? { turned: true as const } : {}),
                     words: wordCount(text),
                     nchar: text.length,
                     alphaWords: alphaWordCount(text),
@@ -238,6 +261,7 @@ export function pageLines(page: RawPageData): RegionLine[] {
                     eqNumber: EQUATION_NUMBER_RE.test(text),
                     source,
                     pieces: pieces.length,
+                    range: [a, b],
                 });
             }
         }
@@ -322,6 +346,7 @@ export function mergeRowFragments(lines: RegionLine[], prims: readonly Primitive
                     maxSize: Math.max(cur.maxSize, next.maxSize),
                     eqNumber: false,
                     pieces: 1,
+                    parts: [...(cur.parts ?? [cur]), next],
                 };
             } else {
                 out.push(cur);

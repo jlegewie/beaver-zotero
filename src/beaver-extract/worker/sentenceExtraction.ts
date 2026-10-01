@@ -53,6 +53,7 @@ import {
     type FilteredParagraphResult,
 } from "../FilteredParagraphPipeline";
 import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
+import type { RotationAngle } from "../PageRotationNormalizer";
 import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
@@ -80,6 +81,7 @@ import {
 import type { DocumentLike, FontApi } from "./mupdfApi";
 import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
+import { placeRegionItems, type RegionItemDraft } from "../regions/regionItems";
 
 /**
  * Per-page sentence work given pre-walked context. Cheap to call in a
@@ -151,6 +153,18 @@ export function extractSentencesForPage(args: {
      * empty fonts and downstream heading detection silently degrades.
      */
     fontApi?: FontApi;
+    /**
+     * Region items for this page (`regionItemsForPage`). `preWalkedDetailed`
+     * must then be the page without the lines they absorbed.
+     */
+    regionItems?: readonly RegionItemDraft[];
+    /** Time spent detecting regions before this call, reported in the phase timings. */
+    regionsMs?: number;
+    /**
+     * Dominant text orientation of the page before region lines were removed
+     * from `preWalkedDetailed` (`detectDominantTextOrientation`).
+     */
+    pageRotation?: RotationAngle;
 }): {
     sentenceResult: PageSentenceResult;
     filteredResult: FilteredParagraphResult;
@@ -201,6 +215,8 @@ export function extractSentencesForPage(args: {
         paragraphSettings: args.paragraphSettings,
         fillBoundaries,
         dividerLines,
+        regionBarriers: args.regionItems?.map((region) => region.bbox),
+        pageRotation: args.pageRotation,
     });
     const filteredParagraphsMs = performance.now() - tFiltered;
 
@@ -216,6 +232,23 @@ export function extractSentencesForPage(args: {
             sourceHeight: filteredResult.sourceHeight,
         },
     });
+    let regionsMs = args.regionsMs ?? 0;
+    if (args.regionItems?.length) {
+        const tRegions = performance.now();
+        const placed = placeRegionItems(args.pageIndex, sentenceResult.items, args.regionItems, {
+            rotation: filteredResult.pageRotation,
+            sourceWidth: filteredResult.sourceWidth,
+            sourceHeight: filteredResult.sourceHeight,
+        });
+        sentenceResult.items = placed.items;
+        sentenceResult.sentences = placed.sentences;
+        if (sentenceResult.degradation) {
+            for (const note of sentenceResult.degradation.notes) {
+                note.itemId = placed.renamed.get(note.itemId) ?? note.itemId;
+            }
+        }
+        regionsMs += performance.now() - tRegions;
+    }
     sentenceResult.items = [
         ...sentenceResult.items,
         ...reindexMarginItems(
@@ -236,6 +269,7 @@ export function extractSentencesForPage(args: {
         lineDetectMs: filteredResult.timings.lineDetectMs,
         paragraphDetectMs: filteredResult.timings.paragraphDetectMs,
         sentenceMapMs,
+        ...(args.regionItems !== undefined ? { regionsMs } : {}),
         charCount,
         lineCount,
         itemCount: sentenceResult.items.length,

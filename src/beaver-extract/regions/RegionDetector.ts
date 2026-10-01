@@ -1,14 +1,14 @@
 /**
- * Region detector: picture and decoration regions on a PDF page, from the page's
- * text lines and its MuPDF graphics summary — no layout model.
+ * Region detector: pictures, tables, display equations and decorations on a PDF
+ * page, from the page's text lines and its MuPDF graphics summary — no layout
+ * model.
  *
- * Pipeline: typed primitives → clustered candidates (grown over labels, panels
- * merged, caption-anchored regions added) → features → logistic-regression class
- * (picture / decoration / other). Without a model it returns candidates and
- * features only (used to export training data).
- *
- * Detection mode only: results are reported through the CLI and debug tooling;
- * extraction output does not use them yet.
+ * Pipeline: typed primitives → candidates (graphics clusters grown over labels
+ * and merged across panels, caption-anchored regions, text groups) → features →
+ * boosted-tree classes with per-class probability floors → overlap resolution →
+ * line routing. Without a model it returns candidates and features only (used to
+ * export training data). Structured extraction turns the result into items
+ * (`regionItems.ts`).
  */
 import type { RawPageData } from "@beaver/agent-core/extract/types";
 
@@ -68,8 +68,19 @@ export interface RegionDetection {
      * regions route text.
      */
     lines?: number[][];
+    /** With `route`: the page's text lines, their flags and where each is routed. */
+    routing?: LineRouting;
     /** Detector time, excluding the graphics summary (collected with the text pass). */
     ms: number;
+}
+
+export interface LineRouting {
+    /** Visual lines (pieces joined by `mergeRowFragments`). */
+    lines: RegionLine[];
+    /** `LINE_RUNNING` / `LINE_CAPTION` per line. */
+    flags: number[];
+    /** Index of the candidate each line is routed to, or -1 (see `routeLines`). */
+    routes: number[];
 }
 
 export interface DetectRegionsOptions {
@@ -77,6 +88,8 @@ export interface DetectRegionsOptions {
     doc?: RegionDocContext;
     model?: RegionModelWeights | null;
     includeLines?: boolean;
+    /** Also return the line routing as objects (`RegionDetection.routing`). */
+    route?: boolean;
 }
 
 export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts: DetectRegionsOptions): RegionDetection {
@@ -102,17 +115,20 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
     if (opts.model) resolveOverlaps(candidates);
     const ms = performance.now() - start;
     const detection: RegionDetection = { pageIndex: opts.pageIndex, scanned: found.scanned, bodySize: bs, candidates, ms };
-    if (opts.includeLines) {
+    if (opts.includeLines || opts.route) {
         const flags = lines.map(
             (l) => (found.running.has(l) ? LINE_RUNNING : 0) | (found.captionText.has(l) ? LINE_CAPTION : 0),
         );
         const routes = routeLines(lines, flags, candidates);
-        detection.lines = lines.map((l, i) => [
-            ...l.bbox.map((v) => Math.round(v * 10) / 10),
-            l.nchar,
-            flags[i],
-            routes[i],
-        ]);
+        if (opts.route) detection.routing = { lines, flags, routes };
+        if (opts.includeLines) {
+            detection.lines = lines.map((l, i) => [
+                ...l.bbox.map((v) => Math.round(v * 10) / 10),
+                l.nchar,
+                flags[i],
+                routes[i],
+            ]);
+        }
     }
     return detection;
 }

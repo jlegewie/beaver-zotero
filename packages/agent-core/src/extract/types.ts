@@ -523,11 +523,14 @@ export interface FormulaItem extends TextBearingItem {
     kind: "formula";
 }
 
-export interface TableItem extends DocItemBase {
+/** A table: one line and one sentence per row (see the public `TableItem`). */
+export interface TableItem extends TextBearingItem {
     kind: "table";
+    sentences?: SentenceItem[];
 }
 
-export interface PictureItem extends DocItemBase {
+/** A figure: `text` and `lines` hold its label rows, possibly none. */
+export interface PictureItem extends TextBearingItem {
     kind: "picture";
 }
 
@@ -773,6 +776,8 @@ export interface StructuredPagePhaseTimings {
     paragraphDetectMs: number;
     /** `extractPageSentences` — item-scoped sentence mapping. */
     sentenceMapMs: number;
+    /** Region detection and region items (schema presets with `regions`). */
+    regionsMs?: number;
     /** Total character count on the target page (post-detailed-walk). */
     charCount: number;
     /** Total line count on the target page (post-detailed-walk). */

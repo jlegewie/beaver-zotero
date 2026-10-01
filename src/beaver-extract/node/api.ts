@@ -184,7 +184,7 @@ export interface DetectRegionsInput {
     includeLines?: boolean;
 }
 
-/** Region detection (detection mode): picture/decoration candidates per page. */
+/** Region candidates per page with features and classes (debugging and training export). */
 export async function detectRegions(input: DetectRegionsInput): Promise<RegionDetectionResult> {
     await ensureExtractionRuntime();
     const reply = await enqueue(() =>

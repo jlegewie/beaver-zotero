@@ -1,7 +1,8 @@
 /**
- * `beaver-extract regions` — region detection (pictures, decorations, tables) in
- * detection mode: candidates with features and, when a trained model is
- * available, class probabilities. Extraction output is unaffected.
+ * `beaver-extract regions` — region detection (pictures, tables, display
+ * equations, decorations): candidates with features and, when a trained model
+ * is available, class probabilities. For debugging and training export; the
+ * items structured extraction emits come from `extract`.
  *
  * Single PDF:
  *   beaver-extract regions paper.pdf --pages 0,3 [--json] [--overlay-dir out/]
@@ -68,7 +69,7 @@ interface PageListRow {
 
 export function buildRegionsCommand(deps: CliDeps): Command {
     const cmd = new Command("regions");
-    cmd.description("Detect picture, decoration and table regions (detection mode; extraction is unaffected).")
+    cmd.description("Detect picture, table, formula and decoration regions (candidates, features, classes).")
         .argument("[pdf]", "path to the PDF file (single-PDF mode)")
         .option("--pages <list>", "comma-separated 0-based pages (single-PDF mode; default: all)")
         .option("--page-list <jsonl>", "batch mode: JSONL rows with pdf_path, page_index and id/page_id")

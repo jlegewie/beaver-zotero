@@ -97,7 +97,7 @@ function itemStyle(item: DocItem): { color: string; prefix: string } {
 }
 
 function itemText(item: DocItem): string {
-    return "text" in item ? item.text : item.kind;
+    return item.text || item.kind;
 }
 
 type DebugItem = NonNullable<PageDebugData["items"]>[number];
@@ -107,7 +107,7 @@ function debugItemStyle(item: DebugItem): { color: string; prefix: string } {
 }
 
 function debugItemText(item: DebugItem): string {
-    return "text" in item ? item.text : item.kind;
+    return ("text" in item && item.text) || item.kind;
 }
 
 function itemSentences(item: DocItem): SentenceItem[] {

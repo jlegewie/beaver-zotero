@@ -1,8 +1,9 @@
 /**
- * Region detection op (detection mode): picture and decoration candidates per
- * page, with features and, when a trained model is available, class
- * probabilities. Used by `beaver-extract regions`; extraction output does not
- * use it yet.
+ * Region detection op: candidates per page (pictures, tables, display
+ * equations, decorations) with features and, when a trained model is
+ * available, class probabilities. Used by `beaver-extract regions` for
+ * debugging and training export; structured extraction runs the detector
+ * itself (`worker/ops.ts`).
  *
  * Each target page is walked once with the graphics-summary tee (the same
  * detailed walk structured extraction uses). Document context — on how many
