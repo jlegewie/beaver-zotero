@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
     accountGenerationAtom,
@@ -8,22 +8,9 @@ import {
 import { backgroundProcessingStatusAtom } from "../atoms/backgroundProcessing";
 import { tryGetWindowRuntime } from "../runtime/windowRuntime";
 import { useSurfaceWindow } from "../runtime/SurfaceWindowContext";
+import { useDocumentVisible } from "./useDocumentVisible";
 
 const COVERAGE_POLL_MS = 60_000;
-
-/** Whether `doc` is visible (not minimized or fully occluded). */
-function useDocumentVisible(doc: Document): boolean {
-    const [visible, setVisible] = useState(() => !doc.hidden);
-    useEffect(() => {
-        // Gecko repeats `visibilitychange` without a state change; the
-        // boolean state makes those repeats no-ops.
-        const update = () => setVisible(!doc.hidden);
-        update();
-        doc.addEventListener("visibilitychange", update);
-        return () => doc.removeEventListener("visibilitychange", update);
-    }, [doc]);
-    return visible;
-}
 
 /**
  * Keeps `backgroundProcessingStatusAtom` fresh while the calling surface is

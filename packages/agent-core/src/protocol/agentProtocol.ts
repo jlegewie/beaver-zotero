@@ -1054,6 +1054,7 @@ export type AttachmentPageImagesErrorCode =
     | 'is_linked_url'       // Attachment is a linked URL, not a stored file
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'empty_document'      // PDF opened but has no readable pages
@@ -1095,6 +1096,7 @@ export type AttachmentImageErrorCode =
     | 'unsupported_image_format'   // Image format the runtime cannot decode (TIFF, HEIC, SVG, ...)
     | 'file_missing'               // Image file not available locally
     | 'file_too_large'             // Image file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'download_failed'            // Remote file download failed
     | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
     | 'timeout'                    // Processing timed out
@@ -1206,6 +1208,7 @@ export type AttachmentSearchErrorCode =
     | 'not_pdf'             // Attachment is not a PDF
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'empty_document'      // PDF opened but has no readable pages

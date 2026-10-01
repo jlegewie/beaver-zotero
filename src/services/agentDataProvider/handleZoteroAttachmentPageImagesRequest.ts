@@ -34,6 +34,7 @@ import {
     isRemoteAccessAvailable,
     preflightCachedPdfMeta,
 } from './utils';
+import { fileAccessDeniedMessage, isFileAccessDeniedError } from '../documentExtraction/attachmentSource';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
@@ -427,6 +428,10 @@ export async function handleZoteroAttachmentPageImagesRequest(
         }
 
         logger(`handleZoteroAttachmentPageImagesRequest: Rendering failed: ${error}`, 1);
+
+        if (isFileAccessDeniedError(error)) {
+            return errorResponse(fileAccessDeniedMessage('PDF', errorKey), 'file_permission_denied');
+        }
 
         if (isExtractionError(error)) {
             // PAGE_OUT_OF_RANGE carries `pageCount` in payload (worker strict resolvers).

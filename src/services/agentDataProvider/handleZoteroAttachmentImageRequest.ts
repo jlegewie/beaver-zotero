@@ -25,6 +25,7 @@ import {
     checkRemotePdfSize,
     isRemoteAccessAvailable,
 } from './utils';
+import { fileAccessDeniedMessage, isFileAccessDeniedError } from '../documentExtraction/attachmentSource';
 import {
     DEFAULT_ATTACHMENT_IMAGE_TIMEOUT_SECONDS,
     TimeoutError,
@@ -249,6 +250,9 @@ export async function handleZoteroAttachmentImageRequest(
         }
 
         logger(`handleZoteroAttachmentImageRequest: Processing failed: ${error}`, 1);
+        if (isFileAccessDeniedError(error)) {
+            return errorResponse(fileAccessDeniedMessage('image', errorKey), 'file_permission_denied');
+        }
         return errorResponse(
             `Failed to process image for ${errorKey}: ${error instanceof Error ? error.message : String(error)}`,
             'image_processing_failed'

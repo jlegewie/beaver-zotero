@@ -119,6 +119,8 @@ export interface DocumentCacheSourceIdentity {
 
 interface CacheMetadataInput {
     extractionSource?: "native" | "ocr";
+    /** md5 of the local source bytes an OCR payload was prepared from. */
+    sourceMd5?: string | null;
     contentKind?: ExtractContentKind;
     pageCount: number | null;
     pageLabels: PageLabels | Record<number, string> | null;
@@ -1518,6 +1520,7 @@ export class DocumentCache {
             extractionSchemaVersion: metadataInput.extractionSchemaVersion,
             cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
             extractionSource: input.metadata.extractionSource ?? "native",
+            sourceMd5: input.metadata.extractionSource === 'ocr' ? input.metadata.sourceMd5 ?? null : null,
         });
         const cleanup = oldPayload && oldPayload.payloadPath !== payloadWrite.path
             ? [...deletedPayloads, oldPayload]
@@ -1581,6 +1584,7 @@ export class DocumentCache {
             extractionSchemaVersion: metadataInput.extractionSchemaVersion,
             cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
             extractionSource: input.metadata.extractionSource ?? "native",
+            sourceMd5: input.metadata.extractionSource === 'ocr' ? input.metadata.sourceMd5 ?? null : null,
         });
         const cleanup = oldPayload && oldPayload.payloadPath !== payloadWrite.path
             ? [...deletedPayloads, oldPayload]
@@ -1619,10 +1623,13 @@ export class DocumentCache {
 
     /**
      * Move an entry to `source` when only the file's path or mtime changed and
-     * the bytes still hash to the processing ledger's hash for the recorded
-     * location. The reconciler performs the same move for the ledger; doing it
-     * here keeps a read that lands first from discarding the entry. Returns the
-     * updated entry, or `null` when the bytes cannot be verified.
+     * the bytes are verified unchanged. A processing ledger row that has
+     * prepared the attachment is authoritative: the bytes must hash to its
+     * `fileHash` and its hashed location must be the cached location; the row
+     * is then moved with the entry, so a later read or a further change is
+     * verified against the new location. Without such a row, the md5 stored
+     * with the OCR payloads is the reference. Returns the updated entry, or
+     * `null` when the bytes cannot be verified.
      */
     private async relocateUnchangedSource(
         ref: DocumentRef,
@@ -1632,25 +1639,62 @@ export class DocumentCache {
         if (isRemoteFilePath(record.filePath) || isRemoteFilePath(source.filePath)) return null;
         if (source.fileSignature.size_bytes !== record.fileSignature.size_bytes
             || source.sourceSizeBytes !== record.sourceSizeBytes) return null;
+        const from = { filePath: record.filePath, mtimeMs: record.fileSignature.mtime_ms, sizeBytes: record.fileSignature.size_bytes };
         const row = await this.db.getAttachmentProcessingState(ref.libraryId, ref.zoteroKey);
-        const hashed = row?.extractionSource ? parseLocalSourceIdentity(row.extractionSource)?.location : null;
-        if (!row?.fileHash || row.extractStatus !== 'done' || !hashed
-            || hashed.filePath !== record.filePath
-            || hashed.mtimeMs !== record.fileSignature.mtime_ms
-            || hashed.sizeBytes !== record.fileSignature.size_bytes) return null;
+        const hashed = row?.extractStatus === 'done' && row.fileHash && row.extractionSource
+            ? parseLocalSourceIdentity(row.extractionSource)
+            : null;
+        const ledger = hashed && row?.fileHash && row.extractionSource
+            ? { ...hashed, identity: row.extractionSource, fileHash: row.fileHash }
+            : null;
+        let expectedHash: string | null;
+        if (ledger) {
+            if (ledger.location.filePath !== from.filePath
+                || ledger.location.mtimeMs !== from.mtimeMs
+                || ledger.location.sizeBytes !== from.sizeBytes) return null;
+            expectedHash = ledger.fileHash;
+        } else {
+            expectedHash = await this.storedOcrSourceMd5(record);
+        }
+        if (!expectedHash) return null;
         const fileHash = await Zotero.Utilities.Internal.md5Async(source.filePath).catch(() => null);
-        if (fileHash !== row.fileHash) return null;
+        if (fileHash !== expectedHash) return null;
         // Bytes replaced while they were hashed must not inherit the cached text.
         const after = await getFileSignature(source.filePath);
         if (after.mtime_ms !== source.fileSignature.mtime_ms || after.size_bytes !== source.fileSignature.size_bytes) {
             return null;
         }
-        await this.relocateSource(
-            ref,
-            { filePath: record.filePath, mtimeMs: record.fileSignature.mtime_ms, sizeBytes: record.fileSignature.size_bytes },
-            { filePath: source.filePath, mtimeMs: source.fileSignature.mtime_ms },
-        );
+        const to = { filePath: source.filePath, mtimeMs: source.fileSignature.mtime_ms };
+        const cached = await this.relocateSource(ref, from, to);
+        if (ledger && cached !== 'missing') {
+            // Same identity format as `observeAttachmentSource`, so the
+            // reconciler sees the moved row as current rather than changed.
+            await this.db.relocateAttachmentExtractionSource({
+                libraryId: ref.libraryId,
+                zoteroKey: ref.zoteroKey,
+                expectedSource: ledger.identity,
+                fileHash: ledger.fileHash,
+                source: JSON.stringify([ledger.kind, ledger.schema, to.filePath, to.mtimeMs, from.sizeBytes]),
+                fileMtimeMs: to.mtimeMs,
+            }).catch((error) => logger(`DocumentCache: ledger relocation failed: ${error}`, 1));
+        }
         return this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
+    }
+
+    /**
+     * The source md5 recorded with an entry's OCR payloads, when every OCR
+     * payload carries the same one for the entry's current location.
+     */
+    private async storedOcrSourceMd5(record: DocumentCacheMetadataRecord): Promise<string | null> {
+        const ocr = (await this.db.getDocumentCachePayloadsForMetadata(record.id))
+            .filter(p => p.extractionSource === 'ocr');
+        const hashes = new Set(ocr.map(p => p.sourceFilePath === record.filePath
+            && p.sourceFileSignature.mtime_ms === record.fileSignature.mtime_ms
+            && p.sourceFileSignature.size_bytes === record.fileSignature.size_bytes
+            ? p.sourceMd5 ?? null
+            : null));
+        const [hash] = hashes;
+        return hashes.size === 1 && hash ? hash : null;
     }
 
     private static recordedSource(record: DocumentCacheMetadataRecord): DocumentCacheSourceIdentity {

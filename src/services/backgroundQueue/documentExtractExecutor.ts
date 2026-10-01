@@ -118,6 +118,10 @@ export class DocumentExtractExecutor implements JobExecutor {
         const postObservation = this.checkScope(record);
         if (postObservation) return postObservation;
         const extractionSource = observation?.identity ?? null;
+        if (source.kind === 'error' && source.code === 'file_permission_denied') {
+            // Retried like a refused read: the same error reports a briefly locked file.
+            return { kind: 'retry', error: source.code, attemptedExtractionSource: extractionSource };
+        }
         if (source.kind === 'error') {
             await ctx.db.markAttachmentExtractFailure({
                 libraryId: item.libraryID,

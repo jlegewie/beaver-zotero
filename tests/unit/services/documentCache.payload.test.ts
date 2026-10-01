@@ -139,12 +139,12 @@ describe('DocumentCache payloads', () => {
         await conn.closeDatabase();
     });
 
-    async function putStructured(result = structuredResult, extractionSource?: 'ocr') {
+    async function putStructured(result = structuredResult, extractionSource?: 'ocr', sourceMd5?: string) {
         await cache.putResult({
             item: createCacheAttachment(), filePath: sourcePath, mode: 'structured',
             sourceSizeBytes: 3, contentType: 'application/pdf', result,
             metadata: { pageCount: 1, pageLabels: { '0': '1' }, pages: onePageGeometry,
-                ...(extractionSource ? { extractionSource } : {}) },
+                ...(extractionSource ? { extractionSource } : {}), ...(sourceMd5 ? { sourceMd5 } : {}) },
         });
     }
 
@@ -347,7 +347,9 @@ describe('DocumentCache payloads', () => {
                 expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
             });
 
-            it('discards the OCR text when the ledger did not hash the cached location', async () => {
+            it.each([false, true])('discards the OCR text when the ledger did not hash the cached location (stored md5=%s)', async (storedMd5) => {
+                // A prepared ledger row is authoritative over the md5 stored with the payloads.
+                if (storedMd5) await putStructured(structuredResult, 'ocr', 'scan-md5');
                 await conn.queryAsync(`UPDATE attachment_processing_state SET extraction_source = ?`,
                     [JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), sourcePath, 9, 3])]);
                 files.set(renamedPath, files.get(sourcePath)!);
@@ -356,6 +358,57 @@ describe('DocumentCache payloads', () => {
 
                 expect(md5Async).not.toHaveBeenCalled();
                 expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            });
+
+            async function ledgerLocation() {
+                const row = await db.getAttachmentProcessingState(1, 'ABCD1234');
+                return { extractionSource: row?.extractionSource, fileMtimeMs: row?.fileMtimeMs };
+            }
+
+            it.each([
+                ['mtime changes', [[sourcePath, 20], [sourcePath, 30]]],
+                ['renames', [[renamedPath, 10], ['/tmp/renamed-again.pdf', 10]]],
+            ] as const)('keeps the OCR text across two successive %s, each followed by a read', async (_label, moves) => {
+                for (const [path, mtime] of moves) {
+                    files.set(path, files.get(sourcePath)!);
+                    mockIOUtils.stat.mockResolvedValue({ lastModified: mtime, size: 3 } as any);
+
+                    expect(await cache.getResult(ref, 'structured', path)).toEqual(structuredResult);
+
+                    expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))
+                        .toMatchObject({ extractionSource: 'ocr', sourceFilePath: path, sourceFileSignature: { mtime_ms: mtime } });
+                    // The ledger moves with the entry, so the next change is verified against this location.
+                    expect(await ledgerLocation()).toEqual({
+                        extractionSource: JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), path, mtime, 3]),
+                        fileMtimeMs: mtime,
+                    });
+                }
+                expect(md5Async).toHaveBeenCalledTimes(2);
+                expect(await db.getAttachmentProcessingState(1, 'ABCD1234'))
+                    .toMatchObject({ extractStatus: 'done', fileHash: 'scan-md5' });
+            });
+
+            it('leaves the ledger in place when the cache entry could not be relocated', async () => {
+                files.set(renamedPath, files.get(sourcePath)!);
+                const before = await ledgerLocation();
+                vi.spyOn(cache, 'relocateSource').mockResolvedValueOnce('missing');
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await ledgerLocation()).toEqual(before);
+            });
+
+            it('does not move a ledger row that changed while the bytes were hashed', async () => {
+                files.set(renamedPath, files.get(sourcePath)!);
+                md5Async.mockImplementation(async () => {
+                    await conn.queryAsync(`UPDATE attachment_processing_state SET file_hash = 'replaced-md5'`);
+                    return 'scan-md5';
+                });
+
+                await cache.getResult(ref, 'structured', renamedPath);
+
+                expect((await ledgerLocation()).extractionSource)
+                    .toBe(JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), sourcePath, 10, 3]));
             });
 
             it('does not relocate bytes that changed while they were hashed', async () => {
@@ -368,6 +421,75 @@ describe('DocumentCache payloads', () => {
                 expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
 
                 expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toMatchObject({ filePath: renamedPath });
+                expect((await ledgerLocation()).extractionSource)
+                    .toBe(JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), sourcePath, 10, 3]));
+            });
+        });
+
+        describe('protected OCR preparation without a prepared ledger row', () => {
+            const md5Async = vi.fn();
+
+            beforeEach(() => {
+                (Zotero.Utilities as any).Internal = { md5Async };
+                md5Async.mockResolvedValue('scan-md5');
+            });
+
+            afterEach(() => {
+                delete (Zotero.Utilities as any).Internal;
+            });
+
+            async function excludeLibraryAndRename() {
+                await putStructured(structuredResult, 'ocr', 'scan-md5');
+                // Exclusion drops the ledger and keeps the OCR preparation.
+                await cache.invalidateByLibrary(1, { retainProtectedOcr: true });
+                files.set(renamedPath, files.get(sourcePath)!);
+            }
+
+            it('verifies a renamed file against the md5 stored with the OCR text', async () => {
+                await excludeLibraryAndRename();
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+
+                expect(md5Async).toHaveBeenCalledWith(renamedPath);
+                expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))
+                    .toMatchObject({ extractionSource: 'ocr', sourceFilePath: renamedPath, sourceMd5: 'scan-md5' });
+                expect(await db.getAttachmentProcessingState(1, 'ABCD1234')).toBeNull();
+            });
+
+            it('verifies against the stored md5 while a re-created ledger row is not yet prepared', async () => {
+                await excludeLibraryAndRename();
+                await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCD1234', itemId: 100, contentKind: 'pdf' });
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+
+                expect(await db.getAttachmentProcessingState(1, 'ABCD1234'))
+                    .toMatchObject({ extractStatus: null, extractionSource: null });
+            });
+
+            it('discards the OCR text when the renamed file has different bytes', async () => {
+                await excludeLibraryAndRename();
+                md5Async.mockResolvedValue('other-md5');
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            });
+
+            it('discards an entry written without a stored md5, as before', async () => {
+                await putStructured(structuredResult, 'ocr');
+                await cache.invalidateByLibrary(1, { retainProtectedOcr: true });
+                files.set(renamedPath, files.get(sourcePath)!);
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(md5Async).not.toHaveBeenCalled();
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            });
+
+            it('does not store an md5 with native payloads', async () => {
+                await putStructured(structuredResult, undefined, 'scan-md5');
+
+                expect((await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))?.sourceMd5).toBeNull();
             });
         });
     });

@@ -208,6 +208,11 @@ export interface DocumentCachePayloadRecord {
     payloadPath: string;
     payloadSizeBytes: number;
     payloadSha256: string | null;
+    /**
+     * md5 of the source file bytes a protected OCR payload was prepared from.
+     * Lets a renamed or touched file be verified without a processing ledger row.
+     */
+    sourceMd5?: string | null;
     extractionSchemaVersion: string;
     cacheFormatVersion: number;
     createdAt: string;
@@ -923,6 +928,10 @@ export class BeaverDB {
                     }
                 });
             }
+            // Nullable and ignored by older builds, so the schema version stays put.
+            if (!columns.has('source_md5')) {
+                await this.queryAsync(`ALTER TABLE document_cache_payloads ADD COLUMN source_md5 TEXT`);
+            }
         }
         await this.setSchemaVersion('document_cache', DOCUMENT_CACHE_SCHEMA_VERSION);
 
@@ -976,6 +985,7 @@ export class BeaverDB {
                 payload_size_bytes         INTEGER NOT NULL,
                 payload_sha256             TEXT,
                 extraction_source          TEXT NOT NULL DEFAULT 'native',
+                source_md5                 TEXT,
                 extraction_schema_version  TEXT NOT NULL,
                 cache_format_version       INTEGER NOT NULL,
                 created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
@@ -3570,6 +3580,7 @@ export class BeaverDB {
             payloadSizeBytes: row.payload_size_bytes,
             payloadSha256: row.payload_sha256 ?? null,
             extractionSource: row.extraction_source === "ocr" ? "ocr" : "native",
+            sourceMd5: row.source_md5 ?? null,
             extractionSchemaVersion: row.extraction_schema_version,
             cacheFormatVersion: row.cache_format_version,
             createdAt: row.created_at,
@@ -3928,6 +3939,7 @@ export class BeaverDB {
                     updated_at: row.getResultByIndex(17),
                     last_accessed_at: row.getResultByIndex(18),
                     extraction_source: row.getResultByIndex(19),
+                    source_md5: row.getResultByIndex(20),
                 });
             },
         });
@@ -3948,7 +3960,7 @@ export class BeaverDB {
                        content_kind, source_file_path, source_file_mtime_ms, source_file_size_bytes,
                        source_size_bytes, payload_path, payload_size_bytes,
                        payload_sha256, extraction_schema_version, cache_format_version,
-                       created_at, updated_at, last_accessed_at, extraction_source
+                       created_at, updated_at, last_accessed_at, extraction_source, source_md5
                 FROM document_cache_payloads`;
     }
 
@@ -4181,8 +4193,8 @@ export class BeaverDB {
                 (metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
                  source_file_path, source_file_mtime_ms, source_file_size_bytes,
                  source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
-                 extraction_schema_version, cache_format_version, extraction_source, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 extraction_schema_version, cache_format_version, extraction_source, source_md5, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
              ON CONFLICT(metadata_id, payload_kind) DO UPDATE SET
                 metadata_id = excluded.metadata_id,
                 item_id = excluded.item_id,
@@ -4199,6 +4211,7 @@ export class BeaverDB {
                 extraction_schema_version = excluded.extraction_schema_version,
                 cache_format_version = excluded.cache_format_version,
                 extraction_source = excluded.extraction_source,
+                source_md5 = excluded.source_md5,
                 updated_at = datetime('now')`,
             [
                 record.metadataId,
@@ -4217,6 +4230,7 @@ export class BeaverDB {
                 record.extractionSchemaVersion,
                 record.cacheFormatVersion,
                 record.extractionSource ?? "native",
+                record.sourceMd5 ?? null,
             ],
         );
         const payload = await this.getDocumentCachePayload(record.libraryId, record.zoteroKey, record.payloadKind);

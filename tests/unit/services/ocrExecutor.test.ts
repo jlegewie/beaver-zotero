@@ -904,6 +904,19 @@ describe('OcrExecutor', () => {
         expect(mockedPut).not.toHaveBeenCalled();
     });
 
+    it('retries a local scan the OS refuses to stat like one it refuses to read', async () => {
+        mockedResolveSource.mockResolvedValue({ kind: 'error', code: 'file_permission_denied' });
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toMatchObject({
+            kind: 'retry',
+            reason: 'ocr_local_read_failed',
+            error: 'ocr_local_read_failed: file_permission_denied',
+        });
+        expect(api.requestOcr).not.toHaveBeenCalled();
+    });
+
     it('retries when the remote scan download fails on the upload path', async () => {
         mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
