@@ -1,3 +1,4 @@
+import * as duplicates from './duplicates/merge';
 import { executeRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
 import { ensureReaderContentTypeForItem } from './attachmentContentType';
 import type { OperationContext } from './agentDataProvider/operationContext';
@@ -19,6 +20,8 @@ import * as organizeItems from './manualActions/organizeItemsActions';
 import { savePreparedNote } from './savePreparedNote';
 
 const operations = {
+    executeMergeItemsAction: duplicates.executeMergeItemsAction,
+    undoMergeItemsAction: duplicates.undoMergeItemsAction,
     artifact_request: handleArtifactRequestUncoordinated,
     executeRequest,
     savePreparedNote,

@@ -87,6 +87,10 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // markdown renderer does with object-id hrefs; a client that predates it would
 // treat `[Smith 2004](u-KEY)` as a broken relative link, so the backend only
 // tells the model to write those when this feature is declared.
+// zotero_duplicates is declaration-only because it gates an inbound
+// duplicates_request and the merge_items action: a build that predates them
+// drops the unknown event and never answers, so the backend withholds the
+// duplicate tools instead of inferring support from a version.
 // two_page_highlights is declaration-only because it gates a relocation shape
 // the client must apply: a build that predates it refuses a two-page highlight
 // destination, so the backend keeps rejecting those unless it is declared.
@@ -113,6 +117,7 @@ const DECLARATION_ONLY_FEATURES = [
     'batch_item_display',
     'item_links',
     'continuation_new_run',
+    'zotero_duplicates',
     'two_page_highlights',
 ];
 

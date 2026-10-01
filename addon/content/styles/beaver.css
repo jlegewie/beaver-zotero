@@ -3862,3 +3862,185 @@
 #beaver-pane-window #beaver-prompt.beaver-content-column {
     --beaver-column-pad: 0.75rem;
 }
+
+/* ── Duplicate review: find_duplicates results ──
+ * Records are referred to by neutral letter badges so the field comparison can
+ * point back at them. */
+.beaver-root .duplicate-member-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 3px;
+    margin-top: 1px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--fill-secondary);
+    background: var(--fill-quinary);
+    border: 1px solid var(--fill-quarternary);
+}
+
+.beaver-root .duplicate-group-title {
+    font-size: 0.925rem;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+}
+
+/* Aligns record rows, warnings and differences under the group title text. */
+.beaver-root .duplicate-group-body {
+    padding-left: 24px;
+}
+
+.beaver-root .duplicate-member-row:hover {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .duplicate-member-row:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+.beaver-root .duplicate-differences-toggle {
+    background: none;
+    border: 0;
+    padding: 2px 0;
+    margin: 0;
+    min-width: 0;
+    text-align: left;
+    cursor: pointer;
+}
+
+.beaver-root .duplicate-differences-toggle:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .duplicate-differences {
+    padding: 2px 0 4px 18px;
+}
+
+.beaver-root .duplicate-field-value {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* ── Duplicate review: merge_items approval ──
+ * Accent color marks selection only (native radios); secondary information
+ * uses the secondary text color so it stays readable. */
+.beaver-root .merge-section-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--fill-primary);
+    padding: 0 8px 2px;
+}
+
+.beaver-root .merge-record {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+}
+
+.beaver-root .merge-record-choice {
+    cursor: pointer;
+}
+
+.beaver-root .merge-record-choice:not(.merge-record-disabled):hover {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .merge-record-kept {
+    background: var(--fill-quinary);
+    border-color: var(--fill-quarternary);
+}
+
+.beaver-root .merge-record-disabled {
+    cursor: default;
+}
+
+.beaver-root .merge-radio {
+    flex-shrink: 0;
+    margin: 3px 0 0;
+    accent-color: var(--accent-blue);
+}
+
+.beaver-root .merge-field {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr) 18px;
+    column-gap: 8px;
+    align-items: start;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.875rem;
+}
+
+.beaver-root .merge-field-label {
+    color: var(--fill-secondary);
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .merge-field-value {
+    min-width: 0;
+    color: var(--fill-primary);
+}
+
+.beaver-root .merge-field-button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.beaver-root .merge-field-choosable:hover {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .merge-field-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--fill-secondary);
+    cursor: pointer;
+}
+
+.beaver-root .merge-field-toggle:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .merge-field-button:focus-visible,
+.beaver-root .merge-field-toggle:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 4px;
+}
+
+.beaver-root .merge-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    cursor: pointer;
+}

@@ -1,6 +1,7 @@
 import React from 'react';
 import type { MetadataEdit, AppliedMetadataEdit, CreatorJSON } from '@beaver/agent-core/types/agentActions/base';
 import { resolveFieldForItemType } from '../../../../src/utils/zoteroUtils';
+import { formatFieldName } from '../../../utils/fieldLabels';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -116,36 +117,6 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
         </div>
     );
 };
-
-/**
- * Format field names for display (camelCase -> Title Case)
- */
-function formatFieldName(field: string): string {
-    // Common field name mappings
-    const fieldNames: Record<string, string> = {
-        abstractNote: 'Abstract',
-        publicationTitle: 'Publication',
-        DOI: 'DOI',
-        ISBN: 'ISBN',
-        ISSN: 'ISSN',
-        url: 'URL',
-        shortTitle: 'Short Title',
-        seriesNumber: 'Series Number',
-        seriesTitle: 'Series Title',
-        archiveLocation: 'Archive Location',
-        callNumber: 'Call Number',
-    };
-
-    if (fieldNames[field]) {
-        return fieldNames[field];
-    }
-
-    // Convert camelCase to Title Case
-    return field
-        .replace(/([A-Z])/g, ' $1')
-        .replace(/^./, (str) => str.toUpperCase())
-        .trim();
-}
 
 /**
  * Truncate long values for display
