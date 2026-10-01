@@ -18,6 +18,7 @@ import { EMPTY_DOC_CONTEXT, candidateFeatures, type RegionDocContext } from "./f
 import { intersect, overlapFrac, rectArea, type Rect } from "./geometry";
 import { assertCompatible, predictRegionClass, type RegionClass, type RegionModelWeights } from "./model";
 import { bodySize, mergeRowFragments, pageLines, pagePrimitives, type RegionLine } from "./pageSignals";
+import { completeTableRows } from "./tableRows";
 
 export interface DetectedRegion {
     bbox: Rect;
@@ -119,7 +120,8 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
         const flags = lines.map(
             (l) => (found.running.has(l) ? LINE_RUNNING : 0) | (found.captionText.has(l) ? LINE_CAPTION : 0),
         );
-        const routes = routeLines(lines, flags, candidates);
+        const rules = primitives.filter((p) => p.kind === "hrule").map((p) => p.bbox);
+        const routes = routeLines(lines, flags, candidates, rules);
         if (opts.route) detection.routing = { lines, flags, routes };
         if (opts.includeLines) {
             detection.lines = lines.map((l, i) => [
@@ -166,15 +168,18 @@ export function resolveOverlaps(regions: DetectedRegion[]): void {
 /**
  * Where each line goes once regions leave the prose stream: the index of the
  * smallest classified region containing the line's centre, or -1 for prose.
- * Running text and captions always stay in prose — a region absorbs only the
- * text that belongs to it (labels, cells, equation parts).
+ * Running text and captions stay in prose — a region absorbs only the text that
+ * belongs to it (labels, cells, equation parts) — except for lines that belong
+ * to a table's rows: those join the table, as do rows its box missed between
+ * its cells and the horizontal `rules` that rule them (`completeTableRows`).
  */
 export function routeLines(
     lines: readonly RegionLine[],
     flags: readonly number[],
     regions: readonly DetectedRegion[],
+    rules: readonly Rect[] = [],
 ): number[] {
-    return lines.map((l, i) => {
+    const routes = lines.map((l, i) => {
         if (flags[i] & (LINE_RUNNING | LINE_CAPTION)) return -1;
         const cx = (l.bbox[0] + l.bbox[2]) / 2;
         const cy = (l.bbox[1] + l.bbox[3]) / 2;
@@ -192,4 +197,11 @@ export function routeLines(
         });
         return best;
     });
+    const tables = regions.flatMap((r, index) => (r.label === "table" ? [{ index, bbox: r.bbox }] : []));
+    if (tables.length) {
+        const running = flags.map((f) => (f & LINE_RUNNING) !== 0);
+        const caption = flags.map((f) => (f & LINE_CAPTION) !== 0);
+        completeTableRows({ lines, running, caption, tables, rules }, routes);
+    }
+    return routes;
 }

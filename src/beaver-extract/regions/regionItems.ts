@@ -12,7 +12,8 @@
  * - picture: label rows, not sentences; rows of bare numbers (axis ticks) are
  *   dropped and the text is capped.
  * Lines routed to a decoration are removed without an item. Running text and
- * captions are never routed (`routeLines`), so prose keeps its sentences.
+ * captions are not routed (`routeLines`), so prose keeps its sentences; only
+ * lines on a table's rows join the table whatever their flags.
  *
  * Routing works on the detector's visual lines, which split structured-text
  * lines at wide gaps and join word fragments. A structured-text line goes
