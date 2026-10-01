@@ -2,8 +2,10 @@ import { atom } from "jotai";
 import type {
     MergeItemsChoices,
     MergeItemsProposedData,
+    MergeItemsResultData,
 } from "@beaver/agent-core/protocol/duplicates";
 import type { AgentAction } from "@beaver/agent-core/agents/agentActionTypes";
+import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 
 /** Unsaved choices are local to the action's reviewing window. */
 export const mergeItemsChoicesAtom = atom<Record<string, MergeItemsChoices>>(
@@ -58,4 +60,17 @@ export function updateMergeItemsChoices(
         ...patch,
         field_sources: { ...current.field_sources, ...patch.field_sources },
     };
+}
+
+/**
+ * The record an applied merge kept, for revealing the combined item. Read from
+ * the persisted result, so it needs no live lookup. `library_id` is left
+ * unresolved: callers resolve the portable `library_ref` on this device.
+ */
+export function getMergedItemReference(action: AgentAction): ZoteroItemReference | null {
+    if (action.action_type !== "merge_items" || action.status !== "applied") return null;
+    const result = action.result_data as MergeItemsResultData | undefined;
+    const kept = result?.preview?.members.find((m) => m.item_id === result.master_item_id);
+    if (!kept?.library_ref || !kept.zotero_key) return null;
+    return { library_id: 0, library_ref: kept.library_ref, zotero_key: kept.zotero_key };
 }

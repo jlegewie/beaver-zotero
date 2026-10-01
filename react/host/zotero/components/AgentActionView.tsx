@@ -1,4 +1,5 @@
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
+import { getMergedItemReference } from '../../../atoms/mergeItemsChoices';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { navigateToAnnotation } from '../../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -480,7 +481,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const bulkAnnotationRevealRef = action && isCreateAnnotationsAgentAction(action)
         ? action.proposed_data.resolved_ref
         : null;
+    const mergedItemReference = action ? getMergedItemReference(action) : null;
     const headerLinkActionRules: HeaderLinkActionRule[] = [
+        {
+            matches: () => !!mergedItemReference,
+            tooltip: 'Reveal merged item',
+            onClick: async () => {
+                const ref = mergedItemReference!;
+                // The collection lookup is a local query, so it needs this
+                // device's rowid; `revealSource` resolves the reference itself.
+                const libraryId = resolveLibraryRef(ref);
+                const collectionKey = libraryId
+                    ? await getCurrentCollectionKeyForItem(libraryId, ref.zotero_key)
+                    : undefined;
+                revealSource(ref, collectionKey);
+            },
+        },
         {
             matches: () => (
                 toolName === 'create_note' &&

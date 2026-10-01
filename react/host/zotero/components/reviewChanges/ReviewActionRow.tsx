@@ -39,6 +39,7 @@ import {
 } from '../../../../components/icons/icons';
 import { getZoteroItemReferenceFromAgentAction } from '../../../../agents/agentActions';
 import { getCurrentCollectionKeyForItem, openNoteByKey, revealSource } from '../../../../utils/sourceUtils';
+import { getMergedItemReference } from '../../../../atoms/mergeItemsChoices';
 import { resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -184,7 +185,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     // which already toggles the preview. Only a single-action row has one item to
     // reveal; a multi-item create_items row does not.
     const revealReference = row.actions.length === 1
-        ? getZoteroItemReferenceFromAgentAction(firstAction)
+        ? getZoteroItemReferenceFromAgentAction(firstAction) ?? getMergedItemReference(firstAction)
         : null;
 
     // See `getOpenNoteTarget`: a created note is opened, not revealed, on the
@@ -204,10 +205,10 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         if (!revealReference) return;
         // Reveal within the current collection when the item belongs to it,
         // instead of switching to the library root.
-        const collectionKey = await getCurrentCollectionKeyForItem(
-            revealReference.library_id,
-            revealReference.zotero_key,
-        );
+        // The collection lookup needs this device's rowid; a reference may
+        // carry only the portable library_ref.
+        const libraryId = resolveLibraryRef(revealReference) ?? revealReference.library_id;
+        const collectionKey = await getCurrentCollectionKeyForItem(libraryId, revealReference.zotero_key);
         revealSource(revealReference, collectionKey);
     }, [revealReference]);
 
