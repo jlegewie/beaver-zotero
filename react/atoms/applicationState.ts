@@ -18,13 +18,16 @@ import {
     CurrentCollection,
     CurrentLibrary,
     CurrentSavedSearch,
+    CurrentSpecialCollection,
     IndexingStatus,
+    SpecialCollectionType,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { currentReaderAttachmentAtom, readerTextSelectionAtom, stagedReaderActionContextAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import {
+    getCollectionTreeRows,
     getSelectedLibraryId,
     getSelectedCollections,
     getSelectedSavedSearches,
@@ -51,6 +54,16 @@ import { logger } from '@beaver/agent-core/platform/logger';
  * tell the user what it is missing.
  */
 const MAX_LIBRARY_SELECTION = 30;
+
+/**
+ * Collections-tree row types reported as `current_special_collections`. Only
+ * views the agent can act on are listed: Duplicate Items maps onto duplicate
+ * discovery and merging, Unfiled Items onto the `unfiled` search filter.
+ */
+const REPORTED_SPECIAL_COLLECTION_TYPES: ReadonlySet<string> = new Set<SpecialCollectionType>([
+    'duplicates',
+    'unfiled',
+]);
 
 /**
  * Build reader state for the current reader attachment.
@@ -135,6 +148,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
     let currentLibrary: CurrentLibrary | undefined = undefined;
     let currentCollections: CurrentCollection[] = [];
     let currentSearches: CurrentSavedSearch[] = [];
+    let currentSpecialCollections: CurrentSpecialCollection[] = [];
     let librarySelection: ZoteroItemReference[] | undefined = undefined;
     let librarySelectionTotalCount: number | undefined = undefined;
 
@@ -173,6 +187,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         // In library view, get from ZoteroPane
         if (pane) {
             const selectedSearches = getSelectedSavedSearches(pane);
+            const selectedTreeRows = getCollectionTreeRows(pane);
             const selectedPaneItems = pane.getSelectedItems() ?? [];
             // The primary (first) selected library. A selection can span
             // libraries, so this is deliberately not "the only library in
@@ -233,6 +248,18 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                     name: search.name,
                     library_id: search.libraryID,
                     library_ref: libraryRefForLibraryID(search.libraryID) ?? undefined,
+                }));
+
+            // Special-collection rows carry their library on `ref.libraryID`
+            // (a Zotero.Duplicates or Zotero.Search for the two reported kinds).
+            currentSpecialCollections = selectedTreeRows
+                .filter((row: any) => REPORTED_SPECIAL_COLLECTION_TYPES.has(row?.type)
+                    && typeof row.ref?.libraryID === 'number'
+                    && searchableLibrarySet.has(row.ref.libraryID))
+                .map((row: any) => ({
+                    type: row.type as SpecialCollectionType,
+                    library_id: row.ref.libraryID,
+                    library_ref: libraryRefForLibraryID(row.ref.libraryID) ?? undefined,
                 }));
 
             // Drop any selected items that belong to an excluded library.
@@ -324,6 +351,9 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
             ? { current_collection: currentCollections[0], current_collections: currentCollections }
             : {}),
         ...(currentSearches.length > 0 ? { current_searches: currentSearches } : {}),
+        ...(currentSpecialCollections.length > 0
+            ? { current_special_collections: currentSpecialCollections }
+            : {}),
         ...(librarySelection
             ? {
                 library_selection: librarySelection,

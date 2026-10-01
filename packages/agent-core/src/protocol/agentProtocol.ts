@@ -2943,6 +2943,29 @@ export interface CurrentSavedSearch {
 }
 
 /**
+ * Zotero special collections Beaver reports in application state: built-in,
+ * per-library views in the collections pane rather than user-created
+ * collections.
+ *
+ * - `duplicates`: "Duplicate Items", Zotero's duplicate candidates.
+ * - `unfiled`: "Unfiled Items", items that belong to no collection.
+ */
+export type SpecialCollectionType = 'duplicates' | 'unfiled';
+
+/**
+ * A special collection selected in the collections pane. Reported only for
+ * kinds the agent can act on; other special views are left out.
+ */
+export interface CurrentSpecialCollection {
+    /** Which special collection is selected */
+    type: SpecialCollectionType;
+    /** Library ID the special collection belongs to */
+    library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
+}
+
+/**
  * Application state sent with messages.
  * Contains current view state and reader state if in reader view.
  */
@@ -2976,6 +2999,12 @@ export interface ApplicationStateInput {
      * `current_collections`.
      */
     current_searches?: CurrentSavedSearch[];
+    /**
+     * Special collections in the current selection, in collections-list order.
+     * A selection can mix them with collections and saved searches, so this
+     * list is independent of `current_collections` and `current_searches`.
+     */
+    current_special_collections?: CurrentSpecialCollection[];
     /**
      * Currently selected library items, truncated to a client-defined maximum.
      */
