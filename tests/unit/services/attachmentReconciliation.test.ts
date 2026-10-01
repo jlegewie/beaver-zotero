@@ -220,7 +220,7 @@ describe('attachment change reconciliation', () => {
         })]);
     });
 
-    it('re-enqueues OCR after a recoverable service-unavailable response', async () => {
+    it('leaves OCR parked by a closed admission gate to the admission probe, except on user request', async () => {
         mocks.kind = 'pdf';
         item.attachmentContentType = 'application/pdf';
         await db.ensureAttachmentProcessingState({
@@ -234,10 +234,14 @@ describe('attachment change reconciliation', () => {
         await (reconciler as any).reconcileAttachment(
             db, item, 'pdf', false, [], await db.getAttachmentProcessingState(1, item.key), false, 'backfill',
         );
+        expect(maybeEnqueueOcrJob).not.toHaveBeenCalled();
 
+        await (reconciler as any).reconcileAttachment(
+            db, item, 'pdf', false, [], await db.getAttachmentProcessingState(1, item.key), false, 'interactive',
+        );
         expect(maybeEnqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({
             zoteroKey: item.key,
-            requestContext: 'backfill',
+            requestContext: 'interactive',
         }));
     });
 

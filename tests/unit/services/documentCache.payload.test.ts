@@ -8,6 +8,7 @@ import { SCHEMA_VERSION, type BeaverExtractResult } from '@beaver/agent-core/ext
 import type { PageGeometry } from '../../../src/services/documentCache';
 import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
 import { computeStructuredDocumentHash } from '../../../src/services/documentExtraction/structuredDocumentHash';
+import { expectedExtractionSchemaVersion } from '../../../src/services/documentExtraction/shared/extractionSchemaVersions';
 
 const mockIOUtils = (globalThis as any).IOUtils as {
     exists: ReturnType<typeof vi.fn>;
@@ -290,6 +291,84 @@ describe('DocumentCache payloads', () => {
             expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
 
             expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 })).toBe('missing');
+        });
+
+        describe('read before the reconciler relocates a protected OCR preparation', () => {
+            const md5Async = vi.fn();
+
+            beforeEach(async () => {
+                (Zotero.Utilities as any).Internal = { md5Async };
+                md5Async.mockResolvedValue('scan-md5');
+                // The processing ledger hashed the bytes at the cached location.
+                await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCD1234', itemId: 100, contentKind: 'pdf' });
+                await conn.queryAsync(`UPDATE attachment_processing_state SET extract_status = 'done',
+                    file_hash = 'scan-md5', extraction_source = ? WHERE zotero_key = 'ABCD1234'`,
+                [JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), sourcePath, 10, 3])]);
+                await putStructured(structuredResult, 'ocr');
+            });
+
+            afterEach(() => {
+                delete (Zotero.Utilities as any).Internal;
+            });
+
+            it.each([
+                ['rename', renamedPath, 10],
+                ['mtime change', sourcePath, 20],
+            ])('serves and relocates the OCR text after a %s with unchanged bytes', async (_label, path, mtime) => {
+                files.set(path, files.get(sourcePath)!);
+                mockIOUtils.stat.mockResolvedValue({ lastModified: mtime, size: 3 } as any);
+
+                expect(await cache.getResult(ref, 'structured', path)).toEqual(structuredResult);
+
+                expect(md5Async).toHaveBeenCalledWith(path);
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234'))
+                    .toMatchObject({ filePath: path, fileSignature: { mtime_ms: mtime, size_bytes: 3 } });
+                expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))
+                    .toMatchObject({ extractionSource: 'ocr', sourceFilePath: path });
+                // The reconciler's own relocation then finds the entry already moved.
+                expect(await cache.relocateSource(ref, from, { filePath: path, mtimeMs: mtime })).toBe('current');
+            });
+
+            it('keeps a moved preparation that a version update made unservable', async () => {
+                files.set(renamedPath, files.get(sourcePath)!);
+                await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await cache.getProtectedRepreparation(ref, renamedPath)).toEqual({ pageCount: 1, sourceSizeBytes: 3 });
+            });
+
+            it('discards the OCR text when the renamed file has different bytes', async () => {
+                files.set(renamedPath, new Uint8Array([4, 5, 6]));
+                md5Async.mockResolvedValue('other-md5');
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            });
+
+            it('discards the OCR text when the ledger did not hash the cached location', async () => {
+                await conn.queryAsync(`UPDATE attachment_processing_state SET extraction_source = ?`,
+                    [JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), sourcePath, 9, 3])]);
+                files.set(renamedPath, files.get(sourcePath)!);
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(md5Async).not.toHaveBeenCalled();
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            });
+
+            it('does not relocate bytes that changed while they were hashed', async () => {
+                files.set(renamedPath, files.get(sourcePath)!);
+                md5Async.mockImplementation(async () => {
+                    mockIOUtils.stat.mockResolvedValue({ lastModified: 30, size: 3 } as any);
+                    return 'scan-md5';
+                });
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toMatchObject({ filePath: renamedPath });
+            });
         });
     });
 

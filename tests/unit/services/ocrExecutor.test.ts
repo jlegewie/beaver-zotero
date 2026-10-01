@@ -386,6 +386,28 @@ describe('OcrExecutor', () => {
         expect(notifyOcrAdmissionReopened).not.toHaveBeenCalled();
     });
 
+    it('resumes other parked attachments when a recovery extraction cleared the parked marker', async () => {
+        const notifyOcrAdmissionReopened = vi.fn();
+        (Zotero.Beaver as any).processingReconciler = { notifyOcrAdmissionReopened };
+        const metadata = Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>;
+        metadata.mockResolvedValueOnce(null);
+        const ledger = { fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'needed', lastError: 'ocr_service_unavailable' };
+        dbStub.getAttachmentProcessingState.mockImplementation(async () => ({ ...ledger }));
+        // Completing the recovery extraction clears last_error, so the marker is gone at admission.
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute').mockImplementationOnce(async () => {
+            ledger.lastError = null as any;
+            return { kind: 'complete', reason: 'needs_ocr' };
+        });
+        dbStub.clearAttachmentOcrUnavailable.mockResolvedValue(false);
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+
+        await executor.execute(record, makeCtx());
+
+        expect(recovery).toHaveBeenCalledOnce();
+        expect(notifyOcrAdmissionReopened).toHaveBeenCalledOnce();
+        recovery.mockRestore();
+    });
+
     it('recovers legacy detection metadata through native extraction before requesting OCR', async () => {
         const metadata = Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>;
         metadata.mockResolvedValueOnce(null);

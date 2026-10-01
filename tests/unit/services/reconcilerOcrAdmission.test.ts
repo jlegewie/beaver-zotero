@@ -42,6 +42,7 @@ describe('ReconcilerService OCR admission recovery', () => {
                 zoteroKey: args.zoteroKey, contentKind: 'pdf', payloadKind: 'structured',
                 priority: OCR_PRIORITY_BACKFILL, payload: null, now: Date.now(),
             }]);
+            return true;
         });
         vi.stubGlobal('Zotero', { ...Zotero,
             __beaverShuttingDown: false,
@@ -116,6 +117,44 @@ describe('ReconcilerService OCR admission recovery', () => {
 
         // Admission was still closed; the next probe moves on to the next-oldest row.
         await refuse('SCAN0001', '2026-09-28 03:06:00');
+        await pass();
+        expect(ticketedKeys()).toEqual(['SCAN0001', 'SCAN0002']);
+    });
+
+    it('passes over missing and trashed attachments at the head of the queue', async () => {
+        await parked(1, 'TRASHED1', '2026-09-28 03:01:10');
+        items.get('1-TRASHED1')!.deleted = true;
+        await parked(1, 'MISSING1', '2026-09-28 03:01:11');
+        items.delete('1-MISSING1');
+        await parked(1, 'SCAN0001', '2026-09-28 03:01:12');
+
+        await pass();
+
+        expect(ticketedKeys()).toEqual(['SCAN0001']);
+    });
+
+    it('probes the next attachment when one cannot be ticketed', async () => {
+        await parked(1, 'NOHASH01', '2026-09-28 03:01:11');
+        await parked(1, 'SCAN0001', '2026-09-28 03:01:12');
+        await parked(1, 'SCAN0002', '2026-09-28 03:01:13');
+        const enqueue = mocks.enqueueOcrJob.getMockImplementation()!;
+        mocks.enqueueOcrJob.mockImplementation(async (args: { zoteroKey: string }) =>
+            args.zoteroKey === 'NOHASH01' ? false : enqueue(args as any));
+
+        await pass();
+
+        expect(ticketedKeys()).toEqual(['NOHASH01', 'SCAN0001']);
+    });
+
+    it('moves a probe whose ticket never reaches the OCR API behind the other parked attachments', async () => {
+        await parked(1, 'SCAN0001', '2026-09-28 03:01:11');
+        await parked(1, 'SCAN0002', '2026-09-28 03:01:12');
+        await pass();
+        expect(ticketedKeys()).toEqual(['SCAN0001']);
+
+        // The ticket completes without a request (file not local, no hash, …):
+        // the row stays parked and its marker is not refreshed by a refusal.
+        await connection.queryAsync(`DELETE FROM background_jobs WHERE zotero_key = 'SCAN0001'`);
         await pass();
         expect(ticketedKeys()).toEqual(['SCAN0001', 'SCAN0002']);
     });

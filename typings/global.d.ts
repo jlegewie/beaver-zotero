@@ -521,6 +521,7 @@ declare namespace Zotero {
             markAttachmentOcrFailed(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<void>;
             markAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<boolean>;
             clearAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string): Promise<boolean>;
+            touchAttachmentOcrUnavailable(libraryId: number, zoteroKey: string): Promise<void>;
             getOcrUnavailableAttachments(libraryIds: number[]): Promise<Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }>>;
             recordAttachmentIndexIdentity: import('../src/services/database').BeaverDB['recordAttachmentIndexIdentity'];
             markAttachmentUpsertDone: import('../src/services/database').BeaverDB['markAttachmentUpsertDone'];
