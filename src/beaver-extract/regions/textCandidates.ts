@@ -62,17 +62,7 @@ export function runningTextLines(lines: readonly RegionLine[], bs: number): Set<
     }
     const members = new Map<RegionLine, RegionLine[]>();
     for (const parts of bySource.values()) {
-        const whole = parts.reduce((a, b) => ({
-            ...a,
-            bbox: unionRect(a.bbox, b.bbox),
-            text: `${a.text} ${b.text}`,
-            words: a.words + b.words,
-            nchar: a.nchar + b.nchar + 1,
-            alphaWords: a.alphaWords + b.alphaWords,
-            mathChars: a.mathChars + b.mathChars,
-            inkChars: a.inkChars + b.inkChars,
-            eqNumber: false,
-        }));
+        const whole = joinPieces(parts);
         units.push(whole);
         members.set(whole, parts);
     }
@@ -96,6 +86,15 @@ const JUSTIFY_TOLERANCE = 0.25;
 const JUSTIFIED_LINES = 3;
 /** Stacked lines of a paragraph are at most this many line heights apart. */
 const PARAGRAPH_LEADING = 0.8;
+/** Inline math on a prose line's row sits at most this many body sizes from its words. */
+const INLINE_GAP = 0.6;
+/** ...and is set at most this many times the line's type size. */
+const INLINE_SIZE = 1.5;
+/** A text column runs through a row when running lines within this many body sizes above and below span it. */
+const COLUMN_REACH = 8;
+/** A line that ends a sentence (or a clause before a display: "…, yielding:"). */
+const SENTENCE_END_RE = /[.!?][\])"'”’]*$/u;
+const CLAUSE_END_RE = /[.!?:;,][\])"'”’]*$/u;
 
 /**
  * A line of ordinary words: several words, most of them made of letters, not
@@ -176,13 +175,6 @@ function justifiedParagraphs(units: readonly RegionLine[]): Set<RegionLine> {
 }
 
 /**
- * Pieces of a paragraph that are too short to judge alone: a word run split off
- * a prose line by inline math, or a paragraph's short last line ("… is given
- * by"). They join running text when they continue a running line on its row, or
- * start at a running line's left edge directly below it; short lines of words at
- * a column's left edge join too. Lines that are mostly math never do.
- */
-/**
  * The line runs from a column's left margin (or a paragraph indent after it) to
  * its right margin, as justified prose does; columns are taken from `column`
  * lines (running text).
@@ -197,6 +189,59 @@ export function spansColumn(l: RegionLine, column: readonly RegionLine[], indent
     );
 }
 
+/** Pieces of one line read as a single line: their union box, text and counts. */
+function joinPieces(parts: readonly RegionLine[]): RegionLine {
+    return parts.reduce((a, b) => ({
+        ...a,
+        bbox: unionRect(a.bbox, b.bbox),
+        text: `${a.text} ${b.text}`,
+        words: a.words + b.words,
+        nchar: a.nchar + b.nchar + 1,
+        alphaWords: a.alphaWords + b.alphaWords,
+        mathChars: a.mathChars + b.mathChars,
+        inkChars: a.inkChars + b.inkChars,
+        eqNumber: false,
+    }));
+}
+
+/**
+ * Upright pieces grouped into runs that read as one line: on one row (sharing
+ * most of their height) and at most `INLINE_GAP` body sizes apart, left to
+ * right. Equation numbers stand alone.
+ */
+function inlineRuns(upright: readonly RegionLine[], bs: number): RegionLine[][] {
+    const uf = new UnionFind(upright.length);
+    for (let i = 0; i < upright.length; i++) {
+        const a = upright[i];
+        if (a.eqNumber) continue;
+        for (let j = i + 1; j < upright.length && upright[j].bbox[1] < a.bbox[3]; j++) {
+            const b = upright[j];
+            if (b.eqNumber) continue;
+            const overlap = Math.min(a.bbox[3], b.bbox[3]) - Math.max(a.bbox[1], b.bbox[1]);
+            if (overlap <= 0.5 * Math.min(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1])) continue;
+            if (hgap(a.bbox, b.bbox) <= INLINE_GAP * bs) uf.union(i, j);
+        }
+    }
+    const runs = new Map<number, RegionLine[]>();
+    upright.forEach((l, i) => {
+        const root = uf.find(i);
+        const run = runs.get(root);
+        if (run) run.push(l);
+        else runs.set(root, [l]);
+    });
+    return [...runs.values()].map((run) => run.sort((a, b) => a.bbox[0] - b.bbox[0]));
+}
+
+/**
+ * Pieces of a paragraph that are too short to judge alone: a word run split off
+ * a prose line by inline math, the math itself, a paragraph's short last line
+ * ("… is given by", "[84, 85]."), a heading. They join running text when they
+ * continue a running line on its row, or start at a running line's left edge
+ * directly below it and continue its sentence; a line that inline math splits
+ * into pieces joins when, read whole, it spans its column; short lines of words
+ * at a column's left edge join too. Lines that are mostly math join only as
+ * inline math on a running line's row.
+ */
 function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>, bs: number): void {
     const upright = lines.filter((l) => !l.rot).sort((a, b) => a.bbox[1] - b.bbox[1]);
     // Row-mates: other pieces on a line's row. A line sharing its row with pieces
@@ -232,18 +277,54 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
     // while text in the column to the left lines up only by chance. Boxes end at
     // the font's descender line, which differs little between fonts, while their
     // tops differ with each font's ascent.
+    // An equation in another column is not on the line's row: it does not make a
+    // heading beside it a table cell. A text column runs through the row there: the
+    // nearest running lines above and below the equation both span it and end before
+    // the line starts. Words always count, as the cells of a text table stand in such
+    // columns too.
     const sameSize = (a: RegionLine, b: RegionLine) => Math.abs(a.size - b.size) <= 0.5;
     const aligned = (a: RegionLine, b: RegionLine) =>
         Math.abs(a.bbox[3] - b.bbox[3]) <= ROW_ALIGN * Math.min(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1]);
-    const aloneOnRow = (l: RegionLine, x1 = Infinity) =>
+    const nearestSpanning = (o: RegionLine, up: boolean): RegionLine | undefined => {
+        let best: RegionLine | undefined;
+        let bestGap = COLUMN_REACH * bs;
+        for (const r of running) {
+            if (r.rot || r.bbox[0] > o.bbox[0] + 2 || r.bbox[2] < o.bbox[2] - 2) continue;
+            const gap = up ? o.bbox[1] - r.bbox[3] : r.bbox[1] - o.bbox[3];
+            if (gap < -0.5 * (o.bbox[3] - o.bbox[1]) || gap > bestGap) continue;
+            best = r;
+            bestGap = gap;
+        }
+        return best;
+    };
+    const inOtherColumn = (l: RegionLine, o: RegionLine) => {
+        if (o.bbox[2] > l.bbox[0]) return false;
+        if (/\p{L}{2}/u.test(o.text) && !RELATION_RE.test(o.text) && o.mathChars < 0.5 * o.inkChars) return false;
+        const up = nearestSpanning(o, true);
+        const down = nearestSpanning(o, false);
+        return !!up && !!down && up.bbox[2] < l.bbox[0] && down.bbox[2] < l.bbox[0];
+    };
+    // Within a paragraph, pieces of one line split by inline math are not each
+    // other's row-mates (`ownLine`).
+    const runs = inlineRuns(upright, bs);
+    const runOf = new Map<RegionLine, RegionLine[]>();
+    for (const run of runs) for (const l of run) runOf.set(l, run);
+    const aloneOnRow = (l: RegionLine, x1 = Infinity, ownLine = false) =>
         (rowMates.get(l) ?? []).every(
-            (o) => running.has(o) || o.bbox[0] >= x1 || (o.bbox[2] <= l.bbox[0] && !aligned(l, o) && !sameSize(l, o)),
+            (o) =>
+                running.has(o) ||
+                (ownLine && runOf.has(l) && runOf.get(o) === runOf.get(l)) ||
+                o.bbox[0] >= x1 ||
+                (o.bbox[2] <= l.bbox[0] && !aligned(l, o) && !sameSize(l, o)) ||
+                inOtherColumn(l, o),
         );
     // No text past the line's right edge shares its line in its type size, as a
     // table's row label does with its row's values. A lone number past the line
     // is a manuscript line number in the margin, not a row's values.
     const independent = (r: RegionLine) => {
-        const past = (rowCells.get(r) ?? []).filter((o) => !running.has(o) && o.bbox[0] >= r.bbox[2]);
+        const past = (rowCells.get(r) ?? []).filter(
+            (o) => !running.has(o) && o.bbox[0] >= r.bbox[2] && !(runOf.has(r) && runOf.get(o) === runOf.get(r)),
+        );
         if (past.length === 1 && /^\d{1,4}$/.test(past[0].text)) return true;
         return past.every((o) => !aligned(r, o) || !sameSize(r, o));
     };
@@ -251,7 +332,7 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
     // label: prose beside a table lines up with its rows only by chance, and rarely
     // in their type size, while a label read as running text (a long one) must not
     // carry the labels below it into the paragraph.
-    const aloneInColumn = (l: RegionLine, x1: number) => aloneOnRow(l, x1) && (x1 === Infinity || independent(l));
+    const aloneInColumn = (l: RegionLine, x1: number) => aloneOnRow(l, x1, true) && (x1 === Infinity || independent(l));
     // Running lines indexed by vertical band, so only nearby ones are compared.
     const band = 2 * bs;
     const index = new Map<number, RegionLine[]>();
@@ -271,12 +352,20 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
     // Justified prose spans its column: a line with a few real words that ends at a
     // running line's right margin and starts at its left margin (or within a
     // paragraph indent) is prose however much inline math it holds. Display
-    // equations are centred or indented within the column.
+    // equations are centred or indented within the column. A line that inline math
+    // splits into pieces (a word space apart on one row) is judged as a whole when
+    // one piece is a run of words; an equation's pieces hold symbols, names and
+    // relations.
     const columnLines = [...running].filter((r) => !r.rot);
-    for (const l of upright) {
-        if (l.eqNumber || running.has(l) || l.alphaWords < 3) continue;
-        const indent = 2.5 * Math.max(l.size, 1);
-        if (spansColumn(l, columnLines, indent)) markRunning(l);
+    for (const run of runs) {
+        if (run.some((l) => running.has(l))) continue;
+        if (run.length > 1 && !run.some((l) => l.alphaWords >= 3 && l.mathChars < 0.5 * l.inkChars && !RELATION_RE.test(l.text))) {
+            continue;
+        }
+        const whole = run.length === 1 ? run[0] : joinPieces(run);
+        if (whole.alphaWords < 3) continue;
+        const indent = 2.5 * Math.max(whole.size, 1);
+        if (spansColumn(whole, columnLines, indent)) for (const l of run) markRunning(l);
     }
     // Short lines of words starting at a text column's left edge ("reveals a
     // trivial fixed point", "as well as:") separate display equations.
@@ -289,14 +378,20 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
         if (!wordy) continue;
         if (margins.some((r) => Math.abs(r.bbox[0] - l.bbox[0]) <= 2) && aloneOnRow(l)) markRunning(l);
     }
-    const eligible = upright.filter(
-        (l) => !l.eqNumber && l.alphaWords >= 1 && l.mathChars < 0.5 * l.inkChars && !running.has(l),
-    );
+    // Pieces without words join only as part of a running line: inline math set
+    // a word space from it on its row, or a sentence's last words ("[84, 85].")
+    // stacked under a running line whose sentence they complete.
+    const hasWords = (l: RegionLine) => l.alphaWords >= 1 && l.mathChars < 0.5 * l.inkChars;
+    const tail = (l: RegionLine) =>
+        !hasWords(l) && CLAUSE_END_RE.test(l.text) && !RELATION_RE.test(l.text) && l.mathChars < 0.5 * l.inkChars;
+    const eligible = upright.filter((l) => !l.eqNumber && !running.has(l));
     for (let round = 0; round < 3; round++) {
         let added = false;
         for (const l of eligible) {
             if (running.has(l)) continue;
             const h = l.bbox[3] - l.bbox[1];
+            const words = hasWords(l);
+            const ends = tail(l);
             const seen = new Set<RegionLine>();
             let found = false;
             for (let k = Math.floor((l.bbox[1] - bs) / band); k <= Math.floor(l.bbox[3] / band) && !found; k++) {
@@ -304,9 +399,20 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
                     if (seen.has(r)) continue;
                     seen.add(r);
                     const vOverlap = Math.min(l.bbox[3], r.bbox[3]) - Math.max(l.bbox[1], r.bbox[1]);
+                    // Inline math sits beside a running line's words (no equation's own
+                    // relation), not stacked over them, in their type size; it does not
+                    // reach the line through other pieces of math.
                     const sameRow =
-                        vOverlap > 0.5 * Math.min(h, r.bbox[3] - r.bbox[1]) && hgap(l.bbox, r.bbox) <= 1.5 * bs;
+                        vOverlap > 0.5 * Math.min(h, r.bbox[3] - r.bbox[1]) &&
+                        (words
+                            ? hgap(l.bbox, r.bbox) <= 1.5 * bs
+                            : hasWords(r) &&
+                              !RELATION_RE.test(r.text) &&
+                              Math.max(l.size, l.maxSize) <= INLINE_SIZE * r.size &&
+                              (l.bbox[0] >= r.bbox[2] - 1 || l.bbox[2] <= r.bbox[0] + 1) &&
+                              hgap(l.bbox, r.bbox) <= INLINE_GAP * bs);
                     const below =
+                        (words || (ends && !SENTENCE_END_RE.test(r.text))) &&
                         l.bbox[1] >= r.bbox[1] &&
                         l.bbox[1] - r.bbox[3] <= 0.6 * bs &&
                         Math.abs(l.bbox[0] - r.bbox[0]) <= 2 &&

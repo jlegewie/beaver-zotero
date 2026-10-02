@@ -179,6 +179,70 @@ describe("regionItemsForPage", () => {
         expect(allText(rest)).toEqual(["JOURNAL"]);
     });
 
+    it("keeps a figure's data values and drops only the numbers on its axes", () => {
+        const yTicks = ["60", "40", "20", "0"].map((t, i) => line(300 + 30 * i, [[100, 110, t]]));
+        const xTicks = line(410, [[150, 170, "1990"], [250, 270, "2000"], [350, 370, "2010"]]);
+        const values = [line(315, [[180, 196, "43.6"]]), line(345, [[260, 276, "37.9"]]), line(372, [[300, 316, "37%"]])];
+        const legend = line(430, [[150, 170, "2015"], [250, 270, "2024"]]);
+        const p = page([...yTicks, xTicks, ...values, legend]);
+        const { items } = regionItemsForPage(p, detection(p, [["picture", [90, 290, 380, 445]]]));
+        // Two numbers are no axis; neither are values beside the marks.
+        expect(rowTexts(items[0], " ")).toEqual(["43.6", "37.9", "37%", "2015 2024"]);
+    });
+
+    it("finds an axis next to other numbers, and log axes", () => {
+        // A y axis, with a value of the next panel lined up below it.
+        const ticks = ["2.0", "1.5", "1.0", "0.5", "0.0", "−0.9"].map((t, i) => line(270 + 20 * i, [[100, 112, t]]));
+        // A log axis whose exponents lost their raise.
+        const log = line(400, [[150, 166, "10−3"], [250, 266, "10−2"], [350, 366, "10−1"]]);
+        // Two panels side by side, each with its own x axis on one row.
+        const panels = line(380, [0, 1, 2, 3, 4, 5].map((i): Cell => [150 + 35 * i, 158 + 35 * i, String((i % 3) * 5)]));
+        const p = page([...ticks, log, panels]);
+        const { items } = regionItemsForPage(p, detection(p, [["picture", [90, 260, 380, 415]]]));
+        expect(rowTexts(items[0], " ")).toEqual(["−0.9"]);
+    });
+
+    it("drops index axes and keeps rows of counts", () => {
+        // An index axis starting at 1.
+        const index = line(400, [[150, 156, "1"], [245, 265, "100"], [345, 365, "200"], [445, 465, "300"]]);
+        // A number-at-risk row: counts, four of them stepping evenly.
+        const counts = line(420, [[100, 150, "Placebo"], ...[20, 19, 18, 17, 15, 11, 9].map((n, i): Cell => [200 + 40 * i, 212 + 40 * i, String(n)])]);
+        // Labelled rows of evenly stepped counts are data, not scales, however long.
+        const short = line(440, [[100, 150, "Placebo"], [200, 212, "20"], [240, 252, "19"], [280, 292, "18"]]);
+        const long = line(460, [[100, 150, "Placebo"], ...[20, 19, 18, 17, 16].map((n, i): Cell => [200 + 40 * i, 212 + 40 * i, String(n)])]);
+        // A column of counts in such rows, stepping evenly down, likewise.
+        const arms = ["60", "50", "40"].map((t, i) => line(480 + 20 * i, [[400, 440, `Arm ${i + 1}`], [470, 482, t]]));
+        // A y axis whose tick shares its row with legend text inside the plot is still a scale.
+        const yAxis = ["60", "40", "20", "0"].map((t, i) => line(560 + 20 * i, [[420, 432, t]]));
+        const legend = line(580, [[450, 510, "Treatment"]]);
+        // A label further off than ten type sizes still labels a long row.
+        const total = line(540, [[20, 50, "Total"], ...[50, 40, 30, 20, 10].map((n, i): Cell => [200 + 40 * i, 212 + 40 * i, String(n)])]);
+        const p = page([index, counts, short, long, ...arms, total, ...yAxis, legend]);
+        const { items } = regionItemsForPage(p, detection(p, [["picture", [10, 290, 520, 640]]]));
+        expect(rowTexts(items[0], " ")).toEqual([
+            "Placebo 20 19 18 17 15 11 9",
+            "Placebo 20 19 18",
+            "Placebo 20 19 18 17 16",
+            "Arm 1 60",
+            "Arm 2 50",
+            "Arm 3 40",
+            "Total 50 40 30 20 10",
+            "Treatment",
+        ]);
+    });
+
+    it("keeps numbers in a row that are not on a linear or logarithmic scale", () => {
+        const row = line(400, [[150, 160, "12"], [250, 260, "15"], [350, 360, "31"]]);
+        // A sorted bar chart's value labels, evenly spaced and nearly linear: they do not step evenly.
+        const bars = ["8.6", "5.6", "2.9"].map((t, i) => line(300 + 20 * i, [[200, 212, t]]));
+        // Sorted shares of an oncoplot: runs of three, split by a tie, happen to step evenly.
+        const shares = ["12%", "9%", "6%", "6%", "4%", "2%"].map((t, i) => line(300 + 15 * i, [[330, 345, t]]));
+        const p = page([...bars, ...shares, row]);
+        const { items } = regionItemsForPage(p, detection(p, [["picture", [140, 290, 370, 415]]]));
+        const kept = items[0].rows.flat().map((c) => c.text);
+        expect(kept.sort()).toEqual(["12", "15", "31", "12%", "2.9", "2%", "4%", "6%", "6%", "5.6", "8.6", "9%"].sort());
+    });
+
     it("leaves a page whose only region is a decoration unchanged", () => {
         const titleLine = line(60, [[72, 400, "The Health System Dynamics Framework"]]);
         const p = page([titleLine]);

@@ -539,3 +539,126 @@ describe("page text", () => {
         expect(pageLines(p).filter((l) => l.skewed)).toEqual([]);
     });
 });
+
+describe("paragraph pieces next to display equations", () => {
+    const running = (specs: Spec[]) => {
+        const lines = pageLines(page(specs));
+        const set = runningTextLines(lines, BS);
+        return lines.filter((l) => set.has(l)).map((l) => l.text);
+    };
+    const column = (y: number, n: number, text = PROSE): Spec[] =>
+        Array.from({ length: n }, (_, i): Spec => ({ box: [72, y + i * 13, 290, y + 11 + i * 13], text }));
+
+    it("reads a sentence's last words without letters, stacked under its paragraph, as running text", () => {
+        const tail: Spec = { box: [72, 139, 110, 150], text: "[84, 85]." };
+        const equation: Spec = { box: [140, 168, 220, 180], text: "a=b+c", font: "CMMI10" };
+        const specs = [...column(100, 3), tail, equation];
+        expect(running(specs)).toContain("[84, 85].");
+        const groups = textGroups(specs);
+        expect(groups).toHaveLength(1);
+        expect(groups[0].bbox.map(Math.round)).toEqual([140, 168, 220, 180]);
+        // After a finished sentence, a lone citation is not that sentence's end.
+        expect(running([...column(100, 2), { box: [72, 126, 290, 137], text: `${PROSE} ends.` }, tail, equation])).not.toContain(
+            "[84, 85].",
+        );
+        // Nor is anything set apart from the paragraph.
+        expect(running([...column(100, 3), { ...tail, box: [72, 145, 110, 156] }, equation])).not.toContain("[84, 85].");
+    });
+
+    it("reads inline math a word space from a prose line's words, on its row, as running text", () => {
+        const specs: Spec[] = [
+            ...column(100, 2),
+            { box: [72, 126, 96, 137], text: "with n" },
+            { box: [100, 124, 120, 139], text: "= R/|R|", font: "CMMI10" },
+            { box: [124, 126, 290, 137], text: "and d the electric dipole operator of atom i." },
+        ];
+        expect(running(specs)).toEqual([PROSE, PROSE, "with n", "= R/|R|", "and d the electric dipole operator of atom i."]);
+        // Set further off, the math is a display beside the text, not part of its line.
+        const apart = specs.map((s) => (s.text === "= R/|R|" ? { ...s, box: [100, 124, 112, 139] as Rect } : s));
+        apart[2] = { ...apart[2], box: [72, 126, 90, 137] };
+        expect(running(apart)).not.toContain("= R/|R|");
+    });
+
+    it("does not read an equation's math as inline math of words beside it", () => {
+        const words: Spec = { box: [72, 200, 250, 211], text: PROSE };
+        // A flush-left equation whose first piece reads as words: its relation marks it.
+        const equation: Spec[] = [
+            { box: [72, 200, 250, 211], text: "General Recidivism Risk Score = age∗−w" },
+            { box: [253, 200, 273, 211], text: "(xi)+", font: "CMMI10" },
+        ];
+        expect(running(equation)).not.toContain("(xi)+");
+        // A fraction's numerator stacked over the end of a lead-in line.
+        expect(running([words, { box: [240, 203, 280, 213], text: "ξk+1 − ξk", font: "CMMI10" }])).not.toContain("ξk+1 − ξk");
+        // Set much larger than the words beside it: a banner or display, not inline.
+        expect(running([words, { box: [253, 190, 400, 220], text: "~l·il·¥11-----", size: 22 }])).not.toContain("~l·il·¥11-----");
+        // Math joins only directly beside words, not through other math; words after it do.
+        const math: Spec = { box: [253, 200, 263, 211], text: "x²", font: "CMMI10" };
+        const more: Spec = { box: [266, 200, 300, 211], text: "+ (a+b)", font: "CMMI10" };
+        const tail: Spec = { box: [266, 200, 330, 211], text: "and so on" };
+        expect(running([words, math, more])).toEqual([PROSE, "x²"]);
+        expect(running([words, math, tail])).toEqual([PROSE, "x²", "and so on"]);
+    });
+
+    it("reads a line that inline math splits into pieces as a whole", () => {
+        // A paragraph's indented first line, split by inline math, over its paragraph.
+        const split: Spec[] = [
+            { box: [87, 100, 200, 111], text: "Let us denote by |a⟩, |b⟩", font: "CMMI10" },
+            { box: [204, 100, 290, 111], text: "the eigenstates of a single" },
+            ...column(113, 2),
+        ];
+        expect(running(split)).toContain("Let us denote by |a⟩, |b⟩");
+        // A paragraph's last line, split by inline math: its pieces are not each other's row-mates.
+        const last: Spec[] = [
+            ...column(100, 2),
+            { box: [72, 126, 140, 137], text: "amplitude spectrum" },
+            { box: [143, 126, 160, 137], text: "x̂(f)", font: "CMMI10" },
+            { box: [163, 126, 300, 137], text: "and the phase spectrum, as" },
+            { box: [200, 160, 260, 172], text: "x̂(f) = |x̂(f)|", font: "CMMI10" },
+        ];
+        expect(running(last)).toEqual(expect.arrayContaining(["amplitude spectrum", "and the phase spectrum, as"]));
+        // An equation's pieces span the column too, but hold no run of words.
+        const equation: Spec[] = [
+            { box: [72, 100, 140, 111], text: "VBEC = MRb", font: "CMMI10" },
+            { box: [144, 100, 290, 111], text: "(ω2 − Ω2) r2 + MRb zz2, (1)", font: "CMMI10" },
+            ...column(122, 2),
+        ];
+        expect(running(equation)).toEqual([PROSE, PROSE]);
+        // Nor do function names beside an equation's relation make a run of words.
+        const names: Spec[] = [
+            { box: [87, 100, 200, 111], text: "Π = cosh γ + sinh γ T = exp" },
+            { box: [204, 100, 290, 111], text: "(γ T) (2.36)", font: "CMMI10" },
+            ...column(122, 2),
+        ];
+        expect(running(names)).toEqual([PROSE, PROSE]);
+        // A display equation whose words are function names, starting where a paragraph
+        // does elsewhere: its own trailing piece still keeps it off the margin rule.
+        const display: Spec[] = [
+            { box: [207, 100, 540, 111], text: PROSE },
+            { box: [207, 150, 403, 161], text: "Π = cosh γ + sinh γ T = exp (γ T)" },
+            { box: [406, 150, 409, 161], text: "." },
+        ];
+        expect(running(display)).toEqual([PROSE]);
+    });
+
+    it("reads a heading beside an equation in the other column as part of its own column", () => {
+        const right = (y: number, x0 = 320): Spec => ({ box: [x0, y, 540, y + 11], text: PROSE });
+        const specs: Spec[] = [
+            ...column(80, 3),
+            { box: [120, 136, 200, 152], text: "I = a + b", font: "CMMI10" },
+            { box: [104, 140, 116, 150], text: "{", font: "CMEX10" },
+            ...column(170, 3),
+            { box: [320, 128, 500, 139], text: "B. Step 2: Transfer Learning by Using a", font: "Times-Bold" },
+            { box: [320, 141, 400, 152], text: "Pre-Trained Network", font: "Times-Bold" },
+            right(155, 330),
+            right(168),
+            right(181),
+        ];
+        expect(running(specs)).toContain("Pre-Trained Network");
+        // Words beside it, where a text column runs too, are a cell of its row: a text table.
+        const cells = specs.map((s) => (s.text === "I = a + b" ? { ...s, text: "Treatment group", font: undefined } : s));
+        expect(running(cells)).not.toContain("Pre-Trained Network");
+        // Without a text column through its row, an equation beside the line still counts.
+        const alone = specs.filter((s) => s.box[0] !== 72 || s.text !== PROSE);
+        expect(running(alone)).not.toContain("Pre-Trained Network");
+    });
+});

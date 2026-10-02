@@ -79,8 +79,8 @@ const ITEM_KINDS: ReadonlySet<RegionClass> = new Set<RegionClass>(["table", "pic
 export const FORMULA_PROSE_WORDS = 5;
 /** Figure label text beyond this many characters is cut. */
 export const PICTURE_TEXT_MAX_CHARS = 2000;
-/** A figure row of numbers alone: axis ticks, scales. */
-const NUMERIC_ROW_RE = /^[\s\p{N}.,:;%+\-−–—()[\]/×·^*]*$/u;
+/** Figure text of numbers and number punctuation alone: axis ticks, scales, data values. */
+const NUMERIC_TEXT_RE = /^[\s\p{N}.,:;%+\-−–—()[\]/×·^*$€£]*$/u;
 
 /**
  * Items for the regions of one page and the page without the lines they
@@ -165,7 +165,13 @@ export function regionItemsForPage(
         const cells = cellsByRegion.get(region) ?? [];
         const lead = firstWordWidth(parts[0], numbered[parts[0].source - 1]);
         const size = Math.max(...parts.map((p) => p.size));
-        cells.push({ rect, text: parts.map((p) => p.text).join(" "), rot, size, ...(lead !== undefined ? { lead } : {}) });
+        const text = parts.map((p) => p.text).join(" ");
+        const cell: Cell = { rect, text, rot, size, ...(lead !== undefined ? { lead } : {}) };
+        if (regions[region].label === "picture") {
+            const numbers = figureNumbers(cell, parts, numbered);
+            if (numbers) cell.numbers = numbers;
+        }
+        cells.push(cell);
         cellsByRegion.set(region, cells);
     }
 
@@ -189,7 +195,13 @@ export function regionItemsForPage(
             for (const [source, d] of destination) if (d === k) destination.delete(source);
             return;
         }
-        let rows = table?.rows ?? framed.map((row) => row.map(({ cell }) => ({ text: cell.text, bbox: toBBox(cell.rect) })));
+        // A figure keeps its labels and data values; only axis ticks are dropped.
+        const ticks = kind === "picture" ? axisTicks(cellsByRegion.get(k) ?? []) : undefined;
+        let rows =
+            table?.rows ??
+            framed
+                .map((row) => row.filter(({ cell }) => !ticks?.has(cell)).map(({ cell }) => ({ text: cell.text, bbox: toBBox(cell.rect) })))
+                .filter((row) => row.length > 0);
         if (kind === "picture") rows = pictureRows(rows);
         // Whole structured-text lines are absorbed, so text can reach past the region.
         const bbox = rows.flat().reduce((u, c) => unionBBox(u, c.bbox), toBBox(region.bbox));
@@ -214,6 +226,8 @@ interface Cell {
     lead?: number;
     /** Font size of the line. */
     size: number;
+    /** A figure cell of numbers alone: each number's value and centre. */
+    numbers?: FigureNumber[];
 }
 
 /** Width of `piece`'s first word along its line, when its source line has character boxes. */
@@ -698,18 +712,262 @@ function joinCellLines(lines: readonly string[], vocabulary?: ReadonlySet<string
     return text;
 }
 
-/** Figure label rows without bare-number rows, capped at `PICTURE_TEXT_MAX_CHARS`. */
+/** Figure label rows without rows of number punctuation alone, capped at `PICTURE_TEXT_MAX_CHARS`. */
 function pictureRows(rows: RegionCell[][]): RegionCell[][] {
     const out: RegionCell[][] = [];
     let length = 0;
     for (const row of rows) {
         const text = row.map((c) => c.text).join(" ");
-        if (NUMERIC_ROW_RE.test(text)) continue;
+        if (NUMERIC_TEXT_RE.test(text) && !/\p{N}/u.test(text)) continue;
         if (length + text.length > PICTURE_TEXT_MAX_CHARS) break;
         out.push(row);
         length += text.length + 1;
     }
     return out;
+}
+
+/** A number in a figure: its value and the centre of its characters on the page. */
+interface FigureNumber {
+    value: number;
+    x: number;
+    y: number;
+}
+
+/** A number token: sign, currency, digits with grouping or decimal separators, percent. */
+const NUMBER_RE = /[-−–]?[$€£]?(?:\d+(?:[.,]\d+)*|[.,]\d+)%?/gu;
+/** An axis has at least this many ticks (the second when other numbers share its row or column)... */
+const AXIS_MIN_TICKS = 3;
+const AXIS_PART_MIN_TICKS = 5;
+/** ...each within this share of the tick spacing of where a linear (or logarithmic) scale puts it... */
+const AXIS_TOLERANCE = 0.2;
+/** ...and lined up with the others within this many type sizes (a row's centre line, a column's edge). */
+const AXIS_ALIGN = 0.4;
+/** Tick values step evenly to within this share of a step (rounding in their labels). */
+const STEP_TOLERANCE = 0.01;
+/** Integer ticks this far apart may step unevenly by one (an index axis starting at 1). */
+const INDEX_STEP = 20;
+/** A word this many type sizes from a row of numbers (or within the row's length) labels it. */
+const ROW_LABEL_REACH = 10;
+/** Runs of numbers longer than this are tested only as a whole for an axis. */
+const AXIS_SEARCH_MAX = 40;
+
+/** The value of a number token; `undefined` when it does not read as one number. */
+function numberValue(token: string): number | undefined {
+    let s = token.replace(/[−–]/gu, "-").replace(/[$€£%]/gu, "");
+    if (/^-?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/u.test(s)) s = s.replace(/,/gu, "");
+    else if (/^-?\d*,\d+$/u.test(s)) s = s.replace(",", ".");
+    if (!/\d/u.test(s)) return undefined;
+    const value = Number(s);
+    return Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * The numbers of a figure cell made of numbers alone, positioned from their
+ * characters (along the piece when it has no character boxes); `undefined` for
+ * any other cell, or when a token does not read as a number. A cell of
+ * sideways text counts only as one number, at its centre (a rotated tick label).
+ */
+function figureNumbers(cell: Cell, parts: readonly RegionLine[], numbered: readonly RawLine[]): FigureNumber[] | undefined {
+    const text = cell.text;
+    if (!NUMERIC_TEXT_RE.test(text) || !/\p{N}/u.test(text)) return undefined;
+    const centre = (value: number): FigureNumber[] => [
+        { value, x: (cell.rect[0] + cell.rect[2]) / 2, y: (cell.rect[1] + cell.rect[3]) / 2 },
+    ];
+    // A power of ten whose exponent lost its raise ("10−5"): a log axis label.
+    const power = /^\s*10[−–-](\d{1,3})\s*$/u.exec(text);
+    if (power) return centre(10 ** -Number(power[1]));
+    if (cell.rot !== 0) {
+        const tokens = text.match(NUMBER_RE) ?? [];
+        const value = tokens.length === 1 ? numberValue(tokens[0]) : undefined;
+        return value === undefined ? undefined : centre(value);
+    }
+    const out: FigureNumber[] = [];
+    for (const part of parts) {
+        const source = numbered[part.source - 1] as RawLineDetailed | undefined;
+        const codepoints = source ? [...source.text] : [];
+        const chars = source?.chars?.length === codepoints.length ? source.chars : undefined;
+        const piece = chars ? codepoints.slice(part.range[0], part.range[1]).join("") : part.text;
+        const y = (part.bbox[1] + part.bbox[3]) / 2;
+        for (const match of piece.matchAll(NUMBER_RE)) {
+            const value = numberValue(match[0]);
+            if (value === undefined) return undefined;
+            const a = match.index;
+            const b = a + match[0].length;
+            let x: number;
+            if (chars && piece.length === part.range[1] - part.range[0]) {
+                x = (chars[part.range[0] + a].bbox.l + chars[part.range[0] + b - 1].bbox.r) / 2;
+            } else {
+                x = part.bbox[0] + ((a + b) / 2 / Math.max(1, piece.length)) * (part.bbox[2] - part.bbox[0]);
+            }
+            out.push({ value, x, y });
+        }
+    }
+    return out.length ? out : undefined;
+}
+
+/**
+ * Cells of a figure that are axis ticks: every number in them lies on an axis,
+ * a run of at least `AXIS_MIN_TICKS` numbers lined up on one row (left to
+ * right) or one column edge (top to bottom), strictly increasing or decreasing,
+ * whose positions follow their values on a linear or logarithmic scale. Data
+ * values (a pie chart's shares, bar and point labels) sit beside their marks
+ * and keep their place in the figure text.
+ */
+function axisTicks(cells: readonly Cell[]): Set<Cell> {
+    const numbers = cells.flatMap((cell) => (cell.numbers ?? []).map((n) => ({ ...n, cell })));
+    type Placed = (typeof numbers)[number];
+    const onAxis = new Set<Placed>();
+    const cluster = (list: readonly Placed[], key: (n: Placed) => number): Placed[][] => {
+        const groups: Placed[][] = [];
+        for (const n of [...list].sort((a, b) => key(a) - key(b))) {
+            const group = groups[groups.length - 1];
+            if (group && key(n) - key(group[0]) <= AXIS_ALIGN * n.cell.size) group.push(n);
+            else groups.push([n]);
+        }
+        return groups;
+    };
+    // Runs of numbers along each row (left to right) and column (top to bottom).
+    const byX = (n: Placed) => n.x;
+    const byY = (n: Placed) => n.y;
+    const runs: { run: Placed[]; position: (n: Placed) => number; alone: boolean; values: string }[] = [];
+    const addRuns = (line: readonly Placed[], position: (n: Placed) => number) => {
+        const sorted = [...line].sort((a, b) => position(a) - position(b));
+        for (const run of monotonicRuns(sorted)) {
+            runs.push({ run, position, alone: run.length === sorted.length, values: run.map((n) => n.value).join(" ") });
+        }
+    };
+    // A row of numbers led by a label (an upright cell without numbers on its row,
+    // ending before the first number, at most the row's own length or
+    // `ROW_LABEL_REACH` type sizes before it) is a labelled row of values, never a
+    // scale: none of its numbers is a tick, whichever line it also lies on. An axis
+    // has its title set apart (below, or sideways) and marks to its right.
+    const words = cells.filter((c) => !c.numbers && c.rot === 0);
+    const values = new Set<Cell>();
+    for (const row of cluster(numbers, byY)) {
+        const lo = Math.min(...row.map((n) => n.x));
+        const hi = Math.max(...row.map((n) => n.x));
+        const y = row.reduce((a, n) => a + n.y, 0) / row.length;
+        const reach = Math.max(hi - lo, ROW_LABEL_REACH * row[0].cell.size);
+        const first = Math.min(...row.map((n) => n.cell.rect[0]));
+        const label = words.some(
+            (c) =>
+                c.rect[2] <= first + 1 &&
+                c.rect[2] >= first - reach &&
+                Math.abs((c.rect[1] + c.rect[3]) / 2 - y) <= AXIS_ALIGN * c.size,
+        );
+        if (label) for (const n of row) values.add(n.cell);
+    }
+    for (const row of cluster(numbers, byY)) addRuns(row, byX);
+    // One number per cell: cells sharing an edge or a centre, along a row (sideways
+    // labels of a horizontal axis share their top or bottom) or down a column.
+    const single = numbers.filter((n) => n.cell.numbers!.length === 1);
+    for (const edge of [(r: Rect) => r[1], (r: Rect) => r[3]]) {
+        for (const row of cluster(single, (n) => edge(n.cell.rect))) addRuns(row, byX);
+    }
+    const edges: ((r: Rect) => number)[] = [(r) => r[0], (r) => r[2], (r) => (r[0] + r[2]) / 2];
+    for (const edge of edges) for (const column of cluster(single, (n) => edge(n.cell.rect))) addRuns(column, byY);
+    // Panels repeat their axes: the same values, in the same direction, on other cells.
+    const repeated = (r: (typeof runs)[number]) =>
+        runs.some(
+            (o) =>
+                o.position === r.position &&
+                o.values === r.values &&
+                o.run.every((n) => !r.run.some((m) => m.cell === n.cell)),
+        );
+    // A short axis stands alone on its line or repeats.
+    for (const r of runs) for (const n of onScaleStretches(r.run, r.position, r.alone || repeated(r))) onAxis.add(n);
+    const ticks = new Set<Cell>();
+    for (const cell of cells) {
+        if (cell.numbers && !values.has(cell) && numbers.every((n) => n.cell !== cell || onAxis.has(n))) ticks.add(cell);
+    }
+    return ticks;
+}
+
+/**
+ * The numbers of `run` on an axis: the whole run when it has at least
+ * `AXIS_PART_MIN_TICKS` numbers on one scale (`AXIS_MIN_TICKS` for a `whole`
+ * run, the only one on its line or repeated there), else its longest contiguous
+ * stretch of at least `AXIS_PART_MIN_TICKS`, then the same in what lies before
+ * and after it (a value or another panel's axis next to an axis does not hide
+ * it). Sorted data values step evenly now and then for three in a row, rarely
+ * for four.
+ */
+function onScaleStretches<T extends { value: number }>(run: readonly T[], position: (n: T) => number, whole = false): T[] {
+    const least = whole ? AXIS_MIN_TICKS : AXIS_PART_MIN_TICKS;
+    if (run.length >= least && onScale(run.map(position), run.map((n) => n.value))) return [...run];
+    // A long run is judged whole: the search is cubic in its length.
+    const shortest = run.length > AXIS_SEARCH_MAX ? run.length : AXIS_PART_MIN_TICKS;
+    for (let length = run.length - 1; length >= shortest; length--) {
+        for (let start = 0; start + length <= run.length; start++) {
+            const stretch = run.slice(start, start + length);
+            if (!onScale(stretch.map(position), stretch.map((n) => n.value))) continue;
+            return [
+                ...onScaleStretches(run.slice(0, start), position),
+                ...stretch,
+                ...onScaleStretches(run.slice(start + length), position),
+            ];
+        }
+    }
+    return [];
+}
+
+/**
+ * Maximal runs of strictly increasing or strictly decreasing values: an axis
+ * lies within one (panels side by side repeat their axes), which keeps the
+ * stretch search short.
+ */
+function monotonicRuns<T extends { value: number }>(sorted: readonly T[]): T[][] {
+    const runs: T[][] = [];
+    let run: T[] = [];
+    for (const n of sorted) {
+        const last = run[run.length - 1];
+        if (last && n.value === last.value) {
+            runs.push(run);
+            run = [];
+        } else if (run.length >= 2 && n.value - last.value > 0 !== last.value - run[run.length - 2].value > 0) {
+            runs.push(run);
+            run = [last];
+        }
+        run.push(n);
+    }
+    if (run.length) runs.push(run);
+    return runs;
+}
+
+/**
+ * Tick labels: values on a linear scale's grid (equal steps), or round values
+ * (one significant digit: 1, 2, 5, 10, 0.01) on a logarithmic scale, whose
+ * positions follow that scale. Data values that happen to line up rarely step
+ * evenly.
+ */
+function onScale(positions: readonly number[], values: readonly number[]): boolean {
+    const spacing = (Math.max(...positions) - Math.min(...positions)) / (positions.length - 1);
+    if (!(spacing > 0)) return false;
+    const fits = (xs: readonly number[]) => {
+        const n = xs.length;
+        const mx = xs.reduce((a, b) => a + b, 0) / n;
+        const mp = positions.reduce((a, b) => a + b, 0) / n;
+        let sxx = 0;
+        let sxp = 0;
+        xs.forEach((x, i) => {
+            sxx += (x - mx) ** 2;
+            sxp += (x - mx) * (positions[i] - mp);
+        });
+        if (sxx === 0) return false;
+        const slope = sxp / sxx;
+        return xs.every((x, i) => Math.abs(mp + slope * (x - mx) - positions[i]) <= AXIS_TOLERANCE * spacing);
+    };
+    const step = values[1] - values[0];
+    // An index axis may start at 1 rather than 0 ("1 100 200"): integer steps of 20 or
+    // more may differ by one.
+    const slack =
+        values.every(Number.isInteger) && Math.abs(step) >= INDEX_STEP ? Math.max(1, STEP_TOLERANCE * Math.abs(step)) : STEP_TOLERANCE * Math.abs(step);
+    const evenSteps = values.every((v, i) => i === 0 || Math.abs(v - values[i - 1] - step) <= slack);
+    const round = (v: number) => {
+        const mantissa = v / 10 ** Math.floor(Math.log10(v));
+        return Math.abs(mantissa - Math.round(mantissa)) <= STEP_TOLERANCE;
+    };
+    return (evenSteps && fits(values)) || (values.every((v) => v > 0 && round(v)) && fits(values.map(Math.log)));
 }
 
 function toBBox(r: Rect): BoundingBox {
