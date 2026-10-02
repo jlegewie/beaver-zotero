@@ -304,13 +304,17 @@ describe('resolveImportItems with files', () => {
         expect(result).toMatchObject({ status: 'failed', error: { code: 'unrecognized_file' } });
     });
 
-    it('defers recognition to apply time without item metadata', async () => {
+    it('fails when file recognition is unsupported in this Zotero version', async () => {
         mocks.locateImportFile.mockResolvedValue(located());
-        mocks.recognizeFile.mockResolvedValue({ kind: 'deferred', reason: 'recognizer unavailable' });
+        mocks.recognizeFile.mockResolvedValue({
+            kind: 'error', code: 'file_import_unsupported', message: 'Creating items from files is not supported in this Zotero version.',
+        });
         const [result] = await resolveImportItems([spec('a', { file: { path: '/home/u/papers/a.pdf' } })], base);
-        expect(result).toMatchObject({ status: 'resolved', method: 'recognizer_deferred' });
+        expect(result).toMatchObject({
+            status: 'failed',
+            error: { code: 'file_import_unsupported', message: 'Creating items from files is not supported in this Zotero version.' },
+        });
         expect(result.item).toBeUndefined();
-        expect(result.warnings?.[0]).toContain('Zotero will identify the file');
     });
 
     it('fails with the recognizer error', async () => {
@@ -421,11 +425,11 @@ describe('resolveImportItems duplicate check', () => {
 
     it('checks only resolved items that have item JSON, in the target library', async () => {
         mocks.locateImportFile.mockResolvedValue(located());
-        mocks.recognizeFile.mockResolvedValue({ kind: 'deferred', reason: 'x' });
+        mocks.recognizeFile.mockResolvedValue({ kind: 'error', code: 'unrecognized_file', message: 'x' });
         await resolveImportItems([
             spec('ok', { item: { itemType: 'book', title: 'T' } }),
             spec('failed', { item: { itemType: 'spaceship' } }),
-            spec('deferred', { file: { path: '/home/u/papers/a.pdf' } }),
+            spec('unrecognized', { file: { path: '/home/u/papers/a.pdf' } }),
         ], { ...base, libraryID: 7 });
         expect(mocks.findExistingItems).toHaveBeenCalledTimes(1);
         const [entries, libraryID] = mocks.findExistingItems.mock.calls[0];

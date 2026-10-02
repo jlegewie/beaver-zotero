@@ -138,7 +138,7 @@ beforeEach(() => {
     itemSaverCtor = vi.fn();
     libraryInfo = { editable: true, filesEditable: true };
     prefs = {};
-    apiAvailable = { itemSaver: true, importFromDocument: true, remoteTranslate: true, attachmentRename: false, recognizeDocument: true };
+    apiAvailable = { itemSaver: true, importFromDocument: true, remoteTranslate: true, attachmentRename: false };
 
     mocks.isApiAvailable.mockImplementation((name: string) => apiAvailable[name] ?? false);
     mocks.getPref.mockImplementation((name: string) => prefs[name]);
@@ -159,7 +159,6 @@ beforeEach(() => {
     Z.Prefs.get = vi.fn((name: string) => prefs[name]);
     Z.Date.dateToISO = vi.fn(() => '2026-10-01T00:00:00Z');
     Z.DB = { executeTransaction: vi.fn(async (work: () => Promise<unknown>) => work()) };
-    Z.HTTP = { browserIsOffline: vi.fn(() => false) };
     Z.Collections = { get: vi.fn((id: number) => (id === 20 ? { id: 20, libraryID: 1 } : id === 21 ? { id: 21, libraryID: 7 } : undefined)) };
     Z.Translate = {
         ItemSaver: Object.assign(function (this: any, options: unknown) {
@@ -586,79 +585,14 @@ describe('writeImportItem attachments', () => {
     });
 });
 
-const deferredFile = (): ImportItemProposedData => ({
-    library_id: 1,
-    source: { kind: 'file', input: 'a.pdf' },
-    resolution: { method: 'recognizer_deferred' },
-    file: { path: '/home/u/papers/a.pdf' },
-});
-
-describe('writeImportItem deferred recognition', () => {
-    it('writes nothing while Zotero is offline', async () => {
-        Z.HTTP.browserIsOffline.mockReturnValue(true);
-        mocks.locateImportFile.mockResolvedValue(file());
-        await expect(writeImportItem({
-            library_id: 1,
-            source: { kind: 'file', input: 'a.pdf' },
-            resolution: { method: 'recognizer_deferred' },
-            file: { path: '/home/u/papers/a.pdf' },
-        })).rejects.toMatchObject({ code: 'offline' });
-        expect(Z.Attachments.importFromFile).not.toHaveBeenCalled();
-    });
-
-    it('identifies the standalone file and attaches it to the parent Zotero created', async () => {
-        const standalone = makeSavedItem({ id: 600, key: 'FILEKEY1' });
-        const child = makeSavedItem({ id: 601, key: 'FILEKEY2' });
-        const parent = makeSavedItem({ id: 800, key: 'PARENT01', addToCollection: vi.fn() });
-        Z.Attachments.importFromFile.mockResolvedValueOnce(standalone).mockResolvedValueOnce(child);
-        Z.RecognizeDocument = { _recognize: vi.fn(async () => parent) };
-        mocks.locateImportFile.mockResolvedValue(file());
-        mocks.isPdfDocument.mockReturnValue(true);
-
-        const result = await writeImportItem(deferredFile());
-        expect(Z.Attachments.importFromFile).toHaveBeenNthCalledWith(1, { file: '/home/u/papers/a.pdf', libraryID: 1, collections: undefined });
-        expect(Z.RecognizeDocument._recognize).toHaveBeenCalledWith(standalone);
-        expect(standalone.eraseTx).toHaveBeenCalledTimes(1);
-        expect(Z.Attachments.importFromFile).toHaveBeenNthCalledWith(2, expect.objectContaining({ file: '/home/u/papers/a.pdf', parentItemID: 800 }));
-        expect(result).toMatchObject({ zotero_key: 'PARENT01', attachment_status: 'available', file_attachment_key: '1-FILEKEY2' });
-    });
-
-    it('keeps the standalone attachment when recognition found nothing', async () => {
-        const standalone = makeSavedItem({ id: 600, key: 'FILEKEY1' });
-        Z.Attachments.importFromFile.mockResolvedValue(standalone);
-        Z.RecognizeDocument = { _recognize: vi.fn(async () => null) };
-        mocks.locateImportFile.mockResolvedValue(file());
-
-        const result = await writeImportItem(deferredFile());
-        expect(result.zotero_key).toBe('FILEKEY1');
-        expect(standalone.eraseTx).not.toHaveBeenCalled();
-    });
-
-    it('keeps the standalone attachment when the recognizer throws', async () => {
-        const standalone = makeSavedItem({ id: 600, key: 'FILEKEY1' });
-        Z.Attachments.importFromFile.mockResolvedValue(standalone);
-        Z.RecognizeDocument = { _recognize: vi.fn(async () => { throw new Error('recognizePDF.noMatches'); }) };
-        mocks.locateImportFile.mockResolvedValue(file());
-
-        const result = await writeImportItem(deferredFile());
-        expect(result.zotero_key).toBe('FILEKEY1');
-    });
-
-    it('erases the recognized parent and the standalone copy when finishing fails', async () => {
-        const standalone = makeSavedItem({ id: 600, key: 'FILEKEY1' });
-        const parent = makeSavedItem({ id: 800, key: 'PARENT01', addToCollection: vi.fn() });
-        Z.Attachments.importFromFile.mockResolvedValueOnce(standalone).mockRejectedValueOnce(new Error('disk full'));
-        Z.RecognizeDocument = { _recognize: vi.fn(async () => parent) };
-        mocks.locateImportFile.mockResolvedValue(file());
-
-        await expect(writeImportItem(deferredFile())).rejects.toThrow('disk full');
-        expect(parent.eraseTx).toHaveBeenCalledTimes(1);
-        expect(standalone.eraseTx).toHaveBeenCalledTimes(1);
-    });
-
-    it('fails with missing_item_data when there is neither item nor deferred file', async () => {
+describe('writeImportItem without item data', () => {
+    it('fails with missing_item_data and writes nothing', async () => {
         await expect(writeImportItem({ library_id: 1, source: { kind: 'identifier', input: 'x' } }))
             .rejects.toMatchObject({ code: 'missing_item_data' });
+        mocks.locateImportFile.mockResolvedValue(file());
+        await expect(writeImportItem({ library_id: 1, source: { kind: 'file', input: 'a.pdf' }, file: { path: '/home/u/papers/a.pdf' } }))
+            .rejects.toMatchObject({ code: 'missing_item_data' });
+        expect(Z.Attachments.importFromFile).not.toHaveBeenCalled();
     });
 });
 

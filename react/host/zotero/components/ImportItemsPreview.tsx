@@ -97,7 +97,6 @@ const ImportItemRow: React.FC<{
     const badge = importSourceBadge(data);
     const enrichment = enrichmentNote(data);
     const file = data?.file;
-    const isDeferred = !json && data?.resolution?.method === 'recognizer_deferred';
     const isWeb = !!display && WEB_CONTENT_TYPES.has(display.itemType);
     const indicator = statusIndicator(status);
     const warnings = data?.warnings ?? [];
@@ -133,11 +132,6 @@ const ImportItemRow: React.FC<{
                 {meta && <div className={`${textClass('font-color-secondary')} truncate`}>{meta}</div>}
                 {isWeb && display?.url && (
                     <div className={`${textClass('font-color-tertiary')} truncate text-sm`}>{display.url}</div>
-                )}
-                {isDeferred && (
-                    <div className="font-color-secondary text-sm">
-                        Zotero will identify this file after it is added.
-                    </div>
                 )}
 
                 {(badge || file || enrichment || display?.abstract || warnings.length > 0) && (

@@ -201,10 +201,6 @@ async function resolveFromFile(
     switch (recognition.kind) {
         case 'error':
             return { error: { code: recognition.code, message: recognition.message } };
-        case 'deferred':
-            logger(`itemImport/resolve: deferring recognition of ${file.filename}: ${recognition.reason}`, 1);
-            warnings.push('Zotero will identify the file after it is added; the metadata cannot be shown in advance');
-            return { method: 'recognizer_deferred', warnings };
         case 'item': {
             const result = normalized(recognition.json, libraryID, 'recognizer', recognition.translator, warnings);
             if ('item' in result) result.recognizer_hints = recognition.hints;

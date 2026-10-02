@@ -108,7 +108,7 @@ describe('importItemDisplayJson', () => {
         expect(importItemDisplayJson(data)).toBe(fallback);
     });
 
-    it('returns undefined when neither exists (deferred recognition)', () => {
+    it('returns undefined when neither exists', () => {
         expect(importItemDisplayJson({ source })).toBeUndefined();
     });
 });

@@ -24,7 +24,6 @@ export type ZoteroApiName =
     | 'itemSaver'
     | 'pdfRecognizerData'
     | 'recognizerService'
-    | 'recognizeDocument'
     | 'epub'
     | 'rdfImport'
     | 'importFromDocument'
@@ -41,7 +40,6 @@ const API_NAMES: ZoteroApiName[] = [
     'itemSaver',
     'pdfRecognizerData',
     'recognizerService',
-    'recognizeDocument',
     'epub',
     'rdfImport',
     'importFromDocument',
@@ -108,10 +106,6 @@ function probe(name: ZoteroApiName): ZoteroApiStatus {
             return fn(Z.Sync?.Runner?.getAPIClient) && recognizerBaseUrl() !== null
                 ? { available: true }
                 : { available: false, reason: 'No API client or recognizer URL' };
-        case 'recognizeDocument':
-            return fn(Z.RecognizeDocument?._recognize)
-                ? { available: true }
-                : { available: false, reason: 'Zotero.RecognizeDocument._recognize is missing' };
         case 'epub': {
             const epub = importModule<any>('chrome://zotero/content/EPUB.mjs');
             return fn(epub?.EPUB) && fn(epub.EPUB.prototype?.getMetadataRDF) && fn(epub.EPUB.prototype?.getSectionDocuments)

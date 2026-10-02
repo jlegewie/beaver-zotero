@@ -7,13 +7,15 @@
  *   (`pdf.getRecognizerData`) and Zotero's recognizer service returns an arXiv
  *   id / DOI / ISBN, or a title and authors. This sends the first pages' text
  *   to Zotero's service — exactly what Zotero does by default when a user adds
- *   a PDF. If those internal APIs are unavailable, recognition is deferred to
- *   after approval and runs through Zotero's own per-file recognizer.
+ *   a PDF.
  * - **EPUB:** a port of `RecognizeDocument._recognizeEPUB` for a bare path:
  *   OPF/RDF metadata through the RDF import translator, plus a scan of the
  *   copyright page and first sections for an ISBN or DOI. Fully local except
  *   for the identifier lookup.
  * - Other file types fail with `unsupported_type`.
+ *
+ * Both rely on internal Zotero APIs. When they are missing or have changed, the
+ * file fails with `file_import_unsupported`: nothing is written.
  */
 
 import type { ImportFileRef, TypedIdentifier } from '@beaver/agent-core/types/itemImport';
@@ -52,9 +54,17 @@ export type FileRecognition =
     | { kind: 'identifiers'; identifiers: TypedIdentifier[]; hints: { abstract?: string; language?: string }; titleItem?: Record<string, any> }
     /** Item JSON already produced from the file (EPUB metadata, or a recognized title). */
     | { kind: 'item'; json: Record<string, any>; translator?: string; hints: { abstract?: string; language?: string } }
-    /** The internal APIs are unavailable: recognize after approval with the public API. */
-    | { kind: 'deferred'; reason: string }
-    | { kind: 'error'; code: 'unrecognized_file' | 'unsupported_type' | 'no_text'; message: string };
+    | { kind: 'error'; code: 'unrecognized_file' | 'unsupported_type' | 'no_text' | 'file_import_unsupported'; message: string };
+
+/** The internal APIs file recognition depends on are unavailable in this Zotero version. */
+function recognitionUnavailable(reason: string): FileRecognition {
+    logger(`itemImport/recognizeFile: file recognition unavailable: ${reason}`, 1);
+    return {
+        kind: 'error',
+        code: 'file_import_unsupported',
+        message: 'Creating items from files is not supported in this Zotero version.',
+    };
+}
 
 const PDF_MIME = 'application/pdf';
 const EPUB_MIME = 'application/epub+zip';
@@ -196,7 +206,7 @@ function titleItemFromResponse(response: RecognizerResponse): Record<string, any
 
 async function recognizePdf(file: LocatedFile, timeoutMs: number): Promise<FileRecognition> {
     if (!isApiAvailable('pdfRecognizerData') || !isApiAvailable('recognizerService')) {
-        return { kind: 'deferred', reason: 'PDF recognition APIs unavailable' };
+        return recognitionUnavailable('PDF recognition APIs unavailable');
     }
     const deadline = Date.now() + timeoutMs;
     const left = () => Math.max(1, deadline - Date.now());
@@ -212,10 +222,10 @@ async function recognizePdf(file: LocatedFile, timeoutMs: number): Promise<FileR
             return { kind: 'error', code: 'unrecognized_file', message: `${file.filename} is password-protected.` };
         }
         return looksLikeApiDrift(error)
-            ? { kind: 'deferred', reason: 'PDF worker API drifted' }
+            ? recognitionUnavailable('PDF worker API drifted')
             : { kind: 'error', code: 'unrecognized_file', message: `${file.filename} could not be read as a PDF.` };
     }
-    if (!data) return { kind: 'deferred', reason: 'PDF recognition APIs unavailable' };
+    if (!data) return recognitionUnavailable('PDF recognition APIs unavailable');
 
     const textPages = data.pages.filter((page: any) => hasWords(page?.[2])).length;
     if (!textPages) {
@@ -230,10 +240,10 @@ async function recognizePdf(file: LocatedFile, timeoutMs: number): Promise<FileR
         if (error?.code === 'timeout') throw error;
         logger(`itemImport/recognizeFile: recognizer service failed for ${file.filename}: ${error}`, 1);
         return looksLikeApiDrift(error)
-            ? { kind: 'deferred', reason: 'recognizer service API drifted' }
+            ? recognitionUnavailable('recognizer service API drifted')
             : { kind: 'error', code: 'unrecognized_file', message: `Zotero's recognizer service could not identify ${file.filename}.` };
     }
-    if (!response) return { kind: 'deferred', reason: 'recognizer service unavailable' };
+    if (!response) return recognitionUnavailable('recognizer service unavailable');
 
     const hints = {
         ...(typeof response.abstract === 'string' && response.abstract ? { abstract: response.abstract } : {}),
@@ -319,7 +329,7 @@ async function* firstSectionDocuments(epub: any, filename: string): AsyncGenerat
 
 async function recognizeEpub(file: LocatedFile, timeoutMs: number): Promise<FileRecognition> {
     const EPUB = loadEpubModule();
-    if (!EPUB) return { kind: 'deferred', reason: 'EPUB module unavailable' };
+    if (!EPUB) return recognitionUnavailable('EPUB module unavailable');
 
     let epub: any;
     try {
@@ -367,7 +377,7 @@ async function recognizeEpub(file: LocatedFile, timeoutMs: number): Promise<File
         if (error?.code === 'timeout') throw error;
         if (looksLikeApiDrift(error)) {
             markApiUnavailable('epub', error);
-            return { kind: 'deferred', reason: 'EPUB API drifted' };
+            return recognitionUnavailable('EPUB API drifted');
         }
         return { kind: 'error', code: 'unrecognized_file', message: `${file.filename} could not be read as an EPUB.` };
     } finally {

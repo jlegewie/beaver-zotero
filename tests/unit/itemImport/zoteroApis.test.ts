@@ -58,12 +58,10 @@ describe('API probes', () => {
         expect(isApiAvailable('itemSaver')).toBe(true);
     });
 
-    it('reports the PDF worker, per-file recognizer and attachment helpers unavailable when absent', () => {
+    it('reports the PDF worker and attachment helpers unavailable when absent', () => {
         Z.PDFWorker = undefined;
-        Z.RecognizeDocument = undefined;
         Z.Attachments = {};
         expect(isApiAvailable('pdfRecognizerData')).toBe(false);
-        expect(isApiAvailable('recognizeDocument')).toBe(false);
         expect(isApiAvailable('attachmentRename')).toBe(false);
         expect(isApiAvailable('importFromDocument')).toBe(false);
     });
@@ -96,7 +94,7 @@ describe('API probes', () => {
         const all = probeAllZoteroApis();
         expect(Object.keys(all).sort()).toEqual([
             'attachmentRename', 'epub', 'importFromDocument', 'itemSaver', 'pdfRecognizerData',
-            'recognizeDocument', 'recognizerService', 'rdfImport', 'remoteTranslate', 'translateSearch',
+            'recognizerService', 'rdfImport', 'remoteTranslate', 'translateSearch',
         ].sort());
         for (const status of Object.values(all)) expect(typeof status.available).toBe('boolean');
     });

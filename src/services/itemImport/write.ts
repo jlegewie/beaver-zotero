@@ -327,72 +327,6 @@ async function finishItem(item: Zotero.Item, data: ImportItemProposedData, metho
     }
 }
 
-/**
- * Deferred recognition: import the file standalone (Zotero's recognizer reads a
- * saved attachment), identify it with the per-file recognizer behind "Retrieve
- * Metadata", then attach the file to the parent it created. The recognizer is
- * awaited inside this write, so every item it saves belongs to this import. If
- * nothing is recognized, the standalone attachment stays, as in Zotero.
- */
-async function writeDeferred(
-    data: ImportItemProposedData,
-    file: LocatedFile,
-    libraryID: number,
-    memberships: ReturnType<typeof recheckExistingCollections>,
-    collectionIDs: number[],
-    options: WriteImportOptions,
-): Promise<ImportItemResultData> {
-    // The recognizer needs the network; offline it would only leave a bare
-    // attachment behind, so nothing is written.
-    if ((Zotero.HTTP as any).browserIsOffline?.()) {
-        throw new ImportItemError('offline', 'Zotero is offline, so it cannot identify the file now. Try again when online.');
-    }
-    const attachments = Zotero.Attachments as any;
-    // Always a copy: a linked original (or Beaver's managed copy of an attached
-    // file) must not become part of the library.
-    const attachment: Zotero.Item = await attachments.importFromFile({
-        file: file.path,
-        libraryID,
-        collections: collectionIDs.length ? collectionIDs : undefined,
-    });
-    let parent: Zotero.Item | null = null;
-    try {
-        if (isApiAvailable('recognizeDocument')) {
-            try {
-                parent = (await (Zotero as any).RecognizeDocument._recognize(attachment)) || null;
-            } catch (error) {
-                if (looksLikeApiDrift(error)) markApiUnavailable('recognizeDocument', error);
-                logger(`itemImport/write: deferred recognition failed for ${file.filename}: ${error}`, 1);
-            }
-        }
-        if (!parent) {
-            await finishItem(attachment, data, undefined, options);
-            return resultFor(attachment, memberships, 'available', isPdfDocument(attachment) ? attachment : null, attachment);
-        }
-    } catch (error) {
-        await cleanupFailedImport(attachment);
-        throw error;
-    }
-
-    let attachmentErased = false;
-    try {
-        if (collectionIDs.length) {
-            for (const collectionID of collectionIDs) parent.addToCollection(collectionID);
-            await parent.saveTx();
-        }
-        // Attach the file as an ordinary child, named like any other import.
-        await attachment.eraseTx();
-        attachmentErased = true;
-        const fileAttachment = await attachFile(parent, file);
-        await finishItem(parent, data, 'recognizer', options);
-        return resultFor(parent, memberships, 'available', isPdfDocument(fileAttachment) ? fileAttachment : null, fileAttachment);
-    } catch (error) {
-        await cleanupFailedImport(parent);
-        if (!attachmentErased) await cleanupFailedImport(attachment);
-        throw error;
-    }
-}
-
 /** Write one approved `import_item` action. */
 export async function writeImportItem(data: ImportItemProposedData, options: WriteImportOptions = {}): Promise<ImportItemResultData> {
     if (!data || !data.source) throw new ImportItemError('missing_item_data', 'No item data provided.');
@@ -434,12 +368,7 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
     // read-only meanwhile, so check again right before anything is written.
     assertWriteAccess(libraryID);
 
-    if (!json) {
-        if (method === 'recognizer_deferred' && file) {
-            return writeDeferred(data, file, libraryID, memberships, collectionIDs, options);
-        }
-        throw new ImportItemError('missing_item_data', 'No item data provided.');
-    }
+    if (!json) throw new ImportItemError('missing_item_data', 'No item data provided.');
 
     const toSave: ZoteroItemJson = { ...json };
     if (WEB_CONTENT_ITEM_TYPES.has(json.itemType) || !!snapshotUrl) toSave.accessDate = (Zotero.Date as any).dateToISO(new Date());

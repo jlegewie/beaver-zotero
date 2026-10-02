@@ -104,7 +104,6 @@ export type ResolutionMethod =
     | 'translator'
     | 'web_translator'
     | 'recognizer'
-    | 'recognizer_deferred'
     | 'model_metadata'
     | 'fallback_metadata';
 
@@ -162,7 +161,7 @@ export interface ImportItemProposedData {
     source: ImportSourceDescriptor;
     /**
      * The item exactly as it will be written. Absent on citation-derived
-     * actions (resolved at apply time) and on deferred file recognition.
+     * actions, which are resolved at apply time.
      */
     item?: ZoteroItemJson;
     resolution?: { method: ResolutionMethod | string; translator?: string; resolved_at?: string };

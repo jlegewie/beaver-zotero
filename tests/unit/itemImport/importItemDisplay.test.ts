@@ -29,10 +29,8 @@ describe('importSourceBadge', () => {
     });
 
     it('labels recognizer results as identified from file, without caution', () => {
-        for (const method of ['recognizer', 'recognizer_deferred']) {
-            expect(importSourceBadge(data({ resolution: { method } })))
-                .toMatchObject({ label: 'Identified from file', caution: false });
-        }
+        expect(importSourceBadge(data({ resolution: { method: 'recognizer' } })))
+            .toMatchObject({ label: 'Identified from file', caution: false });
     });
 
     it('labels web translation and mentions the translator in the tooltip', () => {

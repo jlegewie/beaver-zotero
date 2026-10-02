@@ -56,7 +56,7 @@ export function importSourceBadge(data: ImportItemProposedData | undefined): Sou
     if (method === 'fallback_metadata') {
         return { label: 'Partial metadata', caution: true, tooltip: 'The identifier lookup failed, so this uses the search result’s metadata.' };
     }
-    if (method === 'recognizer' || method === 'recognizer_deferred') {
+    if (method === 'recognizer') {
         return { label: 'Identified from file', caution: false, tooltip: translatorTip };
     }
     if (method === 'web_translator') {

@@ -74,15 +74,15 @@ describe('recognizeFile (PDF)', () => {
         expect(await recognizeFile(pdf, 10_000)).toMatchObject({ kind: 'error', code: 'unrecognized_file' });
     });
 
-    it('defers recognition when the internal APIs are unavailable', async () => {
+    it('fails as unsupported in this Zotero version when the internal APIs are unavailable', async () => {
         mocks.isApiAvailable.mockImplementation((name: string) => name !== 'pdfRecognizerData');
-        expect(await recognizeFile(pdf, 10_000)).toMatchObject({ kind: 'deferred' });
+        expect(await recognizeFile(pdf, 10_000)).toMatchObject({ kind: 'error', code: 'file_import_unsupported', message: 'Creating items from files is not supported in this Zotero version.' });
         expect(mocks.getPdfRecognizerData).not.toHaveBeenCalled();
     });
 
-    it('defers when the worker call fails like API drift', async () => {
+    it('fails as unsupported when the worker call fails like API drift', async () => {
         mocks.getPdfRecognizerData.mockRejectedValue(new TypeError('worker._query is not a function'));
-        expect(await recognizeFile(pdf, 10_000)).toMatchObject({ kind: 'deferred' });
+        expect(await recognizeFile(pdf, 10_000)).toMatchObject({ kind: 'error', code: 'file_import_unsupported' });
     });
 });
 
@@ -92,10 +92,10 @@ describe('recognizeFile (other types)', () => {
         expect(result).toMatchObject({ kind: 'error', code: 'unsupported_type' });
     });
 
-    it('defers EPUB recognition when the EPUB module is unavailable', async () => {
+    it('fails EPUB recognition as unsupported when the EPUB module is unavailable', async () => {
         mocks.loadEpubModule.mockReturnValue(null);
         const result = await recognizeFile({ ...pdf, filename: 'book.epub', mimeType: 'application/epub+zip' }, 10_000);
-        expect(result).toMatchObject({ kind: 'deferred' });
+        expect(result).toMatchObject({ kind: 'error', code: 'file_import_unsupported' });
     });
 });
 
