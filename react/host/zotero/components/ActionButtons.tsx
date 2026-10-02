@@ -36,7 +36,10 @@ import { createProvenanceNote } from '../../../utils/noteActions';
 import {
     getPendingCreateItemActionBySourceIdAtom,
     ackAgentActionsAtom,
+    isImportItemAgentAction,
+    setAgentActionsToErrorAtom,
 } from '../../../agents/agentActions';
+import { executeImportItemActions } from '../../../utils/importItemActions';
 import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { currentThreadIdAtom } from '../../../atoms/threads';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
@@ -65,6 +68,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const getPendingCreateItemAction = useAtomValue(getPendingCreateItemActionBySourceIdAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
+    const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     // Active thread ID — used to stamp the background PDF fetch so the
     // attachment_resolved ws event can route back to the live agent run.
     const threadId = useAtomValue(currentThreadIdAtom);
@@ -107,6 +111,33 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             // fetch correlate its attachment_resolved ws event back to the right
             // action server-side.
             const matchingAction = item.source_id ? getPendingCreateItemAction(item.source_id) : null;
+
+            // A v2 proposal for this reference is written through its own action,
+            // so its resolved metadata, library, collections and tags apply.
+            if (matchingAction && isImportItemAgentAction(matchingAction)) {
+                const batch = await executeImportItemActions([matchingAction], {
+                    runId: matchingAction.run_id,
+                    threadId: threadId ?? undefined,
+                });
+                const failure = batch.failures[0];
+                if (failure) {
+                    const existing = failure.errorDetails?.existing_item as ZoteroItemReference | undefined;
+                    if (failure.errorDetails?.error_code === 'already_in_library' && existing) {
+                        markExternalReferenceImported(item.source_id!, existing);
+                        setZoteroItemRef(existing);
+                        setItemExists(true);
+                    }
+                    setAgentActionsToError([matchingAction.id], failure.error, failure.errorDetails);
+                    return;
+                }
+                const result = batch.successes[0].result;
+                const ref = { library_id: result.library_id, zotero_key: result.zotero_key, library_ref: result.library_ref };
+                markExternalReferenceImported(item.source_id!, ref);
+                await ackAgentActions(matchingAction.run_id, [{ action_id: matchingAction.id, result_data: result }]);
+                setZoteroItemRef(ref);
+                setItemExists(true);
+                return;
+            }
 
             // createZoteroItem handles library/collection resolution internally
             // and (since skipBackgroundPdfFetch defaults to false) schedules its
@@ -208,7 +239,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         } finally {
             setIsImporting(false);
         }
-    }, [item, isImporting, isLoading, threadId, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
+    }, [item, isImporting, isLoading, threadId, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions, setAgentActionsToError]);
 
     // React to cache changes (e.g., when item is deleted and cache is invalidated)
     useEffect(() => {

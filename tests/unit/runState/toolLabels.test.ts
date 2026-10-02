@@ -43,3 +43,17 @@ describe('getToolCallLabel', () => {
             .toBe('Import items: no change needed');
     });
 });
+
+describe('getToolCallLabel for create_items', () => {
+    const importCall = (items: unknown[]) => toolCall({ tool_name: 'create_items', args: { items } });
+
+    it('names the lookup while the sources are being resolved', () => {
+        expect(getToolCallLabel(importCall([{ id: '10.1/a' }, { id: 'https://x.org' }]), 'in_progress'))
+            .toMatch(/looking up 2 sources…$/);
+        expect(getToolCallLabel(importCall([{ id: '10.1/a' }]), 'in_progress')).toMatch(/looking up 1 source…$/);
+    });
+
+    it('drops the lookup note once the call completed', () => {
+        expect(getToolCallLabel(importCall([{ id: '10.1/a' }]), 'completed')).not.toMatch(/looking up/);
+    });
+});

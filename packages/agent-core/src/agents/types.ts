@@ -246,12 +246,14 @@ export function isEmptyWriteReturn(
 ): boolean {
     if (part?.part_kind !== 'tool-return' || isUnsuccessfulToolReturn(part)) return false;
     if (typeof part.content === 'string') return true;
-    return (
-        part.tool_name === 'create_items' &&
-        !!part.content &&
-        typeof part.content === 'object' &&
-        Object.keys(part.content.items_created ?? {}).length === 0
-    );
+    if (part.tool_name !== 'create_items' || !part.content || typeof part.content !== 'object') return false;
+    // v2 result: one outcome per input. Nothing to do only when every input was
+    // already in the library (or repeated another input); a failure is news.
+    if (Array.isArray(part.content.items)) {
+        return part.content.items.length > 0 && part.content.items.every((entry: any) =>
+            entry?.outcome === 'already_in_library' || entry?.outcome === 'duplicate_in_call');
+    }
+    return Object.keys(part.content.items_created ?? {}).length === 0;
 }
 
 export interface TextPart {

@@ -2105,7 +2105,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -2823,6 +2823,14 @@ export const CLIENT_FEATURES = {
      * PDF might be downloaded from.
      */
     PDF_CANDIDATES: 'pdf_candidates',
+    /**
+     * `create_items` v2: items are created from identifiers, URLs, attached
+     * files and model-written metadata. The client resolves every source to
+     * Zotero item JSON while validating an `import_item` action, renders and
+     * approves `import_item` actions, and writes the approved JSON on execute.
+     * Citation "Import" proposals arrive as unresolved `import_item` actions.
+     */
+    ITEM_IMPORT_V2: 'item_import_v2',
     /**
      * Chat markdown follows `[label](u-KEY)` (and `zotero://select/...`) as a
      * link that reveals the named library object. Without it those hrefs render

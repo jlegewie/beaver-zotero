@@ -5,6 +5,7 @@ import type { AgentDataRequestContext } from '@beaver/agent-core/transport/agent
 import { executeCreateCollectionAction } from './actions/createCollection';
 import { executeCreateHighlightAnnotationsAction } from './actions/createHighlightAnnotations';
 import { executeCreateItemAction } from './actions/createItems';
+import { executeImportItemAction } from './actions/importItems';
 import { executeCreateNoteAction } from './actions/createNote';
 import { executeCreateNoteAnnotationsAction } from './actions/createNoteAnnotations';
 import { executeEditAnnotationsAction } from './actions/editAnnotations';
@@ -93,6 +94,8 @@ export async function executeRequest(
             result = await executeOrganizeItemsAction(request, ctx);
         } else if (request.action_type === 'create_item') {
             result = await executeCreateItemAction(request, ctx);
+        } else if (request.action_type === 'import_item') {
+            result = await executeImportItemAction(request, ctx);
         } else if (request.action_type === 'edit_note') {
             result = await executeEditNoteAction(request, ctx);
         } else if (request.action_type === 'edit_note_batch') {

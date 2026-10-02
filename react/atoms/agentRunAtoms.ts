@@ -133,6 +133,9 @@ import {
     isEditMetadataAgentAction,
     isZoteroNoteAgentAction,
     isCreateItemAgentAction,
+    isImportItemAgentAction,
+    isItemCreatingAgentAction,
+    itemActionExternalId,
     isCreateCollectionAgentAction,
     isOrganizeItemsAgentAction,
     isManageTagsAgentAction,
@@ -173,6 +176,7 @@ import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQu
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
+import { undoImportItemAction } from '../utils/importItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
@@ -209,7 +213,7 @@ import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from 
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
-import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
+import type { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { appendRunIfMissing, continuationOfferFor, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
@@ -1031,6 +1035,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 await undoEditNoteBatchAction(action);
             } else if (isCreateItemAgentAction(action)) {
                 await undoCreateItemAction(action);
+            } else if (isImportItemAgentAction(action)) {
+                await undoImportItemAction(action);
             } else if (isCreateCollectionAgentAction(action)) {
                 await undoCreateCollectionAction(action);
             } else if (isOrganizeItemsAgentAction(action)) {
@@ -1984,24 +1990,20 @@ export function createWSCallbacks(
             const actions = event.actions.map(toAgentAction);
             set(upsertAgentActionsAtom, actions);
 
-            // Mark external references as imported for applied create_items actions
+            // Mark external references as imported for applied item-creating actions
             // This handles cases where actions are applied via PendingActionsBar
             for (const action of actions) {
-                if (
-                    action.action_type === 'create_item' &&
-                    action.status === 'applied' &&
-                    action.result_data
-                ) {
-                    const proposedData = action.proposed_data as CreateItemProposedData;
+                if (isItemCreatingAgentAction(action) && action.status === 'applied' && action.result_data) {
+                    const externalId = itemActionExternalId(action);
                     const resultData = action.result_data as CreateItemResultData;
 
-                    if (proposedData?.item?.source_id && resultData.library_id && resultData.zotero_key) {
-                        set(markExternalReferenceImportedAtom, proposedData.item.source_id, {
+                    if (externalId && resultData.library_id && resultData.zotero_key) {
+                        set(markExternalReferenceImportedAtom, externalId, {
                             library_id: resultData.library_id,
                             zotero_key: resultData.zotero_key,
                             library_ref: resultData.library_ref,
                         });
-                        logger(`WS onAgentActions: Marked external reference ${proposedData.item.source_id} as imported`, 1);
+                        logger(`WS onAgentActions: Marked external reference ${externalId} as imported`, 1);
                     }
                 }
             }
@@ -3043,7 +3045,7 @@ async function startRegenerateRunOwned(
             .filter(isEditMetadataAgentAction)
             .filter(a => a.status === 'applied');
         const createItemsToUndo = actionsInRemovedRuns
-            .filter(isCreateItemAgentAction)
+            .filter(isItemCreatingAgentAction)
             .filter(a => a.status === 'applied');
         const createCollectionsToUndo = actionsInRemovedRuns
             .filter(isCreateCollectionAgentAction)

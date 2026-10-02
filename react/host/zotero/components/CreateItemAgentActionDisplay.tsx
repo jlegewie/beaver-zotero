@@ -19,7 +19,9 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveItemReference } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
 import {
-    CreateItemAgentAction,
+    ItemCreatingAgentAction,
+    isImportItemAgentAction,
+    itemActionExternalId,
     ackAgentActionsAtom,
     setAgentActionsToErrorAtom,
     rejectAgentActionAtom,
@@ -27,6 +29,10 @@ import {
 } from '../../../agents/agentActions';
 import { AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
+import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { executeImportItemActions, undoImportItemActions } from '../../../utils/importItemActions';
+import { importActionReference } from '../../../utils/importItemDisplay';
 import {
     annotationBusyAtom,
     annotationPanelStateAtom,
@@ -35,7 +41,7 @@ import {
     setAnnotationPanelStateAtom,
     toggleAnnotationPanelVisibilityAtom
 } from '../../../atoms/messageUIState';
-import { markExternalReferenceImportedAtom } from '../../../atoms/externalReferences';
+import { markExternalReferenceDeletedAtom, markExternalReferenceImportedAtom } from '../../../atoms/externalReferences';
 import { currentThreadIdAtom } from '../../../atoms/threads';
 import { ToolDisplayFooter } from '../../../components/messages/ToolDisplayFooter';
 import AgentActionItemButtons from './AgentActionItemButtons';
@@ -44,11 +50,13 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 
 interface CreateItemListItemProps {
-    action: CreateItemAgentAction;
+    action: ItemCreatingAgentAction;
+    /** The reference the action stands for (an import_item carries none of its own). */
+    reference: ExternalReference;
     isBusy: boolean;
-    onApply: (action: CreateItemAgentAction) => Promise<void>;
-    onReject: (action: CreateItemAgentAction) => void;
-    onExistingMatch: (action: CreateItemAgentAction, itemRef: ZoteroItemReference) => void;
+    onApply: (action: ItemCreatingAgentAction) => Promise<void>;
+    onReject: (action: ItemCreatingAgentAction) => void;
+    onExistingMatch: (action: ItemCreatingAgentAction, itemRef: ZoteroItemReference) => void;
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;
@@ -57,6 +65,7 @@ interface CreateItemListItemProps {
 
 const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
     action,
+    reference,
     isBusy,
     onApply,
     onReject,
@@ -66,7 +75,7 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
     onMouseLeave,
     className,
 }) => {
-    const item = action.proposed_data.item;
+    const item = reference;
 
     const handleApply = useCallback(() => {
         if (isBusy) return;
@@ -134,18 +143,29 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
             </div>
             <AgentActionItemButtons
                 action={action}
+                item={reference}
                 isBusy={isBusy}
                 onApply={handleApply}
                 onReject={handleReject}
-                onExistingMatch={handleExistingMatch}
+                // An import_item never adopts an existing item: the card shows
+                // it as already in the library, and nothing is acknowledged.
+                onExistingMatch={isImportItemAgentAction(action) ? undefined : handleExistingMatch}
             />
         </div>
     );
 };
 
+/**
+ * A failed action the user can retry or dismiss. An import that found its work
+ * already in the library is settled: the row offers the existing item instead.
+ */
+function isRetryable(action: ItemCreatingAgentAction): boolean {
+    return action.status === 'error' && action.error_details?.error_code !== 'already_in_library';
+}
+
 interface CreateItemAgentActionDisplayProps {
     runId: string;
-    actions: CreateItemAgentAction[];
+    actions: ItemCreatingAgentAction[];
 }
 
 /**
@@ -185,9 +205,16 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
+    const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
     // Active thread ID — used to stamp the background PDF fetch so the
     // attachment_resolved ws event can route back to the live agent run.
     const threadId = useAtomValue(currentThreadIdAtom);
+    const referenceMapping = useAtomValue(externalReferenceMappingAtom);
+    const referenceFor = useCallback((action: ItemCreatingAgentAction): ExternalReference => (
+        isImportItemAgentAction(action)
+            ? importActionReference(action.proposed_data, referenceMapping)
+            : action.proposed_data.item
+    ), [referenceMapping]);
 
     // Panel state management
     const togglePanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
@@ -198,7 +225,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
     // Compute overall state of all items
     const somePending = actions.some((action) => action.status === 'pending');
-    const someErrors = actions.some((action) => action.status === 'error');
+    const someErrors = actions.some(isRetryable);
     const appliedCount = actions.filter((action) => action.status === 'applied').length;
     const rejectedCount = actions.filter((action) => action.status === 'rejected' || action.status === 'undone').length;
     const pendingCount = actions.filter((action) => action.status === 'pending').length;
@@ -214,7 +241,10 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
     /**
      * Handle existing library match - auto-acknowledge the action
      */
-    const handleExistingMatch = useCallback(async (action: CreateItemAgentAction, itemRef: ZoteroItemReference) => {
+    const handleExistingMatch = useCallback(async (action: ItemCreatingAgentAction, itemRef: ZoteroItemReference) => {
+        // An import_item never adopts an existing item: acknowledging it would
+        // make undo erase the user's own item.
+        if (isImportItemAgentAction(action)) return;
         // Prevent duplicate auto-acknowledges
         if (autoAcknowledgedRef.current.has(action.id)) {
             return;
@@ -224,8 +254,9 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         logger(`handleExistingMatch: Auto-acknowledging action ${action.id} with existing item ${itemRef.library_id}-${itemRef.zotero_key}`, 1);
 
         // Update external reference cache
-        if (action.proposed_data.item.source_id) {
-            markExternalReferenceImported(action.proposed_data.item.source_id, itemRef);
+        const externalId = itemActionExternalId(action);
+        if (externalId) {
+            markExternalReferenceImported(externalId, itemRef);
         }
 
         // Acknowledge the action with the existing item reference.
@@ -249,30 +280,71 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
     /**
      * Apply a single create item action
      */
-    const handleApplyItem = useCallback(async (action: CreateItemAgentAction) => {
+    /**
+     * Create the item for one import_item action: resolved at this click, written
+     * into the library being viewed. A work already in the library fails the
+     * action (nothing is adopted); the card then shows it as already there.
+     */
+    const applyImportItems = useCallback(async (actions: ItemCreatingAgentAction[]): Promise<AckActionLink[]> => {
+        const batch = await executeImportItemActions(actions, {
+            runId,
+            threadId: threadId ?? undefined,
+        });
+        for (const failure of batch.failures) {
+            const existing = failure.errorDetails?.existing_item as ZoteroItemReference | undefined;
+            const externalId = itemActionExternalId(failure.action);
+            if (failure.errorDetails?.error_code === 'already_in_library' && existing && externalId) {
+                markExternalReferenceImported(externalId, existing);
+            }
+            setAgentActionsToError([failure.action.id], failure.error, failure.errorDetails);
+        }
+        return batch.successes.map((success) => {
+            const externalId = itemActionExternalId(success.action);
+            if (externalId) {
+                markExternalReferenceImported(externalId, {
+                    library_id: success.result.library_id,
+                    zotero_key: success.result.zotero_key,
+                    library_ref: success.result.library_ref,
+                });
+            }
+            return { action_id: success.action.id, result_data: success.result } as AckActionLink;
+        });
+    }, [markExternalReferenceImported, runId, setAgentActionsToError, threadId]);
+
+    /**
+     * Apply a single create item action
+     */
+    const handleApplyItem = useCallback(async (action: ItemCreatingAgentAction) => {
         setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
 
         try {
-            // Create the item in Zotero with full post-processing.
-            // applyCreateItemData handles library/collection resolution internally.
-            // Thread action/run/thread IDs so the background PDF fetch can emit
-            // attachment_resolved back to this thread on completion.
-            const result: CreateItemResultData = await applyCreateItemData(action.proposed_data, {
-                actionId: action.id,
-                runId,
-                threadId: threadId ?? undefined,
-            });
+            let result: CreateItemResultData;
+            if (isImportItemAgentAction(action)) {
+                const [link] = await applyImportItems([action]);
+                if (!link) return;
+                result = link.result_data as CreateItemResultData;
+            } else {
+                // Create the item in Zotero with full post-processing.
+                // applyCreateItemData handles library/collection resolution internally.
+                // Thread action/run/thread IDs so the background PDF fetch can emit
+                // attachment_resolved back to this thread on completion.
+                result = await applyCreateItemData(action.proposed_data, {
+                    actionId: action.id,
+                    runId,
+                    threadId: threadId ?? undefined,
+                });
+
+                // Update external reference cache
+                if (action.proposed_data.item.source_id) {
+                    markExternalReferenceImported(action.proposed_data.item.source_id, {
+                        library_id: result.library_id,
+                        zotero_key: result.zotero_key,
+                        library_ref: result.library_ref,
+                    });
+                }
+            }
 
             logger(`handleApplyItem: created item ${action.id}: ${JSON.stringify(result)}`, 1);
-
-            // Update external reference cache
-            if (action.proposed_data.item.source_id) {
-                markExternalReferenceImported(action.proposed_data.item.source_id, {
-                    library_id: result.library_id,
-                    zotero_key: result.zotero_key,
-                    library_ref: result.library_ref,
-                });
-            }
 
             // Sync the newly created item to backend
             await ensureItemSynced(result.library_id, result.zotero_key);
@@ -303,7 +375,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         } finally {
             setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
         }
-    }, [ackAgentActions, groupId, markExternalReferenceImported, runId, threadId, setBusyState, setAgentActionsToError]);
+    }, [ackAgentActions, applyImportItems, groupId, markExternalReferenceImported, runId, threadId, setBusyState, setAgentActionsToError]);
 
     /**
      * Apply all pending items
@@ -315,7 +387,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
         try {
             const actionsToApply = actions.filter(
-                action => action.status === 'pending' || action.status === 'error'
+                action => action.status === 'pending' || isRetryable(action)
             );
 
             if (actionsToApply.length === 0) {
@@ -332,10 +404,21 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             // Maximum 3 concurrent imports to prevent overwhelming the system
             const BATCH_SIZE = 3;
             const applyResults: (AckActionLink | null)[] = [];
-            
-            for (let i = 0; i < actionsToApply.length; i += BATCH_SIZE) {
-                const batch = actionsToApply.slice(i, i + BATCH_SIZE);
-                logger(`handleApplyAll: Processing batch ${i / BATCH_SIZE + 1} of ${Math.ceil(actionsToApply.length / BATCH_SIZE)} (${batch.length} items)`, 1);
+
+            // import_item actions resolve and write in one plugin-realm batch.
+            const importActions = actionsToApply.filter(isImportItemAgentAction);
+            if (importActions.length > 0) {
+                try {
+                    applyResults.push(...await applyImportItems(importActions));
+                } finally {
+                    importActions.forEach((action) => setBusyState({ key: groupId, annotationId: action.id, isBusy: false }));
+                }
+            }
+            const legacyActions = actionsToApply.filter((action) => !isImportItemAgentAction(action));
+
+            for (let i = 0; i < legacyActions.length; i += BATCH_SIZE) {
+                const batch = legacyActions.slice(i, i + BATCH_SIZE);
+                logger(`handleApplyAll: Processing batch ${i / BATCH_SIZE + 1} of ${Math.ceil(legacyActions.length / BATCH_SIZE)} (${batch.length} items)`, 1);
                 
                 const batchResults = await Promise.all(
                     batch.map(async (action) => {
@@ -343,6 +426,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                             // Create the item in Zotero with full post-processing.
                             // Pass action/run/thread IDs so the background PDF
                             // fetch can emit attachment_resolved back to this thread.
+                            if (isImportItemAgentAction(action)) return null;
                             const result: CreateItemResultData = await applyCreateItemData(action.proposed_data, {
                                 actionId: action.id,
                                 runId,
@@ -423,17 +507,23 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             logger(`handleApplyAll: unexpected error: ${error}`, 1);
             setPanelState({ key: groupId, updates: { isApplying: false } });
         }
-    }, [ackAgentActions, actions, groupId, markExternalReferenceImported, runId, threadId, setPanelState, setAgentActionsToError, setBusyState]);
+    }, [ackAgentActions, actions, applyImportItems, groupId, markExternalReferenceImported, runId, threadId, setPanelState, setAgentActionsToError, setBusyState]);
 
     /**
      * Handle rejecting an item (for pending items) or deleting (for applied items)
      */
-    const handleReject = useCallback(async (action: CreateItemAgentAction) => {
+    const handleReject = useCallback(async (action: ItemCreatingAgentAction) => {
         setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
         try {
             if (action.status !== 'applied' || !action.result_data?.zotero_key) {
                 // Item not created yet - just mark as rejected
                 rejectAgentAction(action.id);
+            } else if (isImportItemAgentAction(action)) {
+                const batch = await undoImportItemActions([action]);
+                if (batch.failures.length > 0) throw new Error(batch.failures[0].error);
+                const externalId = itemActionExternalId(action);
+                if (externalId) markExternalReferenceDeleted(externalId);
+                undoAgentAction(action.id);
             } else {
                 // Delete the item from Zotero. Resolve through the device-portable
                 // library_ref so a group item created on another computer maps to the
@@ -466,14 +556,14 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         } finally {
             setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
         }
-    }, [groupId, rejectAgentAction, setBusyState, setAgentActionsToError, undoAgentAction]);
+    }, [groupId, markExternalReferenceDeleted, rejectAgentAction, setBusyState, setAgentActionsToError, undoAgentAction]);
 
     /**
      * Reject all pending items
      */
     const handleRejectAll = useCallback(() => {
         const pendingActions = actions.filter(
-            action => action.status === 'pending' || action.status === 'error'
+            action => action.status === 'pending' || isRetryable(action)
         );
         pendingActions.forEach(action => {
             rejectAgentAction(action.id);
@@ -490,15 +580,19 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         return DocumentValidationIcon;
     };
 
-    // Generate button text parts (bold label + regular detail)
+    // Generate button text parts (bold label + regular detail). A count that
+    // covers only some of the listed rows says so ("1 of 3 Items").
+    const itemCount = (count: number) => (count === totalItems
+        ? `${count} Item${count === 1 ? '' : 's'}`
+        : `${count} of ${totalItems} Item${totalItems === 1 ? '' : 's'}`);
     const getButtonTextParts = (): { label: string; detail: string } => {
         if (pendingCount > 0) {
-            return { label: 'Import', detail: `${pendingCount} Item${pendingCount === 1 ? '' : 's'}` };
+            return { label: 'Import', detail: itemCount(pendingCount) };
         }
         if (allErrors) {
-            return { label: 'Error importing', detail: `${totalItems} Item${totalItems === 1 ? '' : 's'}` };
+            return { label: 'Error importing', detail: itemCount(totalItems) };
         }
-        return { label: 'Imported', detail: `${appliedCount} Item${appliedCount === 1 ? '' : 's'}` };
+        return { label: 'Imported', detail: itemCount(appliedCount) };
     };
 
     // Determine when results can be toggled
@@ -553,6 +647,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                                 variant="ghost-secondary"
                                 iconClassName="font-color-red"
                                 onClick={handleRejectAll}
+                                ariaLabel="Reject all"
                             />
                         </Tooltip>
                         <Tooltip content="Add all items" showArrow singleLine>
@@ -561,6 +656,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                                 variant="ghost-secondary"
                                 iconClassName="font-color-green scale-14"
                                 onClick={handleApplyAll}
+                                ariaLabel="Add all items"
                             />
                         </Tooltip>
                     </div>
@@ -574,6 +670,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                         <CreateItemListItem
                             key={action.id}
                             action={action}
+                            reference={referenceFor(action)}
                             isBusy={Boolean(busyState[action.id])}
                             onApply={handleApplyItem}
                             onReject={handleReject}
