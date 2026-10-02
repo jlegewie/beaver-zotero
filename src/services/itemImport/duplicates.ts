@@ -44,18 +44,28 @@ export function urlVariants(url: string): string[] {
     return Array.from(variants);
 }
 
+/**
+ * Regular items in `libraryID` whose URL field equals one of `urls`, keyed by
+ * the matched URL. Attachments (snapshots, linked URLs), notes and annotations
+ * are excluded: they are not bibliographic records, and a child attachment's
+ * trashed parent would not show up in `deletedItems` for the child itself.
+ */
 async function findByUrl(urls: string[], libraryID: number): Promise<Map<string, number>> {
     const found = new Map<string, number>();
     if (!urls.length) return found;
     const fieldID = Zotero.ItemFields.getID('url');
     if (!fieldID) return found;
+    const noteTypeID = Zotero.ItemTypes.getID('note') || 28;
+    const attachmentTypeID = Zotero.ItemTypes.getID('attachment') || 3;
+    const annotationTypeID = Zotero.ItemTypes.getID('annotation') || 1;
     const placeholders = urls.map(() => '?').join(', ');
     const sql = 'SELECT items.itemID, itemDataValues.value FROM items '
         + 'JOIN itemData ON itemData.itemID = items.itemID '
         + 'JOIN itemDataValues ON itemDataValues.valueID = itemData.valueID '
         + `WHERE items.libraryID = ? AND itemData.fieldID = ? AND itemDataValues.value IN (${placeholders}) `
+        + 'AND items.itemTypeID NOT IN (?, ?, ?) '
         + 'AND items.itemID NOT IN (SELECT itemID FROM deletedItems)';
-    await Zotero.DB.queryAsync(sql, [libraryID, fieldID, ...urls], {
+    await Zotero.DB.queryAsync(sql, [libraryID, fieldID, ...urls, noteTypeID, attachmentTypeID, annotationTypeID], {
         onRow: (row: any) => {
             const value = row.getResultByIndex(1);
             if (!found.has(value)) found.set(value, row.getResultByIndex(0));
