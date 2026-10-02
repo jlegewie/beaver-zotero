@@ -36,6 +36,7 @@ import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { isLibraryScopeKnown } from '../libraryScope';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isApiError, isSessionExpiredError, isSessionRefreshError, isServerError } from '@beaver/agent-core/types/apiErrors';
+import { UntagBatcher } from './untagBatcher';
 import type {
     JobExecutionContext,
     JobExecutor,
@@ -80,6 +81,13 @@ const PROBE_FIRST_HASH_LIMIT = 1_000;
 /** Wait after the server reports a cleanup ref failed on its side. */
 const UNTAG_FAILED_RETRY_MS = 5_000;
 
+/** An API error that rejects the request itself; repeating it cannot succeed. */
+function isTerminalApiError(error: unknown): boolean {
+    if (!isApiError(error)) return false;
+    return TERMINAL_CODES.has(error.code ?? `http_${error.status}`)
+        || error.status === 400 || error.status === 413;
+}
+
 export interface FulltextUpsertExecutorOptions {
     /** Called with each requirements response an upsert reads. */
     onRequirements?: (requirements: IndexRequirements) => void;
@@ -115,8 +123,13 @@ export class FulltextUpsertExecutor implements JobExecutor {
     private disposed = false;
     /** Consecutive uploads the hash-only probe could not complete. */
     private payloadUploadStreak = 0;
+    /** Shares `POST /index/delete` requests between concurrent cleanup jobs. */
+    private untagBatcher?: UntagBatcher;
 
-    dispose(): void { this.disposed = true; }
+    dispose(): void {
+        this.disposed = true;
+        this.untagBatcher?.close();
+    }
 
     constructor(
         private readonly api: SearchIndexApiClient = searchIndexApiClient,
@@ -549,7 +562,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
                 }
             }
         }
-        const outcome = await this.untagOne({
+        const outcome = await this.untagOne(accountId, {
             scope_ref: scopeRef,
             zotero_key: record.zoteroKey,
             doc_hash: hash,
@@ -572,15 +585,25 @@ export class FulltextUpsertExecutor implements JobExecutor {
             && record.payload?.index_local_id === getZoteroUserIdentifier().localUserKey;
     }
 
-    private async untagOne(ref: IndexDocumentRef, storedLocalId: string | undefined, accessChanged: () => boolean): Promise<JobOutcome> {
+    private async untagOne(
+        accountId: string,
+        ref: IndexDocumentRef,
+        storedLocalId: string | undefined,
+        accessChanged: () => boolean,
+    ): Promise<JobOutcome> {
         const { localUserKey } = getZoteroUserIdentifier();
+        this.untagBatcher ??= new UntagBatcher(this.api, isTerminalApiError);
         try {
-            const response = await this.api.untag(storedLocalId ?? localUserKey, [ref]);
-            const result = response.results[0];
+            const { result, batchFailed } = await this.untagBatcher.untag(
+                accountId, storedLocalId ?? localUserKey, ref, accessChanged);
             if (!result || result.outcome === 'failed') {
                 // The server reports a ref it could not process (a database or
                 // connection failure) as `failed`; nothing is wrong with the ref.
-                return this.remoteRetry('index_untag_failed', UNTAG_FAILED_RETRY_MS);
+                // Only a batch that failed throughout pauses the whole lane.
+                return batchFailed
+                    ? this.remoteRetry('index_untag_failed', UNTAG_FAILED_RETRY_MS)
+                    : { kind: 'retry', error: 'index_untag_failed', countsAsAttempt: false,
+                        retryAfterMs: UNTAG_FAILED_RETRY_MS };
             }
             if (result.outcome === 'busy') {
                 const retryAfterMs = Math.max(1, result.retry_after_seconds ?? 1) * 1_000;
@@ -687,7 +710,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
                 countsAsAttempt: false, retryAfterMs: 60_000,
             };
         }
-        if (TERMINAL_CODES.has(code) || error.status === 400 || error.status === 413) {
+        if (isTerminalApiError(error)) {
             if (record && row) {
                 return this.terminal(record, row, code, error.message, ctx, accessChanged);
             }

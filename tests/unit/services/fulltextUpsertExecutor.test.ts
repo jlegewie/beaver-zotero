@@ -282,6 +282,103 @@ describe('FulltextUpsertExecutor', () => {
         expect(api.untag).toHaveBeenCalledWith('OLDDEVICE', [{ scope_ref: 'g123', zotero_key: record.zoteroKey, doc_hash: 'a'.repeat(64) }]);
     });
 
+    describe('batched cleanup', () => {
+        const cleanupJob = (id: number, zoteroKey: string, hash: string): BackgroundJobRecord => ({
+            ...record, id, jobType: 'fulltext_untag', zoteroKey,
+            payload: { ...record.payload!, doc_hash: hash, index_account_id: 'account-a',
+                index_scope_ref: 'g123', index_local_id: 'OLDDEVICE' },
+        });
+        const jobs = () => [cleanupJob(101, 'KEYAAAA1', 'b'.repeat(64)), cleanupJob(102, 'KEYBBBB2', 'c'.repeat(64))];
+
+        beforeEach(() => {
+            (Zotero.Beaver as any).account = { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: 'account-a' } } }) };
+        });
+
+        it('shares one delete request between concurrent cleanup jobs', async () => {
+            api.untag.mockImplementation(async (_localId: string, refs: any[]) => ({
+                results: refs.map((ref) => ({ ...ref, outcome: 'untagged' })),
+            }));
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+
+            const outcomes = await Promise.all(jobs().map((job) => executor.execute(job, ctx)));
+
+            expect(outcomes).toEqual([
+                { kind: 'complete', reason: 'index_untagged' },
+                { kind: 'complete', reason: 'index_untagged' },
+            ]);
+            expect(api.untag).toHaveBeenCalledTimes(1);
+            expect(api.untag).toHaveBeenCalledWith('OLDDEVICE', [
+                { scope_ref: 'g123', zotero_key: 'KEYAAAA1', doc_hash: 'b'.repeat(64) },
+                { scope_ref: 'g123', zotero_key: 'KEYBBBB2', doc_hash: 'c'.repeat(64) },
+            ]);
+        });
+
+        it('pauses the lane for a failed ref only when its whole batch failed', async () => {
+            api.untag.mockImplementationOnce(async (_localId: string, refs: any[]) => ({
+                results: refs.map((ref, index) => ({ ...ref, outcome: index === 0 ? 'failed' : 'untagged' })),
+            }));
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+            const [failed, untagged] = await Promise.all(jobs().map((job) => executor.execute(job, ctx)));
+            expect(failed).toMatchObject({ kind: 'retry', error: 'index_untag_failed', countsAsAttempt: false });
+            expect(failed).not.toHaveProperty('laneCooldownMs');
+            expect(untagged).toEqual({ kind: 'complete', reason: 'index_untagged' });
+
+            api.untag.mockImplementationOnce(async (_localId: string, refs: any[]) => ({
+                results: refs.map((ref) => ({ ...ref, outcome: 'failed' })),
+            }));
+            const outcomes = await Promise.all(jobs().map((job) => executor.execute(job, ctx)));
+            for (const outcome of outcomes) {
+                expect(outcome).toMatchObject({ kind: 'retry', error: 'index_untag_failed', laneCooldownMs: expect.any(Number) });
+            }
+        });
+
+        it('keeps valid cleanups when another ref in their batch is rejected', async () => {
+            api.untag.mockImplementation(async (_localId: string, refs: any[]) => {
+                if (refs.some((entry) => entry.zotero_key === 'KEYAAAA1')) {
+                    throw new ApiError(400, 'invalid ref', 'invalid ref', 'invalid_scope_ref');
+                }
+                return { results: refs.map((entry) => ({ ...entry, outcome: 'untagged' })) };
+            });
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+
+            const [rejected, valid] = await Promise.all(jobs().map((job) => executor.execute(job, ctx)));
+
+            expect(rejected).toEqual({ kind: 'complete', reason: 'terminal:invalid_scope_ref' });
+            expect(valid).toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(api.untag).toHaveBeenCalledTimes(3);
+        });
+
+        it('does not send the ref of a job aborted while it waited for its batch', async () => {
+            api.untag.mockImplementation(async (_localId: string, refs: any[]) => ({
+                results: refs.map((entry) => ({ ...entry, outcome: 'untagged' })),
+            }));
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+            const abort = new AbortController();
+            const [first, second] = jobs();
+
+            const aborted = executor.execute(first, { ...ctx, externalAbortSignal: abort.signal });
+            const kept = executor.execute(second, ctx);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            abort.abort();
+
+            expect(await aborted).toEqual({ kind: 'release', reason: 'access_changed' });
+            expect(await kept).toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(api.untag).toHaveBeenCalledTimes(1);
+            expect(api.untag).toHaveBeenCalledWith('OLDDEVICE', [
+                { scope_ref: 'g123', zotero_key: 'KEYBBBB2', doc_hash: 'c'.repeat(64) },
+            ]);
+        });
+
+        it('releases waiting cleanup jobs when the executor is disposed', async () => {
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+            const pending = executor.execute(jobs()[0], ctx);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            executor.dispose();
+            expect(await pending).toEqual({ kind: 'release', reason: 'access_changed' });
+            expect(api.untag).not.toHaveBeenCalled();
+        });
+    });
+
     it.each([false, true])('transfers unchanged content to another account after an ambiguous upload: %s', async (ambiguous) => {
         let accountId = 'account-a';
         Zotero.Beaver.account = { getGeneration: () => 1,
