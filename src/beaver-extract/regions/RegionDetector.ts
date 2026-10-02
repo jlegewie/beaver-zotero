@@ -99,6 +99,10 @@ export interface LineRouting {
     flags: number[];
     /** Index of the candidate each line is routed to, or -1 (see `routeLines`). */
     routes: number[];
+    /** The page's horizontal rules (row separators of tables). */
+    rules?: Rect[];
+    /** The page's vertical rules (row separators of sideways tables). */
+    verticalRules?: Rect[];
 }
 
 export interface DetectRegionsOptions {
@@ -147,7 +151,8 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
         );
         const rules = primitives.filter((p) => p.kind === "hrule").map((p) => p.bbox);
         const routes = routeLines(routed, flags, candidates, rules);
-        if (opts.route) detection.routing = { lines: routed, flags, routes };
+        const verticalRules = primitives.filter((p) => p.kind === "vrule").map((p) => p.bbox);
+        if (opts.route) detection.routing = { lines: routed, flags, routes, rules, verticalRules };
         if (opts.includeLines) {
             detection.lines = routed.map((l, i) => [
                 ...l.bbox.map((v) => Math.round(v * 10) / 10),

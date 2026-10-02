@@ -261,6 +261,415 @@ describe("regionItemsForPage", () => {
     });
 });
 
+describe("regionItemsForPage tables", () => {
+    /** Items and remaining page for one table region over the page. */
+    const table = (p: RawPageDataDetailed, prose: (text: string) => boolean = () => false, rules: Rect[] = [], verticalRules: Rect[] = []) => {
+        const d = detection(p, [["table", [60, 60, 560, 700]]], prose);
+        d.routing!.rules = rules;
+        d.routing!.verticalRules = verticalRules;
+        return regionItemsForPage(p, d);
+    };
+
+    it("joins the lines of a wrapped cell and the visual rows of one table row", () => {
+        const p = page([
+            line(100, [[72, 140, "Planning"], [200, 498, "Change can be controlled by senior managers in a"]]),
+            // A full line above: the next word would not have fitted.
+            line(112, [[200, 470, "top-down fashion through formal plans and"]]),
+            // A line that ended mid-sentence runs on into a lower-case line.
+            line(124, [[200, 330, "monitoring of progress."]]),
+            line(136, [[72, 160, "Communication"], [200, 496, "Lateral and informal communication between"]]),
+            line(148, [[200, 400, "peers is the primary vehicle."]]),
+        ]);
+        const { items } = table(p);
+        expect(rowTexts(items[0])).toEqual([
+            "Planning | Change can be controlled by senior managers in a top-down fashion through formal plans and monitoring of progress.",
+            "Communication | Lateral and informal communication between peers is the primary vehicle.",
+        ]);
+        expect(items[0].columns).toBe(2);
+        // The cell's box covers its lines.
+        expect(items[0].rows[0][1].bbox.t).toBe(100);
+        expect(items[0].rows[0][1].bbox.b).toBe(135);
+    });
+
+    it("joins a word broken at a line end and keeps a cell's next paragraph with its row", () => {
+        const p = page([
+            line(100, [[72, 140, "Planning"], [200, 330, "Change is managed by"], [400, 498, "Senior managers set the"]]),
+            line(112, [[200, 330, "plans of senior manage-"], [400, 470, "direction of change."]]),
+            // A capital after a line that ended a sentence: the cell's next paragraph.
+            line(124, [[200, 300, "ment teams."], [400, 498, "Practice follows from it."]]),
+        ]);
+        expect(rowTexts(table(p).items[0])).toEqual([
+            "Planning | Change is managed by plans of senior management teams. | Senior managers set the direction of change. Practice follows from it.",
+        ]);
+    });
+
+    it("never joins rows of values, separate labels or rows across a rule", () => {
+        const values = page([
+            line(100, [[72, 150, "Age"], [250, 320, "0.23"], [400, 470, "0.19"]]),
+            line(112, [[250, 320, "(0.05)"], [400, 470, "(0.04)"]]),
+            line(124, [[72, 150, "Income"], [250, 320, "1.10"], [400, 470, "0.98"]]),
+        ]);
+        expect(rowTexts(table(values).items[0])).toEqual(["Age | 0.23 | 0.19", "(0.05) | (0.04)", "Income | 1.10 | 0.98"]);
+
+        // Names filling a fitted column look like wrapped lines but start new cells.
+        const names = page([
+            line(100, [[72, 160, "United Kingdom"], [250, 300, "London"]]),
+            line(112, [[72, 110, "France"], [250, 290, "Paris"]]),
+            line(124, [[72, 150, "Germany"], [250, 290, "Berlin"]]),
+        ]);
+        expect(table(names).items[0].rows).toHaveLength(3);
+        // A label starting in lower case does not pull the values under it into the row above.
+        const reagents = page([
+            line(100, [[72, 170, "2-Mercaptoethanol"], [250, 290, "500 µl"]]),
+            line(112, [[72, 100, "bFGF"], [250, 285, "25 µl"]]),
+        ]);
+        expect(table(reagents).items[0].rows).toHaveLength(2);
+
+        const ruled = page([
+            line(100, [[72, 140, "Planning"], [200, 498, "Change can be controlled by senior managers in a"]]),
+            line(112, [[200, 470, "top-down fashion through formal plans and"]]),
+        ]);
+        expect(table(ruled).items[0].rows).toHaveLength(1);
+        expect(table(ruled, () => false, [[195, 111.5, 500, 112]]).items[0].rows).toHaveLength(2);
+        // A label set sideways among upright cells does not hide the rule.
+        const withSidewaysLabel = page([
+            line(70, [[62, 70, "Stage"]], 90),
+            line(100, [[72, 140, "Planning"], [200, 498, "Change can be controlled by senior managers in a"]]),
+            line(112, [[200, 470, "top-down fashion through formal plans and"]]),
+        ]);
+        const sideways = table(withSidewaysLabel, () => false, [[195, 111.5, 500, 112]]).items[0].rows;
+        expect(sideways.find((r) => r.some((c) => c.text.startsWith("Change")))!.some((c) => c.text.includes("top-down"))).toBe(false);
+    });
+
+    it("joins rows by the evidence of their cells", () => {
+        const texts = (p: RawPageDataDetailed) => rowTexts(table(p).items[0]);
+        // A word broken at the line end joins its rest, though neither line is full.
+        expect(
+            texts(
+                page([
+                    line(100, [[72, 140, "Planning and"], [200, 290, "Change is manage-"]]),
+                    line(112, [[72, 110, "control"], [200, 270, "ment of plans."]]),
+                    line(124, [[72, 140, "Monitoring"], [200, 400, "Senior managers track the change."]]),
+                ]),
+            ),
+        ).toEqual(["Planning and control | Change is management of plans.", "Monitoring | Senior managers track the change."]);
+        // A new cell in the first column starts a row, even beside a wrapping cell.
+        expect(
+            texts(
+                page([
+                    line(100, [[72, 150, "Plans are set."], [200, 400, "Senior managers set the direction of the"]]),
+                    line(112, [[72, 130, "Monitoring"], [200, 300, "change in the firm."]]),
+                ]),
+            ),
+        ).toHaveLength(2);
+        // Cells of one row ending on different lines: the shorter row continues.
+        expect(
+            texts(
+                page([
+                    line(100, [[72, 140, "Wamala et al."], [200, 280, "292 patients and"], [330, 415, "Education related"]]),
+                    line(112, [[200, 265, "controls (all"], [330, 390, "inversely to"]]),
+                    line(124, [[72, 150, "Matthews et al."], [200, 250, "401 women"], [330, 415, "Education showed"]]),
+                ]),
+            ),
+        ).toEqual(["Wamala et al. | 292 patients and controls (all | Education related inversely to", "Matthews et al. | 401 women | Education showed"]);
+        // A group label wrapped onto a line of its own.
+        expect(
+            texts(
+                page([
+                    line(100, [[72, 250, "Average hours of direct teaching or"]]),
+                    line(112, [[72, 190, "supervision of residents"]]),
+                    line(124, [[72, 330, "Community hospital, university affiliated program"], [400, 440, "1.1"], [480, 520, "0.6"]]),
+                ]),
+            ),
+        ).toEqual(["Average hours of direct teaching or supervision of residents", "Community hospital, university affiliated program | 1.1 | 0.6"]);
+        // The cell's next sentence after a full line that ended one.
+        expect(
+            texts(
+                page([
+                    line(100, [[72, 140, "Sun (2020)"], [200, 400, "Travel by car to reach locations and do activities."]]),
+                    line(112, [[200, 360, "Government can install levees."]]),
+                    line(124, [[72, 140, "Toft (2011)"], [200, 380, "Fishers are aggregated into port groups."]]),
+                ]),
+            ),
+        ).toEqual([
+            "Sun (2020) | Travel by car to reach locations and do activities. Government can install levees.",
+            "Toft (2011) | Fishers are aggregated into port groups.",
+        ]);
+    });
+
+    it("never joins lines far apart, however spaced the table's rows", () => {
+        // Two rows only: their spacing is the one pitch the table shows, not its line spacing.
+        const p = page([
+            line(100, [[72, 140, "Planning"], [200, 498, "Change can be controlled by senior managers in a"]]),
+            line(300, [[200, 470, "top-down fashion through formal plans and"]]),
+        ]);
+        expect(table(p).items[0].rows).toHaveLength(2);
+    });
+
+    it("counts text left out between the lines of one joined row", () => {
+        const lines = [
+            line(100, [[72, 140, "Planning"], [200, 498, "Change can be controlled by senior managers in a"]]),
+            line(112, [[200, 498, "Running text the routing left in the prose, set here."]]),
+            line(124, [[200, 470, "top-down fashion through formal plans and"]]),
+        ];
+        const out = table(page(lines), (t) => t.startsWith("Running"));
+        expect(out.items).toEqual([]);
+        expect(allText(out.page)).toEqual(lines.map((l) => l.text));
+    });
+
+    it("honours row rules in a sideways table", () => {
+        // The upright table of the rule case, turned to read down the page: an upright
+        // line at y covers page x from 600 - y - 11 to 600 - y, its text running down.
+        const sideways = (y: number, y0: number, y1: number, text: string): RawLineDetailed => {
+            const x = 600 - y - 11;
+            const step = (y1 - y0) / text.length;
+            const font = { name: "Times-Roman", family: "Times", weight: "normal", style: "normal", size: BS };
+            return {
+                wmode: 0,
+                bbox: { l: x, t: y0, r: x + 11, b: y1, origin: "top-left" },
+                font,
+                x,
+                y: y0,
+                text,
+                rotation: 90,
+                chars: [...text].map((c, i) => ({ c, quad: [], bbox: { l: x, t: y0 + i * step, r: x + 11, b: y0 + (i + 1) * step, origin: "top-left" } })),
+                spans: [{ start: 0, font }],
+            } as unknown as RawLineDetailed;
+        };
+        const p = page([
+            sideways(100, 72, 140, "Planning"),
+            sideways(100, 200, 498, "Change can be controlled by senior managers in a"),
+            sideways(112, 200, 470, "top-down fashion through formal plans and"),
+        ]);
+        expect(table(p).items[0].rows).toHaveLength(1);
+        expect(table(p, () => false, [], [[488, 195, 488.5, 500]]).items[0].rows).toHaveLength(2);
+    });
+
+    it("starts a row at a new sentence in the first column", () => {
+        const p = page([
+            line(100, [[72, 240, "Managers set the strategy for the firm."], [300, 540, "They decide which markets the firm will enter."]]),
+            line(112, [[72, 240, "Employees carry out the daily work there."], [300, 540, "They report progress to their managers weekly."]]),
+        ]);
+        expect(rowTexts(table(p).items[0])).toEqual([
+            "Managers set the strategy for the firm. | They decide which markets the firm will enter.",
+            "Employees carry out the daily work there. | They report progress to their managers weekly.",
+        ]);
+    });
+
+    it("honours row rules in an upside-down table", () => {
+        // The upright table of the rule case, turned 180 degrees on the page.
+        const H = 800;
+        const turned = (y: number, cells: Cell[]) => line(H - y - 11, cells.map(([x0, x1, t]): Cell => [612 - x1, 612 - x0, t]).reverse(), 180);
+        const p = page([
+            turned(100, [[72, 140, "Planning"], [200, 498, "Change can be controlled by senior managers in a"]]),
+            turned(112, [[200, 470, "top-down fashion through formal plans and"]]),
+        ]);
+        expect(table(p).items[0].rows).toHaveLength(1);
+        expect(table(p, () => false, [[112, H - 112, 417, H - 111.5]]).items[0].rows).toHaveLength(2);
+    });
+
+    it("keeps one-line rows of a list apart, and lines set apart from their cell", () => {
+        const fitted = (x: number, t: string): Cell => [x, x + 5.5 * t.length, t];
+        const list = page(
+            ["Concept|Search term", "cultural capital|‘cultural*capital*’ or ‘capital*cultural’", "economic capital|‘economic*capital*’ or ‘capital*economic’", "social capital|‘social*capital*’ or ‘capital*social’"].map((r, i) => {
+                const [a, b] = r.split("|");
+                return line(100 + 12 * i, [fitted(72, a), fitted(200, b)]);
+            }),
+        );
+        expect(table(list).items[0].rows).toHaveLength(4);
+        // Two lists set side by side: an entry missing on the right does not make the row ragged.
+        const symbols = page([
+            line(100, [[72, 90, "Pe"], [115, 200, "Peclet number"], [300, 310, "h"], [335, 440, "angle around the pin"]]),
+            line(112, [[72, 90, "q00"], [115, 270, "heat flux at any axial section."]]),
+            line(124, [[72, 90, "Re"], [115, 200, "Reynolds number"], [300, 310, "e"], [335, 440, "dissipation rate"]]),
+        ]);
+        expect(table(symbols).items[0].rows).toHaveLength(3);
+
+        const wrapped = (second: Cell, y = 112) =>
+            page([
+                line(100, [[72, 140, "Planning"], [200, 498, "Change can be controlled by senior managers in a"]]),
+                line(y, [second]),
+                line(170, [[72, 140, "Control"], [200, 498, "Monitoring of change by ticking activities off charts."]]),
+            ]);
+        expect(table(wrapped([200, 470, "top-down fashion through formal plans."])).items[0].rows).toHaveLength(2);
+        // Too far below, or indented too far, to be the cell's next line.
+        expect(table(wrapped([200, 470, "top-down fashion through formal plans."], 140)).items[0].rows).toHaveLength(3);
+        expect(table(wrapped([260, 500, "top-down fashion through formal plans."])).items[0].rows).toHaveLength(3);
+    });
+
+    it("starts a row at a new list item even when another column wraps", () => {
+        const p = page([
+            line(100, [[72, 160, "Definition"], [200, 300, "Definition"], [350, 500, "Revenue - Percentage (RP)"]]),
+            line(112, [[72, 160, "for 3+ consecutive"], [200, 300, "over a period of 3"], [350, 500, "Employees - Absolute (EA)"]]),
+            // "years" continues its cell, but "Employees - Percentage" is the next item of a list.
+            line(124, [[72, 100, "years"], [200, 228, "years"], [350, 500, "Employees - Percentage (EP)"]]),
+        ]);
+        expect(table(p).items[0].rows.map((r) => r.map((c) => c.text).join(" | "))).toEqual([
+            "Definition | Definition | Revenue - Percentage (RP)",
+            "for 3+ consecutive | over a period of 3 | Employees - Absolute (EA)",
+            "years | years | Employees - Percentage (EP)",
+        ]);
+    });
+
+    it("takes columns from rows whose cells stand side by side, not from pieces stacked in a row", () => {
+        // Labels set as two short pieces stacked in each row: four pieces but three columns.
+        const stacked = (y: number, a: string, b: string, mean: string, sd: string) => [
+            line(y, [[72, 90, a], [200, 230, mean], [300, 330, sd]]),
+            line(y + 3, [[73, 89, b]]),
+        ];
+        const p = page([
+            ...stacked(100, "Core", "var", "0.003", "0.618"),
+            ...stacked(115, "Ctrl", "var", "1.821", "0.619"),
+            ...stacked(130, "Main", "var", "2.221", "4.698"),
+            line(145, [[72, 120, "Age"], [200, 230, "63.09"], [300, 330, "11.65"]]),
+            line(160, [[72, 120, "Gender"], [200, 230, "0.845"], [300, 330, "0.362"]]),
+        ]);
+        const { items } = table(p);
+        expect(items[0].columns).toBe(3);
+        expect(items[0].rows.slice(-2).map((r) => r.map((c) => c.column))).toEqual([
+            [0, 1, 2],
+            [0, 1, 2],
+        ]);
+    });
+
+    it("takes columns from rows that align, not from a line split at wide word gaps", () => {
+        const p = page([
+            line(100, [[72, 160, "Student (2020)"], [200, 350, "Businesses are tourism operators"], [400, 540, "Operators decrease"]]),
+            // Justified word gaps split one line of the middle column into pieces.
+            line(112, [[200, 240, "Returns;"], [265, 300, "revenue;"], [325, 350, "costs;"], [400, 540, "For all types."]]),
+            line(124, [[72, 160, "Suh (2019)"], [200, 350, "Households travel by car"], [400, 540, "Protection is effective"]]),
+            line(136, [[72, 160, "Sun (2020)"], [200, 350, "Travel by car or transit"], [400, 540, "Results are mixed"]]),
+        ]);
+        const { items } = table(p);
+        expect(items[0].columns).toBe(3);
+        expect(items[0].rows.map((r) => r.map((c) => c.column ?? -1))).toEqual([[0, 1, 2], [-1, -1, -1, -1], [0, 1, 2], [0, 1, 2]]);
+    });
+
+    it("never takes columns from rows whose values sit in different columns", () => {
+        // Centred headers over right-aligned values; each row lacks one of the two values.
+        const p = page([
+            line(100, [[72, 130, "Variable"], [255, 295, "Model 1"], [395, 435, "Model 2"]]),
+            line(115, [[72, 110, "Age"], [300, 320, "0.23"]]),
+            line(130, [[72, 120, "Income"], [400, 460, "123456.789"]]),
+            line(145, [[72, 120, "Female"], [305, 320, "1.5"]]),
+            line(160, [[72, 120, "Married"], [445, 460, "2.1"]]),
+        ]);
+        const { items } = table(p);
+        expect(items[0].columns).toBe(3);
+        const cell = (text: string) => items[0].rows.flat().find((c) => c.text === text)!;
+        expect(cell("123456.789").column).not.toBe(cell("0.23").column ?? -1);
+    });
+
+    it("takes columns from all rows with the most cells, though they do not line up cell by cell", () => {
+        // A matrix whose values sit between its header labels.
+        const p = page([
+            line(100, [[72, 110, "Variable"], [150, 170, "ESG"], [250, 270, "Size"], [350, 370, "Roe"]]),
+            line(115, [[72, 100, "ESG"], [180, 210, "0.204"], [280, 310, "0.154"], [380, 410, "-0.105"]]),
+            line(130, [[72, 100, "Size"], [180, 210, "0.185"], [280, 310, "0.041"], [380, 410, "0.228"]]),
+            line(145, [[72, 100, "Roe"], [180, 210, "0.012"], [280, 310, "0.310"], [380, 410, "0.093"]]),
+        ]);
+        const { items } = table(p);
+        expect(items[0].columns).toBe(4);
+        expect(items[0].rows.map((r) => r.map((c) => c.column))).toEqual(Array.from({ length: 4 }, () => [0, 1, 2, 3]));
+    });
+
+    it("keeps a label column that only the header row spans", () => {
+        const p = page([
+            line(100, [[72, 150, "Variable"], [250, 320, "Model 1"], [400, 470, "Model 2"]]),
+            line(115, [[72, 200, "Free school meals"]]),
+            line(130, [[250, 320, "0.221"], [400, 470, "0.375"]]),
+            line(145, [[72, 200, "Neighbourhood deprivation"]]),
+            line(160, [[250, 320, "0.178"], [400, 470, "0.265"]]),
+        ]);
+        const { items } = table(p);
+        expect(items[0].columns).toBe(3);
+        expect(items[0].rows[2].map((c) => c.column)).toEqual([1, 2]);
+    });
+
+    it("leaves a table without column structure or with its text left in the prose to the prose", () => {
+        // A code listing: one cell per line, the long lines read as running text.
+        const code = [
+            line(100, [[72, 160, "def approx(q):"]]),
+            line(112, [[90, 540, "    return conf.periods[i] * lookup(q, window=conf.window, scatter=True, mask=mask_bits)"]]),
+            line(124, [[90, 200, "    for i in range:"]]),
+            line(136, [[108, 540, "        accumulate(conf.window, q, lookup(q, window=conf.window, scatter=False))"]]),
+            line(148, [[108, 200, "        q.free()"]]),
+        ];
+        const listing = page(code);
+        const isLong = (t: string) => t.length > 60;
+        const out = table(listing, isLong);
+        expect(out.items).toEqual([]);
+        expect(allText(out.page)).toEqual(code.map((l) => l.text));
+
+        // Values whose row labels were read as running text.
+        const stranded = page(
+            [line(100, [[72, 240, "Mother smoked prior to pregnancy"]]), line(112, [[72, 240, "Mother drank during pregnancy"]]), line(124, [[72, 240, "Mother went to mothercraft"]])],
+            [line(100, [[300, 340, "0.318"], [400, 440, "0.273"]]), line(112, [[300, 340, "0.950"], [400, 440, "0.988"]]), line(124, [[300, 340, "0.366"], [400, 440, "0.359"]])],
+            [line(88, [[72, 120, "Variable"], [300, 340, "Model 1"], [400, 440, "Model 2"]]), line(136, [[72, 110, "Total"], [300, 340, "0.501"], [400, 440, "0.512"]])],
+        );
+        expect(table(stranded, (t) => t.startsWith("Mother")).items).toEqual([]);
+
+        // Single lines with one row of two cells: no column structure.
+        const lines = page([
+            line(100, [[72, 77, "{"]]),
+            line(112, [[90, 172, "\"Type\": \"array\","]]),
+            line(124, [[90, 140, "\"Items\": {"]]),
+            line(136, [[108, 178, "\"Name\": \"step\""], [300, 355, "// the step"]]),
+            line(148, [[108, 203, "\"Kind\": \"object\","]]),
+            line(160, [[90, 100, "},"]]),
+            line(172, [[90, 163, "\"Size\": 1024,"]]),
+            line(184, [[72, 77, "}"]]),
+        ]);
+        expect(table(lines).items).toEqual([]);
+
+        // A title alone.
+        expect(table(page([line(100, [[72, 250, "PARAMETER SETTINGS"]])])).items).toEqual([]);
+    });
+
+    it("counts only text within the table's columns as left out of it", () => {
+        // A two-column table took in two lines of the text column beside it; the prose
+        // between them is not text of the table.
+        const rows = Array.from({ length: 30 }, (_, i) => line(100 + 12 * i, [[72, 150, `Characteristic ${i}`], [250, 290, `${i} (4.4)`]]));
+        const beside = Array.from({ length: 30 }, (_, i) =>
+            line(100 + 12 * i, [[318, 548, i === 3 ? "RESULTS" : i === 20 ? "in upper tract in a third of patients." : `patients received the treatment in cycle ${i} of the study`]]),
+        );
+        const strays = new Set(["RESULTS", "in upper tract in a third of patients."]);
+        const out = table(page(rows, beside), (t) => t.startsWith("patients received"));
+        expect(out.items).toHaveLength(1);
+        expect(out.items[0].rows).toHaveLength(30);
+        expect(out.items[0].rows.flat().filter((c) => strays.has(c.text))).toHaveLength(2);
+    });
+
+    it("leaves a one-column listing with lines left in the prose to the prose", () => {
+        const short = (y: number, i: number) => line(y, [[72, 180, `Q${i} = lookup(conf, ${i})`]]);
+        const lines = [
+            ...Array.from({ length: 5 }, (_, i) => short(100 + 12 * i, i)),
+            line(160, [[72, 400, "Accumulate(conf.window, q, lookup(q, window=conf.window))"]]),
+            ...Array.from({ length: 5 }, (_, i) => short(172 + 12 * i, i + 5)),
+        ];
+        const p = page(lines);
+        // Kept whole it is a list; with its long line left out it is a fragment.
+        expect(table(p).items[0].rows).toHaveLength(11);
+        expect(table(p, (t) => t.startsWith("Accumulate")).items).toEqual([]);
+    });
+
+    it("keeps a clean one-column list and a table without text", () => {
+        const list = page([
+            line(100, [[72, 200, "Pre-operative"]]),
+            line(115, [[90, 220, "Beta-blocker therapy"]]),
+            line(130, [[72, 200, "Operative technique"]]),
+            line(145, [[90, 260, "Internal mammary artery use"]]),
+        ]);
+        const { items } = table(list);
+        expect(rowTexts(items[0])).toEqual(["Pre-operative", "Beta-blocker therapy", "Operative technique", "Internal mammary artery use"]);
+        expect(items[0].columns).toBeUndefined();
+
+        const prose = page([line(800, [[72, 540, PROSE]])]);
+        const empty = table(prose);
+        expect(empty.items.map((i) => [i.kind, i.rows])).toEqual([["table", []]]);
+    });
+});
+
 function textItem(index: number, box: Rect, sentences: string[], joinWithNext = false): DocItem {
     const id = `p0:i${index}`;
     const bbox: BoundingBox = { l: box[0], t: box[1], r: box[2], b: box[3], origin: "top-left" };
@@ -285,7 +694,7 @@ function textItem(index: number, box: Rect, sentences: string[], joinWithNext = 
 
 function draft(kind: RegionItemDraft["kind"], box: Rect, rows: string[][] = []): RegionItemDraft {
     const bbox: BoundingBox = { l: box[0], t: box[1], r: box[2], b: box[3], origin: "top-left" };
-    return { kind, bbox, rows: rows.map((r) => r.map((text) => ({ text, bbox }))) };
+    return { kind, region: 0, bbox, rows: rows.map((r) => r.map((text) => ({ text, bbox }))) };
 }
 
 describe("placeRegionItems", () => {

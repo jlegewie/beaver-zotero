@@ -5,9 +5,13 @@
  * Text lines routed to a table, figure or display equation leave the prose:
  * they are removed from the page before paragraph detection and become the
  * region item's text instead.
- * - table: one row per line, cells joined by " | "; each row is a sentence. A
- *   row missing cells keeps an empty slot for each, so values stay under their
- *   column.
+ * - table: one row per table row, cells joined by " | "; each row is a
+ *   sentence. A cell's text wrapped over several lines is one cell, and the
+ *   visual lines of one row are one row (`tableRows`). A row missing cells
+ *   keeps an empty slot for each, so values stay under their column. A region
+ *   that cannot be read as a table (`readsAsTable`: no column structure, or
+ *   much of the text between its rows left in the prose) emits nothing and
+ *   leaves its text in the prose.
  * - formula: the equation's rows; an equation number stays at the end of its row.
  * - picture: label rows, not sentences; rows of bare numbers (axis ticks) are
  *   dropped and the text is capped.
@@ -27,21 +31,25 @@ import type {
     ItemLine,
     RawBlockDetailed,
     RawLine,
+    RawLineDetailed,
     RawPageDataDetailed,
     SentenceItem,
 } from "@beaver/agent-core/extract/types";
 
+import { decideLineBreakHyphen } from "../ParagraphSentenceMapper";
 import { rotateBBox, type RotationAngle } from "../PageRotationNormalizer";
 import type { Rect } from "./geometry";
 import type { RegionClass } from "./model";
 import { sourceLines, type RegionLine } from "./pageSignals";
-import { LINE_FURNITURE, type RegionDetection } from "./RegionDetector";
+import { LINE_CAPTION, LINE_FURNITURE, LINE_SKEWED, type LineRouting, type RegionDetection } from "./RegionDetector";
 
 export type RegionItemKind = "table" | "picture" | "formula";
 
 /** A region item before it is placed in the page's reading order. */
 export interface RegionItemDraft {
     kind: RegionItemKind;
+    /** Index of the detected region (`RegionDetection.candidates`) the item comes from. */
+    region: number;
     /** The region's box, grown to cover the text it absorbed. */
     bbox: BoundingBox;
     /** Rows in reading order; each row's cells left to right. */
@@ -79,7 +87,11 @@ const NUMERIC_ROW_RE = /^[\s\p{N}.,:;%+\-−–—()[\]/×·^*]*$/u;
  * absorb. `detection` must come from `detectRegions(page, …, { route: true })`
  * with a model; a scanned page gets no regions.
  */
-export function regionItemsForPage(page: RawPageDataDetailed, detection: RegionDetection): PageRegionItems {
+export function regionItemsForPage(
+    page: RawPageDataDetailed,
+    detection: RegionDetection,
+    vocabulary?: ReadonlySet<string>,
+): PageRegionItems {
     const routing = detection.routing;
     const regions = detection.candidates;
     const kept = regions.map((r) => r.label !== undefined && r.label !== "other");
@@ -151,21 +163,37 @@ export function regionItemsForPage(page: RawPageDataDetailed, detection: RegionD
         const rot = readingRotation(parts[0]);
         parts.sort((a, b) => readingFrame(a.bbox, rot)[0] - readingFrame(b.bbox, rot)[0]);
         const cells = cellsByRegion.get(region) ?? [];
-        cells.push({ rect, text: parts.map((p) => p.text).join(" "), rot });
+        const lead = firstWordWidth(parts[0], numbered[parts[0].source - 1]);
+        const size = Math.max(...parts.map((p) => p.size));
+        cells.push({ rect, text: parts.map((p) => p.text).join(" "), rot, size, ...(lead !== undefined ? { lead } : {}) });
         cellsByRegion.set(region, cells);
     }
+
+    // Where each visual line ends up: the region holding its text, or -1 for prose.
+    const lineDestination = routing.lines.map((line) => {
+        for (const piece of line.parts ?? [line]) {
+            const d = destination.get(piece.source);
+            if (d !== undefined) return d;
+        }
+        return -1;
+    });
 
     const items: RegionItemDraft[] = [];
     regions.forEach((region, k) => {
         if (!kept[k] || !ITEM_KINDS.has(region.label!)) return;
         const kind = region.label as RegionItemKind;
         const framed = groupRows(cellsByRegion.get(k) ?? []);
-        const aligned = kind === "table" ? alignColumns(framed) : undefined;
-        let rows = aligned?.rows ?? framed.map((row) => row.map(({ cell }) => ({ text: cell.text, bbox: toBBox(cell.rect) })));
+        const table = kind === "table" ? tableRows(framed, routing.rules ?? [], routing.verticalRules ?? [], vocabulary) : undefined;
+        if (table && table.rows.length && !readsAsTable(table, tableLeak(k, routing, lineDestination, table))) {
+            // Not a table to read row by row: its text stays in the prose.
+            for (const [source, d] of destination) if (d === k) destination.delete(source);
+            return;
+        }
+        let rows = table?.rows ?? framed.map((row) => row.map(({ cell }) => ({ text: cell.text, bbox: toBBox(cell.rect) })));
         if (kind === "picture") rows = pictureRows(rows);
         // Whole structured-text lines are absorbed, so text can reach past the region.
         const bbox = rows.flat().reduce((u, c) => unionBBox(u, c.bbox), toBBox(region.bbox));
-        items.push({ kind, bbox, rows, ...(aligned ? { columns: aligned.columns } : {}) });
+        items.push({ kind, region: k, bbox, rows, ...(table?.columns ? { columns: table.columns } : {}) });
     });
 
     const absorbed = new Set<RawLine>(furniture);
@@ -182,6 +210,27 @@ interface Cell {
     rect: Rect;
     text: string;
     rot: ReadingRotation;
+    /** Width of the first word along the line, from its character boxes. */
+    lead?: number;
+    /** Font size of the line. */
+    size: number;
+}
+
+/** Width of `piece`'s first word along its line, when its source line has character boxes. */
+function firstWordWidth(piece: RegionLine, source: RawLine | undefined): number | undefined {
+    const chars = (source as RawLineDetailed | undefined)?.chars;
+    if (!chars || chars.length !== source!.text.length) return undefined;
+    let i = piece.range[0];
+    const end = Math.min(piece.range[1], chars.length);
+    while (i < end && /\s/.test(chars[i].c)) i++;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let j = i; j < end && !/\s/.test(chars[j].c); j++) {
+        const b = chars[j].bbox;
+        lo = Math.min(lo, piece.rot ? b.t : b.l);
+        hi = Math.max(hi, piece.rot ? b.b : b.r);
+    }
+    return hi > lo ? hi - lo : undefined;
 }
 
 /** The direction a line reads in: vertical, upside down, or upright. */
@@ -206,10 +255,94 @@ function readingFrame(r: Rect, rot: ReadingRotation): Rect {
     }
 }
 
+/** A table needs this share of its rows to hold cells in two or more of its columns... */
+export const TABLE_MIN_ALIGNED_ROWS = 0.2;
+/** ...and may leave at most this share of the text between its rows in the prose. */
+export const TABLE_MAX_LEAK = 0.3;
+/** A column holds lines on at least this share of a table's visual lines to bound it. */
+const COLUMN_MIN_ROWS = 0.1;
+/** A table of one column is a list: at least this many rows, and almost nothing between them left out. */
+const LIST_MIN_ROWS = 3;
+const LIST_MAX_LEAK = 0.1;
+
+/**
+ * Whether a table's rows can be read as a table. Its text must not be split
+ * with the prose: when much of the text between its rows stays out (cells set
+ * as running text, the long lines of a code listing), the table holds a
+ * fragment and the prose the rest, each out of order. And it must have column
+ * structure: rows of cells under its columns, or one column of short rows (a
+ * list). Code, a caption or reference list split at wide word gaps, and a
+ * title alone have neither. A region that fails is no table; its text reads
+ * best as prose.
+ */
+function readsAsTable(table: TableRows, leak: number): boolean {
+    if (leak >= TABLE_MAX_LEAK) return false;
+    if (!table.columns) return table.rows.every((row) => row.length === 1) && table.rows.length >= LIST_MIN_ROWS && leak < LIST_MAX_LEAK;
+    const aligned = table.rows.filter((row) => row.length >= 2 && row.every((c) => c.column !== undefined)).length;
+    return aligned >= TABLE_MIN_ALIGNED_ROWS * table.rows.length;
+}
+
+/**
+ * Share of the text between a table's rows that stays in the prose: lines
+ * with a line of the table both above and below them in their own horizontal
+ * range, starting within the table's columns (its cells placed in a column),
+ * captions aside; against the table's own text. A line the table took in from
+ * beside it (a box reaching into the next text column) neither counts nor
+ * frames the prose there.
+ */
+function tableLeak(k: number, routing: LineRouting, destination: readonly number[], table: TableRows): number {
+    const rows = table.rows;
+    const mine = routing.lines.flatMap((line, i) => (destination[i] === k ? [line] : []));
+    if (mine.length === 0) return 0;
+    const rotCounts = new Map<ReadingRotation, number>();
+    for (const line of mine) rotCounts.set(readingRotation(line), (rotCounts.get(readingRotation(line)) ?? 0) + 1);
+    const rot = [...rotCounts].reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+    // The columns' extent: cells in a column that runs down the table's lines
+    // (not a stray line set beside a row or two), or every cell of a
+    // one-column table or one without such a column.
+    const minLines = Math.max(2, COLUMN_MIN_ROWS * table.lines);
+    const cells = rows.flat();
+    const inColumns = table.columns ? cells.filter((c) => c.column !== undefined && (table.columnLines.get(c.column) ?? 0) >= minLines) : cells;
+    const placed = inColumns.length ? inColumns : cells;
+    let left = Infinity;
+    let right = -Infinity;
+    for (const c of placed) {
+        const f = readingFrame([c.bbox.l, c.bbox.t, c.bbox.r, c.bbox.b], rot);
+        left = Math.min(left, f[0]);
+        right = Math.max(right, f[2]);
+    }
+    const within = (f: Rect) => f[0] >= left - 1 && f[0] <= right;
+    const boxes = mine.map((line) => readingFrame(line.bbox, rot)).filter(within);
+    const own = mine.reduce((n, line) => n + line.inkChars, 0);
+    let out = 0;
+    routing.lines.forEach((line, i) => {
+        if (destination[i] !== -1 || routing.flags[i] & (LINE_CAPTION | LINE_FURNITURE | LINE_SKEWED)) return;
+        const f = readingFrame(line.bbox, rot);
+        if (!within(f)) return;
+        const cy = (f[1] + f[3]) / 2;
+        let above = false;
+        let below = false;
+        for (const g of boxes) {
+            if (Math.min(f[2], g[2]) <= Math.max(f[0], g[0])) continue;
+            if (g[3] <= cy) above = true;
+            if (g[1] >= cy) below = true;
+        }
+        if (above && below) out += line.inkChars;
+    });
+    return out / (out + own);
+}
+
 /** A cell with its box in the region's reading frame. */
 interface FramedCell {
     cell: Cell;
     f: Rect;
+}
+
+/** The reading rotation of most cells: the frame a region's rows are read in. */
+function dominantRotation(cells: readonly Cell[]): ReadingRotation {
+    const rotCounts = new Map<ReadingRotation, number>();
+    for (const c of cells) rotCounts.set(c.rot, (rotCounts.get(c.rot) ?? 0) + 1);
+    return [...rotCounts].reduce((a, b) => (b[1] > a[1] ? b : a))[0];
 }
 
 /**
@@ -219,9 +352,7 @@ interface FramedCell {
  */
 function groupRows(cells: Cell[]): FramedCell[][] {
     if (cells.length === 0) return [];
-    const rotCounts = new Map<ReadingRotation, number>();
-    for (const c of cells) rotCounts.set(c.rot, (rotCounts.get(c.rot) ?? 0) + 1);
-    const rot = [...rotCounts].reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+    const rot = dominantRotation(cells);
     const framed = cells.map((c) => ({ cell: c, f: readingFrame(c.rect, rot) }));
     framed.sort((a, b) => a.f[1] + a.f[3] - (b.f[1] + b.f[3]) || a.f[0] - b.f[0]);
     const rows: { top: number; bottom: number; cells: FramedCell[] }[] = [];
@@ -242,41 +373,329 @@ function groupRows(cells: Cell[]): FramedCell[][] {
     return rows.map((row) => row.cells.sort((a, b) => a.f[0] - b.f[0]));
 }
 
+/** Rows of several cells that must align to a column structure for it to stand. */
+const ALIGNED_ROWS = 0.5;
+/** Neighbouring pieces of a row overlapping by more than this share of the narrower one are stacked, not side by side. */
+const STACK_OVERLAP = 0.5;
+
 /**
- * Table rows with each cell's column. Columns span the cells of the rows with
- * the most cells; a shorter row is aligned when each of its cells overlaps
- * exactly one column and they keep their order. Other rows (a header spanning
- * columns, a cell in a gutter) stay unaligned. `undefined` for a table without
- * at least two columns.
+ * Each cell's table column. Columns span the cells of the rows with the most
+ * cells; another row is aligned when each of its cells overlaps exactly one
+ * column and they keep their order. Other rows (a header spanning columns, a
+ * cell in a gutter) stay unaligned (`undefined`). A row whose pieces are
+ * stacked over each other (a label set in two short lines) sets no columns.
+ * When most rows of several cells do not align, the rows with the most cells
+ * are no column structure (a line whose justified word gaps split it into
+ * pieces), and rows with fewer cells that line up with each other set the
+ * columns; failing that, the rows
+ * with the most cells do, and few rows align (`readsAsTable`). A table whose
+ * rows hold one cell each is one column; one whose rows never set
+ * side-by-side columns has none (`columns` 1, nothing aligned).
  */
-function alignColumns(rows: FramedCell[][]): { rows: RegionCell[][]; columns: number } | undefined {
-    const columns = Math.max(0, ...rows.map((row) => row.length));
-    if (columns < 2) return undefined;
+function assignColumns(rows: FramedCell[][]): { columns: number; of: (number | undefined)[][] } {
+    const counts = [...new Set(rows.map((row) => row.length))].sort((a, b) => b - a);
+    if ((counts[0] ?? 0) <= 1) return { columns: counts[0] ?? 0, of: rows.map((row) => row.map(() => 0)) };
+    const multi = rows.filter((row) => row.length >= 2).length;
+    let first: { columns: number; of: (number | undefined)[][] } | undefined;
+    for (const columns of counts) {
+        if (columns < 2) break;
+        const of = alignToColumns(rows, columns, columns < counts[0]);
+        if (!of) continue;
+        first ??= { columns, of };
+        const aligned = rows.filter((row, i) => row.length >= 2 && of[i].every((j) => j !== undefined)).length;
+        if (aligned >= ALIGNED_ROWS * multi) return { columns, of };
+    }
+    return first ?? { columns: 1, of: rows.map((row) => row.map(() => undefined)) };
+}
+
+/**
+ * Each cell's column among the spans of the rows with exactly `columns` cells
+ * whose cells stand side by side (see `assignColumns`) and, when `agreeing`,
+ * line up with each other; `undefined` when no such row sets them (each one
+ * holds pieces stacked over each other).
+ */
+function alignToColumns(rows: FramedCell[][], columns: number, agreeing: boolean): (number | undefined)[][] | undefined {
+    const sideBySide = (row: FramedCell[]) =>
+        row.every(({ f }, j) => j === 0 || f[0] - row[j - 1].f[2] > -STACK_OVERLAP * Math.min(f[2] - f[0], row[j - 1].f[2] - row[j - 1].f[0]));
+    const candidates = rows.filter((row) => row.length === columns && sideBySide(row));
+    if (candidates.length === 0) return undefined;
+    // Rows with fewer cells than the most only set columns where they agree:
+    // cell by cell they overlap (set flush left, centred or flush right),
+    // around the row most others agree with. Rows each missing a different
+    // value would otherwise merge distinct columns.
+    const agree = (a: FramedCell[], b: FramedCell[]) => a.every(({ f }, j) => Math.min(f[2], b[j].f[2]) > Math.max(f[0], b[j].f[0]));
+    const partners = agreeing ? candidates.map((a) => candidates.filter((b) => agree(a, b)).length) : [];
+    const anchor = agreeing ? candidates[partners.indexOf(Math.max(...partners))] : undefined;
+    const setting = new Set(anchor ? candidates.filter((row) => agree(anchor, row)) : candidates);
     const spans = Array.from({ length: columns }, () => [Infinity, -Infinity]);
-    for (const row of rows) {
-        if (row.length !== columns) continue;
+    for (const row of setting) {
         row.forEach(({ f }, j) => {
             spans[j][0] = Math.min(spans[j][0], f[0]);
             spans[j][1] = Math.max(spans[j][1], f[2]);
         });
     }
-    const toCell = ({ cell }: FramedCell, column?: number): RegionCell => ({
-        text: cell.text,
-        bbox: toBBox(cell.rect),
-        ...(column !== undefined ? { column } : {}),
+    return rows.map((row) => {
+        if (setting.has(row)) return row.map((_, j) => j);
+        const assigned = row.map(({ f }) => {
+            const hits = spans.flatMap(([l, r], j) => (Math.min(r, f[2]) > Math.max(l, f[0]) ? [j] : []));
+            return hits.length === 1 ? hits[0] : -1;
+        });
+        const ordered = assigned.every((j, i) => j >= 0 && (i === 0 || j > assigned[i - 1]));
+        return row.map((_, i) => (ordered ? assigned[i] : undefined));
     });
-    return {
-        columns,
-        rows: rows.map((row) => {
-            if (row.length === columns) return row.map((c, j) => toCell(c, j));
-            const assigned = row.map(({ f }) => {
-                const hits = spans.flatMap(([l, r], j) => (Math.min(r, f[2]) > Math.max(l, f[0]) ? [j] : []));
-                return hits.length === 1 ? hits[0] : -1;
+}
+
+/**
+ * Lines of one cell follow each other at most this many type sizes apart (top
+ * to top), or this much more than the table's leading: its tightest line
+ * pitch within a column (`LEADING_QUANTILE`), counted only up to
+ * `MAX_LEADING` type sizes (a table of one-line rows has no line spacing to
+ * learn, only its row spacing).
+ */
+const WRAP_PITCH = 1.6;
+const WRAP_LEADING = 1.25;
+const LEADING_QUANTILE = 0.1;
+const MAX_LEADING = 2;
+/** A wrapped line starts this close (type sizes) to its cell's left edge or centre... */
+const WRAP_ALIGN = 0.5;
+/** ...or is indented by at most this many type sizes (a hanging indent). */
+const WRAP_INDENT = 4;
+/**
+ * A line is full when the next word would end this close (type sizes) to the
+ * column's right edge: cells are set a little narrower than their column.
+ */
+const WRAP_SLACK = 0.5;
+/**
+ * A line wraps only when it is full and holds this many words: shorter lines
+ * fill a column fitted to them, as the items of a list do.
+ */
+const FULL_LINE_WORDS = 4;
+/** In a column of flowing text (at least this many wraps of long lines), a full line of this many words wraps. */
+const FLOWING_WRAPS = 2;
+const FLOWING_LINE_WORDS = 2;
+const SENTENCE_END_RE = /[.!?;:]["'”’)\]]*$/u;
+/** A word space, in type sizes. */
+const SPACE = 0.25;
+/** Share of a column's longest lines that may run past its right edge. */
+const RIGHT_EDGE_OUTLIERS = 0.1;
+const WORD_RE = /\p{L}{2,}/u;
+
+/**
+ * The type size of two consecutive lines: their font size, unless it is far
+ * from their box height (fonts scaled by the text matrix report wrong sizes).
+ */
+function lineUnit(a: FramedCell, b: FramedCell): number {
+    const height = Math.min(a.f[3] - a.f[1], b.f[3] - b.f[1]);
+    const size = Math.min(a.cell.size, b.cell.size);
+    return size >= 0.5 * height && size <= 2 * height ? size : height;
+}
+
+/**
+ * How a cell line relates to the line above it in its column, from sure
+ * continuation to sure break (`continuation`).
+ */
+type Continuation = "continues" | "likely" | "maybe" | "starts" | "begins" | "breaks";
+
+/**
+ * How `next` relates to cell line `above`, the line before it in its column.
+ * It "breaks" from it unless it sits tight under it, starts at its left edge
+ * (or indented, or centred under it), and both hold words. Then it
+ * "continues" a word broken at the line end, or a full line of running words
+ * (the next word would not have fitted before `right`, the column's right
+ * edge) when it starts in lower case; after a full line that ended a
+ * sentence, a capital is "likely" the cell's next sentence. Any other lower-case start is "maybe":
+ * a short line looks the same whether it wrapped or is one item of a list.
+ * Any other start (a capital, a digit, a caseless script) "starts" a new
+ * sentence or cell after a line that ended one, and otherwise "begins" a new
+ * item: a list's entries end without a full stop.
+ */
+function continuation(above: FramedCell, next: FramedCell, right: number, leading: number, minWords = FULL_LINE_WORDS): Continuation {
+    const a = above.f;
+    const b = next.f;
+    const unit = lineUnit(above, next);
+    if (unit <= 0 || b[1] <= a[1] || b[1] - a[1] > Math.max(WRAP_PITCH, WRAP_LEADING * Math.min(leading / unit, MAX_LEADING)) * unit) return "breaks";
+    const indent = b[0] - a[0];
+    const centred = Math.abs((b[0] + b[2]) / 2 - (a[0] + a[2]) / 2) <= WRAP_ALIGN * unit;
+    if (!centred && (indent < -WRAP_ALIGN * unit || indent > WRAP_INDENT * unit)) return "breaks";
+    const upper = above.cell.text.trimEnd();
+    const lower = next.cell.text.trimStart();
+    if (!WORD_RE.test(upper) || !/\p{L}/u.test(lower)) return "breaks";
+    if (/\p{L}-$/u.test(upper) && /^\p{L}/u.test(lower)) return "continues";
+    const word = /^\S+/.exec(lower)?.[0] ?? lower;
+    const wordWidth = next.cell.lead ?? ((b[2] - b[0]) * word.length) / Math.max(1, lower.length);
+    const full = upper.split(/\s+/).length >= minWords && a[2] + SPACE * unit + wordWidth > right - WRAP_SLACK * unit;
+    // The first letter, past opening quotes and brackets: lower case continues a sentence.
+    const first = /^[\p{Ps}\p{Pi}"'*]*(\p{L})/u.exec(lower)?.[1];
+    if (first && first !== first.toUpperCase()) return full ? "continues" : "maybe";
+    if (!SENTENCE_END_RE.test(upper)) return "begins";
+    return full ? "likely" : "starts";
+}
+
+/**
+ * A visual row joins the row above when none of its cells breaks from the
+ * line above it and its cells continue at least as often as they start anew:
+ * a new row cannot start mid-sentence in one of its columns, while a cell's
+ * next paragraph starts with a capital. A new item (a capital after a line
+ * that did not end a sentence) and a new cell in the first column (the row
+ * labels) always start a row; so does a new sentence there, unless another
+ * cell of the line runs on from the line above. Lower-case lines that may continue the cells
+ * above them join when the row is ragged — they fill fewer columns than the
+ * line above and none in the first column, as cells of one row ending on
+ * different lines do, unlike the one-line rows of a list — or when a lone
+ * such line in the first column continues a label that did not end a
+ * sentence (a label wrapped onto a line of its own). `kinds` holds each
+ * cell's `Continuation`, `columns` its column, `ended` whether the line above
+ * it ended a sentence, `above` the number of cells on the line above.
+ */
+function joinsRowAbove(
+    kinds: readonly Continuation[],
+    columns: readonly (number | undefined)[],
+    ended: readonly boolean[],
+    above: number,
+    multi: boolean,
+): boolean {
+    if (kinds.includes("breaks") || kinds.includes("begins") || kinds.some((k, i) => k === "starts" && columns[i] === 0)) return false;
+    const count = (kind: Continuation) => kinds.filter((k) => k === kind).length;
+    // A new sentence in the first column starts a row unless another cell runs on mid-sentence.
+    if (kinds.some((k, i) => k === "likely" && columns[i] === 0) && count("continues") === 0) return false;
+    const starts = count("starts");
+    if (count("continues") >= Math.max(1, starts) || (count("likely") > 0 && starts === 0)) return true;
+    if (starts > 0 || !multi) return false;
+    if (columns[0] !== 0) return kinds.length < above;
+    return kinds.length === 1 && !ended[0];
+}
+
+/** A table's rows, with the visual lines they come from and how many of those hold each column. */
+interface TableRows {
+    rows: RegionCell[][];
+    columns?: number;
+    lines: number;
+    columnLines: Map<number, number>;
+}
+
+/**
+ * Table rows of whole cells. Visual lines are grouped into rows by height
+ * (`groupRows`), and a cell's text may wrap over several of them: a visual
+ * row whose cells continue the cells above them (`continuation`,
+ * `joinsRowAbove`), with no rule drawn between them, joins the row above.
+ * Each cell's lines become one text, words broken at a line end joined as in
+ * prose (`decideLineBreakHyphen`). Each row's cells carry their column when
+ * the table has at least two and the row aligns to them.
+ */
+function tableRows(
+    framed: FramedCell[][],
+    rules: readonly Rect[],
+    verticalRules: readonly Rect[],
+    vocabulary?: ReadonlySet<string>,
+): TableRows {
+    const { columns, of } = assignColumns(framed);
+    // The column's right edge: where its lines end, ignoring the few that run
+    // past it (a line squeezed wider, a cell reaching into the gutter).
+    const ends = new Map<number, number[]>();
+    framed.forEach((row, i) =>
+        row.forEach(({ f }, k) => {
+            const j = of[i][k];
+            if (j !== undefined) ends.set(j, [...(ends.get(j) ?? []), f[2]]);
+        }),
+    );
+    const right = new Map<number, number>();
+    for (const [j, list] of ends) {
+        list.sort((a, b) => b - a);
+        right.set(j, list[Math.floor(RIGHT_EDGE_OUTLIERS * list.length)]);
+    }
+    // The table's leading: the pitch of consecutive lines in a column, at its tightest.
+    const pitches: number[] = [];
+    for (let i = 1; i < framed.length; i++) {
+        framed[i].forEach((cell, k) => {
+            const ka = of[i - 1].indexOf(of[i][k]);
+            if (of[i][k] !== undefined && ka >= 0) pitches.push(cell.f[1] - framed[i - 1][ka].f[1]);
+        });
+    }
+    pitches.sort((a, b) => a - b);
+    const leading = pitches.length ? pitches[Math.floor(LEADING_QUANTILE * pitches.length)] : 0;
+    // A column of flowing text (it wraps at least twice in a way a list cannot:
+    // a broken word, or a full line of running words) wraps short lines too.
+    const wraps = new Map<number, number>();
+    for (let i = 1; i < framed.length; i++) {
+        framed[i].forEach((cell, k) => {
+            const j = of[i][k];
+            const ka = j === undefined ? -1 : of[i - 1].indexOf(j);
+            if (ka >= 0 && continuation(framed[i - 1][ka], cell, right.get(j!)!, leading) === "continues") {
+                wraps.set(j!, (wraps.get(j!) ?? 0) + 1);
+            }
+        });
+    }
+    const minWords = (j: number) => ((wraps.get(j) ?? 0) >= FLOWING_WRAPS ? FLOWING_LINE_WORDS : FULL_LINE_WORDS);
+    // Row separators in the cells' reading frame: the page's horizontal rules
+    // for upright and upside-down tables, its vertical rules for sideways ones.
+    // A rotated header or label among the cells does not change the frame.
+    const cells = framed.flat().map((c) => c.cell);
+    const rot = cells.length ? dominantRotation(cells) : 0;
+    const separators = (rot === 0 || rot === 180 ? rules : verticalRules).map((r) => readingFrame(r, rot));
+    const ruledBetween = (a: FramedCell, b: FramedCell) =>
+        separators.some(
+            (r) =>
+                (r[1] + r[3]) / 2 > (a.f[1] + a.f[3]) / 2 &&
+                (r[1] + r[3]) / 2 < (b.f[1] + b.f[3]) / 2 &&
+                Math.min(r[2], a.f[2], b.f[2]) > Math.max(r[0], a.f[0], b.f[0]),
+        );
+
+    // Logical rows: per cell, its lines top to bottom and its column.
+    const logical: { lines: FramedCell[]; column?: number }[][] = [];
+    framed.forEach((row, i) => {
+        const prev = i > 0 ? logical[logical.length - 1] : undefined;
+        const above = i > 0 ? framed[i - 1] : undefined;
+        if (prev && above && of[i].every((j) => j !== undefined) && of[i - 1].every((j) => j !== undefined)) {
+            const targets = row.map((cell, k) => prev.find((c) => c.column === of[i][k]));
+            const lasts = targets.map((t) => t?.lines[t.lines.length - 1]);
+            const kinds = row.map((cell, k): Continuation => {
+                const last = lasts[k];
+                if (!last || !above.includes(last) || ruledBetween(last, cell)) return "breaks";
+                return continuation(last, cell, right.get(of[i][k]!)!, leading, minWords(of[i][k]!));
             });
-            const ordered = assigned.every((j, i) => j >= 0 && (i === 0 || j > assigned[i - 1]));
-            return row.map((c, i) => toCell(c, ordered ? assigned[i] : undefined));
+            const ended = lasts.map((l) => !!l && SENTENCE_END_RE.test(l.cell.text.trimEnd()));
+            if (joinsRowAbove(kinds, of[i], ended, above.length, columns >= 2)) {
+                row.forEach((cell, k) => targets[k]!.lines.push(cell));
+                return;
+            }
+        }
+        logical.push(row.map((cell, k) => ({ lines: [cell], column: of[i][k] })));
+    });
+
+    const multi = columns >= 2;
+    const columnLines = new Map<number, number>();
+    for (const cols of of) for (const j of new Set(cols)) if (j !== undefined) columnLines.set(j, (columnLines.get(j) ?? 0) + 1);
+    return {
+        lines: framed.length,
+        columnLines,
+        ...(multi ? { columns } : {}),
+        rows: logical.map((row) => {
+            const aligned = multi && row.every((c) => c.column !== undefined);
+            return row.map(({ lines, column }) => ({
+                text: joinCellLines(lines.map((l) => l.cell.text), vocabulary),
+                bbox: toBBox(
+                    lines.reduce<Rect>(
+                        (u, l) => [Math.min(u[0], l.cell.rect[0]), Math.min(u[1], l.cell.rect[1]), Math.max(u[2], l.cell.rect[2]), Math.max(u[3], l.cell.rect[3])],
+                        [Infinity, Infinity, -Infinity, -Infinity],
+                    ),
+                ),
+                ...(aligned ? { column } : {}),
+            }));
         }),
     };
+}
+
+/** The text of a cell's lines, words broken at a line end joined as in prose. */
+function joinCellLines(lines: readonly string[], vocabulary?: ReadonlySet<string>): string {
+    let text = lines[0] ?? "";
+    for (let i = 1; i < lines.length; i++) {
+        const next = lines[i];
+        const decision = decideLineBreakHyphen(text, next, vocabulary);
+        if (decision === "join") text = text.replace(/-\s*$/u, "") + next.trimStart();
+        else if (decision === "keep") text = text.trimEnd() + next.trimStart();
+        else text = `${text} ${next}`;
+    }
+    return text;
 }
 
 /** Figure label rows without bare-number rows, capped at `PICTURE_TEXT_MAX_CHARS`. */

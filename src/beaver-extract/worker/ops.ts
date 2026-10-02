@@ -822,7 +822,7 @@ export function runExtractFromIndices(
             let pagesForTarget = analysisPages;
             if (regionImages && detailed) {
                 const tRegions = performance.now();
-                const regions = pageRegions(detailed, pageCache!.graphicsFor(i), regionImages, pageCount);
+                const regions = pageRegions(detailed, pageCache!.graphicsFor(i), regionImages, pageCount, compoundVocabulary);
                 if (regions.page !== detailed) {
                     // The target without absorbed lines replaces the walked page, so
                     // paragraph detection never sees them (and no font bridge runs).
@@ -986,6 +986,7 @@ function pageRegions(
     graphics: GraphicsSummary | undefined,
     imagesByPage: ReadonlyMap<number, ReadonlySet<number>>,
     pageCount: number,
+    vocabulary: ReadonlySet<string>,
 ): PageRegionItems {
     if (!graphics || !REGION_MODEL) {
         throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
@@ -997,7 +998,7 @@ function pageRegions(
             model: REGION_MODEL,
             route: true,
         });
-        return regionItemsForPage(page, detection);
+        return regionItemsForPage(page, detection, vocabulary);
     } catch (err) {
         postLog("warn", `[mupdf-worker] region detection failed on page ${page.pageIndex}: ${String(err)}`);
         return { page, items: [], margin: [] };
