@@ -11,7 +11,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { cancelTasksForItem } from '../../utils/backgroundTasks';
 import { hasLibraryIdentity, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef, resolveWriteTargetLibrary } from '../../utils/libraryIdentity';
-import { applyCreateItemData } from '../itemImport';
+import { applyCreateItemData } from '../itemImport/legacy';
 import type { AttachmentResolvedPayload } from '../attachmentResolved';
 
 /** Maximum concurrent item creations in batch jobs */
@@ -170,7 +170,7 @@ export async function executeCreateItemActions(
  * Run async functions with a concurrency limit.
  * Like Promise.all but limits how many run simultaneously.
  */
-async function runWithConcurrency<T, R>(
+export async function runWithConcurrency<T, R>(
     items: T[],
     fn: (item: T) => Promise<R>,
     concurrency: number

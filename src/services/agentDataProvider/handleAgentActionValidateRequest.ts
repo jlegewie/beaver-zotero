@@ -8,6 +8,7 @@ import {
 import { validateCreateCollectionAction } from './actions/createCollection';
 import { validateCreateHighlightAnnotationsAction } from './actions/createHighlightAnnotations';
 import { validateCreateItemAction } from './actions/createItems';
+import { validateImportItemsAction } from './actions/importItems';
 import { validateCreateNoteAction } from './actions/createNote';
 import { validateCreateNoteAnnotationsAction } from './actions/createNoteAnnotations';
 import { validateEditAnnotationsAction } from './actions/editAnnotations';
@@ -45,6 +46,10 @@ export async function handleAgentActionValidateRequest(
 
         if (request.action_type === 'create_item') {
             return await validateCreateItemAction(request);
+        }
+
+        if (request.action_type === 'import_item') {
+            return await validateImportItemsAction(request);
         }
 
         if (request.action_type === 'edit_note') {

@@ -13,6 +13,7 @@ import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
 import { LibraryMutations } from './services/libraryMutations';
 import { LibraryOperations } from './services/libraryOperations';
+import { ItemImportService } from './services/itemImport/service';
 import { NotePreviews } from './services/notePreviews';
 import { AIProvider } from "./services/OpenAIProvider";
 import { createSyncPauseService } from './services/syncPause';
@@ -43,6 +44,7 @@ class Addon {
         },
     );
     public libraryOperations = new LibraryOperations();
+    public itemImport = new ItemImportService();
     public runtime = new BeaverInstance();
     public voiceNative?: import("./services/voice/nativeVoice").NativeVoice;
     public voice?: VoiceService;

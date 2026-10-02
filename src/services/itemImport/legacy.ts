@@ -1,20 +1,18 @@
-import { resolveCollection, type ResolvedCollection } from './collections/collectionIdentity';
-import { recheckExistingCollections } from './collections/collectionMutations';
+import { resolveCollection, type ResolvedCollection } from '../collections/collectionIdentity';
+import { recheckExistingCollections } from '../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
-import { generateTaskId, isPdfFetchInProgress, scheduleBackgroundTask } from '../utils/backgroundTasks';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../utils/libraryIdentity';
-import { createProvenanceNote } from '../utils/noteProvenance';
-import { buildPdfResolvers, PdfFetchOptions } from '../utils/pdfResolvers';
-import { getPref } from '../utils/prefs';
-import { TimingAccumulator } from '../utils/timing';
-import type { AttachmentResolvedPayload } from './attachmentResolved';
-import { fetchPdfAttachment } from './pdfAttachmentFetch';
-import { isPdfDocument } from '../utils/attachmentFiles';
+import { isPdfFetchInProgress } from '../../utils/backgroundTasks';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { createProvenanceNote } from '../../utils/noteProvenance';
+import { getPref } from '../../utils/prefs';
+import { TimingAccumulator } from '../../utils/timing';
+import type { AttachmentResolvedPayload } from '../attachmentResolved';
+import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
+import { stampBeaverProvenanceExtra } from './provenance';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
-const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
 
 
 function trackWith<T>(timing: TimingAccumulator | undefined, name: string, fn: () => Promise<T>): Promise<T> {
@@ -274,28 +272,6 @@ async function createItemManually(itemData: ExternalReference, libraryId: number
     // This keeps item creation fast and non-blocking.
 
     return item;
-}
-
-/**
- * Stamp Beaver provenance into an item's Extra field without saving it.
- */
-export function stampBeaverProvenanceExtra(
-    item: Zotero.Item,
-    options: { reason?: string } = {},
-): boolean {
-    const currentExtra = (item.getField('extra') as string) || '';
-    if (currentExtra.includes(BEAVER_PROVENANCE_MARKER)) {
-        return false;
-    }
-
-    const addedDate = new Date().toISOString().slice(0, 10);
-    const extraLines = [`${BEAVER_PROVENANCE_MARKER}: ${addedDate}`];
-    if (options.reason && !currentExtra.includes(`Beaver Reason: ${options.reason}`)) {
-        extraLines.push(`Beaver Reason: ${options.reason}`);
-    }
-
-    item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
-    return true;
 }
 
 /**
@@ -598,146 +574,6 @@ async function cleanupFailedImport(item: Zotero.Item): Promise<void> {
     } catch (error) {
         logger(`Failed to clean up imported item ${item.libraryID}-${item.key}: ${error}`, 1);
     }
-}
-
-/**
- * Filter attachment IDs to return only PDF attachments.
- */
-async function filterPdfAttachments(attachmentIds: number[]): Promise<Zotero.Item[]> {
-    if (!attachmentIds || attachmentIds.length === 0) return [];
-    
-    const attachments = await Promise.all(
-        attachmentIds.map(id => Zotero.Items.getAsync(id))
-    );
-    
-    return attachments.filter((a): a is Zotero.Item => 
-        a && !a.deleted && isPdfDocument(a)
-    );
-}
-
-/** Schedule PDF discovery outside the mutation queue and coordinate only its attachment save. */
-function schedulePdfFetchTask(
-    libraryId: number,
-    itemKey: string,
-    options: PdfFetchOptions
-): void {
-    const taskId = generateTaskId('pdf_fetch', libraryId, itemKey);
-    const generation = Zotero.Beaver.account?.getGeneration();
-    const assertAccess = () => {
-        const library = Zotero.Libraries.get(libraryId);
-        if (generation !== Zotero.Beaver.account?.getGeneration()) throw new Error('Account changed');
-        if (!Zotero.Beaver.libraryScopeInitialized || !Zotero.Beaver.searchableLibraryIds?.includes(libraryId)
-            || !library || !library.editable || library.filesEditable === false) {
-            throw new Error('Library is excluded or unavailable');
-        }
-    };
-
-    scheduleBackgroundTask(
-        taskId,
-        'pdf_fetch',
-        async (signal: AbortSignal) => {
-            const startedAt = Date.now();
-            let item: Zotero.Item | null = null;
-            let attachedPdf: Zotero.Item | null = null;
-            let accessMethod: string | undefined;
-            // Set when the attachment came from the fetch rather than from the
-            // re-check below, which is the only case where `accessMethod`
-            // describes the file we ended up with.
-            let attachedByFetch = false;
-
-            try {
-                assertAccess();
-                const fetched = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, itemKey);
-                if (!fetched) {
-                    throw new Error(`Item not found: ${libraryId}-${itemKey}`);
-                }
-                item = fetched;
-
-                // Check if cancelled or PDF was attached in the meantime
-                if (signal.aborted) return;
-                const attachmentIds = await item.getAttachments();
-                const pdfAttachments = await filterPdfAttachments(attachmentIds);
-                if (pdfAttachments.length > 0) {
-                    logger(`schedulePdfFetchTask: Item already has PDF, skipping`, 2);
-                    // Capture for the finally so we emit `available`. The PDF
-                    // may have been attached out-of-band (e.g. translator) and
-                    // the backend may still have us marked `pending`.
-                    attachedPdf = pdfAttachments[0];
-                    return;
-                }
-
-                const resolvers = buildPdfResolvers(item, options);
-                if (resolvers.length === 0) {
-                    logger(`schedulePdfFetchTask: No resolvers for ${itemKey}`, 2);
-                    return;
-                }
-
-                logger(`schedulePdfFetchTask: Trying ${resolvers.length} resolvers for ${itemKey}`, 2);
-                const outcome = await fetchPdfAttachment(item, resolvers, signal, assertAccess);
-                if (outcome.attachment) {
-                    attachedPdf = outcome.attachment;
-                    accessMethod = outcome.accessMethod;
-                    attachedByFetch = !!accessMethod;
-                    logger(`schedulePdfFetchTask: Attached PDF via ${accessMethod ?? 'existing'}`, 2);
-                }
-
-                if (signal.aborted) return;
-
-
-            } catch (e: any) {
-                // Early failure path (e.g. item lookup threw). attachedPdf
-                // stays null so finally emits `failed`.
-                logger(
-                    `schedulePdfFetchTask: ${itemKey} task body threw: ${e?.message || e}`,
-                    1,
-                );
-            } finally {
-                // Always emit the attachment_resolved ws event
-                if (!signal.aborted && generation === Zotero.Beaver.account?.getGeneration()
-                    && Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
-                    // If we don't yet have a PDF, re-check attachments: a
-                    // translator can save one out of band.
-                    if (!attachedPdf && item) {
-                        try {
-                            const currentAttachmentIds = await item.getAttachments();
-                            const currentPdfs = await filterPdfAttachments(currentAttachmentIds);
-                            if (currentPdfs.length > 0) {
-                                attachedPdf = currentPdfs[0];
-                                logger(
-                                    `schedulePdfFetchTask: Re-check found PDF for ${itemKey} (key=${attachedPdf.key})`,
-                                    2,
-                                );
-                            }
-                        } catch (e: any) {
-                            logger(
-                                `schedulePdfFetchTask: Re-check getAttachments failed for ${itemKey}: ${e?.message || e}`,
-                                2,
-                            );
-                        }
-                    }
-
-                    if (!signal.aborted && generation === Zotero.Beaver.account?.getGeneration()
-                        && Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
-                        options.onAttachmentResolved?.({
-                            threadId: options.threadId,
-                            actionId: options.actionId,
-                            libraryId,
-                            zoteroKey: itemKey,
-                            attachmentStatus: attachedPdf ? 'available' : 'failed',
-                            attachmentKey: attachedPdf ? `${libraryId}-${attachedPdf.key}` : undefined,
-                            accessMethod: attachedByFetch ? accessMethod : undefined,
-                            elapsedMs: Date.now() - startedAt,
-                        });
-                    }
-                }
-            }
-        },
-        {
-            itemKey,
-            libraryId,
-            progressMessage: 'Finding PDF...',
-        }
-    );
 }
 
 /**

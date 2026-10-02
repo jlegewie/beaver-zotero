@@ -283,6 +283,7 @@ export function getActionLabel(
                 : `${verb} Annotation`;
         }
         case 'create_item':
+        case 'import_item':
         case 'create_items':
             return completed ? 'Imported' : 'Import';
         case 'create_collection':
@@ -377,11 +378,24 @@ export function getActionTitle(
             return 'Confirm External Search';
         }
         case 'create_item':
+        case 'import_item':
         case 'create_items': {
+            if (!actions || actions.length === 0) {
+                // v2 approval: the actions carry the items; the request carries
+                // their count and the first titles.
+                const titles = Array.isArray(actionData?.titles) ? actionData.titles : [];
+                if (actionData?.items_count === 1 && typeof titles[0] === 'string' && titles[0]) {
+                    return truncateText(titles[0], 60);
+                }
+                if (typeof actionData?.items_count === 'number' && actionData.items_count > 1) {
+                    return `${actionData.items_count} Items`;
+                }
+            }
             // For create_item, get title from the item data
             // Check actions first, then fall back to actionData (for pending approvals where actions may be empty)
             if (actions && actions.length === 1) {
-                const item = actions[0].proposed_data?.item ?? actionData?.item;
+                const proposed = actions[0].proposed_data;
+                const item = proposed?.item ?? proposed?.pending_resolution?.fallback_item ?? actionData?.item;
                 if (item?.title) {
                     return truncateText(item.title, 70);
                 }

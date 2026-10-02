@@ -58,6 +58,7 @@
     "./src/types/actions.ts",
     "./src/types/attachments/apiTypes.ts",
     "./src/types/citations.ts",
+    "./src/types/itemImport.ts",
     "./src/types/customChatModel.ts",
     "./src/types/librarySuggestions.ts",
     "./src/types/profile.ts",

@@ -28,7 +28,8 @@ import {
     isCheckingReferenceObjectAtom,
 } from '@beaver/agent-core/citations/externalReferences';
 import { ButtonVariant } from '@beaver/agent-ui/primitives/Button';
-import { CreateItemAgentAction } from '../../../agents/agentActions';
+import { ItemCreatingAgentAction } from '../../../agents/agentActions';
+import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { resolveSearchableLibraryId } from '../libraryAccess';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
@@ -36,7 +37,9 @@ import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
 interface AgentActionItemButtonsProps {
-    action: CreateItemAgentAction;
+    action: ItemCreatingAgentAction;
+    /** The reference the action stands for (import_item actions carry none of their own). */
+    item?: ExternalReference;
     isBusy: boolean;
     onApply: () => void;
     onReject: () => void;
@@ -61,6 +64,7 @@ interface AgentActionItemButtonsProps {
  */
 const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
     action,
+    item: itemProp,
     isBusy,
     onApply,
     onReject,
@@ -68,7 +72,14 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
     buttonVariant = 'surface-light',
     className = '',
 }) => {
-    const item = action.proposed_data.item;
+    const item: ExternalReference = itemProp ?? (action.proposed_data as { item: ExternalReference }).item;
+    // An import_item that found its work already in the library fails rather
+    // than adopting it; the card then offers the existing item.
+    const existingFromError: ZoteroItemReference | null = action.status === 'error'
+        && action.error_details?.error_code === 'already_in_library'
+        && action.error_details?.existing_item?.zotero_key
+        ? action.error_details.existing_item as ZoteroItemReference
+        : null;
     const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
     const setSelectedReference = useSetAtom(selectedExternalReferenceAtom);
     const checkReference = useSetAtom(checkExternalReferenceAtom);
@@ -92,8 +103,8 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
             };
         }
         // Otherwise use existing library match if found
-        return existingItemRef;
-    }, [action.status, action.result_data, existingItemRef]);
+        return existingItemRef ?? existingFromError;
+    }, [action.status, action.result_data, existingItemRef, existingFromError]);
 
     const effectiveItemRef = getEffectiveItemRef();
 
@@ -214,7 +225,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
     const hasDetails = Boolean(item.abstract);
 
     // Determine which buttons to show based on status
-    const showRevealButton = action.status === 'applied' || (action.status === 'pending' && existingItemRef);
+    const showRevealButton = action.status === 'applied' || (action.status === 'pending' && existingItemRef) || !!existingFromError;
     const showAddButton = (action.status === 'pending' && !existingItemRef && !isCheckingLibrary) 
         || action.status === 'rejected' 
         || action.status === 'undone';
@@ -285,7 +296,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
                 <Spinner className="scale-12 -mr-1" />
             )}
 
-            {action.status === 'error' && !isLoading && (
+            {action.status === 'error' && !existingFromError && !isLoading && (
                 <Tooltip content="Retry creating item" singleLine>
                     <IconButton
                         variant={buttonVariant}
@@ -334,7 +345,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
 
             {/* Pending with existing match OR Applied: Reveal button */}
             {showRevealButton && !isLoading && (
-                <Tooltip content={action.status === 'pending' ? 'Already in library - click to reveal' : 'Reveal in Zotero'} singleLine>
+                <Tooltip content={action.status !== 'applied' ? 'Already in library - click to reveal' : 'Reveal in Zotero'} singleLine>
                     <Button
                         variant={buttonVariant}
                         rightIcon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />}
@@ -343,7 +354,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
                         onClick={handleReveal}
                         disabled={isLoading}
                     >
-                        {action.status === 'pending' ? 'In Library' : 'Reveal'}
+                        {action.status !== 'applied' ? 'In Library' : 'Reveal'}
                     </Button>
                 </Tooltip>
             )}

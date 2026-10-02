@@ -4044,3 +4044,218 @@
     gap: 6px;
     cursor: pointer;
 }
+
+/* Import items card (create_items): expandable rows */
+
+.beaver-root .import-item-header {
+    cursor: pointer;
+}
+
+.beaver-root .import-item-icon {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    /* Centered on the title's first line. */
+    height: 1.34em;
+    height: 1lh;
+}
+
+.beaver-root .import-item-reveal {
+    display: inline-flex;
+    vertical-align: middle;
+    color: var(--fill-secondary);
+    cursor: pointer;
+}
+
+.beaver-root .import-item-reveal:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .import-item-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--fill-secondary);
+    cursor: pointer;
+}
+
+.beaver-root .import-item-header:hover .import-item-toggle,
+.beaver-root .import-item-toggle:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .import-item-toggle:focus-visible,
+.beaver-root .import-item-link:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+}
+
+.beaver-root .import-item-details {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 6px 0 2px 24px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--fill-quinary);
+    font-size: 0.875rem;
+    cursor: auto;
+    user-select: text;
+}
+
+.beaver-root .import-item-fields {
+    display: grid;
+    grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+    column-gap: 12px;
+    row-gap: 4px;
+}
+
+.beaver-root .import-item-field-label,
+.beaver-root .import-item-section-label {
+    color: var(--fill-secondary);
+}
+
+.beaver-root .import-item-field-label {
+    white-space: nowrap;
+}
+
+.beaver-root .import-item-field-value {
+    min-width: 0;
+    color: var(--fill-primary);
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .import-item-link {
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--accent-blue);
+    text-align: left;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.beaver-root .import-item-link:hover {
+    text-decoration: underline;
+}
+
+.beaver-root .import-item-abstract {
+    color: var(--fill-primary);
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+.beaver-root .import-item-abstract-clamped {
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.beaver-root .import-item-notes {
+    margin: 0;
+    padding-inline-start: 1.2em;
+    color: var(--fill-secondary);
+}
+
+/* Import items card: destination breadcrumb and tags */
+
+.beaver-root .import-destination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 4px;
+    margin-bottom: 8px;
+    font-size: 0.875rem;
+}
+
+.beaver-root .import-crumbs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.beaver-root .import-crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 1px 4px;
+    margin: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    font: inherit;
+    color: var(--fill-secondary);
+    cursor: pointer;
+}
+
+/* The first crumb's icon lines up with the item icons below it. */
+.beaver-root .import-crumb:first-child {
+    margin-left: -4px;
+}
+
+.beaver-root .import-crumb:last-child {
+    color: var(--fill-primary);
+}
+
+.beaver-root .import-crumb:not(:disabled):hover {
+    background: var(--fill-quinary);
+    color: var(--fill-primary);
+}
+
+.beaver-root .import-crumb:disabled {
+    cursor: default;
+}
+
+.beaver-root .import-crumb:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+}
+
+.beaver-root .import-crumb-icon,
+.beaver-root .import-tag-icon {
+    flex-shrink: 0;
+    transform: scale(0.85);
+}
+
+.beaver-root .import-crumb-separator {
+    flex-shrink: 0;
+    color: var(--fill-tertiary);
+    transform: scale(0.7);
+}
+
+.beaver-root .import-destination-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+}
+
+.beaver-root .import-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    max-width: 100%;
+    padding: 0 6px 0 3px;
+    border-radius: 10px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
