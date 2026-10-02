@@ -1,11 +1,11 @@
-import * as itemImport from '../../src/services/itemImport';
+import * as itemImport from '../../src/services/itemImport/legacy';
 import { getSelectedCollection } from '../../src/utils/zoteroSelection';
 import { captureWindowMutationOptions, runWindowOperation } from '../runtime/libraryMutation';
 import { getContextWindow } from '../runtime/windowRuntime';
 import { emitAttachmentResolved } from './attachmentResolvedEvent';
 import { getZoteroTargetContext } from './zoteroTargetContext';
-export { stampBeaverProvenanceExtra } from '../../src/services/itemImport';
-export type { ImportItemOptions } from '../../src/services/itemImport';
+export { stampBeaverProvenanceExtra } from '../../src/services/itemImport/legacy';
+export type { ImportItemOptions } from '../../src/services/itemImport/legacy';
 
 async function resolveOptions(options?: itemImport.ImportItemOptions): Promise<itemImport.ImportItemOptions> {
     if (options?.libraryId !== undefined) return { onAttachmentResolved: emitAttachmentResolved, ...options };

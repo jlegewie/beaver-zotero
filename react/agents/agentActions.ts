@@ -16,6 +16,9 @@ import {
     AgentAction,
     CreateItemAgentAction,
     isCreateItemAgentAction,
+    isItemCreatingAgentAction,
+    itemActionExternalId,
+    type ItemCreatingAgentAction,
     isCreateAnnotationsAgentAction,
     isEditAnnotationsAgentAction,
     isAnnotationAgentAction,
@@ -380,7 +383,13 @@ export const setAgentActionsToErrorAtom = atom(
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             return prev.map((action) => 
                 actionIds.includes(action.id)
-                    ? { ...action, status: 'error' as ActionStatus, error_message: errorMessage }
+                    ? {
+                        ...action,
+                        status: 'error' as ActionStatus,
+                        error_message: errorMessage,
+                        // Surfaces read the details (e.g. an import's existing item) before any reload.
+                        ...(errorDetails ? { error_details: errorDetails } : {}),
+                    }
                     : action
             );
         });
@@ -457,17 +466,17 @@ export const undoAgentActionAtom = atom(
 );
 
 /**
- * Find a pending create_item agent action by source_id.
- * Used to sync external-reference action buttons with pending create-item actions.
+ * Find an unapplied item-creating action (create_item or import_item) for an external reference.
+ * Used to sync external-reference action buttons with pending item proposals.
  */
 export const getPendingCreateItemActionBySourceIdAtom = atom(
-    (get) => (sourceId: string): CreateItemAgentAction | null => {
+    (get) => (sourceId: string): ItemCreatingAgentAction | null => {
         const actions = get(threadAgentActionsAtom);
         return actions.find(
-            (action): action is CreateItemAgentAction =>
-                isCreateItemAgentAction(action) &&
+            (action): action is ItemCreatingAgentAction =>
+                isItemCreatingAgentAction(action) &&
                 (action.status === 'pending' || action.status === 'undone' || action.status === 'error' || action.status === 'rejected') &&
-                action.proposed_data.item.source_id === sourceId
+                itemActionExternalId(action) === sourceId
         ) ?? null;
     }
 );

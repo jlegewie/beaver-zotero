@@ -68,4 +68,30 @@ describe('isEmptyWriteReturn', () => {
         expect(isEmptyWriteReturn(null)).toBe(false);
         expect(isEmptyWriteReturn(undefined)).toBe(false);
     });
+
+    describe('create_items v2 results (one outcome per input)', () => {
+        it('is no change when every input was already in the library or repeated', () => {
+            expect(isEmptyWriteReturn(toolReturn({
+                content: { status: 'applied', items: [
+                    { input: 'doi:10.1/a', outcome: 'already_in_library', item_id: 'u-ABCD2345' },
+                    { input: 'doi:10.1/b', outcome: 'duplicate_in_call', duplicate_of: 'doi:10.1/a' },
+                ] },
+            }))).toBe(true);
+        });
+
+        it('is not no change when an input failed', () => {
+            expect(isEmptyWriteReturn(toolReturn({
+                content: { status: 'applied', items: [
+                    { input: 'doi:10.1/a', outcome: 'already_in_library' },
+                    { input: 'ext-ABCD1234', outcome: 'failed', error_code: 'unrecognized_file' },
+                ] },
+            }))).toBe(false);
+        });
+
+        it('is not no change when an item was created', () => {
+            expect(isEmptyWriteReturn(toolReturn({
+                content: { status: 'applied', items: [{ input: 'doi:10.1/a', outcome: 'created' }] },
+            }))).toBe(false);
+        });
+    });
 });

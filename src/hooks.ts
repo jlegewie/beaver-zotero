@@ -949,6 +949,7 @@ function onShutdown(): Promise<void> {
 
 async function disposePlugin(): Promise<void> {
     stopLocalIngress();
+    addon.itemImport.dispose();
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
     Zotero.__beaverShuttingDown = true;

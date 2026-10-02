@@ -6,6 +6,7 @@ import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
 import { CreateItemsPreview } from './CreateItemsPreview';
+import { ImportItemsPreview } from './ImportItemsPreview';
 import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
 import { EditNotePreview } from '../../../components/agentRuns/EditNotePreview';
@@ -259,7 +260,10 @@ export const ActionPreview: React.FC<{
         );
     }
 
-    if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item') {
+    if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item' || previewData.actionType === 'import_item') {
+        if (actions && actions.length > 0 && actions[0].action_type === 'import_item') {
+            return <ImportItemsPreview actions={actions} status={status} />;
+        }
         // If no actions array provided, return fallback
         if (!actions || actions.length === 0) {
             return (

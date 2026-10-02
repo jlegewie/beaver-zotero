@@ -1,17 +1,17 @@
-import { resolveCollection, type ResolvedCollection } from './collections/collectionIdentity';
-import { recheckExistingCollections } from './collections/collectionMutations';
+import { resolveCollection, type ResolvedCollection } from '../collections/collectionIdentity';
+import { recheckExistingCollections } from '../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
-import { generateTaskId, isPdfFetchInProgress, scheduleBackgroundTask } from '../utils/backgroundTasks';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../utils/libraryIdentity';
-import { createProvenanceNote } from '../utils/noteProvenance';
-import { buildPdfResolvers, PdfFetchOptions } from '../utils/pdfResolvers';
-import { getPref } from '../utils/prefs';
-import { TimingAccumulator } from '../utils/timing';
-import type { AttachmentResolvedPayload } from './attachmentResolved';
-import { fetchPdfAttachment } from './pdfAttachmentFetch';
-import { isPdfDocument } from '../utils/attachmentFiles';
+import { generateTaskId, isPdfFetchInProgress, scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { createProvenanceNote } from '../../utils/noteProvenance';
+import { buildPdfResolvers, PdfFetchOptions } from '../../utils/pdfResolvers';
+import { getPref } from '../../utils/prefs';
+import { TimingAccumulator } from '../../utils/timing';
+import type { AttachmentResolvedPayload } from '../attachmentResolved';
+import { fetchPdfAttachment } from '../pdfAttachmentFetch';
+import { isPdfDocument } from '../../utils/attachmentFiles';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
@@ -603,7 +603,7 @@ async function cleanupFailedImport(item: Zotero.Item): Promise<void> {
 /**
  * Filter attachment IDs to return only PDF attachments.
  */
-async function filterPdfAttachments(attachmentIds: number[]): Promise<Zotero.Item[]> {
+export async function filterPdfAttachments(attachmentIds: number[]): Promise<Zotero.Item[]> {
     if (!attachmentIds || attachmentIds.length === 0) return [];
     
     const attachments = await Promise.all(
@@ -616,7 +616,7 @@ async function filterPdfAttachments(attachmentIds: number[]): Promise<Zotero.Ite
 }
 
 /** Schedule PDF discovery outside the mutation queue and coordinate only its attachment save. */
-function schedulePdfFetchTask(
+export function schedulePdfFetchTask(
     libraryId: number,
     itemKey: string,
     options: PdfFetchOptions

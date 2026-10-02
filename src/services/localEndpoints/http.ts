@@ -134,6 +134,12 @@ import {
     handleTestWorkerWedgeProbeHttpRequest,
 } from './handlers/testCacheHandlers';
 
+import {
+    handleTestItemImportCapabilitiesHttpRequest,
+    handleTestItemImportResolveHttpRequest,
+    handleTestItemImportWriteHttpRequest,
+} from './handlers/testItemImportHandlers';
+
 
 import {
     handleTestCollectionCreateHttpRequest,
@@ -889,6 +895,12 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
+        endpoints['/beaver/test/item-import-resolve'] =
+            createEndpoint(handleTestItemImportResolveHttpRequest);
+        endpoints['/beaver/test/item-import-write'] =
+            createEndpoint(handleTestItemImportWriteHttpRequest);
+        endpoints['/beaver/test/item-import-capabilities'] =
+            createEndpoint(handleTestItemImportCapabilitiesHttpRequest);
         endpoints['/beaver/test/resolve-readable'] =
             createEndpoint(handleTestResolveReadableHttpRequest);
         endpoints['/beaver/test/best-epub-attachment'] =

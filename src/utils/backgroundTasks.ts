@@ -12,7 +12,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 export type BackgroundTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 /** Type of background task */
-export type BackgroundTaskType = 'pdf_fetch' | 'sync' | 'metadata_enrich';
+export type BackgroundTaskType = 'pdf_fetch' | 'snapshot' | 'sync' | 'metadata_enrich';
 
 /** State of a background task */
 export interface BackgroundTaskState {

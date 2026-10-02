@@ -30,6 +30,7 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     // run. A manually configured underlying group preference is still read.
     delete_annotations: 'annotation_deletion',
     create_item: 'create_items',
+    import_item: 'create_items',
     create_items: 'create_items',
 };
 

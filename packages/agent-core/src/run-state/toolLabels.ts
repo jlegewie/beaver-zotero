@@ -435,6 +435,15 @@ function computeMainLabel(
     const viewLocator = getViewLocationLabel(view, toolName);
 
     switch (toolName) {
+        // === Item import (create_items v2: `items` is one entry per input) ===
+        case 'create_items': {
+            const items = Array.isArray(args.items) ? args.items : null;
+            if (items && items.length > 0 && status === 'in_progress') {
+                return `${baseLabel}: looking up ${items.length} source${items.length === 1 ? '' : 's'}…`;
+            }
+            return baseLabel;
+        }
+
         // === Fulltext search tools ===
         case 'fulltext_search': {
             const query = args.query_semantic as string | undefined;

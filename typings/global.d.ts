@@ -84,6 +84,7 @@ declare namespace Zotero {
         let documents: import("../src/services/instanceDocuments").InstanceDocuments | undefined;
         let notePreviews: import("../src/services/notePreviews").NotePreviews;
         let libraryOperations: import("../src/services/libraryOperations").LibraryOperations;
+        let itemImport: import("../src/services/itemImport/service").ItemImportService;
         let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;
         let mutations: import("../src/services/libraryMutations").LibraryMutations;
         let syncPause: ReturnType<typeof import("../src/services/syncPause").createSyncPauseService>;

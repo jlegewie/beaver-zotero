@@ -91,6 +91,8 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // duplicates_request and the merge_items action: a build that predates them
 // drops the unknown event and never answers, so the backend withholds the
 // duplicate tools instead of inferring support from a version.
+// item_import_v2 is declaration-only because it gates the import_item action
+// type: an older build cannot resolve, render or write it.
 // two_page_highlights is declaration-only because it gates a relocation shape
 // the client must apply: a build that predates it refuses a two-page highlight
 // destination, so the backend keeps rejecting those unless it is declared.
@@ -119,6 +121,7 @@ const DECLARATION_ONLY_FEATURES = [
     'continuation_new_run',
     'zotero_duplicates',
     'two_page_highlights',
+    'item_import_v2',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

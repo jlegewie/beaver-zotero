@@ -9,7 +9,7 @@ import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent
 import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../../utils/batchFindExistingReferences';
 import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimingAccumulator } from '../../../utils/timing';
-import { applyCreateItemData } from '../../itemImport';
+import { applyCreateItemData } from '../../itemImport/legacy';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
