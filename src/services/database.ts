@@ -1,5 +1,6 @@
 import type { SearchPreparationRow } from './searchIndexState';
 import { buildUntagJobInput, indexCleanupIdentity } from './backgroundProcessing/utils';
+import { LOCAL_EXTRACT_PRIORITY_CEILING } from './backgroundProcessing/constants';
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
 import { ThreadData } from '../../react/atoms/threads';
@@ -112,11 +113,15 @@ export function inlineNullParams(sql: string, params: readonly unknown[]): [stri
     return [out, remaining];
 }
 
-/* 
+/** Where an embedding's text came from: item metadata or text derived from an attachment. */
+export type EmbeddingSource = 'metadata' | 'attachment_text';
+
+/*
  * Interface for the 'embeddings' table row
- * 
+ *
  * Table stores paper embeddings for semantic search.
- * Embeddings are generated from title + abstract text.
+ * Embeddings are generated from title + abstract text, or from title + text
+ * derived from the item's attachment when the abstract is short.
  */
 export interface EmbeddingRecord {
     item_id: number;                    // Zotero item ID
@@ -124,11 +129,60 @@ export interface EmbeddingRecord {
     zotero_key: string;                 // Zotero item key
     version: number;                    // Zotero item version at embedding time
     client_date_modified: string;       // Item's clientDateModified at embedding time
-    content_hash: string;               // Hash of title+abstract for change detection
+    content_hash: string;               // Hash of the embedded text for change detection
     embedding: Uint8Array;              // Int8 embedding stored as BLOB
     dimensions: number;                 // Embedding dimensions (256 or 512)
     model_id: string;                   // Model identifier (e.g., "voyage-3-int8-512")
     indexed_at: string;                 // When the embedding was created
+    source?: EmbeddingSource;           // Defaults to 'metadata'
+    source_attachment_id?: number | null; // Attachment whose derived text was embedded
+}
+
+/** Map key for per-attachment lookups. */
+export function attachmentRefKey(libraryId: number, zoteroKey: string): string {
+    return `${libraryId}/${zoteroKey}`;
+}
+
+/** Attachment keys grouped by library, in chunks that fit SQLite's parameter limit. */
+function keyChunksByLibrary(refs: { libraryId: number; zoteroKey: string }[]): [number, string[]][] {
+    const keysByLibrary = new Map<number, string[]>();
+    for (const ref of refs) {
+        const keys = keysByLibrary.get(ref.libraryId) ?? [];
+        keys.push(ref.zoteroKey);
+        keysByLibrary.set(ref.libraryId, keys);
+    }
+    const chunks: [number, string[]][] = [];
+    for (const [libraryId, keys] of keysByLibrary) {
+        for (let i = 0; i < keys.length; i += 500) chunks.push([libraryId, keys.slice(i, i + 500)]);
+    }
+    return chunks;
+}
+
+/**
+ * Row of 'attachment_embedding_text': topic text derived from one attachment's
+ * structured extraction. It depends only on the file, so it stays valid when
+ * the attachment is reparented.
+ */
+export interface AttachmentEmbeddingTextRecord {
+    libraryId: number;
+    zoteroKey: string;
+    itemId: number;
+    contentKind: 'pdf' | 'epub' | 'snapshot';
+    /** File identity the text was derived from; remote-only files have no mtime/size, only a hash. */
+    fileMtimeMs: number;
+    fileSizeBytes: number;
+    fileHash: string | null;
+    extractionSource: 'native' | 'ocr';
+    /** `EMBEDDING_TEXT_VERSION` of the derivation. */
+    textVersion: number;
+    title: string | null;
+    titleSource: string | null;
+    keywords: string | null;
+    /** Empty when the document had no usable text (`bodySource = 'none'`). */
+    body: string;
+    bodySource: 'abstract' | 'opening' | 'outline' | 'none';
+    /** Epoch ms of the last derivation. */
+    updatedAt: number;
 }
 
 /**
@@ -688,6 +742,48 @@ export class BeaverDB {
                 indexed_at               TEXT NOT NULL DEFAULT (datetime('now')),
                 PRIMARY KEY (item_id)
             );
+        `);
+        const embeddingColumns = await this.getTableColumns('embeddings');
+        if (!embeddingColumns.has('source')) {
+            await this.queryAsync(`ALTER TABLE embeddings ADD COLUMN source TEXT NOT NULL DEFAULT 'metadata'`);
+        }
+        if (!embeddingColumns.has('source_attachment_id')) {
+            await this.queryAsync(`ALTER TABLE embeddings ADD COLUMN source_attachment_id INTEGER`);
+        }
+        // Reverse link: which units embedded text derived from an attachment.
+        await this.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_embeddings_source_attachment
+            ON embeddings(source_attachment_id);
+        `);
+
+        // Derived embedding text per extracted attachment. Rows survive
+        // document-cache eviction and are reused when an attachment moves
+        // between parents. `index_pending` stays set until the embedding
+        // index has recomputed the units that may use the row.
+        await this.queryAsync(`
+            CREATE TABLE IF NOT EXISTS attachment_embedding_text (
+                library_id         INTEGER NOT NULL,
+                zotero_key         TEXT NOT NULL,
+                item_id            INTEGER NOT NULL,
+                content_kind       TEXT NOT NULL,
+                file_mtime_ms      INTEGER NOT NULL,
+                file_size_bytes    INTEGER NOT NULL,
+                file_hash          TEXT,
+                extraction_source  TEXT NOT NULL,
+                text_version       INTEGER NOT NULL,
+                title              TEXT,
+                title_source       TEXT,
+                keywords           TEXT,
+                body               TEXT NOT NULL,
+                body_source        TEXT NOT NULL,
+                index_pending      INTEGER NOT NULL DEFAULT 1,
+                updated_at         INTEGER NOT NULL,
+                UNIQUE(library_id, zotero_key)
+            );
+        `);
+        await this.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachment_embedding_text_item
+            ON attachment_embedding_text(item_id);
         `);
 
         // Table for tracking embedding index state per library
@@ -1566,6 +1662,8 @@ export class BeaverDB {
             dimensions: row.dimensions,
             model_id: row.model_id,
             indexed_at: row.indexed_at,
+            source: row.source ?? 'metadata',
+            source_attachment_id: row.source_attachment_id ?? null,
         };
     }
 
@@ -1610,8 +1708,9 @@ export class BeaverDB {
         await this.queryAsync(
             `INSERT OR REPLACE INTO embeddings 
              (item_id, library_id, zotero_key, version, client_date_modified, 
-              content_hash, embedding, dimensions, model_id, indexed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              content_hash, embedding, dimensions, model_id, indexed_at,
+              source, source_attachment_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 embedding.item_id,
                 embedding.library_id,
@@ -1622,7 +1721,9 @@ export class BeaverDB {
                 embedding.embedding,
                 embedding.dimensions,
                 embedding.model_id,
-                now
+                now,
+                embedding.source ?? 'metadata',
+                embedding.source_attachment_id ?? null,
             ]
         );
     }
@@ -1643,8 +1744,9 @@ export class BeaverDB {
                 await this.queryAsync(
                     `INSERT OR REPLACE INTO embeddings 
                      (item_id, library_id, zotero_key, version, client_date_modified, 
-                      content_hash, embedding, dimensions, model_id, indexed_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                      content_hash, embedding, dimensions, model_id, indexed_at,
+                      source, source_attachment_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         embedding.item_id,
                         embedding.library_id,
@@ -1655,7 +1757,9 @@ export class BeaverDB {
                         embedding.embedding,
                         embedding.dimensions,
                         embedding.model_id,
-                        indexedAt
+                        indexedAt,
+                        embedding.source ?? 'metadata',
+                        embedding.source_attachment_id ?? null,
                     ]
                 );
             }
@@ -1925,12 +2029,248 @@ export class BeaverDB {
 
         const rows = await this.queryAsync(sql, params);
         const result = new Map<number, string>();
-        
+
         for (const row of rows) {
             result.set(row.item_id, row.content_hash);
         }
 
         return result;
+    }
+
+    /** Units whose embedded text was derived from one of these attachments. */
+    public async getUnitIdsBySourceAttachment(attachmentIds: number[]): Promise<number[]> {
+        const unitIds: number[] = [];
+        for (let i = 0; i < attachmentIds.length; i += 500) {
+            const chunk = attachmentIds.slice(i, i + 500);
+            await this.queryAsync(
+                `SELECT item_id FROM embeddings WHERE source_attachment_id IN (${chunk.map(() => '?').join(',')})`,
+                chunk,
+                { onRow: (row: any) => unitIds.push(row.getResultByIndex(0)) },
+            );
+        }
+        return unitIds;
+    }
+
+    /** Embedding source of each indexed unit among `itemIds`. */
+    public async getEmbeddingSources(
+        itemIds: number[],
+    ): Promise<Map<number, { source: EmbeddingSource; sourceAttachmentId: number | null }>> {
+        const result = new Map<number, { source: EmbeddingSource; sourceAttachmentId: number | null }>();
+        for (let i = 0; i < itemIds.length; i += 500) {
+            const chunk = itemIds.slice(i, i + 500);
+            await this.queryAsync(
+                `SELECT item_id, source, source_attachment_id FROM embeddings
+                 WHERE item_id IN (${chunk.map(() => '?').join(',')})`,
+                chunk,
+                {
+                    onRow: (row: any) => result.set(row.getResultByIndex(0), {
+                        source: row.getResultByIndex(1) === 'attachment_text' ? 'attachment_text' : 'metadata',
+                        sourceAttachmentId: row.getResultByIndex(2) ?? null,
+                    }),
+                },
+            );
+        }
+        return result;
+    }
+
+    /** Point existing embeddings at a new text source without re-embedding them. */
+    public async updateEmbeddingSources(
+        updates: { itemId: number; source: EmbeddingSource; sourceAttachmentId: number | null }[],
+    ): Promise<void> {
+        if (updates.length === 0) return;
+        await this.conn.executeTransaction(async () => {
+            for (const update of updates) {
+                await this.queryAsync(
+                    `UPDATE embeddings SET source = ?, source_attachment_id = ? WHERE item_id = ?`,
+                    [update.source, update.sourceAttachmentId, update.itemId],
+                );
+            }
+        });
+    }
+
+    // =============================================
+    // Attachment Embedding Text Methods
+    // =============================================
+
+    /**
+     * Insert or replace the derived text of one attachment. With `markPending`
+     * the row waits for the embedding index; without it, a new row is stored as
+     * applied and an existing row keeps its pending state.
+     */
+    public async upsertAttachmentEmbeddingText(
+        record: Omit<AttachmentEmbeddingTextRecord, 'updatedAt'>,
+        now: number = Date.now(),
+        markPending: boolean = true,
+    ): Promise<void> {
+        const pending = markPending ? 1 : 0;
+        await this.queryAsync(
+            `INSERT INTO attachment_embedding_text (
+                library_id, zotero_key, item_id, content_kind, file_mtime_ms, file_size_bytes, file_hash,
+                extraction_source, text_version, title, title_source, keywords, body, body_source,
+                index_pending, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(library_id, zotero_key) DO UPDATE SET
+                item_id = excluded.item_id, content_kind = excluded.content_kind,
+                file_mtime_ms = excluded.file_mtime_ms, file_size_bytes = excluded.file_size_bytes,
+                file_hash = excluded.file_hash,
+                extraction_source = excluded.extraction_source, text_version = excluded.text_version,
+                title = excluded.title, title_source = excluded.title_source,
+                keywords = excluded.keywords, body = excluded.body, body_source = excluded.body_source,
+                index_pending = MAX(index_pending, excluded.index_pending), updated_at = excluded.updated_at`,
+            [
+                record.libraryId, record.zoteroKey, record.itemId, record.contentKind,
+                record.fileMtimeMs, record.fileSizeBytes, record.fileHash, record.extractionSource, record.textVersion,
+                record.title, record.titleSource, record.keywords, record.body, record.bodySource, pending, now,
+            ],
+        );
+    }
+
+    /** Derived text rows keyed by `attachmentRefKey(libraryId, zoteroKey)`. */
+    public async getAttachmentEmbeddingTexts(
+        refs: { libraryId: number; zoteroKey: string }[],
+    ): Promise<Map<string, AttachmentEmbeddingTextRecord>> {
+        const result = new Map<string, AttachmentEmbeddingTextRecord>();
+        for (const [libraryId, chunk] of keyChunksByLibrary(refs)) {
+            await this.queryAsync(
+                `SELECT library_id, zotero_key, item_id, content_kind, file_mtime_ms, file_size_bytes,
+                        extraction_source, text_version, title, title_source, keywords, body,
+                        body_source, updated_at, file_hash
+                 FROM attachment_embedding_text
+                 WHERE library_id = ? AND zotero_key IN (${chunk.map(() => '?').join(',')})`,
+                [libraryId, ...chunk],
+                {
+                    onRow: (row: any) => {
+                        const record: AttachmentEmbeddingTextRecord = {
+                            libraryId: row.getResultByIndex(0),
+                            zoteroKey: row.getResultByIndex(1),
+                            itemId: row.getResultByIndex(2),
+                            contentKind: row.getResultByIndex(3),
+                            fileMtimeMs: row.getResultByIndex(4),
+                            fileSizeBytes: row.getResultByIndex(5),
+                            extractionSource: row.getResultByIndex(6),
+                            textVersion: row.getResultByIndex(7),
+                            title: row.getResultByIndex(8) ?? null,
+                            titleSource: row.getResultByIndex(9) ?? null,
+                            keywords: row.getResultByIndex(10) ?? null,
+                            body: row.getResultByIndex(11) ?? '',
+                            bodySource: row.getResultByIndex(12),
+                            updatedAt: row.getResultByIndex(13),
+                            fileHash: row.getResultByIndex(14) ?? null,
+                        };
+                        result.set(attachmentRefKey(record.libraryId, record.zoteroKey), record);
+                    },
+                },
+            );
+        }
+        return result;
+    }
+
+    /** `EMBEDDING_TEXT_VERSION` the embedding index last ran a full diff with, or null. */
+    public async getEmbeddingTextIndexVersion(): Promise<number | null> {
+        return this.getSchemaVersion('embedding_text_index');
+    }
+
+    public async setEmbeddingTextIndexVersion(version: number): Promise<void> {
+        await this.setSchemaVersion('embedding_text_index', version);
+    }
+
+    /** Attachment ids whose derived text has not yet been applied to the index. */
+    public async getPendingAttachmentEmbeddingTextIds(libraryIds: number[]): Promise<number[]> {
+        if (libraryIds.length === 0) return [];
+        const ids: number[] = [];
+        await this.queryAsync(
+            `SELECT item_id FROM attachment_embedding_text
+             WHERE index_pending = 1 AND library_id IN (${libraryIds.map(() => '?').join(',')})`,
+            libraryIds,
+            { onRow: (row: any) => ids.push(row.getResultByIndex(0)) },
+        );
+        return ids;
+    }
+
+    /** Mark rows applied, unless they were re-derived after `derivedBefore` (epoch ms). */
+    public async clearAttachmentEmbeddingTextPending(itemIds: number[], derivedBefore: number): Promise<void> {
+        for (let i = 0; i < itemIds.length; i += 500) {
+            const chunk = itemIds.slice(i, i + 500);
+            await this.queryAsync(
+                `UPDATE attachment_embedding_text SET index_pending = 0
+                 WHERE index_pending = 1 AND updated_at < ?
+                   AND item_id IN (${chunk.map(() => '?').join(',')})`,
+                [derivedBefore, ...chunk],
+            );
+        }
+    }
+
+    public async getAttachmentEmbeddingTextKeys(libraryId: number): Promise<string[]> {
+        const keys: string[] = [];
+        await this.queryAsync(
+            `SELECT zotero_key FROM attachment_embedding_text WHERE library_id = ?`,
+            [libraryId],
+            { onRow: (row: any) => keys.push(row.getResultByIndex(0)) },
+        );
+        return keys;
+    }
+
+    public async deleteAttachmentEmbeddingTexts(refs: { libraryId: number; zoteroKey: string }[]): Promise<void> {
+        for (const [libraryId, chunk] of keyChunksByLibrary(refs)) {
+            await this.queryAsync(
+                `DELETE FROM attachment_embedding_text
+                 WHERE library_id = ? AND zotero_key IN (${chunk.map(() => '?').join(',')})`,
+                [libraryId, ...chunk],
+            );
+        }
+    }
+
+    /** Record a new signature for a file whose content is unchanged; the text stays applied. */
+    public async updateAttachmentEmbeddingTextFile(
+        libraryId: number,
+        zoteroKey: string,
+        file: { mtime_ms: number; size_bytes: number },
+    ): Promise<void> {
+        await this.queryAsync(
+            `UPDATE attachment_embedding_text SET file_mtime_ms = ?, file_size_bytes = ?
+             WHERE library_id = ? AND zotero_key = ?`,
+            [file.mtime_ms, file.size_bytes, libraryId, zoteroKey],
+        );
+    }
+
+    /**
+     * Delete an attachment's derived text unless it was derived from this file:
+     * compared by content hash when known, else by signature. Returns true when deleted.
+     */
+    public async deleteAttachmentEmbeddingTextUnlessFile(
+        libraryId: number,
+        zoteroKey: string,
+        file: { mtime_ms: number; size_bytes: number; hash: string | null },
+    ): Promise<boolean> {
+        const [differs, params] = file.hash
+            ? ['file_hash IS NOT ?', [file.hash]]
+            : ['(file_mtime_ms != ? OR file_size_bytes != ?)', [file.mtime_ms, file.size_bytes]];
+        return this.executeChangedRow(
+            `DELETE FROM attachment_embedding_text
+             WHERE library_id = ? AND zotero_key = ? AND ${differs}`,
+            [libraryId, zoteroKey, ...params],
+        );
+    }
+
+    public async deleteAttachmentEmbeddingTextsByItemIds(itemIds: number[]): Promise<void> {
+        for (let i = 0; i < itemIds.length; i += 500) {
+            const chunk = itemIds.slice(i, i + 500);
+            await this.queryAsync(
+                `DELETE FROM attachment_embedding_text WHERE item_id IN (${chunk.map(() => '?').join(',')})`,
+                chunk,
+            );
+        }
+    }
+
+    /** Drop derived text for every library outside `libraryIds` (excluded or removed libraries). */
+    public async deleteAttachmentEmbeddingTextsOutsideLibraries(libraryIds: number[]): Promise<void> {
+        await this.queryAsync(
+            libraryIds.length === 0
+                ? `DELETE FROM attachment_embedding_text`
+                : `DELETE FROM attachment_embedding_text
+                   WHERE library_id NOT IN (${libraryIds.map(() => '?').join(',')})`,
+            libraryIds,
+        );
     }
 
     // =============================================
@@ -2491,6 +2831,44 @@ export class BeaverDB {
             [libraryId, zoteroKey],
         );
         return rows[0] ?? null;
+    }
+
+    /**
+     * Attachments whose final extraction verdict (failed, skipped, OCR needed or
+     * failed) was recorded for an extraction schema other than the expected one
+     * for their content kind, read from the stored source identity.
+     */
+    public async getAttachmentIdsWithOutdatedTerminalVerdicts(
+        libraryId: number,
+        expectedSchemas: { pdf: string | null; epub: string | null; snapshot: string | null },
+    ): Promise<number[]> {
+        const ids: number[] = [];
+        await this.queryAsync(
+            `SELECT item_id FROM attachment_processing_state
+             WHERE library_id = ? AND item_id IS NOT NULL AND extraction_source IS NOT NULL
+               AND (extract_status IN ('failed', 'skipped') OR ocr_status IN ('needed', 'failed'))
+               AND (CASE WHEN json_valid(extraction_source) THEN json_extract(extraction_source, '$[1]') END)
+                   IS NOT (CASE content_kind WHEN 'pdf' THEN ? WHEN 'epub' THEN ? WHEN 'snapshot' THEN ? END)`,
+            [libraryId, expectedSchemas.pdf, expectedSchemas.epub, expectedSchemas.snapshot],
+            { onRow: (row: any) => ids.push(row.getResultByIndex(0)) },
+        );
+        return ids;
+    }
+
+    /** Ledger rows for specific attachments. */
+    public async getAttachmentProcessingStatesByRefs(
+        refs: { libraryId: number; zoteroKey: string }[],
+    ): Promise<AttachmentProcessingStateRecord[]> {
+        const rows: AttachmentProcessingStateRecord[] = [];
+        for (const [libraryId, chunk] of keyChunksByLibrary(refs)) {
+            rows.push(...await this.selectAttachmentProcessingStates(
+                `SELECT ${ATTACHMENT_PROCESSING_COLUMNS}
+                 FROM attachment_processing_state
+                 WHERE library_id = ? AND zotero_key IN (${chunk.map(() => '?').join(',')})`,
+                [libraryId, ...chunk],
+            ));
+        }
+        return rows;
     }
 
     public async getAttachmentProcessingStatesByLibrary(
@@ -4923,6 +5301,8 @@ export class BeaverDB {
         enqueued = (changesRows[0] ?? 0) === 1;
 
         if (!enqueued) {
+            // A request that replaces the queued payload keeps an explicit
+            // cache-preparation request of the same content kind.
             await this.queryAsync(
                 `UPDATE background_jobs SET
                     priority      = MIN(priority, ?),
@@ -4939,7 +5319,11 @@ export class BeaverDB {
                                          WHEN priority >= 100 AND ? >= 100
                                               AND json_extract(?, '$.prepare_cache') = 1 THEN ?
                                          WHEN content_kind != ? OR ? < priority OR ? = 'fulltext_upsert'
-                                         THEN ? ELSE payload_json END,
+                                         THEN CASE WHEN content_kind = ?
+                                                        AND json_extract(payload_json, '$.prepare_cache') = 1
+                                                   THEN json_set(?, '$.prepare_cache', json('true'))
+                                                   ELSE ? END
+                                         ELSE payload_json END,
                     attempt_count = CASE WHEN content_kind != ? OR ? < priority
                                          THEN 0 ELSE attempt_count END,
                     last_error    = CASE WHEN content_kind != ? OR ? < priority
@@ -4957,7 +5341,7 @@ export class BeaverDB {
                     priority, payloadJson, payloadJson,
                     input.contentKind, priority,
                     input.jobType,
-                    payloadJson,
+                    input.contentKind, payloadJson, payloadJson,
                     input.contentKind, priority,
                     input.contentKind, priority,
                     input.jobType,
@@ -5255,14 +5639,24 @@ export class BeaverDB {
         );
     }
 
-    /** Retire budget-limited work only while it is still background priority. */
+    /**
+     * Retire budget-limited work only while it is still background priority,
+     * above the local extraction band the budget does not apply to.
+     */
     public async completeBackgroundPreparationJob(id: number, now: number): Promise<boolean> {
         let retired = true;
         await this.conn.executeTransaction(async () => {
-            if (await this.executeChangedRow(`DELETE FROM background_jobs WHERE id = ? AND priority >= 100`, [id])) return;
-            // A foreground request may have promoted the claimed ticket while
-            // its executor was waiting. Make that work immediately claimable.
-            retired = !(await this.executeChangedRow(`UPDATE background_jobs SET available_at = ? WHERE id = ? AND priority < 100`, [now, id]));
+            if (await this.executeChangedRow(
+                `DELETE FROM background_jobs WHERE id = ? AND priority >= ?`,
+                [id, LOCAL_EXTRACT_PRIORITY_CEILING],
+            )) return;
+            // A foreground request or the embedding index may have promoted the
+            // claimed ticket while its executor was waiting. Make that work
+            // immediately claimable.
+            retired = !(await this.executeChangedRow(
+                `UPDATE background_jobs SET available_at = ? WHERE id = ? AND priority < ?`,
+                [now, id, LOCAL_EXTRACT_PRIORITY_CEILING],
+            ));
         });
         return retired;
     }

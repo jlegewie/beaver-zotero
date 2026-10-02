@@ -1496,6 +1496,10 @@ export async function opExtract(
                 args.includeDiagnostics ?? false,
               )
             : toMarkdownExtractResult(internal, preset, args.includeDiagnostics ?? false);
+        if (result.mode === "structured") {
+            const infoTitle = collectDocumentInfo(doc).title?.trim();
+            if (infoTitle) result.infoTitle = infoTitle;
+        }
         return { result };
     } catch (e) {
         docFailed = true;

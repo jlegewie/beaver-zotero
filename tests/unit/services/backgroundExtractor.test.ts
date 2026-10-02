@@ -2582,6 +2582,48 @@ describe('BackgroundExtractor', () => {
                 .toEqual(['BACKLOG1']);
         });
 
+        it.each([
+            [true, ['EMBED102', 'EMBED104'], ['OCR00105', 'BACKLOG1']],
+            [false, [], ['EMBED102', 'EMBED104', 'OCR00105', 'BACKLOG1']],
+        ])('claims the embedding band only when idle with processing off (idle=%s)', async (idle, executed, remaining) => {
+            (Zotero.Prefs.get as any).mockImplementation(() => undefined);
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValue(idle ? Number.MAX_SAFE_INTEGER : 0);
+            try {
+                for (const [zoteroKey, priority] of [
+                    ['EMBED102', 102], ['EMBED104', 104], ['OCR00105', 105], ['BACKLOG1', 110],
+                ] as const) {
+                    await db.enqueueBackgroundJob({
+                        jobType: 'document_extract', libraryId: 1, zoteroKey, contentKind: 'pdf',
+                        payloadKind: 'structured', priority, payload: payload(), now: 0,
+                    });
+                }
+                const { BackgroundExtractor } = await loadProcessor();
+                const proc = new BackgroundExtractor();
+                const execute = vi.fn(async (): Promise<JobOutcome> => ({ kind: 'complete', reason: 'ok' }));
+                proc.registerExecutor({ jobType: 'document_extract', execute }, { maxInFlight: 1 });
+                while ((await proc.processOnce({ awaitLaunchedJobs: true })).processed) { /* drain */ }
+
+                expect((await db.peekBackgroundJobs()).map((job) => job.zoteroKey)).toEqual(remaining);
+                expect(execute.mock.calls.map(([record]) => (record as any).zoteroKey)).toEqual(executed);
+            } finally {
+                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(Number.MAX_SAFE_INTEGER);
+            }
+        });
+
+        it('claims the whole backlog when idle with processing on', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'document_extract', libraryId: 1, zoteroKey: 'BACKLOG1', contentKind: 'pdf',
+                payloadKind: 'structured', priority: 110, payload: payload(), now: 0,
+            });
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const execute = vi.fn(async (): Promise<JobOutcome> => ({ kind: 'complete', reason: 'ok' }));
+            proc.registerExecutor({ jobType: 'document_extract', execute }, { maxInFlight: 1 });
+            expect((await proc.processOnce({ awaitLaunchedJobs: true })).processed).toBe(true);
+            expect(execute).toHaveBeenCalledOnce();
+        });
+
         it('not idle + priority=50 job in queue still claims and runs', async () => {
             const idleMod = await import('../../../src/utils/idleService');
             (idleMod.getSystemIdleTimeMs as any).mockReturnValueOnce(0);
