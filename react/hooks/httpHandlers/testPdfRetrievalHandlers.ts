@@ -6,7 +6,7 @@
  * of strategies until one attaches a PDF, report what happened and how long
  * each step took, then erase the item and its files again.
  *
- * The strategies mirror `schedulePdfFetchTask` in `react/utils/addItemActions.ts`
+ * The strategies mirror `schedulePdfFetchTask` in `src/services/itemImport/pdfFetch.ts`
  * one for one (`importFromURL` with `contentType: 'application/pdf'`, then
  * `addAvailableFile`), so a measurement taken here is a measurement of the code
  * users run. `add_file_from_urls` is the same `Zotero.Attachments` entry point

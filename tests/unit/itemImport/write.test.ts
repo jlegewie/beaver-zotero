@@ -39,9 +39,12 @@ vi.mock('../../../src/services/itemImport/zoteroApis', () => ({
     markApiUnavailable: mocks.markApiUnavailable,
     withTimeout: mocks.withTimeout,
 }));
-vi.mock('../../../src/services/itemImport/legacy', () => ({
+vi.mock('../../../src/services/itemImport/pdfFetch', () => ({
     filterPdfAttachments: mocks.filterPdfAttachments,
     schedulePdfFetchTask: mocks.schedulePdfFetchTask,
+}));
+vi.mock('../../../src/services/itemImport/provenance', () => ({
+    BEAVER_PROVENANCE_MARKER: 'Added by Beaver',
     stampBeaverProvenanceExtra: mocks.stampBeaverProvenanceExtra,
 }));
 vi.mock('../../../src/services/itemImport/recognizeFile', () => ({ locateImportFile: mocks.locateImportFile }));
@@ -270,64 +273,21 @@ describe('writeImportItem saving', () => {
         expect(itemSaverCtor).toHaveBeenCalledWith(expect.objectContaining({ collections: [20] }));
     });
 
-    it('falls back to a plain save with notes and normalized tags when ItemSaver is unavailable', async () => {
+    it('fails without writing when ItemSaver is unavailable', async () => {
         apiAvailable.itemSaver = false;
-        const created: any[] = [];
-        Z.Item = function (this: any, type: string) {
-            Object.assign(this, makeSavedItem({ id: 700 + created.length, key: `NEW0000${created.length}` }));
-            this.itemType = type;
-            this.fromJSON = vi.fn();
-            this.setCollections = vi.fn();
-            this.setNote = vi.fn();
-            created.push(this);
-        };
-        mocks.recheckExistingCollections.mockReturnValue([{ collection: { id: 10 }, collectionId: 'u-C', key: 'C' }]);
-        const data = journal({
-            item: {
-                itemType: 'journalArticle',
-                title: 'Paper',
-                tags: ['a', { tag: 'b', type: 0 }] as any,
-                notes: [{ note: '<p>translator note</p>' }],
-            },
-            collection_ids: ['u-C'],
-        });
-        const result = await writeImportItem(data);
-
+        await expect(writeImportItem(journal())).rejects.toMatchObject({ code: 'item_import_unsupported' });
+        expect(itemSaverCtor).not.toHaveBeenCalled();
         expect(saveItems).not.toHaveBeenCalled();
-        const [parent, note] = created;
-        expect(parent.itemType).toBe('journalArticle');
-        expect(parent.fromJSON).toHaveBeenCalledWith(expect.objectContaining({
-            title: 'Paper',
-            tags: [{ tag: 'a', type: 1 }, { tag: 'b', type: 1 }],
-        }));
-        expect(parent.fromJSON.mock.calls[0][0]).not.toHaveProperty('notes');
-        expect(parent.setCollections).toHaveBeenCalledWith([10]);
-        expect(note.itemType).toBe('note');
-        expect(note.parentID).toBe(parent.id);
-        expect(note.setNote).toHaveBeenCalledWith('<p>translator note</p>');
-        // Parent and notes are saved in one transaction.
-        expect(Z.DB.executeTransaction).toHaveBeenCalledTimes(1);
-        expect(parent.save).toHaveBeenCalled();
-        expect(note.save).toHaveBeenCalled();
-        expect(result.zotero_key).toBe(parent.key);
     });
 
-    it('marks ItemSaver unavailable and falls back when it fails like API drift', async () => {
+    it('marks ItemSaver unavailable and fails when it breaks like API drift', async () => {
         const drift = new TypeError('saver.saveItems is not a function');
         saveItems.mockRejectedValue(drift);
-        const created: any[] = [];
-        Z.Item = function (this: any) {
-            Object.assign(this, makeSavedItem({ key: 'FALLBACK1' }));
-            this.fromJSON = vi.fn();
-            this.setCollections = vi.fn();
-            created.push(this);
-        };
-        const result = await writeImportItem(journal());
+        await expect(writeImportItem(journal())).rejects.toMatchObject({ code: 'item_import_unsupported' });
         expect(mocks.markApiUnavailable).toHaveBeenCalledWith('itemSaver', drift);
-        expect(result.zotero_key).toBe('FALLBACK1');
     });
 
-    it('propagates a non-drift ItemSaver failure without falling back', async () => {
+    it('propagates a non-drift ItemSaver failure', async () => {
         saveItems.mockRejectedValue(new Error('database locked'));
         await expect(writeImportItem(journal())).rejects.toThrow('database locked');
         expect(mocks.markApiUnavailable).not.toHaveBeenCalled();

@@ -6,8 +6,9 @@
  * this module. Each API is probed lazily on first use (does it exist, does it
  * have the expected shape) and the result is cached for the plugin's lifetime.
  * A runtime failure that looks like API drift (a TypeError, or an unexpected
- * result shape) marks the API unavailable for the session, so callers take
- * their fallback instead of surfacing a raw Zotero internal error. Each
+ * result shape) marks the API unavailable for the session, so callers fail
+ * with a clear error (or skip an optional step, such as renaming an attached
+ * file) instead of surfacing a raw Zotero internal error. Each
  * unavailable API is logged once with the Zotero version.
  *
  * The probe states are reported at `/beaver/test/item-import-capabilities`.

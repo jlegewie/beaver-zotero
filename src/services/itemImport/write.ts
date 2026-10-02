@@ -32,8 +32,8 @@ import { assertLibraryWritable, recheckExistingCollections } from '../collection
 import { coordinateLibraryMutation } from '../libraryMutations';
 import { isPdfDocument } from '../../utils/attachmentFiles';
 import { WEB_CONTENT_ITEM_TYPES } from './duplicates';
-import { normalizeTags } from './itemJson';
-import { filterPdfAttachments, schedulePdfFetchTask, stampBeaverProvenanceExtra } from './legacy';
+import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
+import { BEAVER_PROVENANCE_MARKER, stampBeaverProvenanceExtra } from './provenance';
 import { locateImportFile, type LocatedFile } from './recognizeFile';
 import { resolveImportItems } from './resolve';
 import { checkUrlAllowed, createGuardedBrowser, landedOnBlockedHost } from './resolveUrl';
@@ -114,49 +114,34 @@ async function resolvePending(data: ImportItemProposedData, libraryID: number, t
     return resolved;
 }
 
-/** Save item JSON with Zotero's own saver (creators, notes, automatic tags), attachments ignored. */
-async function saveItemJson(json: ZoteroItemJson, libraryID: number, collectionIDs: number[]): Promise<Zotero.Item> {
-    const clone = JSON.parse(JSON.stringify(json));
-    if (isApiAvailable('itemSaver')) {
-        try {
-            const ItemSaver = (Zotero as any).Translate.ItemSaver;
-            const saver = new ItemSaver({
-                libraryID,
-                collections: collectionIDs.length ? collectionIDs : false,
-                forceTagType: 1,
-                attachmentMode: ItemSaver.ATTACHMENT_MODE_IGNORE,
-            });
-            const items: Zotero.Item[] = await saver.saveItems([clone], () => {}, () => {});
-            const item = items?.find((candidate) => candidate && !candidate.isNote?.());
-            if (item) return item;
-            throw new Error('ItemSaver returned no item');
-        } catch (error) {
-            if (!looksLikeApiDrift(error)) throw error;
-            markApiUnavailable('itemSaver', error);
-        }
-    }
+const SAVE_UNSUPPORTED_MESSAGE = 'Saving imported items is not supported in this Zotero version.';
 
-    // Fallback: plain fromJSON + save, notes and tags by hand.
-    const notes = Array.isArray(clone.notes) ? clone.notes : [];
-    delete clone.notes;
-    clone.tags = normalizeTags(clone.tags, 1);
-    const item = new Zotero.Item(clone.itemType);
-    item.libraryID = libraryID;
-    item.fromJSON(clone);
-    if (collectionIDs.length) item.setCollections(collectionIDs);
-    // One transaction: a failing note must not leave an untracked parent behind.
-    await Zotero.DB.executeTransaction(async () => {
-        await item.save();
-        for (const entry of notes) {
-            const text = typeof entry === 'string' ? entry : entry?.note;
-            if (!text) continue;
-            const note = new Zotero.Item('note');
-            note.libraryID = libraryID;
-            note.parentID = item.id;
-            note.setNote(text);
-            await note.save();
-        }
-    });
+/**
+ * Save item JSON with Zotero's own saver (creators, notes, automatic tags),
+ * attachments ignored. `ItemSaver` is what Zotero uses for every translator
+ * result, so there is no hand-written fallback: if it is missing or has
+ * changed, the import fails without writing anything.
+ */
+async function saveItemJson(json: ZoteroItemJson, libraryID: number, collectionIDs: number[]): Promise<Zotero.Item> {
+    if (!isApiAvailable('itemSaver')) throw new ImportItemError('item_import_unsupported', SAVE_UNSUPPORTED_MESSAGE);
+    const clone = JSON.parse(JSON.stringify(json));
+    let items: Zotero.Item[];
+    try {
+        const ItemSaver = (Zotero as any).Translate.ItemSaver;
+        const saver = new ItemSaver({
+            libraryID,
+            collections: collectionIDs.length ? collectionIDs : false,
+            forceTagType: 1,
+            attachmentMode: ItemSaver.ATTACHMENT_MODE_IGNORE,
+        });
+        items = await saver.saveItems([clone], () => {}, () => {});
+    } catch (error) {
+        if (!looksLikeApiDrift(error)) throw error;
+        markApiUnavailable('itemSaver', error);
+        throw new ImportItemError('item_import_unsupported', SAVE_UNSUPPORTED_MESSAGE);
+    }
+    const item = items?.find((candidate) => candidate && !candidate.isNote?.());
+    if (!item) throw new Error('ItemSaver returned no item');
     return item;
 }
 
@@ -294,7 +279,7 @@ function resultFor(
 /** Extra with Beaver's provenance line and, for unchecked metadata, its source line. */
 function withProvenanceLines(extra: string, method: string | undefined): string {
     const lines = extra ? [extra] : [];
-    if (!extra.includes('Added by Beaver')) lines.push(`Added by Beaver: ${new Date().toISOString().slice(0, 10)}`);
+    if (!extra.includes(BEAVER_PROVENANCE_MARKER)) lines.push(`${BEAVER_PROVENANCE_MARKER}: ${new Date().toISOString().slice(0, 10)}`);
     const sourceLine = method ? BEAVER_METADATA_LINE[method] : undefined;
     if (sourceLine && !extra.includes(sourceLine)) lines.push(sourceLine);
     return lines.join('\n');

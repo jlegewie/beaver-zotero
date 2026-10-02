@@ -75,6 +75,10 @@ export async function validateImportItemsAction(request: ActionValidateRequest):
 
     const service = Zotero.Beaver?.itemImport;
     if (!service) return invalid(request, 'Item import is unavailable. Restart Zotero and try again.', 'item_import_unavailable');
+    // Fail before resolving: nothing approved here could be written.
+    if (!service.canSave()) {
+        return invalid(request, 'Saving imported items is not supported in this Zotero version.', 'item_import_unsupported');
+    }
 
     const deadlineMs = Math.min(
         typeof data.deadline_ms === 'number' && data.deadline_ms > 0 ? data.deadline_ms : DEFAULT_RESOLUTION_MS,

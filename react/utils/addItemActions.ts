@@ -4,7 +4,7 @@ import { captureWindowMutationOptions, runWindowOperation } from '../runtime/lib
 import { getContextWindow } from '../runtime/windowRuntime';
 import { emitAttachmentResolved } from './attachmentResolvedEvent';
 import { getZoteroTargetContext } from './zoteroTargetContext';
-export { stampBeaverProvenanceExtra } from '../../src/services/itemImport/legacy';
+export { stampBeaverProvenanceExtra } from '../../src/services/itemImport/provenance';
 export type { ImportItemOptions } from '../../src/services/itemImport/legacy';
 
 async function resolveOptions(options?: itemImport.ImportItemOptions): Promise<itemImport.ImportItemOptions> {

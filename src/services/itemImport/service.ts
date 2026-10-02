@@ -11,7 +11,7 @@
 
 import type { ImportItemSpec, ResolvedItem } from '@beaver/agent-core/types/itemImport';
 import { resolveImportItems, type ResolveOptions } from './resolve';
-import { probeAllZoteroApis, type ZoteroApiName, type ZoteroApiStatus } from './zoteroApis';
+import { isApiAvailable, probeAllZoteroApis, type ZoteroApiName, type ZoteroApiStatus } from './zoteroApis';
 
 export class ItemImportService {
     private disposed = false;
@@ -20,6 +20,11 @@ export class ItemImportService {
     async resolve(specs: ImportItemSpec[], options: ResolveOptions): Promise<ResolvedItem[]> {
         if (this.disposed) throw Object.assign(new Error('Beaver is shutting down'), { code: 'shutting_down' });
         return resolveImportItems(specs, options);
+    }
+
+    /** Whether this Zotero version can save resolved items (`Zotero.Translate.ItemSaver`). */
+    canSave(): boolean {
+        return isApiAvailable('itemSaver');
     }
 
     /** Probe states of the internal Zotero APIs item import relies on. */

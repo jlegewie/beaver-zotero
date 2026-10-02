@@ -14,6 +14,19 @@
  * Work is bounded: per-kind concurrency, a per-item cap, and the caller's
  * overall deadline. A slow source fails as one `timeout` item; the rest of the
  * batch is returned.
+ *
+ * Time limits, outermost first:
+ * - The backend waits 60 s for the validate response and asks for a 45 s
+ *   batch deadline; `validateImportItemsAction` caps it at 55 s, so the plugin
+ *   always answers before the backend gives up.
+ * - Each item gets `PER_ITEM_MS` for its kind, or whatever is left of the batch
+ *   deadline if that is less.
+ * - Steps inside an item (the URL's DNS check, page reads, identifier lookups,
+ *   file recognition) draw on that same per-item time; they never extend it.
+ *
+ * Separate limits after approval, outside this budget: resolving a citation
+ * import when the user clicks it (20 s) and loading a page for its snapshot
+ * (60 s), both in `write.ts`.
  */
 
 import type {
