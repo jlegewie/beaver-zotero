@@ -7,6 +7,11 @@ import {
 } from '@beaver/agent-core/types/itemImport';
 
 describe('itemJsonDisplay', () => {
+    it('uses a statute\'s name of act or a case\'s name as the title', () => {
+        expect(itemJsonDisplay({ itemType: 'statute', nameOfAct: 'API Standards', shortTitle: 'API' }).title).toBe('API Standards');
+        expect(itemJsonDisplay({ itemType: 'case', caseName: 'Brown v. Board of Education' }).title).toBe('Brown v. Board of Education');
+    });
+
     it('summarizes a journal article for a UI row', () => {
         const display = itemJsonDisplay({
             itemType: 'journalArticle',

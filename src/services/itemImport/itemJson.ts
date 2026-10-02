@@ -108,7 +108,7 @@ function normalizeCreators(creators: unknown, warnings: string[]): any[] {
 }
 
 /** Base fields whose type-specific variants (university, institution, bookTitle, …) are interchangeable. */
-const BASE_FIELDS = ['publisher', 'publicationTitle', 'number', 'type', 'medium', 'title', 'date'];
+const BASE_FIELDS = ['publisher', 'publicationTitle', 'number', 'type', 'medium', 'title', 'date', 'volume', 'pages', 'place'];
 
 /**
  * Move a field that belongs to another item type onto this type's variant of

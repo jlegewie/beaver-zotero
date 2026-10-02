@@ -87,6 +87,15 @@ function failed(key: string, code: string, message: string, extra: Partial<Resol
 }
 
 /** Fill an empty abstract from fallback metadata (fill-only; identity fields never touched). */
+/** A fallback the model wrote counts as model metadata; a search result's is partial metadata. */
+function fallbackMethod(spec: ImportItemSpec): ResolutionMethod {
+    return spec.fallback_source === 'model' ? 'model_metadata' : 'fallback_metadata';
+}
+
+function fallbackNote(spec: ImportItemSpec): string {
+    return spec.fallback_source === 'model' ? 'using the given metadata' : "using the search result's metadata";
+}
+
 function fillFromFallback(item: ZoteroItemJson, fallback: ZoteroItemJson | undefined): void {
     const abstract = fallback?.abstractNote;
     if (typeof abstract === 'string' && abstract.trim() && !(typeof item.abstractNote === 'string' && item.abstractNote.trim())) {
@@ -149,8 +158,8 @@ async function resolveOne(
                 fillFromFallback(resolution.item, spec.fallback_item);
             }
         } else if (spec.fallback_item) {
-            warnings.push(`identifier lookup failed (${translation.message}); using the search result's metadata`);
-            resolution = normalized(spec.fallback_item, libraryID, 'fallback_metadata', undefined, warnings);
+            warnings.push(`identifier lookup failed (${translation.message}); ${fallbackNote(spec)}`);
+            resolution = normalized(spec.fallback_item, libraryID, fallbackMethod(spec), undefined, warnings);
         } else {
             return failed(spec.key, translation.code, translation.message, { file: fileRef });
         }
@@ -164,15 +173,15 @@ async function resolveOne(
                 fillFromFallback(resolution.item, spec.fallback_item);
             }
         } else if (spec.fallback_item) {
-            warnings.push(`page lookup failed (${translation.message}); using the search result's metadata`);
-            resolution = normalized(spec.fallback_item, libraryID, 'fallback_metadata', undefined, warnings);
+            warnings.push(`page lookup failed (${translation.message}); ${fallbackNote(spec)}`);
+            resolution = normalized(spec.fallback_item, libraryID, fallbackMethod(spec), undefined, warnings);
         } else {
             return failed(spec.key, translation.code, translation.message, { file: fileRef });
         }
     } else if (spec.fallback_item) {
         // A chosen reference without an identifier: its metadata names the work,
         // and an attached file belongs to it rather than being identified anew.
-        resolution = normalized(spec.fallback_item, libraryID, 'fallback_metadata', undefined, warnings);
+        resolution = normalized(spec.fallback_item, libraryID, fallbackMethod(spec), undefined, warnings);
     } else if (located) {
         resolution = await resolveFromFile(spec, located, libraryID, budget(PER_ITEM_MS.file), warnings);
     } else {

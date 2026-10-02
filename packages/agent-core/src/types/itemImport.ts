@@ -71,7 +71,7 @@ export interface ImportSourceDescriptor {
  * One item to resolve. Resolution order:
  * 1. `item` (model metadata) is validated and normalized, and wins;
  * 2. `identifier` is translated; `fallback_item` is used if that fails;
- * 3. `url` is web-translated;
+ * 3. `url` is web-translated; `fallback_item` is used if that fails;
  * 4. `fallback_item` (no identifier or URL): it is validated and normalized,
  *    and a `file` attaches to it;
  * 5. only `file`: the file is recognized.
@@ -83,6 +83,8 @@ export interface ImportItemSpec {
     url?: string;
     item?: ZoteroItemJson;
     fallback_item?: ZoteroItemJson;
+    /** Who wrote `fallback_item`: a search result (default) or the model. */
+    fallback_source?: 'reference' | 'model';
     file?: ImportFileRef;
 }
 
@@ -264,7 +266,9 @@ export function itemJsonDisplay(json: ZoteroItemJson): ItemJsonDisplay {
     const url = fieldString(json, 'url');
 
     return {
-        title: fieldString(json, 'title') ?? fieldString(json, 'shortTitle') ?? 'Untitled',
+        // Statutes, cases and emails keep their title in a type-specific field.
+        title: fieldString(json, 'title') ?? fieldString(json, 'nameOfAct') ?? fieldString(json, 'caseName')
+            ?? fieldString(json, 'subject') ?? fieldString(json, 'shortTitle') ?? 'Untitled',
         itemType: json.itemType,
         creatorsSummary,
         year,

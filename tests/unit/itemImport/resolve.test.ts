@@ -109,6 +109,19 @@ describe('resolveImportItems dispatch', () => {
         expect(result.warnings?.[0]).toContain('identifier lookup failed (DOI 10.1/x was not found.)');
     });
 
+    it('labels a fallback the model wrote as model metadata', async () => {
+        mocks.translateIdentifier.mockResolvedValue({ ok: false, code: 'not_found', message: 'not found' });
+        const [result] = await resolveImportItems([
+            spec('a', {
+                identifier: { type: 'arxiv', value: '2505.15917' },
+                fallback_item: { itemType: 'preprint', title: 'Given' },
+                fallback_source: 'model',
+            }),
+        ], base);
+        expect(result).toMatchObject({ status: 'resolved', method: 'model_metadata', item: { title: 'Given' } });
+        expect(result.warnings?.[0]).toBe('identifier lookup failed (not found); using the given metadata');
+    });
+
     it('fails with the lookup error when the identifier fails and there is no fallback', async () => {
         mocks.translateIdentifier.mockResolvedValue({ ok: false, code: 'not_found', message: 'nope' });
         const [result] = await resolveImportItems([spec('a', { identifier: { type: 'doi', value: '10.1/x' } })], base);

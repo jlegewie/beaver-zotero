@@ -276,6 +276,31 @@ describe('normalizeItemJson base-field remapping', () => {
     });
 });
 
+describe('normalizeItemJson general field names', () => {
+    it('maps the general volume field to the type\'s own variant', () => {
+        const ids: Record<string, number> = { volume: 200, codeVolume: 201, title: 110 };
+        const names = Object.fromEntries(Object.entries(ids).map(([name, id]) => [id, name]));
+        const fields = Zotero.ItemFields as any;
+        const saved = { ...fields };
+        Object.assign(fields, {
+            getID: (name: string) => ids[name] ?? 0,
+            getName: (id: number) => names[id],
+            // This type holds the volume base field as `codeVolume`, as a statute does.
+            isValidForType: (id: number) => id === ids.codeVolume || id === ids.title,
+            getFieldIDFromTypeAndBase: (_type: number, base: number) => (base === ids.volume ? ids.codeVolume : false),
+            getTypeFieldsFromBase: (base: number) => (base === ids.volume ? ['codeVolume', 'reporterVolume'] : []),
+        });
+        try {
+            const result = normalizeItemJson({ itemType: 'book', title: 'Act', volume: '45' } as any, 1);
+            expect(result.ok).toBe(true);
+            expect(lastFromJSON).toMatchObject({ codeVolume: '45' });
+            expect(lastFromJSON).not.toHaveProperty('volume');
+        } finally {
+            Object.assign(fields, saved);
+        }
+    });
+});
+
 describe('normalizeItemJson translator creators', () => {
     it('keeps a single-field (fieldMode 1) creator as one name', () => {
         const result = normalizeItemJson({
