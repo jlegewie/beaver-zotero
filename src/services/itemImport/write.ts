@@ -360,7 +360,10 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
     if (!json) throw new ImportItemError('missing_item_data', 'No item data provided.');
 
     const toSave: ZoteroItemJson = { ...json };
-    if (WEB_CONTENT_ITEM_TYPES.has(json.itemType) || !!snapshotUrl) toSave.accessDate = (Zotero.Date as any).dateToISO(new Date());
+    // An access date the user gave is kept; otherwise web content records when it was saved.
+    if ((WEB_CONTENT_ITEM_TYPES.has(json.itemType) || !!snapshotUrl) && !(typeof json.accessDate === 'string' && json.accessDate.trim())) {
+        toSave.accessDate = (Zotero.Date as any).dateToISO(new Date());
+    }
     // Provenance goes into the first save: other plugins that react to new items
     // (title linters, arXiv helpers) may re-save the item from their own copy,
     // which would drop a stamp added in a second save.

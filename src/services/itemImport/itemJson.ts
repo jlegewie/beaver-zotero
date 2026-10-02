@@ -19,7 +19,6 @@ const TRANSPORT_KEYS = [
     'itemID',
     'key',
     'version',
-    'accessDate',
     'dateAdded',
     'dateModified',
     'collections',
@@ -145,8 +144,9 @@ function remapBaseFields(json: Record<string, any>, itemType: string): void {
 /**
  * Validate and normalize item JSON for `libraryID` without saving.
  *
- * - Strips transport keys (`attachments`, `seeAlso`, `id`, `accessDate`, …);
- *   a fresh `accessDate` is added at write time for web content.
+ * - Strips transport keys (`attachments`, `seeAlso`, `id`, …). A given
+ *   `accessDate` is kept when Zotero reads it as a date (a translator's
+ *   placeholder is dropped); web content without one gets the write time.
  * - Keeps `notes` (written as child notes) and normalizes tags to objects.
  * - Fails with `invalid_metadata` on a missing or unknown `itemType`.
  * - Reports fields Zotero moved to Extra, and creator fixes, as warnings.

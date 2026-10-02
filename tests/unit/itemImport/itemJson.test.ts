@@ -92,9 +92,11 @@ describe('normalizeItemJson normalization', () => {
         }, 1);
         expect(result.ok).toBe(true);
         const sent = lastFromJSON!;
-        for (const key of ['attachments', 'seeAlso', 'accessDate', 'dateAdded', 'key', 'version', 'collections', 'relations']) {
+        for (const key of ['attachments', 'seeAlso', 'dateAdded', 'key', 'version', 'collections', 'relations']) {
             expect(sent).not.toHaveProperty(key);
         }
+        // Zotero itself keeps a real access date and drops a translator's placeholder.
+        expect(sent).toHaveProperty('accessDate', '2020-01-01');
         const item = (result as any).item;
         for (const key of ['key', 'version', 'dateAdded']) expect(item).not.toHaveProperty(key);
         expect(item).toMatchObject({ itemType: 'journalArticle', title: 'T' });

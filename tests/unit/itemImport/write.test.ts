@@ -323,6 +323,11 @@ describe('writeImportItem saving', () => {
         await writeImportItem(journal({ snapshot_url: 'https://x.org/r', item: { itemType: 'report', title: 'R' } }));
         expect(saveItems.mock.calls[0][0][0].accessDate).toBe('2026-10-01T00:00:00Z');
     });
+
+    it('keeps an access date the item already has', async () => {
+        await writeImportItem(journal({ item: { itemType: 'webpage', title: 'Page', accessDate: '2026-09-29' } }));
+        expect(saveItems.mock.calls[0][0][0].accessDate).toBe('2026-09-29');
+    });
 });
 
 describe('writeImportItem finishing touches', () => {
