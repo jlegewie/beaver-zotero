@@ -5,6 +5,7 @@ import {
     enrichmentNote,
     importActionReference,
     importSourceBadge,
+    importSourceDetail,
 } from '../../../react/utils/importItemDisplay';
 
 const data = (overrides: Partial<ImportItemProposedData> = {}): ImportItemProposedData => ({
@@ -18,9 +19,8 @@ describe('importSourceBadge', () => {
         expect(importSourceBadge(data({ source: { kind: 'file', input: 'a.pdf' } }))).toBeNull();
     });
 
-    it('flags model-written metadata as a caution', () => {
-        expect(importSourceBadge(data({ resolution: { method: 'model_metadata' } })))
-            .toMatchObject({ label: 'Metadata written by Beaver', caution: true });
+    it('shows no badge for model-written metadata', () => {
+        expect(importSourceBadge(data({ resolution: { method: 'model_metadata' } }))).toBeNull();
     });
 
     it('flags fallback metadata as partial', () => {
@@ -36,7 +36,7 @@ describe('importSourceBadge', () => {
     it('labels web translation and mentions the translator in the tooltip', () => {
         const badge = importSourceBadge(data({ resolution: { method: 'web_translator', translator: 'Embedded Metadata' } }));
         expect(badge).toMatchObject({ label: 'From web page', caution: false });
-        expect(badge?.tooltip).toContain('Embedded Metadata');
+        expect(badge?.tooltip).toBe('Translator: Embedded Metadata');
     });
 
     it('names the search provider for external sources', () => {
@@ -73,8 +73,40 @@ describe('importSourceBadge', () => {
     it('lets the resolution method take precedence over the source', () => {
         expect(importSourceBadge(data({
             source: { kind: 'external', input: 'W1', provider: 'openalex' },
+            resolution: { method: 'web_translator' },
+        }))?.label).toBe('From web page');
+        expect(importSourceBadge(data({
+            source: { kind: 'external', input: 'W1', provider: 'openalex' },
             resolution: { method: 'model_metadata' },
-        }))?.label).toBe('Metadata written by Beaver');
+        }))).toBeNull();
+    });
+});
+
+describe('importSourceDetail', () => {
+    it('names the identifier and its value', () => {
+        expect(importSourceDetail(data({
+            source: { kind: 'identifier', input: 'x', identifier: { type: 'doi', value: '10.1038/nature12373' } },
+        }))).toBe('DOI 10.1038/nature12373');
+        expect(importSourceDetail(data({
+            source: { kind: 'external', input: 'W1' },
+            pending_resolution: { identifier: { type: 'arxiv', value: '2106.09685' } },
+        }))).toBe('arXiv 2106.09685');
+    });
+
+    it('shows the URL of a web page source', () => {
+        expect(importSourceDetail(data({ source: { kind: 'url', input: 'x', url: 'https://x.org/a' } }))).toBe('https://x.org/a');
+    });
+
+    it('names the search result for external sources', () => {
+        expect(importSourceDetail(data({ source: { kind: 'external', input: 'W1', provider: 'openalex', external_id: 'W1' } })))
+            .toBe('OpenAlex search result W1');
+    });
+
+    it('says nothing for model-written metadata', () => {
+        expect(importSourceDetail(data({
+            source: { kind: 'metadata', input: 'metadata[0]' },
+            resolution: { method: 'model_metadata' },
+        }))).toBeNull();
     });
 });
 

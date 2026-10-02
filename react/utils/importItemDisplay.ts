@@ -44,17 +44,15 @@ const FIELD_LABEL: Record<string, string> = {
     language: 'Language',
 };
 
-/** Where an item's metadata came from, as a short badge. */
+/** Where an item's metadata came from, as a short badge. Model-written metadata has none. */
 export function importSourceBadge(data: ImportItemProposedData | undefined): SourceBadge | null {
     if (!data) return null;
     const method = data.resolution?.method;
     const translator = data.resolution?.translator;
-    const translatorTip = translator ? `Looked up with the Zotero translator “${translator}”` : undefined;
-    if (method === 'model_metadata') {
-        return { label: 'Metadata written by Beaver', caution: true, tooltip: 'Not checked against a database — review before adding.' };
-    }
+    const translatorTip = translator ? `Translator: ${translator}` : undefined;
+    if (method === 'model_metadata') return null;
     if (method === 'fallback_metadata') {
-        return { label: 'Partial metadata', caution: true, tooltip: 'The identifier lookup failed, so this uses the search result’s metadata.' };
+        return { label: 'Partial metadata', caution: true, tooltip: 'Lookup failed; from the search result' };
     }
     if (method === 'recognizer') {
         return { label: 'Identified from file', caution: false, tooltip: translatorTip };
@@ -71,6 +69,24 @@ export function importSourceBadge(data: ImportItemProposedData | undefined): Sou
         return { label: `via ${IDENTIFIER_LABEL[identifierType] ?? identifierType}`, caution: false, tooltip: translatorTip };
     }
     if (source?.kind === 'url') return { label: 'From web page', caution: false, tooltip: translatorTip };
+    return null;
+}
+
+/**
+ * What the item was looked up from, for the details view: "DOI 10.1038/…",
+ * a URL, or the search result. Null for model-written metadata.
+ */
+export function importSourceDetail(data: ImportItemProposedData | undefined): string | null {
+    if (!data || data.resolution?.method === 'model_metadata') return null;
+    const source = data.source;
+    const identifier = source?.identifier ?? data.pending_resolution?.identifier;
+    if (identifier) return `${IDENTIFIER_LABEL[identifier.type] ?? identifier.type} ${identifier.value}`;
+    if (source?.kind === 'url' && (source.url || data.pending_resolution?.url)) return source.url ?? data.pending_resolution!.url!;
+    if (source?.kind === 'external' && source.provider) {
+        const provider = PROVIDER_LABEL[source.provider] ?? source.provider;
+        return source.external_id ? `${provider} search result ${source.external_id}` : `${provider} search result`;
+    }
+    if (data.resolution?.method === 'recognizer') return 'Identified from the attached file';
     return null;
 }
 

@@ -91,9 +91,13 @@ export async function locateImportFile(
             return {
                 ok: false,
                 code: 'file_not_found',
+                // After resolution the ref carries the file name, which is what
+                // the user sees; the model only ever passes the ext- id.
                 message: resolved.record
-                    ? `The attached file ext-${ref.ext_key} is no longer available on this computer.`
-                    : `ext-${ref.ext_key} is not an attached file.`,
+                    ? `${ref.filename ?? `The attached file ext-${ref.ext_key}`} is no longer available on this computer.`
+                    : ref.filename
+                        ? `${ref.filename} is no longer attached to this conversation.`
+                        : `ext-${ref.ext_key} is not an attached file.`,
             };
         }
         const record = resolved.record;

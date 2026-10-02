@@ -105,6 +105,14 @@ describe('locateImportFile', () => {
         expect(await locateImportFile({ ext_key: 'ABCD1234' })).toMatchObject({ ok: false, code: 'file_not_found' });
     });
 
+    it('names a file by its file name, not its ext- id, once it has one', async () => {
+        mocks.resolveExternalFile.mockResolvedValue({ ok: false });
+        expect(await locateImportFile({ ext_key: 'ABCD1234', filename: 'grams.epub' })).toMatchObject({
+            ok: false, code: 'file_not_found', message: 'grams.epub is no longer attached to this conversation.',
+        });
+        expect(await locateImportFile({ ext_key: 'ABCD1234' })).toMatchObject({ message: 'ext-ABCD1234 is not an attached file.' });
+    });
+
     it('fills filename, mime type and size from the external file record', async () => {
         mocks.resolveExternalFile.mockResolvedValue({
             ok: true,
