@@ -1,4 +1,5 @@
 import { FulltextUpsertExecutor } from "../backgroundQueue/fulltextUpsertExecutor";
+import { UNTAG_BATCH_MAX_REFS } from "../backgroundQueue/untagBatcher";
 import { searchIndexApiClient } from "../searchIndex/searchIndexApiClient";
 import { INDEX_RECONCILE_INTERVAL_MS } from "../backgroundProcessing/constants";
 import { reconcileRemoteRefs } from "../backgroundProcessing/remoteRefsReconcile";
@@ -23,13 +24,16 @@ const INDEX_LANE_DEFAULT_IN_FLIGHT = 4;
  */
 const INDEX_LANE_ACTIVE_IN_FLIGHT = 4;
 /**
- * Cloud-index cleanup. Each untag is a short sequence of server round trips
- * that reads no local content, and the backend applies no per-user in-flight
- * limit to it. Excluding a library queues one untag per indexed document, so
- * the lane needs several in flight to drain that backlog in minutes. The
- * active width leaves connections to the API host free for chat requests.
+ * Cloud-index cleanup. Excluding a library queues one untag per indexed
+ * document. Running jobs share batched `/index/delete` requests (see
+ * UntagBatcher), so a lane slot is a ref waiting for its batch, not a
+ * connection: the idle width fills two full batches, and the active width
+ * one, while at most two requests reach the API host at a time.
  */
-const UNTAG_LANE_CAPACITY = { maxInFlight: 8, activeMaxInFlight: 4 };
+const UNTAG_LANE_CAPACITY = {
+    maxInFlight: 2 * UNTAG_BATCH_MAX_REFS,
+    activeMaxInFlight: UNTAG_BATCH_MAX_REFS,
+};
 const CLEANUP_RESTORE_INTERVAL_MS = 6 * 60 * 60_000;
 
 /** Upsert lane limits for a backend-advertised per-user limit. */
