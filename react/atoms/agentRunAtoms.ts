@@ -181,6 +181,7 @@ import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
+import { undoMergeItemsAction } from '../utils/mergeItemsActions';
 import { undoEditNoteAction, undoEditNoteBatchAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
@@ -1047,6 +1048,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 await undoManageCollectionsAction(action);
             } else if (isCreateNoteAgentAction(action)) {
                 await undoCreateNoteAction(action);
+            } else if (action.action_type === 'merge_items') {
+                await undoMergeItemsAction(action);
             }
         } catch (error) {
             logger(`undoAppliedActionsInReverse: Failed to undo action ${action.id} (${action.action_type}): ${error}`, 1);
@@ -1069,6 +1072,7 @@ interface ActionsToUndo {
     manageTags: AgentAction[];
     manageCollections: AgentAction[];
     createNotes: AgentAction[];
+    mergeItems: AgentAction[];
 }
 
 type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
@@ -1080,10 +1084,10 @@ type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
  * or 'cancel' to abort regeneration entirely.
  */
 function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoConfirmResult {
-    const { annotations, annotationEdits, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes } = actions;
+    const { annotations, annotationEdits, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes, mergeItems } = actions;
     const totalActions = annotations.length + annotationEdits.length + zoteroNotes.length + metadataEdits.length +
                          noteEdits.length + createItems.length + createCollections.length + organizeItems.length +
-                         manageTags.length + manageCollections.length + createNotes.length;
+                         manageTags.length + manageCollections.length + createNotes.length + mergeItems.length;
 
     if (totalActions === 0) return 'skip';
 
@@ -1135,6 +1139,9 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
     }
     if (createNotes.length > 0) {
         changeLines.push(`• ${createNotes.length} created note${createNotes.length === 1 ? '' : 's'}`);
+    }
+    if (mergeItems.length > 0) {
+        changeLines.push(`• ${mergeItems.length} duplicate merge${mergeItems.length === 1 ? '' : 's'}`);
     }
 
     const title = 'Retry?';
@@ -3065,6 +3072,8 @@ async function startRegenerateRunOwned(
         const createNotesToUndo = actionsInRemovedRuns
             .filter(isCreateNoteAgentAction)
             .filter(a => a.status === 'applied');
+        const mergeItemsToUndo = actionsInRemovedRuns
+            .filter(a => a.action_type === 'merge_items' && a.status === 'applied');
 
         // Prompt the user to confirm undoing applied actions. The dialog is
         // the consent and must precede the truncate POST: a user who cancels
@@ -3077,7 +3086,7 @@ async function startRegenerateRunOwned(
                                  createItemsToUndo.length > 0 ||
                                  createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
                                  manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
-                                 createNotesToUndo.length > 0;
+                                 createNotesToUndo.length > 0 || mergeItemsToUndo.length > 0;
         if (hasActionsToUndo) {
             confirmResult = confirmUndoAppliedActions({
                 annotations: annotationsToDelete,
@@ -3091,6 +3100,7 @@ async function startRegenerateRunOwned(
                 manageTags: manageTagsToUndo,
                 manageCollections: manageCollectionsToUndo,
                 createNotes: createNotesToUndo,
+                mergeItems: mergeItemsToUndo,
             }, options.window ?? getHostWindow());
             if (confirmResult === 'cancel') {
                 return;
