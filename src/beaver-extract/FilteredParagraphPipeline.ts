@@ -458,30 +458,39 @@ export function collectMarginItemsFromFilteredPage(
         for (const line of block.lines) keptLines.add(line);
     }
 
-    const items: MarginItem[] = [];
+    const removed: RawLine[] = [];
     for (const block of originalPage.blocks) {
         if (block.type !== "text" || !block.lines) continue;
         for (const line of block.lines) {
-            const text = (line.text ?? "").trim();
-            if (!text || keptLines.has(line)) continue;
-            const index = items.length;
-            items.push({
-                kind: "margin",
-                id: `p${originalPage.pageIndex}:i${index}`,
-                pageIndex: originalPage.pageIndex,
-                index,
-                bbox: line.bbox,
-                columnIndex: 0,
-                text: line.text,
-                lines: [
-                    {
-                        text: line.text,
-                        bbox: line.bbox,
-                        fontSize: line.font?.size,
-                    },
-                ],
-            });
+            if (!keptLines.has(line)) removed.push(line);
         }
+    }
+    return marginItemsForLines(originalPage.pageIndex, removed);
+}
+
+/** One margin item per non-blank line, in the given order and frame. */
+export function marginItemsForLines(pageIndex: number, lines: readonly RawLine[]): MarginItem[] {
+    const items: MarginItem[] = [];
+    for (const line of lines) {
+        const text = (line.text ?? "").trim();
+        if (!text) continue;
+        const index = items.length;
+        items.push({
+            kind: "margin",
+            id: `p${pageIndex}:i${index}`,
+            pageIndex,
+            index,
+            bbox: line.bbox,
+            columnIndex: 0,
+            text: line.text,
+            lines: [
+                {
+                    text: line.text,
+                    bbox: line.bbox,
+                    fontSize: line.font?.size,
+                },
+            ],
+        });
     }
     return items;
 }

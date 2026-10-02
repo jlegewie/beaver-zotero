@@ -12,7 +12,7 @@
  */
 import { UnionFind } from "./cluster";
 import { hgap, overlapFrac, unionRect, vgap, type Rect } from "./geometry";
-import { isProse, type Primitive, type RegionLine } from "./pageSignals";
+import { NUMERIC_RE, isProse, type Primitive, type RegionLine } from "./pageSignals";
 
 /** Stacked lines join across at most this many body sizes of vertical space. */
 const STACK_GAP = 1.0;
@@ -80,13 +80,99 @@ export function runningTextLines(lines: readonly RegionLine[], bs: number): Set<
     const widths = prose.map((l) => l.bbox[2] - l.bbox[0]).sort((a, b) => a - b);
     const proseWidth = widths.length ? widths[Math.floor(widths.length / 2)] : Infinity;
     const proseSet = new Set(prose);
+    const justified = justifiedParagraphs(units);
     const running = new Set<RegionLine>();
     for (const l of units) {
-        if (!proseSet.has(l) && !(isWordy(l) && l.bbox[2] - l.bbox[0] >= 0.7 * proseWidth)) continue;
+        if (!proseSet.has(l) && !justified.has(l) && !(isWordy(l) && l.bbox[2] - l.bbox[0] >= 0.7 * proseWidth)) continue;
         for (const piece of members.get(l) ?? [l]) running.add(piece);
     }
     extendParagraphs(lines, running, bs);
     return running;
+}
+
+/** Justified edges agree within this many em (hyphens and kerning shift them a little). */
+const JUSTIFY_TOLERANCE = 0.25;
+/** A justified paragraph has at least this many lines sharing both edges. */
+const JUSTIFIED_LINES = 3;
+/** Stacked lines of a paragraph are at most this many line heights apart. */
+const PARAGRAPH_LEADING = 0.8;
+
+/**
+ * A line of ordinary words: several words, most of them made of letters, not
+ * mostly math and without a relation sign (aligned display equations share
+ * both edges too, in a math font or not).
+ */
+function isTextLine(l: RegionLine): boolean {
+    return (
+        !l.rot &&
+        !l.eqNumber &&
+        !RELATION_RE.test(l.text) &&
+        l.words >= 4 &&
+        l.alphaWords >= 2 &&
+        l.alphaWords >= 0.4 * l.words &&
+        l.mathChars < 0.5 * l.inkChars &&
+        !NUMERIC_RE.test(l.text)
+    );
+}
+
+/**
+ * Lines of justified paragraphs: runs of stacked lines of words, closely set,
+ * that start and end at the same x. Judged from geometry alone, so prose is
+ * found whatever its size relative to the page's body text, its column width,
+ * or its fonts. A run needs `JUSTIFIED_LINES` distinct lines; ragged table
+ * cells rarely align on both edges, and the justified cells of a text table
+ * sit side by side, line for line, in one type size. Prose at body size beside
+ * another column is found as prose anyway.
+ */
+function justifiedParagraphs(units: readonly RegionLine[]): Set<RegionLine> {
+    const text = units.filter(isTextLine).sort((a, b) => a.bbox[1] - b.bbox[1]);
+    // The line directly below each one, if it continues a justified paragraph.
+    const next = new Map<RegionLine, RegionLine>();
+    for (let i = 0; i < text.length; i++) {
+        const a = text[i];
+        const h = a.bbox[3] - a.bbox[1];
+        for (let j = i + 1; j < text.length; j++) {
+            const b = text[j];
+            const gap = b.bbox[1] - a.bbox[3];
+            if (gap > PARAGRAPH_LEADING * h) break;
+            if (gap < -0.5 * h) continue;
+            const tolerance = JUSTIFY_TOLERANCE * Math.max(a.size, b.size, 1);
+            if (
+                Math.abs(a.bbox[0] - b.bbox[0]) <= tolerance &&
+                Math.abs(a.bbox[2] - b.bbox[2]) <= tolerance &&
+                Math.abs(a.size - b.size) <= 0.5
+            ) {
+                next.set(a, b);
+                break;
+            }
+        }
+    }
+    const below = new Set(next.values());
+    // Text beside a line on its line, in its type size: the cells of a table row.
+    // A narrow column beside a table differs in size or lines up only by chance.
+    const sharesLine = (l: RegionLine) => {
+        const h = l.bbox[3] - l.bbox[1];
+        return units.some(
+            (o) =>
+                o !== l &&
+                !o.rot &&
+                (o.bbox[0] >= l.bbox[2] || o.bbox[2] <= l.bbox[0]) &&
+                Math.abs(o.size - l.size) <= 0.5 &&
+                Math.abs(o.bbox[3] - l.bbox[3]) <= ROW_ALIGN * Math.min(h, o.bbox[3] - o.bbox[1]),
+        );
+    };
+    const out = new Set<RegionLine>();
+    for (const start of text) {
+        if (below.has(start)) continue;
+        const run = [start];
+        for (let l = next.get(start); l; l = next.get(l)) run.push(l);
+        // A column of repeated cell values lines up too; paragraph lines differ. The
+        // cells of a text table stand side by side, line for line.
+        if (new Set(run.map((l) => l.text)).size < JUSTIFIED_LINES) continue;
+        if (run.filter(sharesLine).length > 0.5 * run.length) continue;
+        for (const l of run) out.add(l);
+    }
+    return out;
 }
 
 /**
@@ -117,6 +203,13 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
     // that are not running text is a table cell, not a paragraph line (equation
     // numbers and manuscript line numbers do not count).
     const rowMates = new Map<RegionLine, RegionLine[]>();
+    // Every piece on a line's row, numbers included: values of a table row.
+    const rowCells = new Map<RegionLine, RegionLine[]>();
+    const add = (map: Map<RegionLine, RegionLine[]>, x: RegionLine, y: RegionLine) => {
+        const list = map.get(x);
+        if (list) list.push(y);
+        else map.set(x, [y]);
+    };
     for (let i = 0; i < upright.length; i++) {
         const a = upright[i];
         for (let j = i + 1; j < upright.length && upright[j].bbox[1] < a.bbox[3]; j++) {
@@ -124,15 +217,41 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
             const overlap = Math.min(a.bbox[3], b.bbox[3]) - Math.max(a.bbox[1], b.bbox[1]);
             if (overlap <= 0.5 * Math.min(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1])) continue;
             for (const [x, y] of [[a, b], [b, a]] as const) {
-                if (y.eqNumber || /^\d{1,4}$/.test(y.text)) continue;
-                const mates = rowMates.get(x);
-                if (mates) mates.push(y);
-                else rowMates.set(x, [y]);
+                if (y.eqNumber) continue;
+                add(rowCells, x, y);
+                if (!/^\d{1,4}$/.test(y.text)) add(rowMates, x, y);
             }
         }
     }
-    const aloneOnRow = (l: RegionLine) => (rowMates.get(l) ?? []).every((o) => running.has(o));
-
+    // Alone on its row up to the right edge `x1` of its text column, when a
+    // paragraph establishes one: lines past that edge (the next column, a table
+    // beside the paragraph) do not count.
+    // A line wholly to its left counts unless it is set in another type size and
+    // off the line's baseline: cells of one table row (labels to the left of a
+    // column of descriptions, a label centred on a wrapped cell) share a size,
+    // while text in the column to the left lines up only by chance. Boxes end at
+    // the font's descender line, which differs little between fonts, while their
+    // tops differ with each font's ascent.
+    const sameSize = (a: RegionLine, b: RegionLine) => Math.abs(a.size - b.size) <= 0.5;
+    const aligned = (a: RegionLine, b: RegionLine) =>
+        Math.abs(a.bbox[3] - b.bbox[3]) <= ROW_ALIGN * Math.min(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1]);
+    const aloneOnRow = (l: RegionLine, x1 = Infinity) =>
+        (rowMates.get(l) ?? []).every(
+            (o) => running.has(o) || o.bbox[0] >= x1 || (o.bbox[2] <= l.bbox[0] && !aligned(l, o) && !sameSize(l, o)),
+        );
+    // No text past the line's right edge shares its line in its type size, as a
+    // table's row label does with its row's values. A lone number past the line
+    // is a manuscript line number in the margin, not a row's values.
+    const independent = (r: RegionLine) => {
+        const past = (rowCells.get(r) ?? []).filter((o) => !running.has(o) && o.bbox[0] >= r.bbox[2]);
+        if (past.length === 1 && /^\d{1,4}$/.test(past[0].text)) return true;
+        return past.every((o) => !aligned(r, o) || !sameSize(r, o));
+    };
+    // Alone up to the right edge `x1` of the paragraph it continues, and not a row
+    // label: prose beside a table lines up with its rows only by chance, and rarely
+    // in their type size, while a label read as running text (a long one) must not
+    // carry the labels below it into the paragraph.
+    const aloneInColumn = (l: RegionLine, x1: number) => aloneOnRow(l, x1) && (x1 === Infinity || independent(l));
     // Running lines indexed by vertical band, so only nearby ones are compared.
     const band = 2 * bs;
     const index = new Map<number, RegionLine[]>();
@@ -161,14 +280,14 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
     }
     // Short lines of words starting at a text column's left edge ("reveals a
     // trivial fixed point", "as well as:") separate display equations.
-    const margins = [...running].filter((r) => !r.rot).map((r) => r.bbox[0]);
+    const margins = [...running].filter((r) => !r.rot);
     for (const l of upright) {
         if (l.eqNumber || running.has(l)) continue;
         // Display equations are centred or indented, so a line of words starting at the
         // margin ("where Z(N)(α) and Q(N)(α) are given by …") is prose even with inline math.
         const wordy = l.alphaWords >= 3 || (l.alphaWords >= 2 && l.alphaWords >= 0.6 * l.words && l.mathChars <= 0.2 * l.inkChars);
         if (!wordy) continue;
-        if (margins.some((x) => Math.abs(x - l.bbox[0]) <= 2) && aloneOnRow(l)) markRunning(l);
+        if (margins.some((r) => Math.abs(r.bbox[0] - l.bbox[0]) <= 2) && aloneOnRow(l)) markRunning(l);
     }
     const eligible = upright.filter(
         (l) => !l.eqNumber && l.alphaWords >= 1 && l.mathChars < 0.5 * l.inkChars && !running.has(l),
@@ -192,7 +311,7 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
                         l.bbox[1] - r.bbox[3] <= 0.6 * bs &&
                         Math.abs(l.bbox[0] - r.bbox[0]) <= 2 &&
                         Math.abs(l.size - r.size) <= 1 &&
-                        aloneOnRow(l);
+                        aloneInColumn(l, r.bbox[2]);
                     if (sameRow || below) {
                         found = true;
                         break;
@@ -205,6 +324,96 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
             }
         }
         if (!added) break;
+    }
+    markHeadings(upright, running, aloneInColumn);
+}
+
+/** Cells of one table row end within this many line heights of each other. */
+const ROW_ALIGN = 0.2;
+/** A paragraph a heading sits on has at least this many running lines. */
+const HEADED_LINES = 3;
+/** A heading has at most this many words. */
+const HEADING_WORDS = 12;
+/** A heading has at most this share of math characters. */
+const HEADING_MATH = 0.3;
+
+/**
+ * Headings of paragraphs: a short line set directly above a paragraph (a stack
+ * of running lines), within its span — flush with its left edge or indented
+ * like its first line — alone on its row within that span, and set apart in
+ * type (larger, or in another font). A heading over several lines is followed
+ * upward. A heading belongs to the text column, so it never joins a table or
+ * figure set beside the column.
+ */
+function markHeadings(
+    upright: readonly RegionLine[],
+    running: Set<RegionLine>,
+    aloneInColumn: (l: RegionLine, x1: number) => boolean,
+): void {
+    const height = (l: RegionLine) => l.bbox[3] - l.bbox[1];
+    const overlapsX = (a: RegionLine, b: RegionLine) => Math.min(a.bbox[2], b.bbox[2]) > Math.max(a.bbox[0], b.bbox[0]);
+    // The nearest line directly above one, overlapping it horizontally, within the
+    // reach of a heading's gap (lines further up are never stacked on it).
+    const byBottom = [...upright].sort((a, b) => a.bbox[3] - b.bbox[3]);
+    const reach = 3 * Math.max(1, ...upright.map(height));
+    const above = (l: RegionLine): RegionLine | undefined => {
+        const cy = (l.bbox[1] + l.bbox[3]) / 2;
+        // First line whose bottom lies below the centre of `l`: candidates end before it.
+        let lo = 0;
+        let hi = byBottom.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (byBottom[mid].bbox[3] < cy + 0.5 * height(l)) lo = mid + 1;
+            else hi = mid;
+        }
+        for (let k = lo - 1; k >= 0 && byBottom[k].bbox[3] >= l.bbox[1] - reach; k--) {
+            const o = byBottom[k];
+            if (o === l || !overlapsX(o, l) || (o.bbox[1] + o.bbox[3]) / 2 >= cy) continue;
+            if (l.bbox[1] - o.bbox[3] < -0.5 * height(l)) continue;
+            return o; // the highest bottom first
+        }
+        return undefined;
+    };
+    const stacked = (a: RegionLine, b: RegionLine) =>
+        b.bbox[1] - a.bbox[3] <= PARAGRAPH_LEADING * Math.max(height(a), height(b)) &&
+        Math.abs(a.bbox[0] - b.bbox[0]) <= 3 * Math.max(a.size, b.size, 1);
+    // Paragraph tops: running lines with no running line stacked above them and
+    // HEADED_LINES running lines stacked from them down.
+    const below = new Map<RegionLine, RegionLine>();
+    for (const l of upright) {
+        if (!running.has(l)) continue;
+        const a = above(l);
+        if (a && running.has(a) && stacked(a, l) && !below.has(a)) below.set(a, l);
+    }
+    const hasAbove = new Set(below.values());
+    for (const top of upright) {
+        if (!running.has(top) || hasAbove.has(top)) continue;
+        const paragraph = [top];
+        for (let l = below.get(top); l && paragraph.length < HEADED_LINES; l = below.get(l)) paragraph.push(l);
+        if (paragraph.length < HEADED_LINES) continue;
+        const left = Math.min(...paragraph.map((l) => l.bbox[0]));
+        const right = Math.max(...paragraph.map((l) => l.bbox[2]));
+        // A heading is set apart from its paragraph's type: larger, or in another font
+        // (bold, small caps). A table's labels share the type of the cells below them.
+        const fonts = new Map<string | undefined, number>();
+        for (const l of paragraph) fonts.set(l.font, (fonts.get(l.font) ?? 0) + 1);
+        const paragraphFont = [...fonts].reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+        const paragraphSize = Math.max(...paragraph.map((l) => l.size));
+        const distinct = (h: RegionLine) =>
+            h.size >= paragraphSize + 0.5 || (h.font !== undefined && paragraphFont !== undefined && h.font !== paragraphFont);
+        let cur = top;
+        for (;;) {
+            const h = above(cur);
+            if (!h || running.has(h) || h.eqNumber || h.alphaWords < 1 || h.words > HEADING_WORDS || !distinct(h)) break;
+            // A display equation over its explanation is set apart too, in a math font.
+            if (RELATION_RE.test(h.text) || h.mathChars > HEADING_MATH * h.inkChars) break;
+            const indent = 3 * Math.max(cur.size, 1);
+            if (h.bbox[0] < left - 2 || h.bbox[0] > left + indent || h.bbox[2] > right + 2) break;
+            if (h.bbox[1] > cur.bbox[1] || cur.bbox[1] - h.bbox[3] > 1.2 * Math.max(height(h), height(cur))) break;
+            if (!aloneInColumn(h, right)) break;
+            running.add(h);
+            cur = h;
+        }
     }
 }
 

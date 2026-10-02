@@ -293,3 +293,249 @@ describe("text candidates", () => {
         expect(groups[0].bbox.map(Math.round)).toEqual([100, 200, 165, 490]);
     });
 });
+
+describe("page text", () => {
+    const runningTexts = (specs: Spec[]) => {
+        const lines = mergeRowFragments(pageLines(page(specs)), []);
+        const running = runningTextLines(lines, BS);
+        return lines.filter((l) => running.has(l)).map((l) => l.text);
+    };
+    const NARROW = [
+        "the aim of this work is to pro-",
+        "duce a comprehensive mapping of",
+        "the existing literature comparing",
+        "models in generating materials.",
+    ];
+
+    it("reads a narrow justified column as running text whatever its type size", () => {
+        // Set in 8pt on a 10pt page and only 128pt wide: neither the size nor the
+        // width rule sees prose, but both edges line up line after line.
+        const specs: Spec[] = NARROW.map((text, i) => ({ box: [72, 100 + i * 10, 200, 108 + i * 10], text, size: 8 }));
+        specs.push({ box: [72, 140, 130, 148], text: "and their uses.", size: 8 });
+        expect(runningTexts(specs)).toEqual([...NARROW, "and their uses."]);
+    });
+
+    it("does not read aligned display equations as a justified paragraph", () => {
+        const eqs = ["Loss = MSE + penalty", "Risk = MSE + variance", "Cost = SSE + penalty"];
+        const specs: Spec[] = [
+            ...[0, 1, 2].map((i): Spec => ({ box: [72, 60 + i * 13, 540, 71 + i * 13], text: PROSE })),
+            ...eqs.map((text, i): Spec => ({ box: [200, 120 + i * 14, 330, 132 + i * 14], text, font: "CambriaMath" })),
+        ];
+        expect(runningTexts(specs)).toEqual([PROSE, PROSE, PROSE]);
+        // The same in the text font, where few characters count as math.
+        const plain = specs.map((sp) => (sp.font ? { ...sp, font: undefined } : sp));
+        expect(runningTexts(plain)).toEqual([PROSE, PROSE, PROSE]);
+    });
+
+    it("does not read the justified cells of a text table as paragraphs", () => {
+        const left = ["such a dialogue allows us to", "transcend medical boundaries", "in which the patient is not", "merely an object of scrutiny"];
+        const right = ["the touch is configured as a", "dialogue mediated by the body", "whose meaning arises in the", "relation between the two of"];
+        const specs: Spec[] = [
+            ...left.map((text, i): Spec => ({ box: [72, 100 + i * 10, 200, 108 + i * 10], text, size: 8 })),
+            ...right.map((text, i): Spec => ({ box: [215, 100 + i * 10, 343, 108 + i * 10], text, size: 8 })),
+        ];
+        expect(runningTexts(specs)).toEqual([]);
+    });
+
+    it("does not read a column of repeated cell values as a paragraph", () => {
+        const specs: Spec[] = [0, 1, 2, 3].map((i) => ({ box: [300, 100 + i * 12, 420, 109 + i * 12], text: "Generated PEM Assessment Score", size: 8 }));
+        expect(runningTexts(specs)).toEqual([]);
+    });
+
+    it("reads a paragraph's short last line as running text beside a table in the next column", () => {
+        const specs: Spec[] = [
+            { box: [72, 100, 290, 111], text: PROSE },
+            { box: [72, 113, 290, 124], text: PROSE },
+            { box: [72, 126, 150, 137], text: "chose preparation time." },
+            // Table cells in the other column, on the last line's row.
+            { box: [330, 127, 380, 136], text: "Deviation", size: 8 },
+            { box: [420, 127, 450, 136], text: "Mean", size: 8 },
+        ];
+        expect(runningTexts(specs)).toEqual([PROSE, PROSE, "chose preparation time."]);
+    });
+
+    it("keeps a table's column of descriptions out of running text, but not prose beside a table", () => {
+        // Labels with descriptions on their rows: one description is long enough to read
+        // as prose, and the short ones start at its left edge.
+        const table: Spec[] = [
+            { box: [72, 100, 150, 110], text: "python_tool", size: 9 },
+            { box: [200, 100, 540, 110], text: "Generates and deploys useful code for the whole tool chain" },
+            { box: [72, 112, 150, 122], text: "reader_tool", size: 9 },
+            { box: [200, 113, 400, 122], text: "Reads and returns file contents" },
+            { box: [72, 124, 150, 134], text: "plotter_tool", size: 9 },
+            { box: [200, 125, 380, 134], text: "Plots useful output data" },
+        ];
+        const tableRunning = runningTexts(table);
+        expect(tableRunning).not.toContain("Reads and returns file contents");
+        expect(tableRunning).not.toContain("Plots useful output data");
+
+        // A cell to the right within the column blocks a line whether or not it shares
+        // its line exactly (header cells in fonts with different boxes).
+        const header: Spec[] = [
+            { box: [72, 100, 540, 111], text: PROSE },
+            { box: [72, 113, 160, 124], text: "Generalized Example Workflow", size: 9 },
+            { box: [250, 116, 330, 127], text: "Description", size: 9 },
+        ];
+        expect(runningTexts(header)).toEqual([PROSE]);
+
+        // A table in the left column; the right column's paragraph ends on a row that
+        // overlaps a label without sharing its line.
+        const beside: Spec[] = [
+            { box: [72, 104, 150, 113], text: "Petrochemical based", size: 8 },
+            { box: [72, 116, 150, 125], text: "Biological based", size: 8 },
+            { box: [320, 90, 540, 101], text: PROSE },
+            { box: [320, 103, 540, 114], text: PROSE },
+            { box: [320, 116, 460, 127], text: "carbon source of the polymer." },
+        ];
+        expect(runningTexts(beside)).toContain("carbon source of the polymer.");
+    });
+
+    it("keeps row labels out of running text when the label above reads as prose", () => {
+        const LONG = "Gatorade Original Fierce Organic Flow Zero Frost";
+        // Tight rows at body size; numbers sit on every label's line.
+        const row = (y: number, text: string, values = true): Spec[] => [
+            { box: [72, y, 72 + 5 * text.length, y + 10], text },
+            ...(values ? [{ box: [400, y, 420, y + 10], text: "0.46" }, { box: [480, y, 492, y + 10], text: "12" }] : []),
+        ];
+        const labels = runningTexts([...row(100, LONG), ...row(112, "Infuse Thirst Quencher")]);
+        expect(labels).toEqual([LONG]);
+        // A label read as prose without values of its own (a group row) still does not
+        // turn the label below it, which has values, into running text.
+        const group = runningTexts([...row(100, LONG, false), ...row(112, "Infuse Thirst Quencher")]);
+        expect(group).toEqual([LONG]);
+    });
+
+    it("reads a paragraph's last word as running text beside a manuscript line number", () => {
+        const specs: Spec[] = [
+            { box: [72, 100, 290, 111], text: PROSE },
+            { box: [72, 113, 290, 124], text: PROSE },
+            { box: [72, 126, 100, 137], text: "time." },
+            // Line numbers in the right margin, in the body font, on each line's baseline.
+            ...[0, 1, 2].map((i): Spec => ({ box: [520, 100 + i * 13, 532, 111 + i * 13], text: `${10 + i}` })),
+        ];
+        expect(runningTexts(specs)).toContain("time.");
+    });
+
+    it("keeps the last line of a wrapped cell in its table when its label sits beside it", () => {
+        const LONG = "Electrification of transport and power grids requires massive volumes of copper";
+        const specs: Spec[] = [
+            { box: [187, 100, 540, 110], text: LONG },
+            { box: [187, 112, 260, 122], text: "and rare earths" },
+            // The row label, centred on the two-line cell, in the cells' type size.
+            { box: [65, 105, 140, 118], text: "Energy Transition" },
+        ];
+        expect(runningTexts(specs)).toEqual([LONG]);
+    });
+
+    it("reads only a line set apart in type as a paragraph's heading", () => {
+        const para = [0, 1, 2].map((i): Spec => ({ box: [72, 104 + i * 13, 290, 115 + i * 13], text: PROSE }));
+        // In the paragraph's own type: a table's group label over its cells, not a heading.
+        expect(runningTexts([{ box: [72, 91, 140, 102], text: "Mastectomy" }, ...para])).not.toContain("Mastectomy");
+        expect(runningTexts([{ box: [72, 91, 140, 102], text: "Mastectomy", font: "Times-Bold" }, ...para])).toContain("Mastectomy");
+        // A display equation over its explanation, in a math font, is no heading.
+        expect(runningTexts([{ box: [72, 91, 160, 102], text: "Luser = a(b + c)", font: "CambriaMath" }, ...para])).not.toContain(
+            "Luser = a(b + c)",
+        );
+    });
+
+    it("reads a heading over a paragraph as part of the text column, apart from a table beside it", () => {
+        const specs: Spec[] = [
+            { box: [72, 88, 150, 101], text: "2. OBJECTIVE", size: 12 },
+            ...[0, 1, 2].map((i): Spec => ({ box: [72, 104 + i * 13, 290, 115 + i * 13], text: PROSE })),
+        ];
+        // A table to the right, its header on the heading's row.
+        const cols = [330, 420, 500];
+        cols.forEach((x, c) => specs.push({ box: [x, 91, x + 40, 100], text: ["Variable", "Theme", "Example"][c], size: 8 }));
+        for (let r = 0; r < 4; r++) cols.forEach((x, c) => specs.push({ box: [x, 104 + r * 12, x + 30, 113 + r * 12], text: `${r}.${c}5`, size: 8 }));
+        expect(runningTexts(specs)).toContain("2. OBJECTIVE");
+        const groups = textGroups(specs);
+        expect(groups).toHaveLength(1);
+        expect(groups[0].bbox.map(Math.round)).toEqual([330, 91, 540, 149]);
+    });
+
+    it("keeps the rows of a table set tight under its caption out of the caption", () => {
+        const specs: Spec[] = [
+            { box: [330, 100, 480, 110], text: "Table 2 CFA results and indexes", size: 8 },
+            { box: [330, 112, 370, 122], text: "Variables", size: 8 },
+            { box: [400, 112, 440, 122], text: "Alpha", size: 8 },
+            { box: [460, 112, 475, 122], text: "CR", size: 8 },
+            { box: [330, 124, 345, 134], text: "BI", size: 8 },
+            { box: [400, 124, 425, 134], text: "0.944", size: 8 },
+            { box: [460, 124, 485, 134], text: "0.983", size: 8 },
+        ];
+        const found = findCandidates(pageLines(page(specs)), [], W, H, BS);
+        expect([...found.captionText].map((l) => l.text)).toEqual(["Table 2 CFA results and indexes"]);
+
+        // A caption line broken into pieces by inline math is still caption text.
+        const inline: Spec[] = [
+            { box: [55, 100, 400, 108], text: "FIG. 1. Sample reconstructions of the first mode", size: 7 },
+            { box: [55, 110, 300, 118], text: "of the sample image, and the ratio", size: 7 },
+            { box: [303, 109, 320, 119], text: "σ1/σi", size: 7 },
+            { box: [324, 110, 400, 118], text: "displayed corresponds to", size: 7 },
+        ];
+        const caption = findCandidates(pageLines(page(inline)), [], W, H, BS).captionText;
+        expect([...caption].map((l) => l.text).sort()).toEqual(inline.map((sp) => sp.text).sort());
+    });
+
+    it("never counts the page's own text font as math, whatever its name", () => {
+        const specs: Spec[] = [
+            ...[0, 1, 2].map((i): Spec => ({ box: [72, 100 + i * 13, 540, 111 + i * 13], text: PROSE, font: "STIX-Regular" })),
+            { box: [200, 150, 300, 162], text: "x=y+z", font: "STIXMath" },
+        ];
+        const lines = pageLines(page(specs));
+        expect(lines.map((l) => l.mathChars)).toEqual([0, 0, 0, 5]);
+        // Equations are not prose, however wordy their variable names.
+        const equations = pageLines(page(["Loss = MSE + variance + penalty", "Risk = MSE + variance + bias"].map(
+            (text, i): Spec => ({ box: [150, 100 + i * 14, 400, 112 + i * 14], text, font: "CambriaMath" }),
+        )));
+        expect(equations.every((l) => l.mathChars === l.inkChars)).toBe(true);
+        // Without text of its own on the page, the same font reads as math.
+        expect(pageLines(page([{ box: [72, 100, 100, 111], text: "a+b", font: "STIX-Regular" }]))[0].mathChars).toBe(3);
+    });
+
+    it("reports the font setting most of a line, summed over its runs", () => {
+        // Regular, the longest single span in bold, regular again: regular sets more characters overall.
+        const p = page([{ box: [72, 100, 540, 111], text: "plain text BOLDEMPHASISXYZW then more text" }]);
+        const line = p.blocks[0].lines![0] as RawLineDetailed;
+        const font = (name: string) => ({ name, family: "Times", weight: "normal", style: "normal", size: BS });
+        line.spans = [
+            { start: 0, font: font("Times-Roman") },
+            { start: 11, font: font("Times-Bold") },
+            { start: 28, font: font("Times-Roman") },
+        ];
+        expect(pageLines(p).map((l) => l.font)).toEqual(["Times-Roman"]);
+    });
+
+    it("flags text set at an angle by its characters drifting across the line", () => {
+        const p = page([
+            { box: [126, 87, 553, 695], text: "UNCORRECTED PROOF", size: 59 },
+            { box: [72, 100, 540, 111], text: PROSE, size: 0.24 }, // a font scaled by the text matrix
+            { box: [72, 120, 300, 131], text: "a superscript at the end¹²" },
+        ]);
+        // The watermark's characters climb the page diagonally.
+        const mark = p.blocks[0].lines![0] as RawLineDetailed;
+        mark.chars.forEach((ch, i) => {
+            const x = 126 + i * 24;
+            const y = 640 - i * 32;
+            ch.bbox = { l: x, t: y, r: x + 55, b: y + 55 } as never;
+        });
+        const sup = p.blocks[2].lines![0] as RawLineDetailed;
+        for (const ch of sup.chars.slice(-2)) ch.bbox = { ...ch.bbox, t: 117, b: 124 } as never;
+        const lines = pageLines(p);
+        expect(lines[0].skewed).toBe(true);
+        expect(lines.slice(1).filter((l) => l.skewed)).toEqual([]);
+    });
+
+    it("does not read a stacked delimiter or a fraction set as one line as angled text", () => {
+        const p = page([
+            { box: [300, 100, 310, 150], text: "⎛⎜⎜⎝)" }, // bracket pieces stacked straight down
+            { box: [200, 200, 260, 230], text: "a+b=cd" }, // numerator "a+b", then "=", then denominator "cd"
+        ]);
+        const bracket = p.blocks[0].lines![0] as RawLineDetailed;
+        bracket.chars.forEach((ch, i) => (ch.bbox = { l: 300, t: 100 + i * 10, r: 310, b: 110 + i * 10 } as never));
+        const fraction = p.blocks[1].lines![0] as RawLineDetailed;
+        const levels = [200, 200, 200, 210, 220, 220];
+        fraction.chars.forEach((ch, i) => (ch.bbox = { l: 200 + i * 10, t: levels[i], r: 210 + i * 10, b: levels[i] + 10 } as never));
+        expect(pageLines(p).filter((l) => l.skewed)).toEqual([]);
+    });
+});

@@ -12,7 +12,12 @@ import { inverseRotateBBox } from "../../../src/beaver-extract/PageRotationNorma
 import type { Rect } from "../../../src/beaver-extract/regions/geometry";
 import type { RegionClass } from "../../../src/beaver-extract/regions/model";
 import { mergeRowFragments, pageLines } from "../../../src/beaver-extract/regions/pageSignals";
-import type { DetectedRegion, RegionDetection } from "../../../src/beaver-extract/regions/RegionDetector";
+import {
+    LINE_FURNITURE,
+    LINE_SKEWED,
+    type DetectedRegion,
+    type RegionDetection,
+} from "../../../src/beaver-extract/regions/RegionDetector";
 import {
     PICTURE_TEXT_MAX_CHARS,
     placeRegionItems,
@@ -155,7 +160,7 @@ describe("regionItemsForPage", () => {
         expect(allText(rest)).toEqual([where.text]);
     });
 
-    it("keeps figure labels, drops rows of bare numbers and removes decoration text without an item", () => {
+    it("keeps figure labels, drops rows of bare numbers and leaves decoration text in the prose", () => {
         const title = line(300, [[150, 350, "GDP growth by region"]]);
         const ticks = line(400, [[150, 160, "0"], [250, 260, "20"], [350, 360, "40"]]);
         const legend = line(420, [[150, 220, "Treatment"], [300, 360, "Control"]]);
@@ -171,8 +176,35 @@ describe("regionItemsForPage", () => {
 
         expect(items.map((i) => i.kind)).toEqual(["picture"]);
         expect(rowTexts(items[0], " ")).toEqual(["GDP growth by region", "Treatment Control"]);
-        expect(allText(rest)).toEqual([]);
-        expect(rest.blocks).toHaveLength(0);
+        expect(allText(rest)).toEqual(["JOURNAL"]);
+    });
+
+    it("leaves a page whose only region is a decoration unchanged", () => {
+        const titleLine = line(60, [[72, 400, "The Health System Dynamics Framework"]]);
+        const p = page([titleLine]);
+        const out = regionItemsForPage(p, detection(p, [["decoration", [60, 40, 420, 90]]]));
+        expect(out).toEqual({ page: p, items: [], margin: [] });
+    });
+
+    it("sets page furniture aside as margin text, with or without regions", () => {
+        const text = line(120, [[72, 540, PROSE]]);
+        const mark = line(300, [[150, 450, "UNCORRECTED PROOF"]]);
+        const p = page([text], [mark]);
+        const d = detection(p, []);
+        d.routing!.flags = d.routing!.lines.map((l) => (l.text === "UNCORRECTED PROOF" ? LINE_SKEWED | LINE_FURNITURE : 0));
+        const out = regionItemsForPage(p, d);
+        expect(out.items).toEqual([]);
+        expect(out.margin).toEqual([mark]);
+        expect(allText(out.page)).toEqual([PROSE]);
+
+        const figure = line(500, [[150, 300, "Treatment"]]);
+        const q = page([text], [mark], [figure]);
+        const e = detection(q, [["picture", [140, 490, 310, 520]]]);
+        e.routing!.flags = e.routing!.lines.map((l) => (l.text === "UNCORRECTED PROOF" ? LINE_SKEWED | LINE_FURNITURE : 0));
+        const withRegion = regionItemsForPage(q, e);
+        expect(withRegion.items.map((i) => i.kind)).toEqual(["picture"]);
+        expect(withRegion.margin).toEqual([mark]);
+        expect(allText(withRegion.page)).toEqual([PROSE]);
     });
 
     it("caps figure label text", () => {
@@ -225,7 +257,7 @@ describe("regionItemsForPage", () => {
         expect(none.page).toBe(p);
         expect(none.items).toEqual([]);
         const scanned = regionItemsForPage(p, { ...detection(p, [["picture", [60, 100, 560, 160]]]), scanned: true });
-        expect(scanned).toEqual({ page: p, items: [] });
+        expect(scanned).toEqual({ page: p, items: [], margin: [] });
     });
 });
 

@@ -92,11 +92,19 @@ export interface RegionLine {
     mathChars: number;
     /** Non-space characters. */
     inkChars: number;
+    /** Name of the font setting most of the line's characters, when known. */
+    font?: string;
     /** Smallest and largest font size on the line (font runs; else `size`). */
     minSize: number;
     maxSize: number;
     /** The line is only an equation number. */
     eqNumber: boolean;
+    /**
+     * Text set at an angle (neither horizontal nor vertical, see `isSkewed`):
+     * its box says nothing about the layout. A diagonal watermark's box spans
+     * most of the page.
+     */
+    skewed?: true;
     /**
      * 1-based index of the structured-text line this piece was split from (among
      * its non-blank lines, see `sourceLines`), and that line's piece count.
@@ -152,16 +160,24 @@ export interface Primitive {
 type FontRun = { start: number; font: { name: string; size: number } };
 
 /** Math and size statistics of chars [a, b) of a line, from its font runs. */
-function rangeMath(chars: readonly string[], runs: readonly FontRun[], a: number, b: number) {
+function rangeMath(
+    chars: readonly string[],
+    runs: readonly FontRun[],
+    a: number,
+    b: number,
+    textFont: string | undefined,
+) {
     let math = 0;
     let ink = 0;
     let minSize = Infinity;
     let maxSize = 0;
+    // Ink per font name: a line can return to its font after an emphasized span.
+    const fontInk = new Map<string, number>();
     for (let r = 0; r < runs.length; r++) {
         const s0 = Math.max(a, runs[r].start);
         const s1 = Math.min(b, r + 1 < runs.length ? runs[r + 1].start : chars.length);
         if (s0 >= s1) continue;
-        const mathFont = isMathFont(runs[r].font.name);
+        const mathFont = runs[r].font.name !== textFont && isMathFont(runs[r].font.name);
         let runInk = 0;
         for (let i = s0; i < s1; i++) {
             const c = chars[i];
@@ -170,12 +186,21 @@ function rangeMath(chars: readonly string[], runs: readonly FontRun[], a: number
             if (mathFont || MATH_CHAR_RE.test(c)) math++;
         }
         ink += runInk;
+        if (runInk > 0 && runs[r].font.name) fontInk.set(runs[r].font.name, (fontInk.get(runs[r].font.name) ?? 0) + runInk);
         if (runInk > 0 && runs[r].font.size > 0) {
             minSize = Math.min(minSize, runs[r].font.size);
             maxSize = Math.max(maxSize, runs[r].font.size);
         }
     }
-    return { math, ink, minSize, maxSize };
+    let font: string | undefined;
+    let best = 0;
+    for (const [name, n] of fontInk) {
+        if (n > best) {
+            font = name;
+            best = n;
+        }
+    }
+    return { math, ink, minSize, maxSize, font };
 }
 
 /** Gap (in em) between two inked characters that splits a line into separate pieces. */
@@ -212,8 +237,122 @@ export function sourceLines(page: RawPageData): RawLine[] {
     return out;
 }
 
+/** Character centres drifting across the line by this many character heights: set at an angle. */
+const SKEW_DRIFT = 1.5;
+/** A step between characters drifts when it moves this many character heights across the line. */
+const SKEW_STEP = 0.05;
+/** Angled text drifts on at least this share of its steps between characters. */
+const SKEW_STEADY = 0.8;
+/** Without character boxes: a line's box this many times its type size across. */
+const SKEW_RATIO = 3;
+
+/**
+ * Text set at an angle: from its first to its last inked character, the
+ * character centres drift across the line's direction by more than a
+ * character's height (horizontal text stays on its baseline, sub- and
+ * superscripts aside), steadily from one character to the next while also
+ * advancing along the line (a tall delimiter built from stacked glyph pieces
+ * only drifts; a fraction set as one line jumps between levels). Font sizes
+ * can be wrong (fonts scaled by the text matrix), so character boxes decide; a
+ * line without them falls back to its box against its type size.
+ */
+function isSkewed(
+    line: RawLineDetailed,
+    chars: readonly string[],
+    a: number,
+    b: number,
+    rot: 0 | 90 | 270,
+    bbox: Rect,
+    typeSize: number,
+): boolean {
+    if (b - a < 2) return false;
+    if (line.chars?.length !== chars.length) {
+        const across = rot ? bbox[2] - bbox[0] : bbox[3] - bbox[1];
+        return across > SKEW_RATIO * typeSize;
+    }
+    // First and last inked characters.
+    let first = a;
+    while (first < b && /\s/.test(chars[first])) first++;
+    let last = b - 1;
+    while (last > first && /\s/.test(chars[last])) last--;
+    if (first >= last) return false;
+    const f = line.chars[first].bbox;
+    const l = line.chars[last].bbox;
+    const across = (c: typeof f) => (rot ? (c.l + c.r) / 2 : (c.t + c.b) / 2);
+    const along = (c: typeof f) => (rot ? (c.t + c.b) / 2 : (c.l + c.r) / 2);
+    const extent = (c: typeof f) => (rot ? c.r - c.l : c.b - c.t);
+    // The smaller of the two: a superscript or a tall glyph at either end must not hide a drift.
+    const height = Math.max(Math.min(extent(f), extent(l)), 1);
+    const drift = across(l) - across(f);
+    if (Math.abs(drift) <= SKEW_DRIFT * height) return false;
+    // Text at an angle drifts steadily, each character moving both across and along the
+    // line. Glyph pieces stacked into a tall delimiter (a matrix bracket) do not advance;
+    // a fraction set as one line (numerator and denominator) jumps between two levels.
+    const advance = Math.sign(along(l) - along(f));
+    let steps = 0;
+    let steady = 0;
+    let prevAcross = across(f);
+    let prevAlong = along(f);
+    for (let i = first + 1; i <= last; i++) {
+        if (/\s/.test(chars[i])) continue;
+        const c = line.chars[i].bbox;
+        steps++;
+        // Each step moves across the line and along it, as rotated text does.
+        if ((across(c) - prevAcross) * Math.sign(drift) > SKEW_STEP * height && (along(c) - prevAlong) * advance > SKEW_STEP * height) steady++;
+        prevAcross = across(c);
+        prevAlong = along(c);
+    }
+    return steady >= SKEW_STEADY * steps;
+}
+
+/** A word of at least three letters, for finding the page's text font. */
+const TEXT_WORD_RE = /^\p{L}{3,}[.,;:!?)]*$/u;
+/** Lines of prose are mostly such words. */
+const TEXT_WORD_SHARE = 0.6;
+/** A relation sign marks an equation, not prose. */
+const PROSE_RELATION_RE = /[=≤≥<>≈≡≠]/;
+
+/**
+ * The font that sets most characters of the page's prose lines (lines mostly
+ * of words, without relation signs): its text font. Fonts are listed as math by
+ * name, and some text fonts share a name with a math family (STIX), so the
+ * page's own text font is never math. A page of equations has no prose lines
+ * and no text font.
+ */
+function pageTextFont(page: RawPageData): string | undefined {
+    const chars = new Map<string, number>();
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) {
+            if (line.text.length < 15 || PROSE_RELATION_RE.test(line.text)) continue;
+            // Prose: at least four words of letters, and mostly words (an equation's
+            // variable names come between operators).
+            const tokens = line.text.split(/\s+/).filter(Boolean);
+            const words = tokens.filter((t) => TEXT_WORD_RE.test(t)).length;
+            if (words < 4 || words < TEXT_WORD_SHARE * tokens.length) continue;
+            const detailed = line as RawLineDetailed;
+            const runs: FontRun[] = detailed.spans?.length ? detailed.spans : [{ start: 0, font: line.font }];
+            const n = detailed.chars?.length ?? [...line.text].length;
+            runs.forEach((run, r) => {
+                const end = r + 1 < runs.length ? runs[r + 1].start : n;
+                chars.set(run.font.name, (chars.get(run.font.name) ?? 0) + Math.max(0, end - run.start));
+            });
+        }
+    }
+    let best: string | undefined;
+    let bestCount = 0;
+    for (const [name, count] of chars) {
+        if (count > bestCount) {
+            best = name;
+            bestCount = count;
+        }
+    }
+    return best;
+}
+
 export function pageLines(page: RawPageData): RegionLine[] {
     const lines: RegionLine[] = [];
+    const textFont = pageTextFont(page);
     let source = 0;
     for (const block of page.blocks) {
         if (block.type !== "text" || !block.lines) continue;
@@ -244,7 +383,8 @@ export function pageLines(page: RawPageData): RegionLine[] {
                         bbox = [Math.min(bbox[0], cb.l), Math.min(bbox[1], cb.t), Math.max(bbox[2], cb.r), Math.max(bbox[3], cb.b)];
                     }
                 }
-                const m = rangeMath(chars, runs, a, b);
+                const m = rangeMath(chars, runs, a, b, textFont);
+                const maxSize = m.maxSize || size;
                 lines.push({
                     bbox,
                     text,
@@ -256,9 +396,11 @@ export function pageLines(page: RawPageData): RegionLine[] {
                     alphaWords: alphaWordCount(text),
                     mathChars: m.math,
                     inkChars: m.ink,
+                    ...(m.font ? { font: m.font } : {}),
                     minSize: m.minSize === Infinity ? size : m.minSize,
-                    maxSize: m.maxSize || size,
+                    maxSize,
                     eqNumber: EQUATION_NUMBER_RE.test(text),
+                    ...(isSkewed(detailed, chars, a, b, rot, bbox, Math.max(size, maxSize)) ? { skewed: true as const } : {}),
                     source,
                     pieces: pieces.length,
                     range: [a, b],
@@ -337,6 +479,7 @@ export function mergeRowFragments(lines: RegionLine[], prims: readonly Primitive
                     bbox: [cur.bbox[0], Math.min(cur.bbox[1], next.bbox[1]), Math.max(cur.bbox[2], next.bbox[2]), Math.max(cur.bbox[3], next.bbox[3])],
                     text,
                     size: next.nchar > cur.nchar ? next.size : cur.size,
+                    ...((next.nchar > cur.nchar ? next.font : cur.font) ? { font: next.nchar > cur.nchar ? next.font : cur.font } : {}),
                     words: cur.words + next.words,
                     nchar: cur.nchar + next.nchar + 1,
                     alphaWords: cur.alphaWords + next.alphaWords,

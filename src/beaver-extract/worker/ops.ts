@@ -57,6 +57,7 @@ import type {
     PDFSearchResult,
     InternalProcessedPage,
     PageGeometry,
+    RawLine,
     RawPageData,
     RawPageDataDetailed,
     StructuredPagePhaseTimings,
@@ -129,7 +130,7 @@ import type { DocumentLike, FontApi } from "./mupdfApi";
 import type { GraphicsSummary } from "./graphicsSummary";
 import { detectRegions } from "../regions/RegionDetector";
 import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
-import { regionItemsForPage, type RegionItemDraft } from "../regions/regionItems";
+import { regionItemsForPage, type PageRegionItems, type RegionItemDraft } from "../regions/regionItems";
 import { REGION_MODEL } from "../regions/weights";
 import { DEFAULT_REGION_CONTEXT_PAGES } from "./regionOps";
 
@@ -815,6 +816,7 @@ export function runExtractFromIndices(
             const preWalkedDetailedMs = preWalkedDetailedMsByTarget!.get(i) ?? 0;
             let detailed = preWalkedDetailedTargets!.get(i);
             let regionItems: RegionItemDraft[] | undefined;
+            let regionMargin: RawLine[] | undefined;
             let regionsMs: number | undefined;
             let pageRotation: RotationAngle | undefined;
             let pagesForTarget = analysisPages;
@@ -834,6 +836,7 @@ export function runExtractFromIndices(
                     detailed = stripped;
                 }
                 regionItems = regions.items;
+                regionMargin = regions.margin;
                 regionsMs = performance.now() - tRegions;
             }
             const { sentenceResult, filteredResult, phaseTimings } =
@@ -855,6 +858,7 @@ export function runExtractFromIndices(
                     preWalkedDetailed: detailed,
                     preWalkedDetailedMs,
                     regionItems,
+                    regionMargin,
                     regionsMs,
                     pageRotation,
                 });
@@ -982,7 +986,7 @@ function pageRegions(
     graphics: GraphicsSummary | undefined,
     imagesByPage: ReadonlyMap<number, ReadonlySet<number>>,
     pageCount: number,
-): { page: RawPageDataDetailed; items: RegionItemDraft[] } {
+): PageRegionItems {
     if (!graphics || !REGION_MODEL) {
         throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
     }
@@ -996,7 +1000,7 @@ function pageRegions(
         return regionItemsForPage(page, detection);
     } catch (err) {
         postLog("warn", `[mupdf-worker] region detection failed on page ${page.pageIndex}: ${String(err)}`);
-        return { page, items: [] };
+        return { page, items: [], margin: [] };
     }
 }
 

@@ -41,6 +41,14 @@ export const CONTAINED_FRACTION = 0.8;
 /** Regions overlapping a larger region at this IoU or more duplicate it. */
 export const DUPLICATE_IOU = 0.5;
 /**
+ * A region holding a region at least this much more probable than itself is
+ * dropped before overlaps are resolved: a page-sized weak region (a full-page
+ * background, a stray cluster) must not swallow a confident figure inside it.
+ * Chosen on the development sets; the research repo's `resolve_overlaps`
+ * applies it with the same margin.
+ */
+export const CONFIDENCE_MARGIN = 0.25;
+/**
  * A candidate is a region only when its class is at least this probable.
  * Uncertain regions would move prose out of the text for little gain; the bar
  * is lower for tables, whose mistakes reformat text instead of hiding it.
@@ -56,6 +64,15 @@ export const REGION_MIN_PROB: Readonly<Record<Exclude<RegionClass, "other">, num
 /** Line flags in `RegionDetection.lines`. */
 export const LINE_RUNNING = 1;
 export const LINE_CAPTION = 2;
+/** Text set at an angle (`RegionLine.skewed`); it takes no part in detection. */
+export const LINE_SKEWED = 4;
+/**
+ * Skewed text spanning the page (a diagonal watermark): page furniture, read
+ * as margin text rather than as part of the layout. Never routed.
+ */
+export const LINE_FURNITURE = 8;
+/** Skewed text spanning at least this share of the page's width and height is furniture. */
+const FURNITURE_SPAN = 1 / 3;
 
 export interface RegionDetection {
     pageIndex: number;
@@ -96,7 +113,10 @@ export interface DetectRegionsOptions {
 export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts: DetectRegionsOptions): RegionDetection {
     const start = performance.now();
     if (opts.model) assertCompatible(opts.model);
-    const pieces = pageLines(page);
+    const all = pageLines(page);
+    // Skewed text has meaningless boxes: it neither forms nor shapes candidates.
+    const pieces = all.filter((l) => !l.skewed);
+    const skewed = all.filter((l) => l.skewed);
     const bs = bodySize(pieces);
     const primitives = pagePrimitives(graphics, page.width, page.height, bs);
     const lines = mergeRowFragments(pieces, primitives);
@@ -117,14 +137,19 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
     const ms = performance.now() - start;
     const detection: RegionDetection = { pageIndex: opts.pageIndex, scanned: found.scanned, bodySize: bs, candidates, ms };
     if (opts.includeLines || opts.route) {
-        const flags = lines.map(
-            (l) => (found.running.has(l) ? LINE_RUNNING : 0) | (found.captionText.has(l) ? LINE_CAPTION : 0),
+        const furniture = (l: RegionLine) =>
+            l.bbox[2] - l.bbox[0] >= FURNITURE_SPAN * page.width && l.bbox[3] - l.bbox[1] >= FURNITURE_SPAN * page.height;
+        const routed = [...lines, ...skewed];
+        const flags = routed.map((l) =>
+            l.skewed
+                ? LINE_SKEWED | (furniture(l) ? LINE_FURNITURE : 0)
+                : (found.running.has(l) ? LINE_RUNNING : 0) | (found.captionText.has(l) ? LINE_CAPTION : 0),
         );
         const rules = primitives.filter((p) => p.kind === "hrule").map((p) => p.bbox);
-        const routes = routeLines(lines, flags, candidates, rules);
-        if (opts.route) detection.routing = { lines, flags, routes };
+        const routes = routeLines(routed, flags, candidates, rules);
+        if (opts.route) detection.routing = { lines: routed, flags, routes };
         if (opts.includeLines) {
-            detection.lines = lines.map((l, i) => [
+            detection.lines = routed.map((l, i) => [
                 ...l.bbox.map((v) => Math.round(v * 10) / 10),
                 l.nchar,
                 flags[i],
@@ -139,13 +164,27 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
  * Classified regions compete for space, largest first: a region mostly inside a
  * kept one (a panel, an axis-label group, an equation inside a table) or
  * overlapping it heavily (the graphics and text candidates of one table) becomes
- * part of it. The research repo's `resolve_overlaps` applies the same rule when
- * scoring.
+ * part of it. Before that, a region holding a far more probable one
+ * (`CONFIDENCE_MARGIN`) becomes "other". The research repo's `resolve_overlaps`
+ * applies the same rule when scoring.
  */
 export function resolveOverlaps(regions: DetectedRegion[]): void {
-    const order = regions
+    const labelled = regions
         .map((_, i) => i)
-        .filter((i) => regions[i].label !== undefined && regions[i].label !== "other")
+        .filter((i) => regions[i].label !== undefined && regions[i].label !== "other");
+    const prob = (i: number) => regions[i].probs?.[regions[i].label!] ?? 0;
+    const outweighed = labelled.filter((i) =>
+        labelled.some(
+            (j) =>
+                j !== i &&
+                rectArea(regions[j].bbox) < rectArea(regions[i].bbox) &&
+                prob(j) >= prob(i) + CONFIDENCE_MARGIN &&
+                rectArea(intersect(regions[j].bbox, regions[i].bbox)) >= CONTAINED_FRACTION * rectArea(regions[j].bbox),
+        ),
+    );
+    for (const i of outweighed) regions[i].label = "other";
+    const order = labelled
+        .filter((i) => !outweighed.includes(i))
         .sort((a, b) => rectArea(regions[b].bbox) - rectArea(regions[a].bbox));
     const kept: number[] = [];
     for (const i of order) {
@@ -172,6 +211,8 @@ export function resolveOverlaps(regions: DetectedRegion[]): void {
  * belongs to it (labels, cells, equation parts) — except for lines that belong
  * to a table's rows: those join the table, as do rows its box missed between
  * its cells and the horizontal `rules` that rule them (`completeTableRows`).
+ * Decorations take no text: what they overlap stays in prose, where margin
+ * detection decides about it. Furniture is never routed.
  */
 export function routeLines(
     lines: readonly RegionLine[],
@@ -180,13 +221,13 @@ export function routeLines(
     rules: readonly Rect[] = [],
 ): number[] {
     const routes = lines.map((l, i) => {
-        if (flags[i] & (LINE_RUNNING | LINE_CAPTION)) return -1;
+        if (flags[i] & (LINE_RUNNING | LINE_CAPTION | LINE_FURNITURE)) return -1;
         const cx = (l.bbox[0] + l.bbox[2]) / 2;
         const cy = (l.bbox[1] + l.bbox[3]) / 2;
         let best = -1;
         let bestArea = Infinity;
         regions.forEach((r, k) => {
-            if (!r.label || r.label === "other") return;
+            if (!r.label || r.label === "other" || r.label === "decoration") return;
             const b = r.bbox;
             if (cx < b[0] || cx > b[2] || cy < b[1] || cy > b[3]) return;
             const area = rectArea(b);
@@ -199,9 +240,20 @@ export function routeLines(
     });
     const tables = regions.flatMap((r, index) => (r.label === "table" ? [{ index, bbox: r.bbox }] : []));
     if (tables.length) {
-        const running = flags.map((f) => (f & LINE_RUNNING) !== 0);
-        const caption = flags.map((f) => (f & LINE_CAPTION) !== 0);
-        completeTableRows({ lines, running, caption, tables, rules }, routes);
+        // Skewed lines have no rows to share; completion leaves them where they are.
+        const upright = lines.flatMap((_, i) => (flags[i] & LINE_SKEWED ? [] : [i]));
+        const sub = upright.map((i) => routes[i]);
+        completeTableRows(
+            {
+                lines: upright.map((i) => lines[i]),
+                running: upright.map((i) => (flags[i] & LINE_RUNNING) !== 0),
+                caption: upright.map((i) => (flags[i] & LINE_CAPTION) !== 0),
+                tables,
+                rules,
+            },
+            sub,
+        );
+        upright.forEach((i, k) => (routes[i] = sub[k]));
     }
     return routes;
 }

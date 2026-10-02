@@ -49,6 +49,7 @@ import type { PageSentenceResult } from "../ParagraphSentenceMapper";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import {
     detectFilteredParagraphs,
+    marginItemsForLines,
     reindexMarginItems,
     type FilteredParagraphResult,
 } from "../FilteredParagraphPipeline";
@@ -65,6 +66,7 @@ import type {
     GraphicsLayerMode,
     MarginRemovalResult,
     MarginSettings,
+    RawLine,
     RawPageData,
     RawPageDataDetailed,
     StructuredPagePhaseTimings,
@@ -158,6 +160,11 @@ export function extractSentencesForPage(args: {
      * must then be the page without the lines they absorbed.
      */
     regionItems?: readonly RegionItemDraft[];
+    /**
+     * Lines region detection set aside as page furniture (`PageRegionItems.margin`);
+     * they become margin items. `preWalkedDetailed` must then be the page without them.
+     */
+    regionMargin?: readonly RawLine[];
     /** Time spent detecting regions before this call, reported in the phase timings. */
     regionsMs?: number;
     /**
@@ -252,7 +259,7 @@ export function extractSentencesForPage(args: {
     sentenceResult.items = [
         ...sentenceResult.items,
         ...reindexMarginItems(
-            filteredResult.marginItems,
+            [...filteredResult.marginItems, ...marginItemsForLines(args.pageIndex, args.regionMargin ?? [])],
             sentenceResult.items.length,
         ),
     ];

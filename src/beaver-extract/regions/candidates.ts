@@ -27,6 +27,8 @@ import { runningTextLines, textGroups } from "./textCandidates";
 const MAX_MERGE_CANDIDATES = 300;
 /** Continuation lines followed below a caption's first row. */
 const MAX_CAPTION_LINES = 15;
+/** Text on one row this many em apart is in separate cells; inline math sits closer. */
+const CELL_GAP_EM = 2;
 const CLUSTERED: ReadonlySet<PrimitiveKind> = new Set(["image", "mark", "glyph", "pixel", "hrule", "vrule", "box"]);
 /** Primitive kinds that make up table rulings rather than pictures. */
 const RULE_KINDS: ReadonlySet<PrimitiveKind> = new Set(["hrule", "vrule", "box", "pixel"]);
@@ -341,8 +343,27 @@ function captionBlocks(caps: RegionLine[], lines: readonly RegionLine[], bs: num
             .filter((l) => !l.rot && l.bbox[1] > cap.bbox[1] + 1 && !isCaptionLine(l) && Math.abs(l.size - cap.size) <= 1)
             .sort((a, b) => a.bbox[1] - b.bbox[1]);
         // Continuation lines follow at the caption's own line spacing and height; a
-        // table or figure below the caption starts after a larger gap.
+        // table or figure below the caption starts after a larger gap. Caption text
+        // runs one line per row: a row whose text, in the caption's span, breaks at a
+        // column gap holds table cells set tight under the caption. Inline math set
+        // as separate pieces sits closer.
         const capH = cap.bbox[3] - cap.bbox[1];
+        const rowShared = (l: RegionLine) => {
+            const row = lines
+                .filter(
+                    (o) =>
+                        (o === l || o.source !== l.source) &&
+                        !o.rot &&
+                        o.bbox[0] < out.bbox[2] + bs &&
+                        o.bbox[2] > out.bbox[0] - bs &&
+                        Math.min(o.bbox[3], l.bbox[3]) - Math.max(o.bbox[1], l.bbox[1]) >
+                            0.5 * Math.min(o.bbox[3] - o.bbox[1], l.bbox[3] - l.bbox[1]),
+                )
+                .sort((a, b) => a.bbox[0] - b.bbox[0]);
+            return row.some(
+                (o, i) => i > 0 && o.bbox[0] - Math.max(...row.slice(0, i).map((p) => p.bbox[2])) >= CELL_GAP_EM * Math.max(l.size, 1),
+            );
+        };
         for (let n = 0; n < MAX_CAPTION_LINES; n++) {
             const next = below.find(
                 (l) =>
@@ -353,7 +374,7 @@ function captionBlocks(caps: RegionLine[], lines: readonly RegionLine[], bs: num
                     l.bbox[0] >= out.bbox[0] - bs &&
                     l.bbox[2] <= out.bbox[2] + bs,
             );
-            if (!next) break;
+            if (!next || rowShared(next)) break;
             absorb(next);
         }
         return out;

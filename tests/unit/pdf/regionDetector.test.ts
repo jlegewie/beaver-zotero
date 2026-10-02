@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { findCandidates } from "../../../src/beaver-extract/regions/candidates";
 import {
+    CONFIDENCE_MARGIN,
     LINE_CAPTION,
+    LINE_FURNITURE,
     LINE_RUNNING,
+    LINE_SKEWED,
     REGION_MIN_PROB,
     detectRegions,
     resolveOverlaps,
@@ -301,6 +304,56 @@ describe("routeLines", () => {
         const flags = [0, 0, LINE_RUNNING, LINE_CAPTION, 0, 0];
         expect(routeLines(lines, flags, regions)).toEqual([1, 0, -1, -1, -1, -1]);
     });
+
+    it("gives decorations no text and never routes page furniture", () => {
+        const region = (bbox: Rect, label: DetectedRegion["label"]): DetectedRegion => ({ bbox, anchored: false, features: [], label });
+        const regions = [region([50, 50, 550, 700], "picture"), region([60, 60, 300, 120], "decoration")];
+        const lines = [
+            line([70, 70, 290, 110], "The Health System Dynamics Framework"), // a title on a banner
+            line([100, 300, 140, 340], "Q4 2019"), // a small label set at an angle
+            line([100, 100, 500, 650], "UNCORRECTED PROOF"), // a watermark across the page
+        ];
+        const flags = [0, LINE_SKEWED, LINE_SKEWED | LINE_FURNITURE];
+        // The title falls to the figure holding the banner; the label to its figure.
+        expect(routeLines(lines, flags, regions)).toEqual([0, 0, -1]);
+        expect(routeLines(lines, flags, [regions[1]])).toEqual([-1, -1, -1]);
+    });
+});
+
+describe("detectRegions", () => {
+    it("keeps a diagonal watermark out of detection and flags it as furniture", () => {
+        const page = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: W,
+            height: H,
+            blocks: [
+                [126, 87, 553, 695, "UNCORRECTED PROOF", 59],
+                [72, 100, 540, 111, PROSE_TEXT, BS],
+                [72, 113, 540, 124, PROSE_TEXT, BS],
+            ].map(([l, t, r, b, text, size]) => ({
+                type: "text",
+                bbox: { l, t, r, b },
+                lines: [
+                    {
+                        wmode: 0,
+                        bbox: { l, t, r, b },
+                        font: { name: "Times-Roman", family: "Times", weight: "normal", style: "normal", size },
+                        x: l,
+                        y: b,
+                        text,
+                        rotation: 0,
+                    },
+                ],
+            })),
+        } as unknown as RawPageData;
+        const detection = detectRegions(page, summary([]), { pageIndex: 0, route: true });
+        expect(detection.candidates).toEqual([]);
+        const { lines, flags } = detection.routing!;
+        const mark = lines.findIndex((l) => l.text === "UNCORRECTED PROOF");
+        expect(flags[mark]).toBe(LINE_SKEWED | LINE_FURNITURE);
+        expect(lines.filter((l) => l.text === PROSE_TEXT)).toHaveLength(2);
+    });
 });
 
 describe("resolveOverlaps", () => {
@@ -328,6 +381,25 @@ describe("resolveOverlaps", () => {
         expect(regions[4].containedIn).toBe(5);
         expect(regions[2].containedIn).toBeUndefined();
         expect(regions[6].containedIn).toBeUndefined();
+    });
+
+    it("drops a region that holds a far more probable one", () => {
+        const scored = (bbox: Rect, label: DetectedRegion["label"], p: number): DetectedRegion => ({
+            ...region(bbox, label),
+            probs: { other: 1 - p, picture: 0, decoration: 0, table: 0, formula: 0, [label!]: p },
+        });
+        const regions = [
+            scored([100, 80, 550, 700], "picture", 0.74), // a page-sized weak region
+            scored([90, 60, 500, 350], "picture", 0.99), // the figure, mostly inside it
+            scored([120, 400, 300, 600], "picture", 0.74 + CONFIDENCE_MARGIN - 0.01), // not confident enough
+        ];
+        resolveOverlaps(regions);
+        expect(regions.map((r) => r.label)).toEqual(["other", "picture", "picture"]);
+
+        // Without the confident figure, the weaker one's panel is part of it as before.
+        const again = [scored([100, 80, 550, 700], "picture", 0.74), scored([120, 400, 300, 600], "picture", 0.9)];
+        resolveOverlaps(again);
+        expect(again.map((r) => r.label)).toEqual(["picture", "other"]);
     });
 });
 

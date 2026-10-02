@@ -11,9 +11,11 @@
  * - formula: the equation's rows; an equation number stays at the end of its row.
  * - picture: label rows, not sentences; rows of bare numbers (axis ticks) are
  *   dropped and the text is capped.
- * Lines routed to a decoration are removed without an item. Running text and
- * captions are not routed (`routeLines`), so prose keeps its sentences; only
- * lines on a table's rows join the table whatever their flags.
+ * Decorations take no text, and running text and captions are not routed
+ * (`routeLines`), so prose keeps its sentences; only lines on a table's rows
+ * join the table whatever their flags. Skewed text spanning the page (a
+ * diagonal watermark) leaves the layout as margin text: it would otherwise cut
+ * across the page's columns.
  *
  * Routing works on the detector's visual lines, which split structured-text
  * lines at wide gaps and join word fragments. A structured-text line goes
@@ -33,7 +35,7 @@ import { rotateBBox, type RotationAngle } from "../PageRotationNormalizer";
 import type { Rect } from "./geometry";
 import type { RegionClass } from "./model";
 import { sourceLines, type RegionLine } from "./pageSignals";
-import type { RegionDetection } from "./RegionDetector";
+import { LINE_FURNITURE, type RegionDetection } from "./RegionDetector";
 
 export type RegionItemKind = "table" | "picture" | "formula";
 
@@ -56,9 +58,11 @@ export interface RegionCell {
 }
 
 export interface PageRegionItems {
-    /** The page without the lines regions absorbed (the input page when none are). */
+    /** The page without the lines regions absorbed or set aside (the input page when none are). */
     page: RawPageDataDetailed;
     items: RegionItemDraft[];
+    /** Page furniture set aside as margin text (`LINE_FURNITURE`), in page order. */
+    margin: RawLine[];
 }
 
 const ITEM_KINDS: ReadonlySet<RegionClass> = new Set<RegionClass>(["table", "picture", "formula"]);
@@ -79,13 +83,28 @@ export function regionItemsForPage(page: RawPageDataDetailed, detection: RegionD
     const routing = detection.routing;
     const regions = detection.candidates;
     const kept = regions.map((r) => r.label !== undefined && r.label !== "other");
-    if (!routing || detection.scanned || !kept.some(Boolean)) return { page, items: [] };
+    if (!routing || detection.scanned) return { page, items: [], margin: [] };
+    const numbered = sourceLines(page);
+    const furniture = new Set<RawLine>();
+    routing.lines.forEach((line, i) => {
+        if (!(routing.flags[i] & LINE_FURNITURE)) return;
+        for (const piece of line.parts ?? [line]) {
+            const source = numbered[piece.source - 1];
+            if (source) furniture.add(source);
+        }
+    });
+    const margin = numbered.filter((l) => furniture.has(l));
+    if (!kept.some((k, i) => k && regions[i].label !== "decoration")) {
+        return { page: withoutLines(page, furniture), items: [], margin };
+    }
 
     // Each piece with the region its visual line is routed to.
     const pieces: { piece: RegionLine; line: number; route: number }[] = [];
     routing.lines.forEach((line, i) => {
         let route = routing.routes[i];
         if (route >= 0 && regions[route].label === "formula" && line.alphaWords >= FORMULA_PROSE_WORDS) route = -1;
+        // Decorations take no text (`routeLines` never routes to one); nothing is deleted.
+        if (route >= 0 && regions[route].label === "decoration") route = -1;
         for (const piece of line.parts ?? [line]) pieces.push({ piece, line: i, route });
     });
 
@@ -149,13 +168,12 @@ export function regionItemsForPage(page: RawPageDataDetailed, detection: RegionD
         items.push({ kind, bbox, rows, ...(aligned ? { columns: aligned.columns } : {}) });
     });
 
-    const absorbed = new Set<RawLine>();
-    const numbered = sourceLines(page);
+    const absorbed = new Set<RawLine>(furniture);
     for (const source of destination.keys()) {
         const line = numbered[source - 1];
         if (line) absorbed.add(line);
     }
-    return { page: withoutLines(page, absorbed), items };
+    return { page: withoutLines(page, absorbed), items, margin };
 }
 
 type ReadingRotation = 0 | 90 | 180 | 270;
