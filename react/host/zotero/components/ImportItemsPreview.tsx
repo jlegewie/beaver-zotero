@@ -208,6 +208,7 @@ const ImportItemRow: React.FC<{
                         icon={ArrowUpRightIcon}
                         className="font-color-secondary scale-11 flex-shrink-0"
                         onClick={() => revealSource(createdRef, data.collection_ids?.[0] ?? data.collection_keys?.[0])}
+                        ariaLabel="Reveal in Zotero"
                     />
                 </Tooltip>
             )}

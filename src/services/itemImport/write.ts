@@ -258,18 +258,20 @@ function scheduleSnapshotTask(libraryId: number, itemKey: string, url: string, o
 
 function resultFor(
     item: Zotero.Item,
-    memberships: ReturnType<typeof recheckExistingCollections>,
+    collections: { memberships: ReturnType<typeof recheckExistingCollections>; skipped: string[] },
     status: ImportItemResultData['attachment_status'],
     attachment?: Zotero.Item | null,
     fileAttachment?: Zotero.Item | null,
 ): ImportItemResultData {
     const libraryId = item.libraryID;
+    const { memberships, skipped } = collections;
     return {
         library_id: libraryId,
         zotero_key: item.key,
         library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
         collection_ids: memberships.map((entry) => entry.collectionId),
         collection_keys: memberships.map((entry) => entry.key),
+        ...(skipped.length ? { skipped_collections: skipped } : {}),
         attachment_status: status,
         ...(attachment ? { attachment_key: `${libraryId}-${attachment.key}` } : {}),
         ...(fileAttachment ? { file_attachment_key: `${libraryId}-${fileAttachment.key}` } : {}),
@@ -319,8 +321,10 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
     assertWriteAccess(libraryID);
     assertLibraryWritable(libraryID);
     const requested = data.collection_ids ?? data.collection_keys ?? [];
-    // A collection deleted after approval is skipped; the item is still created.
+    // A collection deleted after approval is skipped and reported; the item is still created.
     const memberships = recheckExistingCollections(requested, libraryID);
+    const skipped = requested.filter((input) => !memberships.some((entry) => entry.collectionId === input || entry.key === input));
+    const collections = { memberships, skipped };
     const collectionIDs = memberships.map((entry) => entry.collection.id);
     if (options.collectionId != null && !collectionIDs.includes(options.collectionId)) {
         const contextCollection = Zotero.Collections.get(options.collectionId);
@@ -372,16 +376,16 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
         const pdfs = await filterPdfAttachments(item.getAttachments());
         if (fileAttachment) {
             const primary = pdfs[0] ?? fileAttachment;
-            return resultFor(item, memberships, 'available', primary, fileAttachment);
+            return resultFor(item, collections, 'available', primary, fileAttachment);
         }
-        if (pdfs.length) return resultFor(item, memberships, 'available', pdfs[0]);
+        if (pdfs.length) return resultFor(item, collections, 'available', pdfs[0]);
 
         // Web content gets a snapshot, following Zotero's own "Take automatic snapshots" setting.
         const snapshotEnabled = !!snapshotUrl && Zotero.Prefs.get('automaticSnapshots') !== false
             && isApiAvailable('importFromDocument') && isApiAvailable('remoteTranslate');
         if (snapshotEnabled) {
             scheduleSnapshotTask(libraryID, item.key, snapshotUrl!, options);
-            return resultFor(item, memberships, 'pending');
+            return resultFor(item, collections, 'pending');
         }
         const filesEditable = (Zotero.Libraries.get(libraryID) as any)?.filesEditable !== false;
         // Zotero's own resolvers work from a DOI or URL; with neither and no
@@ -398,9 +402,9 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
                 threadId: options.threadId ?? undefined,
                 onAttachmentResolved: options.onAttachmentResolved,
             });
-            return resultFor(item, memberships, 'pending');
+            return resultFor(item, collections, 'pending');
         }
-        return resultFor(item, memberships, 'none');
+        return resultFor(item, collections, 'none');
     } catch (error) {
         await cleanupFailedImport(item);
         throw error;

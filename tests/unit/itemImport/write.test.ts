@@ -247,6 +247,19 @@ describe('writeImportItem saving', () => {
         });
     });
 
+    it('creates the item without a collection deleted after approval and reports it', async () => {
+        mocks.recheckExistingCollections.mockReturnValue([{ collection: { id: 10 }, collectionId: 'u-KEPT0001', key: 'KEPT0001' }]);
+        const result = await writeImportItem(journal({ collection_ids: ['u-KEPT0001', 'u-GONE0001'] }));
+        expect(itemSaverCtor).toHaveBeenCalledWith(expect.objectContaining({ collections: [10] }));
+        expect(result).toMatchObject({ collection_ids: ['u-KEPT0001'], skipped_collections: ['u-GONE0001'] });
+    });
+
+    it('omits skipped collections when every collection still exists', async () => {
+        mocks.recheckExistingCollections.mockReturnValue([{ collection: { id: 10 }, collectionId: 'u-COLL0001', key: 'COLL0001' }]);
+        const result = await writeImportItem(journal({ collection_ids: ['u-COLL0001'] }));
+        expect(result).not.toHaveProperty('skipped_collections');
+    });
+
     it('does not pass collections to the saver when there are none', async () => {
         await writeImportItem(journal());
         expect(itemSaverCtor).toHaveBeenCalledWith(expect.objectContaining({ collections: false }));

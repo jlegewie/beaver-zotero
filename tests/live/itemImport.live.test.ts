@@ -110,7 +110,7 @@ describe('resolution with real translators', () => {
         expect(results['metadata[0]'].method).toBe('model_metadata');
         expect(results['metadata[0]'].item?.creators?.[0]).toMatchObject({ creatorType: 'author', name: 'World Bank' });
         expect(results['metadata[0]'].item?.institution).toBe('Somewhere');
-        expect(results['metadata[0]'].warnings).toContain('university stored as institution');
+        expect(results['metadata[0]'].warnings?.join(' ')).not.toMatch(/university/i);
         expect(results['metadata[0]'].warnings?.join(' ')).toMatch(/moved to Extra.*Court/i);
         expect(results['metadata[1]'].error?.code).toBe('invalid_metadata');
     });

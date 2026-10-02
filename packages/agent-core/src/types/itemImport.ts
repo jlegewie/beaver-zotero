@@ -181,6 +181,8 @@ export interface ImportItemResultData {
     zotero_key: string;
     collection_keys?: string[];
     collection_ids?: string[];
+    /** Requested collections that no longer existed at write time (the item was created without them). */
+    skipped_collections?: string[];
     attachment_status: AttachmentStatus;
     /** library_id-zotero_key of the PDF (or attached file) once available. */
     attachment_key?: string;

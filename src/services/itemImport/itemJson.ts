@@ -113,9 +113,11 @@ const BASE_FIELDS = ['publisher', 'publicationTitle', 'number', 'type', 'medium'
 /**
  * Move a field that belongs to another item type onto this type's variant of
  * the same base field (e.g. `university` on a report becomes `institution`),
- * instead of letting Zotero park it in Extra. Only fills an empty target.
+ * instead of letting Zotero park it in Extra. Only fills an empty target. No
+ * data is lost, so this is not reported as a warning; a variant whose target is
+ * already set is dropped, as Zotero's own `fromJSON` does.
  */
-function remapBaseFields(json: Record<string, any>, itemType: string, warnings: string[]): void {
+function remapBaseFields(json: Record<string, any>, itemType: string): void {
     const fields = Zotero.ItemFields as any;
     const typeID = Zotero.ItemTypes.getID(itemType);
     const required = ['getID', 'getName', 'isValidForType', 'getFieldIDFromTypeAndBase', 'getTypeFieldsFromBase'];
@@ -134,7 +136,6 @@ function remapBaseFields(json: Record<string, any>, itemType: string, warnings: 
             if (variantID && fields.isValidForType(variantID, typeID)) continue;
             if (!isNonEmpty(json[target])) {
                 json[target] = json[variant];
-                warnings.push(`${variant} stored as ${target}`);
             }
             delete json[variant];
         }
@@ -176,7 +177,7 @@ export function normalizeItemJson(input: ZoteroItemJson | Record<string, unknown
         else if (!isNonEmpty(value) && key !== 'tags' && key !== 'creators') delete json[key];
     }
 
-    remapBaseFields(json, itemType, warnings);
+    remapBaseFields(json, itemType);
 
     let output: Record<string, any>;
     try {

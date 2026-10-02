@@ -269,7 +269,7 @@ describe('normalizeItemJson base-field remapping', () => {
             expect(result.ok).toBe(true);
             expect(lastFromJSON).toMatchObject({ institution: 'MIT' });
             expect(lastFromJSON).not.toHaveProperty('university');
-            expect((result as any).warnings).toContain('university stored as institution');
+            expect(((result as any).warnings ?? []).join(' ')).not.toMatch(/university/);
         } finally {
             Object.assign(fields, saved);
         }

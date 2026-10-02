@@ -580,15 +580,19 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         return DocumentValidationIcon;
     };
 
-    // Generate button text parts (bold label + regular detail)
+    // Generate button text parts (bold label + regular detail). A count that
+    // covers only some of the listed rows says so ("1 of 3 Items").
+    const itemCount = (count: number) => (count === totalItems
+        ? `${count} Item${count === 1 ? '' : 's'}`
+        : `${count} of ${totalItems} Item${totalItems === 1 ? '' : 's'}`);
     const getButtonTextParts = (): { label: string; detail: string } => {
         if (pendingCount > 0) {
-            return { label: 'Import', detail: `${pendingCount} Item${pendingCount === 1 ? '' : 's'}` };
+            return { label: 'Import', detail: itemCount(pendingCount) };
         }
         if (allErrors) {
-            return { label: 'Error importing', detail: `${totalItems} Item${totalItems === 1 ? '' : 's'}` };
+            return { label: 'Error importing', detail: itemCount(totalItems) };
         }
-        return { label: 'Imported', detail: `${appliedCount} Item${appliedCount === 1 ? '' : 's'}` };
+        return { label: 'Imported', detail: itemCount(appliedCount) };
     };
 
     // Determine when results can be toggled
@@ -643,6 +647,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                                 variant="ghost-secondary"
                                 iconClassName="font-color-red"
                                 onClick={handleRejectAll}
+                                ariaLabel="Reject all"
                             />
                         </Tooltip>
                         <Tooltip content="Add all items" showArrow singleLine>
@@ -651,6 +656,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                                 variant="ghost-secondary"
                                 iconClassName="font-color-green scale-14"
                                 onClick={handleApplyAll}
+                                ariaLabel="Add all items"
                             />
                         </Tooltip>
                     </div>
