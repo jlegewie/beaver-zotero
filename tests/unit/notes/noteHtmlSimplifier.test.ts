@@ -906,6 +906,7 @@ describe('expandToRawHtml', () => {
         vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue({
             id: 42, key: 'ATTACH12', libraryID: 1, parentID: false,
             isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            attachmentContentType: 'application/pdf',
             getField: () => 'Report.pdf',
             getFilePathAsync: async () => '/report.pdf',
         } as any);
