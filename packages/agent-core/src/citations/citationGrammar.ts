@@ -10,6 +10,7 @@ export type LocatorKind =
     | 'paragraph'
     | 'heading'
     | 'list'
+    | 'reference'
     | 'caption'
     | 'footnote'
     | 'figure'
@@ -76,11 +77,14 @@ type CitationLike = {
 
 const CLOBBER_PREFIX = 'user-content-';
 
+// First match by `startsWith` wins, so a longer prefix must be listed before
+// any shorter prefix it starts with (e.g. `list` before `l`, `page` before `p`).
 const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boolean }> = [
     { prefix: 'paragraph', kind: 'paragraph', numericOnly: true },
     { prefix: 'heading', kind: 'heading', numericOnly: true },
     { prefix: 'caption', kind: 'caption', numericOnly: true },
     { prefix: 'footnote', kind: 'footnote', numericOnly: true },
+    { prefix: 'ref', kind: 'reference', numericOnly: true },
     { prefix: 'margin', kind: 'margin', numericOnly: true },
     { prefix: 'table', kind: 'table', numericOnly: true },
     { prefix: 'page', kind: 'page' },
@@ -99,6 +103,7 @@ const CITATION_INDEX_PREFIXES: Partial<Record<LocatorKind, string>> = {
     paragraph: ID_PREFIXES.text,
     heading: ID_PREFIXES.section_header,
     list: ID_PREFIXES.list_item,
+    reference: ID_PREFIXES.reference,
     caption: ID_PREFIXES.caption,
     footnote: ID_PREFIXES.footnote,
     figure: ID_PREFIXES.picture,

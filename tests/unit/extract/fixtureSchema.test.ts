@@ -140,6 +140,32 @@ describe("fixture schema validator", () => {
         expectFixtureError(nonNumeric, /items\[0\]\.level: expected finite number/);
     });
 
+    it("accepts reference items with text and sentences", () => {
+        const f = fixture();
+        f.expected.structured.pages[0].items[0] = {
+            id: "ref1",
+            kind: "reference",
+            pageIndex: 0,
+            order: 0,
+            bbox: [1, 2, 3, 4],
+            text: "Smith, J. (2020). A paper. Journal, 1(2), 3-4.",
+            sentences: [
+                {
+                    id: "s0",
+                    order: 0,
+                    text: "Smith, J. (2020).",
+                    bboxes: [[1, 2, 3, 4]],
+                },
+            ],
+        };
+        const validated = validateFixture(f);
+        expect(validated.expected.structured.pages[0].items[0]).toMatchObject({
+            kind: "reference",
+            text: "Smith, J. (2020). A paper. Journal, 1(2), 3-4.",
+            sentences: [{ id: "s0", text: "Smith, J. (2020)." }],
+        });
+    });
+
     it("rejects explicit joinWithNext false", () => {
         const f = fixture();
         f.expected.structured.pages[0].items[0].sentences[0].joinWithNext = false;

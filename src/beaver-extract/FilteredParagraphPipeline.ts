@@ -83,6 +83,12 @@ export interface FilteredParagraphContext {
     /** Forwarded to `detectParagraphs`. */
     paragraphSettings?: ParagraphDetectionSettings;
     /**
+     * Ask `detectParagraphs` to echo the page / column thresholds it
+     * computed onto `paragraphResult`. Opt-in: detection is unchanged,
+     * only the result gains two extra fields.
+     */
+    trackThresholds?: boolean;
+    /**
      * Bounding boxes of background-shaded display elements on the target
      * page (see `ColumnDetectionOptions.fillBoundaries`). When supplied,
      * `ColumnDetector` refuses to fuse text blocks across fill-zone
@@ -381,7 +387,10 @@ export function detectFilteredParagraphs(
                 styleProfile.bodyStyles,
                 ctx.paragraphSettings ?? {},
                 { paragraph: 0, header: 0 },
-                { trackItemLines: true },
+                {
+                    trackItemLines: true,
+                    trackThresholds: ctx.trackThresholds,
+                },
             );
             paragraphDetectMs = performance.now() - tParagraphDetect;
             logParagraphDetection(paragraphResult);

@@ -285,6 +285,7 @@ const allowedKinds = new Set<DocumentItemKind>([
     "text",
     "section_header",
     "list_item",
+    "reference",
     "caption",
     "footnote",
     "formula",
@@ -297,6 +298,7 @@ const textBearingKinds = new Set<DocumentItemKind>([
     "text",
     "section_header",
     "list_item",
+    "reference",
     "caption",
     "footnote",
     "formula",
@@ -306,6 +308,7 @@ const textBearingKinds = new Set<DocumentItemKind>([
 const sentenceBearingKinds = new Set<DocumentItemKind>([
     "text",
     "list_item",
+    "reference",
     "caption",
     "footnote",
 ]);

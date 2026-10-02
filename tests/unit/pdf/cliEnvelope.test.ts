@@ -463,6 +463,7 @@ describe('buildProgram', () => {
         for (const expected of [
             'analyze-layout',
             'extract',
+            'features',
             'fixture',
             'info',
             'overlay',
