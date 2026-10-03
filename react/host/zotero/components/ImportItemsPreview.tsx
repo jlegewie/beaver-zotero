@@ -18,6 +18,7 @@ import {
     CSSItemTypeIcon,
     FileIcon,
     Icon,
+    TagIcon,
 } from '../../../components/icons/icons';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
@@ -398,7 +399,8 @@ const DestinationBar: React.FC<{ destination: Destination }> = ({ destination })
                 <div className="import-destination-tags">
                     {tags.map((tag) => (
                         <span key={tag} className="import-tag" title={`Tag: ${tag}`}>
-                            <CSSIcon name="tag" className="icon-16 import-tag-icon" />
+                            {/* <CSSIcon name="tag" className="icon-16 import-tag-icon" /> */}
+                            <Icon icon={TagIcon} className="scale-90 mr-020" />
                             <span className="truncate">{tag}</span>
                         </span>
                     ))}
