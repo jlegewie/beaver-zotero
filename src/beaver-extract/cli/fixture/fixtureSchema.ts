@@ -300,6 +300,7 @@ const textBearingKinds = new Set<DocumentItemKind>([
     "caption",
     "footnote",
     "formula",
+    "table",
     "margin",
 ]);
 
@@ -308,6 +309,7 @@ const sentenceBearingKinds = new Set<DocumentItemKind>([
     "list_item",
     "caption",
     "footnote",
+    "table",
 ]);
 
 function validateDocumentItem(value: unknown, source: string): DocumentItem {
@@ -325,12 +327,8 @@ function validateDocumentItem(value: unknown, source: string): DocumentItem {
         bbox: validateRect(v.bbox, `${source}.bbox`),
     };
 
-    if (textBearingKinds.has(kind)) {
-        if (v.text === undefined) {
-            throw new FixtureValidationError(`${source}.text: expected string`);
-        }
-    } else if (v.text !== undefined) {
-        throw new FixtureValidationError(`${source}.text: forbidden for ${kind}`);
+    if (textBearingKinds.has(kind) && v.text === undefined) {
+        throw new FixtureValidationError(`${source}.text: expected string`);
     }
 
     if (sentenceBearingKinds.has(kind)) {
@@ -373,6 +371,11 @@ function validateDocumentItem(value: unknown, source: string): DocumentItem {
             kind,
             text: expectString(v.text, `${source}.text`),
         } as DocumentItem;
+    }
+
+    // A picture's text is its label rows, absent when it has none.
+    if (kind === "picture" && v.text !== undefined) {
+        return { ...base, kind, text: expectString(v.text, `${source}.text`) };
     }
 
     return { ...base, kind } as DocumentItem;

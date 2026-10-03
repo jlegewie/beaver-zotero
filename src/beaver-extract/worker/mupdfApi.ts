@@ -6,6 +6,12 @@
  * ops must be in this file.
  */
 
+import {
+    DEFAULT_GRAPHICS_SUMMARY_MAX_RECORDS,
+    parseGraphicsSummary,
+    type GraphicsSummary,
+} from "./graphicsSummary";
+
 /**
  * Minimal type for the libmupdf WASM module. We declare only the symbols
  * actually invoked; everything else is reached through `(libmupdf as any)`
@@ -97,6 +103,13 @@ export interface LibMuPdf {
     _wasm_colorspace_get_type(ptr: number): number;
     _wasm_colorspace_get_n(ptr: number): number;
     _wasm_stroke_state_get_linewidth?(ptr: number): number;
+    // ----- Graphics summary (fork addition; absent in older WASM builds) -----
+    // `_wasm_new_stext_page_with_graphics` builds the structured text exactly like
+    // `_wasm_new_stext_page_from_page` and, from the same pass over the page
+    // contents, a graphics summary collected by `_wasm_take_graphics_summary`.
+    _wasm_new_stext_page_with_graphics?(page: number, opts: number, maxRecords: number): number;
+    _wasm_take_graphics_summary?(): number;
+    _wasm_new_graphics_summary_from_page?(page: number, maxRecords: number): number;
     [key: string]: unknown;
 }
 
@@ -134,6 +147,12 @@ export interface StructuredTextWalker {
     onLineFont?(fontPtr: number, size: number): void;
     endLine?(): void;
     onChar?(rune: string, quad: QuadTuple): void;
+    /**
+     * Per-character font pointer and exact size, fired before each `onChar`.
+     * Opt-in: it costs two more WASM calls per character, so the default walk
+     * reads fonts only once per line (`onLineFont`).
+     */
+    onCharFont?(fontPtr: number, size: number): void;
     onImageBlock?(bbox: RectTuple, transform: unknown, image: unknown): void;
 }
 
@@ -245,6 +264,17 @@ export interface PageLike {
      */
     collectFilledRects(maxFills?: number): FillRect[];
     collectGraphics(opts?: CollectGraphicsOptions): GraphicsLayerPrimitives;
+    /**
+     * Structured text (identical to `toStructuredText(options)`) plus the page's
+     * graphics summary, from one interpretation of the page contents. Requires
+     * `MuPDFApi.supportsGraphicsSummary`.
+     */
+    toStructuredTextWithGraphics(
+        options?: string,
+        maxRecords?: number,
+    ): { stext: StructuredTextLike; graphics: GraphicsSummary };
+    /** Graphics summary only (content stream, no annotations). Requires `supportsGraphicsSummary`. */
+    getGraphicsSummary(maxRecords?: number): GraphicsSummary;
     destroy(): void;
 }
 
@@ -293,6 +323,8 @@ export interface MuPDFApi {
     Matrix: MatrixApi;
     ColorSpace: ColorSpacePalette;
     Font: FontApi;
+    /** True when the WASM build exports the graphics-summary functions. */
+    supportsGraphicsSummary: boolean;
 }
 
 /**
@@ -1078,6 +1110,34 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
             }
             return new StructuredText(stextPtr);
         }
+        toStructuredTextWithGraphics(
+            options = "",
+            maxRecords = DEFAULT_GRAPHICS_SUMMARY_MAX_RECORDS,
+        ): { stext: StructuredTextLike; graphics: GraphicsSummary } {
+            const build = libmupdf._wasm_new_stext_page_with_graphics;
+            const take = libmupdf._wasm_take_graphics_summary;
+            if (!build || !take) {
+                throw new Error("This MuPDF build has no graphics summary support");
+            }
+            const stextPtr = build(this.pointer, STRING(options), maxRecords);
+            if (!stextPtr) {
+                throw new Error("Failed to create structured text");
+            }
+            const stext = new StructuredText(stextPtr);
+            try {
+                return { stext, graphics: takeGraphicsSummary(take()) };
+            } catch (error) {
+                stext.destroy();
+                throw error;
+            }
+        }
+        getGraphicsSummary(maxRecords = DEFAULT_GRAPHICS_SUMMARY_MAX_RECORDS): GraphicsSummary {
+            const summarize = libmupdf._wasm_new_graphics_summary_from_page;
+            if (!summarize) {
+                throw new Error("This MuPDF build has no graphics summary support");
+            }
+            return takeGraphicsSummary(summarize(this.pointer, maxRecords));
+        }
         toPixmap(matrix: MatrixTuple, colorspace: ColorSpaceLike, alpha = false, showExtras = true) {
             let result: number;
             if (showExtras) {
@@ -1230,6 +1290,12 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                                     // never reaches the wire. See its docstring.
                                     const rune = sanitizeRune(runeCode);
                                     const quad = fromQuad(libmupdf._wasm_stext_char_get_quad(ch));
+                                    if (walker.onCharFont) {
+                                        walker.onCharFont(
+                                            libmupdf._wasm_stext_char_get_font(ch),
+                                            libmupdf._wasm_stext_char_get_size(ch),
+                                        );
+                                    }
                                     walker.onChar(rune, quad);
                                     ch = libmupdf._wasm_stext_char_get_next(ch);
                                 }
@@ -1320,10 +1386,28 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
         },
     };
 
+    /** Parse and free a graphics-summary buffer returned by the WASM exports. */
+    function takeGraphicsSummary(bufPtr: number): GraphicsSummary {
+        if (!bufPtr) {
+            throw new Error("Graphics summary was not produced");
+        }
+        try {
+            const data = libmupdf._wasm_buffer_get_data(bufPtr);
+            const len = libmupdf._wasm_buffer_get_len(bufPtr);
+            return parseGraphicsSummary(libmupdf.HEAPU8.subarray(data, data + len));
+        } finally {
+            libmupdf._wasm_drop_buffer(bufPtr);
+        }
+    }
+
     return {
         Document: { openDocument: Document.openDocument.bind(Document) },
         Matrix,
         ColorSpace,
         Font,
+        supportsGraphicsSummary:
+            typeof libmupdf._wasm_new_stext_page_with_graphics === "function" &&
+            typeof libmupdf._wasm_take_graphics_summary === "function" &&
+            typeof libmupdf._wasm_new_graphics_summary_from_page === "function",
     };
 }

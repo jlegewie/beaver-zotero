@@ -413,6 +413,14 @@ export interface RawChar {
     bbox: BoundingBox;
 }
 
+/** A run of consecutive characters in one font at one size. */
+export interface RawFontSpan {
+    /** Index of the run's first character in the line's `chars`. */
+    start: number;
+    /** Font of the run; `size` is the exact (untruncated) font size. */
+    font: RawFont;
+}
+
 /** A line enriched with per-character quads. */
 export interface RawLineDetailed extends RawLine {
     /**
@@ -420,6 +428,11 @@ export interface RawLineDetailed extends RawLine {
      * INVARIANT: `text.length === chars.length` and `text[i] === chars[i].c`.
      */
     chars: RawChar[];
+    /**
+     * Font runs covering `chars` in order, present only when the walk was asked
+     * for them (region detection). The line-level `font` is the first run's.
+     */
+    spans?: RawFontSpan[];
 }
 
 /** A block enriched with detailed lines. */
@@ -510,11 +523,14 @@ export interface FormulaItem extends TextBearingItem {
     kind: "formula";
 }
 
-export interface TableItem extends DocItemBase {
+/** A table: one line and one sentence per row (see the public `TableItem`). */
+export interface TableItem extends TextBearingItem {
     kind: "table";
+    sentences?: SentenceItem[];
 }
 
-export interface PictureItem extends DocItemBase {
+/** A figure: `text` and `lines` hold its label rows, possibly none. */
+export interface PictureItem extends TextBearingItem {
     kind: "picture";
 }
 
@@ -760,6 +776,8 @@ export interface StructuredPagePhaseTimings {
     paragraphDetectMs: number;
     /** `extractPageSentences` — item-scoped sentence mapping. */
     sentenceMapMs: number;
+    /** Region detection and region items (schema presets with `regions`). */
+    regionsMs?: number;
     /** Total character count on the target page (post-detailed-walk). */
     charCount: number;
     /** Total line count on the target page (post-detailed-walk). */

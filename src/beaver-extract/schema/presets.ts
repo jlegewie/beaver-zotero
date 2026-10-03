@@ -17,11 +17,17 @@ export interface PdfExtractionPreset {
     textRepair: boolean;
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */
     idScheme: ExtractIdScheme;
+    /**
+     * Region detection in structured extraction: tables, figures and display
+     * equations become `table` / `picture` / `formula` items, and the text
+     * lines they absorb leave the prose (see `regions/regionItems.ts`).
+     */
+    regions: boolean;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, idScheme: "document" },
-    "5": { schemaVersion: "5", textRepair: true, idScheme: "page" },
+    "4": { schemaVersion: "4", textRepair: false, idScheme: "document", regions: false },
+    "5": { schemaVersion: "5", textRepair: true, idScheme: "page", regions: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

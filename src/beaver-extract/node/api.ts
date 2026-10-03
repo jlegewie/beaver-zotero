@@ -28,6 +28,7 @@ import {
     opStructuredExtractWithDebug,
 } from "../worker/ops";
 import { enqueue } from "../worker/opQueue";
+import { opDetectRegions, type RegionDetectionResult } from "../worker/regionOps";
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -171,3 +172,30 @@ export async function analyzeOCRNeeds(
     const reply = await enqueue(() => opAnalyzeOCRNeeds({ pdfData, options }));
     return reply.result;
 }
+
+export interface DetectRegionsInput {
+    pdfData: PdfBytes;
+    pageIndices: number[];
+    /** Extra pages (graphics summary only) used for document context. */
+    contextPages?: number;
+    /** false: return unclassified candidates (training-data export). */
+    classify?: boolean;
+    /** Also return each page's text lines with routing flags. */
+    includeLines?: boolean;
+}
+
+/** Region candidates per page with features and classes (debugging and training export). */
+export async function detectRegions(input: DetectRegionsInput): Promise<RegionDetectionResult> {
+    await ensureExtractionRuntime();
+    const reply = await enqueue(() =>
+        opDetectRegions({
+            pdfData: input.pdfData instanceof Uint8Array ? input.pdfData : new Uint8Array(input.pdfData),
+            pageIndices: input.pageIndices,
+            contextPages: input.contextPages,
+            classify: input.classify,
+            includeLines: input.includeLines,
+        }),
+    );
+    return reply.result;
+}
+

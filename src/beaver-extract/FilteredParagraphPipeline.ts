@@ -23,6 +23,7 @@ import {
     bboxFromXYWH,
     bboxHeight,
     bboxWidth,
+    type BoundingBox,
     type MarginItem,
     type MarginRemovalResult,
     type MarginSettings,
@@ -99,6 +100,21 @@ export interface FilteredParagraphContext {
         end: number;
         thickness: number;
     }>;
+    /**
+     * Regions (tables, figures, equations) whose lines were removed from the
+     * target page, in raw MuPDF frame: the box and, for an equation, the boxes
+     * of its lines. Each keeps the text above it apart from the text below it
+     * in the reading frame; one spanning columns is read after the text above
+     * it in every column, one within a column is read through
+     * (`ColumnDetectionOptions.regionBarriers`).
+     */
+    regionBarriers?: ReadonlyArray<{ bbox: BoundingBox; content?: ReadonlyArray<BoundingBox> }>;
+    /**
+     * Dominant text orientation of the target page, when the caller detected
+     * it before removing lines from the page (e.g. region text). Without it,
+     * orientation is detected on the supplied page.
+     */
+    pageRotation?: RotationAngle;
 }
 
 /**
@@ -239,7 +255,8 @@ export function detectFilteredParagraphs(
     // against the raw bboxes so the marginZone exclusion uses the
     // original page geometry.
     const tRotation = performance.now();
-    const pageRotation = detectDominantTextOrientation(rawTargetPage, marginZone);
+    const pageRotation =
+        ctx.pageRotation ?? detectDominantTextOrientation(rawTargetPage, marginZone);
     const rotated = rotateRawPage(rawTargetPage, pageRotation);
     const targetPage = rotated.page;
     const rotationMs = performance.now() - tRotation;
@@ -351,6 +368,14 @@ export function detectFilteredParagraphs(
                   };
               })
             : ctx.dividerLines;
+    const uprightRect = (box: BoundingBox) => {
+        const upright = rotateBBox(box, pageRotation, rotated.sourceWidth, rotated.sourceHeight);
+        return { x: upright.l, y: upright.t, w: bboxWidth(upright), h: bboxHeight(upright) };
+    };
+    const regionBarriers = (ctx.regionBarriers ?? []).map((region) => ({
+        box: uprightRect(region.bbox),
+        ...(region.content ? { content: region.content.map(uprightRect) } : {}),
+    }));
 
     const tColumnDetect = performance.now();
     const columnResult = detectColumns(filteredPage, {
@@ -359,6 +384,7 @@ export function detectFilteredParagraphs(
         bodyStyles: styleProfile.bodyStyles,
         fillBoundaries,
         dividerLines,
+        regionBarriers,
         debug: isAnalyzerLoggingEnabled(),
     });
     const columnDetectMs = performance.now() - tColumnDetect;
@@ -431,30 +457,39 @@ export function collectMarginItemsFromFilteredPage(
         for (const line of block.lines) keptLines.add(line);
     }
 
-    const items: MarginItem[] = [];
+    const removed: RawLine[] = [];
     for (const block of originalPage.blocks) {
         if (block.type !== "text" || !block.lines) continue;
         for (const line of block.lines) {
-            const text = (line.text ?? "").trim();
-            if (!text || keptLines.has(line)) continue;
-            const index = items.length;
-            items.push({
-                kind: "margin",
-                id: `p${originalPage.pageIndex}:i${index}`,
-                pageIndex: originalPage.pageIndex,
-                index,
-                bbox: line.bbox,
-                columnIndex: 0,
-                text: line.text,
-                lines: [
-                    {
-                        text: line.text,
-                        bbox: line.bbox,
-                        fontSize: line.font?.size,
-                    },
-                ],
-            });
+            if (!keptLines.has(line)) removed.push(line);
         }
+    }
+    return marginItemsForLines(originalPage.pageIndex, removed);
+}
+
+/** One margin item per non-blank line, in the given order and frame. */
+export function marginItemsForLines(pageIndex: number, lines: readonly RawLine[]): MarginItem[] {
+    const items: MarginItem[] = [];
+    for (const line of lines) {
+        const text = (line.text ?? "").trim();
+        if (!text) continue;
+        const index = items.length;
+        items.push({
+            kind: "margin",
+            id: `p${pageIndex}:i${index}`,
+            pageIndex,
+            index,
+            bbox: line.bbox,
+            columnIndex: 0,
+            text: line.text,
+            lines: [
+                {
+                    text: line.text,
+                    bbox: line.bbox,
+                    fontSize: line.font?.size,
+                },
+            ],
+        });
     }
     return items;
 }
