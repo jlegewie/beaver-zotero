@@ -52,6 +52,12 @@ export interface RegionItemDraft {
     region: number;
     /** The region's box, grown to cover the text it absorbed. */
     bbox: BoundingBox;
+    /**
+     * Where the item sits among the page's columns, for placement, when that
+     * is narrower than `bbox`: the box of its body, without a label set in
+     * another column's margin (`splitRegionItems`). Defaults to `bbox`.
+     */
+    anchor?: BoundingBox;
     /** Rows in reading order; each row's cells left to right. */
     rows: RegionCell[][];
     /** Table column count, when rows were aligned to columns. */
@@ -1006,6 +1012,37 @@ function withoutLines(page: RawPageDataDetailed, lines: ReadonlySet<RawLine>): R
 
 const CELL_SEPARATOR: Record<RegionItemKind, string> = { table: " | ", formula: " ", picture: " " };
 
+/**
+ * Region items as column detection laid them out (`ColumnDetectionResult.regionPieces`:
+ * pieces as indices into the region's cells in reading order). A region split
+ * into pieces becomes one item per piece, each keeping its cells' rows, with
+ * their union as its box: an equation box that merged one equation from each
+ * column becomes an equation in each column. Every piece is placed by its body
+ * (`RegionItemDraft.anchor`), so a label in another column's margin, or a box
+ * reaching past the text, does not move the equation out of its column.
+ */
+export function splitRegionItems(
+    drafts: readonly RegionItemDraft[],
+    pieces: readonly (readonly { members: readonly number[]; body: readonly number[] }[] | undefined)[] | undefined,
+): RegionItemDraft[] {
+    return drafts.flatMap((draft, k) => {
+        const split = pieces?.[k];
+        if (!split?.length) return [draft];
+        const cells = draft.rows.flat();
+        const index = new Map<RegionCell, number>(cells.map((cell, i) => [cell, i]));
+        const union = (indices: readonly number[]) =>
+            indices.map((i) => cells[i].bbox).reduce((u, b) => unionBBox(u, b));
+        if (split.length === 1) return [{ ...draft, anchor: union(split[0].body) }];
+        return split.map(({ members, body }) => {
+            const keep = new Set(members);
+            const rows = draft.rows
+                .map((row) => row.filter((cell) => keep.has(index.get(cell)!)))
+                .filter((row) => row.length > 0);
+            return { ...draft, rows, bbox: union(members), anchor: union(body) };
+        });
+    });
+}
+
 /** The page's reading frame: its dominant text rotation and MuPDF-frame size. */
 export interface ReadingFrame {
     rotation: RotationAngle;
@@ -1017,10 +1054,12 @@ export interface ReadingFrame {
  * Place region items among a page's text items in reading order and renumber
  * every item (`p<page>:i<index>`). A region goes before the first item below
  * its centre that overlaps it horizontally, else after the last such item above
- * it, else at the end — but never between a sentence and its continuation in
- * the next item. Regions sharing a position keep reading order: one placed
- * after an item comes before one placed before the next item. `sentences` is rebuilt from the items (they share sentence
- * objects); `renamed` maps old item ids to new ones.
+ * it, else at the end. A table or figure never goes between a sentence and its
+ * continuation in the next item; a display equation may, as it is part of the
+ * sentence around it. Regions sharing a position keep reading order: one placed
+ * after an item comes before one placed before the next item, then rows top to
+ * bottom, left to right within a row. `sentences` is rebuilt from the items
+ * (they share sentence objects); `renamed` maps old item ids to new ones.
  *
  * Item and region boxes are in the MuPDF frame. On a page with sideways text,
  * pass its `frame` so "below" and "horizontally" are judged in the upright
@@ -1042,7 +1081,7 @@ export function placeRegionItems(
     // Position = number of text items before the region.
     const itemBoxes = items.map((item) => upright(item.bbox));
     const placed = regions.map((region, order) => {
-        const box = upright(region.bbox);
+        const box = upright(region.anchor ?? region.bbox);
         const center = cy(box);
         let position = itemBoxes.findIndex((b) => overlapsX(b, box) && cy(b) > center);
         const after = position < 0;
@@ -1053,14 +1092,23 @@ export function placeRegionItems(
             });
             position = last >= 0 ? last + 1 : items.length;
         }
-        while (position > 0 && position < items.length && continues(items[position - 1])) position++;
-        return { region, top: box.t, position, after, order };
+        if (region.kind !== "formula") {
+            while (position > 0 && position < items.length && continues(items[position - 1])) position++;
+        }
+        return { region, box, position, after, order };
     });
     // At one position, regions that close the preceding item's column come
-    // before those that open the next item's column, then top to bottom.
+    // before those that open the next item's column, then in rows: top to
+    // bottom, and left to right within a row (side-by-side panels).
     placed.sort(
-        (a, b) => a.position - b.position || Number(b.after) - Number(a.after) || a.top - b.top || a.order - b.order,
+        (a, b) => a.position - b.position || Number(b.after) - Number(a.after) || a.box.t - b.box.t || a.order - b.order,
     );
+    for (let start = 0; start < placed.length; ) {
+        let end = start;
+        while (end < placed.length && placed[end].position === placed[start].position && placed[end].after === placed[start].after) end++;
+        placed.splice(start, end - start, ...inRows(placed.slice(start, end)));
+        start = end;
+    }
 
     const out: DocItem[] = [];
     const renamed = new Map<string, string>();
@@ -1090,6 +1138,25 @@ export function placeRegionItems(
         }
     }
     return { items: out, sentences, renamed };
+}
+
+/**
+ * Boxes sorted top to bottom, regrouped into rows read left to right: a box
+ * joins the row of the box above it when it stands beside every box of the
+ * row (no horizontal overlap) and overlaps the first by half the shorter
+ * one's height. Stacked boxes stay top to bottom.
+ */
+function inRows<T extends { box: BoundingBox }>(sorted: readonly T[]): T[] {
+    const rows: T[][] = [];
+    for (const entry of sorted) {
+        const row = rows[rows.length - 1];
+        const first = row?.[0].box;
+        const overlap = first ? Math.min(first.b, entry.box.b) - Math.max(first.t, entry.box.t) : 0;
+        const beside = row?.every(({ box }) => box.r <= entry.box.l || entry.box.r <= box.l);
+        if (row && beside && overlap >= 0.5 * Math.min(first!.b - first!.t, entry.box.b - entry.box.t)) row.push(entry);
+        else rows.push([entry]);
+    }
+    return rows.flatMap((row) => [...row].sort((a, b) => a.box.l - b.box.l));
 }
 
 /** A row's text; an aligned row leaves an empty slot for each missing column. */

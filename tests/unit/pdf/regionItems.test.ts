@@ -8,6 +8,7 @@ import type {
     SentenceItem,
 } from "@beaver/agent-core/extract/types";
 
+import { detectColumns } from "../../../src/beaver-extract/ColumnDetector";
 import { inverseRotateBBox } from "../../../src/beaver-extract/PageRotationNormalizer";
 import type { Rect } from "../../../src/beaver-extract/regions/geometry";
 import type { RegionClass } from "../../../src/beaver-extract/regions/model";
@@ -22,6 +23,7 @@ import {
     PICTURE_TEXT_MAX_CHARS,
     placeRegionItems,
     regionItemsForPage,
+    splitRegionItems,
     type RegionItemDraft,
 } from "../../../src/beaver-extract/regions/regionItems";
 
@@ -807,11 +809,131 @@ describe("placeRegionItems", () => {
         ]);
     });
 
+    it("reads side-by-side regions left to right, then the row below", () => {
+        // Panels a | b above the caption, b set a little higher; panel c under them.
+        const caption = textItem(0, [72, 400, 540, 420], ["Figure 1."]);
+        const a = draft("picture", [72, 100, 290, 250], [["a"]]);
+        const b = draft("picture", [320, 95, 540, 250], [["b"]]);
+        const c = draft("picture", [72, 270, 540, 390], [["c"]]);
+        const out = placeRegionItems(0, [caption], [c, b, a]);
+        expect(out.items.map((i) => i.text)).toEqual(["a", "b", "c", "Figure 1."]);
+
+        // Stacked boxes that overlap stay top to bottom, even when the lower one
+        // starts further left.
+        const upper = draft("formula", [100, 100, 400, 140], [["x = 1"]]);
+        const lower = draft("formula", [80, 115, 380, 160], [["y = 2"]]);
+        const stacked = placeRegionItems(0, [caption], [lower, upper]);
+        expect(stacked.items.map((i) => i.text)).toEqual(["x = 1", "y = 2", "Figure 1."]);
+    });
+
     it("never separates a sentence from its continuation in the next item", () => {
         const items = [textItem(0, [72, 80, 290, 700], ["Starts here and"], true), right[0], right[1]];
         const fig = draft("picture", [320, 20, 540, 60]);
         const out = placeRegionItems(0, items, [fig]);
         expect(out.items.map((i) => i.kind)).toEqual(["text", "text", "picture", "text"]);
+
+        // A display equation is part of its sentence: at the foot of the left
+        // column it comes before the sentence's continuation in the right one.
+        const intro = textItem(0, [72, 80, 290, 600], ["We minimize the loss:"], true);
+        const eq = draft("formula", [72, 620, 290, 660], [["L = Σ p log q (2)"]]);
+        const placed = placeRegionItems(0, [intro, right[0], right[1]], [eq]);
+        expect(placed.items.map((i) => i.kind)).toEqual(["text", "formula", "text", "text"]);
+    });
+
+    it("splits an equation box merged across the gutter and places each equation in its column", () => {
+        // Each column: an introduction, an equation, the rest. One box took both
+        // equations; column detection reads the columns through it and reports
+        // which of its lines lie in which column.
+        const intro = [textItem(0, [100, 100, 300, 240], ["Left intro:"]), textItem(2, [320, 100, 520, 240], ["Right intro:"])];
+        const rest = [textItem(1, [100, 400, 300, 550], ["Left rest."]), textItem(3, [320, 400, 520, 550], ["Right rest."])];
+        const cell = (text: string, box: Rect) => ({ text, bbox: { l: box[0], t: box[1], r: box[2], b: box[3], origin: "top-left" as const } });
+        const merged: RegionItemDraft = {
+            kind: "formula",
+            region: 0,
+            bbox: { l: 100, t: 260, r: 520, b: 370, origin: "top-left" },
+            rows: [[cell("x = 1 (1)", [130, 300, 290, 320]), cell("y = 2 (2)", [350, 305, 520, 325])]],
+        };
+        const page = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: 620,
+            height: 700,
+            blocks: [...intro, ...rest].map((item) => ({
+                type: "text" as const,
+                bbox: item.bbox,
+                lines: [{ wmode: 0, bbox: item.bbox, font: { name: "Body", family: "Body", weight: "normal", style: "normal", size: 10 }, x: item.bbox.l, y: item.bbox.t, text: "body text" }],
+            })),
+        };
+        const toRect = (b: BoundingBox) => ({ x: b.l, y: b.t, w: b.r - b.l, h: b.b - b.t });
+        const columns = detectColumns(page, {
+            regionBarriers: [{ box: toRect(merged.bbox), content: merged.rows.flat().map((c) => toRect(c.bbox)) }],
+        });
+        expect(columns.regionPieces).toEqual([[{ members: [0], body: [0] }, { members: [1], body: [1] }]]);
+        const inOrder = [intro[0], rest[0], intro[1], rest[1]];
+        const out = placeRegionItems(0, inOrder, splitRegionItems([merged], columns.regionPieces));
+        expect(out.items.map((i) => i.text)).toEqual(["Left intro:", "x = 1 (1)", "Left rest.", "Right intro:", "y = 2 (2)", "Right rest."]);
+        expect(out.items[1].bbox).toEqual(merged.rows[0][0].bbox);
+    });
+
+    it("anchors each piece of a region at the union of its body's cells", () => {
+        const cell = (text: string, box: Rect) => ({ text, bbox: { l: box[0], t: box[1], r: box[2], b: box[3], origin: "top-left" as const } });
+        const bb = (box: Rect) => ({ l: box[0], t: box[1], r: box[2], b: box[3], origin: "top-left" as const });
+        const region: RegionItemDraft = {
+            kind: "formula",
+            region: 0,
+            bbox: bb([40, 100, 560, 200]),
+            rows: [
+                [cell("(1)", [40, 100, 55, 110]), cell("a = b", [120, 100, 200, 110]), cell("c = d", [400, 100, 480, 110])],
+                [cell("+ e", [130, 120, 210, 130]), cell("+ f", [410, 120, 490, 130])],
+            ],
+        };
+        // One piece: the item keeps its rows and box and is placed by its body.
+        const [whole] = splitRegionItems([region], [[{ members: [0, 1, 2, 3, 4], body: [1, 3] }]]);
+        expect(whole.rows).toBe(region.rows);
+        expect(whole.bbox).toEqual(region.bbox);
+        expect(whole.anchor).toEqual(bb([120, 100, 210, 130]));
+        // Two pieces: each takes its cells, its box spans them, its anchor its body.
+        const [left, right] = splitRegionItems([region], [[{ members: [0, 1, 3], body: [1, 3] }, { members: [2, 4], body: [2, 4] }]]);
+        expect(left.rows.map((r) => r.map((c) => c.text))).toEqual([["(1)", "a = b"], ["+ e"]]);
+        expect(left.bbox).toEqual(bb([40, 100, 210, 130]));
+        expect(left.anchor).toEqual(bb([120, 100, 210, 130]));
+        expect(right.anchor).toEqual(bb([400, 100, 490, 130]));
+        // Regions column detection left whole are passed through.
+        expect(splitRegionItems([region], [undefined])).toEqual([region]);
+    });
+
+    it("places an equation by its body when a label in the other column's margin widens its box", () => {
+        // A right-column equation with its number at the left margin; the left
+        // column is one block running past it.
+        const left = textItem(0, [100, 100, 300, 550], ["Left column."]);
+        const intro = textItem(1, [320, 100, 520, 240], ["Right intro:"]);
+        const rest = textItem(2, [320, 400, 520, 550], ["Right rest."]);
+        const cell = (text: string, box: Rect) => ({ text, bbox: { l: box[0], t: box[1], r: box[2], b: box[3], origin: "top-left" as const } });
+        const labelled: RegionItemDraft = {
+            kind: "formula",
+            region: 0,
+            bbox: { l: 100, t: 270, r: 520, b: 360, origin: "top-left" },
+            rows: [[cell("(4)", [100, 300, 115, 320]), cell("z = x + y", [350, 300, 500, 320])]],
+        };
+        const page = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: 620,
+            height: 700,
+            blocks: [left, intro, rest].map((item) => ({
+                type: "text" as const,
+                bbox: item.bbox,
+                lines: [{ wmode: 0, bbox: item.bbox, font: { name: "Body", family: "Body", weight: "normal", style: "normal", size: 10 }, x: item.bbox.l, y: item.bbox.t, text: "body text" }],
+            })),
+        };
+        const toRect = (b: BoundingBox) => ({ x: b.l, y: b.t, w: b.r - b.l, h: b.b - b.t });
+        const columns = detectColumns(page, {
+            regionBarriers: [{ box: toRect(labelled.bbox), content: labelled.rows.flat().map((c) => toRect(c.bbox)) }],
+        });
+        const out = placeRegionItems(0, [left, intro, rest], splitRegionItems([labelled], columns.regionPieces));
+        expect(out.items.map((i) => i.text)).toEqual(["Left column.", "Right intro:", "(4) z = x + y", "Right rest."]);
+        // The item keeps its whole box.
+        expect(out.items[2].bbox).toEqual(labelled.bbox);
     });
 
     it("places regions in the reading frame of a sideways page and keeps MuPDF-frame boxes", () => {

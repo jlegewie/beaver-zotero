@@ -83,7 +83,7 @@ import {
 import type { DocumentLike, FontApi } from "./mupdfApi";
 import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
-import { placeRegionItems, type RegionItemDraft } from "../regions/regionItems";
+import { placeRegionItems, splitRegionItems, type RegionItemDraft } from "../regions/regionItems";
 
 /**
  * Per-page sentence work given pre-walked context. Cheap to call in a
@@ -222,7 +222,12 @@ export function extractSentencesForPage(args: {
         paragraphSettings: args.paragraphSettings,
         fillBoundaries,
         dividerLines,
-        regionBarriers: args.regionItems?.map((region) => region.bbox),
+        regionBarriers: args.regionItems?.map((region) => ({
+            bbox: region.bbox,
+            // An equation's lines are its content. A figure's graphics and a
+            // table's grid fill their box: cells leave gaps anywhere.
+            ...(region.kind === "formula" ? { content: region.rows.flat().map((cell) => cell.bbox) } : {}),
+        })),
         pageRotation: args.pageRotation,
     });
     const filteredParagraphsMs = performance.now() - tFiltered;
@@ -242,7 +247,10 @@ export function extractSentencesForPage(args: {
     let regionsMs = args.regionsMs ?? 0;
     if (args.regionItems?.length) {
         const tRegions = performance.now();
-        const placed = placeRegionItems(args.pageIndex, sentenceResult.items, args.regionItems, {
+        // Column detection split equation boxes that merged one equation from
+        // each column; the items follow, so each is placed in its own column.
+        const regionItems = splitRegionItems(args.regionItems, filteredResult.columnResult.regionPieces);
+        const placed = placeRegionItems(args.pageIndex, sentenceResult.items, regionItems, {
             rotation: filteredResult.pageRotation,
             sourceWidth: filteredResult.sourceWidth,
             sourceHeight: filteredResult.sourceHeight,
