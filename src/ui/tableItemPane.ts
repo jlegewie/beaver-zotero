@@ -668,7 +668,7 @@ export async function describeTableItemPane(
         actions: tableSectionActions(win, false),
     };
 
-    const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryID, ref.key) as
         | Zotero.Item
         | false;
     if (!item) {

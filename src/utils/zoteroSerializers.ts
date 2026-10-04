@@ -15,6 +15,7 @@ import { syncingItemFilterAsync } from './itemSyncStatus';
 import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
 import { cleanMetadataUrl } from './metadataUrl';
 import { isAttachmentOnServer } from './webAPI';
+import { safeIsInTrashAsync } from './zoteroItemUtils';
 import { getCitationKeyFromItem, getCollectionClientDateModifiedAsISOString, getMimeType, safeFileExists, safeIsInTrash } from './zoteroUtils';
 
 export interface FileData {
@@ -303,8 +304,8 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         identifiers: getIdentifiersFromItem(item),
         language: item.getField('language'),
         formatted_citation: formatItemReference(item),
-        deleted: (() => {
-            const trashState = safeIsInTrash(item);
+        deleted: await (async () => {
+            const trashState = await safeIsInTrashAsync(item);
             if (trashState === null) {
                 logger(
                     `serializeItem: Item missing isInTrash, marking deleted. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"} type=${item?.itemType ?? "unknown"}`,
@@ -412,7 +413,15 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchRes
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: item.itemType,
         // @ts-ignore - Add proper types later
-        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
+        deleted: (() => {
+            if (typeof item.isInTrash !== 'function') return item.deleted ?? false;
+            // Child items in an unloaded library throw; fall back to the item's own flag.
+            try {
+                return item.isInTrash();
+            } catch {
+                return item.deleted ?? false;
+            }
+        })(),
         title: item.getField('title', false, true),
         year: getYearFromItem(item),
         rank: 0,
@@ -552,8 +561,8 @@ export async function serializeAttachment(
         link_mode: item.attachmentLinkMode,
         tags: item.getTags().length > 0 ? item.getTags() : null,
         collections: getCollectionKeysFromItem(item),
-        deleted: (() => {
-            const trashState = safeIsInTrash(item);
+        deleted: await (async () => {
+            const trashState = await safeIsInTrashAsync(item);
             if (trashState === null) {
                 logger(
                     `serializeAttachment: Attachment missing isInTrash, marking deleted. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"}`,

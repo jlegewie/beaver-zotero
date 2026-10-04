@@ -76,7 +76,7 @@ describe('locator resolution by id scheme', () => {
         };
         getResult = vi.fn().mockResolvedValue(currentResult());
         (Zotero as any).Beaver = { documentCache: { getResult } };
-        (Zotero as any).Items = { getByLibraryAndKey: vi.fn(() => attachment) };
+        (Zotero as any).Items = { getByLibraryAndKeyAsync: vi.fn(async () => attachment) };
         vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
             kind: 'ok',
             cached: false,

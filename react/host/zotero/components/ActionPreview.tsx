@@ -1,5 +1,5 @@
 import { MergeItemsPreview } from './MergeItemsPreview';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { AgentAction } from '../../../agents/agentActions';
 import type { OrganizeItemsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { EditMetadataPreview } from './EditMetadataPreview';
@@ -22,6 +22,52 @@ import {
     getBatchRewriteOldContent,
     getEditNotePreviewKind,
 } from './editNoteBatchPreviewData';
+
+/** Synchronous item-type lookup; undefined when the item is missing or not loaded yet. */
+function readItemTypeID(libraryId: number, zoteroKey: string): number | undefined {
+    try {
+        const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
+        return item ? item.itemTypeID : undefined;
+    } catch {
+        // Items of a library Zotero has not loaded yet throw on sync lookup.
+        return undefined;
+    }
+}
+
+/**
+ * Resolve an item's type id, reading synchronously when the item is cached
+ * and otherwise loading it once in an effect.
+ */
+function useItemTypeID(libraryId: number | null, zoteroKey: string | undefined): number | undefined {
+    const syncValue = libraryId && zoteroKey ? readItemTypeID(libraryId, zoteroKey) : undefined;
+    const lookupKey = `${libraryId}:${zoteroKey}`;
+    const [loaded, setLoaded] = useState<{ lookupKey: string; itemTypeID: number } | null>(null);
+    const needsAsync = !!libraryId && !!zoteroKey && syncValue === undefined;
+
+    useEffect(() => {
+        if (!needsAsync || !libraryId || !zoteroKey) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+                if (!cancelled && item) setLoaded({ lookupKey, itemTypeID: item.itemTypeID });
+            } catch {
+                // Leave the type unresolved; the preview falls back to the agent-supplied label.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [needsAsync, libraryId, zoteroKey, lookupKey]);
+
+    return syncValue ?? (loaded?.lookupKey === lookupKey ? loaded.itemTypeID : undefined);
+}
+
+const EditMetadataActionPreview: React.FC<{
+    libraryId: number | null;
+    zoteroKey: string | undefined;
+} & Omit<React.ComponentProps<typeof EditMetadataPreview>, 'itemTypeID'>> = ({ libraryId, zoteroKey, ...props }) => {
+    const itemTypeID = useItemTypeID(libraryId, zoteroKey);
+    return <EditMetadataPreview {...props} itemTypeID={itemTypeID} />;
+};
 
 /**
  * Dispatches to action-specific preview components
@@ -84,8 +130,7 @@ export const ActionPreview: React.FC<{
         // Resolve the edited item's type so the preview can display the field
         // that will actually change (the edit handler remaps wrong-type labels
         // to the type's equivalent field). Falls back to the agent-supplied
-        // label when the item is not loaded.
-        let itemTypeID: number | undefined;
+        // label when the item is not available.
         const zoteroKey = previewData.actionData.zotero_key;
         // Resolve the portable library_ref to a local library id first: a group
         // item's device-local library_id is UNRESOLVED_LIBRARY_ID (0) — its
@@ -97,20 +142,17 @@ export const ActionPreview: React.FC<{
             library_ref: previewData.actionData.library_ref,
             library_id: previewData.actionData.library_id,
         });
-        if (libraryId && zoteroKey) {
-            const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
-            if (item) itemTypeID = item.itemTypeID;
-        }
 
         return (
-            <EditMetadataPreview
+            <EditMetadataActionPreview
+                libraryId={libraryId}
+                zoteroKey={zoteroKey}
                 edits={edits}
                 currentValues={currentValues}
                 appliedEdits={appliedEdits}
                 status={status}
                 oldCreators={oldCreators}
                 newCreators={newCreators}
-                itemTypeID={itemTypeID}
             />
         );
     }
