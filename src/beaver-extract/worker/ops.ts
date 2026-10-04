@@ -29,6 +29,8 @@ import type { PageLine } from "../LineDetector";
 import {
     collectMarginItemsFromFilteredPage,
     detectFilteredParagraphs,
+    documentBodyExtents,
+    regionFurnitureLines,
     reindexMarginItems,
 } from "../FilteredParagraphPipeline";
 import {
@@ -804,6 +806,15 @@ export function runExtractFromIndices(
             );
         }
         const regionImages = pageCache?.regions ? new Map<number, Set<number>>() : undefined;
+        // Region detection keeps the document's running headers and footers out of regions.
+        const bodyExtents = regionImages
+            ? documentBodyExtents(analysisPages, { marginRemoval, styleProfile, margins: opts.margins, marginZone: opts.marginZone })
+            : new Map<string, { top: number; bottom: number }>();
+        const runningRepeat = getEffectiveRepeatThreshold({
+            requested: requestedRepeatThreshold,
+            totalPageCount: pageCount,
+            analysisPageCount: analysisPages.length,
+        }).topBottom;
         if (regionImages) {
             for (const i of effectiveTargetIndices) {
                 const graphics = pageCache!.graphicsFor(i);
@@ -822,13 +833,25 @@ export function runExtractFromIndices(
             let pagesForTarget = analysisPages;
             if (regionImages && detailed) {
                 const tRegions = performance.now();
-                const regions = pageRegions(detailed, pageCache!.graphicsFor(i), regionImages, pageCount, compoundVocabulary);
+                // Orientation is read from the full page: removing region text can
+                // leave too little text to detect it.
+                const rotation = detectDominantTextOrientation(detailed, opts.marginZone);
+                // Running headers, footers and page numbers stay page furniture.
+                const margin = regionFurnitureLines(detailed, {
+                    marginRemoval,
+                    marginAnalysis,
+                    styleProfile,
+                    margins: opts.margins,
+                    marginZone: opts.marginZone,
+                    pageRotation: rotation,
+                    repeat: runningRepeat,
+                    bodyExtents,
+                });
+                const regions = pageRegions(detailed, pageCache!.graphicsFor(i), regionImages, pageCount, compoundVocabulary, margin);
                 if (regions.page !== detailed) {
                     // The target without absorbed lines replaces the walked page, so
                     // paragraph detection never sees them (and no font bridge runs).
-                    // Orientation is read from the full page first: removing region
-                    // text can leave too little text to detect it.
-                    pageRotation = detectDominantTextOrientation(detailed, opts.marginZone);
+                    pageRotation = rotation;
                     const stripped = regions.page;
                     pagesForTarget = analysisPages.map((p) =>
                         p.pageIndex === i ? (stripped as unknown as RawPageData) : p,
@@ -987,6 +1010,7 @@ function pageRegions(
     imagesByPage: ReadonlyMap<number, ReadonlySet<number>>,
     pageCount: number,
     vocabulary: ReadonlySet<string>,
+    margin: ReadonlySet<RawLine>,
 ): PageRegionItems {
     if (!graphics || !REGION_MODEL) {
         throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
@@ -997,6 +1021,7 @@ function pageRegions(
             doc: pageRegionDocContext(page.pageIndex, imagesByPage, pageCount, DEFAULT_REGION_CONTEXT_PAGES),
             model: REGION_MODEL,
             route: true,
+            margin,
         });
         return regionItemsForPage(page, detection, vocabulary);
     } catch (err) {

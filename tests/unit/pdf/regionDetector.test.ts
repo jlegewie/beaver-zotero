@@ -5,6 +5,8 @@ import {
     CONFIDENCE_MARGIN,
     LINE_CAPTION,
     LINE_FURNITURE,
+    LINE_GUTTER,
+    LINE_MARGIN,
     LINE_RUNNING,
     LINE_SKEWED,
     REGION_MIN_PROB,
@@ -26,6 +28,7 @@ import {
     NOTE_CAPTION_RE,
     isFigureCaption,
     isTableCaption,
+    lineNumberGutter,
     pageLines,
     pagePrimitives,
     type RegionLine,
@@ -320,6 +323,255 @@ describe("routeLines", () => {
     });
 });
 
+describe("routeLines margin text and equation numbers", () => {
+    const region = (bbox: Rect, label: DetectedRegion["label"]): DetectedRegion => ({ bbox, anchored: false, features: [], label });
+
+    it("keeps the document's margin text out of regions, except a continued table's header row", () => {
+        // A running header the figure box reaches over.
+        const figure = [line([72, 30, 300, 40], "Journal of Neuroscience 41"), line([100, 120, 140, 130], "Time (s)")];
+        expect(routeLines(figure, [LINE_MARGIN, 0], [region([60, 25, 540, 400], "picture")])).toEqual([-1, 0]);
+        // A continued table repeats its header at the top of each page; its rows follow it directly.
+        const continued = [
+            line([72, 60, 160, 70], "Authenticity issue"),
+            line([300, 60, 360, 70], "Markers"),
+            line([72, 80, 160, 90], "Geographical origin"),
+            line([300, 80, 400, 90], "Chlorogenic acid"),
+        ];
+        const table = [region([60, 55, 540, 300], "table")];
+        expect(routeLines(continued, [LINE_MARGIN, LINE_MARGIN, 0, 0], table)).toEqual([0, 0, 0, 0]);
+        // A header with a two-line cell: its second line reaches past the margin band, and
+        // the first row follows three line heights below the margin text.
+        const twoLine = [
+            line([61, 71, 106, 79], "Author (year)"),
+            line([459, 71, 489, 79], "Research"),
+            line([459, 81, 484, 89], "method"),
+            line([61, 102, 331, 110], "Motoyama and From resource munificence"),
+            line([459, 102, 496, 110], "Single case"),
+        ];
+        expect(routeLines(twoLine, [LINE_MARGIN, LINE_MARGIN, 0, 0, 0], [region([40, 66, 520, 400], "table")])).toEqual([0, 0, 0, 0, 0]);
+        // Both header lines in the margin band: the rows follow the second.
+        expect(routeLines(twoLine, [LINE_MARGIN, LINE_MARGIN, LINE_MARGIN, 0, 0], [region([40, 66, 520, 400], "table")])).toEqual([0, 0, 0, 0, 0]);
+        // A running header has a caption, not a row, between it and the table.
+        const headed = [line([72, 30, 300, 40], "J Pathol Inform 2019"), line([72, 50, 400, 60], "Table 1: Patient characteristics"), ...continued.slice(2)];
+        expect(routeLines(headed, [LINE_MARGIN, LINE_CAPTION, 0, 0], [region([60, 25, 540, 300], "table")])).toEqual([-1, -1, 0, 0]);
+        // A header cell of words reads as running text too; the rows that follow it make it the
+        // table's.
+        const wordy = [
+            line([72, 60, 280, 70], "Authenticity issue raised in the reviewed studies"),
+            line([300, 60, 360, 70], "Markers"),
+            line([72, 80, 160, 90], "Geographical origin"),
+            line([300, 80, 400, 90], "Chlorogenic acid"),
+            line([72, 100, 160, 110], "Species substitution"),
+            line([300, 100, 400, 110], "DNA barcodes"),
+            line([72, 120, 160, 130], "Adulteration"),
+            line([300, 120, 400, 130], "Fatty acids"),
+        ];
+        const wordyFlags = [LINE_MARGIN | LINE_RUNNING, LINE_MARGIN, 0, 0, 0, 0, 0, 0];
+        expect(routeLines(wordy, wordyFlags, [region([60, 55, 540, 300], "table")])).toEqual(Array(8).fill(0));
+        // A running header over the page stays margin text.
+        const head = [line([72, 30, 400, 40], "Journal of Food Composition and Analysis 41 (2024)"), ...wordy.slice(2)];
+        expect(routeLines(head, [LINE_MARGIN | LINE_RUNNING, 0, 0, 0, 0, 0, 0], [region([60, 25, 540, 300], "table")])[0]).toBe(-1);
+        // So does one set in the table's columns, a gap above its rows.
+        const split = [line([72, 45, 160, 55], "Dong and Maynard"), line([300, 45, 360, 55], "Page 7"), ...wordy.slice(2)];
+        expect(routeLines(split, [LINE_MARGIN, LINE_MARGIN, 0, 0, 0, 0, 0, 0], [region([60, 75, 540, 300], "table")]).slice(0, 2)).toEqual([-1, -1]);
+    });
+
+    it("carries every line of a merged table fragment into the table, skewed ones too", () => {
+        const rows = (y: number): RegionLine[] =>
+            [0, 12, 24].flatMap((d) => [
+                line([72, y + d, 140, y + d + 10], `C57BL/${y + d} mice`),
+                line([250, y + d, 360, y + d + 10], "Shanghai Model Organisms"),
+                line([400, y + d, 440, y + d + 10], `SM-${y + d}`),
+            ]);
+        const ruled: Rect[] = [100, 112, 124, 136, 148, 160, 172, 184].map((y): Rect => [70, y - 2.5, 540, y - 2]);
+        // A stamp set at an angle inside the lower fragment's box.
+        const stamp = { ...line([460, 140, 500, 160], "DRAFT"), skewed: true };
+        const lines = [...rows(100), ...rows(136), stamp, prose(300), prose(314), prose(328)];
+        const flags = lines.map((l) => (l === stamp ? LINE_SKEWED : l.text === PROSE_TEXT ? LINE_RUNNING : 0));
+        const regions = [region([70, 98, 540, 134], "table"), region([70, 134, 540, 170], "table")];
+        const routes = routeLines(lines, flags, regions, ruled);
+        expect(regions[1]).toMatchObject({ label: "other", containedIn: 0 });
+        expect(routes.slice(0, 19)).toEqual(Array(19).fill(0));
+        // The table's box takes in the fragment's.
+        expect(regions[0].bbox).toEqual([70, 98, 540, 170]);
+    });
+
+    it("keeps table fragments with another region between them apart", () => {
+        const rows = (y: number): RegionLine[] =>
+            [0, 12, 24].flatMap((d) => [
+                line([72, y + d, 140, y + d + 10], `C57BL/${y + d} mice`),
+                line([250, y + d, 360, y + d + 10], "Shanghai Model Organisms"),
+                line([400, y + d, 440, y + d + 10], `SM-${y + d}`),
+            ]);
+        const ruled: Rect[] = [100, 112, 124, 152, 164, 176, 188].map((y): Rect => [70, y - 2.5, 540, y - 2]);
+        const formula = line([250, 138, 360, 148], "x = a + b");
+        const lines = [...rows(100), formula, ...rows(152), prose(300), prose(314), prose(328)];
+        const flags = lines.map((l) => (l.text === PROSE_TEXT ? LINE_RUNNING : 0));
+        const regions = [region([70, 98, 540, 134], "table"), region([70, 150, 540, 186], "table"), region([240, 136, 370, 150], "formula")];
+        const routes = routeLines(lines, flags, regions, ruled);
+        expect(regions[1].label).toBe("table");
+        expect(routes.slice(0, 19)).toEqual([...Array(9).fill(0), 2, ...Array(9).fill(1)]);
+    });
+
+    it("leaves a list marker opening a line of the neighbouring column to its list", () => {
+        const equation = line([72, 100, 200, 112], "E = mc² + ∑ᵢ pᵢ²/2m");
+        const marker = line([300, 101, 314, 111], "(1)"); // a list's number in the right column
+        const item = line([320, 101, 540, 111], "the first item of the list continues here");
+        expect(routeLines([equation, marker, item], [0, 0, LINE_RUNNING], [region([70, 98, 202, 114], "formula")])).toEqual([0, -1, -1]);
+        // The equation's own number at its column's edge, nearer the next column than the
+        // equation: the column's lines run out to it.
+        const lines = [
+            line([72, 140, 200, 152], "F = ma"),
+            line([270, 141, 284, 151], "(2)"),
+            line([300, 141, 540, 151], "the second paragraph of the column starts here"),
+            line([72, 170, 284, 180], "where the force acts on the mass of the body"),
+        ];
+        const flags = [0, 0, LINE_RUNNING, LINE_RUNNING];
+        expect(routeLines(lines, flags, [region([70, 138, 202, 154], "formula")])).toEqual([0, 0, -1, -1]);
+        // No line of the equation's column: one running across both columns, one ending short
+        // of the number, one beside the equation rather than under it, one far below it.
+        const others: Rect[] = [
+            [72, 170, 540, 180],
+            [72, 170, 240, 180],
+            [230, 170, 284, 180],
+            [72, 400, 284, 410],
+        ];
+        for (const bbox of others) {
+            const variant = [...lines.slice(0, 3), line(bbox, "where the force acts on the mass")];
+            expect(routeLines(variant, flags, [region([70, 138, 202, 154], "formula")])).toEqual([0, -1, -1, -1]);
+        }
+        // A number that ends its row is the equation's.
+        expect(routeLines([equation, marker], [0, 0], [region([70, 98, 202, 114], "formula")])).toEqual([0, 0]);
+    });
+
+    it("gives an equation number beside or just below its equation to that equation", () => {
+        const lines = [
+            line([51, 642, 270, 662], "ASM{U(x, y)} = F−1{F{U(x, y)} ⋅ H(fx, fy)}"),
+            line([272, 669, 292, 678], "(6)"), // a baseline lower, just right of the box
+            line([400, 700, 520, 712], "y = ax + b"),
+            line([530, 700, 545, 712], "(7)"), // on the equation's row
+            line([51, 740, 270, 752], "z = c"),
+            line([110, 752, 260, 762], "where the sum runs over"), // prose between the equation and the number
+            line([272, 754, 292, 763], "(8)"),
+        ];
+        const flags = [0, 0, 0, 0, 0, LINE_RUNNING, 0];
+        const regions = [region([51, 642, 270, 662], "formula"), region([400, 700, 520, 712], "formula"), region([51, 740, 270, 752], "formula")];
+        expect(routeLines(lines, flags, regions)).toEqual([0, 0, 1, 1, 2, -1, -1]);
+    });
+});
+
+describe("lineNumberGutter", () => {
+    it("finds a manuscript's line numbers in the margin, numbering text and blank lines alike", () => {
+        const lines = Array.from({ length: 12 }, (_, k) => [
+            line([40, 100 + 20 * k, 52, 110 + 20 * k], String(127 + k)),
+            ...(k === 6 ? [] : [prose(100 + 20 * k, 72, 540)]),
+        ]).flat();
+        const gutter = lineNumberGutter(lines);
+        expect([...gutter].map((l) => l.text)).toEqual(Array.from({ length: 12 }, (_, k) => String(127 + k)));
+    });
+
+    it("finds line numbers set centred, whose edges shift from one digit to two", () => {
+        // A one-digit number spans 11.2–16.8, a two-digit one 8–20: neither edge lines up, the centres do.
+        const lines = Array.from({ length: 20 }, (_, k) => [
+            line(k < 9 ? [11.2, 54 + 22 * k, 16.8, 69 + 22 * k] : [8, 54 + 22 * k, 20, 69 + 22 * k], String(k + 1)),
+            prose(50 + 22 * k, 28, 333),
+        ]).flat();
+        expect(lineNumberGutter(lines).size).toBe(20);
+    });
+
+    it("leaves a table's row numbers in the text body alone", () => {
+        // Numbered rows of a table that starts at the body's left edge.
+        const rows = Array.from({ length: 12 }, (_, k) => [
+            line([72, 100 + 14 * k, 80, 110 + 14 * k], String(k + 1)),
+            line([100, 100 + 14 * k, 300, 110 + 14 * k], "Systolic blood pressure reading"),
+        ]).flat();
+        expect(lineNumberGutter([...rows, prose(300), prose(314)]).size).toBe(0);
+        // Numbers in the margin that do not count up line by line are no gutter either.
+        const scattered = Array.from({ length: 12 }, (_, k) => line([40, 100 + 20 * k, 52, 110 + 20 * k], String((k * 7) % 13)));
+        expect(lineNumberGutter([...scattered, ...Array.from({ length: 12 }, (_, k) => prose(100 + 20 * k))]).size).toBe(0);
+    });
+
+    it("leaves the number column of a table that fills the page alone", () => {
+        // The descriptions set the text body, so the numbers stand outside it.
+        const rows = (value: boolean) =>
+            Array.from({ length: 12 }, (_, k) => [
+                line([40, 100 + 14 * k, 50, 110 + 14 * k], String(k + 1)),
+                line([72, 100 + 14 * k, 300, 110 + 14 * k], "Systolic blood pressure at rest"),
+                ...(value ? [line([400, 100 + 14 * k, 430, 110 + 14 * k], `${120 + k}.5`)] : []),
+            ]).flat();
+        // Its rows hold the table's values.
+        expect(lineNumberGutter(rows(true)).size).toBe(0);
+        // Its numbers stand under a heading of their own, below the table's caption.
+        const caption = line([40, 60, 400, 70], "Table 2. Measurements taken during the visit");
+        expect(lineNumberGutter([caption, line([40, 80, 58, 90], "No."), ...rows(false)]).size).toBe(0);
+        // A page number over the column is no start of its numbering.
+        expect(lineNumberGutter([line([40, 30, 52, 40], "316"), caption, line([40, 80, 58, 90], "No."), ...rows(false)]).size).toBe(0);
+        // A short caption, a continued page's running head, or none: the heading counts all the same.
+        const short = line([40, 60, 160, 70], "Table 2. Measurements");
+        expect(lineNumberGutter([short, line([40, 80, 58, 90], "No."), ...rows(false)]).size).toBe(0);
+        const runningHead = line([200, 40, 400, 50], "Journal of Clinical Measurement 12");
+        expect(lineNumberGutter([runningHead, line([40, 60, 58, 70], "No."), ...rows(false)]).size).toBe(0);
+        expect(lineNumberGutter([line([40, 85, 58, 95], "No."), ...rows(false)]).size).toBe(0);
+        // Without either, the column reads as line numbers.
+        expect(lineNumberGutter([caption, ...rows(false)]).size).toBe(12);
+    });
+
+    it("keeps a manuscript's gutter beside references, page furniture and a second gutter", () => {
+        // Numbered references: their marks number items and are no values.
+        const references = Array.from({ length: 12 }, (_, k) => [
+            line([40, 100 + 20 * k, 52, 110 + 20 * k], String(400 + k)),
+            line([72, 100 + 20 * k, 84, 110 + 20 * k], `${k + 1}.`),
+            prose(100 + 20 * k, 90, 540),
+        ]).flat();
+        // A running head in the margin above all of the page's text is furniture.
+        const head = line([40, 40, 52, 50], "Pg");
+        expect(lineNumberGutter([head, ...references]).size).toBe(12);
+        // Under the page's first text, a heading that runs on into the body, or a mark of
+        // no words in the margin, is no heading of the column.
+        const opening = [prose(54), line([40, 72, 300, 82], "Supplementary methods for the trial"), line([42, 86, 48, 94], "†")];
+        expect(lineNumberGutter([...opening, ...references]).size).toBe(12);
+        // Numbers in both margins number the same lines.
+        const both = Array.from({ length: 12 }, (_, k) => [
+            line([40, 100 + 20 * k, 52, 110 + 20 * k], String(1 + k)),
+            prose(100 + 20 * k),
+            line([560, 100 + 20 * k, 572, 110 + 20 * k], String(1 + k)),
+        ]).flat();
+        expect(lineNumberGutter(both).size).toBe(24);
+    });
+
+    it("never routes the gutter, and keeps it out of a table's rows", () => {
+        const region = (bbox: Rect, label: DetectedRegion["label"]): DetectedRegion => ({ bbox, anchored: false, features: [], label });
+        const lines = [line([40, 100, 52, 110], "64"), line([72, 100, 200, 110], "Cornelius Senf"), line([300, 100, 420, 110], "Kristoffer")];
+        expect(routeLines(lines, [LINE_GUTTER, 0, 0], [region([30, 90, 430, 120], "table")])).toEqual([-1, 0, 0]);
+    });
+});
+
+describe("routeLines paragraphs", () => {
+    it("returns to its paragraph a line of numbers a figure box took under it", () => {
+        const region = (bbox: Rect, label: DetectedRegion["label"]): DetectedRegion => ({ bbox, anchored: false, features: [], label });
+        const lines = [
+            line([42, 100, 291, 111], "Meta-analysis found no significant effect of massage on"),
+            line([42, 112, 291, 123], "fatigue with high study heterogeneity (SMD 0.47, 95% CI"),
+            line([42, 124, 260, 135], "−0.28 to 1.22; participants=171; studies=5; I2=86%)"),
+            line([42, 136, 94, 147], "(figure 3C)."),
+            line([42, 170, 120, 181], "Hopper et al."), // a figure label under a sentence's end
+            line([330, 124, 400, 135], "Barlow et al."), // a label of the figure beside
+        ];
+        const flags = [LINE_RUNNING, LINE_RUNNING, 0, 0, 0, 0];
+        expect(routeLines(lines, flags, [region([40, 20, 560, 470], "picture")])).toEqual([-1, -1, -1, -1, 0, 0]);
+    });
+
+    it("leaves a display equation set at the margin under its lead-in to the formula", () => {
+        const region = (bbox: Rect, label: DetectedRegion["label"]): DetectedRegion => ({ bbox, anchored: false, features: [], label });
+        const lines = [
+            line([42, 100, 291, 111], "The energy of the mixed state is the sum of the two"),
+            line([42, 112, 291, 123], "contributions, which after averaging is given by"),
+            line([42, 124, 200, 135], "∫ 2π dθ ∫ ∞ dr r φ† δH φ = v"),
+        ];
+        expect(routeLines(lines, [LINE_RUNNING, LINE_RUNNING, 0], [region([40, 122, 300, 140], "formula")])).toEqual([-1, -1, 0]);
+    });
+});
+
 describe("detectRegions", () => {
     it("keeps a diagonal watermark out of detection and flags it as furniture", () => {
         const page = {
@@ -353,6 +605,34 @@ describe("detectRegions", () => {
         const mark = lines.findIndex((l) => l.text === "UNCORRECTED PROOF");
         expect(flags[mark]).toBe(LINE_SKEWED | LINE_FURNITURE);
         expect(lines.filter((l) => l.text === PROSE_TEXT)).toHaveLength(2);
+    });
+
+    it("flags the document's margin text of words or page numbers, not a repeating symbol", () => {
+        const raw = (l: number, t: number, r: number, b: number, text: string) => ({
+            wmode: 0,
+            bbox: { l, t, r, b },
+            font: { name: "Times-Roman", family: "Times", weight: "normal", style: "normal", size: BS },
+            x: l,
+            y: b,
+            text,
+            rotation: 0,
+        });
+        const header = raw(72, 30, 300, 41, "Journal of Testing Studies");
+        const number = raw(520, 30, 540, 41, "41");
+        const sum = raw(300, 60, 310, 71, "∑");
+        const pageOf = raw(263, 739, 329, 748, "2201416 (6 of 10)");
+        const body = raw(72, 100, 540, 111, PROSE_TEXT);
+        const page = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: W,
+            height: H,
+            blocks: [header, number, sum, pageOf, body].map((l) => ({ type: "text", bbox: l.bbox, lines: [l] })),
+        } as unknown as RawPageData;
+        const detection = detectRegions(page, summary([]), { pageIndex: 0, route: true, margin: new Set([header, number, sum, pageOf] as never[]) });
+        const { lines, flags } = detection.routing!;
+        const flagOf = (text: string) => flags[lines.findIndex((l) => l.text === text)] & LINE_MARGIN;
+        expect([flagOf("Journal of Testing Studies"), flagOf("41"), flagOf("2201416 (6 of 10)"), flagOf("∑"), flagOf(PROSE_TEXT)]).toEqual([LINE_MARGIN, LINE_MARGIN, LINE_MARGIN, 0, 0]);
     });
 });
 

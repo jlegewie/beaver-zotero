@@ -19,9 +19,16 @@
  * prose (a running line nearly as wide as its text column, or a justified line
  * of words) or running text beyond the table's rows. Rules between lines
  * separate them, so a table's notes under its bottom rule stay out.
+ *
+ * A table framed by its own rules is bounded by them, and holds what stands in
+ * its column grid between them however much it reads like prose (a text table's
+ * definitions, a column of long labels), unless that text column runs on as the
+ * page's paragraphs beyond the table. Lines its box took from beyond the frame
+ * go back to their text column, and a fragment of the table that the detector cut
+ * off at a band of text or at its ruled rows merges into it.
  */
 import type { Rect } from "./geometry";
-import { isCaptionLine, type RegionLine } from "./pageSignals";
+import { isCaptionLine, wideGaps, type RegionLine } from "./pageSignals";
 
 /** Left edges within this many points are one edge. */
 const EDGE_TOLERANCE = 2.5;
@@ -49,6 +56,32 @@ const RULE_JOIN = 2;
 const COLUMN_ALIGN = 3;
 /** A band between rows longer than this many lines is a paragraph, not a group header. */
 const MAX_BAND_LINES = 2;
+/** A rule through a line, past this share of its height from either edge, strikes it through... */
+const STRUCK_MARGIN = 0.25;
+/** ...and rules striking lines through this often are a pattern, no table's frame. */
+const STRUCK_SHARE = 1 / 3;
+/** A table's rules lie within this many line heights of its cells. */
+const RULE_NEAR = 3;
+/** A sentence ends: terminal punctuation, maybe followed by a closing quote or bracket. */
+const SENTENCE_END_RE = /[.!?][\])"'”’]*$/u;
+/** The span of most of a table's cells leaves out this share of their edges on each side. */
+const CORE_QUANTILE = 0.1;
+/** A table with at least this many rules of its own is framed by them. */
+const FRAME_RULES = 2;
+/** A framed table reaches at most this many line heights past its rules (a label column set outside them). */
+const FRAME_REACH = 3;
+/** Lines beyond a table's frame belong to a text column there when this many paragraph lines span them. */
+const BEYOND_LINES = 2;
+/** A list's marker: a number, letter or roman numeral with its punctuation, or a bullet. */
+const LIST_MARKER_RE = /^(?:\(?(?:\d{1,4}|[a-zA-Z]|[ivxlcIVXLC]{1,6})[.):]?|[•●○◦▪■►▸‣∙·–—-])$/u;
+/** A numbered list counts up by one for at least this share of its steps. */
+const LIST_CONSECUTIVE = 0.7;
+/** A column of the table's grid holds at least this many of its cells. */
+const GRID_MIN_CELLS = 2;
+/** A fragment repeating this many of a table's rows of words is a table of its own. */
+const REPEATED_HEADER_ROWS = 2;
+/** A table merges into another when at least this share of its cells stands in the other's grid. */
+const MERGE_FIT = 0.8;
 
 export interface TableRowInput {
     lines: readonly RegionLine[];
@@ -99,13 +132,14 @@ function sameRow(a: Rect, b: Rect): boolean {
 /**
  * Route prose lines that belong to a table's rows to that table (see the module
  * comment). `routes` holds the region index of each line, or -1 for prose, and
- * is updated in place. Only upright lines are considered.
+ * is updated in place. Only upright lines are considered. Returns the tables
+ * merged into another, by index: their lines are routed to that table now.
  */
-export function completeTableRows(input: TableRowInput, routes: number[]): void {
+export function completeTableRows(input: TableRowInput, routes: number[]): Map<number, number> {
     const { lines, running, caption } = input;
     const rules = joinRules(input.rules);
     const upright = lines.map((_, i) => i).filter((i) => !lines[i].rot);
-    if (!upright.length) return;
+    if (!upright.length) return new Map();
     const startsCaption = upright.map((i) => caption[i] && isCaptionLine(lines[i]));
     const starts = upright.filter((_, k) => startsCaption[k]);
     // A caption's title can be set apart from its "Table 2" on the same line.
@@ -163,6 +197,16 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
             return cx >= l && cx <= r && cells.some((c) => sameRow(b, lines[c].bbox));
         });
     const runningLines = upright.filter((i) => running[i] && !rowLabel(i));
+    // A running line stacked on another, with no rule between: a paragraph's line.
+    const stackedRunning = (i: number) =>
+        ([-1, 1] as const).some((dir) => {
+            const j = neighbour(i, dir);
+            if (j < 0 || !running[j]) return false;
+            const a = lines[i].bbox;
+            const b = lines[j].bbox;
+            const gap = dir < 0 ? a[1] - b[3] : b[1] - a[3];
+            return gap <= STACK_GAP * Math.max(height(a), height(b)) && !ruledBetween(a, b);
+        });
     const widthOf = (i: number) => lines[i].bbox[2] - lines[i].bbox[0];
     const pageWidth = quantile(runningLines.map(widthOf), 0.75);
     const paragraphWidth = new Map<number, boolean>();
@@ -273,46 +317,192 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
         return found;
     }
 
+    // A line's horizontal spans between its gaps wider than a word space.
+    const segments = (i: number): [number, number][] => {
+        const out: [number, number][] = [];
+        let start = lines[i].bbox[0];
+        for (const [g0, g1] of [...wideGaps(lines[i])].sort((a, b) => a[0] - b[0])) {
+            out.push([start, g0]);
+            start = g1;
+        }
+        out.push([start, lines[i].bbox[2]]);
+        return out;
+    };
+    // Another line set on the row of lines `i` and `j`, between them.
+    const runningBetween = (i: number, j: number): boolean => {
+        const a = lines[i].bbox;
+        const b = lines[j].bbox;
+        return upright.some((k) => k !== i && k !== j && sameRow(a, lines[k].bbox) && lines[k].bbox[0] >= a[2] - EDGE_TOLERANCE && lines[k].bbox[2] <= b[0] + EDGE_TOLERANCE);
+    };
+
+    const merged = new Map<number, number>();
     const tables = [...input.tables].sort(
         (a, b) => (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]) - (a.bbox[2] - a.bbox[0]) * (a.bbox[3] - a.bbox[1]),
     );
-    for (const table of tables) {
-        const routed = upright.filter((i) => routes[i] === table.index);
-        if (routed.length < 3) continue;
+    // A table's cells, the span of its rows and its own rules: those near its rows that
+    // span most of its cells, not ones spanning paragraph text beside them (a page-wide
+    // rule over a table in one column).
+    const tableFrame = (index: number) => {
+        const routed = upright.filter((i) => routes[i] === index);
+        if (routed.length < 3) return undefined;
         const lineHeight = median(routed.map((i) => height(lines[i].bbox)));
         // The table's rows and extent come from cells of ordinary height; a tall line
         // (a diagonal watermark's box) would stretch them over the page.
         const cells = routed.filter((i) => height(lines[i].bbox) <= TALL_LINE * lineHeight);
-        if (cells.length < 3) continue;
+        if (cells.length < 3) return undefined;
         const rowCenters: number[] = [];
         for (const i of [...cells].sort((a, b) => centerY(lines[a].bbox) - centerY(lines[b].bbox))) {
             const cy = centerY(lines[i].bbox);
             if (!rowCenters.length || cy - rowCenters[rowCenters.length - 1] > 0.5 * lineHeight) rowCenters.push(cy);
         }
         const pitch = median(rowCenters.slice(1).map((c, k) => c - rowCenters[k])) || 1.5 * lineHeight;
-        let top = Math.min(...cells.map((i) => lines[i].bbox[1]));
-        let bottom = Math.max(...cells.map((i) => lines[i].bbox[3]));
+        const top = Math.min(...cells.map((i) => lines[i].bbox[1]));
+        const bottom = Math.max(...cells.map((i) => lines[i].bbox[3]));
         const cellLeft = Math.min(...cells.map((i) => lines[i].bbox[0]));
         const cellRight = Math.max(...cells.map((i) => lines[i].bbox[2]));
-        let left = Math.min(cellLeft, table.bbox[0]);
-        let right = Math.max(cellRight, table.bbox[2]);
-        // A rule spanning paragraph text beside the table's rows (a page-wide rule over a
-        // table in one column) is not one of the table's rules.
+        // The span of most cells: a few stray lines the box took beside the table do not widen it.
+        const coreLeft = quantile(cells.map((i) => lines[i].bbox[0]), CORE_QUANTILE);
+        const coreRight = quantile(cells.map((i) => lines[i].bbox[2]), 1 - CORE_QUANTILE);
         const besideText = upright.filter((i) => {
             const b = lines[i].bbox;
             const cx = (b[0] + b[2]) / 2;
-            return routes[i] !== table.index && centerY(b) > top && centerY(b) < bottom && (cx < cellLeft || cx > cellRight) && proseLine(i);
+            return routes[i] !== index && centerY(b) > top && centerY(b) < bottom && (cx < cellLeft || cx > cellRight) && proseLine(i);
         });
         const own = rules.filter(
             (r) =>
                 r[1] >= top - RULE_REACH * pitch &&
                 r[3] <= bottom + RULE_REACH * pitch &&
-                Math.min(r[2], cellRight) - Math.max(r[0], cellLeft) >= 0.5 * (cellRight - cellLeft) &&
+                Math.min(r[2], coreRight) - Math.max(r[0], coreLeft) >= 0.5 * (coreRight - coreLeft) &&
                 !besideText.some((i) => {
                     const b = lines[i].bbox;
                     return (b[0] + b[2]) / 2 > r[0] && (b[0] + b[2]) / 2 < r[2];
                 }),
         );
+        // The frame: the span of the table's own rules, with the segments of each drawn in
+        // line with it within the table's box (a rule broken at the column gaps). A table's
+        // rules run between its lines; lines struck through (a hatched background) frame nothing.
+        const struck = (r: Rect) =>
+            upright.some((i) => {
+                const b = lines[i].bbox;
+                const y = centerY(r);
+                return Math.min(r[2], b[2]) > Math.max(r[0], b[0]) && y > b[1] + STRUCK_MARGIN * height(b) && y < b[3] - STRUCK_MARGIN * height(b);
+            });
+        const box = input.tables.find((t) => t.index === index)!.bbox;
+        const left = Math.min(box[0], cellLeft) - EDGE_TOLERANCE;
+        const right = Math.max(box[2], cellRight) + EDGE_TOLERANCE;
+        const inLine = rules.filter((r) => r[0] >= left && r[2] <= right && own.some((o) => Math.abs(centerY(o) - centerY(r)) <= RULE_JOIN));
+        // Segments extend the frame across the table's column gaps, not across a page gutter
+        // to a rule drawn level with one of them (a fraction bar in the next column).
+        let span: [number, number] = [Math.min(...own.map((r) => r[0])), Math.max(...own.map((r) => r[2]))];
+        for (let grown = own.length > 0; grown; ) {
+            grown = false;
+            for (const r of inLine) {
+                if (r[0] >= span[0] && r[2] <= span[1]) continue;
+                if (r[0] > span[1] + FRAME_REACH * lineHeight || r[2] < span[0] - FRAME_REACH * lineHeight) continue;
+                span = [Math.min(span[0], r[0]), Math.max(span[1], r[2])];
+                grown = true;
+            }
+        }
+        const crossing = own.filter(struck).length;
+        const frame: [number, number] | undefined =
+            own.length - crossing >= FRAME_RULES && crossing < STRUCK_SHARE * own.length ? span : undefined;
+        return { cells, lineHeight, pitch, top, bottom, cellLeft, cellRight, coreLeft, coreRight, own, frame };
+    };
+    // A table framed by its own rules ends at the frame: lines its box took from a text
+    // column beyond the rules go back to that column, which paragraphs show (running
+    // lines set wholly beyond the frame, two or more spanning the line). So do the markers
+    // of a list there, set before their entries under a hanging indent: each opens a
+    // running line on its row in its type size, and numbered ones count up by one.
+    // Lines a frame returned to the text column beyond it; no table takes them back.
+    const beyondFrame = new Set<number>();
+    // A line the box took from beside the table, wholly outside the span of most of its
+    // cells, that ends a sentence of the paragraph set directly above it (at its left edge,
+    // within its width; not a caption) goes back to that paragraph when its text column
+    // runs on beyond the table's rows and no rule of the table spans it: a page
+    // paragraph's last line beside a table.
+    for (const table of input.tables) {
+        const cells = upright.filter((i) => routes[i] === table.index);
+        if (cells.length < 3) continue;
+        const coreLeft = quantile(cells.map((i) => lines[i].bbox[0]), CORE_QUANTILE);
+        const coreRight = quantile(cells.map((i) => lines[i].bbox[2]), 1 - CORE_QUANTILE);
+        const cellsTop = Math.min(...cells.map((i) => lines[i].bbox[1]));
+        const cellsBottom = Math.max(...cells.map((i) => lines[i].bbox[3]));
+        for (const i of cells) {
+            const b = lines[i].bbox;
+            if (b[0] < coreRight && b[2] > coreLeft) continue;
+            const j = neighbour(i, -1);
+            if (j < 0 || !running[j] || caption[j] || routes[j] !== -1) continue;
+            const a = lines[j].bbox;
+            // The page's paragraph: its text column runs on above or below the table's rows
+            // (a table column of running text ends with the table).
+            const pageColumn = upright.some(
+                (k) => running[k] && Math.abs(lines[k].bbox[0] - a[0]) <= EDGE_TOLERANCE && (lines[k].bbox[3] < cellsTop || lines[k].bbox[1] > cellsBottom),
+            );
+            // A rule of the table drawn across both its cells and the line puts the line inside it.
+            const ruledIn = rules.some(
+                (r) => r[1] >= cellsTop - RULE_NEAR * height(b) && r[3] <= cellsBottom + RULE_NEAR * height(b) && r[0] <= coreLeft + EDGE_TOLERANCE && r[2] >= b[2] - EDGE_TOLERANCE,
+            );
+            if (!pageColumn || ruledIn) continue;
+            if (
+                Math.abs(a[0] - b[0]) <= EDGE_TOLERANCE &&
+                b[2] <= a[2] + EDGE_TOLERANCE &&
+                b[1] - a[3] <= STACK_GAP * height(a) &&
+                !SENTENCE_END_RE.test(lines[j].text.trimEnd())
+            ) {
+                routes[i] = -1;
+                beyondFrame.add(i);
+            }
+        }
+    }
+    for (const table of input.tables) {
+        const found = tableFrame(table.index);
+        if (!found?.frame) continue;
+        const [l, r] = found.frame;
+        const outside = (j: number) => lines[j].bbox[0] >= r - EDGE_TOLERANCE || lines[j].bbox[2] <= l + EDGE_TOLERANCE;
+        // Running text wholly beyond the frame is none of the table's row labels.
+        const runningBeyond = upright.filter((j) => running[j] && outside(j));
+        const outsideCells = found.cells.filter((i) => {
+            const b = lines[i].bbox;
+            return !(b[0] < r + EDGE_TOLERANCE && b[2] > l - EDGE_TOLERANCE);
+        });
+        const markers = outsideCells.filter(
+            (i) =>
+                LIST_MARKER_RE.test(lines[i].text.trim()) &&
+                runningBeyond.some(
+                    (j) =>
+                        lines[j].bbox[0] >= lines[i].bbox[2] - EDGE_TOLERANCE &&
+                        sameRow(lines[i].bbox, lines[j].bbox) &&
+                        Math.abs(lines[j].size - lines[i].size) <= 1 &&
+                        !runningBetween(i, j),
+                ),
+        );
+        const numbers = markers
+            .map((i) => ({ y: lines[i].bbox[1], n: /^\d+/.exec(lines[i].text.trim())?.[0] }))
+            .filter((m) => m.n !== undefined)
+            .sort((a, b) => a.y - b.y)
+            .map((m) => Number(m.n));
+        const counted = numbers.length < 2 || numbers.slice(1).filter((n, k) => n === numbers[k] + 1).length >= LIST_CONSECUTIVE * (numbers.length - 1);
+        for (const i of outsideCells) {
+            const b = lines[i].bbox;
+            const spanning = runningBeyond.filter((j) => b[0] >= lines[j].bbox[0] - EDGE_TOLERANCE && b[2] <= lines[j].bbox[2] + EDGE_TOLERANCE);
+            if (spanning.length >= BEYOND_LINES || (counted && markers.includes(i))) {
+                routes[i] = -1;
+                beyondFrame.add(i);
+            }
+        }
+    }
+
+    for (const table of tables) {
+        const frame = tableFrame(table.index);
+        if (!frame) continue;
+        const { cells, lineHeight, pitch, cellLeft, cellRight, coreLeft, coreRight, own } = frame;
+        let { top, bottom } = frame;
+        // The table reaches as far as its box or its rules; a frame of rules bounds it, give
+        // or take a label column set a little outside the rules.
+        const framed = frame.frame !== undefined;
+        const reach = FRAME_REACH * lineHeight;
+        let left = Math.min(cellLeft, frame.frame ? Math.max(table.bbox[0], frame.frame[0] - reach) : table.bbox[0]);
+        let right = Math.max(cellRight, frame.frame ? Math.min(table.bbox[2], frame.frame[1] + reach) : table.bbox[2]);
         for (const r of own) {
             left = Math.min(left, r[0]);
             right = Math.max(right, r[2]);
@@ -324,7 +514,7 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
         };
         // A tall line (a diagonal watermark's box) is never a row of the table.
         const free = (i: number) =>
-            routes[i] === -1 && !isStart.get(i) && within(i) && height(lines[i].bbox) <= TALL_LINE * lineHeight;
+            routes[i] === -1 && !isStart.get(i) && !beyondFrame.has(i) && within(i) && height(lines[i].bbox) <= TALL_LINE * lineHeight;
         // A caption starting beside the table's rows (or on its header row), not above or
         // below them, is set at the table's side: the lines under it are that caption.
         const tableTop = top;
@@ -336,14 +526,225 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
         // Ruled blocks of rows past the cells, below and above.
         const spanning = rules.filter((r) => Math.min(r[2], right) - Math.max(r[0], left) >= RULE_SPAN * (right - left));
         const joined: number[] = [];
-        // The table's columns: spans of its cells that overlap horizontally.
+        // The table's columns: spans of its cells that overlap horizontally. A line split
+        // at gaps wider than a word space spans its pieces, so cells of two columns set on
+        // one line do not join the columns.
         const columns: [number, number][] = [];
-        for (const c of [...cells].sort((a, b) => lines[a].bbox[0] - lines[b].bbox[0])) {
-            const [x0, , x1] = lines[c].bbox;
+        for (const [x0, x1] of cells.flatMap(segments).sort((a, b) => a[0] - b[0])) {
             const last = columns[columns.length - 1];
             if (last && x0 < last[1]) last[1] = Math.max(last[1], x1);
             else columns.push([x0, x1]);
         }
+        // A table framed by its own rules (two or more: top and bottom, or a header rule and
+        // the bottom) holds the text in its column grid between them, however much a cell
+        // reads like a paragraph: a long row label, a definition set as justified or centred
+        // text. The grid's columns are the spans its cells set: two cells or more, or a cell
+        // of its first row beside two others (a column header); a single column (a framed
+        // listing) is no grid. Text stands in the column nearest its centre when it reaches
+        // into no other (cells are set flush left, centred or ragged in their column). The
+        // frame bounds the grid: a box reaching past the rules into the next text column
+        // takes nothing there.
+        const [frameLeft, frameRight] = frame.frame ?? [left, right];
+        const headTop = Math.min(...cells.map((c) => centerY(lines[c].bbox)));
+        const fullRow = (c: number) =>
+            centerY(lines[c].bbox) - headTop < 0.5 * lineHeight &&
+            cells.filter((o) => o !== c && sameRow(lines[c].bbox, lines[o].bbox)).length >= 2;
+        const gridColumns = columns.filter(([l, r]) => {
+            const inside = cells.filter((c) => lines[c].bbox[0] >= l && lines[c].bbox[2] <= r);
+            return inside.length >= GRID_MIN_CELLS || inside.some(fullRow);
+        });
+        // The grid column a span of text stands in, or -1.
+        const spanColumn = ([x0, x1]: [number, number]): number => {
+            const cx = (x0 + x1) / 2;
+            let k = 0;
+            while (k + 1 < gridColumns.length && cx > (gridColumns[k][0] + gridColumns[k][1] + gridColumns[k + 1][0] + gridColumns[k + 1][1]) / 4) k++;
+            const crosses = gridColumns.some(([l, r], m) => m !== k && Math.min(r, x1) > Math.max(l, x0));
+            return crosses ? -1 : k;
+        };
+        // The grid column of a line (its first, for cells of neighbouring columns set on one
+        // line and split at the gutters between them), or -1.
+        const gridColumn = (i: number): number => {
+            const [x0, , x1] = lines[i].bbox;
+            // The grid stands within its frame and most of its cells (a stray line the box
+            // took beside the table does not widen it).
+            if (!framed || gridColumns.length < 2 || x0 < Math.min(frameLeft, coreLeft) - EDGE_TOLERANCE || x1 > Math.max(frameRight, coreRight) + EDGE_TOLERANCE) return -1;
+            const whole = spanColumn([x0, x1]);
+            if (whole >= 0) return whole;
+            const placed = segments(i).map(spanColumn);
+            return placed.every((k, m) => k >= 0 && (m === 0 || k >= placed[m - 1])) ? placed[0] : -1;
+        };
+        // A paragraph in a grid column (its lines stacked in that column) set beside cells
+        // of the grid's other columns is a cell too, however far the rows found so far reach.
+        // Cells beside a paragraph can be centred on it, so they share its span rather than
+        // one of its lines.
+        const tableParagraph = new Map<number, boolean>();
+        const inTableParagraph = (j: number): boolean => {
+            let v = tableParagraph.get(j);
+            if (v === undefined) {
+                const column = gridColumn(j);
+                let y0 = lines[j].bbox[1];
+                let y1 = lines[j].bbox[3];
+                for (const dir of [-1, 1] as const) {
+                    for (let cur = j; ; ) {
+                        const next = neighbour(cur, dir);
+                        if (next < 0 || gridColumn(next) !== column) break;
+                        const a = lines[cur].bbox;
+                        const b = lines[next].bbox;
+                        const gap = dir < 0 ? a[1] - b[3] : b[1] - a[3];
+                        if (gap > STACK_GAP * Math.max(height(a), height(b)) || ruledBetween(a, b)) break;
+                        y0 = Math.min(y0, b[1]);
+                        y1 = Math.max(y1, b[3]);
+                        cur = next;
+                    }
+                }
+                v =
+                    column >= 0 &&
+                    upright.some((o) => {
+                        const b = lines[o].bbox;
+                        return !running[o] && Math.min(y1, b[3]) - Math.max(y0, b[1]) >= 0.5 * height(b) && gridColumn(o) >= 0 && gridColumn(o) !== column;
+                    });
+                tableParagraph.set(j, v);
+            }
+            return v;
+        };
+        // Paragraph text of the page: lines of a paragraph (running lines stacked on another,
+        // not a heading or band alone) beyond the table's rows, at the line's left edge, that
+        // it is nearly as wide as.
+        const bodyText = (i: number): boolean =>
+            runningLines.some((j) => {
+                const cy = centerY(lines[j].bbox);
+                return (
+                    j !== i &&
+                    (cy < top - lineHeight || cy > bottom + lineHeight) &&
+                    Math.abs(lines[j].bbox[0] - lines[i].bbox[0]) <= EDGE_TOLERANCE &&
+                    widthOf(i) >= PARAGRAPH_WIDTH * widthOf(j) &&
+                    stackedRunning(j) &&
+                    !inTableParagraph(j)
+                );
+            });
+        // A line set directly under or over a paragraph line of the page (its short last
+        // line, a heading over it) belongs to that paragraph, not to the grid.
+        const paragraphTail = (i: number): boolean =>
+            ([-1, 1] as const).some((dir) => {
+                const j = neighbour(i, dir);
+                if (j < 0 || !running[j] || !bodyText(j)) return false;
+                const a = lines[i].bbox;
+                const b = lines[j].bbox;
+                const gap = dir < 0 ? a[1] - b[3] : b[1] - a[3];
+                return gap <= STACK_GAP * Math.max(height(a), height(b)) && !ruledBetween(a, b);
+            });
+        // Per line, while the table's extent stays put (a merge or a block moves it).
+        let gridCache = new Map<number, boolean>();
+        let cachedFor = "";
+        const gridText = (i: number): boolean => {
+            const key = `${top}:${bottom}`;
+            if (key !== cachedFor) {
+                gridCache = new Map();
+                cachedFor = key;
+            }
+            let v = gridCache.get(i);
+            if (v === undefined) {
+                v = gridColumn(i) >= 0 && !bodyText(i) && !paragraphTail(i);
+                gridCache.set(i, v);
+            }
+            return v;
+        };
+        // A line directly under (or, going up, over) one of `cellsSoFar` in its grid column.
+        const continuesCell = (i: number, cellsSoFar: readonly number[], dir: 1 | -1): boolean => {
+            const j = neighbour(i, -dir as 1 | -1);
+            if (j < 0 || !cellsSoFar.includes(j) || gridColumn(j) !== gridColumn(i)) return false;
+            const a = lines[i].bbox;
+            const b = lines[j].bbox;
+            const gap = dir > 0 ? a[1] - b[3] : b[1] - a[3];
+            return gap <= STACK_GAP * Math.max(height(a), height(b)) && !ruledBetween(a, b);
+        };
+        // Another table whose cells stand in this table's grid, in two of its columns or
+        // more, is a part of it that its rows continue into (a table cut at a band of
+        // running text, or at its ruled rows).
+        const mergeable = (k: number): boolean => {
+            if (k < 0 || k === table.index || merged.has(k) || !input.tables.some((t) => t.index === k)) return false;
+            const theirs = upright.filter((i) => routes[i] === k);
+            const placed = theirs.map(gridColumn);
+            if (
+                !theirs.length ||
+                placed.filter((c) => c >= 0).length < MERGE_FIT * theirs.length ||
+                new Set(placed.filter((c) => c >= 0)).size < 2
+            ) {
+                return false;
+            }
+            // Directly above or below this table's rows, with nothing but text of its grid
+            // between them (a caption or a paragraph between two tables keeps them apart).
+            const between = betweenFragment(theirs);
+            if (!between) return false;
+            const [inside, reaching, owned] = between;
+            // Another region between them (an equation, a figure) keeps them apart, as text does.
+            if (owned.length) return false;
+            if (inside.some((i) => !gridText(i) || isStart.get(i) || captionChain(i).length > 0)) return false;
+            // A caption or paragraph set wider than the table stands between its fragments too;
+            // a row wider than the table's estimated sides does not.
+            if (reaching.some((i) => caption[i] || running[i])) return false;
+            // A fragment that opens with this table's header is a table of its own.
+            return !repeatsHeader(theirs);
+        };
+        // The lines between this table's rows and another fragment of it: free ones within its
+        // sides, free ones reaching past them, and those of other regions. Undefined when the
+        // fragment is not directly above or below the rows.
+        const betweenFragment = (theirs: readonly number[]): [number[], number[], number[]] | undefined => {
+            const otherTop = Math.min(...theirs.map((i) => lines[i].bbox[1]));
+            const otherBottom = Math.max(...theirs.map((i) => lines[i].bbox[3]));
+            const [from, to] = otherTop >= bottom - 1 ? [bottom, otherTop] : otherBottom <= top + 1 ? [otherBottom, top] : [NaN, NaN];
+            if (!(to - from <= ROW_GAP * pitch)) return undefined;
+            const across = upright.filter(
+                (i) => !beyondFrame.has(i) && lines[i].bbox[0] < right && lines[i].bbox[2] > left && centerY(lines[i].bbox) > from && centerY(lines[i].bbox) < to,
+            );
+            const free = across.filter((i) => routes[i] === -1);
+            const fragment = routes[theirs[0]];
+            const owned = across.filter((i) => routes[i] >= 0 && routes[i] !== table.index && routes[i] !== fragment);
+            return [free.filter(within), free.filter((i) => !within(i)), owned];
+        };
+        // The texts of the first row of `group`, against this table's first row.
+        const firstRow = (group: readonly number[]): string[] => {
+            const head = Math.min(...group.map((i) => centerY(lines[i].bbox)));
+            return group.filter((i) => centerY(lines[i].bbox) - head < 0.5 * lineHeight).map((i) => lines[i].text.trim().toLowerCase());
+        };
+        // The rows of words in `group` (rows holding two cells of words or more), as texts.
+        const wordRows = (group: readonly number[]): Map<string, number> => {
+            const out = new Map<string, number>();
+            const sorted = [...group].sort((a, b) => centerY(lines[a].bbox) - centerY(lines[b].bbox));
+            for (let k = 0; k < sorted.length; ) {
+                const row = [sorted[k]];
+                while (++k < sorted.length && centerY(lines[sorted[k]].bbox) - centerY(lines[row[0]].bbox) < 0.5 * lineHeight) row.push(sorted[k]);
+                const words = row.filter((i) => /\p{L}{2,}/u.test(lines[i].text)).length;
+                if (words < 2) continue;
+                const text = row
+                    .sort((a, b) => lines[a].bbox[0] - lines[b].bbox[0])
+                    .map((i) => lines[i].text.trim().toLowerCase())
+                    .join(" | ");
+                out.set(text, words);
+            }
+            return out;
+        };
+        const ownHead = new Set(firstRow([...cells, ...joined]));
+        const ownRows = wordRows([...cells, ...joined]);
+        // A table has one header: a fragment that opens with this table's first row, or
+        // repeats a block of its rows of words further down (a multi-row header under a
+        // diagram's labels), is a table of its own.
+        const repeatsHeader = (group: readonly number[]): boolean => {
+            const head = firstRow(group);
+            if (head.filter((t) => ownHead.has(t)).length >= Math.max(2, 0.5 * head.length)) return true;
+            return [...wordRows(group).keys()].filter((text) => ownRows.has(text)).length >= REPEATED_HEADER_ROWS;
+        };
+        const merge = (k: number) => {
+            merged.set(k, table.index);
+            const between = betweenFragment(upright.filter((i) => routes[i] === k))?.[0] ?? [];
+            for (const i of upright) {
+                if (routes[i] !== k && !between.includes(i)) continue;
+                routes[i] = table.index;
+                joined.push(i);
+                top = Math.min(top, lines[i].bbox[1]);
+                bottom = Math.max(bottom, lines[i].bbox[3]);
+            }
+        };
         // Set over one of the table's columns: aligned with it on the left, centre or right,
         // as a column header is. A note's fragment overlaps a column only by chance.
         const overColumn = (i: number) => {
@@ -354,11 +755,23 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
                     (Math.abs(x0 - l) <= COLUMN_ALIGN || Math.abs(x1 - r) <= COLUMN_ALIGN || Math.abs((x0 + x1) / 2 - (l + r) / 2) <= COLUMN_ALIGN),
             );
         };
+        // A fragment of this table directly above or below its rows (nothing between them)
+        // merges into it.
+        for (let found = true; found; ) {
+            found = false;
+            for (const other of input.tables) {
+                if (!mergeable(other.index)) continue;
+                merge(other.index);
+                found = true;
+            }
+        }
         for (const dir of [1, -1] as const) {
             // A ruled block with no lines is crossed only upward: above it, a header separator,
             // sit the column headers, which must align with the table's columns. Below the
             // table's bottom border come its notes, never more rows.
             let pastEmpty = false;
+            // The first block past the cells, before any rule, may continue their last row.
+            let first = true;
             for (;;) {
                 const edge = dir > 0 ? bottom : top;
                 // The next rule past the edge (each step moves the edge past a rule).
@@ -368,7 +781,7 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
                 if (!rule) break;
                 const ruleY = dir > 0 ? Math.max(rule[1], edge) : Math.min(rule[3], edge);
                 const block = upright
-                    .filter((i) => within(i) && (dir > 0 ? centerY(lines[i].bbox) > edge && centerY(lines[i].bbox) < ruleY : centerY(lines[i].bbox) < edge && centerY(lines[i].bbox) > ruleY))
+                    .filter((i) => within(i) && !beyondFrame.has(i) && (dir > 0 ? centerY(lines[i].bbox) > edge && centerY(lines[i].bbox) < ruleY : centerY(lines[i].bbox) < edge && centerY(lines[i].bbox) > ruleY))
                     .sort((a, b) => dir * (lines[a].bbox[1] - lines[b].bbox[1]));
                 // Rows are dense: the block starts and ends near the table, without wide gaps.
                 let reach = edge;
@@ -382,17 +795,22 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
                 if (!block.length) {
                     if (pastEmpty || dir > 0) break;
                     pastEmpty = true;
+                    first = false;
                     if (dir > 0) bottom = rule[3];
                     else top = rule[1];
                     continue;
                 }
                 // Rows hold several cells: the block's rows end at a line alone on its row
                 // (a note under the last row), a caption, paragraph text or another region.
+                for (const k of new Set(block.map((i) => routes[i]))) if (mergeable(k)) merge(k);
                 const rowed = [...cells, ...joined];
                 let taken = 0;
                 for (; taken < block.length; taken++) {
                     const i = block[taken];
-                    if (routes[i] !== -1 || isStart.get(i) || proseLine(i) || inParagraph(i)) break;
+                    if (routes[i] === table.index) continue;
+                    if (routes[i] !== -1 || isStart.get(i)) break;
+                    const text = gridText(i);
+                    if (!text && (proseLine(i) || inParagraph(i))) break;
                     if (height(lines[i].bbox) > TALL_LINE * lineHeight) break;
                     if (pastEmpty && !overColumn(i)) break;
                     // Caption text, above the table or beside it, ends the block.
@@ -406,7 +824,10 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
                             sameRow(lines[i].bbox, lines[j].bbox) &&
                             Math.max(lines[j].bbox[0] - lines[i].bbox[2], lines[i].bbox[0] - lines[j].bbox[2]) >= lineHeight,
                     );
-                    if (!mates.length || mates.some((j) => routes[j] !== -1 && routes[j] !== table.index)) break;
+                    if (mates.some((j) => routes[j] !== -1 && routes[j] !== table.index)) break;
+                    // A line alone on its row continues a cell when it stands in the grid
+                    // under (or over) a line of that cell in its column.
+                    if (!mates.length && !(text && (first || continuesCell(i, rowed, dir) || inTableParagraph(i)))) break;
                     rowed.push(i);
                 }
                 // A row is taken whole: lines on the row of the line that ended the block go too.
@@ -424,6 +845,7 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
                 }
                 if (dir > 0) bottom = rule[3];
                 else top = rule[1];
+                first = false;
             }
         }
         for (const i of joined) routes[i] = table.index;
@@ -456,9 +878,11 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
             // Caption text continuing a caption start with no rule between (a table's top
             // rule separates its caption from a label column set under it).
             if (captionChain(i).length) continue;
-            if (column.some((j) => proseLine(j)) || inParagraph(i)) continue;
+            // Text in a framed table's grid is a cell, on a row or wrapped between rows.
+            const text = gridText(i) && column.every((j) => isCell.has(j) || gridText(j));
+            if (!text && (column.some((j) => proseLine(j)) || inParagraph(i))) continue;
             if (column.some((j) => running[j] && !isCell.has(j) && (centerY(lines[j].bbox) < top || centerY(lines[j].bbox) > bottom))) continue;
-            if (!row) {
+            if (!row && !text) {
                 // The band: the lines around this one that are on none of the table's rows.
                 const at = column.indexOf(i);
                 const inBand = (j: number) => !isCell.has(j) && !onRow(j);
@@ -472,4 +896,5 @@ export function completeTableRows(input: TableRowInput, routes: number[]): void 
         }
         for (const i of accepted) routes[i] = table.index;
     }
+    return merged;
 }

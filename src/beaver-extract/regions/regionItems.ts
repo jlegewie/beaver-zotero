@@ -41,7 +41,7 @@ import { rotateBBox, type RotationAngle } from "../PageRotationNormalizer";
 import type { Rect } from "./geometry";
 import type { RegionClass } from "./model";
 import { sourceLines, type RegionLine } from "./pageSignals";
-import { LINE_CAPTION, LINE_FURNITURE, LINE_SKEWED, type LineRouting, type RegionDetection } from "./RegionDetector";
+import { LINE_CAPTION, LINE_FURNITURE, LINE_GUTTER, LINE_MARGIN, LINE_RUNNING, LINE_SKEWED, type LineRouting, type RegionDetection } from "./RegionDetector";
 
 export type RegionItemKind = "table" | "picture" | "formula";
 
@@ -81,8 +81,36 @@ export interface PageRegionItems {
 
 const ITEM_KINDS: ReadonlySet<RegionClass> = new Set<RegionClass>(["table", "picture", "formula"]);
 
-/** A formula line with this many ordinary words is prose around the equation. */
+/** A formula row with this many ordinary words is prose around the equation. */
 export const FORMULA_PROSE_WORDS = 5;
+/** A LaTeX command ("\frac", "\ label"), as in an equation's source kept in the text layer. */
+const LATEX_COMMAND_RE = /\\\s?[A-Za-z]{2,}/;
+/** A word token: letters only, maybe with an apostrophe or hyphen, and trailing punctuation. */
+const TEXT_WORD_RE = /^[\p{L}][\p{L}'’-]{2,}[.,;:!?)]*$/u;
+/** A token mixing Greek and Latin letters: a variable's name. */
+const MIXED_SCRIPT_RE = /(?=.*\p{Script=Greek})(?=.*\p{Script=Latin})/u;
+/** Names of mathematical operators, set upright in text fonts. */
+const MATH_OPERATORS = new Set([
+    "arg", "cos", "cosh", "cot", "coth", "csc", "deg", "det", "dim", "exp", "gcd", "hom", "inf", "ker", "lim", "liminf",
+    "limsup", "log", "max", "min", "mod", "sec", "sin", "sinh", "sup", "tan", "tanh", "var", "cov", "corr", "diag", "sign",
+    "tr", "rank", "argmax", "argmin", "softmax", "relu", "erf", "logit",
+]);
+/** A piece with at most this share of math characters is text. */
+const FORMULA_TEXT_MATH = 0.2;
+/** A formula row beside a running line of this many words is that line's inline math... */
+const FORMULA_RUNNING_WORDS = 3;
+/** ...set at most this many typical piece heights from it (a word space, not a column gutter). */
+const FORMULA_INLINE_GAP = 1;
+/** A column gutter has at least this many running lines on each side... */
+const GUTTER_SIDE_LINES = 5;
+/** ...and is crossed by at most this share of the fewer of them (a title, an abstract). */
+const GUTTER_CROSSING = 0.2;
+/** A justified prose line starts at most this many typical piece heights inside its column (an indent). */
+const FORMULA_INDENT = 2.5;
+/** A formula row's text reaches through gaps of at most this many typical piece heights. */
+const FORMULA_ROW_GAP = 2;
+/** Formula pieces taller than this many times a typical one (upper quartile) belong to no row. */
+const FORMULA_ROW_HEIGHT = 1.5;
 /** Figure label text beyond this many characters is cut. */
 export const PICTURE_TEXT_MAX_CHARS = 2000;
 /** Figure text of numbers and number punctuation alone: axis ticks, scales, data values. */
@@ -117,10 +145,11 @@ export function regionItemsForPage(
     }
 
     // Each piece with the region its visual line is routed to.
+    const prose = formulaProseRows(routing, regions);
     const pieces: { piece: RegionLine; line: number; route: number }[] = [];
     routing.lines.forEach((line, i) => {
         let route = routing.routes[i];
-        if (route >= 0 && regions[route].label === "formula" && line.alphaWords >= FORMULA_PROSE_WORDS) route = -1;
+        if (route >= 0 && regions[route].label === "formula" && (line.alphaWords >= FORMULA_PROSE_WORDS || prose.has(i))) route = -1;
         // Decorations take no text (`routeLines` never routes to one); nothing is deleted.
         if (route >= 0 && regions[route].label === "decoration") route = -1;
         for (const piece of line.parts ?? [line]) pieces.push({ piece, line: i, route });
@@ -172,7 +201,8 @@ export function regionItemsForPage(
         const lead = firstWordWidth(parts[0], numbered[parts[0].source - 1]);
         const size = Math.max(...parts.map((p) => p.size));
         const text = parts.map((p) => p.text).join(" ");
-        const cell: Cell = { rect, text, rot, size, ...(lead !== undefined ? { lead } : {}) };
+        const segments = parts.flatMap((p) => pieceSegments(p, numbered[p.source - 1]));
+        const cell: Cell = { rect, text, rot, size, ...(lead !== undefined ? { lead } : {}), ...(segments.length > 1 ? { segments } : {}) };
         if (regions[region].label === "picture") {
             const numbers = figureNumbers(cell, parts, numbered);
             if (numbers) cell.numbers = numbers;
@@ -196,7 +226,7 @@ export function regionItemsForPage(
         const kind = region.label as RegionItemKind;
         const framed = groupRows(cellsByRegion.get(k) ?? []);
         const table = kind === "table" ? tableRows(framed, routing.rules ?? [], routing.verticalRules ?? [], vocabulary) : undefined;
-        if (table && table.rows.length && !readsAsTable(table, tableLeak(k, routing, lineDestination, table))) {
+        if (table && table.rows.length && !readsAsTable(table, tableLeak(k, routing, lineDestination, table), runningShare(k, routing, lineDestination))) {
             // Not a table to read row by row: its text stays in the prose.
             for (const [source, d] of destination) if (d === k) destination.delete(source);
             return;
@@ -209,8 +239,15 @@ export function regionItemsForPage(
                 .map((row) => row.filter(({ cell }) => !ticks?.has(cell)).map(({ cell }) => ({ text: cell.text, bbox: toBBox(cell.rect) })))
                 .filter((row) => row.length > 0);
         if (kind === "picture") rows = pictureRows(rows);
-        // Whole structured-text lines are absorbed, so text can reach past the region.
-        const bbox = rows.flat().reduce((u, c) => unionBBox(u, c.bbox), toBBox(region.bbox));
+        // A table or equation whose text all went back to the prose is no item. A figure
+        // without text (a photo, a raster chart) still is, and so is a table or equation that
+        // never had a text layer (a raster table, an equation drawn as paths).
+        else if (!rows.length && hadText(region.bbox, routing)) return;
+        // Whole structured-text lines are absorbed, so text can reach past the region. An
+        // equation's box ends where lines it took from the prose above or below it went back.
+        const cells = rows.flat();
+        const box = kind === "formula" && cells.length ? withoutReturnedProse(toBBox(region.bbox), cells, routing) : toBBox(region.bbox);
+        const bbox = cells.reduce((u, c) => unionBBox(u, c.bbox), box);
         items.push({ kind, region: k, bbox, rows, ...(table?.columns ? { columns: table.columns } : {}) });
     });
 
@@ -220,6 +257,162 @@ export function regionItemsForPage(
         if (line) absorbed.add(line);
     }
     return { page: withoutLines(page, absorbed), items, margin };
+}
+
+/** Whether text lines of the page (other than furniture) stand in `rect`, centre inside. */
+function hadText(rect: Rect, routing: LineRouting): boolean {
+    return routing.lines.some((l, i) => {
+        if (routing.flags[i] & (LINE_FURNITURE | LINE_MARGIN)) return false;
+        const cx = (l.bbox[0] + l.bbox[2]) / 2;
+        const cy = (l.bbox[1] + l.bbox[3]) / 2;
+        return cx >= rect[0] && cx <= rect[2] && cy >= rect[1] && cy <= rect[3];
+    });
+}
+
+/**
+ * An equation's box without the prose it took above or below its own lines: its top
+ * moves below the lines inside it over the equation's text (they went elsewhere), and
+ * its bottom above those under it. Rules, radicals and delimiters drawn as paths keep
+ * the rest of the box.
+ */
+function withoutReturnedProse(box: BoundingBox, cells: readonly { bbox: BoundingBox }[], routing: LineRouting): BoundingBox {
+    const top = Math.min(...cells.map((c) => c.bbox.t));
+    const bottom = Math.max(...cells.map((c) => c.bbox.b));
+    let t = box.t;
+    let b = box.b;
+    routing.lines.forEach((l) => {
+        const cx = (l.bbox[0] + l.bbox[2]) / 2;
+        const cy = (l.bbox[1] + l.bbox[3]) / 2;
+        if (cx < box.l || cx > box.r || cy < box.t || cy > box.b) return;
+        if (l.bbox[3] <= top) t = Math.max(t, l.bbox[3]);
+        else if (l.bbox[1] >= bottom) b = Math.min(b, l.bbox[1]);
+    });
+    return { ...box, t, b };
+}
+
+/**
+ * Lines routed to a formula that are prose around it, beyond single lines of words
+ * (`FORMULA_PROSE_WORDS`): pieces on a row of the formula's box that holds that many
+ * words of text and runs across its text column as justified prose does, or that sits
+ * a word space from a running line of words (the pieces are its inline math). A row is
+ * judged whole within its text column: justified prose with inline math is split into
+ * pieces at its wide word gaps and around the math, each too short to judge alone.
+ */
+function formulaProseRows(routing: LineRouting, regions: RegionDetection["candidates"]): Set<number> {
+    const prose = new Set<number>();
+    if (!regions.some((r) => r.label === "formula")) return prose;
+    const height = (i: number) => routing.lines[i].bbox[3] - routing.lines[i].bbox[1];
+    // The page's column gutters: places few running lines cross, with running lines on both
+    // sides. A row of prose stays in its column.
+    const running = routing.lines.filter((l, i) => routing.flags[i] & LINE_RUNNING && !l.rot);
+    const gutters: number[] = [];
+    if (running.length >= 2 * GUTTER_SIDE_LINES) {
+        const x0 = Math.min(...running.map((l) => l.bbox[0]));
+        const x1 = Math.max(...running.map((l) => l.bbox[2]));
+        let open: number | undefined;
+        for (let x = x0; x <= x1; x += 1) {
+            const crossing = running.filter((l) => l.bbox[0] < x && l.bbox[2] > x).length;
+            const left = running.filter((l) => l.bbox[2] <= x).length;
+            const right = running.filter((l) => l.bbox[0] >= x).length;
+            const gutter = left >= GUTTER_SIDE_LINES && right >= GUTTER_SIDE_LINES && crossing <= GUTTER_CROSSING * Math.min(left, right);
+            if (gutter && open === undefined) open = x;
+            if (!gutter && open !== undefined) {
+                gutters.push((open + x) / 2);
+                open = undefined;
+            }
+        }
+    }
+    regions.forEach((region, k) => {
+        if (region.label !== "formula") return;
+        const members = routing.routes.flatMap((route, i) => (route === k ? [i] : []));
+        if (!members.length) return;
+        // Tall pieces (brackets, stacked fractions) span several rows and belong to none.
+        const heights = members.map(height).sort((a, b) => a - b);
+        const typical = heights[Math.floor(0.75 * heights.length)];
+        const [x0, y0, x1, y1] = region.bbox;
+        const side = (i: number) => {
+            const cx = (routing.lines[i].bbox[0] + routing.lines[i].bbox[2]) / 2;
+            return gutters.filter((g) => g < cx).length;
+        };
+        const inBox = routing.lines.flatMap((l, i) => {
+            const cx = (l.bbox[0] + l.bbox[2]) / 2;
+            const cy = (l.bbox[1] + l.bbox[3]) / 2;
+            const inside = cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 && !l.rot;
+            const member = routing.routes[i] === k || (routing.routes[i] < 0 && (routing.flags[i] & LINE_RUNNING) !== 0);
+            return inside && member && height(i) <= FORMULA_ROW_HEIGHT * typical ? [i] : [];
+        });
+        inBox.sort((a, b) => routing.lines[a].bbox[1] - routing.lines[b].bbox[1]);
+        let row: number[] = [];
+        let top = 0;
+        let bottom = 0;
+        const close = () => {
+            for (const column of new Set(row.map(side))) {
+                // The row's text around the formula's pieces: what they reach through gaps of
+                // at most a few word spaces, set beside them rather than stacked over them.
+                const gap = (i: number, j: number) => Math.max(routing.lines[j].bbox[0] - routing.lines[i].bbox[2], routing.lines[i].bbox[0] - routing.lines[j].bbox[2]);
+                const pieces = row.filter((i) => side(i) === column && routing.routes[i] === k);
+                const part = [...pieces];
+                for (let grew = true; grew; ) {
+                    grew = false;
+                    for (const i of row) {
+                        if (part.includes(i) || side(i) !== column) continue;
+                        if (!pieces.every((j) => gap(i, j) >= 0) || !part.some((j) => gap(i, j) <= FORMULA_ROW_GAP * typical)) continue;
+                        part.push(i);
+                        grew = true;
+                    }
+                }
+                // Words of text, not the variable names of an equation set in a math font.
+                const words = part.reduce((n, i) => n + textWords(routing.lines[i]), 0);
+                // A running line a word space from the pieces, directly or through other text
+                // a word space apart: the pieces are its inline math.
+                const inline = [...pieces];
+                for (let grew = true; grew; ) {
+                    grew = false;
+                    for (const i of part) {
+                        if (inline.includes(i) || !inline.some((j) => gap(i, j) <= FORMULA_INLINE_GAP * typical)) continue;
+                        inline.push(i);
+                        grew = true;
+                    }
+                }
+                const beside = inline.some((i) => routing.flags[i] & LINE_RUNNING && routing.lines[i].alphaWords >= FORMULA_RUNNING_WORDS);
+                // Words alone do not make prose (an equation's variables can read as words):
+                // the row must also run across its text column as a justified line does.
+                const body = part.filter((i) => !routing.lines[i].eqNumber);
+                const x0 = Math.min(...body.map((i) => routing.lines[i].bbox[0]));
+                const x1 = Math.max(...body.map((i) => routing.lines[i].bbox[2]));
+                const spans = running.some((r) => x0 >= r.bbox[0] - 2 && x0 <= r.bbox[0] + FORMULA_INDENT * typical && Math.abs(x1 - r.bbox[2]) <= 3);
+                if (!(words >= FORMULA_PROSE_WORDS && spans) && !beside) continue;
+                for (const i of part) if (routing.routes[i] === k) prose.add(i);
+            }
+        };
+        for (const i of inBox) {
+            const [, a, , b] = routing.lines[i].bbox;
+            if (row.length && Math.min(bottom, b) - Math.max(top, a) >= 0.5 * Math.min(bottom - top, b - a)) {
+                row.push(i);
+                top = Math.min(top, a);
+                bottom = Math.max(bottom, b);
+                continue;
+            }
+            close();
+            row = [i];
+            top = a;
+            bottom = b;
+        }
+        close();
+    });
+    return prose;
+}
+
+/**
+ * Words of text on a formula piece: tokens of three letters or more, other than the
+ * names of mathematical operators ("log", "exp", "max") and variable names mixing
+ * Greek and Latin letters ("εit"), on a piece set mostly outside math fonts (an
+ * equation's variables are not words) and holding no LaTeX commands (an equation's
+ * source kept in the text layer).
+ */
+function textWords(line: RegionLine): number {
+    if (line.mathChars > FORMULA_TEXT_MATH * line.inkChars || LATEX_COMMAND_RE.test(line.text)) return 0;
+    return line.text.split(/\s+/).filter((w) => TEXT_WORD_RE.test(w) && !MIXED_SCRIPT_RE.test(w) && !MATH_OPERATORS.has(w.replace(/[^\p{L}]/gu, "").toLowerCase())).length;
 }
 
 type ReadingRotation = 0 | 90 | 180 | 270;
@@ -234,6 +427,43 @@ interface Cell {
     size: number;
     /** A figure cell of numbers alone: each number's value and centre. */
     numbers?: FigureNumber[];
+    /**
+     * The line's text split at its gaps wider than a word space (`RegionLine.gaps`),
+     * when there are any: the cells MuPDF may have set on one line.
+     */
+    segments?: { text: string; rect: Rect }[];
+}
+
+/**
+ * `piece`'s text split at its gaps wider than a word space, from its source line's
+ * character boxes; the whole piece when it has none.
+ */
+function pieceSegments(piece: RegionLine, source: RawLine | undefined): { text: string; rect: Rect }[] {
+    const chars = (source as RawLineDetailed | undefined)?.chars;
+    if (!piece.gaps?.length || !chars) return [{ text: piece.text, rect: piece.bbox }];
+    const out: { text: string; rect: Rect }[] = [];
+    let text = "";
+    let rect: Rect | undefined;
+    let prevRight = -Infinity;
+    const flush = () => {
+        if (rect && text.trim()) out.push({ text: text.trim(), rect });
+        text = "";
+        rect = undefined;
+    };
+    for (let i = piece.range[0]; i < Math.min(piece.range[1], chars.length); i++) {
+        const c = chars[i];
+        if (/\s/.test(c.c)) {
+            text += c.c;
+            continue;
+        }
+        const b = c.bbox;
+        if (piece.gaps.some(([g0, g1]) => prevRight <= g0 + 0.01 && b.l >= g1 - 0.01)) flush();
+        text += c.c;
+        rect = rect ? [Math.min(rect[0], b.l), Math.min(rect[1], b.t), Math.max(rect[2], b.r), Math.max(rect[3], b.b)] : [b.l, b.t, b.r, b.b];
+        prevRight = Math.max(prevRight, b.r);
+    }
+    flush();
+    return out.length ? out : [{ text: piece.text, rect: piece.bbox }];
 }
 
 /** Width of `piece`'s first word along its line, when its source line has character boxes. */
@@ -295,11 +525,45 @@ const LIST_MAX_LEAK = 0.1;
  * title alone have neither. A region that fails is no table; its text reads
  * best as prose.
  */
-function readsAsTable(table: TableRows, leak: number): boolean {
-    if (leak >= TABLE_MAX_LEAK) return false;
+function readsAsTable(table: TableRows, leak: number, running = 0): boolean {
+    if (leak >= TABLE_MAX_LEAK || table.listed) return false;
+    // A table of running text must read row by row, not in fragments of its cells' sentences.
+    // Rules between its rows separate them: each is whole, whatever case its cells start in.
+    if (!table.ruled && running >= TEXT_TABLE_RUNNING && fragmentRows(table.rows) > TEXT_TABLE_FRAGMENTS * table.rows.length) return false;
+
     if (!table.columns) return table.rows.every((row) => row.length === 1) && table.rows.length >= LIST_MIN_ROWS && leak < LIST_MAX_LEAK;
     const aligned = table.rows.filter((row) => row.length >= 2 && row.every((c) => c.column !== undefined)).length;
     return aligned >= TABLE_MIN_ALIGNED_ROWS * table.rows.length;
+}
+
+/** A table with at least this share of its text on running lines is a table of running text... */
+const TEXT_TABLE_RUNNING = 0.25;
+/** ...which reads row by row only while at most this share of its rows are fragments. */
+const TEXT_TABLE_FRAGMENTS = 0.15;
+
+/** Share of region `k`'s text (ink) on lines flagged as running text. */
+function runningShare(k: number, routing: LineRouting, destination: readonly number[]): number {
+    let all = 0;
+    let running = 0;
+    routing.lines.forEach((line, i) => {
+        if (destination[i] !== k) return;
+        all += line.inkChars;
+        if (routing.flags[i] & LINE_RUNNING) running += line.inkChars;
+    });
+    return all ? running / all : 0;
+}
+
+/**
+ * Rows that are fragments of the rows around them: every cell goes on with a sentence
+ * (starts in lower case), as the wrapped lines of cells left as rows of their own do.
+ */
+function fragmentRows(rows: readonly RegionCell[][]): number {
+    return rows.filter((row) =>
+        row.every((cell) => {
+            const first = /^[\p{Ps}\p{Pi}"'*]*(\p{L})/u.exec(cell.text.trimStart())?.[1];
+            return !!first && first !== first.toUpperCase();
+        }),
+    ).length;
 }
 
 /**
@@ -336,7 +600,7 @@ function tableLeak(k: number, routing: LineRouting, destination: readonly number
     const own = mine.reduce((n, line) => n + line.inkChars, 0);
     let out = 0;
     routing.lines.forEach((line, i) => {
-        if (destination[i] !== -1 || routing.flags[i] & (LINE_CAPTION | LINE_FURNITURE | LINE_SKEWED)) return;
+        if (destination[i] !== -1 || routing.flags[i] & (LINE_CAPTION | LINE_FURNITURE | LINE_SKEWED | LINE_GUTTER | LINE_MARGIN)) return;
         const f = readingFrame(line.bbox, rot);
         if (!within(f)) return;
         const cy = (f[1] + f[3]) / 2;
@@ -391,6 +655,113 @@ function groupRows(cells: Cell[]): FramedCell[][] {
         rows.push({ top: item.f[1], bottom: item.f[3], cells: [item] });
     }
     return rows.map((row) => row.cells.sort((a, b) => a.f[0] - b.f[0]));
+}
+
+/**
+ * Pieces of one cell, split at a justified line's wide word gaps, joined: in a row
+ * left unaligned (`assignColumns`) whose pieces each stand in exactly one column, in
+ * order, the pieces sharing a column are one cell. Rows otherwise stay as they are.
+ */
+function joinSplitCells(
+    rows: FramedCell[][],
+    assigned: { columns: number; of: (number | undefined)[][] },
+): { columns: number; of: (number | undefined)[][]; framed: FramedCell[][] } {
+    const { columns } = assigned;
+    const framed = [...rows];
+    const of = [...assigned.of];
+    if (columns < 2) return { columns, of, framed };
+    const spans = new Map<number, [number, number]>();
+    rows.forEach((row, i) =>
+        row.forEach(({ f }, k) => {
+            const j = of[i][k];
+            if (j === undefined) return;
+            const span = spans.get(j);
+            spans.set(j, span ? [Math.min(span[0], f[0]), Math.max(span[1], f[2])] : [f[0], f[2]]);
+        }),
+    );
+    rows.forEach((row, i) => {
+        if (of[i].every((j) => j !== undefined)) return;
+        const hits = row.map(({ f }) => {
+            const inside = [...spans].filter(([, [l, r]]) => Math.min(r, f[2]) > Math.max(l, f[0]));
+            return inside.length === 1 ? inside[0][0] : -1;
+        });
+        if (!hits.every((j, k) => j >= 0 && (k === 0 || j >= hits[k - 1])) || new Set(hits).size === hits.length) return;
+        const cells: FramedCell[] = [];
+        const columnsOf: number[] = [];
+        row.forEach((c, k) => {
+            if (k === 0 || hits[k] !== hits[k - 1]) {
+                cells.push(c);
+                columnsOf.push(hits[k]);
+                return;
+            }
+            const a = cells[cells.length - 1];
+            const union = (x: Rect, y: Rect): Rect => [Math.min(x[0], y[0]), Math.min(x[1], y[1]), Math.max(x[2], y[2]), Math.max(x[3], y[3])];
+            cells[cells.length - 1] = {
+                cell: { ...a.cell, rect: union(a.cell.rect, c.cell.rect), text: `${a.cell.text} ${c.cell.text}`, size: Math.max(a.cell.size, c.cell.size) },
+                f: union(a.f, c.f),
+            };
+        });
+        framed[i] = cells;
+        of[i] = columnsOf;
+    });
+    return { columns, of, framed };
+}
+
+/**
+ * Cells of neighbouring columns that MuPDF set on one line, split: in a row left
+ * unaligned, a cell standing in two columns or more whose pieces between its wide gaps
+ * (`Cell.segments`) each stand in exactly one column becomes one cell per column, so
+ * the gaps it splits at lie in the gutters between them, when each holds a word or a
+ * number (not a letter of letter-spaced text). The row is then aligned anew.
+ */
+function splitJoinedCells(assigned: { columns: number; of: (number | undefined)[][]; framed: FramedCell[][] }): {
+    columns: number;
+    of: (number | undefined)[][];
+    framed: FramedCell[][];
+} {
+    const { columns } = assigned;
+    if (columns < 2) return assigned;
+    const framed = [...assigned.framed];
+    const of = [...assigned.of];
+    const spans = new Map<number, [number, number]>();
+    framed.forEach((row, i) => {
+        if (!of[i].every((j) => j !== undefined)) return;
+        row.forEach(({ f }, k) => {
+            const j = of[i][k]!;
+            const span = spans.get(j);
+            spans.set(j, span ? [Math.min(span[0], f[0]), Math.max(span[1], f[2])] : [f[0], f[2]]);
+        });
+    });
+    const rot = dominantRotation(framed.flat().map((c) => c.cell));
+    const columnOf = (f: Rect): number => {
+        const hits = [...spans].filter(([, [l, r]]) => Math.min(r, f[2]) > Math.max(l, f[0]));
+        return hits.length === 1 ? hits[0][0] : -1;
+    };
+    framed.forEach((row, i) => {
+        if (of[i].every((j) => j !== undefined)) return;
+        let split = false;
+        const cells = row.flatMap((c) => {
+            if (!c.cell.segments || columnOf(c.f) !== -1) return [c];
+            const parts = c.cell.segments.map((g) => ({ ...g, f: readingFrame(g.rect, rot) })).sort((a, b) => a.f[0] - b.f[0]);
+            const placed = parts.map((g) => columnOf(g.f));
+            if (placed.some((j) => j < 0) || new Set(placed).size < 2 || placed.some((j, k) => k > 0 && j < placed[k - 1])) return [c];
+            const groups = [...new Set(placed)].map((j) => parts.filter((_, k) => placed[k] === j));
+            // Cells hold words or numbers; single letters a gap apart are letter-spaced text.
+            if (groups.some((mine) => mine.map((g) => g.text).join("").replace(/\s/gu, "").length < 2)) return [c];
+            split = true;
+            return groups.map((mine) => {
+                const rect = mine.reduce<Rect>((u, g) => [Math.min(u[0], g.rect[0]), Math.min(u[1], g.rect[1]), Math.max(u[2], g.rect[2]), Math.max(u[3], g.rect[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+                const { lead: _lead, segments: _segments, ...rest } = c.cell;
+                return { cell: { ...rest, rect, text: mine.map((g) => g.text).join(" ") }, f: readingFrame(rect, rot) };
+            });
+        });
+        if (!split) return;
+        const assignedTo = cells.map(({ f }) => columnOf(f));
+        const ordered = assignedTo.every((j, k) => j >= 0 && (k === 0 || j > assignedTo[k - 1]));
+        framed[i] = cells;
+        of[i] = cells.map((_, k) => (ordered ? assignedTo[k] : undefined));
+    });
+    return { columns, of, framed };
 }
 
 /** Rows of several cells that must align to a column structure for it to stand. */
@@ -520,7 +891,8 @@ type Continuation = "continues" | "likely" | "maybe" | "starts" | "begins" | "br
  * How `next` relates to cell line `above`, the line before it in its column.
  * It "breaks" from it unless it sits tight under it, starts at its left edge
  * (or indented, or centred under it), and both hold words. Then it
- * "continues" a word broken at the line end, or a full line of running words
+ * "continues" a word broken at the line end, a bracket it left open, or a full
+ * line of running words
  * (the next word would not have fitted before `right`, the column's right
  * edge) when it starts in lower case; after a full line that ended a
  * sentence, a capital is "likely" the cell's next sentence. Any other lower-case start is "maybe":
@@ -541,6 +913,8 @@ function continuation(above: FramedCell, next: FramedCell, right: number, leadin
     const lower = next.cell.text.trimStart();
     if (!WORD_RE.test(upper) || !/\p{L}/u.test(lower)) return "breaks";
     if (/\p{L}-$/u.test(upper) && /^\p{L}/u.test(lower)) return "continues";
+    // A bracket left open runs on to the line that closes it.
+    if (opensBracket(upper) && closesBracket(lower)) return "continues";
     const word = /^\S+/.exec(lower)?.[0] ?? lower;
     const wordWidth = next.cell.lead ?? ((b[2] - b[0]) * word.length) / Math.max(1, lower.length);
     const full = upper.split(/\s+/).length >= minWords && a[2] + SPACE * unit + wordWidth > right - WRAP_SLACK * unit;
@@ -591,6 +965,10 @@ interface TableRows {
     columns?: number;
     lines: number;
     columnLines: Map<number, number>;
+    /** The columns hold one list read down them, not rows read across (`listedDown`). */
+    listed: boolean;
+    /** Rules across the table separate each of its rows (`joinRuledBands`). */
+    ruled: boolean;
 }
 
 /**
@@ -603,12 +981,12 @@ interface TableRows {
  * the table has at least two and the row aligns to them.
  */
 function tableRows(
-    framed: FramedCell[][],
+    visual: FramedCell[][],
     rules: readonly Rect[],
     verticalRules: readonly Rect[],
     vocabulary?: ReadonlySet<string>,
 ): TableRows {
-    const { columns, of } = assignColumns(framed);
+    const { columns, of, framed } = splitJoinedCells(joinSplitCells(visual, assignColumns(visual)));
     // The column's right edge: where its lines end, ignoring the few that run
     // past it (a line squeezed wider, a cell reaching into the gutter).
     const ends = new Map<number, number[]>();
@@ -674,7 +1052,12 @@ function tableRows(
                 return continuation(last, cell, right.get(of[i][k]!)!, leading, minWords(of[i][k]!));
             });
             const ended = lasts.map((l) => !!l && SENTENCE_END_RE.test(l.cell.text.trimEnd()));
-            if (joinsRowAbove(kinds, of[i], ended, above.length, columns >= 2)) {
+            // A row cannot start while a cell beside it runs on mid-sentence: a new list
+            // item there is the next item of its own cell (lists set side by side in one row).
+            const items =
+                kinds.includes("continues") &&
+                row.every((cell, k) => kinds[k] === "continues" || (!!lasts[k] && !ruledBetween(lasts[k]!, cell) && nextItem(lasts[k]!, cell, leading)));
+            if (items || joinsRowAbove(kinds, of[i], ended, above.length, columns >= 2)) {
                 row.forEach((cell, k) => targets[k]!.lines.push(cell));
                 return;
             }
@@ -682,14 +1065,22 @@ function tableRows(
         logical.push(row.map((cell, k) => ({ lines: [cell], column: of[i][k] })));
     });
 
+    const { rows, ruled } =
+        columns >= 2
+            ? joinRuledBands(logical, framed, separators, (above, next, j) => continuation(above, next, right.get(j)!, leading, minWords(j)))
+            : { rows: logical, ruled: false };
+
     const multi = columns >= 2;
     const columnLines = new Map<number, number>();
     for (const cols of of) for (const j of new Set(cols)) if (j !== undefined) columnLines.set(j, (columnLines.get(j) ?? 0) + 1);
     return {
         lines: framed.length,
         columnLines,
+        // Rules under every row make rows of it, however its columns happen to run.
+        listed: !ruled && listedDown(framed),
+        ruled,
         ...(multi ? { columns } : {}),
-        rows: logical.map((row) => {
+        rows: rows.map((row) => {
             const aligned = multi && row.every((c) => c.column !== undefined);
             return row.map(({ lines, column }) => ({
                 text: joinCellLines(lines.map((l) => l.cell.text), vocabulary),
@@ -703,6 +1094,292 @@ function tableRows(
             }));
         }),
     };
+}
+
+/** A table rules its rows when at least this many rules across it separate its lines. */
+const RULED_ROWS_MIN = 3;
+/** A rule inside a band divides a column when it spans at least this share of the column. */
+const LOCAL_RULE_SPAN = 0.5;
+/** A rule across a table spans at least this share of its width. */
+const RULED_ROWS_SPAN = 0.6;
+/** Bands of complete rows with no step either way, at least this many, make a table of sectioned records. */
+const SECTION_BANDS = 2;
+
+/**
+ * Logical rows of a table that rules its rows (rules across it between many of its
+ * lines), joined per ruled band: the lines between two rules are one row when their
+ * cells run on from line to line (most steps down a column continue a cell, or start
+ * its next sentence), as the wrapped cells of a text table do. A band of separate
+ * values (one-line rows of numbers or items under a section rule) stays as it is.
+ * `continues` judges a step down a column. `ruled` tells whether rules separate each row
+ * (every band reads as one row), not just the head and foot of the table.
+ */
+function joinRuledBands(
+    logical: { lines: FramedCell[]; column?: number }[][],
+    framed: FramedCell[][],
+    separators: readonly Rect[],
+    continues: (above: FramedCell, next: FramedCell, column: number) => Continuation,
+): { rows: { lines: FramedCell[]; column?: number }[][]; ruled: boolean } {
+    const cells = framed.flat();
+    if (!cells.length) return { rows: logical, ruled: false };
+    const x0 = Math.min(...cells.map((c) => c.f[0]));
+    const x1 = Math.max(...cells.map((c) => c.f[2]));
+    const y0 = Math.min(...cells.map((c) => c.f[1]));
+    const y1 = Math.max(...cells.map((c) => c.f[3]));
+    // Rules drawn as one segment per column count together: what they cover of the table's width.
+    const byLine = new Map<number, [number, number][]>();
+    for (const r of separators) {
+        const y = Math.round((r[1] + r[3]) / 2);
+        const [a, b] = [Math.max(r[0], x0), Math.min(r[2], x1)];
+        // A rule beside the table (another column's) covers none of it.
+        if (y <= y0 || y >= y1 || b <= a) continue;
+        byLine.set(y, [...(byLine.get(y) ?? []), [a, b]]);
+    }
+    const covered = (parts: [number, number][]) => {
+        let total = 0;
+        let end = -Infinity;
+        for (const [a, b] of [...parts].sort((p, q) => p[0] - q[0])) {
+            if (b <= end) continue;
+            total += b - Math.max(a, end);
+            end = b;
+        }
+        return total;
+    };
+    const cuts = [...byLine]
+        .filter(([, parts]) => covered(parts) >= RULED_ROWS_SPAN * (x1 - x0))
+        .map(([y]) => y)
+        .sort((a, b) => a - b);
+    const bands = cuts.filter((y, k) => k === 0 || y - cuts[k - 1] > 2);
+    if (bands.length < RULED_ROWS_MIN) return { rows: logical, ruled: false };
+    // Cells left unaligned (a row of fewer cells) take the column their lines overlap most.
+    const spans = new Map<number, [number, number]>();
+    for (const row of logical) {
+        for (const c of row) {
+            if (c.column === undefined) continue;
+            const span = spans.get(c.column);
+            const l = Math.min(...c.lines.map((x) => x.f[0]));
+            const r = Math.max(...c.lines.map((x) => x.f[2]));
+            spans.set(c.column, span ? [Math.min(span[0], l), Math.max(span[1], r)] : [l, r]);
+        }
+    }
+    const columnOf = (c: { lines: FramedCell[]; column?: number }): number | undefined => {
+        if (c.column !== undefined) return c.column;
+        const l = Math.min(...c.lines.map((x) => x.f[0]));
+        const r = Math.max(...c.lines.map((x) => x.f[2]));
+        const hits = [...spans].filter(([, [a, b]]) => Math.min(b, r) > Math.max(a, l));
+        return hits.length === 1 ? hits[0][0] : undefined;
+    };
+    // The column of each cell for judging and joining a band; rows left as they are keep theirs.
+    const placed = new Map(logical.map((row) => [row, row.map((c) => ({ ...c, column: columnOf(c) }))]));
+    const band = (row: { lines: FramedCell[] }[]) => {
+        const cy = (row[0].lines[0].f[1] + row[0].lines[0].f[3]) / 2;
+        return bands.filter((y) => y < cy).length;
+    };
+    // Rules inside a band that divide one column only: a cell boundary with no counterpart
+    // in the other columns, whose text runs on across it (sections of a form side by side).
+    const localRules = [...byLine]
+        .filter(([y, parts]) => !cuts.includes(y) && covered(parts) < RULED_ROWS_SPAN * (x1 - x0))
+        .flatMap(([y, parts]) => {
+            const hits = [...spans].filter(([, [a, b]]) => parts.some(([l, r]) => Math.min(r, b) - Math.max(l, a) >= LOCAL_RULE_SPAN * (b - a)));
+            return hits.length === 1 ? [{ y, column: hits[0][0] }] : [];
+        });
+    const sectioned = (cells: { lines: FramedCell[]; column?: number }[][]) =>
+        localRules.some(({ y, column }) => {
+            const lines = cells.flatMap((row) => row.filter((c) => c.column !== column).flatMap((c) => c.lines));
+            return lines.some((l) => l.f[3] < y) && lines.some((l) => l.f[1] > y) && cells.flat().some((c) => c.column === column && c.lines.some((l) => l.f[1] > y));
+        });
+    const groups: { lines: FramedCell[]; column?: number }[][][] = [];
+    for (const row of logical) {
+        const last = groups[groups.length - 1];
+        if (last && band(row) === band(last[0])) last.push(row);
+        else groups.push([row]);
+    }
+    const verdicts = groups.map((group) => (group.length > 1 ? runsOn(group.map((row) => placed.get(row)!), continues, spans.size) : false));
+    // A band of complete rows that neither run on nor break is one row wrapped evenly in every
+    // column, unless the table's bands repeat that shape: sections of one-line records.
+    const records = verdicts.filter((v) => v === "unclear").length >= SECTION_BANDS;
+    const out: { lines: FramedCell[]; column?: number }[][] = [];
+    // Whether the rules separate each row: every band reads as one row.
+    let separated = true;
+    groups.forEach((group, k) => {
+        const cells = group.map((row) => placed.get(row)!);
+        const verdict = verdicts[k];
+        const joins = verdict === true || (verdict === "unclear" && !records) || sectioned(cells);
+        if (group.length > 1 && !joins) separated = false;
+        if (group.length > 1 && joins) {
+            const byColumn = new Map<number, FramedCell[]>();
+            for (const row of cells) for (const c of row) byColumn.set(c.column!, [...(byColumn.get(c.column!) ?? []), ...c.lines]);
+            // A column's lines read top to bottom, whichever rows they were first grouped in.
+            out.push([...byColumn].sort((a, b) => a[0] - b[0]).map(([column, lines]) => ({ lines: lines.sort((p, q) => p.f[1] - q.f[1]), column })));
+        } else {
+            out.push(...group);
+        }
+    });
+    return { rows: out, ruled: separated };
+}
+
+/**
+ * Whether the rows of one ruled band run on: each cell has a column, and no step down a
+ * column across the rows starts a new cell, or such steps are outweighed by steps that
+ * continue one (clearly, when two of the rows fill every column). "unclear" when every
+ * row fills every column of the table (`tableColumns`) and no step continues or breaks a
+ * cell.
+ */
+function runsOn(
+    group: { lines: FramedCell[]; column?: number }[][],
+    continues: (above: FramedCell, next: FramedCell, column: number) => Continuation,
+    tableColumns: number,
+): boolean | "unclear" {
+    if (group.some((row) => row.some((c) => c.column === undefined))) return false;
+    let on = 0;
+    let off = 0;
+    // Steps across the rows' boundaries: a cell's first line under the last line of its
+    // column in the rows above (steps within a cell are part of that row already).
+    const last = new Map<number, FramedCell>();
+    for (const row of group) {
+        for (const c of row) {
+            for (const [n, line] of c.lines.entries()) {
+                const above = last.get(c.column!);
+                if (above && n === 0) {
+                    // A line running on (a broken word, a full line, the next sentence after a
+                    // full line) joins its cell; a break or a new item does not; the rest says nothing.
+                    const kind = continues(above, line, c.column!);
+                    if (kind === "breaks" || kind === "begins") off++;
+                    else if (kind === "continues" || kind === "likely") on++;
+                }
+                last.set(c.column!, line);
+            }
+        }
+    }
+    // Rows that each fill every column are rows of their own unless the cells clearly run on.
+    const columns = new Set(group.flatMap((row) => row.map((c) => c.column)));
+    const full = group.filter((row) => new Set(row.map((c) => c.column)).size === columns.size).length;
+    // A cell wrapped over its lines leaves rows short of one of the table's columns. Rows that
+    // all fill every column with no step either way are either one row wrapped evenly or
+    // one-line records: the caller decides from the table's other bands.
+    const complete = group.filter((row) => new Set(row.map((c) => c.column)).size >= tableColumns).length;
+    if (off === 0) return on > 0 || complete < group.length || "unclear";
+    return on > 0 && (full >= 2 ? on > off : on >= off);
+}
+
+/** A column takes part in the list test with at least this many entries. */
+const LIST_MIN_ENTRIES = 4;
+/** Numbered entries: at least this share of a column's entries. */
+const LIST_KEYED = 0.8;
+/** At least this share of a column's entries are distinct (an author can head several references). */
+const LIST_DISTINCT = 0.5;
+/** Read down the columns, at least this share of neighbouring entries are in order... */
+const LIST_ORDERED_DOWN = 0.85;
+/** ...and at most this share read across the rows. */
+const LIST_ORDERED_ACROSS = 0.7;
+
+/**
+ * Whether the region's text is one ordered list set in columns (an index, a glossary,
+ * a keyword or reference list) rather than rows: its entries, read down each column
+ * and on into the next, are in alphabetical or numerical order (each column starting
+ * after the one before ends), while read across the rows they are not. Columns are the spans of text between vertical gutters; a
+ * column's entries are its lines, or under a hanging indent the lines at its left
+ * edge. Every column of entries must take part: a column of values or repeated
+ * categories beside them pairs records across the rows, as a table does. Such text
+ * reads down the columns, as the prose does.
+ */
+function listedDown(framed: FramedCell[][]): boolean {
+    const cells = framed.flatMap((row, i) => row.map((cell) => ({ row: i, cell })));
+    const spans: [number, number][] = [];
+    for (const { cell } of [...cells].sort((a, b) => a.cell.f[0] - b.cell.f[0])) {
+        const last = spans[spans.length - 1];
+        if (last && cell.f[0] < last[1]) last[1] = Math.max(last[1], cell.f[2]);
+        else spans.push([cell.f[0], cell.f[2]]);
+    }
+    const entries: { row: number; column: number; key: string | number }[] = [];
+    const ranges: [string | number, string | number][] = [];
+    let columns = 0;
+    let records = false;
+    spans.forEach(([l, r], j) => {
+        const inColumn = cells.filter((c) => c.cell.f[0] >= l && c.cell.f[2] <= r);
+        const unit = Math.max(1, Math.min(...inColumn.map((c) => c.cell.cell.size)));
+        const hanging = inColumn.some((c) => c.cell.f[0] - l > WRAP_ALIGN * unit);
+        const heads = hanging ? inColumn.filter((c) => c.cell.f[0] - l <= WRAP_ALIGN * unit) : inColumn;
+        const keyed = heads.map((c) => ({ row: c.row, column: j, key: entryKey(c.cell.cell.text) }));
+        // Entries keyed by words, past any numbered ones among them; or numbered entries.
+        const words = keyed.filter((e): e is { row: number; column: number; key: string } => typeof e.key === "string");
+        const numbers = keyed.filter((e): e is { row: number; column: number; key: number } => typeof e.key === "number");
+        const use = words.length >= LIST_MIN_ENTRIES ? words : numbers.length >= LIST_KEYED * heads.length ? numbers : [];
+        // A list's entries differ; a column repeating a few values (a category, "Yes") is no list.
+        if (use.length < LIST_MIN_ENTRIES || new Set(use.map((e) => e.key)).size < LIST_DISTINCT * use.length) {
+            if (heads.length >= LIST_MIN_ENTRIES) records = true;
+            return;
+        }
+        columns++;
+        entries.push(...use);
+        ranges.push([use[0].key, use[use.length - 1].key]);
+    });
+    if (columns < 2 || records || new Set(entries.map((e) => typeof e.key)).size !== 1) return false;
+    // The list runs on from one column into the next: each column's first entry comes
+    // after the last of the column before.
+    if (ranges.some((r, j) => j > 0 && compareKeys(ranges[j - 1][1], r[0]) > 0)) return false;
+    const across = [...entries].sort((a, b) => a.row - b.row || a.column - b.column);
+    return ordered(entries) >= LIST_ORDERED_DOWN && ordered(across) <= LIST_ORDERED_ACROSS;
+}
+
+/**
+ * An entry's sort key: the number of a numbered entry ("12.", "3)", "[3]"), or its
+ * first word in lower case when it starts with one. Bare numbers (a table's values,
+ * a year under a reference's authors) key nothing.
+ */
+function entryKey(text: string): string | number | undefined {
+    const number = /^\s*(?:\[(\d{1,4})\]|\(?(\d{1,4})[.)])(?:\s|$)/.exec(text);
+    if (number) return Number(number[1] ?? number[2]);
+    const word = /^[\s"'“‘([]*(\p{L}+)/u.exec(text);
+    return word ? word[1].toLocaleLowerCase() : undefined;
+}
+
+/** Order of two entry keys: numerically, or alphabetically. */
+function compareKeys(a: string | number, b: string | number): number {
+    return typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b));
+}
+
+/** Share of neighbouring entries in ascending order. */
+function ordered(entries: readonly { key: string | number }[]): number {
+    let up = 0;
+    for (let i = 1; i < entries.length; i++) if (compareKeys(entries[i - 1].key, entries[i].key) <= 0) up++;
+    return entries.length > 1 ? up / (entries.length - 1) : 0;
+}
+
+/**
+ * A list item's marker: a bullet, or a dash, number or letter (closed by "." or ")")
+ * followed by a space (not a negative number or a decimal).
+ */
+const ITEM_MARKER_RE = /^\s*(?:[•●○◦▪■►▸‣∙·]\s*|(?:[–—-]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s+)\S/u;
+
+/** `next` is the next item of a list after `above`, set at the list's line spacing. */
+function nextItem(above: FramedCell, next: FramedCell, leading: number): boolean {
+    const unit = lineUnit(above, next);
+    const pitch = next.f[1] - above.f[1];
+    return ITEM_MARKER_RE.test(next.cell.text) && pitch > 0 && pitch <= Math.max(WRAP_PITCH, WRAP_LEADING * Math.min(leading / unit, MAX_LEADING)) * unit;
+}
+
+/** The text leaves a round or square bracket open. */
+function opensBracket(text: string): boolean {
+    let depth = 0;
+    for (const ch of text) {
+        if (ch === "(" || ch === "[") depth++;
+        else if ((ch === ")" || ch === "]") && depth > 0) depth--;
+    }
+    return depth > 0;
+}
+
+/** The text closes a bracket it did not open. */
+function closesBracket(text: string): boolean {
+    let depth = 0;
+    for (const ch of text) {
+        if (ch === "(" || ch === "[") depth++;
+        else if (ch === ")" || ch === "]") {
+            if (depth === 0) return true;
+            depth--;
+        }
+    }
+    return false;
 }
 
 /** The text of a cell's lines, words broken at a line end joined as in prose. */
@@ -1159,9 +1836,9 @@ function inRows<T extends { box: BoundingBox }>(sorted: readonly T[]): T[] {
     return rows.flatMap((row) => [...row].sort((a, b) => a.box.l - b.box.l));
 }
 
-/** A row's text; an aligned row leaves an empty slot for each missing column. */
+/** A row's text; an aligned row (one cell per column) leaves an empty slot for each missing column. */
 function rowText(row: readonly RegionCell[], separator: string, columns?: number): string {
-    if (!columns || row.length === columns || row.some((c) => c.column === undefined)) {
+    if (!columns || row.length === columns || row.some((c) => c.column === undefined) || new Set(row.map((c) => c.column)).size < row.length) {
         return row.map((c) => c.text).join(separator);
     }
     const slots = Array.from({ length: columns }, () => "");

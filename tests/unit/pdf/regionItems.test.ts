@@ -15,6 +15,7 @@ import type { RegionClass } from "../../../src/beaver-extract/regions/model";
 import { mergeRowFragments, pageLines } from "../../../src/beaver-extract/regions/pageSignals";
 import {
     LINE_FURNITURE,
+    LINE_RUNNING,
     LINE_SKEWED,
     type DetectedRegion,
     type RegionDetection,
@@ -99,7 +100,7 @@ function detection(
         const cy = (l.bbox[1] + l.bbox[3]) / 2;
         return candidates.findIndex((c) => c.label !== "other" && cx >= c.bbox[0] && cx <= c.bbox[2] && cy >= c.bbox[1] && cy <= c.bbox[3]);
     });
-    return { pageIndex: 0, scanned: false, bodySize: BS, candidates, routing: { lines, flags: lines.map(() => 0), routes }, ms: 0 };
+    return { pageIndex: 0, scanned: false, bodySize: BS, candidates, routing: { lines, flags: lines.map((l) => (prose(l.text) ? LINE_RUNNING : 0)), routes }, ms: 0 };
 }
 
 const PROSE = "the quick brown fox jumps over the lazy dog";
@@ -160,6 +161,25 @@ describe("regionItemsForPage", () => {
         expect(items.map((i) => i.kind)).toEqual(["formula"]);
         expect(rowTexts(items[0], " ")).toEqual(["x = α + β y (12)"]);
         expect(allText(rest)).toEqual([where.text]);
+    });
+
+    it("leaves a formula row of justified prose with inline math in the prose", () => {
+        // The prose row is split at its wide word gaps into pieces of one word each; the
+        // next row is a running line with inline math in front of it.
+        const p = page([
+            line(70, [[72, 530, PROSE]]),
+            line(82, [[72, 530, PROSE]]),
+            line(100, [[72, 120, "Suppose"], [150, 180, "that"], [210, 220, "B"], [250, 310, "bootstrap"], [340, 390, "samples"], [420, 450, "are"], [480, 530, "drawn,"]]),
+            line(115, [[72, 160, "z = {z, 1 ≤ a ≤ B}."], [168, 530, "The bootstrapped version of the predictor is"]]),
+            line(140, [[200, 330, "θ = Xβ + r(1 − r)"], [500, 530, "(3.2)"]]),
+            // A word equation, centred: its variables read as words, but it is no prose line.
+            line(165, [[150, 230, "Capital Adjusted"], [280, 295, "="], [345, 440, "Composition Types Total"], [500, 530, "(3.3)"]]),
+        ]);
+        const prose = (t: string) => t.startsWith("The bootstrapped") || t === PROSE;
+        const d = detection(p, [["formula", [70, 95, 540, 180]]], prose);
+        const { items, page: rest } = regionItemsForPage(p, d);
+        expect(items.map((i) => rowTexts(i))).toEqual([["θ = Xβ + r(1 − r) | (3.2)", "Capital Adjusted | = | Composition Types Total | (3.3)"]]);
+        expect(allText(rest)).toHaveLength(4);
     });
 
     it("keeps figure labels, drops rows of bare numbers and leaves decoration text in the prose", () => {
@@ -273,6 +293,28 @@ describe("regionItemsForPage", () => {
         expect(allText(withRegion.page)).toEqual([PROSE]);
     });
 
+    it("starts and ends an equation with its own lines, not with prose its box took", () => {
+        // The formula box starts at its lead-in, which stays in the prose.
+        const lead = line(100, [[72, 290, "consisting of a static and a dynamic component according to"]]);
+        const eq = line(116, [[115, 233, "H(t) = Hwo − HS(t)."], [279, 295, "(21)"]]);
+        const p = page([lead, eq]);
+        const { items } = regionItemsForPage(p, detection(p, [["formula", [54, 98, 295, 130]]], (t) => t.startsWith("consisting")));
+        expect(items).toHaveLength(1);
+        expect(items[0].bbox.t).toBe(lead.bbox.b);
+        // Across, the box keeps its column's span; below, it keeps what it covers under the
+        // equation's text (a fraction's denominator rule, a radical drawn as paths).
+        expect(items[0].bbox.l).toBe(54);
+        expect(items[0].bbox.b).toBe(130);
+        // Prose taken below it: the box ends above it.
+        const after = line(132, [[72, 290, "where the static part does not depend on time."]]);
+        const below = page([eq, after]);
+        const tail = regionItemsForPage(below, detection(below, [["formula", [54, 98, 295, 140]]], (t) => t.startsWith("where")));
+        expect(tail.items[0].bbox).toMatchObject({ t: 98, b: after.bbox.t });
+        // Without prose taken, the box stays whole.
+        const alone = page([eq]);
+        expect(regionItemsForPage(alone, detection(alone, [["formula", [54, 98, 295, 130]]])).items[0].bbox).toMatchObject({ t: 98, b: 130 });
+    });
+
     it("caps figure label text", () => {
         const labels = Array.from({ length: 60 }, (_, i) => line(100 + 12 * i, [[100, 500, `label ${i} ${"x".repeat(50)}`]]));
         const p = page(labels);
@@ -297,7 +339,8 @@ describe("regionItemsForPage", () => {
         const d2 = detection(p, [["table", [440, 110, 480, 140]]]);
         const out = regionItemsForPage(p, d2);
         expect(allText(out.page)).toEqual([mixed.text]);
-        expect(out.items[0].rows).toEqual([]);
+        // A table left without text is no item.
+        expect(out.items).toEqual([]);
     });
 
     it("keeps a line in the prose when two regions tie for its characters", () => {
@@ -309,7 +352,7 @@ describe("regionItemsForPage", () => {
         ]);
         const { page: rest, items } = regionItemsForPage(p, d);
         expect(allText(rest)).toEqual([split.text]);
-        expect(items.map((i) => [i.kind, i.rows])).toEqual([["table", []]]);
+        expect(items).toEqual([]);
     });
 
     it("never absorbs lines routed to prose, and leaves pages without regions unchanged", () => {
@@ -483,6 +526,194 @@ describe("regionItemsForPage tables", () => {
         expect(allText(out.page)).toEqual(lines.map((l) => l.text));
     });
 
+    it("reads each ruled band of a table that rules its rows as one row", () => {
+        // A text table: every row ruled off; the definition wraps, the year is centred on it.
+        const p = page([
+            line(100, [[72, 160, "Authors"], [200, 240, "Year"], [300, 520, "Definition"]]),
+            line(120, [[72, 160, "Pal R., Torstensson"], [300, 520, "Capability to be ready in time of crisis and to sustain"]]),
+            line(126, [[200, 225, "2014"]]),
+            line(132, [[72, 160, "H., and Mattila H."], [300, 520, "superior organizational performance."]]),
+            line(152, [[72, 160, "Starr, R., Newfrock,"], [300, 520, "Ability and capacity to withstand systematic"]]),
+            line(158, [[200, 225, "2003"]]),
+            line(164, [[72, 160, "J., and Delurey, M."], [300, 520, "discontinuities and adapt to new risk environments."]]),
+            line(184, [[72, 160, "Lengnick-Hall C.A.,"], [300, 520, "Resilience capacity is defined as a unique blend of"]]),
+            line(190, [[200, 225, "2005"]]),
+            line(196, [[72, 160, "Beck T.E."], [300, 520, "cognitive and contextual properties."]]),
+        ]);
+        const ruled: Rect[] = [116, 148, 180, 210].map((y): Rect => [70, y, 522, y + 0.5]);
+        expect(rowTexts(table(p, () => false, ruled).items[0])).toEqual([
+            "Authors | Year | Definition",
+            "Pal R., Torstensson H., and Mattila H. | 2014 | Capability to be ready in time of crisis and to sustain superior organizational performance.",
+            "Starr, R., Newfrock, J., and Delurey, M. | 2003 | Ability and capacity to withstand systematic discontinuities and adapt to new risk environments.",
+            "Lengnick-Hall C.A., Beck T.E. | 2005 | Resilience capacity is defined as a unique blend of cognitive and contextual properties.",
+        ]);
+        // A ruled section of one-line rows of values stays row by row.
+        const values = page([
+            line(100, [[72, 160, "Variable"], [300, 340, "Mean"], [420, 460, "SD"]]),
+            ...Array.from({ length: 4 }, (_, k) => line(120 + 12 * k, [[72, 160, `Item ${k + 1}`], [300, 340, `${k}.25`], [420, 460, `${k}.75`]])),
+            ...Array.from({ length: 4 }, (_, k) => line(176 + 12 * k, [[72, 160, `Item ${k + 5}`], [300, 340, `${k}.35`], [420, 460, `${k}.85`]])),
+        ]);
+        const sections: Rect[] = [116, 172, 222, 240].map((y): Rect => [70, y, 462, y + 0.5]);
+        expect(table(values, () => false, sections).items[0].rows).toHaveLength(9);
+    });
+
+    it("keeps one-line records under section rules apart when nothing runs on", () => {
+        // Bands that each hold several complete one-line rows are sections of records.
+        const fruit = [
+            ["apple", "red"],
+            ["banana", "yellow"],
+            ["cherry", "red"],
+            ["grape", "purple"],
+            ["lemon", "yellow"],
+            ["lime", "green"],
+            ["orange", "orange"],
+            ["plum", "purple"],
+        ];
+        const p = page([
+            line(100, [[72, 160, "Fruit"], [300, 380, "Colour"]]),
+            ...fruit.map(([f, c], k) => line(120 + 12 * k + 8 * Math.floor(k / 2), [[72, 160, f], [300, 380, c]])),
+        ]);
+        // Section rules after every second record, and above and below the table.
+        const sections: Rect[] = [116, 142, 168, 194, 220].map((y): Rect => [70, y, 382, y + 0.5]);
+        expect(rowTexts(table(p, () => false, sections).items[0])).toEqual(["Fruit | Colour", ...fruit.map(([f, c]) => `${f} | ${c}`)]);
+        // Header cells wrapped at different points leave a row short of a column: one row.
+        const headed = page([
+            line(100, [[72, 140, "Milieu"], [200, 260, "Micro"], [300, 380, "Rank"]]),
+            line(110, [[72, 140, "risico"], [200, 260, "krediet"]]),
+            line(120, [[72, 140, "analyse"]]),
+            ...fruit.slice(0, 4).map(([f, c], k) => line(140 + 20 * k, [[72, 140, f], [200, 260, c], [300, 380, String(k + 1)]])),
+        ]);
+        const rows: Rect[] = [96, 134, 156, 176, 196, 216].map((y): Rect => [70, y, 382, y + 0.5]);
+        expect(rowTexts(table(headed, () => false, rows).items[0])).toEqual([
+            "Milieu risico analyse | Micro krediet | Rank",
+            ...fruit.slice(0, 4).map(([f, c], k) => `${f} | ${c} | ${k + 1}`),
+        ]);
+        // A header wrapped evenly in every column is one band of complete rows: one row.
+        const even = page([
+            line(100, [[72, 140, "hemmt"], [200, 260, "weder"], [300, 380, "fördert"]]),
+            line(110, [[72, 140, "stark"], [200, 260, "noch"], [300, 380, "eher"]]),
+            ...fruit.slice(0, 4).map(([f, c], k) => line(140 + 20 * k, [[72, 140, f], [200, 260, c], [300, 380, String(k + 1)]])),
+        ]);
+        const evenRules: Rect[] = [96, 134, 156, 176, 196, 216].map((y): Rect => [70, y, 382, y + 0.5]);
+        expect(rowTexts(table(even, () => false, evenRules).items[0])[0]).toBe("hemmt stark | weder noch | fördert eher");
+        // A record whose last cell is set a line lower leaves its rows short of a column: one
+        // row, also among sections of records.
+        const taste = ["sweet", "soft", "tart", "ripe"];
+        const offset = page([
+            line(100, [[72, 140, "Fruit"], [200, 260, "Colour"], [300, 380, "Taste"]]),
+            line(120, [[72, 140, "quince"], [200, 260, "yellow"]]),
+            line(132, [[300, 380, "hard"]]),
+            ...fruit.slice(0, 4).map(([f, c], k) => line(150 + 12 * k + 8 * Math.floor(k / 2), [[72, 140, f], [200, 260, c], [300, 380, taste[k]]])),
+        ]);
+        const offsetRules: Rect[] = [116, 146, 176, 210].map((y): Rect => [70, y, 382, y + 0.5]);
+        expect(rowTexts(table(offset, () => false, offsetRules).items[0])).toEqual([
+            "Fruit | Colour | Taste",
+            "quince | yellow | hard",
+            ...fruit.slice(0, 4).map(([f, c], k) => `${f} | ${c} | ${taste[k]}`),
+        ]);
+    });
+
+    it("ignores rules of another text column beside a table that rules its rows", () => {
+        // A text table in the right half of the page; the left column has rules at the same heights.
+        const p = page([
+            line(100, [[250, 312, "Authors"], [340, 358, "Year"], [410, 564, "Definition"]]),
+            line(120, [[250, 312, "Pal R., Torstensson"], [410, 564, "Capability to be ready in time of crisis and to sustain"]]),
+            line(126, [[340, 358, "2014"]]),
+            line(132, [[250, 312, "H., and Mattila H."], [410, 564, "superior organizational performance."]]),
+            line(152, [[250, 312, "Starr, R., Newfrock,"], [410, 564, "Ability and capacity to withstand systematic"]]),
+            line(158, [[340, 358, "2003"]]),
+            line(164, [[250, 312, "J., and Delurey, M."], [410, 564, "discontinuities and adapt to new risk environments."]]),
+            line(184, [[250, 312, "Lengnick-Hall C.A.,"], [410, 564, "Resilience capacity is defined as a unique blend of"]]),
+            line(190, [[340, 358, "2005"]]),
+            line(196, [[250, 312, "Beck T.E."], [410, 564, "cognitive and contextual properties."]]),
+        ]);
+        const ys = [116, 148, 180, 210];
+        const own: Rect[] = ys.map((y): Rect => [249, y, 565, y + 0.5]);
+        const beside: Rect[] = ys.map((y): Rect => [40, y, 100, y + 0.5]);
+        const rows = [
+            "Authors | Year | Definition",
+            "Pal R., Torstensson H., and Mattila H. | 2014 | Capability to be ready in time of crisis and to sustain superior organizational performance.",
+            "Starr, R., Newfrock, J., and Delurey, M. | 2003 | Ability and capacity to withstand systematic discontinuities and adapt to new risk environments.",
+            "Lengnick-Hall C.A., Beck T.E. | 2005 | Resilience capacity is defined as a unique blend of cognitive and contextual properties.",
+        ];
+        expect(rowTexts(table(p, () => false, own).items[0])).toEqual(rows);
+        expect(rowTexts(table(p, () => false, [...beside, ...own]).items[0])).toEqual(rows);
+    });
+
+    it("reads a ruled band whose columns run on independently as one row", () => {
+        // A worksheet: a list of patterns beside two paragraphs that run on mid-sentence.
+        const p = page([
+            line(100, [[72, 200, "E. Problematic Patterns"], [240, 380, "F. Alternative Thought"], [420, 560, "G. Re-rated Belief"]]),
+            line(120, [[72, 200, "Jumping to conclusions"], [240, 380, "I hate that my friends died and"], [420, 560, "Re-rate how much you now believe"]]),
+            line(132, [[72, 200, "Exaggerating or minimizing"], [240, 380, "although it did not seem critical"], [420, 560, "the thought in section B from zero"]]),
+            line(144, [[72, 200, "Ignoring important parts"], [240, 380, "to make that run I do not know what"], [420, 560, "to one hundred percent after all of"]]),
+            line(156, [[72, 200, "Oversimplifying"], [240, 380, "the lieutenant was thinking then."], [420, 560, "this, rated here."]]),
+            line(176, [[72, 200, "Total"], [240, 380, "Rated 40 percent"], [420, 560, "Rated 60 percent"]]),
+            line(196, [[72, 200, "Mean"], [240, 380, "Rated 50 percent"], [420, 560, "Rated 70 percent"]]),
+        ]);
+        const ruled: Rect[] = [116, 170, 190].map((y): Rect => [70, y, 562, y + 0.5]);
+        expect(rowTexts(table(p, () => false, ruled).items[0])).toEqual([
+            "E. Problematic Patterns | F. Alternative Thought | G. Re-rated Belief",
+            "Jumping to conclusions Exaggerating or minimizing Ignoring important parts Oversimplifying | I hate that my friends died and although it did not seem critical to make that run I do not know what the lieutenant was thinking then. | Re-rate how much you now believe the thought in section B from zero to one hundred percent after all of this, rated here.",
+            "Total | Rated 40 percent | Rated 60 percent",
+            "Mean | Rated 50 percent | Rated 70 percent",
+        ]);
+        // Rows of their own start together across the columns, and stay rows; so do rows
+        // whose label wraps beside a value that starts its next line.
+        const rows = page([
+            line(100, [[72, 250, "Pattern"], [300, 520, "Example"]]),
+            line(120, [[72, 250, "Jumping to conclusions"], [300, 520, "He wanted us dead"]]),
+            line(132, [[72, 250, "Exaggerating or minimizing"], [300, 520, "It was the worst day"]]),
+            line(144, [[72, 250, "Forward primers for the mouse"], [300, 520, "Integrated DNA Technologies,"]]),
+            line(156, [[72, 250, "papillomavirus 5-TAGCTTTGTCTG-3"], [300, 520, "Brendle et al."]]),
+            line(168, [[72, 250, "Reverse primers for the mouse"], [300, 520, "Integrated DNA Technologies,"]]),
+            line(180, [[72, 250, "papillomavirus 5-GTCAGTGGTGTC-3"], [300, 520, "Brendle et al."]]),
+            line(200, [[72, 250, "Total"], [300, 520, "Three"]]),
+            line(220, [[72, 250, "Mean"], [300, 520, "One"]]),
+        ]);
+        expect(table(rows, () => false, [116, 194, 214].map((y): Rect => [70, y, 522, y + 0.5])).items[0].rows.length).toBeGreaterThanOrEqual(6);
+    });
+
+    it("reads a ruled band one of whose columns a rule of its own divides as one row", () => {
+        // B and its follow-up section C share a column, ruled apart; A runs on beside both.
+        const p = page([
+            line(100, [[72, 250, "A. Situation and its setting"], [300, 520, "B. Thought or stuck point here"]]),
+            line(120, [[72, 170, "My lieutenant sent us."], [300, 400, "He got them killed."]]),
+            line(133, [[72, 160, "Four friends died."], [300, 360, "C. Emotions"]]),
+            line(146, [[72, 150, "Because of him."], [300, 390, "Angry, all of it."]]),
+            line(168, [[72, 150, "Total"], [300, 420, "Rated 40 percent"]]),
+            line(188, [[72, 150, "Mean"], [300, 420, "Rated 60 percent"]]),
+        ]);
+        const ruled: Rect[] = [116, 162, 182].map((y): Rect => [70, y, 522, y + 0.5]);
+        const local: Rect = [298, 131.8, 522, 132.2];
+        expect(rowTexts(table(p, () => false, [...ruled, local]).items[0])).toEqual([
+            "A. Situation and its setting | B. Thought or stuck point here",
+            "My lieutenant sent us. Four friends died. Because of him. | He got them killed. C. Emotions Angry, all of it.",
+            "Total | Rated 40 percent",
+            "Mean | Rated 60 percent",
+        ]);
+    });
+
+    it("splits cells of neighbouring columns that one structured-text line joins at their gutter", () => {
+        const p = page([
+            line(100, [[72, 110, "Name"], [150, 200, "Location"], [300, 360, "Role"]]),
+            line(115, [[72, 118, "Shuhei"], [150, 220, "Neurology"], [300, 380, "Analysis"]]),
+            // MuPDF set the name and the location as one line, 12 pt apart across the gutter.
+            line(130, [[72, 138, "Ryo Ogawa,"], [150, 230, "Department"], [300, 380, "Revision"]]),
+            line(145, [[72, 120, "Juichi"], [150, 220, "Pharmacy"], [300, 380, "Supervision"]]),
+            // A note whose word gaps do not fall in the gutters stays one cell.
+            line(160, [[72, 160, "Note values"], [168, 380, "are means of the three ratings"]]),
+        ]);
+        const { items } = table(p);
+        expect(rowTexts(items[0])).toEqual([
+            "Name | Location | Role",
+            "Shuhei | Neurology | Analysis",
+            "Ryo Ogawa, | Department | Revision",
+            "Juichi | Pharmacy | Supervision",
+            "Note values are means of the three ratings",
+        ]);
+    });
+
     it("honours row rules in a sideways table", () => {
         // The upright table of the rule case, turned to read down the page: an upright
         // line at y covers page x from 600 - y - 11 to 600 - y, its text running down.
@@ -577,6 +808,105 @@ describe("regionItemsForPage tables", () => {
         ]);
     });
 
+    it("keeps lists set side by side in one row: an item cannot start a row mid-sentence beside it", () => {
+        const p = page([
+            line(100, [[72, 250, "Minimum Characteristics"], [320, 500, "Advanced Characteristics"]]),
+            line(118, [[72, 250, "• Access is facilitated to tools"], [320, 500, "• Greater access to clinical"]]),
+            line(130, [[84, 250, "and resources such as clinical"], [332, 500, "supports is facilitated for all"]]),
+            line(142, [[84, 250, "and quality improvement tools."], [320, 500, "• PCN co-designs and tests new"]]),
+            line(154, [[72, 250, "• PCN collaborates with local"], [332, 500, "primary-care focused digital tools."]]),
+            line(166, [[84, 250, "and provincial partners."], [332, 380, ""]].filter(([, , t]) => t)),
+        ]);
+        expect(table(p).items[0].rows.map((r) => r.map((c) => c.text).join(" | "))).toEqual([
+            "Minimum Characteristics | Advanced Characteristics",
+            "• Access is facilitated to tools and resources such as clinical and quality improvement tools. • PCN collaborates with local and provincial partners. | " +
+                "• Greater access to clinical supports is facilitated for all • PCN co-designs and tests new primary-care focused digital tools.",
+        ]);
+    });
+
+    it("leaves a table of running text to the prose when its rows are fragments of sentences", () => {
+        // Questions wrapping over several lines whose continuations fall into rows of their own.
+        const rows: [string, string?][] = [
+            ["Question", "Method"],
+            ["How can the local supply chains plan", "Robust optimization"],
+            ["to respond to disasters at a local"],
+            ["and global scale in terms of relief?"],
+            ["How smart cities can help to support", "System dynamics"],
+            ["epidemic epicenters and their hospitals?", "and simulation"],
+            ["What makes operations in disturbed", "Stochastic"],
+            ["supply chains resilient to the shock?", "programming"],
+        ];
+        const p = page(rows.map(([a, b], k) => line(100 + 30 * k, b ? [[72, 250, a], [320, 420, b]] : [[72, 250, a]])));
+        const d = detection(p, [["table", [60, 60, 560, 700]]]);
+        // The long cells read as running text; the table holds them all the same.
+        d.routing!.flags = d.routing!.lines.map((l) => (l.words >= 6 ? LINE_RUNNING : 0));
+        expect(regionItemsForPage(p, d).items).toEqual([]);
+        // So does one with rules that leave several rows between them.
+        d.routing!.rules = [120, 240, 300].map((y): Rect => [70, y, 422, y + 0.5]);
+        expect(regionItemsForPage(p, d).items).toEqual([]);
+        // With its cells whole, the same table reads row by row.
+        const whole = page([
+            line(100, [[72, 250, "Question"], [320, 420, "Method"]]),
+            line(130, [[72, 250, "How can the local supply chains respond?"], [320, 420, "Robust optimization"]]),
+            line(160, [[72, 250, "How can smart cities support epicenters?"], [320, 420, "System dynamics"]]),
+            line(190, [[72, 250, "What makes operations resilient to shocks?"], [320, 420, "Stochastic programming"]]),
+        ]);
+        const w = detection(whole, [["table", [60, 60, 560, 700]]]);
+        w.routing!.flags = w.routing!.lines.map((l) => (l.words >= 6 ? LINE_RUNNING : 0));
+        expect(regionItemsForPage(whole, w).items[0].rows).toHaveLength(4);
+    });
+
+    it("keeps a table ruled under every row whose key columns happen to run in order", () => {
+        const records = [
+            ["Alpha", "Mouse", "0.91"],
+            ["Bravo", "Rabbit", "0.87"],
+            ["Charlie", "Rat", "0.78"],
+            ["Delta", "Sheep", "0.82"],
+            ["Echo", "Swine", "0.69"],
+            ["Foxtrot", "Wolf", "0.95"],
+        ];
+        const p = page([
+            line(100, [[72, 150, "Accession"], [220, 300, "Model"], [380, 420, "Score"]]),
+            ...records.map(([a, m, v], k) => line(124 + 20 * k, [[72, 150, a], [220, 300, m], [380, 420, v]])),
+        ]);
+        const rows = ["Accession | Model | Score", ...records.map((r) => r.join(" | "))];
+        const rules: Rect[] = [96, 118, 140, 160, 180, 200, 220, 240].map((y): Rect => [70, y, 422, y + 0.5]);
+        const d = detection(p, [["table", [60, 60, 560, 700]]]);
+        d.routing!.rules = rules;
+        expect(rowTexts(regionItemsForPage(p, d).items[0])).toEqual(rows);
+        // Without rules between its rows the value column still pairs each record.
+        const open = detection(p, [["table", [60, 60, 560, 700]]]);
+        open.routing!.rules = [96, 118, 240].map((y): Rect => [70, y, 422, y + 0.5]);
+        expect(rowTexts(regionItemsForPage(p, open).items[0])).toEqual(rows);
+    });
+
+    it("keeps a text table ruled under every row whose cells start lower case", () => {
+        const records = [
+            ["enrolment", "education", "total enrolled students divided by the population"],
+            ["literacy", "education", "share of adults who can read and write a short text"],
+            ["income", "economy", "gross household income per adult member in dollars"],
+            ["tenure", "housing", "share of households that own the dwelling they live in"],
+        ];
+        const p = page([
+            line(100, [[72, 150, "Variable"], [190, 260, "Category"], [300, 540, "Definition"]]),
+            ...records.map(([v, c, d], k) => line(124 + 20 * k, [[72, 150, v], [190, 260, c], [300, 540, d]])),
+        ]);
+        const rules: Rect[] = [96, 118, 140, 160, 180, 200].map((y): Rect => [70, y, 542, y + 0.5]);
+        const d = detection(p, [["table", [60, 60, 560, 700]]]);
+        d.routing!.flags = d.routing!.lines.map((l) => (l.words >= 6 ? LINE_RUNNING : 0));
+        d.routing!.rules = rules;
+        expect(rowTexts(regionItemsForPage(p, d).items[0])).toEqual(["Variable | Category | Definition", ...records.map((r) => r.join(" | "))]);
+    });
+
+    it("never reads a decimal value as a list item", () => {
+        const p = page([
+            line(100, [[72, 330, "(metaverse, digital economy and its main users)"], [400, 440, "0.923"]]),
+            line(112, [[72, 330, "(digital economy, digital transformation and"], [400, 440, "0.902"]]),
+            line(124, [[72, 330, "(digital economy, wearable device and services)"], [400, 440, "0.829"]]),
+        ]);
+        expect(table(p).items[0].rows).toHaveLength(3);
+    });
+
     it("takes columns from rows whose cells stand side by side, not from pieces stacked in a row", () => {
         // Labels set as two short pieces stacked in each row: four pieces but three columns.
         const stacked = (y: number, a: string, b: string, mean: string, sd: string) => [
@@ -598,7 +928,7 @@ describe("regionItemsForPage tables", () => {
         ]);
     });
 
-    it("takes columns from rows that align, not from a line split at wide word gaps", () => {
+    it("takes columns from rows that align, not from a line split at wide word gaps, and joins its pieces", () => {
         const p = page([
             line(100, [[72, 160, "Student (2020)"], [200, 350, "Businesses are tourism operators"], [400, 540, "Operators decrease"]]),
             // Justified word gaps split one line of the middle column into pieces.
@@ -608,7 +938,9 @@ describe("regionItemsForPage tables", () => {
         ]);
         const { items } = table(p);
         expect(items[0].columns).toBe(3);
-        expect(items[0].rows.map((r) => r.map((c) => c.column ?? -1))).toEqual([[0, 1, 2], [-1, -1, -1, -1], [0, 1, 2], [0, 1, 2]]);
+        // The split line's pieces in one column are one cell again.
+        expect(items[0].rows.map((r) => r.map((c) => c.column ?? -1))).toEqual([[0, 1, 2], [1, 2], [0, 1, 2], [0, 1, 2]]);
+        expect(items[0].rows[1].map((c) => c.text)).toEqual(["Returns; revenue; costs;", "For all types."]);
     });
 
     it("never takes columns from rows whose values sit in different columns", () => {
@@ -719,7 +1051,39 @@ describe("regionItemsForPage tables", () => {
         expect(table(p, (t) => t.startsWith("Accumulate")).items).toEqual([]);
     });
 
-    it("keeps a clean one-column list and a table without text", () => {
+    it("leaves a list set in columns to the prose: it reads down the columns", () => {
+        const left = ["additive bilingualism", "adolescent register", "alphabetic principle", "automaticity", "bottom-up model", "deep orthographies"];
+        const right = ["narrative mode", "paradigmatic mode", "phonological recoding", "reading for meaning", "segmentation", "submersion"];
+        const p = page(left.map((t, k) => line(100 + 15 * k, [[72, 220, t], [320, 470, right[k]]])));
+        expect(table(p).items).toEqual([]);
+        // Reference entries under a hanging indent, an author heading several of them.
+        const refs = page([
+            line(100, [[72, 220, "Abbott, Andrew"], [320, 470, "Bechky, Beth A."]]),
+            line(112, [[90, 230, "1988 The system of professions"], [338, 480, "2003b Object lessons"]]),
+            line(124, [[72, 220, "Balogun, J., and P. Johnson"], [320, 470, "Bechky, Beth A."]]),
+            line(136, [[90, 230, "2003 Three responses to the"], [338, 480, "2006a Gaffers, gofers"]]),
+            line(148, [[72, 220, "Barley, Stephen R."], [320, 470, "Brown, John Seely"]]),
+            line(160, [[90, 230, "1996a Technicians in the"], [338, 480, "1991 Organizational learning"]]),
+            line(172, [[72, 220, "Barley, Stephen R."], [320, 470, "Bryan, Lowell L."]]),
+        ]);
+        expect(table(refs).items).toEqual([]);
+    });
+
+    it("keeps a table whose columns are in order across its rows, or repeat values", () => {
+        // Terms and their abbreviations: in order down the columns and across the rows.
+        const terms = ["alpha", "beta", "delta", "gamma", "kappa", "sigma"];
+        const p = page(terms.map((t, k) => line(100 + 15 * k, [[72, 220, `${t} level`], [320, 470, `${t} rate`]])));
+        expect(table(p).items).toHaveLength(1);
+        // Sorted parameter columns of a results table key nothing: bare numbers are no entries.
+        const grid = page(Array.from({ length: 6 }, (_, k) => line(100 + 15 * k, [[72, 120, String(5 * (k + 1))], [200, 250, "0"], [320, 370, "0.81"]])));
+        expect(table(grid).items).toHaveLength(1);
+        // Label columns each in order down the rows, but the second does not start where the first ends.
+        const labels = [["HEiDi", "Cold"], ["HEiDi", "Cold"], ["HEiDi", "Ice"], ["TriCS", "Ice"]];
+        const runs = page(labels.map(([a, b], k) => line(100 + 15 * k, [[72, 120, a], [200, 250, b], [320, 370, "0.81"]])));
+        expect(table(runs).items).toHaveLength(1);
+    });
+
+    it("keeps a clean one-column list, and a table without a text layer as an empty item", () => {
         const list = page([
             line(100, [[72, 200, "Pre-operative"]]),
             line(115, [[90, 220, "Beta-blocker therapy"]]),
@@ -730,9 +1094,13 @@ describe("regionItemsForPage tables", () => {
         expect(rowTexts(items[0])).toEqual(["Pre-operative", "Beta-blocker therapy", "Operative technique", "Internal mammary artery use"]);
         expect(items[0].columns).toBeUndefined();
 
+        // A raster table: no text stands in its box.
         const prose = page([line(800, [[72, 540, PROSE]])]);
         const empty = table(prose);
         expect(empty.items.map((i) => [i.kind, i.rows])).toEqual([["table", []]]);
+        // A table whose text all went back to the prose is no item.
+        const returned = page([line(120, [[72, 540, PROSE]])]);
+        expect(table(returned, () => true).items).toEqual([]);
     });
 });
 

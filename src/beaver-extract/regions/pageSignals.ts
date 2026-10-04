@@ -115,6 +115,12 @@ export interface RegionLine {
     range: [number, number];
     /** The pieces `mergeRowFragments` joined into this line; absent for a single piece. */
     parts?: RegionLine[];
+    /**
+     * Gaps wider than a word space between inked characters of the piece, as [x0, x1]
+     * (`wideGaps` adds those between joined pieces): where table cells that MuPDF set on
+     * one line meet.
+     */
+    gaps?: [number, number][];
 }
 
 const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/g;
@@ -225,6 +231,25 @@ function linePieces(line: RawLineDetailed, chars: readonly string[], em: number)
     }
     pieces.push([start, line.chars.length]);
     return pieces;
+}
+
+/** Gaps of at least `min` between consecutive inked characters in [a, b) of a horizontal line. */
+function innerGaps(line: RawLineDetailed, chars: readonly string[], a: number, b: number, min: number): [number, number][] {
+    const gaps: [number, number][] = [];
+    let prevRight = -Infinity;
+    for (let i = a; i < b; i++) {
+        if (/\s/.test(chars[i] ?? " ")) continue;
+        const box = line.chars[i].bbox;
+        if (prevRight !== -Infinity && box.l - prevRight >= min) gaps.push([prevRight, box.l]);
+        prevRight = Math.max(prevRight === -Infinity ? box.r : prevRight, box.r);
+    }
+    return gaps;
+}
+
+/** A line's gaps wider than a word space: its pieces' own (`RegionLine.gaps`) and those between them. */
+export function wideGaps(line: RegionLine): [number, number][] {
+    if (!line.parts) return line.gaps ?? [];
+    return line.parts.flatMap((p, k) => [...(k > 0 ? [[line.parts![k - 1].bbox[2], p.bbox[0]] as [number, number]] : []), ...(p.gaps ?? [])]);
 }
 
 /** The structured-text lines that `RegionLine.source` numbers (1-based), in page order. */
@@ -385,6 +410,7 @@ export function pageLines(page: RawPageData): RegionLine[] {
                 }
                 const m = rangeMath(chars, runs, a, b, textFont);
                 const maxSize = m.maxSize || size;
+                const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, chars, a, b, WORD_GAP_EM * Math.max(1, size)) : [];
                 lines.push({
                     bbox,
                     text,
@@ -404,6 +430,7 @@ export function pageLines(page: RawPageData): RegionLine[] {
                     source,
                     pieces: pieces.length,
                     range: [a, b],
+                    ...(gaps.length ? { gaps } : {}),
                 });
             }
         }
@@ -499,6 +526,107 @@ export function mergeRowFragments(lines: RegionLine[], prims: readonly Primitive
         out.push(cur);
     }
     return out;
+}
+
+/** A manuscript line number: a bare integer. */
+const LINE_NUMBER_RE = /^\d{1,5}$/;
+/** A gutter numbers at least this many lines... */
+const GUTTER_MIN_LINES = 8;
+/** ...counting up by one from line to line for at least this share of them. */
+const GUTTER_CONSECUTIVE = 0.7;
+/** Its numbers line up on one edge, or on their centres, within this many points. */
+const GUTTER_ALIGN = 3;
+/** Lines of at least this many words set the page's text body. */
+const BODY_WORDS = 4;
+
+/** A table's number column has values (digits, no letters) on at least this share of its rows. */
+const GUTTER_VALUE_ROWS = 0.5;
+/** A heading over a number column stands at most this many line heights above its first number. */
+const HEADING_GAP = 2;
+/** An enumeration mark ("5.", "(5)", "[5]"): it numbers an item, it is no value. */
+const ENUMERATION_RE = /^[([]?\d{1,4}[.)\]]$/u;
+
+/**
+ * A manuscript's line numbers: bare integers stacked in one column in the margin,
+ * wholly outside the page's text body (left of the left edge of its lines of words,
+ * or right of their right edge), counting up by one from line to line. They number
+ * the lines of the page, whatever the lines hold, and are no column of a table: a
+ * table's row numbers stand inside the text body, or, on a page the table fills,
+ * share its rows with the table's values or stand under a heading of their own
+ * (`numbersTable`).
+ */
+export function lineNumberGutter(lines: readonly RegionLine[]): Set<RegionLine> {
+    const upright = lines.filter((l) => !l.rot && !l.skewed);
+    const body = upright.filter((l) => l.alphaWords >= BODY_WORDS);
+    const out = new Set<RegionLine>();
+    if (body.length < 3) return out;
+    const lefts = body.map((l) => l.bbox[0]).sort((a, b) => a - b);
+    const rights = body.map((l) => l.bbox[2]).sort((a, b) => a - b);
+    const bodyLeft = lefts[Math.floor(0.1 * lefts.length)];
+    const bodyRight = rights[Math.min(rights.length - 1, Math.floor(0.9 * rights.length))];
+    const numbers = upright.filter((l) => LINE_NUMBER_RE.test(l.text.trim()));
+    const sides: { side: RegionLine[]; outer: [number, number] }[] = [
+        { side: numbers.filter((l) => l.bbox[2] < bodyLeft), outer: [-Infinity, bodyLeft] },
+        { side: numbers.filter((l) => l.bbox[0] > bodyRight), outer: [bodyRight, Infinity] },
+    ];
+    const stacked = sides.filter(({ side }) => {
+        if (side.length < GUTTER_MIN_LINES) return false;
+        // Flush left, flush right or centred: numbers of one and two digits differ in width.
+        const aligned = (at: (b: Rect) => number) => {
+            const xs = side.map((l) => at(l.bbox)).sort((a, b) => a - b);
+            return xs[xs.length - 1 - Math.floor(0.1 * xs.length)] - xs[Math.floor(0.1 * xs.length)] <= GUTTER_ALIGN;
+        };
+        if (!aligned((b) => b[0]) && !aligned((b) => b[2]) && !aligned((b) => (b[0] + b[2]) / 2)) return false;
+        const sorted = [...side].sort((a, b) => a.bbox[1] - b.bbox[1]);
+        const values = sorted.map((l) => Number(l.text.trim()));
+        const steps = values.slice(1).filter((v, k) => v === values[k] + 1).length;
+        return steps >= GUTTER_CONSECUTIVE * (values.length - 1);
+    });
+    // Numbers in both margins number the same lines: neither is a value of the other's rows.
+    const others = upright.filter((l) => !stacked.some(({ side }) => side.includes(l)));
+    for (const { side, outer } of stacked) {
+        if (!numbersTable(side, others, outer)) for (const l of side) out.add(l);
+    }
+    return out;
+}
+
+/**
+ * Whether a column of consecutive numbers outside the page's lines of words is a
+ * table's number column rather than a manuscript's line numbers. A gutter holds
+ * nothing but its numbers, beside lines of text. A table's numbers share their rows
+ * with the table's values (most rows hold a cell of digits without letters that
+ * is no enumeration mark), or stand under a heading of their own ("No.") set within
+ * the column: directly over the numbers (`HEADING_GAP`), or under other text of the
+ * page such as a caption. Text alone at the top of the page, a gap above the
+ * numbers, is page furniture.
+ */
+function numbersTable(
+    numbers: readonly RegionLine[],
+    others: readonly RegionLine[],
+    [outerFrom, outerTo]: [number, number],
+): boolean {
+    const valueRows = numbers.filter((n) => {
+        const cy = (n.bbox[1] + n.bbox[3]) / 2;
+        return others.some(
+            (l) => l.bbox[1] < cy && l.bbox[3] > cy && /\d/u.test(l.text) && !/\p{L}/u.test(l.text) && !ENUMERATION_RE.test(l.text.trim()),
+        );
+    }).length;
+    if (valueRows >= GUTTER_VALUE_ROWS * numbers.length) return true;
+    const em = Math.max(...numbers.map((n) => n.size));
+    const left = Math.min(...numbers.map((n) => n.bbox[0])) - em;
+    const right = Math.max(...numbers.map((n) => n.bbox[2])) + em;
+    // The numbering starts at its smallest number; a page number can stand above it.
+    const first = numbers.reduce((a, b) => (Number(b.text.trim()) < Number(a.text.trim()) ? b : a));
+    const top = first.bbox[1];
+    const h = first.bbox[3] - first.bbox[1];
+    return others.some(
+        (l) =>
+            /\p{L}/u.test(l.text) &&
+            l.bbox[0] >= Math.max(left, outerFrom) &&
+            l.bbox[2] <= Math.min(right, outerTo) &&
+            l.bbox[3] <= top &&
+            (top - l.bbox[3] <= HEADING_GAP * h || others.some((o) => o !== l && o.bbox[3] <= l.bbox[1])),
+    );
 }
 
 /** Character-weighted mode of horizontal line font sizes (0.5pt bins). */

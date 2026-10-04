@@ -13,9 +13,11 @@ interface TestLine {
     caption?: boolean;
     /** Routed to the table (index 0) before completion. */
     cell?: boolean;
+    /** Gaps wider than a word space inside the line. */
+    gaps?: [number, number][];
 }
 
-function regionLine(bbox: Rect, text: string): RegionLine {
+function regionLine(bbox: Rect, text: string, gaps?: [number, number][]): RegionLine {
     const ink = text.replace(/\s/g, "").length;
     return {
         bbox,
@@ -33,12 +35,13 @@ function regionLine(bbox: Rect, text: string): RegionLine {
         source: 0,
         pieces: 1,
         range: [0, text.length],
+        ...(gaps ? { gaps } : {}),
     };
 }
 
 /** Routes after completion for one table at `box`: "T" for the table, "-" for prose. */
 function complete(test: TestLine[], box: Rect, rules: Rect[] = []): string {
-    const lines = test.map((l) => regionLine(l.bbox, l.text));
+    const lines = test.map((l) => regionLine(l.bbox, l.text, l.gaps));
     const routes = test.map((l) => (l.cell ? 0 : -1));
     completeTableRows(
         {
@@ -54,10 +57,10 @@ function complete(test: TestLine[], box: Rect, rules: Rect[] = []): string {
 }
 
 /** Routes after completion for two tables: lines at `second` start in table 1. */
-function completeTwo(test: TestLine[], box0: Rect, box1: Rect, rules: Rect[], second: number[]): string {
-    const lines = test.map((l) => regionLine(l.bbox, l.text));
+function completeTwo(test: TestLine[], box0: Rect, box1: Rect, rules: Rect[], second: number[], merged?: Map<number, number>): string {
+    const lines = test.map((l) => regionLine(l.bbox, l.text, l.gaps));
     const routes = test.map((l, i) => (second.includes(i) ? 1 : l.cell ? 0 : -1));
-    completeTableRows(
+    const into = completeTableRows(
         {
             lines,
             running: test.map((l) => !!l.running),
@@ -70,6 +73,7 @@ function completeTwo(test: TestLine[], box0: Rect, box1: Rect, rules: Rect[], se
         },
         routes,
     );
+    for (const [k, v] of into) merged?.set(k, v);
     return routes.map((r) => (r === 0 ? "T" : r === 1 ? "1" : "-")).join("");
 }
 
@@ -363,5 +367,199 @@ describe("completeTableRows", () => {
         const column: TestLine[] = [86, 100, 114, 128, 142].map((y) => ({ bbox: [320, y, 560, y + 10], text: PROSE, running: true }));
         const rules: Rect[] = [[40, 141, 580, 141.5]];
         expect(complete([...table, ...column], [70, 98, 242, 140], rules)).toBe("TTTTTT-----");
+    });
+
+    it("returns to its paragraph the last line the box took from the column beside the table", () => {
+        const table: TestLine[] = [100, 112, 124, 136, 148].flatMap((y) => [
+            { bbox: [60, y, 100, y + 10], text: `${y}`, cell: true },
+            { bbox: [120, y, 240, y + 10], text: "Extremely Characteristic", cell: true },
+        ]);
+        const column: TestLine[] = [
+            { bbox: [325, 78, 540, 88], text: "CEO, more so than any other chemical company, has long", running: true },
+            { bbox: [325, 88, 540, 98], text: "been run by its board, and the board has in turn always", running: true },
+            { bbox: [325, 100, 540, 110], text: "always been managed by a team of executives rather than", running: true },
+            { bbox: [325, 110, 540, 120], text: "an autocratic CEO, says John Roberts, analyst at Merrill", running: true },
+            { bbox: [325, 120, 420, 130], text: "Lynch (Westervelt, 2000).", cell: true },
+            { bbox: [325, 138, 540, 148], text: "CEO Michael Parker notes that the top management team", running: true },
+        ];
+        expect(complete([...table, ...column], [58, 98, 545, 160])).toBe("T".repeat(10) + "------");
+        // A column of running text that ends with the table is the table's: it keeps its lines.
+        expect(complete([...table, ...column.slice(2)], [58, 98, 545, 160]).slice(12, 13)).toBe("T");
+        // So does a table's own column of running text under the table's rules.
+        const ruled: Rect[] = [[56, 96, 545, 96.5], [56, 160, 545, 160.5]];
+        expect(complete([...table, ...column], [58, 98, 545, 160], ruled).slice(14, 15)).toBe("T");
+        // A caption's sentence running on above a header cell of the table keeps no line.
+        const caption: TestLine = { bbox: [20, 66, 540, 78], text: "Table 1 Data sources of Landsat images used", running: true, caption: true };
+        const header: TestLine = { bbox: [20, 84, 52, 94], text: "Year Satellite", cell: true };
+        expect(complete([caption, header, ...table], [18, 82, 245, 160])).toBe("-T" + "T".repeat(10));
+    });
+
+    describe("tables framed by their own rules", () => {
+        /** A header row and the rules of a booktabs table: top, under the header, bottom. */
+        const header: TestLine[] = [
+            { bbox: [72, 104, 120, 114], text: "Theme", cell: true },
+            { bbox: [200, 104, 230, 114], text: "Gap", cell: true },
+            { bbox: [380, 104, 480, 114], text: "Research questions", cell: true },
+        ];
+        const rules: Rect[] = [[70, 100, 540, 100.5], [70, 117, 540, 117.5], [70, 220, 540, 220.5]];
+        /** A row at `y`: a short label, a three-line cell of running text, a centred two-line one. */
+        const textRow = (y: number, cell: boolean): TestLine[] => [
+            { bbox: [72, y, 150, y + 10], text: "Circular supply chain", cell },
+            ...[0, 1, 2].map((k): TestLine => ({ bbox: [180, y + 12 * k, 340, y + 12 * k + 10], text: "focus on circular supply chain management with", running: true })),
+            { bbox: [372, y, 532, y + 10], text: "RQ1 What are the key success factors for", running: true },
+            { bbox: [384, y + 12, 519, y + 22], text: "the circular economy transition to work?", running: true },
+        ];
+
+        it("routes its running-text cells and the rows its box missed", () => {
+            const lines = [...header, ...textRow(122, true), ...textRow(162, false), ...text];
+            expect(complete(lines, [70, 102, 540, 133], rules)).toBe("TTT" + "T".repeat(6) + "T".repeat(6) + "---");
+        });
+
+        it("leaves the text beside it to the page without a frame or a second column", () => {
+            const lines = [...header, ...textRow(122, true), ...textRow(162, false), ...text];
+            // Unframed (one rule), the rows the box missed stay prose.
+            expect(complete(lines, [70, 102, 540, 133], rules.slice(0, 1)).slice(9)).toBe("-".repeat(9));
+            // A framed listing has one column, no grid: its running lines stay prose.
+            const listing: TestLine[] = [
+                { bbox: [72, 104, 200, 114], text: "tree:", cell: true },
+                { bbox: [82, 116, 220, 126], text: "- id: N04", cell: true },
+                { bbox: [92, 128, 300, 138], text: "title: three layers that separate the evidence from code", running: true },
+                { bbox: [92, 140, 200, 150], text: "type: decision", cell: true },
+            ];
+            expect(complete([...listing, ...text], [70, 102, 302, 152], [[70, 100, 540, 100.5], [70, 155, 540, 155.5]])).toBe("TT-T---");
+        });
+
+        it("ends at its frame: lines its box took from the next text column go back to it", () => {
+            const table: TestLine[] = [100, 114, 128, 142].flatMap((y) => [
+                { bbox: [40, y, 120, y + 10], text: "Method", cell: true },
+                { bbox: [200, y, 240, y + 10], text: "70.2", cell: true },
+            ]);
+            const frame: Rect[] = [[38, 96, 280, 96.5], [38, 154, 280, 154.5]];
+            // The next column: a heading the box took, among paragraph lines.
+            const column: TestLine[] = [
+                { bbox: [320, 72, 560, 82], text: PROSE, running: true },
+                { bbox: [320, 84, 560, 94], text: PROSE, running: true },
+                { bbox: [320, 114, 420, 124], text: "Supplementary materials", cell: true },
+                { bbox: [320, 140, 560, 150], text: PROSE, running: true },
+                { bbox: [320, 152, 560, 162], text: PROSE, running: true },
+            ];
+            expect(complete([...table, ...column], [38, 98, 560, 152], frame)).toBe("TTTTTTTT-----");
+            // Without its own rules the box decides, as before.
+            expect(complete([...table, ...column], [38, 98, 560, 152])).toBe("TTTTTTTT--T--");
+        });
+
+        it("merges a fragment of the table directly under its rows, not a table past its caption", () => {
+            const rows = (y: number, cell: boolean, n = 3): TestLine[] =>
+                Array.from({ length: n }, (_, k) => 12 * k).flatMap((d) => [
+                    { bbox: [72, y + d, 140, y + d + 10], text: `C57BL/${y + d} mice`, cell },
+                    { bbox: [250, y + d, 360, y + d + 10], text: "Shanghai Model Organisms", cell },
+                    { bbox: [400, y + d, 440, y + d + 10], text: `SM-${y + d}`, cell },
+                ]);
+            const ruled: Rect[] = [100, 112, 124, 136, 148, 160, 172, 184].map((y): Rect => [70, y - 2.5, 540, y - 2]);
+            // Cut at a ruled row: the lower fragment is the table's.
+            const merged = new Map<number, number>();
+            const lines = [...rows(100, true), ...rows(136, false), ...text];
+            const second = Array.from({ length: 9 }, (_, k) => 9 + k);
+            expect(completeTwo(lines, [70, 98, 540, 134], [70, 134, 540, 170], ruled, second, merged)).toBe("T".repeat(18) + "---");
+            expect([...merged]).toEqual([[1, 0]]);
+            // Cut at a band of its grid (a group header): the band joins too, in its place.
+            const band: TestLine = { bbox: [72, 140, 230, 150], text: "Experimental models: Organisms/strains", running: true };
+            const lower = Array.from({ length: 9 }, (_, k) => 10 + k);
+            const banded = [...rows(100, true), band, ...rows(152, false), ...text];
+            expect(completeTwo(banded, [70, 98, 540, 136], [70, 150, 540, 188], ruled, lower, new Map()).slice(0, 19)).toBe("T".repeat(19));
+            // A caption between them keeps two tables apart.
+            const caption: TestLine = { bbox: [72, 140, 230, 150], text: "Table 2. Organisms and strains", caption: true };
+            const tables = [...rows(100, true), caption, ...rows(152, false), ...text];
+            expect(completeTwo(tables, [70, 98, 540, 136], [70, 150, 540, 188], ruled, lower, new Map()).slice(9, 19)).toBe("-111111111");
+            // As does one set wider than the tables, past the ends of their rules.
+            const wide = [...rows(100, true), { ...caption, bbox: [72, 140, 540, 150] as Rect }, ...rows(152, false), ...text];
+            const narrow: Rect[] = ruled.map((r): Rect => [r[0], r[1], 445, r[3]]);
+            expect(completeTwo(wide, [70, 98, 445, 136], [70, 150, 445, 188], narrow, lower, new Map()).slice(9, 19)).toBe("-111111111");
+            const paragraph: TestLine = { bbox: [72, 140, 540, 150], text: "The second table lists the strains bred in house.", running: true };
+            const parted = [...rows(100, true), paragraph, ...rows(152, false), ...text];
+            expect(completeTwo(parted, [70, 98, 445, 136], [70, 150, 445, 188], narrow, lower, new Map()).slice(9, 19)).toBe("-111111111");
+            // A cell of the table's own reaching past its rules is no such line.
+            const cell: TestLine = { bbox: [250, 140, 520, 150], text: "G (baking ⇒ F serving)" };
+            const reaching = [...rows(100, true), cell, ...rows(152, false), ...text];
+            expect(completeTwo(reaching, [70, 98, 445, 136], [70, 150, 445, 188], narrow, lower, new Map()).slice(0, 9)).toBe("T".repeat(9));
+            expect(completeTwo(reaching, [70, 98, 445, 136], [70, 150, 445, 188], narrow, lower, new Map()).slice(10, 19)).toBe("T".repeat(9));
+            // So does a header the lower table repeats.
+            const header = (y: number, cell: boolean): TestLine[] => [
+                { bbox: [72, y, 140, y + 10], text: "Strain", cell },
+                { bbox: [250, y, 360, y + 10], text: "Source", cell },
+                { bbox: [400, y, 440, y + 10], text: "Identifier", cell },
+            ];
+            const repeated = [...header(88, true), ...rows(100, true), ...header(136, false), ...rows(148, false), ...text];
+            const lowerTable = Array.from({ length: 12 }, (_, k) => 12 + k);
+            expect(completeTwo(repeated, [70, 86, 540, 134], [70, 134, 540, 182], ruled, lowerTable, new Map()).slice(12, 24)).toBe("1".repeat(12));
+            // Or repeats its rows under labels of its own (a wiring diagram over the second table).
+            const twoRowHeader = (y: number, cell: boolean): TestLine[] => [
+                ...header(y, cell),
+                { bbox: [250, y + 10, 360, y + 20], text: "Supplier name", cell },
+                { bbox: [400, y + 10, 440, y + 20], text: "Catalog number", cell },
+            ];
+            const labels: TestLine[] = [
+                { bbox: [72, 136, 90, 146], text: "H1", cell: false },
+                { bbox: [250, 136, 268, 146], text: "H6", cell: false },
+            ];
+            const diagram = [...twoRowHeader(78, true), ...rows(100, true), ...labels, ...twoRowHeader(148, false), ...rows(170, false), ...text];
+            const lowerDiagram = Array.from({ length: 16 }, (_, k) => 14 + k);
+            const ruledDiagram: Rect[] = [100, 112, 124, 136, 170, 182, 194, 206].map((y): Rect => [70, y - 2.5, 540, y - 2]);
+            expect(completeTwo(diagram, [70, 76, 540, 134], [70, 134, 540, 204], ruledDiagram, lowerDiagram, new Map()).slice(0, 30)).toBe("T".repeat(14) + "1".repeat(16));
+            // One repeated row under a group header of its own is a panel of the same table.
+            const panel = [...header(88, true), ...rows(100, true), ...labels, ...header(148, false), ...rows(160, false), ...text];
+            const lowerPanel = Array.from({ length: 14 }, (_, k) => 12 + k);
+            const ruledPanel: Rect[] = [100, 112, 124, 136, 160, 172, 184, 196].map((y): Rect => [70, y - 2.5, 540, y - 2]);
+            expect(new Set(completeTwo(panel, [70, 86, 540, 134], [70, 134, 540, 194], ruledPanel, lowerPanel, new Map()).slice(0, 26)).size).toBe(1);
+        });
+
+        it("bounds its grid by its frame, not by a stray line the box took beside it", () => {
+            // A ruled table in the left column; the box reaches over the right column, where it
+            // took an equation number at the column's edge.
+            const table: TestLine[] = [100, 114, 128, 142, 156, 170, 184, 198].flatMap((y) => [
+                { bbox: [40, y, 120, y + 10], text: "Coarse Tree", cell: true },
+                { bbox: [200, y, 240, y + 10], text: "72.00", cell: true },
+            ]);
+            const frame: Rect[] = [96, 110, 124, 138, 152, 166, 180, 194, 210].map((y): Rect => [38, y, 280, y + 0.5]);
+            const column: TestLine[] = [
+                { bbox: [554, 100, 565, 110], text: "(3)", cell: true },
+                ...[114, 128, 142, 156].map((y): TestLine => ({ bbox: [312, y, 565, y + 10], text: PROSE, running: true })),
+            ];
+            expect(complete([...table, ...column], [38, 98, 565, 208], frame).slice(16)).toBe("-----");
+            // A fraction bar in the next column, level with one of the table's rules, does not
+            // carry the frame across the gutter to the equation over it.
+            const equation: TestLine = { bbox: [389, 114, 469, 123], text: "Total signals", cell: true };
+            const bar: Rect = [346, 124, 470, 124.5];
+            expect(complete([...table, ...column, equation], [38, 98, 565, 208], [...frame, bar]).slice(21)).toBe("-");
+        });
+
+        it("returns a list's numbers beyond the frame to the entries they open", () => {
+            // A framed table whose box reaches into the reference list beside it.
+            const table: TestLine[] = [100, 114, 128, 142].flatMap((y) => [
+                { bbox: [40, y, 120, y + 10], text: "Shuhei", cell: true },
+                { bbox: [200, y, 270, y + 10], text: "Neurology", cell: true },
+            ]);
+            const frame: Rect[] = [[38, 96, 280, 96.5], [38, 154, 280, 154.5]];
+            const references: TestLine[] = [86, 100, 114, 128, 142, 156].flatMap((y, k) => [
+                { bbox: [300, y, 310, y + 10], text: `${15 + k}.`, cell: y >= 100 && y <= 142 },
+                { bbox: [320, y, 560, y + 10], text: PROSE, running: true },
+            ]);
+            expect(complete([...table, ...references], [38, 98, 450, 152], frame)).toBe("T".repeat(8) + "-".repeat(12));
+        });
+
+        it("routes cells of two grid columns that one line joins at their gutter", () => {
+            // The third row's theme and gap stand on one structured-text line across the gutter.
+            const joined: TestLine[] = [
+                { bbox: [76, 202, 334, 212], text: "Circular ecosystem architecture Limited exploration of ecosystems", running: true, gaps: [[150, 180]] },
+                { bbox: [372, 202, 532, 212], text: "RQ8 How do circular ecosystem architectures", running: true },
+                { bbox: [196, 214, 324, 224], text: "and stakeholders' role in supporting", running: true },
+            ];
+            const lines = [...header, ...textRow(122, true), ...textRow(162, true), ...joined, ...text];
+            const frame: Rect[] = [[70, 100, 540, 100.5], [70, 117, 540, 117.5], [70, 240, 540, 240.5]];
+            expect(complete(lines, [70, 102, 540, 200], frame).slice(15, 18)).toBe("TTT");
+            // Without a gap at the gutter the line spans two columns: no cell of the grid.
+            const spanning = joined.map((l) => ({ ...l, gaps: undefined }));
+            expect(complete([...header, ...textRow(122, true), ...textRow(162, true), ...spanning, ...text], [70, 102, 540, 200], frame).slice(15, 16)).toBe("-");
+        });
     });
 });
