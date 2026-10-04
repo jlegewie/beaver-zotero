@@ -22,7 +22,13 @@ import { isLinkedUrlAttachment, safeFileExists, safeIsInTrash } from '../../util
 import { loadPreferences } from '../deferredToolPolicy';
 import type { OperationContext } from './operationContext';
 
-import { DeferredToolPreference, type AttachmentRowResult } from '@beaver/agent-core/protocol/agentProtocol';
+import {
+    DeferredToolPreference,
+    type AttachmentRowResult,
+    type NoteResultItem,
+    type RegularListResultItem,
+    type RegularSearchResultItem,
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { wasItemAddedBeforeLastSync } from '../../utils/itemSyncStatus';
 import { isAttachmentOnServer } from '../../utils/webAPI';
@@ -446,6 +452,43 @@ export function degradedAttachmentRow(
     return {
         ...degradedAttachmentInfo(item, parentInfo?.item_id ?? null),
         result_type: 'attachment',
+        parent_title: parentInfo?.title ?? null,
+        parent_item: parentInfo ?? null,
+        date_modified: safeStub(() => item.dateModified) ?? null,
+    };
+}
+
+/** Data types read when building regular and note search/list rows. */
+export const ROW_DATA_TYPES = ['primaryData', 'itemData', 'creators', 'note'];
+
+/**
+ * Minimal regular-item row for an item whose data Zotero cannot read, so one
+ * bad record degrades instead of failing the whole search or list page.
+ */
+export function degradedRegularRow(item: Zotero.Item): RegularSearchResultItem & RegularListResultItem {
+    return {
+        result_type: 'regular',
+        item_id: modelObjectId(item.libraryID, item.key),
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        item_type: safeStub(() => item.itemType) ?? 'unknown',
+        title: null,
+        creators: null,
+        year: null,
+        date_added: safeStub(() => item.dateAdded) ?? null,
+        date_modified: safeStub(() => item.dateModified) ?? null,
+    };
+}
+
+/**
+ * Minimal note row for a note whose data Zotero cannot read.
+ */
+export function degradedNoteRow(item: Zotero.Item, parentInfo: ItemStub | null): NoteResultItem {
+    return {
+        result_type: 'note',
+        item_id: modelObjectId(item.libraryID, item.key),
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        title: null,
+        parent_item_id: parentInfo?.item_id ?? null,
         parent_title: parentInfo?.title ?? null,
         parent_item: parentInfo ?? null,
         date_modified: safeStub(() => item.dateModified) ?? null,
@@ -1574,8 +1617,10 @@ export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: num
     const bestAttachment = await item.getBestAttachment();
     const bestAttachmentKey = bestAttachment ? `${bestAttachment.libraryID}-${bestAttachment.key}` : null;
 
-    const supportedAttachmentKeys = attachmentIDs
-        .map(id => Zotero.Items.get(id))
+    // getBestAttachment() loads only some children; load the rest
+    // asynchronously in case the library's items are not loaded yet.
+    const attachments = attachmentIDs.length ? await Zotero.Items.getAsync(attachmentIDs) : [];
+    const supportedAttachmentKeys = attachments
         .filter(attachment => attachment && isAgentSupportedItem(attachment))
         .map(attachment => {
             const key = `${attachment.libraryID}-${attachment.key}`;

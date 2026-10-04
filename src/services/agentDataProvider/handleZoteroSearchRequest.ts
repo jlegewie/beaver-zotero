@@ -22,7 +22,19 @@ import {
 import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { validateCollectionLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, isReadableItemField, readItemField } from './utils';
+import { readWithDataReload } from '../../utils/zoteroDataLoading';
+import {
+    validateCollectionLibraryAccess,
+    extractYear,
+    formatCreatorsString,
+    getAttachmentInfoForItem,
+    degradedAttachmentRow,
+    degradedNoteRow,
+    degradedRegularRow,
+    isReadableItemField,
+    readItemField,
+    ROW_DATA_TYPES,
+} from './utils';
 import { addSearchCondition, findVacuousNegation, vacuousNegationMessage } from './searchConditions';
 
 
@@ -328,12 +340,16 @@ export async function handleZoteroSearchRequest(
                         }
                         break;
                     case 'creator': {
-                        const creators = item.getCreators();
-                        // lastName covers both personal authors and corporate/institutional
-                        // names (fieldMode=1 stores the full name in lastName)
-                        sortValue = creators.length > 0
-                            ? (creators[0].lastName || '').toLowerCase()
-                            : '';
+                        try {
+                            const creators = await readWithDataReload(item, ROW_DATA_TYPES, () => item.getCreators());
+                            // lastName covers both personal authors and corporate/institutional
+                            // names (fieldMode=1 stores the full name in lastName)
+                            sortValue = creators.length > 0
+                                ? (creators[0].lastName || '').toLowerCase()
+                                : '';
+                        } catch {
+                            sortValue = '';
+                        }
                         break;
                     }
                     case 'year': {
@@ -429,7 +445,12 @@ export async function handleZoteroSearchRequest(
         for (const item of paginatedZoteroItems) {
             if (item.isNote()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                items.push(serializeNote(item, parentInfo));
+                try {
+                    items.push(await readWithDataReload(item, ROW_DATA_TYPES, () => serializeNote(item, parentInfo)));
+                } catch (error) {
+                    logger(`handleZoteroSearchRequest: Degrading unreadable note ${item.key}: ${error}`, 2);
+                    items.push(degradedNoteRow(item, parentInfo ?? null));
+                }
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
                 let attachmentItem: AttachmentRowResult;
@@ -456,54 +477,61 @@ export async function handleZoteroSearchRequest(
                 }
                 items.push(attachmentItem);
             } else {
-                // Get creators
-                const creators = item.getCreators();
-
-                // Get date and extract year
-                let year: number | null = null;
                 try {
-                    const dateStr = item.getField('date', false, true) as string;
-                    if (dateStr) {
-                        year = extractYear(dateStr);
-                    }
-                } catch {
-                    // Date field may not exist for some item types
-                }
+                    items.push(await readWithDataReload(item, ROW_DATA_TYPES, () => {
+                        // Get creators
+                        const creators = item.getCreators();
 
-                // Get title safely
-                let title = '';
-                try {
-                    title = (item.getField('title', false, true) as string) || '';
-                } catch {
-                    // Some item types (like annotations) may not have title field
-                    title = item.getDisplayTitle?.() || '';
-                }
-
-                const resultItem: RegularSearchResultItem = {
-                    result_type: 'regular',
-                    item_id: modelObjectId(item.libraryID, item.key),
-                    library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
-                    item_type: item.itemType,
-                    title,
-                    creators: formatCreatorsString(creators),
-                    year,
-                };
-
-                // Include extra fields if requested
-                if (readableFields.length > 0) {
-                    const extraFields: Record<string, any> = {};
-                    for (const field of readableFields) {
-                        const value = readItemField(item, field);
-                        if (value !== undefined && value !== null && value !== '') {
-                            extraFields[field] = value;
+                        // Get date and extract year
+                        let year: number | null = null;
+                        try {
+                            const dateStr = item.getField('date', false, true) as string;
+                            if (dateStr) {
+                                year = extractYear(dateStr);
+                            }
+                        } catch {
+                            // Date field may not exist for some item types
                         }
-                    }
-                    if (Object.keys(extraFields).length > 0) {
-                        resultItem.extra_fields = extraFields;
-                    }
-                }
 
-                items.push(resultItem);
+                        // Get title safely
+                        let title = '';
+                        try {
+                            title = (item.getField('title', false, true) as string) || '';
+                        } catch {
+                            // Some item types (like annotations) may not have title field
+                            title = item.getDisplayTitle?.() || '';
+                        }
+
+                        const resultItem: RegularSearchResultItem = {
+                            result_type: 'regular',
+                            item_id: modelObjectId(item.libraryID, item.key),
+                            library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+                            item_type: item.itemType,
+                            title,
+                            creators: formatCreatorsString(creators),
+                            year,
+                        };
+
+                        // Include extra fields if requested
+                        if (readableFields.length > 0) {
+                            const extraFields: Record<string, any> = {};
+                            for (const field of readableFields) {
+                                const value = readItemField(item, field);
+                                if (value !== undefined && value !== null && value !== '') {
+                                    extraFields[field] = value;
+                                }
+                            }
+                            if (Object.keys(extraFields).length > 0) {
+                                resultItem.extra_fields = extraFields;
+                            }
+                        }
+                        return resultItem;
+                    }));
+                } catch (error) {
+                    // Isolate the row so one unreadable record does not empty the page.
+                    logger(`handleZoteroSearchRequest: Degrading unreadable item ${item.key}: ${error}`, 2);
+                    items.push(degradedRegularRow(item));
+                }
             }
         }
 

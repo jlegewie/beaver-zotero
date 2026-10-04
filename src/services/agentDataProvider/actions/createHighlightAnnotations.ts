@@ -15,6 +15,7 @@ import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/c
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
+import { getParentItemAsync } from '../../../utils/zoteroDataLoading';
 import {
     createEpubHighlightAnnotation,
     createPdfHighlightForItem,
@@ -107,7 +108,7 @@ async function resolveAttachment(ref: ZoteroItemReference): Promise<Zotero.Item 
 
 async function getAttachmentTitle(attachment: Zotero.Item): Promise<string> {
     try {
-        const parent = attachment.parentItem;
+        const parent = await getParentItemAsync(attachment);
         if (parent) {
             await parent.loadDataType('itemData');
             return await shortItemTitle(parent);
