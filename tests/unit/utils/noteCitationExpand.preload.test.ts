@@ -138,15 +138,21 @@ describe('preloadNotePageLabels', () => {
             + '<span class="citation-item">Author, p. 341</span></span>';
     }
 
+    /** Item lookups that only find `item` in `libraryID`, through either API. */
+    function mockItemLookups(libraryID: number, item: any): void {
+        const lookup = (lib: number, key: string) => (lib === libraryID && key === item.key ? item : null);
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(lookup);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (lib: number, key: string) => lookup(lib, key));
+    }
+
     it('loads a cited group item\'s labels from its own library, not the note\'s', async () => {
         const attachment = { ...makeAttachment(42, 'GROUPKEY'), libraryID: 7 };
         const cache = { getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 0: '341' } }) };
-        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => attachment);
+        mockItemLookups(7, attachment);
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
         const labels = await preloadNotePageLabels(makeGroupCitation('GROUPKEY'), 1);
 
-        expect((globalThis as any).Zotero.Items.getByLibraryAndKey).toHaveBeenCalledWith(7, 'GROUPKEY');
         expect(labels).toEqual({ 'g6073928-GROUPKEY': { 0: '341' } });
     });
 
@@ -155,7 +161,7 @@ describe('preloadNotePageLabels', () => {
             (libraryID: number) => (libraryID === 7 ? { message: 'Library excluded' } : null) as any,
         );
         const cache = { getMetadata: vi.fn() };
-        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => makeAttachment(42, 'GROUPKEY'));
+        mockItemLookups(7, { ...makeAttachment(42, 'GROUPKEY'), libraryID: 7 });
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
         expect(await preloadNotePageLabels(makeGroupCitation('GROUPKEY'), 1)).toEqual({});
