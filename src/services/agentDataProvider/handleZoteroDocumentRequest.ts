@@ -309,7 +309,7 @@ export async function resolveServedAttachmentDiagnostics(
         const [bestAttachmentByParent] = await Promise.all([bestAttachments, childItems]);
         return {
             is_primary: parentID !== null && bestAttachmentByParent.get(parentID) === attachment.id,
-            annotations_count: attachment.getAnnotations().length,
+            annotations_count: attachment.numAnnotations(),
         };
     } catch (error) {
         logger(`handleZoteroDocumentRequest: attachment diagnostics failed for ${attachment.libraryID}-${attachment.key}: ${error}`, 1);

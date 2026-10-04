@@ -150,7 +150,7 @@ describe('handleZoteroSearchRequest', () => {
             page_count: 9,
             line_count: null,
             is_primary: Boolean(options.isPrimary),
-            annotations_count: item.isFileAttachment?.() ? item.getAnnotations?.().length ?? 0 : 0,
+            annotations_count: item.isFileAttachment?.() ? item.numAnnotations?.() ?? 0 : 0,
         } as any));
 
         searches = [];
@@ -372,7 +372,7 @@ describe('handleZoteroSearchRequest', () => {
                 key: 'ATTACH',
                 itemType: 'attachment',
                 isFileAttachment: vi.fn(() => true),
-                getAnnotations: vi.fn(() => []),
+                numAnnotations: vi.fn(() => 0),
                 getDisplayTitle: vi.fn(() => 'Attachment'),
             } as Partial<MockItem>));
 
@@ -708,7 +708,7 @@ describe('handleZoteroSearchRequest', () => {
             attachmentFilename: 'paper.pdf',
             attachmentContentType: 'application/pdf',
             isFileAttachment: vi.fn(() => true),
-            getAnnotations: vi.fn(() => [{ id: 2 }, { id: 3 }]),
+            numAnnotations: vi.fn(() => 2),
         } as Partial<MockItem>);
         itemsById.set(parent.id, parent);
         itemsById.set(attachment.id, attachment);

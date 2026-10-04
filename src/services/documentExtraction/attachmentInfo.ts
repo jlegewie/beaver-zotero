@@ -569,7 +569,11 @@ export async function getAttachmentInfo(
     };
 
     if (options.includeAnnotationsCount) {
-        base.annotations_count = item.isFileAttachment?.() ? item.getAnnotations().length : 0;
+        const isFileAttachment = !!item.isFileAttachment?.();
+        if (isFileAttachment && !loaded?.childItems) {
+            await item.loadDataType?.('childItems');
+        }
+        base.annotations_count = isFileAttachment ? item.numAnnotations() : 0;
     }
 
     // Linked URLs are web links, not files Beaver can read.

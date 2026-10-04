@@ -77,11 +77,24 @@ export async function handleGetAnnotationsRequest(
 
         await Zotero.Items.loadDataTypes([attachment], ['primaryData', 'itemData', 'childItems']);
 
-        const allAnnotations: Zotero.Item[] = attachment.getAnnotations();
-        const totalCount = allAnnotations.length;
+        // Read IDs and fetch the page asynchronously: annotations in a library
+        // whose items are not loaded yet are not in Zotero's object cache.
+        // getAsync returns cached objects before newly loaded ones, so restore
+        // the document order of the IDs.
+        const allAnnotationIds = attachment.getAnnotations(false, true);
+        const totalCount = allAnnotationIds.length;
         const offset = Math.max(0, request.offset || 0);
         const limit = Math.max(0, request.limit || 0);
-        const annotationItems = allAnnotations.slice(offset, offset + limit);
+        const pageIds = allAnnotationIds.slice(offset, offset + limit);
+        const loadedById = new Map<number, Zotero.Item>();
+        if (pageIds.length > 0) {
+            for (const annotation of await Zotero.Items.getAsync(pageIds)) {
+                if (annotation) loadedById.set(annotation.id, annotation);
+            }
+        }
+        const annotationItems = pageIds
+            .map(id => loadedById.get(id))
+            .filter((annotation): annotation is Zotero.Item => annotation !== undefined);
 
         if (annotationItems.length > 0) {
             await Zotero.Items.loadDataTypes(annotationItems, ['primaryData', 'itemData', 'tags', 'annotation', 'annotationDeferred']);

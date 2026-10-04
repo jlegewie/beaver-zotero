@@ -51,6 +51,7 @@ type MockAttachmentOptions = {
     filePath?: string | null;
     linkMode?: number;
     itemDataLoaded?: boolean;
+    childItemsLoaded?: boolean;
     filename?: string;
 };
 
@@ -66,12 +67,12 @@ function makeAttachment(options: MockAttachmentOptions = {}): AttachmentItem {
         attachmentFilename: options.filename ?? 'paper.pdf',
         attachmentContentType: contentType,
         attachmentLinkMode: options.linkMode ?? 0,
-        _loaded: { itemData: options.itemDataLoaded ?? true },
+        _loaded: { itemData: options.itemDataLoaded ?? true, childItems: options.childItemsLoaded ?? true },
         loadDataType: vi.fn(async () => {}),
         isAttachment: vi.fn(() => true),
         isPDFAttachment: vi.fn(() => contentType === 'application/pdf'),
         isFileAttachment: vi.fn(() => true),
-        getAnnotations: vi.fn(() => [{ id: 1 }]),
+        numAnnotations: vi.fn(() => 1),
         getDisplayTitle: vi.fn(() => 'Attachment title'),
         getField: vi.fn(() => 'Attachment title'),
         getFilePathAsync: vi.fn(async () => filePath),
@@ -455,6 +456,20 @@ describe('getAttachmentInfo', () => {
 
         expect((attachment as any).loadDataType).toHaveBeenCalledWith('itemData');
         expect(info.title).toBe('Attachment title');
+    });
+
+    it('loads child items on demand before counting annotations', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({ contentKind: 'pdf', errorCode: null, pageCount: 3 })),
+            },
+        };
+        const attachment = makeAttachment({ childItemsLoaded: false });
+
+        const info = await getAttachmentInfo(attachment, { includeAnnotationsCount: true });
+
+        expect((attachment as any).loadDataType).toHaveBeenCalledWith('childItems');
+        expect(info.annotations_count).toBe(1);
     });
 
     it('skips the item data load when it is already loaded', async () => {
