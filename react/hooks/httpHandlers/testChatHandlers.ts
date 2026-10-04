@@ -1,3 +1,5 @@
+import { undoMergeItemsAction } from '../../utils/mergeItemsActions';
+import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
 /**
  * Dev-only HTTP handlers for driving the chat/run lifecycle headlessly.
  *
@@ -68,6 +70,7 @@ import { undoCreateNoteAction } from '../../utils/createNoteActions';
 import { undoEditNoteAction, undoEditNoteBatchAction } from '../../utils/editNoteActions';
 import { undoCreateAnnotationsAction } from '../../utils/createAnnotationsActions';
 import { undoCreateItemActions } from '../../utils/createItemActions';
+import { undoImportItemActions } from '../../utils/importItemActions';
 import { undoEditAnnotationsAction } from '../../utils/editAnnotationsActions';
 
 // ---------------------------------------------------------------------------
@@ -370,6 +373,7 @@ export async function handleTestApproveActionHttpRequest(request: any) {
     }
 
     for (const actionId of targetIds) {
+        if (request?.actionChanges) store.set(mergeItemsChoicesAtom, { ...store.get(mergeItemsChoicesAtom), [actionId]: request.actionChanges });
         store.set(sendApprovalResponseAtom, {
             actionId,
             approved,
@@ -451,6 +455,9 @@ export async function handleTestUndoActionHttpRequest(request: any) {
                 reverted = { fieldsReverted: result.fieldsReverted };
                 break;
             }
+            case 'merge_items':
+                await undoMergeItemsAction(action);
+                break;
             case 'create_collection':
                 await undoCreateCollectionAction(action);
                 break;
@@ -485,6 +492,13 @@ export async function handleTestUndoActionHttpRequest(request: any) {
                 break;
             case 'create_item': {
                 const batch = await undoCreateItemActions([action]);
+                if (batch.failures.length > 0) {
+                    return { ok: false, actionId, error: batch.failures[0].error };
+                }
+                break;
+            }
+            case 'import_item': {
+                const batch = await undoImportItemActions([action]);
                 if (batch.failures.length > 0) {
                     return { ok: false, actionId, error: batch.failures[0].error };
                 }

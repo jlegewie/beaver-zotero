@@ -61,8 +61,9 @@ describe('agentItemSupport', () => {
             expect(isAgentSupportedItem(pdfAttachment())).toBe(true);
         });
 
-        it('accepts EPUB attachments via isEPUBAttachment()', () => {
-            const item = withTrash(createMockAttachment({ contentType: '', isEPUB: true }));
+        it('accepts EPUB attachments stored under a generic content type', () => {
+            const item = withTrash(createMockAttachment({ contentType: 'application/octet-stream' }));
+            (item as any).attachmentFilename = 'book.epub';
             expect(isAgentSupportedItem(item)).toBe(true);
         });
 
@@ -157,6 +158,24 @@ describe('agentItemSupport', () => {
 
         it('rejects attachments with no file anywhere', async () => {
             await expect(agentItemFilterAsync(epubAttachment({ fileExists: false }))).resolves.toBe(false);
+        });
+
+        it('resolves trash state through unloaded ancestors instead of dropping the item', async () => {
+            const parent = { id: 1, deleted: false, parentID: null };
+            const savedItems = (Zotero as any).Items;
+            (Zotero as any).Items = { getAsync: vi.fn(async () => parent) };
+            try {
+                const att = epubAttachment({ fileExists: true }) as any;
+                att.parentID = 1;
+                att.deleted = false;
+                att.isInTrash = vi.fn(() => { throw new Error('Item 1 not yet loaded'); });
+                await expect(agentItemFilterAsync(att)).resolves.toBe(true);
+
+                parent.deleted = true;
+                await expect(agentItemFilterAsync(att)).resolves.toBe(false);
+            } finally {
+                (Zotero as any).Items = savedItems;
+            }
         });
 
         it('passes regular items without checking files', async () => {

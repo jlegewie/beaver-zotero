@@ -39,6 +39,11 @@ export class MockDBConnection {
         // `( ?`. Reproduce that here so tests exercise the statement production
         // actually runs. See zoteroQueryParams.ts.
         const [sql, params] = parseQueryAndParams(sqlIn, paramsIn);
+        // Firefox's Sqlite.sys.mjs, under Zotero.DBConnection, refuses a LIKE
+        // whose pattern is not a bound parameter.
+        if (/\bLIKE\s+(?![?:@$])/i.test(sql)) {
+            throw new Error('Please enter a LIKE clause with bindings');
+        }
 
         // Reader PRAGMAs like table_info return rows in Zotero's queryAsync, so
         // they go through the reader path; assignment PRAGMAs fall through to
@@ -70,19 +75,28 @@ export class MockDBConnection {
         return [];
     }
 
+    /** Transactions run one at a time, like Zotero's. */
+    private transactionQueue: Promise<void> = Promise.resolve();
+
     /**
      * Mimics Zotero.DBConnection.executeTransaction.
-     * Wraps fn in a real SQLite transaction.
+     * Wraps fn in a real SQLite transaction; a call made while another
+     * transaction is open waits for it to finish.
      */
-    async executeTransaction(fn: () => Promise<void>): Promise<void> {
-        this.db.exec('BEGIN');
-        try {
-            await fn();
-            this.db.exec('COMMIT');
-        } catch (err) {
-            this.db.exec('ROLLBACK');
-            throw err;
-        }
+    executeTransaction(fn: () => Promise<void>): Promise<void> {
+        const run = async () => {
+            this.db.exec('BEGIN');
+            try {
+                await fn();
+                this.db.exec('COMMIT');
+            } catch (err) {
+                this.db.exec('ROLLBACK');
+                throw err;
+            }
+        };
+        const result = this.transactionQueue.then(run);
+        this.transactionQueue = result.catch(() => undefined);
+        return result;
     }
 
     /** Mimics Zotero.DBConnection.test — no-op for in-memory DB. */

@@ -110,9 +110,11 @@ describe('answering the pending approvals the user decided on', () => {
         });
 
         expect(answered).toBe(2);
+        // The trailing argument carries reviewed merge choices; these cards
+        // are not merges, so nothing is attached.
         expect(sendApprovalResponse.mock.calls).toEqual([
-            ['action-1', true, 'You can apply all'],
-            ['action-2', true, 'You can apply all'],
+            ['action-1', true, 'You can apply all', undefined],
+            ['action-2', true, 'You can apply all', undefined],
         ]);
         expect(store.get(pendingApprovalsAtom).size).toBe(0);
     });
@@ -131,6 +133,7 @@ describe('answering the pending approvals the user decided on', () => {
             'action-1',
             false,
             'Use the subtitle instead',
+            undefined,
         );
     });
 
@@ -144,7 +147,7 @@ describe('answering the pending approvals the user decided on', () => {
             userInstructions: '   ',
         });
 
-        expect(sendApprovalResponse).toHaveBeenCalledWith('action-1', true, null);
+        expect(sendApprovalResponse).toHaveBeenCalledWith('action-1', true, null, undefined);
     });
 
     it('does nothing when no card is waiting', () => {
@@ -179,7 +182,7 @@ describe('answering the pending approvals the user decided on', () => {
         expect(answered).toBe(1);
         expect([...store.get(pendingApprovalsAtom).keys()]).toEqual(['late-1']);
         expect(sendApprovalResponse).toHaveBeenCalledTimes(1);
-        expect(sendApprovalResponse).toHaveBeenCalledWith('seen-1', true, 'Fine by me');
+        expect(sendApprovalResponse).toHaveBeenCalledWith('seen-1', true, 'Fine by me', undefined);
     });
 
     it('does not answer a card that was already answered on its own', () => {
@@ -193,7 +196,7 @@ describe('answering the pending approvals the user decided on', () => {
 
         expect(answered).toBe(1);
         expect(sendApprovalResponse).toHaveBeenCalledTimes(1);
-        expect(sendApprovalResponse).toHaveBeenCalledWith('action-2', false, null);
+        expect(sendApprovalResponse).toHaveBeenCalledWith('action-2', false, null, undefined);
     });
 });
 
@@ -258,7 +261,7 @@ describe('granting full access for a run', () => {
         expect(approved).toBe(1);
         expect([...store.get(pendingApprovalsAtom).keys()]).toEqual(['cost-1']);
         expect(sendApprovalResponse).toHaveBeenCalledTimes(1);
-        expect(sendApprovalResponse).toHaveBeenCalledWith('tags-1', true, undefined);
+        expect(sendApprovalResponse).toHaveBeenCalledWith('tags-1', true, undefined, undefined);
     });
 
     it('answers nothing when the grant is switched back off', () => {

@@ -1,6 +1,8 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveNavigationWindow, WindowUnavailableError } from '../../src/runtime/navigation';
 import { getContextWindow } from './windowRuntime';
+import { runWindowOperation } from './libraryMutation';
+import { canonicalContentTypeCorrection } from '../../src/utils/attachmentFiles';
 
 /** Legacy APIs read the active main window synchronously when opening a tab. */
 function assertLegacyTarget(win: ReturnType<typeof Zotero.getMainWindow>): void {
@@ -81,6 +83,22 @@ async function ensureAttachmentFileForReader(itemID: number, win: ReturnType<typ
     Zotero.Notifier.trigger('redraw', 'item', []);
 }
 
+/**
+ * Give a mislabelled PDF/EPUB the content type Zotero's reader requires, as
+ * `ZoteroPane.viewAttachment` does when the user opens the file. Without it
+ * the reader cannot open an attachment stored as, e.g., `application/octet-stream`.
+ * Applies in libraries excluded from Beaver too: opening is user-initiated.
+ */
+async function ensureContentTypeForReader(itemID: number): Promise<void> {
+    const item = await Zotero.Items.getAsync(itemID);
+    if (!item || !canonicalContentTypeCorrection(item)) return;
+    try {
+        await runWindowOperation('ensureReaderContentType', [itemID]);
+    } catch (error) {
+        logger(`openReader: could not correct content type for ${itemID}: ${error}`, 2);
+    }
+}
+
 /** Pin a real main window before any reader initialization awaits. */
 export async function openReader(
     itemID: number, location?: any, options: Record<string, any> = {},
@@ -88,6 +106,7 @@ export async function openReader(
 ): Promise<any> {
     const win = await resolveNavigationWindow(origin);
     await ensureAttachmentFileForReader(itemID, win);
+    await ensureContentTypeForReader(itemID);
     if (win.closed || win.__beaverRuntime?.status === 'closing') throw new WindowUnavailableError();
     // Older Zotero releases ignore the window option and use the focused main window.
     // Recheck activation immediately before each native call that uses global focus.
@@ -199,16 +218,70 @@ export async function openNote(itemID: number, origin: Window = getContextWindow
     }
 }
 
-/** Preserve Zotero's external-file preferences while targeting the originating pane. */
-export async function viewAttachment(itemID: number, origin?: Window): Promise<void> {
+/**
+ * Preserve Zotero's external-file preferences while targeting the originating pane.
+ * `forceAlternateWindowBehavior` inverts the "open reader in new window" preference,
+ * like a shift-click in the items tree.
+ */
+export async function viewAttachment(
+    itemID: number, origin?: Window, options: { forceAlternateWindowBehavior?: boolean } = {},
+): Promise<void> {
     try {
         const win = await resolveNavigationWindow(origin ?? getContextWindow());
         if (typeof (win.Zotero_Tabs as any).isOwnTabEvent !== 'function') {
             await focusLegacyTarget(win);
             assertLegacyTarget(win);
         }
-        await win.ZoteroPane.viewAttachment(itemID);
+        await (win.ZoteroPane as any).viewAttachment(itemID, null, false, options);
     } catch (error) {
         logger(`viewAttachment: ${error}`, 2);
     }
+}
+
+/** Open a note in its own window; releases without note tabs only have note windows. */
+export async function openNoteWindow(itemID: number, origin?: Window): Promise<void> {
+    try {
+        const win = await resolveNavigationWindow(origin ?? getContextWindow());
+        if (typeof (Zotero as any).Notes?.open === 'function') {
+            await (win.ZoteroPane as any).openNote(itemID, { openInWindow: true });
+        } else {
+            await win.ZoteroPane.openNoteWindow(itemID);
+        }
+    } catch (error) {
+        logger(`openNoteWindow: ${error}`, 2);
+    }
+}
+
+/**
+ * Reveal an attachment's file in the OS file manager, or show Zotero's
+ * missing-file dialog. Revealing an existing file needs no Zotero window, so
+ * only the dialog may bring one up (from the standalone Beaver window or
+ * Settings when no main window is open).
+ */
+export async function showAttachmentInFilesystem(itemID: number, origin?: Window): Promise<void> {
+    try {
+        if (await revealExistingAttachmentFile(itemID)) return;
+        const win = await resolveNavigationWindow(origin ?? getContextWindow());
+        await (win.ZoteroPane as any).showAttachmentInFilesystem(itemID);
+    } catch (error) {
+        logger(`showAttachmentInFilesystem: ${error}`, 2);
+    }
+}
+
+/** Reveal a file attachment whose file exists, as `ZoteroPane` does; `false` otherwise. */
+async function revealExistingAttachmentFile(itemID: number): Promise<boolean> {
+    const attachment = await Zotero.Items.getAsync(itemID);
+    if (!attachment?.isFileAttachment()) return false;
+    const path = await attachment.getFilePathAsync();
+    if (!path) return false;
+    const file = Zotero.File.pathToFile(path);
+    try {
+        file.reveal();
+    } catch {
+        // Platforms without nsIFile.reveal() (e.g. Linux) open the parent folder.
+        Zotero.launchFile(file.parent!.path);
+    }
+    // Zotero's own reveal notification; the typings omit the 'reveal' event.
+    void Zotero.Notifier.trigger('reveal' as _ZoteroTypes.Notifier.Event, 'file', attachment.id);
+    return true;
 }

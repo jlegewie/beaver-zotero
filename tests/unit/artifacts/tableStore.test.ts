@@ -198,8 +198,8 @@ beforeEach(async () => {
             ),
         },
         Items: {
-            getByLibraryAndKey: vi.fn(
-                (libraryID: number, key: string) =>
+            getByLibraryAndKeyAsync: vi.fn(
+                async (libraryID: number, key: string) =>
                     libraryID === LIBRARY_ID && key === KEY ? item : false
             ),
             loadDataTypes: vi.fn(async () => undefined),
@@ -1184,7 +1184,7 @@ describe('conversation rewind', () => {
     it('does not read or modify an excluded library', async () => {
         checkLibraryExcluded.mockReturnValue({ message: 'Excluded' });
         await expect(trimTable(ref, request)).rejects.toMatchObject({ code: 'library_excluded' });
-        expect(Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 });
 
@@ -1436,7 +1436,7 @@ describe('artifact provider through the real file store', () => {
     it('checks target exclusions before item lookup', async () => {
         checkLibraryExcluded.mockReturnValue({ message: 'excluded secret library' });
         expect(await request('read')).toEqual(expect.objectContaining({ ok: false, error_code: 'library_excluded' }));
-        expect(Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
     it('withholds excluded rows in retained history even after their removal from current content', async () => {
         const withSource = demoSpec();
@@ -1685,7 +1685,7 @@ describe('group tables through the provider and file store', () => {
             getLibraryIDFromGroupID: (id: number) => (id === groupID ? groupLibraryID : false),
             getGroupIDFromLibraryID: (id: number) => (id === groupLibraryID ? groupID : false),
         };
-        vi.mocked(Zotero.Items.getByLibraryAndKey).mockImplementation((id, key) =>
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockImplementation(async (id, key) =>
             id === groupLibraryID && key === KEY ? item : false,
         );
         let imported = false;
@@ -1881,7 +1881,7 @@ describe('group tables through the provider and file store', () => {
                 unseen: [],
             },
         ]);
-        expect(Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
         expect(await readTable(groupRef)).toMatchObject({ spec: { title: 'Demo table' } });
     });
 

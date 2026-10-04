@@ -682,6 +682,35 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect(mockState.extractCalls).toHaveLength(0);
     });
 
+    it('reports a plain-text attachment the OS refuses to stat as file_permission_denied', async () => {
+        const textItem = {
+            libraryID: 1,
+            key: 'TEXT1234',
+            loadAllData: vi.fn().mockResolvedValue(undefined),
+            isAttachment: vi.fn(() => true),
+            isPDFAttachment: vi.fn(() => false),
+            attachmentContentType: 'text/plain',
+            attachmentLinkMode: 0,
+            getFilePathAsync: vi.fn().mockResolvedValue('/Dropbox/notes.txt'),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(textItem);
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true, item: textItem, key: '1-TEXT1234', contentKind: 'text', contentType: 'text/plain',
+        } as any);
+        (globalThis as any).IOUtils.stat.mockRejectedValueOnce(
+            Object.assign(new Error('Could not stat /Dropbox/notes.txt'), { name: 'NotAllowedError' }));
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-text-denied',
+            attachment: { library_id: 1, zotero_key: 'TEXT1234' },
+            mode: 'structured',
+        });
+
+        expect(response).toMatchObject({ error_code: 'file_permission_denied' });
+        expect(response.error).toContain('does not have permission to read the text file for 1-TEXT1234');
+    });
+
     it('returns cached EPUB documents through the document request handler', async () => {
         const epubItem = {
             id: 43,

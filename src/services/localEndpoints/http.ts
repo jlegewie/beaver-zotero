@@ -1,3 +1,4 @@
+import { handleDuplicatesRequest } from '../duplicates/discovery';
 import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCacheHandlers';
 import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
@@ -132,6 +133,12 @@ import {
     handleTestWorkerStatsHttpRequest,
     handleTestWorkerWedgeProbeHttpRequest,
 } from './handlers/testCacheHandlers';
+
+import {
+    handleTestItemImportCapabilitiesHttpRequest,
+    handleTestItemImportResolveHttpRequest,
+    handleTestItemImportWriteHttpRequest,
+} from './handlers/testItemImportHandlers';
 
 
 import {
@@ -830,6 +837,8 @@ export function registerEndpoints(): (() => void) | undefined {
         createEndpoint(handleListTagsHttpRequest);
 
     // Deferred tool endpoints
+    endpoints['/beaver/library/duplicates'] = createEndpoint((request: any) => handleDuplicatesRequest({ ...request, event: 'duplicates_request', request_id: generateRequestId() }));
+
     endpoints['/beaver/agent-action/validate'] =
         createEndpoint(handleAgentActionValidateHttpRequest);
 
@@ -886,6 +895,12 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
+        endpoints['/beaver/test/item-import-resolve'] =
+            createEndpoint(handleTestItemImportResolveHttpRequest);
+        endpoints['/beaver/test/item-import-write'] =
+            createEndpoint(handleTestItemImportWriteHttpRequest);
+        endpoints['/beaver/test/item-import-capabilities'] =
+            createEndpoint(handleTestItemImportCapabilitiesHttpRequest);
         endpoints['/beaver/test/resolve-readable'] =
             createEndpoint(handleTestResolveReadableHttpRequest);
         endpoints['/beaver/test/best-epub-attachment'] =

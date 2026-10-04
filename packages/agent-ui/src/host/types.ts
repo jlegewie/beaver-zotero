@@ -7,6 +7,7 @@ import type { ExternalReference } from '@beaver/agent-core/types/externalReferen
 import type { ToolCallPart, AgentRun, AgentRunStatus, MessageSearchFilters } from '@beaver/agent-core/agents/types';
 import type { MessageAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { MenuPosition, SearchMenuCloseReason } from '../primitives/SearchMenu';
+import type { MenuItem } from '../primitives/ContextMenu';
 import type { AddSourcesMenuHandle, AddSourcesQuerySource } from '../composer/useAddSourcesMenu';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
@@ -151,6 +152,13 @@ export interface NavigationHost {
      * against the libraries it can see.
      */
     revealBatchOutcome?(target: BatchOutcomeTarget): void | Promise<void>;
+    /**
+     * Right-click menu entries for a library item: reveal it, open it (or its
+     * best attachment), show its file. Interaction-time, so the host may load the
+     * item live. Resolves to an empty list when the item is unavailable.
+     * Optional — clients without it leave item rows with no custom menu.
+     */
+    itemMenuItems?(ref: ZoteroItemReference): Promise<MenuItem[]>;
 }
 
 /**

@@ -29,7 +29,7 @@ import {
 import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
 import { copyToClipboard } from '../../utils/clipboard';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { renderToHTML, renderToMarkdown } from '../../utils/citationRenderers';
+import { renderToHTML, renderToMarkdownAsync } from '../../utils/citationRenderers';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { getHost } from '@beaver/agent-ui/host';
@@ -301,7 +301,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
     }, [panelKey, toggleNotePanelVisibility]);
 
     const handleCopy = useCallback(async () => {
-        const formattedContent = renderToMarkdown(`# ${noteTitle}\n\n${trimmedContent || note.content}`);
+        const formattedContent = await renderToMarkdownAsync(`# ${noteTitle}\n\n${trimmedContent || note.content}`);
         await copyToClipboard(formattedContent);
     }, [noteTitle, trimmedContent, note.content]);
 

@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
+import { useDocumentVisible } from '../../hooks/useDocumentVisible';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { DocumentCacheStats } from '../../../src/services/documentCache';
 import { clearDocumentCache } from '../../../src/services/backgroundProcessing/resetLocalState';
@@ -40,6 +41,7 @@ function describeCache(cache: DocumentCacheStats): string {
  */
 const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = false }) => {
     const surfaceWindow = useSurfaceWindow();
+    const visible = useDocumentVisible(surfaceWindow.document);
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
     const [cache, setCache] = useState<DocumentCacheStats | null | undefined>(undefined);
@@ -56,9 +58,11 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
         }
     }, []);
 
+    // Reads stop while the window is minimized or occluded; becoming visible
+    // again re-reads at once and restarts the cadence below.
     useEffect(() => {
-        void refresh();
-    }, [refresh]);
+        if (visible) void refresh();
+    }, [refresh, visible]);
 
     // The cache service is attached late in startup and a read can fail
     // transiently, so keep re-reading while the row has nothing to show;
@@ -66,13 +70,13 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
     // interval, not a timeout: a failed read leaves `cache` at null, which
     // would never re-trigger a state-keyed timeout.
     useEffect(() => {
-        if (cache === undefined) return;
+        if (cache === undefined || !visible) return;
         const timer = surfaceWindow.setInterval(
             () => void refresh(),
             cache === null ? CACHE_STATS_RETRY_MS : CACHE_STATS_REFRESH_MS,
         );
         return () => surfaceWindow.clearInterval(timer);
-    }, [cache, refresh, surfaceWindow]);
+    }, [cache, refresh, surfaceWindow, visible]);
 
     const clear = useCallback(async () => {
         if (!cache) return;

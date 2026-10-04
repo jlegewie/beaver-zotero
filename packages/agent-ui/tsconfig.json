@@ -97,6 +97,7 @@
     "./src/icons/CircleIcon.tsx",
     "./src/icons/ClockIcon.tsx",
     "./src/icons/CopyIcon.tsx",
+    "./src/icons/BookCopyIcon.tsx",
     "./src/icons/TableIcon.tsx",
     "./src/icons/MicIcon.tsx",
     "./src/icons/BubbleChatQuestionIcon.tsx",
@@ -216,6 +217,8 @@
     "./src/chat/rehypeFindHighlight.ts",
     "./src/chat/actionPopup.ts",
     "./src/chat/useAlternateActivation.ts",
+    "./src/chat/useItemContextMenu.tsx",
+    "./src/chat/pendingMenuRequest.ts",
     "./src/chat/useCitationMarker.ts",
     "./src/chat/useCitationViewModel.ts",
 

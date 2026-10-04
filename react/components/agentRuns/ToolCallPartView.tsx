@@ -42,6 +42,7 @@ import {
     FlowConnectionIcon,
     WrenchIcon,
     TableIcon,
+    BookCopyIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
@@ -115,6 +116,10 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Organize items tool
     organize_items: TaskDoneIcon,
+
+    // Duplicate tools
+    find_duplicates: BookCopyIcon,
+    merge_items: BookCopyIcon,
 
     // Read tool result
     read_file: TextAlignLeftIcon,
@@ -295,6 +300,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         part.tool_name === 'edit_annotations' ||
         part.tool_name === 'delete_annotations' ||
         part.tool_name === 'organize_items' ||
+        part.tool_name === 'merge_items' ||
         part.tool_name === 'manage_tags' ||
         part.tool_name === 'manage_collections' ||
         part.tool_name === 'create_items' ||

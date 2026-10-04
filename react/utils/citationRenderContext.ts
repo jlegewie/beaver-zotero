@@ -6,8 +6,11 @@ import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { CITATION_TAG_PATTERN } from './citationPreprocessing';
 import {
+    baseCitationKey,
     citationIndexCandidateIdsForLocator,
     getPageLocator,
+    getRequestedRef,
+    getResolvedRef,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
@@ -21,7 +24,10 @@ import {
     locatorSchemaVersion,
     structuredPdfResultForSchema,
 } from '../../src/services/documentExtraction/structuredPdfResult';
-import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
+import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { ensureLibraryItemsLoaded } from '../../src/utils/zoteroDataLoading';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { isPdfDocument } from '../../src/utils/attachmentFiles';
 import type { ExternalFileRecord } from '../../src/services/database';
 
 function citationLocationsFromEntries(entries: CitationIndexEntry[]): PartLocation[] {
@@ -98,7 +104,7 @@ export async function buildLocalCitationDataMapForContent(
         if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) continue;
 
         try {
-            const item = Zotero.Items.getByLibraryAndKey(
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(
                 normalized.ref.library_id,
                 normalized.ref.zotero_key,
             );
@@ -109,7 +115,7 @@ export async function buildLocalCitationDataMapForContent(
 
             const schemaVersion = locatorSchemaVersion(
                 normalized.ref.loc,
-                !!preloadPath.item.isPDFAttachment?.(),
+                isPdfDocument(preloadPath.item),
             );
             const cacheKey = `${preloadPath.item.libraryID}:${preloadPath.item.key}:${preloadPath.filePath}:${schemaVersion}`;
             let resultPromise = structuredResultsByFile.get(cacheKey);
@@ -282,12 +288,68 @@ export async function resolveExternalFileCitations(content: string): Promise<{
 }
 
 /**
+ * Load the Zotero libraries of every item cited in the content.
+ *
+ * Static citation renderers (note export, copied Markdown) resolve and format
+ * items synchronously, which fails for items in a library Zotero has not
+ * loaded yet. Awaiting this first makes those synchronous reads succeed. A
+ * citation's library comes from its resolved metadata ref when present, else
+ * from the tag itself; external references count via their mapped Zotero item.
+ * Not gated on library exclusion: this only enables rendering persisted history.
+ */
+export async function loadCitedLibraries(
+    content: string,
+    citations: Iterable<Citation> = [],
+    externalMapping: Record<string, ZoteroItemReference | null> = {},
+): Promise<void> {
+    const citationByKey = new Map<string, Citation>();
+    for (const citation of citations) {
+        const requested = getRequestedRef(citation);
+        if (!requested) continue;
+        citationByKey.set(requestedCitationKey(requested), citation);
+        if (!citationByKey.has(baseCitationKey(requested))) {
+            citationByKey.set(baseCitationKey(requested), citation);
+        }
+    }
+
+    const libraryIds = new Set<number>();
+    const regex = new RegExp(CITATION_TAG_PATTERN.source, CITATION_TAG_PATTERN.flags);
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(content)) !== null) {
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
+        if (!normalized.ok) continue;
+        const metadata = citationByKey.get(requestedCitationKey(normalized.ref))
+            ?? citationByKey.get(baseCitationKey(normalized.ref));
+        for (const ref of [normalized.ref, metadata ? getResolvedRef(metadata) : null]) {
+            if (ref?.kind === 'zotero') {
+                const libraryId = resolveLibraryRef(ref);
+                if (libraryId) libraryIds.add(libraryId);
+            } else if (ref?.kind === 'external') {
+                const mapped = externalMapping[ref.external_id];
+                const libraryId = mapped ? resolveLibraryRef(mapped) : null;
+                if (libraryId) libraryIds.add(libraryId);
+            }
+        }
+    }
+
+    await ensureLibraryItemsLoaded(libraryIds);
+}
+
+/**
  * Build the full static-render context for Zotero note export.
  */
 export async function prepareCitationRenderContext(
     content: string,
     contextData?: RenderContextData,
 ): Promise<RenderContextData | undefined> {
+    // First, so the preloads below and the synchronous render that follows
+    // can look up every cited item.
+    await loadCitedLibraries(
+        content,
+        Object.values((contextData ? contextData.citationDataMap : store.get(citationMapAtom)) ?? {}),
+        (contextData ? contextData.externalMapping : store.get(externalReferenceItemMappingAtom)) ?? {},
+    );
     const [pageLabelsByAttachmentId, structuredCitationDataMap, externalFiles] = await Promise.all([
         preloadPageLabelsForContent(content),
         buildLocalCitationDataMapForContent(content),

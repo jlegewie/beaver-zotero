@@ -123,8 +123,10 @@ export function checkNewCitationItemsExist(
         if (excluded) {
             return `Citation ${label}="${id}": ${excluded.message}`;
         }
-        const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
-        if (!item) {
+        // ID lookup checks existence without loading the item, so it works in
+        // libraries whose items have not been loaded yet.
+        const itemId = Zotero.Items.getIDFromLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
+        if (!itemId) {
             return `Citation references a Zotero item that does not exist: ${label}="${id}". Verify the item ID is correct.`;
         }
     }

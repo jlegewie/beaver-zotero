@@ -354,6 +354,7 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
         };
         (Zotero as any).Libraries = { userLibraryID: 1, get: () => ({ isGroup: false }) };
         (Zotero.Items as any).getByLibraryAndKey = vi.fn(() => attachment);
+        (Zotero.Items as any).getByLibraryAndKeyAsync = vi.fn(async () => attachment);
         (Zotero.Items as any).loadDataTypes = vi.fn(async () => {
             await Promise.resolve();
             titleLoaded = true;

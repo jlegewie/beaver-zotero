@@ -1,4 +1,5 @@
 import { FulltextUpsertExecutor } from "../backgroundQueue/fulltextUpsertExecutor";
+import { UNTAG_BATCH_MAX_REFS } from "../backgroundQueue/untagBatcher";
 import { searchIndexApiClient } from "../searchIndex/searchIndexApiClient";
 import { INDEX_RECONCILE_INTERVAL_MS } from "../backgroundProcessing/constants";
 import { reconcileRemoteRefs } from "../backgroundProcessing/remoteRefsReconcile";
@@ -22,6 +23,17 @@ const INDEX_LANE_DEFAULT_IN_FLIGHT = 4;
  * connections to the API host free for chat requests.
  */
 const INDEX_LANE_ACTIVE_IN_FLIGHT = 4;
+/**
+ * Cloud-index cleanup. Excluding a library queues one untag per indexed
+ * document. Running jobs share batched `/index/delete` requests (see
+ * UntagBatcher), so a lane slot is a ref waiting for its batch, not a
+ * connection: the idle width fills two full batches, and the active width
+ * one, while at most two requests reach the API host at a time.
+ */
+const UNTAG_LANE_CAPACITY = {
+    maxInFlight: 2 * UNTAG_BATCH_MAX_REFS,
+    activeMaxInFlight: UNTAG_BATCH_MAX_REFS,
+};
 const CLEANUP_RESTORE_INTERVAL_MS = 6 * 60 * 60_000;
 
 /** Upsert lane limits for a backend-advertised per-user limit. */
@@ -53,7 +65,7 @@ export function startFulltextUpsertLane(
         "fulltext_untag",
     );
     if (hasAccess) dispatcher.registerExecutor(executor, indexLaneCapacity());
-    dispatcher.registerExecutor(untagExecutor, { maxInFlight: 1, survivesLibraryExclusion: true });
+    dispatcher.registerExecutor(untagExecutor, { ...UNTAG_LANE_CAPACITY, survivesLibraryExclusion: true });
     let sweeping = false;
     let sweep: Promise<void> | undefined;
     let restoration: Promise<unknown> | undefined;

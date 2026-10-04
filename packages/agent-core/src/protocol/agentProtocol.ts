@@ -1,3 +1,4 @@
+export type { DuplicatesRequest, DuplicatesResponse } from './duplicates';
 export { validateArtifactRequest } from './artifactProtocol';
 import type { ArtifactRequest } from './artifactProtocol';
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../types/profile';
@@ -1054,6 +1055,7 @@ export type AttachmentPageImagesErrorCode =
     | 'is_linked_url'       // Attachment is a linked URL, not a stored file
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'empty_document'      // PDF opened but has no readable pages
@@ -1095,6 +1097,7 @@ export type AttachmentImageErrorCode =
     | 'unsupported_image_format'   // Image format the runtime cannot decode (TIFF, HEIC, SVG, ...)
     | 'file_missing'               // Image file not available locally
     | 'file_too_large'             // Image file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'download_failed'            // Remote file download failed
     | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
     | 'timeout'                    // Processing timed out
@@ -1206,6 +1209,7 @@ export type AttachmentSearchErrorCode =
     | 'not_pdf'             // Attachment is not a PDF
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'empty_document'      // PDF opened but has no readable pages
@@ -2105,7 +2109,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -2239,6 +2243,7 @@ export interface WSDeferredApprovalRequest extends WSBaseEvent {
 
 /** Response to deferred approval request (user's decision) */
 export interface WSDeferredApprovalResponse {
+    action_changes?: import('./duplicates').MergeItemsChoices;
     type: 'deferred_approval_response';
     action_id: string;
     approved: boolean;
@@ -2599,6 +2604,7 @@ export type WSEvent =
     | WSListTagsRequest
     | WSGetMetadataRequest
     | WSGetAnnotationsRequest
+    | import('./duplicates').DuplicatesRequest
     | WSFindAnnotationsRequest
     | WSListLibrariesRequest
     // Note tools
@@ -2711,6 +2717,7 @@ export interface ZoteroInstanceWire {
  * values MUST match the backend's `FEAT_*` constants exactly.
  */
 export const CLIENT_FEATURES = {
+    ZOTERO_DUPLICATES: 'zotero_duplicates',
     LIBRARY_MANAGEMENT: 'library_management',
     MANAGE_LIBRARY_STRUCTURE: 'manage_library_structure',
     NOTE_SUPPORT: 'note_support',
@@ -2820,6 +2827,14 @@ export const CLIENT_FEATURES = {
      * PDF might be downloaded from.
      */
     PDF_CANDIDATES: 'pdf_candidates',
+    /**
+     * `create_items` v2: items are created from identifiers, URLs, attached
+     * files and model-written metadata. The client resolves every source to
+     * Zotero item JSON while validating an `import_item` action, renders and
+     * approves `import_item` actions, and writes the approved JSON on execute.
+     * Citation "Import" proposals arrive as unresolved `import_item` actions.
+     */
+    ITEM_IMPORT_V2: 'item_import_v2',
     /**
      * Chat markdown follows `[label](u-KEY)` (and `zotero://select/...`) as a
      * link that reveals the named library object. Without it those hrefs render
@@ -2936,6 +2951,29 @@ export interface CurrentSavedSearch {
 }
 
 /**
+ * Zotero special collections Beaver reports in application state: built-in,
+ * per-library views in the collections pane rather than user-created
+ * collections.
+ *
+ * - `duplicates`: "Duplicate Items", Zotero's duplicate candidates.
+ * - `unfiled`: "Unfiled Items", items that belong to no collection.
+ */
+export type SpecialCollectionType = 'duplicates' | 'unfiled';
+
+/**
+ * A special collection selected in the collections pane. Reported only for
+ * kinds the agent can act on; other special views are left out.
+ */
+export interface CurrentSpecialCollection {
+    /** Which special collection is selected */
+    type: SpecialCollectionType;
+    /** Library ID the special collection belongs to */
+    library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
+}
+
+/**
  * Application state sent with messages.
  * Contains current view state and reader state if in reader view.
  */
@@ -2969,6 +3007,12 @@ export interface ApplicationStateInput {
      * `current_collections`.
      */
     current_searches?: CurrentSavedSearch[];
+    /**
+     * Special collections in the current selection, in collections-list order.
+     * A selection can mix them with collections and saved searches, so this
+     * list is independent of `current_collections` and `current_searches`.
+     */
+    current_special_collections?: CurrentSpecialCollection[];
     /**
      * Currently selected library items, truncated to a client-defined maximum.
      */

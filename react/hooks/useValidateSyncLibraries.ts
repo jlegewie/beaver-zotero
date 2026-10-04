@@ -26,6 +26,7 @@ export function useValidateSyncLibraries() {
             .map(l => ({
                 library_id: l.library_id,
                 group_id: l.group_id,
+                library_ref: l.library_ref,
                 name: l.name,
                 is_group: l.is_group,
                 type: l.type,

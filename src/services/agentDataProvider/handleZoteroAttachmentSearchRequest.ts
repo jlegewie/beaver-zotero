@@ -34,6 +34,7 @@ import {
     isRemoteAccessAvailable,
     preflightCachedPdfMeta,
 } from './utils';
+import { fileAccessDeniedMessage, isFileAccessDeniedError } from '../documentExtraction/attachmentSource';
 import {
     DEFAULT_SEARCH_TIMEOUT_SECONDS,
     MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
@@ -41,6 +42,7 @@ import {
     createTimeoutController,
 } from './timeout';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
+import { isPdfDocument } from '../../utils/attachmentFiles';
 
 
 /**
@@ -118,7 +120,7 @@ export async function handleZoteroAttachmentSearchRequest(
             );
         }
 
-        if (!zoteroItem.isPDFAttachment()) {
+        if (!isPdfDocument(zoteroItem)) {
             const contentType = zoteroItem.attachmentContentType || 'unknown';
             throwIfTimedOut('not_pdf_response');
             return errorResponse(
@@ -318,6 +320,11 @@ export async function handleZoteroAttachmentSearchRequest(
         }
 
         logger(`handleZoteroAttachmentSearchRequest: Search failed: ${error}`, 1);
+
+        if (isFileAccessDeniedError(error)) {
+            const key = resolvedItem ? `${resolvedItem.libraryID}-${resolvedItem.key}` : unique_key;
+            return errorResponse(fileAccessDeniedMessage('PDF', key), 'file_permission_denied');
+        }
 
         // Handle known extraction errors
         if (isExtractionError(error)) {

@@ -423,7 +423,7 @@ export interface TableRef {
  * to look at. The store's `requireWritable` is where the exclusion boundary is.
  */
 export async function resolveTableItem(ref: TableRef, allowTrashed = false): Promise<Zotero.Item> {
-    const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryID, ref.key) as
         | Zotero.Item
         | false;
     if (!item || (item.deleted && !allowTrashed)) {

@@ -4,14 +4,17 @@ import React, { useState } from 'react';
 import { CollectionListView } from '@beaver/agent-core/run-state/toolResultViews';
 import { CSSIcon } from '../../icons/icons';
 import { getHost } from '@beaver/agent-ui/host';
+import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 
 /**
  * Shared renderer for the {@link CollectionListView} view model (list_collections).
  *
- * Collection clicks reveal the collection through the navigation host.
+ * Collection clicks reveal the collection through the navigation host; a
+ * right-click offers the same as "Show in Library".
  */
 export const CollectionListResultView: React.FC<{ view: CollectionListView }> = ({ view }) => {
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+    const { openCollectionMenu, itemMenu } = useItemContextMenu();
 
     const collections = view.collections;
     if (collections.length === 0) {
@@ -41,6 +44,7 @@ export const CollectionListResultView: React.FC<{ view: CollectionListView }> = 
                             isHovered ? 'bg-quinary' : ''
                         }`}
                         onClick={() => revealCollection(collection)}
+                        onContextMenu={ref ? (event) => openCollectionMenu(ref, event) : undefined}
                         onMouseEnter={() => setHoveredKey(compositeKey)}
                         onMouseLeave={() => setHoveredKey(null)}
                         title="Click to reveal in Zotero"
@@ -61,6 +65,7 @@ export const CollectionListResultView: React.FC<{ view: CollectionListView }> = 
                     Showing {collections.length} of {view.total_count} collections
                 </div>
             )}
+            {itemMenu}
         </div>
     );
 };

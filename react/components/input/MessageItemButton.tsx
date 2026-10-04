@@ -198,13 +198,14 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             revealInLibrary();
         };
 
-        // Context-menu reveal/open actions, depending on the item type. Types
-        // that support more than one action (notes, file attachments) show both:
-        // one to reveal the item in the library and one to open it. The "open"
-        // action is disabled only when the item's tab is the one currently in
-        // view — when it is open in a background tab, opening it switches to that
-        // tab.
-        const revealMenuItems: MenuItem[] = isAnnotation
+        // Context-menu reveal/open actions. Most items use the shared item menu
+        // (resolved on right-click by the host). Tables open in Beaver's table
+        // view and a collection-scoped reveal selects the item inside that
+        // collection, so both keep their own entries: one to reveal the item in
+        // the library and one to open it, disabled only while the item's tab is
+        // the one in view.
+        const useItemMenu = !isTableAttachment(item) && !revealInCollectionKey;
+        const revealMenuItems: MenuItem[] = useItemMenu ? [] : isAnnotation
             ? [{ label: 'Reveal in PDF', icon: PdfIcon, onClick: () => navigateToAnnotation(item) }]
             : item.isNote()
                 ? [
@@ -230,6 +231,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             canEdit,
             disabled,
             extraMenuItems: revealMenuItems,
+            itemRef: useItemMenu ? { library_id: item.libraryID, zotero_key: item.key } : null,
         });
 
         // Handle button click. ChipButton already swallows non-primary clicks and

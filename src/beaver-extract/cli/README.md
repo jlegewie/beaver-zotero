@@ -353,6 +353,9 @@ covers a whole PDF — not a page list — and the fixture id is the
 paperKey only (no `__pN` suffix). Both extract and OCR fixtures live in
 the same corpus roots and share `_shared/<sha>.pdf`; they're
 distinguished by file name (`fixture.json` vs `ocr.json`).
+`analyzeOCRNeeds` reads the same page walk as the structured-extraction
+gate that queues OCR (detailed walk with the current schema's text
+repair), so a fixture pins the production verdict.
 
 ```bash
 # Capture (default --root follows $BEAVER_EXTRACT_FIXTURES_DIR if set,

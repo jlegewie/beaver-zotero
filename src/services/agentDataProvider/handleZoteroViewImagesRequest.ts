@@ -26,7 +26,7 @@ import {
     resolveToImageAttachment,
     resolveToPdfAttachment,
 } from '../documentExtraction/attachmentResolution';
-import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
+import { isLinkedUrlAttachment, isPdfDocument } from '../../utils/attachmentFiles';
 import {
     preflightZoteroAttachmentRequest,
     validateZoteroItemReference,
@@ -135,7 +135,7 @@ async function resolveViewTarget(
         if (children.length > 0) {
             await Zotero.Items.loadDataTypes(children, ['itemData']);
         }
-        const hasPdf = children.some((a) => a.isPDFAttachment());
+        const hasPdf = children.some((a) => isPdfDocument(a));
         // Mirror resolveToImageAttachment's filter (linked URLs excluded) so
         // the pre-scan and the resolver agree on which children count.
         const hasImage = children.some(

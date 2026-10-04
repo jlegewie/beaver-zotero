@@ -22,6 +22,7 @@ vi.mock('../../../react/utils/pageLabels', () => ({
 
 import {
     buildLocalCitationDataMapForContent,
+    loadCitedLibraries,
     prepareCitationRenderContext,
     resolveExternalFileCitations,
 } from '../../../react/utils/citationRenderContext';
@@ -53,6 +54,8 @@ describe('citation render context', () => {
             id: 42,
             key: 'ATTACH01',
             libraryID: 1,
+            isAttachment: () => true,
+            attachmentContentType: '',
         };
         cache = {
             getResult: vi.fn().mockResolvedValue(structuredResult()),
@@ -62,7 +65,11 @@ describe('citation render context', () => {
             ...(globalThis as any).Zotero,
             Beaver: { documentCache: cache },
             Items: {
-                getByLibraryAndKey: vi.fn(() => attachment),
+                // The sync lookup throws as it does for a library Zotero has not loaded.
+                getByLibraryAndKey: vi.fn(() => {
+                    throw new Error('Item 42 not yet loaded');
+                }),
+                getByLibraryAndKeyAsync: vi.fn(async () => attachment),
             },
         };
 
@@ -106,6 +113,7 @@ describe('citation render context', () => {
         attachment.parentID = false;
         attachment.isAttachment = () => true;
         attachment.getFilePathAsync = vi.fn().mockResolvedValue('/storage/ATTACH01/file.pdf');
+        (Zotero as any).Items.getByLibraryAndKey = vi.fn(() => attachment);
         (Zotero as any).Items.loadDataTypes = vi.fn().mockResolvedValue(undefined);
 
         await prepareCitationRenderContext('Claim <citation id="1-ATTACH01" loc="page6"/>', {});
@@ -283,6 +291,48 @@ describe('citation render context', () => {
                 'local:extfile:AB12CD34',
                 'local:extfile:AB12CD34:page2',
             ]);
+        });
+    });
+
+    describe('loadCitedLibraries', () => {
+        let libraries: Record<number, { getDataLoaded: ReturnType<typeof vi.fn>; waitForDataLoad: ReturnType<typeof vi.fn> }>;
+
+        beforeEach(() => {
+            libraries = {};
+            for (const id of [1, 5, 7, 9]) {
+                libraries[id] = {
+                    getDataLoaded: vi.fn(() => id === 1),
+                    waitForDataLoad: vi.fn().mockResolvedValue(undefined),
+                };
+            }
+            (globalThis as any).Zotero.Libraries = {
+                exists: vi.fn((id: number) => id in libraries),
+                get: vi.fn((id: number) => libraries[id]),
+            };
+        });
+
+        it('loads unloaded libraries of cited items, resolved refs and mapped external references', async () => {
+            await loadCitedLibraries(
+                'A <citation id="5-ITEM0001"/> B <citation id="1-ITEM0002"/> C <citation external_id="ext1"/>',
+                [{
+                    citation_id: 'c1',
+                    requested_ref: { kind: 'zotero', library_id: 1, zotero_key: 'ITEM0002' },
+                    resolved_ref: { kind: 'zotero', library_id: 7, zotero_key: 'ITEM0003' },
+                } as any],
+                { ext1: { library_id: 9, zotero_key: 'ITEM0004' } },
+            );
+
+            expect(libraries[5].waitForDataLoad).toHaveBeenCalledWith('item');
+            expect(libraries[7].waitForDataLoad).toHaveBeenCalledWith('item');
+            expect(libraries[9].waitForDataLoad).toHaveBeenCalledWith('item');
+            // Already loaded: nothing to do.
+            expect(libraries[1].waitForDataLoad).not.toHaveBeenCalled();
+        });
+
+        it('loads cited libraries before note export renders', async () => {
+            await prepareCitationRenderContext('Claim <citation id="5-ATTACH01" loc="page6"/>', {});
+
+            expect(libraries[5].waitForDataLoad).toHaveBeenCalledWith('item');
         });
     });
 });

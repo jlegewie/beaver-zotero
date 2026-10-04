@@ -15,6 +15,7 @@ import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/c
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
+import { getParentItemAsync } from '../../../utils/zoteroDataLoading';
 import {
     createEpubHighlightAnnotation,
     createPdfHighlightForItem,
@@ -27,6 +28,7 @@ import {
     SnapshotAnnotationError,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
+import { canUseReaderContentType } from '../../attachmentContentType';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
 import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
@@ -106,7 +108,7 @@ async function resolveAttachment(ref: ZoteroItemReference): Promise<Zotero.Item 
 
 async function getAttachmentTitle(attachment: Zotero.Item): Promise<string> {
     try {
-        const parent = attachment.parentItem;
+        const parent = await getParentItemAsync(attachment);
         if (parent) {
             await parent.loadDataType('itemData');
             return await shortItemTitle(parent);
@@ -242,6 +244,18 @@ export async function validateCreateHighlightAnnotationsAction(
             valid: false,
             error: 'Attachment file is not available locally',
             error_code: 'attachment_file_unavailable',
+            preference: 'always_ask',
+        };
+    }
+    // Zotero only annotates attachments with a canonical content type; a
+    // mislabelled PDF/EPUB is corrected at execution once its file confirms it.
+    if (!await canUseReaderContentType(attachment)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Zotero cannot annotate this attachment: it is stored as '${attachment.attachmentContentType || 'unknown'}' and its file could not be confirmed as a PDF or EPUB.`,
+            error_code: 'invalid_attachment',
             preference: 'always_ask',
         };
     }

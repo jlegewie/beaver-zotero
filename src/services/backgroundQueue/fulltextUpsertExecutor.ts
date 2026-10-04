@@ -36,6 +36,7 @@ import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { isLibraryScopeKnown } from '../libraryScope';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isApiError, isSessionExpiredError, isSessionRefreshError, isServerError } from '@beaver/agent-core/types/apiErrors';
+import { UntagBatcher } from './untagBatcher';
 import type {
     JobExecutionContext,
     JobExecutor,
@@ -61,6 +62,32 @@ const TERMINAL_CODES = new Set([
  */
 const PROBE_SKIP_AFTER_PAYLOAD_UPLOADS = 3;
 
+/** Wait before retrying a job whose content another local job is indexing. */
+const DOCUMENT_BUSY_RETRY_MS = 2_000;
+
+/**
+ * Longest wait on a busy document claim. The holder is almost always a live
+ * request that finishes within seconds; the remaining lease the backend may
+ * report only bounds recovery from a holder that died.
+ */
+const CLAIM_BUSY_MAX_RETRY_MS = 15_000;
+
+/**
+ * Probe hints are consumed by the hash's next upsert. Hints whose upsert never
+ * runs (cancelled by an exclusion or account change) are dropped oldest first.
+ */
+const PROBE_FIRST_HASH_LIMIT = 1_000;
+
+/** Wait after the server reports a cleanup ref failed on its side. */
+const UNTAG_FAILED_RETRY_MS = 5_000;
+
+/** An API error that rejects the request itself; repeating it cannot succeed. */
+function isTerminalApiError(error: unknown): boolean {
+    if (!isApiError(error)) return false;
+    return TERMINAL_CODES.has(error.code ?? `http_${error.status}`)
+        || error.status === 400 || error.status === 413;
+}
+
 export interface FulltextUpsertExecutorOptions {
     /** Called with each requirements response an upsert reads. */
     onRequirements?: (requirements: IndexRequirements) => void;
@@ -70,13 +97,39 @@ export interface FulltextUpsertExecutorOptions {
 export class FulltextUpsertExecutor implements JobExecutor {
     // Upsert and cleanup use separate lanes but mutate the same membership.
     private static activeAttachments = new Set<string>();
+    /**
+     * Document hashes with a request in flight. Attachments with identical
+     * content share one remote document and contend for its claim, so a
+     * second job for the hash waits locally instead of the server.
+     */
+    private static activeHashes = new Set<string>();
+    /**
+     * Hashes whose next upsert probes before uploading: content another job
+     * was indexing is usually already stored, which the probe tags cheaply.
+     */
+    private static probeFirstHashes = new Set<string>();
+
+    private static markProbeFirst(hash: string): void {
+        const hashes = FulltextUpsertExecutor.probeFirstHashes;
+        hashes.delete(hash);
+        hashes.add(hash);
+        if (hashes.size > PROBE_FIRST_HASH_LIMIT) {
+            hashes.delete(hashes.values().next().value as string);
+        }
+    }
+
     readonly jobType: Extract<BackgroundJobType, 'fulltext_upsert' | 'fulltext_untag'>;
 
     private disposed = false;
     /** Consecutive uploads the hash-only probe could not complete. */
     private payloadUploadStreak = 0;
+    /** Shares `POST /index/delete` requests between concurrent cleanup jobs. */
+    private untagBatcher?: UntagBatcher;
 
-    dispose(): void { this.disposed = true; }
+    dispose(): void {
+        this.disposed = true;
+        this.untagBatcher?.close();
+    }
 
     constructor(
         private readonly api: SearchIndexApiClient = searchIndexApiClient,
@@ -112,11 +165,21 @@ export class FulltextUpsertExecutor implements JobExecutor {
         if (FulltextUpsertExecutor.activeAttachments.has(key)) {
             return { kind: 'retry', error: 'index_membership_busy', countsAsAttempt: false, retryAfterMs: 1_000 };
         }
+        const hash = record.payload?.doc_hash;
+        if (hash && FulltextUpsertExecutor.activeHashes.has(hash)) {
+            if (record.jobType === 'fulltext_upsert') FulltextUpsertExecutor.markProbeFirst(hash);
+            return {
+                kind: 'retry', error: 'index_document_busy', countsAsAttempt: false,
+                retryAfterMs: DOCUMENT_BUSY_RETRY_MS,
+            };
+        }
         FulltextUpsertExecutor.activeAttachments.add(key);
+        if (hash) FulltextUpsertExecutor.activeHashes.add(hash);
         try {
             return await this.executeExclusive(record, ctx);
         } finally {
             FulltextUpsertExecutor.activeAttachments.delete(key);
+            if (hash) FulltextUpsertExecutor.activeHashes.delete(hash);
         }
     }
 
@@ -329,7 +392,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
         // During a bulk upload of new content nearly every probe answers
         // `payload_required`; skip that round trip until one upload shows the
         // index already had the content.
-        if (this.payloadUploadStreak >= PROBE_SKIP_AFTER_PAYLOAD_UPLOADS) {
+        const probeFirst = FulltextUpsertExecutor.probeFirstHashes.delete(row.structuredDocumentHash);
+        if (!probeFirst && this.payloadUploadStreak >= PROBE_SKIP_AFTER_PAYLOAD_UPLOADS) {
             const result = await upsertWithPayload('probe');
             if (result && 'kind' in result) return result;
             if (result) response = result;
@@ -498,7 +562,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
                 }
             }
         }
-        const outcome = await this.untagOne({
+        const outcome = await this.untagOne(accountId, {
             scope_ref: scopeRef,
             zotero_key: record.zoteroKey,
             doc_hash: hash,
@@ -521,20 +585,37 @@ export class FulltextUpsertExecutor implements JobExecutor {
             && record.payload?.index_local_id === getZoteroUserIdentifier().localUserKey;
     }
 
-    private async untagOne(ref: IndexDocumentRef, storedLocalId: string | undefined, accessChanged: () => boolean): Promise<JobOutcome> {
+    private async untagOne(
+        accountId: string,
+        ref: IndexDocumentRef,
+        storedLocalId: string | undefined,
+        accessChanged: () => boolean,
+    ): Promise<JobOutcome> {
         const { localUserKey } = getZoteroUserIdentifier();
+        this.untagBatcher ??= new UntagBatcher(this.api, isTerminalApiError);
         try {
-            const response = await this.api.untag(storedLocalId ?? localUserKey, [ref]);
-            const result = response.results[0];
+            const { result, batchFailed } = await this.untagBatcher.untag(
+                accountId, storedLocalId ?? localUserKey, ref, accessChanged);
             if (!result || result.outcome === 'failed') {
-                return { kind: 'retry', error: 'index_untag_failed' };
+                // The server reports a ref it could not process (a database or
+                // connection failure) as `failed`; nothing is wrong with the ref.
+                // Only a batch that failed throughout pauses the whole lane.
+                return batchFailed
+                    ? this.remoteRetry('index_untag_failed', UNTAG_FAILED_RETRY_MS)
+                    : { kind: 'retry', error: 'index_untag_failed', countsAsAttempt: false,
+                        retryAfterMs: UNTAG_FAILED_RETRY_MS };
             }
             if (result.outcome === 'busy') {
+                const retryAfterMs = Math.max(1, result.retry_after_seconds ?? 1) * 1_000;
                 return {
                     kind: 'retry',
                     error: 'index_untag_busy',
                     countsAsAttempt: false,
-                    retryAfterMs: Math.max(1, result.retry_after_seconds ?? 1) * 1_000,
+                    retryAfterMs,
+                    // A document claim frees within seconds. A longer wait means the
+                    // account takes no cleanup claims right now, which holds for
+                    // every queued cleanup, so the whole lane waits with this one.
+                    ...(retryAfterMs > CLAIM_BUSY_MAX_RETRY_MS ? { laneCooldownMs: retryAfterMs } : {}),
                 };
             }
             return { kind: 'complete', reason: 'index_untagged' };
@@ -600,7 +681,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
         // Session recovery is asynchronous; keep this claim parked while the
         // account owner refreshes instead of immediately reclaiming it.
         if (isSessionExpiredError(error)) return { kind: 'defer', reason: 'session_expired' };
-        if (record && isServerError(error)) {
+        if (isServerError(error)) {
             return this.remoteRetry(error.message);
         }
         if (!(isApiError(error))) {
@@ -629,7 +710,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
                 countsAsAttempt: false, retryAfterMs: 60_000,
             };
         }
-        if (TERMINAL_CODES.has(code) || error.status === 400 || error.status === 413) {
+        if (isTerminalApiError(error)) {
             if (record && row) {
                 return this.terminal(record, row, code, error.message, ctx, accessChanged);
             }
@@ -639,11 +720,18 @@ export class FulltextUpsertExecutor implements JobExecutor {
             ? Math.max(1, error.retryAfterSeconds!) * 1_000 : undefined;
         const message = `${code}: ${error.message}`;
         if (code === 'claim_busy' || code === 'lease_lost' || code === 'index_untag_busy') {
-            return { kind: 'retry', error: message, countsAsAttempt: false, retryAfterMs: retryAfterMs ?? 5_000 };
+            if (code === 'claim_busy' && row?.structuredDocumentHash) {
+                // Another writer holds this content, so it is likely indexed by the retry.
+                FulltextUpsertExecutor.markProbeFirst(row.structuredDocumentHash);
+            }
+            return {
+                kind: 'retry', error: message, countsAsAttempt: false,
+                retryAfterMs: Math.min(retryAfterMs ?? 5_000, CLAIM_BUSY_MAX_RETRY_MS),
+            };
         }
-        if (record && (error.status === 429 || [500, 502, 503, 504].includes(error.status)
+        if (error.status === 429 || [500, 502, 503, 504].includes(error.status)
             || isSessionRefreshError(error)
-            || code === 'embedding_unavailable' || code === 'index_write_ambiguous')) {
+            || code === 'embedding_unavailable' || code === 'index_write_ambiguous') {
             return this.remoteRetry(message, retryAfterMs ?? (error.status === 429 ? 5_000 : undefined));
         }
         return { kind: 'retry', error: message, retryAfterMs };

@@ -278,7 +278,7 @@ function changeTypeKey(action: AgentAction): string {
     // Widened: callers may hold either the stored type or the tool name it came
     // from, and two tool names differ from the type they store.
     const actionType: string = action.action_type;
-    if (actionType === 'create_items') return 'create_item';
+    if (actionType === 'create_items' || actionType === 'import_item') return 'create_item';
     if (actionType === 'edit_item') return 'edit_metadata';
     // One kind of change for the heading: both tools edit a note.
     if (actionType === 'edit_note_batch') return 'edit_note';
@@ -296,6 +296,7 @@ const CHANGE_KINDS: Record<string, { verb: string; noun: string }> = {
     edit_metadata: { verb: 'edited', noun: 'item' },
     edit_note: { verb: 'edited', noun: 'note' },
     organize_items: { verb: 'organized', noun: 'item' },
+    merge_items: { verb: 'merged', noun: 'group' },
     manage_tags: { verb: 'updated', noun: 'tag' },
     manage_collections: { verb: 'updated', noun: 'collection' },
     create_highlight_annotations: { verb: 'created', noun: 'highlight' },

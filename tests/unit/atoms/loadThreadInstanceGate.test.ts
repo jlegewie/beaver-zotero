@@ -112,6 +112,7 @@ vi.mock('@beaver/agent-core/citations/externalReferences', async () => {
     return {
         clearExternalReferenceCacheAtom: atom(null, () => {}),
         addExternalReferencesToMappingAtom: atom(null, () => {}),
+        externalReferenceMappingAtom: atom({}),
     };
 });
 
@@ -146,6 +147,7 @@ vi.mock('../../../react/agents/agentActions', async () => {
     return {
         threadAgentActionsAtom: atom<unknown[]>([]),
         isCreateItemAgentAction: vi.fn(() => false),
+        isImportItemAgentAction: vi.fn(() => false),
         validateAppliedAgentAction: (...args: unknown[]) => validateAppliedAgentActionMock(...args),
         undoAgentActionAtom: atom(null, (_get: unknown, _set: unknown, actionId: string) => {
             undoAgentActionWriteMock(actionId);

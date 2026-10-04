@@ -1,11 +1,14 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
+import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     getAgentActionsByRunAtom,
-    isCreateItemAgentAction,
-    CreateItemAgentAction,
+    isItemCreatingAgentAction,
+    isImportItemAgentAction,
+    ItemCreatingAgentAction,
 } from '../../../agents/agentActions';
+import { importActionReference } from '../../../utils/importItemDisplay';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
 import ArtifactsList from './reviewChanges/ArtifactsList';
 import ChangesCard from './reviewChanges/ChangesCard';
@@ -28,6 +31,7 @@ interface AgentActionsReviewProps {
  */
 export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
+    const referenceMapping = useAtomValue(externalReferenceMappingAtom);
     const runIds = React.useMemo(() => runs.map((run) => run.id), [runs]);
     const changesRows = useChangesRows(runIds);
     const artifactRows = useArtifactRows(runIds);
@@ -36,20 +40,23 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) 
 
     // Citation imports retain their per-run control because that component's
     // mutations are scoped to a run. The library changes below are aggregated.
+    // create_item (older clients) and import_item (create_items v2) proposals
+    // share the card; an import_item carries no ExternalReference of its own.
+    const citationCount = React.useCallback((action: ItemCreatingAgentAction): number => (
+        isImportItemAgentAction(action)
+            ? importActionReference(action.proposed_data, referenceMapping).citation_count ?? 0
+            : action.proposed_data.item?.citation_count ?? 0
+    ), [referenceMapping]);
     const createItemActionsByRun = React.useMemo(() => runs.map((run) => ({
         runId: run.id,
         actions: (getAgentActionsByRun(
             run.id,
-            (action) => isCreateItemAgentAction(action) && action.toolcall_id === 'citations'
-        ) as CreateItemAgentAction[]).sort((a, b) => {
-            const countA = a.proposed_data.item.citation_count ?? 0;
-            const countB = b.proposed_data.item.citation_count ?? 0;
-            return countB - countA;
-        }),
+            (action) => isItemCreatingAgentAction(action) && action.toolcall_id === 'citations'
+        ) as ItemCreatingAgentAction[]).sort((a, b) => citationCount(b) - citationCount(a)),
     })).filter(({ actions }) =>
         actions.length > 0 &&
         !actions.every((action) => action.status === 'rejected' || action.status === 'undone')
-    ), [getAgentActionsByRun, runs]);
+    ), [getAgentActionsByRun, runs, citationCount]);
 
     // Don't show during streaming
     if (!lastRun || lastRun.status === 'in_progress') {

@@ -395,6 +395,43 @@ describe('BeaverDB background processing state', () => {
         expect((await db.getAttachmentProcessingState(1, 'SCAN0001'))?.lastError).toBeNull();
     });
 
+    it('lists a refused read only once its queued retry is exhausted', async () => {
+        const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: true };
+        await db.recordAttachmentReadingOutcome({
+            libraryId: 1, zoteroKey: 'DENIED01', contentKind: 'pdf',
+            errorCode: 'file_permission_denied', attemptedAt: 1,
+        });
+        await db.enqueueBackgroundJob({
+            jobType: 'document_extract', libraryId: 1, zoteroKey: 'DENIED01',
+            contentKind: 'pdf', payloadKind: 'structured', now: 0,
+        });
+        // A first attempt that has not run yet is not a retry.
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'permission_denied', count: 1 }]);
+
+        const [job] = await db.peekBackgroundJobs();
+        const retry = { maxAttempts: 2, backoffMs: () => 1_000, now: 10 };
+        expect(await db.failBackgroundJob(job.id, 'file_permission_denied', retry)).toEqual({ dead: false });
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([]);
+
+        expect(await db.failBackgroundJob(job.id, 'file_permission_denied', retry)).toEqual({ dead: true });
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'permission_denied', count: 1 }]);
+    });
+
+    it('does not hide a scan awaiting OCR behind a retried OCR job', async () => {
+        await db.recordAttachmentReadingOutcome({
+            libraryId: 1, zoteroKey: 'SCAN0002', contentKind: 'pdf', errorCode: 'ocr_required', attemptedAt: 1,
+        });
+        await db.enqueueBackgroundJob({
+            jobType: 'document_ocr', libraryId: 1, zoteroKey: 'SCAN0002',
+            contentKind: 'pdf', payloadKind: 'structured', now: 0,
+        });
+        const [job] = await db.peekBackgroundJobs();
+        await db.failBackgroundJob(job.id, 'ocr_unexpected: boom', { maxAttempts: 5, backoffMs: () => 1_000, now: 10 });
+
+        expect(await db.getProcessingIssueCounts({ hasOcrAccess: false, hasSearchIndexAccess: false }))
+            .toEqual([{ reason: 'scanned', count: 1 }]);
+    });
+
     it('keeps the newest replacement metadata on a deduplicated upsert job', async () => {
         const base = {
             jobType: 'fulltext_upsert' as const,

@@ -9,6 +9,7 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
 }));
 
 vi.mock('../../../src/utils/noteCitationExpand', () => ({
+    ensureCitedLibrariesLoaded: vi.fn().mockResolvedValue([]),
     preloadNotePageLabels: vi.fn().mockResolvedValue({}),
 }));
 
@@ -127,5 +128,15 @@ describe('recoverSimplifiedCitationLabel', () => {
         (globalThis as any).Zotero.Libraries = { userLibraryID: 1 };
         expect(recoverSimplifiedCitationLabel('<citation id="u-ATTACH"/>')).toBe('(parent)');
         expect(recoverSimplifiedCitationLabel('<citation item_id="u-PARENT"/>')).toBe('(parent-direct)');
+    });
+});
+
+describe('citation label recovery for unloaded libraries', () => {
+    it('returns no label instead of throwing when the cited item is not loaded', () => {
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => {
+            throw new Error('Item 5 not yet loaded');
+        });
+
+        expect(recoverSimplifiedCitationLabel('<citation id="1-ATTACH"/>')).toBeNull();
     });
 });

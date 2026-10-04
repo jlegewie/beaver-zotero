@@ -7,7 +7,16 @@ import {
 } from "../atoms/profile";
 import { backgroundProcessingStatusAtom } from "../atoms/backgroundProcessing";
 import { tryGetWindowRuntime } from "../runtime/windowRuntime";
+import { useSurfaceWindow } from "../runtime/SurfaceWindowContext";
+import { useDocumentVisible } from "./useDocumentVisible";
 
+const COVERAGE_POLL_MS = 60_000;
+
+/**
+ * Keeps `backgroundProcessingStatusAtom` fresh while the calling surface is
+ * visible. Local status and remote coverage polling pause while the surface's
+ * document is hidden and resume when it becomes visible again.
+ */
 export function useBackgroundProcessingStatus(
     options: {
         includeCoverage?: boolean;
@@ -19,7 +28,12 @@ export function useBackgroundProcessingStatus(
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const setStatus = useSetAtom(backgroundProcessingStatusAtom);
+    const visible = useDocumentVisible(useSurfaceWindow().document);
     const generation = useRef(0);
+    const lastCoverageRequest = useRef<{
+        accountGeneration: number;
+        at: number;
+    } | null>(null);
     const pending = useRef<{
         generation: number;
         again: boolean;
@@ -107,6 +121,8 @@ export function useBackgroundProcessingStatus(
     ]);
 
     useEffect(() => {
+        // Re-running on visibility refreshes immediately when shown again.
+        if (!visible) return;
         let cancelled = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
         const runtime = tryGetWindowRuntime();
@@ -134,13 +150,18 @@ export function useBackgroundProcessingStatus(
             unsubscribe?.();
             if (timer !== undefined) clearTimeout(timer);
         };
-    }, [options.pollIntervalMs, refresh]);
+    }, [options.pollIntervalMs, refresh, visible]);
 
     useEffect(() => {
-        if (!options.includeCoverage || !hasSearchAccess) return;
+        if (!options.includeCoverage || !hasSearchAccess) {
+            lastCoverageRequest.current = null;
+            return;
+        }
+        if (!visible) return;
         let cancelled = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
         const poll = async () => {
+            lastCoverageRequest.current = { accountGeneration, at: Date.now() };
             const coverage = await Zotero.Beaver?.background?.collectCoverage();
             if (cancelled) return;
             if (coverage !== undefined)
@@ -155,9 +176,17 @@ export function useBackgroundProcessingStatus(
                             ? "Could not check search coverage."
                             : null,
                 }));
-            timer = setTimeout(() => void poll(), 60_000);
+            timer = setTimeout(() => void poll(), COVERAGE_POLL_MS);
         };
-        void poll();
+        // Coverage is a backend request: becoming visible resumes the existing
+        // cadence instead of adding a request per visibility change.
+        const last = lastCoverageRequest.current;
+        const due =
+            last?.accountGeneration === accountGeneration
+                ? Math.max(0, last.at + COVERAGE_POLL_MS - Date.now())
+                : 0;
+        if (due === 0) void poll();
+        else timer = setTimeout(() => void poll(), due);
         return () => {
             cancelled = true;
             if (timer !== undefined) clearTimeout(timer);
@@ -167,6 +196,7 @@ export function useBackgroundProcessingStatus(
         options.includeCoverage,
         hasSearchAccess,
         setStatus,
+        visible,
     ]);
 
     return refresh;

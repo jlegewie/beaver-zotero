@@ -220,7 +220,7 @@ describe('attachment change reconciliation', () => {
         })]);
     });
 
-    it('re-enqueues OCR after a recoverable service-unavailable response', async () => {
+    it('leaves OCR parked by a closed admission gate to the admission probe, except on user request', async () => {
         mocks.kind = 'pdf';
         item.attachmentContentType = 'application/pdf';
         await db.ensureAttachmentProcessingState({
@@ -234,10 +234,14 @@ describe('attachment change reconciliation', () => {
         await (reconciler as any).reconcileAttachment(
             db, item, 'pdf', false, [], await db.getAttachmentProcessingState(1, item.key), false, 'backfill',
         );
+        expect(maybeEnqueueOcrJob).not.toHaveBeenCalled();
 
+        await (reconciler as any).reconcileAttachment(
+            db, item, 'pdf', false, [], await db.getAttachmentProcessingState(1, item.key), false, 'interactive',
+        );
         expect(maybeEnqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({
             zoteroKey: item.key,
-            requestContext: 'backfill',
+            requestContext: 'interactive',
         }));
     });
 
@@ -481,6 +485,43 @@ describe('attachment change reconciliation', () => {
             expect(maybeEnqueueOcrJob).not.toHaveBeenCalled();
         });
 
+        it('is a no-op when a read already moved the cache and the ledger', async () => {
+            await seedHashedPdf(true);
+            const to = move('both');
+            const observed = (await observeAttachmentSource(item, 'pdf'))!.identity;
+            await connection.queryAsync('UPDATE attachment_processing_state SET extraction_source = ?, file_mtime_ms = ?',
+                [observed, to.mtimeMs]);
+            const moved = await db.getAttachmentProcessingState(1, item.key);
+
+            await notify();
+
+            expect(await db.getAttachmentProcessingState(1, item.key)).toEqual(moved);
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+            expect(mocks.relocate).not.toHaveBeenCalled();
+            expect(mocks.invalidate).not.toHaveBeenCalled();
+        });
+
+        it('does not queue cache preparation when a read moves the ledger during its own relocation', async () => {
+            const before = await seedHashedPdf(true);
+            const to = move('both');
+            const observed = (await observeAttachmentSource(item, 'pdf'))!.identity;
+            // The read relocates both while the reconciler holds the pre-move row.
+            mocks.relocate.mockImplementation(async () => {
+                await connection.queryAsync('UPDATE attachment_processing_state SET extraction_source = ?, file_mtime_ms = ?',
+                    [observed, to.mtimeMs]);
+                return 'current';
+            });
+            const jobs: any[] = [];
+
+            await (reconciler as any).reconcileAttachment(db, item, 'pdf', true, jobs, before);
+
+            expect(jobs).toEqual([]);
+            expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+                extractStatus: 'done', ocrStatus: 'done', extractionSource: observed, fileMtimeMs: to.mtimeMs,
+            });
+            expect(mocks.invalidate).not.toHaveBeenCalled();
+        });
+
         it('queues cache preparation when a read after the move already discarded the cache', async () => {
             const before = await seedHashedPdf();
             move('path');
@@ -654,6 +695,33 @@ describe('attachment change reconciliation', () => {
         ]);
     });
 
+    it.each([['cache preparation', 'done'], ['re-extraction', null]] as const)(
+        'lists a previously read attachment whose %s is denied until the job dies', async (_, extractStatus) => {
+        await seed(false);
+        await db.recordAttachmentReadingOutcome({ libraryId: 1, zoteroKey: item.key,
+            contentKind: 'snapshot', errorCode: null, attemptedAt: 100 });
+        if (extractStatus === null) await db.resetAttachmentExtraction(1, item.key, 'source_recheck');
+        mocks.resolve.mockResolvedValue({ kind: 'error', code: 'file_permission_denied' });
+        await db.enqueueBackgroundJob({ jobType: 'document_extract', libraryId: 1, zoteroKey: item.key,
+            itemId: item.id, contentKind: 'snapshot', payloadKind: 'structured', priority: 110,
+            payload: { content_kind: 'snapshot', prepare_cache: extractStatus === 'done' }, now: 0 });
+        await connection.queryAsync('UPDATE background_jobs SET attempt_count = 1, available_at = 0');
+        const processor = new BackgroundExtractor();
+
+        expect(await processor.processOnce({ awaitLaunchedJobs: true })).toMatchObject({ processed: true });
+        // A queued retry is pending work, not an issue.
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([]);
+
+        await connection.queryAsync('UPDATE background_jobs SET available_at = 0');
+        expect(await processor.processOnce({ awaitLaunchedJobs: true })).toMatchObject({ processed: true });
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(await db.getAttachmentProcessingState(1, item.key))
+            .toMatchObject({ extractStatus: extractStatus ?? 'failed' });
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'permission_denied', count: 1 }]);
+        expect((await db.getProcessingIssuePage(entitlements, 'permission_denied')).map((issue) => issue.zoteroKey))
+            .toEqual([item.key]);
+    });
+
     it.each([
         ['missing', 'notification'], ['invalid', 'notification'],
         ['missing', 'deep'], ['invalid', 'deep'],
@@ -726,6 +794,32 @@ describe('attachment change reconciliation', () => {
         await notify();
         expect(await db.peekBackgroundJobs()).toHaveLength(1);
         expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'file_unavailable', count: 1 }]);
+    });
+
+    it('records a stat-time permission denial as a recoverable permission issue', async () => {
+        mocks.resolve.mockResolvedValue({ kind: 'error', code: 'file_permission_denied' });
+        await notify('add');
+
+        expect(await db.getAttachmentProcessingState(1, item.key))
+            .toMatchObject({ extractStatus: 'skipped', lastError: 'file_permission_denied' });
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'permission_denied', count: 1 }]);
+    });
+
+    it('retries a document job whose file the OS refuses to stat, without recording a failure', async () => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: item.key, itemId: 7, contentKind: 'snapshot' });
+        await db.enqueueBackgroundJobs([{ jobType: 'document_extract', libraryId: 1, itemId: 7, zoteroKey: item.key,
+            contentKind: 'snapshot', payloadKind: 'structured', payload: { content_kind: 'snapshot' }, now: Date.now() }]);
+        mocks.resolve.mockResolvedValue({ kind: 'error', code: 'file_permission_denied' });
+        const job = await db.claimNextBackgroundJob(Date.now(), 60_000);
+
+        const outcome = await new DocumentExtractExecutor().execute(job!, {
+            db: db as any, runOnMuPDFWorker: async (fn) => fn(), externalAbortSignal: new AbortController().signal,
+            shouldSkipDbWrites: () => false, enqueue: async () => {},
+        });
+
+        expect(outcome).toMatchObject({ kind: 'retry', error: 'file_permission_denied' });
+        expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({ extractStatus: null });
+        expect(mocks.extract).not.toHaveBeenCalled();
     });
 
     async function download() {

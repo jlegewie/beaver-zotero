@@ -1,3 +1,4 @@
+import { withMergeChoicesForDisplay } from '../../../atoms/mergeItemsChoices';
 import { getHostWindow } from '../../../runtime/windowRuntime';
 import React from 'react';
 import { AgentAction, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
@@ -13,6 +14,7 @@ import {
     FolderDetailIcon,
     TaskDoneIcon,
     TagIcon,
+    BookCopyIcon,
     HighlighterIcon,
     DocumentValidationIcon,
     DollarCircleIcon,
@@ -161,6 +163,7 @@ export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProp
     if (toolName === 'edit_annotations' || toolName === 'delete_annotations') return HighlighterIcon;
     if (toolName === 'create_collection') return FolderAddIcon;
     if (toolName === 'organize_items') return TaskDoneIcon;
+    if (toolName === 'merge_items') return BookCopyIcon;
     if (toolName === 'manage_tags') return TagIcon;
     if (toolName === 'manage_collections') return FolderDetailIcon;
     if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
@@ -280,12 +283,15 @@ export function getActionLabel(
                 : `${verb} Annotation`;
         }
         case 'create_item':
+        case 'import_item':
         case 'create_items':
             return completed ? 'Imported' : 'Import';
         case 'create_collection':
             return completed ? 'Created Collection' : 'Create Collection';
         case 'organize_items':
             return completed ? 'Organized' : 'Organize';
+        case 'merge_items':
+            return completed ? 'Merged Duplicates' : 'Merge Duplicates';
         case 'manage_tags':
             return 'Tag';
         case 'manage_collections':
@@ -333,6 +339,8 @@ export function getActionTitle(
                 ? itemTitle
                 : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
         }
+        case 'merge_items':
+            return actionData?.preview?.members?.find((m: any) => m.item_id === actionData.master_item_id)?.title ?? null;
         case 'manage_tags': {
             const name = actionData?.name;
             const op = actionData?.action;
@@ -370,11 +378,24 @@ export function getActionTitle(
             return 'Confirm External Search';
         }
         case 'create_item':
+        case 'import_item':
         case 'create_items': {
+            if (!actions || actions.length === 0) {
+                // v2 approval: the actions carry the items; the request carries
+                // their count and the first titles.
+                const titles = Array.isArray(actionData?.titles) ? actionData.titles : [];
+                if (actionData?.items_count === 1 && typeof titles[0] === 'string' && titles[0]) {
+                    return truncateText(titles[0], 60);
+                }
+                if (typeof actionData?.items_count === 'number' && actionData.items_count > 1) {
+                    return `${actionData.items_count} Items`;
+                }
+            }
             // For create_item, get title from the item data
             // Check actions first, then fall back to actionData (for pending approvals where actions may be empty)
             if (actions && actions.length === 1) {
-                const item = actions[0].proposed_data?.item ?? actionData?.item;
+                const proposed = actions[0].proposed_data;
+                const item = proposed?.item ?? proposed?.pending_resolution?.fallback_item ?? actionData?.item;
                 if (item?.title) {
                     return truncateText(item.title, 70);
                 }
@@ -420,7 +441,7 @@ export function buildPreviewData(
     if (action) {
         return {
             actionType: action.action_type,
-            actionData: action.proposed_data,
+            actionData: withMergeChoicesForDisplay(action).proposed_data,
             currentValue: undefined, // We don't have this for stored actions
             resultData: action.result_data,
             errorMessage: action.error_message,

@@ -13,11 +13,17 @@ import {
     observeAttachmentSource,
     relocatedLocalIdentity,
 } from '../documentExtraction/sourceObservation';
-import { OCR_ENGINE_VERSION, OCR_PRIORITY_BACKFILL, OCR_PRIORITY_ON_DEMAND } from '../ocr/constants';
+import {
+    OCR_ENGINE_VERSION,
+    OCR_PRIORITY_BACKFILL,
+    OCR_PRIORITY_ON_DEMAND,
+    OCR_SERVICE_UNAVAILABLE,
+} from '../ocr/constants';
 import type { AttachmentRef } from './issues';
 import { enqueueOcrJob, maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
 import { getSystemIdleTimeMs } from '../../utils/idleService';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
+import { processableAttachmentSql } from '../../utils/attachmentFiles';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     ATTACHMENT_SCAN_BATCH_SIZE,
@@ -50,6 +56,8 @@ interface LibraryCursor {
 }
 
 const IDLE_THRESHOLD_MS = 30_000;
+/** Attachments a library scan enumerates; `getReadableContentKind()` makes the final call. */
+const PROCESSABLE_ATTACHMENT_SQL = processableAttachmentSql('IA.contentType', 'IA.path');
 
 /**
  * Terminal reasons that say "the bytes were not reachable", not "these bytes
@@ -508,9 +516,13 @@ export class ReconcilerService {
      *
      * `probe` runs once per periodic pass and tickets only the attachment that
      * has waited longest, and nothing while any parked attachment already has a
-     * ticket, so a long outage costs one OCR request per pass. When that request
-     * is accepted, the OCR executor calls {@link notifyOcrAdmissionReopened} and
-     * the next pass runs `all`, which tickets every remaining parked attachment.
+     * ticket, so a long outage costs one OCR request per pass. Missing and
+     * trashed attachments are passed over, and each probed attachment moves to
+     * the back of the queue, so one whose ticket ends before reaching the OCR
+     * API (no local file, no hash, …) cannot hold the head of the queue. When
+     * the request is accepted, the OCR executor calls
+     * {@link notifyOcrAdmissionReopened} and the next pass runs `all`, which
+     * tickets every remaining parked attachment.
      */
     private async resumeUnavailableOcr(
         db: QueueDB,
@@ -521,16 +533,17 @@ export class ReconcilerService {
         if (!backgroundProcessingEnabled() || Zotero.Beaver?.hasOcrAccess !== true) return;
         const parked = await db.getOcrUnavailableAttachments(libraryIds);
         if (mode === 'probe' && parked.some((row) => row.ticketed)) return;
-        const targets = parked.filter((row) => !row.ticketed).slice(0, mode === 'probe' ? 1 : undefined);
         let ticketed = 0;
-        for (const { libraryId, zoteroKey } of targets) {
+        for (const { libraryId, zoteroKey } of parked.filter((row) => !row.ticketed)) {
+            if (mode === 'probe' && ticketed > 0) break;
             if (this.cancelled(generation)) return;
             if (!isBackgroundProcessingLibraryEnabled(libraryId)) continue;
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
             if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
             if (!item || safeIsInTrash(item) !== false) continue;
+            if (mode === 'probe') await db.touchAttachmentOcrUnavailable(libraryId, zoteroKey);
             try {
-                await enqueueOcrJob({
+                if (await enqueueOcrJob({
                     item,
                     libraryId,
                     zoteroKey,
@@ -538,8 +551,7 @@ export class ReconcilerService {
                     pageCount: null,
                     priority: OCR_PRIORITY_BACKFILL,
                     requestContext: 'backfill',
-                });
-                ticketed += 1;
+                })) ticketed += 1;
             } catch (error) {
                 logger(`ReconcilerService: OCR retry enqueue failed for ${libraryId}-${zoteroKey}: ${error}`, 2);
             }
@@ -770,6 +782,10 @@ export class ReconcilerService {
             && row.ocrStatus === 'needed'
             && Zotero.Beaver?.hasOcrAccess === true
         ) {
+            // Attachments parked by a closed admission gate are resumed by
+            // resumeUnavailableOcr; re-ticketing them on every library change
+            // would send one OCR request per parked scan during an outage.
+            if (requestContext === 'backfill' && row.lastError === OCR_SERVICE_UNAVAILABLE) return;
             maybeEnqueueOcrJob({
                 item,
                 libraryId: item.libraryID,
@@ -938,10 +954,7 @@ export class ReconcilerService {
                 MAX(I.clientDateModified),
                 SUM(CASE WHEN IA.itemID IS NOT NULL
                     AND IA.linkMode != ?
-                    AND (LOWER(COALESCE(IA.contentType, '')) IN (
-                        'application/pdf', 'application/epub+zip',
-                        'text/html', 'application/xhtml+xml'
-                    )) THEN 1 ELSE 0 END)
+                    AND ${PROCESSABLE_ATTACHMENT_SQL} THEN 1 ELSE 0 END)
              FROM items I
              LEFT JOIN itemAttachments IA USING (itemID)
              WHERE I.libraryID = ?
@@ -968,10 +981,7 @@ export class ReconcilerService {
                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
                AND NOT EXISTS (SELECT 1 FROM deletedItems D WHERE D.itemID = IA.parentItemID)
                AND IA.linkMode != ?
-               AND LOWER(COALESCE(IA.contentType, '')) IN (
-                    'application/pdf', 'application/epub+zip',
-                    'text/html', 'application/xhtml+xml'
-               )
+               AND ${PROCESSABLE_ATTACHMENT_SQL}
              ORDER BY I.itemID`,
             [libraryId, Zotero.Attachments.LINK_MODE_LINKED_URL],
             { onRow: (row: any) => ids.push(row.getResultByIndex(0)) },

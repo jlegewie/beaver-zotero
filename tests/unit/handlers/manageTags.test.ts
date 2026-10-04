@@ -182,6 +182,41 @@ describe('validateManageTagsAction', () => {
         expect(resp.normalized_action_data?.old_color).toBeUndefined();
     });
 
+    it('rejects a tag that exists globally but has no items or color in the target library', async () => {
+        okLibrary();
+        // Zotero.Tags.getID is global: the name resolves because another
+        // library uses it.
+        Zot.Tags.getID.mockReturnValue(42);
+        Zot.Tags.getTagItems.mockResolvedValue([]);
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-other-lib',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'donor human milk' },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('tag_not_found');
+        expect(resp.error).toBe("Tag not found in library 'My Library': 'donor human milk'.");
+        expect(Zot.Tags.getTagItems).toHaveBeenCalledWith(1, 42);
+    });
+
+    it('accepts an item-less tag that still has a color in the target library', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockReturnValue(42);
+        Zot.Tags.getTagItems.mockResolvedValue([]);
+        Zot.Tags.getColor.mockReturnValue({ color: '#ff0000', position: 0 });
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-colored-empty',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'to-read' },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(resp.current_value?.item_count).toBe(0);
+    });
+
     it('rejects rename with empty new_name', async () => {
         okLibrary();
         Zot.Tags.getID.mockReturnValue(42);
@@ -318,6 +353,7 @@ describe('validateManageTagsAction', () => {
         okLibrary();
         const stored = 'séjour d’études à l’étranger'; // curly apostrophes
         Zot.Tags.getID.mockImplementation((n: string) => (n === stored ? 55 : false));
+        Zot.Tags.getTagItems.mockResolvedValue([10]);
         queueDbRow([stored]);
 
         const resp = await validateManageTagsAction({
@@ -410,7 +446,7 @@ describe('validateManageTagsAction', () => {
             if (!n.startsWith('Tag')) return false;
             return initDone ? 100 + parseInt(n.slice(3), 10) : false;
         });
-        Zot.Tags.getTagItems.mockResolvedValue([]);
+        Zot.Tags.getTagItems.mockResolvedValue([10]);
 
         const calls = [0, 1, 2, 3, 4].map((i) =>
             validateManageTagsAction({
@@ -499,6 +535,40 @@ describe('executeManageTagsAction', () => {
         expect(resp.success).toBe(true);
         expect(Zot.Tags.removeFromLibrary).not.toHaveBeenCalled();
         expect(resp.result_data?.items_affected).toBe(0);
+    });
+
+    it('skips Zotero.Tags.removeFromLibrary when no item in the library has the tag', async () => {
+        // removeFromLibrary throws "Parameter 1 is undefined" on an empty item set.
+        Zot.Tags.getID.mockReturnValue(11);
+        Zot.Tags.getTagItems.mockResolvedValue([]);
+
+        const resp = await executeManageTagsAction({
+            event: 'agent_action_execute',
+            request_id: 'e-empty',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'elsewhere', library_id: 1 },
+        } as any, ctx);
+        expect(resp.success).toBe(true);
+        expect(Zot.Tags.removeFromLibrary).not.toHaveBeenCalled();
+        expect(Zot.Tags.setColor).not.toHaveBeenCalled();
+        expect(resp.result_data?.items_affected).toBe(0);
+    });
+
+    it('clears the color of an item-less tag on delete and snapshots it for undo', async () => {
+        Zot.Tags.getID.mockReturnValue(11);
+        Zot.Tags.getTagItems.mockResolvedValue([]);
+        Zot.Tags.getColor.mockReturnValue({ color: '#ff0000', position: 2 });
+
+        const resp = await executeManageTagsAction({
+            event: 'agent_action_execute',
+            request_id: 'e-color',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'to-read', library_id: 1 },
+        } as any, ctx);
+        expect(resp.success).toBe(true);
+        expect(Zot.Tags.removeFromLibrary).not.toHaveBeenCalled();
+        expect(Zot.Tags.setColor).toHaveBeenCalledWith(1, 'to-read', false);
+        expect(resp.result_data?.old_color).toEqual({ color: '#ff0000', position: 2 });
     });
 
     it('fails with invalid_library_id when library_id missing', async () => {

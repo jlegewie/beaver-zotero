@@ -18,6 +18,7 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     create_note: 'note_creation',
     create_collection: 'library_modifications',
     organize_items: 'library_modifications',
+    merge_items: 'duplicate_merges',
     manage_tags: 'library_structure',
     manage_collections: 'library_structure',
     create_highlight_annotations: 'annotations',
@@ -29,6 +30,7 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     // run. A manually configured underlying group preference is still read.
     delete_annotations: 'annotation_deletion',
     create_item: 'create_items',
+    import_item: 'create_items',
     create_items: 'create_items',
 };
 
@@ -58,6 +60,7 @@ const DEFAULT_GROUP_PREFERENCES: Record<string, DeferredToolPreference> = {
     'note_edits': 'always_ask',
     'note_creation': 'always_apply',
     'library_modifications': 'always_ask',
+    'duplicate_merges': 'always_ask',
     'library_structure': 'always_ask',
     'annotations': 'always_ask',
     'create_items': 'always_ask',

@@ -1,3 +1,5 @@
+import { DuplicateError } from '../duplicates/discovery';
+import { validateMergeItemsAction } from '../duplicates/merge';
 import { CollectionResolutionError } from '../collections/collectionIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
@@ -6,6 +8,7 @@ import {
 import { validateCreateCollectionAction } from './actions/createCollection';
 import { validateCreateHighlightAnnotationsAction } from './actions/createHighlightAnnotations';
 import { validateCreateItemAction } from './actions/createItems';
+import { validateImportItemsAction } from './actions/importItems';
 import { validateCreateNoteAction } from './actions/createNote';
 import { validateCreateNoteAnnotationsAction } from './actions/createNoteAnnotations';
 import { validateEditAnnotationsAction } from './actions/editAnnotations';
@@ -45,6 +48,10 @@ export async function handleAgentActionValidateRequest(
             return await validateCreateItemAction(request);
         }
 
+        if (request.action_type === 'import_item') {
+            return await validateImportItemsAction(request);
+        }
+
         if (request.action_type === 'edit_note') {
             return await validateEditNoteAction(request);
         }
@@ -68,6 +75,8 @@ export async function handleAgentActionValidateRequest(
         if (request.action_type === 'edit_annotations') {
             return await validateEditAnnotationsAction(request);
         }
+
+        if (request.action_type === 'merge_items') return await validateMergeItemsAction(request);
 
         if (request.action_type === 'manage_tags') {
             return await validateManageTagsAction(request);
@@ -95,7 +104,7 @@ export async function handleAgentActionValidateRequest(
             request_id: request.request_id,
             valid: false,
             error: error instanceof Error ? error.message : String(error),
-            error_code: error instanceof CollectionResolutionError ? error.code : 'validation_failed',
+            error_code: error instanceof CollectionResolutionError || error instanceof DuplicateError ? error.code : 'validation_failed',
             preference: 'always_ask',
         };
     }

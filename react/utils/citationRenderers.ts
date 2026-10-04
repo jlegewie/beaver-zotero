@@ -14,6 +14,7 @@ import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { UNRESOLVED_LIBRARY_ID, libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { hydrateItemLinkLibraryRefs } from './itemLinks';
+import { loadCitedLibraries } from './citationRenderContext';
 import {
     baseCitationKey,
     getPageLocator,
@@ -73,6 +74,23 @@ export function preprocessNoteContent(text: string): string {
     }).replace(/<\/note>/g, '\n---');
 }
 
+/** Citation state the Markdown renderer reads from the current thread. */
+interface MarkdownCitationState {
+    citations: BeaverCitation[];
+    citationByKey: Record<string, BeaverCitation>;
+    externalReferenceMapping: Record<string, ExternalReference>;
+    externalItemMapping: Record<string, ZoteroItemReference | null>;
+}
+
+function readMarkdownCitationState(): MarkdownCitationState {
+    return {
+        citations: store.get(citationsAtom),
+        citationByKey: store.get(citationByKeyAtom),
+        externalReferenceMapping: store.get(externalReferenceMappingAtom),
+        externalItemMapping: store.get(externalReferenceItemMappingAtom),
+    };
+}
+
 /**
  * Converts markdown content to plain text
  * @param text Text to format
@@ -80,12 +98,11 @@ export function preprocessNoteContent(text: string): string {
  * @returns Formatted text
  */
 export function renderToMarkdown(
-    text: string
+    text: string,
+    citationState: MarkdownCitationState = readMarkdownCitationState(),
 ) : string {
 
-    const externalReferenceMapping = store.get(externalReferenceMappingAtom);
-    const externalItemMapping = store.get(externalReferenceItemMappingAtom);
-    const citationByKey = store.get(citationByKeyAtom);
+    const { externalReferenceMapping, externalItemMapping, citationByKey } = citationState;
 
     // Array of cited items
     const citedItems: Zotero.Item[] = [];
@@ -218,6 +235,19 @@ export function renderToMarkdown(
     return citedItems.length > 0 || externalReferences.length > 0
         ? `${formattedContent.trim()}\n\n## Sources\n\n${bibliography}`
         : formattedContent;
+}
+
+/**
+ * {@link renderToMarkdown} after loading the libraries of the cited items, so
+ * citations to items in a library Zotero has not loaded yet are formatted
+ * rather than dropped. Prefer this from async callers.
+ */
+export async function renderToMarkdownAsync(text: string): Promise<string> {
+    // Snapshot before awaiting: switching chats meanwhile replaces the
+    // citation state this text was written against.
+    const citationState = readMarkdownCitationState();
+    await loadCitedLibraries(text, citationState.citations, citationState.externalItemMapping);
+    return renderToMarkdown(text, citationState);
 }
 
 export interface RenderContextData {

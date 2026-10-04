@@ -1,3 +1,4 @@
+import type { MergeItemsProposedData, MergeItemsResultData } from '../../protocol/duplicates';
 import type {
     AnnotationProposedData,
     AnnotationResultData
@@ -6,6 +7,7 @@ import type {
     CreateItemProposedData,
     CreateItemResultData
 } from './items';
+import type { ImportItemProposedData, ImportItemResultData } from '../itemImport';
 import type {
     EditNoteProposedData,
     EditNoteResultData
@@ -374,7 +376,7 @@ export interface ConfirmExternalSearchProposedData {
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /**
  * Union type for all proposed data types
@@ -403,9 +405,11 @@ export interface NoteResultData {
 }
 
 export type ProposedData =
+    MergeItemsProposedData |
     AnnotationProposedData |
     NoteProposedData |
     CreateItemProposedData |
+    ImportItemProposedData |
     EditMetadataProposedData |
     CreateCollectionProposedData |
     OrganizeItemsProposedData |
@@ -421,9 +425,11 @@ export type ProposedData =
  * Type of result data after applying an action
  */
 export type ActionResultDataType =
+    MergeItemsResultData |
     AnnotationResultData |
     NoteResultData |
     CreateItemResultData |
+    ImportItemResultData |
     CreateCollectionResultData |
     OrganizeItemsResultData |
     ManageTagsResultData |

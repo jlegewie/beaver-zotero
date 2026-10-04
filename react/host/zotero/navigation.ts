@@ -8,6 +8,7 @@ import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgr
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
 import { selectCollection, selectLibrary, selectTagFilter } from '../../utils/selectItem';
 import { activateCitation } from './citationActivation';
+import { itemMenuItems } from './itemMenu';
 import { launchExternalFile, notifyReferenceUnavailable, notifyTagAmbiguous } from './sourceActions';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { navigateToAttachmentMatch as navigateToAttachmentMatchImpl } from '../../utils/attachmentMatchNavigation';
@@ -59,6 +60,7 @@ function findCollectionByKey(key: string, libraryID: number | null): Zotero.Coll
  */
 export const zoteroNavigation: NavigationHost = {
     openTable: openStoredTable,
+    itemMenuItems,
     revealInLibrary(ref: ZoteroItemReference): void {
         const resolved = resolveItemID(ref);
         if (!resolved || resolved === 'library_unavailable') {
