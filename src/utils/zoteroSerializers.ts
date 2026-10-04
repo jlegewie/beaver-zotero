@@ -609,7 +609,7 @@ export async function serializeAttachment(
 
     if (includeAnnotationsCount) {
         await item.loadDataType("childItems");
-        attachmentData.annotations_count = item.isFileAttachment?.() ? item.getAnnotations().length : 0;
+        attachmentData.annotations_count = item.isFileAttachment?.() ? item.numAnnotations() : 0;
     }
 
     return attachmentData;

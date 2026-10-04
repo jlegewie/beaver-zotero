@@ -74,7 +74,7 @@ import { getAttachmentInfoForItem, getCollectionByIdOrName, resolveStoredTagName
 
 type MockItem = Omit<
     Partial<Zotero.Item>,
-    'itemType' | 'getAnnotations' | 'getField' | 'parentItemID' | 'attachmentFilename'
+    'itemType' | 'numAnnotations' | 'getField' | 'parentItemID' | 'attachmentFilename'
 > & {
     id: number;
     key: string;
@@ -89,7 +89,7 @@ type MockItem = Omit<
     isFileAttachment?: ReturnType<typeof vi.fn>;
     isAnnotation?: ReturnType<typeof vi.fn>;
     getField?: ReturnType<typeof vi.fn>;
-    getAnnotations?: ReturnType<typeof vi.fn>;
+    numAnnotations?: ReturnType<typeof vi.fn>;
 };
 
 function makeItem(overrides: Partial<MockItem> = {}): MockItem {
@@ -151,7 +151,7 @@ describe('handleListItemsRequest', () => {
             page_count: item.attachmentContentType === 'application/pdf' ? 12 : null,
             line_count: null,
             is_primary: Boolean(options.isPrimary),
-            annotations_count: item.isFileAttachment?.() ? item.getAnnotations?.().length ?? 0 : 0,
+            annotations_count: item.isFileAttachment?.() ? item.numAnnotations?.() ?? 0 : 0,
         } as any));
 
         vi.mocked(resolveStoredTagName).mockResolvedValue({ found: true, name: 'to-read' });
@@ -233,7 +233,7 @@ describe('handleListItemsRequest', () => {
             attachmentFilename: 'paper.pdf',
             attachmentContentType: 'application/pdf',
             isFileAttachment: vi.fn(() => true),
-            getAnnotations: vi.fn(() => [{ id: 4 }]),
+            numAnnotations: vi.fn(() => 1),
         });
         const annotation = makeItem({
             id: 4,
@@ -267,7 +267,7 @@ describe('handleListItemsRequest', () => {
             expect.objectContaining({ attachment_id: '1-ATTACH', result_type: 'attachment', annotations_count: 1 }),
         ]));
         expect(response.items).not.toContainEqual(expect.objectContaining({ item_id: '1-ANN1' }));
-        expect(attachment.getAnnotations).toHaveBeenCalledOnce();
+        expect(attachment.numAnnotations).toHaveBeenCalledOnce();
     });
 
     it('returns zero annotations_count for file attachments with no annotations', async () => {
@@ -281,7 +281,7 @@ describe('handleListItemsRequest', () => {
             attachmentFilename: 'paper.pdf',
             attachmentContentType: 'application/pdf',
             isFileAttachment: vi.fn(() => true),
-            getAnnotations: vi.fn(() => []),
+            numAnnotations: vi.fn(() => 0),
         });
 
         itemsById.set(attachment.id, attachment);
@@ -303,7 +303,7 @@ describe('handleListItemsRequest', () => {
             result_type: 'attachment',
             annotations_count: 0,
         }));
-        expect(attachment.getAnnotations).toHaveBeenCalledOnce();
+        expect(attachment.numAnnotations).toHaveBeenCalledOnce();
     });
 
     it('returns zero annotations_count for non-file attachments without reading annotations', async () => {
@@ -317,8 +317,8 @@ describe('handleListItemsRequest', () => {
             attachmentFilename: null,
             attachmentContentType: 'text/html',
             isFileAttachment: vi.fn(() => false),
-            getAnnotations: vi.fn(() => {
-                throw new Error('getAnnotations should not be called');
+            numAnnotations: vi.fn(() => {
+                throw new Error('numAnnotations should not be called');
             }),
         });
 
@@ -341,7 +341,7 @@ describe('handleListItemsRequest', () => {
             result_type: 'attachment',
             annotations_count: 0,
         }));
-        expect(attachment.getAnnotations).not.toHaveBeenCalled();
+        expect(attachment.numAnnotations).not.toHaveBeenCalled();
     });
 
     it('emits a portable "u-<key>" item_id when this device can map the library to the personal library', async () => {

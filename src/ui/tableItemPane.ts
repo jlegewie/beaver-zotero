@@ -212,7 +212,8 @@ async function annotationDates(item: Zotero.Item): Promise<string[]> {
     try {
         if (!item.isFileAttachment()) return [];
         await item.loadDataType('childItems');
-        return (item.getAnnotations() as Zotero.Item[])
+        const annotations = await Zotero.Items.getAsync([...item.getAnnotations(false, true)]);
+        return annotations
             .map((annotation) => annotation?.dateAdded)
             .filter((date): date is string => typeof date === 'string' && !!date);
     } catch (error) {
