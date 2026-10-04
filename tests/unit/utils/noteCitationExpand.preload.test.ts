@@ -130,6 +130,56 @@ describe('preloadNotePageLabels', () => {
         vi.mocked(checkLibraryExcluded).mockReturnValue(null);
     });
 
+    /** A native citation of a group item, as written into a My Library note. */
+    function makeGroupCitation(key: string): string {
+        (globalThis as any).Zotero.Libraries.userLibraryID = 1;
+        (globalThis as any).Zotero.Groups = {
+            getGroupIDFromLibraryID: vi.fn((libraryID: number) => libraryID === 7 ? 6073928 : false),
+        };
+        (globalThis as any).Zotero.URI = {
+            getURIItemLibraryKey: vi.fn((uri: string) => {
+                const m = uri.match(/\/groups\/6073928\/items\/([A-Z0-9]+)$/);
+                return m ? { libraryID: 7, key: m[1] } : false;
+            }),
+        };
+        const citationData = {
+            citationItems: [{ uris: [`http://zotero.org/groups/6073928/items/${key}`], locator: '341' }],
+        };
+        return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
+            + '<span class="citation-item">Author, p. 341</span></span>';
+    }
+
+    /** Item lookups that only find `item` in `libraryID`, through either API. */
+    function mockItemLookups(libraryID: number, item: any): void {
+        const lookup = (lib: number, key: string) => (lib === libraryID && key === item.key ? item : null);
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(lookup);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (lib: number, key: string) => lookup(lib, key));
+    }
+
+    it('loads a cited group item\'s labels from its own library, not the note\'s', async () => {
+        const attachment = { ...makeAttachment(42, 'GROUPKEY'), libraryID: 7 };
+        const cache = { getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 0: '341' } }) };
+        mockItemLookups(7, attachment);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadNotePageLabels(makeGroupCitation('GROUPKEY'), 1);
+
+        expect(labels).toEqual({ 'g6073928-GROUPKEY': { 0: '341' } });
+    });
+
+    it('does not read labels for a citation into an excluded library', async () => {
+        vi.mocked(checkLibraryExcluded).mockImplementation(
+            (libraryID: number) => (libraryID === 7 ? { message: 'Library excluded' } : null) as any,
+        );
+        const cache = { getMetadata: vi.fn() };
+        mockItemLookups(7, { ...makeAttachment(42, 'GROUPKEY'), libraryID: 7 });
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        expect(await preloadNotePageLabels(makeGroupCitation('GROUPKEY'), 1)).toEqual({});
+        expect(cache.getMetadata).not.toHaveBeenCalled();
+        vi.mocked(checkLibraryExcluded).mockReturnValue(null);
+    });
+
     it('returns cached labels without extracting on a cache hit', async () => {
         const attachment = makeAttachment(42, 'ABCD1234');
         const cache = {
