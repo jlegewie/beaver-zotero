@@ -28,6 +28,7 @@ import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
 import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
 import { getNoteContentPreviewText } from '../../utils/noteText';
 import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { getParentItemAsync } from '../../utils/zoteroDataLoading';
 import { isPdfDocument } from '../../utils/attachmentFiles';
 import { checkLibraryExcluded, getAttachmentInfoForItem, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
 
@@ -324,11 +325,12 @@ export async function handleReadNoteRequest(
         let parentItemId: string | undefined;
         let parentTitle: string | undefined;
         let parentSummary: ItemStub | undefined;
-        if (item.parentItem) {
-            await Zotero.Items.loadDataTypes([item.parentItem], ['primaryData', 'itemData', 'creators']);
-            parentItemId = modelObjectId(item.parentItem.libraryID, item.parentItem.key);
-            parentTitle = item.parentItem.getField('title') as string;
-            parentSummary = serializeItemStub(item.parentItem);
+        const parentItem = await getParentItemAsync(item);
+        if (parentItem) {
+            await Zotero.Items.loadDataTypes([parentItem], ['primaryData', 'itemData', 'creators']);
+            parentItemId = modelObjectId(parentItem.libraryID, parentItem.key);
+            parentTitle = parentItem.getField('title') as string;
+            parentSummary = serializeItemStub(parentItem);
         }
 
         // 9. Resolve cited items from the visible slice only

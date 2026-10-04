@@ -22,6 +22,7 @@ import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/serv
 import type { PageLabels } from '../../src/services/documentCache';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
+import { getParentItemAsync } from '../../src/utils/zoteroDataLoading';
 import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import {
     getPageLocator,
@@ -54,6 +55,10 @@ export async function getCitationPreloadFilePath(item: Zotero.Item): Promise<Pre
         const attachment = item.isRegularItem?.() ? await getBestPDFAttachmentAsync(item) : null;
         if (!attachment) return null;
         item = attachment;
+    } else {
+        // Resolving the path updates the parent's attachment state, which
+        // Zotero reports as an error when the parent is not loaded yet.
+        await getParentItemAsync(item);
     }
 
     const filePath = await item.getFilePathAsync();
@@ -117,7 +122,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
         if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) continue;
 
         try {
-            const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(normalized.ref.library_id, normalized.ref.zotero_key);
             if (!item) continue;
 
             const preloadPath = await getCitationPreloadFilePath(item);
@@ -163,6 +168,10 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
  *
  * Returns populated page labels keyed by attachment item ID. Empty label maps
  * are omitted because renderers fall back to raw page numbers.
+ *
+ * Items are looked up asynchronously, which also caches each cited item, its
+ * child list and its attachments. That keeps the synchronous render-time
+ * lookup (`resolvePageLabels`) working for libraries not yet opened in Zotero.
  */
 export async function preloadPageLabelsForCitations(
     citations: ReadonlyArray<Partial<Citation>>
@@ -201,7 +210,7 @@ export async function preloadPageLabelsForCitations(
         if (!resolvedLibraryId) continue;
 
         try {
-            const item = Zotero.Items.getByLibraryAndKey(resolvedLibraryId, zoteroRef.zotero_key);
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(resolvedLibraryId, zoteroRef.zotero_key);
             if (!item) continue;
 
             const preloadPath = await getCitationPreloadFilePath(item);

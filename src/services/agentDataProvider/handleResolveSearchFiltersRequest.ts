@@ -18,6 +18,7 @@ import {
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { agentItemFilter } from '../../utils/agentItemSupport';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { getParentItemAsync } from '../../utils/zoteroDataLoading';
 import { resolveItemsByFilters } from '../../utils/searchTools';
 import {
     resolveCollectionsFilter,
@@ -182,6 +183,8 @@ export async function handleResolveSearchFiltersRequest(
                     if (att && !att.deleted && agentItemFilter(att)) addAttachment(att);
                 }
             } else if (item.isAttachment()) {
+                // The trash check walks to the parent, which may not be loaded.
+                await getParentItemAsync(item);
                 if (!item.deleted && agentItemFilter(item)) {
                     matchedItemCount++;
                     addAttachment(item);

@@ -33,6 +33,22 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
     getAttachmentInfoForItem: vi.fn(),
+    ROW_DATA_TYPES: ['primaryData', 'itemData', 'creators', 'note'],
+    degradedRegularRow: vi.fn((item: any) => ({
+        result_type: 'regular',
+        item_id: `${item.libraryID}-${item.key}`,
+        item_type: item.itemType,
+        title: null,
+        creators: null,
+        year: null,
+    })),
+    degradedNoteRow: vi.fn((item: any, parentInfo: any) => ({
+        result_type: 'note',
+        item_id: `${item.libraryID}-${item.key}`,
+        title: null,
+        parent_item_id: parentInfo?.item_id ?? null,
+        parent_item: parentInfo ?? null,
+    })),
     // Mirrors the real stub's shape. The guarded reads it is built from are
     // covered directly by tests/unit/utils/attachmentFiles.test.ts.
     degradedAttachmentRow: vi.fn((item: any, parentInfo: any) => ({

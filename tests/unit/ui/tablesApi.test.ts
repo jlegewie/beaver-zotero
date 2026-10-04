@@ -145,7 +145,7 @@ beforeEach(() => {
     (Zotero as any).getMainWindow = vi.fn(() => win);
     (Zotero as any).Beaver = { data: { config: { addonID: 'beaver@test' } } };
     (Zotero as any).Items = {
-        getByLibraryAndKey: vi.fn(() => ITEM),
+        getByLibraryAndKeyAsync: vi.fn(async () => ITEM),
         getAsync: vi.fn(async () => [ITEM]),
         get: vi.fn(() => ITEM),
         loadDataTypes: vi.fn(async () => undefined),

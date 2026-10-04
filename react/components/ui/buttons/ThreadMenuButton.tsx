@@ -26,7 +26,7 @@ import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import { getContextWindow } from '../../../runtime/windowRuntime';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
-import { preprocessNoteContent, renderToHTML, renderToMarkdown } from '../../../utils/citationRenderers';
+import { preprocessNoteContent, renderToHTML, renderToMarkdownAsync } from '../../../utils/citationRenderers';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
@@ -140,7 +140,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const handleCopyThread = async () => {
         const content = await getThreadContent();
-        const formatted = renderToMarkdown(content);
+        const formatted = await renderToMarkdownAsync(content);
         await copyToClipboard(formatted);
     };
 

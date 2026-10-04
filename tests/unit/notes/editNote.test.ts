@@ -147,6 +147,7 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
 
 vi.mock('../../../src/utils/noteCitationExpand', () => ({
     expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
+    ensureCitedLibrariesLoaded: vi.fn().mockResolvedValue(undefined),
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue({}),
     preloadNotePageLabels: vi.fn().mockResolvedValue({}),
     preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),

@@ -451,3 +451,36 @@ describe('formatRegularItemOcrLogSuffix', () => {
         })).toBe(', ocr=[1-SCAN1(ocr=required, admitted via vision)]');
     });
 });
+
+describe('itemValidationManager unloaded ancestors', () => {
+    const unloaded = () => { throw new Error('Item 1 not yet loaded'); };
+
+    it('reads trash state of a child attachment whose parent is not cached', async () => {
+        const savedItems = (globalThis as any).Zotero.Items;
+        (globalThis as any).Zotero.Items = {
+            getAsync: vi.fn(async () => ({ id: 1, deleted: false, parentID: null })),
+        };
+        getAttachmentInfoMock.mockResolvedValue(attachmentInfo());
+        try {
+            const att = makeAttachment({ parentID: 1, deleted: false, isInTrash: unloaded } as any);
+            const result = await itemValidationManager.validateItem(att, { searchableLibraryIds: [1] });
+            expect(result.state).toBe('readable');
+        } finally {
+            (globalThis as any).Zotero.Items = savedItems;
+        }
+    });
+
+    it('blocks a child attachment whose uncached parent is trashed', async () => {
+        const savedItems = (globalThis as any).Zotero.Items;
+        (globalThis as any).Zotero.Items = {
+            getAsync: vi.fn(async () => ({ id: 1, deleted: true, parentID: null })),
+        };
+        try {
+            const att = makeAttachment({ id: 11, key: 'TRASHED1', parentID: 1, deleted: false, isInTrash: unloaded } as any);
+            const result = await itemValidationManager.validateItem(att, { searchableLibraryIds: [1] });
+            expect(result.state).toBe('blocked');
+        } finally {
+            (globalThis as any).Zotero.Items = savedItems;
+        }
+    });
+});

@@ -194,8 +194,13 @@ describe('handleReadNoteRequest — success', () => {
             loadDataType: vi.fn().mockResolvedValue(undefined),
             getField: vi.fn(() => 'Parent Article'),
         };
-        const item = makeMockItem({ parentItem });
+        // The parent is not cached (unopened library): only getAsync loads it.
+        const item = makeMockItem({ parentID: 99 });
+        Object.defineProperty(item, 'parentItem', {
+            get: () => { throw new Error('UnloadedDataException: Item 99 not yet loaded'); },
+        });
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Items.getAsync = vi.fn(async (id: number) => (id === 99 ? parentItem : false));
 
         const response = await handleReadNoteRequest(makeRequest());
         expect(response.success).toBe(true);
@@ -594,8 +599,13 @@ describe('handleReadNoteRequest — portable note ids', () => {
             loadDataType: vi.fn().mockResolvedValue(undefined),
             getField: vi.fn(() => 'Parent Article'),
         };
-        const item = makeMockItem({ parentItem });
+        // The parent is not cached (unopened library): only getAsync loads it.
+        const item = makeMockItem({ parentID: 99 });
+        Object.defineProperty(item, 'parentItem', {
+            get: () => { throw new Error('UnloadedDataException: Item 99 not yet loaded'); },
+        });
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Items.getAsync = vi.fn(async (id: number) => (id === 99 ? parentItem : false));
 
         const response = await handleReadNoteRequest(makeRequest());
         expect(response.success).toBe(true);

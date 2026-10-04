@@ -214,6 +214,10 @@ beforeEach(() => {
                 isRegularItem: vi.fn(() => true),
                 getAttachments: vi.fn(() => []),
             })),
+            // Preloads look items up asynchronously; mirror the sync mock so
+            // per-test overrides apply to both.
+            getByLibraryAndKeyAsync: vi.fn(async (libId: number, key: string) =>
+                (globalThis as any).Zotero.Items.getByLibraryAndKey(libId, key)),
         },
         Libraries: {
             ...(globalThis as any).Zotero.Libraries,

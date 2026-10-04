@@ -377,7 +377,7 @@ async function applyEdit(opts: {
         setupPMNormalizingEditor(item);
     }
 
-    (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+    resolveNoteAsync(item);
 
     const result = await executeEditNoteAction(action);
 
@@ -401,6 +401,15 @@ async function applyEdit(opts: {
 }
 
 /**
+ * Resolve the note by its key; other keys (cited items) fall through to the
+ * synchronous lookup mock, as in Zotero where both lookups see the same items.
+ */
+function resolveNoteAsync(item: ReturnType<typeof createMockNoteItem>): void {
+    (Zotero.Items.getByLibraryAndKeyAsync as any).mockImplementation(async (libraryID: number, key: string) =>
+        (key === item.key ? item : Zotero.Items.getByLibraryAndKey(libraryID, key)));
+}
+
+/**
  * Undo an edit via the real undoEditNoteAction.
  */
 async function undoEdit(
@@ -409,7 +418,7 @@ async function undoEdit(
     applyPMNormalization = false,
 ): Promise<string> {
     // Wire mock so undoEditNoteAction can find the item
-    (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+    resolveNoteAsync(item);
 
     await undoEditNoteAction(action);
 

@@ -29,6 +29,22 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
     getAttachmentInfoForItem: vi.fn(),
+    ROW_DATA_TYPES: ['primaryData', 'itemData', 'creators', 'note'],
+    degradedRegularRow: vi.fn((item: any) => ({
+        result_type: 'regular',
+        item_id: `${item.libraryID}-${item.key}`,
+        item_type: item.itemType,
+        title: null,
+        creators: null,
+        year: null,
+    })),
+    degradedNoteRow: vi.fn((item: any, parentInfo: any) => ({
+        result_type: 'note',
+        item_id: `${item.libraryID}-${item.key}`,
+        title: null,
+        parent_item_id: parentInfo?.item_id ?? null,
+        parent_item: parentInfo ?? null,
+    })),
     // These cases never request extra fields; the projection helpers are
     // stubbed pass-through so the module mock stays complete.
     isReadableItemField: vi.fn(() => true),
@@ -688,6 +704,51 @@ describe('handleZoteroSearchRequest', () => {
             expect(mainSearch()!.search).not.toHaveBeenCalled();
             expect(mainSearch()!.setScope).not.toHaveBeenCalled();
         });
+    });
+
+    it('isolates unreadable rows instead of failing the whole search', async () => {
+        const unloaded = () => {
+            const error = new Error("'creators' not loaded for item");
+            error.name = 'UnloadedDataException';
+            return error;
+        };
+        // Zotero dropped this item's creators after the batch load: one reload recovers it.
+        const recovered = makeItem({
+            id: 1,
+            key: 'RELOAD',
+            getCreators: vi.fn()
+                .mockImplementationOnce(() => { throw unloaded(); })
+                .mockImplementation(() => []),
+        });
+        const unreadable = makeItem({
+            id: 2,
+            key: 'BROKEN',
+            getCreators: vi.fn(() => { throw unloaded(); }),
+        });
+        itemsById.set(recovered.id, recovered);
+        itemsById.set(unreadable.id, unreadable);
+        searchResultIds = [1, 2];
+
+        const response = await handleZoteroSearchRequest({
+            event: 'zotero_search_request',
+            request_id: 'req-isolate',
+            conditions: [],
+            join_mode: 'all',
+            item_category: 'regular',
+            recursive: false,
+            limit: 10,
+            offset: 0,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.items).toEqual([
+            expect.objectContaining({ result_type: 'regular', item_id: expect.stringMatching(/-RELOAD$/), title: 'Title' }),
+            expect.objectContaining({ result_type: 'regular', item_id: expect.stringMatching(/-BROKEN$/), title: null }),
+        ]);
+        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith(
+            [recovered],
+            expect.arrayContaining(['creators']),
+        );
     });
 
     it('returns attachment rows with attachment_id and resolver metadata', async () => {

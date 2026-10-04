@@ -259,7 +259,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         if (cachedRef && libraryId) {
             void (async () => {
                 try {
-                    const zoteroItem = Zotero.Items.getByLibraryAndKey(
+                    const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
                         libraryId,
                         cachedRef.zotero_key,
                     );
@@ -304,7 +304,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                     : null;
                 if (result && libraryId) {
                     try {
-                        const zoteroItem = Zotero.Items.getByLibraryAndKey(libraryId, result.zotero_key);
+                        const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, result.zotero_key);
                         if (zoteroItem && zoteroItem.isRegularItem()) {
                             await Zotero.Items.loadDataTypes([zoteroItem], ['itemData', 'childItems']);
                             const attachment = await zoteroItem.getBestAttachment();
