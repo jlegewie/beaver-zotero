@@ -69,7 +69,7 @@ import {
     translatePageLabelToNumber,
     translatePageNumberToLabel,
 } from './pageLabelTranslation';
-import { extractItemKeyFromUri } from './zoteroUri';
+import { citationItemRefFromUri } from './zoteroUri';
 import { isPdfDocument } from './attachmentFiles';
 import {
     modelObjectId,
@@ -257,10 +257,11 @@ export async function preloadNotePageLabels(
                 const locator = ci?.locator != null ? String(ci.locator) : '';
                 if (!locator || (ci?.label != null && ci.label !== 'page')) continue;
 
-                const uri = ci?.uris?.[0] || '';
-                const itemKey = extractItemKeyFromUri(uri);
-                if (!itemKey) continue;
-                await loadLabels(libraryID, itemKey);
+                // Resolved the same way as the simplifier, so the cited item's
+                // own library keys (and loads) the labels.
+                const itemRef = citationItemRefFromUri(ci?.uris?.[0] || '', libraryID);
+                if (!itemRef || checkLibraryExcluded(itemRef.libraryID)) continue;
+                await loadLabels(itemRef.libraryID, itemRef.key);
             }
         } catch {
             // Skip malformed citation metadata or attachments that can't load.

@@ -566,6 +566,96 @@ describe('simplifyNoteHtml', () => {
 // expandToRawHtml
 // =============================================================================
 
+describe('cross-library citations', () => {
+    const GROUP_ID = 6073928;
+    const GROUP_LIBRARY_ID = 7;
+
+    /** A citation span whose URIs name each item's own library. */
+    function rawCitationForUris(uris: string[], page = ''): string {
+        const citationData = {
+            citationItems: uris.map(uri => ({ uris: [uri], locator: page })),
+        };
+        return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
+            + '<span class="citation-item">Author, 2024</span></span>';
+    }
+
+    const groupUri = (key: string) => `http://zotero.org/groups/${GROUP_ID}/items/${key}`;
+    const userUri = (key: string) => `http://zotero.org/users/1/items/${key}`;
+
+    beforeEach(() => {
+        const Z = (globalThis as any).Zotero;
+        Z.Groups.getLibraryIDFromGroupID = vi.fn((groupID: number) => groupID === GROUP_ID ? GROUP_LIBRARY_ID : false);
+        Z.Groups.getGroupIDFromLibraryID = vi.fn((libraryID: number) => {
+            if (libraryID === GROUP_LIBRARY_ID) return GROUP_ID;
+            throw new Error(`Not a group library: ${libraryID}`);
+        });
+        // Mirrors Zotero: every users/<id> URI is the personal library, a
+        // group URI is that group's library (false when not on this computer).
+        Z.URI.getURIItemLibraryKey = vi.fn((uri: string) => {
+            const m = uri.match(/^http:\/\/zotero\.org\/(users|groups)\/(\d+)\/items\/([A-Z0-9]+)$/);
+            if (!m) throw new Error(`Could not parse object URI ${uri}`);
+            if (m[1] === 'users') return { libraryID: 1, key: m[3] };
+            return Number(m[2]) === GROUP_ID ? { libraryID: GROUP_LIBRARY_ID, key: m[3] } : false;
+        });
+    });
+
+    it('ids a group item cited from a My Library note by its own library', () => {
+        const html = wrap(`<p>${rawCitationForUris([groupUri('JLIWC45M')])}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('<citation id="g6073928-JLIWC45M" ref="c_JLIWC45M_0"/>');
+        expect(metadata.elements.get('c_JLIWC45M_0')?.originalAttrs?.item_id).toBe('g6073928-JLIWC45M');
+    });
+
+    it('ids each item of a compound citation by its own library', () => {
+        const html = wrap(`<p>${rawCitationForUris([userUri('KEY1'), groupUri('KEY2')])}</p>`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('items="u-KEY1, g6073928-KEY2"');
+    });
+
+    it('rebuilds an edited cross-library citation against the cited item\'s library', () => {
+        const html = wrap(`<p>${rawCitationForUris([groupUri('JLIWC45M')], '3')}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const edited = simplified.replace('loc="page3"', 'loc="page5"');
+
+        expandToRawHtml(edited, metadata, 'new');
+
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKey).toHaveBeenCalledWith(GROUP_LIBRARY_ID, 'JLIWC45M');
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ libraryID: GROUP_LIBRARY_ID, key: 'JLIWC45M' }),
+            '5',
+        );
+    });
+
+    it('leaves an untouched cross-library citation byte-identical', () => {
+        const html = wrap(`<p>${rawCitationForUris([groupUri('JLIWC45M')], '3')}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+
+        expect(expanded).toContain(encodeURIComponent(groupUri('JLIWC45M')));
+        expect(createCitationHTML).not.toHaveBeenCalled();
+    });
+
+    it('ids a My Library item cited from a group note as u-KEY', () => {
+        const html = wrap(`<p>${rawCitationForUris(['http://zotero.org/users/12345/items/MINE0001'])}</p>`);
+        const { simplified } = simplifyNoteHtml(html, GROUP_LIBRARY_ID);
+
+        expect(simplified).toContain('<citation id="u-MINE0001" ref="c_MINE0001_0"/>');
+    });
+
+    it.each([
+        ['a group not on this computer', 'http://zotero.org/groups/111/items/FOREIGN1'],
+        ['an unparseable URI', 'https://example.org/library/items/FOREIGN1'],
+    ])('falls back to the note\'s library for %s', (_label, uri) => {
+        const html = wrap(`<p>${rawCitationForUris([uri])}</p>`);
+        const { simplified } = simplifyNoteHtml(html, GROUP_LIBRARY_ID);
+
+        expect(simplified).toContain('<citation id="g6073928-FOREIGN1" ref="c_FOREIGN1_0"/>');
+    });
+});
+
 describe('expandToRawHtml', () => {
     function makeMetadata(): { metadata: SimplificationMetadata; rawCit: string; rawAnnot: string; rawAI: string; rawImg: string } {
         const rawCit = rawCitation('EX1');
