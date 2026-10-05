@@ -315,6 +315,9 @@ export interface ExternalFileCitationExportRequest {
 /** File formats a response can be exported to. */
 export type FileExportFormat = 'docx';
 
+/** The final answer only, or the full response with the agent's tool activity. */
+export type FileExportContent = 'final' | 'full';
+
 /** Outcome of exporting to a file. `warnings` are user-facing sentences. */
 export type FileExportResult =
     | { status: 'saved'; path: string; fileName: string; warnings: string[] }
@@ -342,7 +345,7 @@ export interface DocumentExportHost {
      * may read the client's global state. Optional; clients without file export
      * omit it and the action is not offered.
      */
-    exportResponseToFile?(request: { runs: AgentRun[]; format: FileExportFormat }): Promise<FileExportResult>;
+    exportResponseToFile?(request: { runs: AgentRun[]; format: FileExportFormat; content: FileExportContent }): Promise<FileExportResult>;
     /** Show an exported file in the system file manager. */
     revealExportedFile?(path: string): void;
 }

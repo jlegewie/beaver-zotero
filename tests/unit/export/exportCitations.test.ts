@@ -97,6 +97,14 @@ describe('formatExportCitations', () => {
         expect(result.citations.clusters[1].plain).toBe('(1:9 & co)');
     });
 
+    it('combines the pages of one work cited repeatedly in a cluster', async () => {
+        const doc = parseExportSource({ title: '', blocks: [{ type: 'markdown', markdown:
+            'A <citation id="u-AAAAAAAA" loc="page3"/> <citation id="u-AAAAAAAA" loc="page8"/> <citation id="u-AAAAAAAA" loc="page3"/>.' }] });
+        await formatExportCitations(doc, snapshot(), service as any, { liveCitations: true });
+        const request = service.formatCitationSequence.mock.calls[0][0];
+        expect(request.clusters[0].items).toEqual([{ id: 1, locator: '3, 8', label: 'page' }]);
+    });
+
     it('omits document preferences for static citations', async () => {
         const doc = parseExportSource({ title: '', blocks: [{ type: 'markdown', markdown: 'A <citation id="u-AAAAAAAA"/>' }] });
         const result = await formatExportCitations(doc, snapshot(), service as any, { liveCitations: false });

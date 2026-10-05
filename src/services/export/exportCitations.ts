@@ -77,6 +77,13 @@ function fallbackText(name: string, locator?: string): string {
     return `(${name}${locator ? `, p. ${locator}` : ''})`;
 }
 
+/** Combine two page locators of one work, without repeating pages. */
+export function mergeLocators(first: string | undefined, second: string | undefined): string | undefined {
+    if (!first || !second) return first || second;
+    const parts = [...first.split(/,\s*/), ...second.split(/,\s*/)].map(part => part.trim()).filter(Boolean);
+    return [...new Set(parts)].join(', ');
+}
+
 /** The item a citation of `item` should cite: its top-level ancestor. */
 async function citableItem(item: Zotero.Item): Promise<Zotero.Item> {
     let current = item;
@@ -207,9 +214,15 @@ export async function formatExportCitations(
         for (const occurrence of cluster.items) {
             const item = await resolver.resolve(occurrence);
             if (!item) continue;
-            // The same work cited twice in one cluster is one citation.
-            if (item.kind === 'processor' && items.some(other =>
-                other.kind === 'processor' && other.id === item.id && other.locator === item.locator)) continue;
+            // The same work cited twice in one cluster is one citation, with
+            // its pages combined ("2012, 3, 8" rather than "2012, 3; 2012, 8").
+            const same = item.kind === 'processor'
+                ? items.find((other): other is ProcessorItem => other.kind === 'processor' && other.id === item.id)
+                : undefined;
+            if (same && item.kind === 'processor') {
+                same.locator = mergeLocators(same.locator, item.locator);
+                continue;
+            }
             items.push(item);
         }
         resolved.push(items);

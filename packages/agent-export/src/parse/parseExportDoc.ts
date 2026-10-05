@@ -15,7 +15,7 @@ import {
     requestedCitationKey,
     unwrapBacktickedCitations,
 } from '@beaver/agent-core/citations/citationGrammar';
-import type { CitationCluster, CitationOccurrence, ExportDoc, ExportSection, ExportSource } from '../types';
+import type { CitationCluster, CitationOccurrence, ExportDoc, ExportSection, ExportSource, ExportSourceBlock } from '../types';
 import type { MdBlock, MdDefinition, MdInline, MdParagraph, MdRoot } from '../mdast';
 import { codeRanges, markdownProcessor as processor } from './markdown';
 import { decodeHtmlEntities } from '../citations/inlineHtml';
@@ -271,14 +271,84 @@ function asDisplayMath(paragraph: MdParagraph, source: string): string | null {
     return content[0].value;
 }
 
+/** Marks where an activity block sits inside a response's markdown. */
+const ACTIVITY_MARKER = '\uE003';
+const ACTIVITY_MARKER_PATTERN = new RegExp(`^${ACTIVITY_MARKER}(\\d+)${ACTIVITY_MARKER}$`);
+/** A marker inside other content, with the blank line the join put before it. */
+const EMBEDDED_MARKER_PATTERN = new RegExp(`(?:\\n\\n)?${ACTIVITY_MARKER}\\d+${ACTIVITY_MARKER}`, 'g');
+
+/** Remove activity markers that markup swallowed (an unclosed code fence or math block). */
+function stripActivityMarkers<T extends MdBlock | MdInline>(node: T): T {
+    const strip = (value: string) => value.replace(EMBEDDED_MARKER_PATTERN, '');
+    const anyNode = node as unknown as { value?: unknown; children?: Array<MdBlock | MdInline> };
+    const copy = { ...anyNode } as typeof anyNode;
+    if (typeof copy.value === 'string') copy.value = strip(copy.value);
+    if (Array.isArray(copy.children)) copy.children = copy.children.map(stripActivityMarkers);
+    return copy as unknown as T;
+}
+
+/**
+ * Parse a response's text and the activity between it as one markdown
+ * document — so a reference before a tool call finds its definition after it,
+ * as it would in the chat — then split it back into sections at the activity
+ * markers.
+ */
+function parseResponseGroup(
+    builder: DocumentBuilder,
+    group: Array<Extract<ExportSourceBlock, { type: 'markdown' | 'activity' }>>,
+    scope: number,
+): ExportSection[] {
+    const parts = group.map((block, index) => (block.type === 'activity' ? `${ACTIVITY_MARKER}${index}${ACTIVITY_MARKER}` : block.markdown));
+    const sections: ExportSection[] = [];
+    let current: MdBlock[] = [];
+    const placed = new Set<number>();
+    const flush = () => {
+        if (current.length > 0) sections.push({ kind: 'markdown', children: current.map(stripActivityMarkers), scope });
+        current = [];
+    };
+    for (const node of builder.parse(parts.join('\n\n'))) {
+        const marker = node.type === 'paragraph' && node.children.length === 1 && node.children[0].type === 'text'
+            ? ACTIVITY_MARKER_PATTERN.exec(node.children[0].value.trim())
+            : null;
+        const block = marker ? group[Number(marker[1])] : undefined;
+        if (block?.type === 'activity') {
+            flush();
+            sections.push({ kind: 'activity', children: [], calls: block.calls, scope });
+            placed.add(Number(marker![1]));
+        } else {
+            current.push(node);
+        }
+    }
+    flush();
+    // A marker swallowed by surrounding markup (an unclosed code fence) was
+    // removed from that content above; its activity follows the content.
+    group.forEach((block, index) => {
+        if (block.type === 'activity' && !placed.has(index)) sections.push({ kind: 'activity', children: [], calls: block.calls, scope });
+    });
+    return sections;
+}
+
 /** Parse a source into the document model. */
 export function parseExportSource(source: Pick<ExportSource, 'title' | 'blocks'>): ExportDoc {
     const builder = new DocumentBuilder();
-    const sections: ExportSection[] = source.blocks.map(block => {
-        if (block.type === 'note') {
-            return { kind: 'note', title: block.title, children: builder.parse(block.markdown) };
+    const sections: ExportSection[] = [];
+    let scope = 0;
+    let group: Array<Extract<ExportSourceBlock, { type: 'markdown' | 'activity' }>> = [];
+    const flushGroup = () => {
+        if (group.length > 0) sections.push(...parseResponseGroup(builder, group, scope++));
+        group = [];
+    };
+    for (const block of source.blocks) {
+        if (block.type === 'markdown' || block.type === 'activity') {
+            group.push(block);
+            continue;
         }
-        return { kind: block.type, children: builder.parse(block.markdown) };
-    });
+        flushGroup();
+        const children = builder.parse(block.markdown);
+        sections.push(block.type === 'note'
+            ? { kind: 'note', title: block.title, children, scope: scope++ }
+            : { kind: 'user', children, scope: scope++ });
+    }
+    flushGroup();
     return { title: source.title, sections, clusters: builder.clusters };
 }

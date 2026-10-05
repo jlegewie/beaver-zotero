@@ -12,6 +12,7 @@ import type { WriteDocxResult } from '@beaver/agent-export/runtime';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { loadExportRuntime, type ExportRuntime } from './exportRuntime';
 import { formatExportCitations } from './exportCitations';
+import { CitationService } from '../CitationService';
 
 export type ExportFormat = 'docx';
 
@@ -57,6 +58,7 @@ export function exportFileName(title: string, extension: string): string {
 
 export class InstanceExport {
     private runtime: ExportRuntime | null = null;
+    private ownCitationService: CitationService | null = null;
     /** The save dialog is not modal across windows; one export asks at a time. */
     private choosingPath = false;
 
@@ -88,8 +90,10 @@ export class InstanceExport {
      */
     async run(request: ExportRequest, context: { windowId?: string } = {}): Promise<ExportResult> {
         if (!FORMATS[request.format]) throw new Error(`Unsupported export format: ${request.format}`);
-        const citationService = Zotero.Beaver?.citationService;
-        if (!citationService) throw new Error('Citation service unavailable');
+        // The sequence API keeps no state between calls, so an export started
+        // before startup has assigned the shared service uses its own.
+        const citationService = Zotero.Beaver?.citationService
+            ?? (this.ownCitationService ??= new CitationService({ log: (message: string) => logger(message, 4) }));
 
         if (!request.path && this.choosingPath) throw new Error('An export is already waiting for a file name.');
         let path = request.path ?? null;
@@ -147,5 +151,6 @@ export class InstanceExport {
 
     dispose(): void {
         this.runtime = null;
+        this.ownCitationService = null;
     }
 }

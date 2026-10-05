@@ -92,3 +92,76 @@ describe('buildThreadBlocks', () => {
         ]);
     });
 });
+
+describe('buildResponseBlocks content', () => {
+    // Two model responses: work in progress around tool calls, then the answer.
+    const runs = () => [run('r1', 'Q', [
+        { part_kind: 'text', content: 'I will search.' },
+        { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'a', args: { topic_query: 'x' } },
+        { part_kind: 'text', content: 'Narrowing down.' },
+        { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'b', args: { topic_query: 'y' } },
+        { part_kind: 'tool-call', tool_name: 'extract', tool_call_id: 'c', args: {} },
+        { part_kind: 'text', content: 'The answer.' },
+        { part_kind: 'tool-call', tool_name: 'create_note', tool_call_id: 'd', args: { title: 'N', content: 'Note body' } },
+        { part_kind: 'tool-call', tool_name: 'return_suggestions', tool_call_id: 'e', args: {} },
+    ])];
+    const describe = (part: any) => (part.tool_name === 'return_suggestions' ? null : `Called ${part.tool_call_id}`);
+
+    it('exports only what follows the last tool call as the final answer, keeping notes written there', () => {
+        // Notes and follow-up suggestions after the answer do not end it.
+        expect(buildResponseBlocks(runs(), { content: 'final', describeToolCall: describe })).toEqual([
+            { type: 'markdown', markdown: 'The answer.' },
+            { type: 'note', title: 'N', markdown: 'Note body' },
+        ]);
+    });
+
+    it('falls back to the last text when a response ends with a tool call', () => {
+        const endsWithSearch = run('r1', 'Q', [
+            { part_kind: 'text', content: 'Searching.' },
+            { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'a', args: {} },
+        ]);
+        expect(buildResponseBlocks([endsWithSearch], { content: 'final' })).toEqual([
+            { type: 'markdown', markdown: 'Searching.' },
+        ]);
+    });
+
+    it('keeps the whole last answer, notes included, when a response ends with a tool call', () => {
+        const canceled = run('r1', 'Q', [
+            { part_kind: 'text', content: 'Searching.' },
+            { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'a', args: {} },
+            { part_kind: 'text', content: 'Answer <note title="Details">Details</note> Done.' },
+            { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'b', args: {} },
+        ]);
+        expect(buildResponseBlocks([canceled], { content: 'final' })).toEqual([
+            { type: 'markdown', markdown: 'Answer ' },
+            { type: 'note', title: 'Details', markdown: 'Details' },
+            { type: 'markdown', markdown: ' Done.' },
+        ]);
+        const noteOnly = run('r2', 'Q', [
+            { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'a', args: {} },
+            { part_kind: 'tool-call', tool_name: 'create_note', tool_call_id: 'n', args: { title: 'N', content: 'Body' } },
+            { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'b', args: {} },
+        ]);
+        expect(buildResponseBlocks([noteOnly], { content: 'final' })).toEqual([
+            { type: 'note', title: 'N', markdown: 'Body' },
+        ]);
+    });
+
+    it('exports everything in full, with consecutive tool calls grouped as activity', () => {
+        expect(buildResponseBlocks(runs(), { content: 'full', describeToolCall: describe })).toEqual([
+            { type: 'markdown', markdown: 'I will search.' },
+            { type: 'activity', calls: ['Called a'] },
+            { type: 'markdown', markdown: 'Narrowing down.' },
+            { type: 'activity', calls: ['Called b', 'Called c'] },
+            { type: 'markdown', markdown: 'The answer.' },
+            { type: 'note', title: 'N', markdown: 'Note body' },
+        ]);
+    });
+
+    it('leaves tool calls out of a full export without a describer', () => {
+        expect(buildResponseBlocks(runs(), { content: 'full' })).toEqual([
+            { type: 'markdown', markdown: 'I will search.\n\nNarrowing down.\n\nThe answer.' },
+            { type: 'note', title: 'N', markdown: 'Note body' },
+        ]);
+    });
+});

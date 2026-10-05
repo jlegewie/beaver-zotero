@@ -2,21 +2,36 @@
  * Build an export source from agent run history.
  *
  * Exports work from the raw model output persisted in `run.model_messages`
- * (markdown with citation tags), not from anything rendered. Only content a
- * reader sees as the answer is exported: assistant text, and the notes the
- * agent wrote. Reasoning, tool calls and their results are left out.
+ * (markdown with citation tags), not from anything rendered. A response is
+ * exported either as its final answer — what the agent wrote after its last
+ * tool call — or in full: everything it wrote, with each tool call as a short
+ * activity line so the reader can follow what it searched and read. Reasoning
+ * and tool results are never exported.
  */
 
 import type { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
-import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
+import { isAutoLoadingToolCall, isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
 import { parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
-import type { CitationSnapshot, ExportSource, ExportSourceBlock } from '../types';
+import type { CitationSnapshot, ExportContent, ExportSource, ExportSourceBlock } from '../types';
 import { codeRanges } from '../parse/markdown';
 
 export interface ResponseBlockOptions {
     /** Include notes the agent created (`create_note`) as sections. Default true. */
     includeNotes?: boolean;
+    /** The final answer only, or the full response. Default `full`. */
+    content?: ExportContent;
+    /**
+     * Display label of a tool call for full-response exports, or null to leave
+     * the call out. Without it, tool calls are not shown.
+     */
+    describeToolCall?: (part: ToolCallPart) => string | null;
 }
+
+/** One step of a response, in order. */
+type ResponseEvent =
+    | { kind: 'text'; markdown: string }
+    | { kind: 'note'; title: string; markdown: string }
+    | { kind: 'toolCall'; part: ToolCallPart };
 
 export interface ThreadBlockOptions extends ResponseBlockOptions {
     /** Include each run's user prompt. Default true. */
@@ -87,6 +102,51 @@ export function noteFromToolCall(part: ToolCallPart): { title: string; markdown:
     return { title, markdown };
 }
 
+/** The text, notes and tool calls of a response, in order. */
+function responseEvents(runs: AgentRun[], includeNotes: boolean): ResponseEvent[] {
+    const events: ResponseEvent[] = [];
+    for (const run of runs) {
+        for (const message of run.model_messages) {
+            if (!isRenderableMessage(message)) continue;
+            for (const part of message.parts) {
+                if (part.part_kind === 'text') {
+                    for (const block of splitNoteTags(part.content ?? '', includeNotes)) {
+                        if (block.type === 'markdown') events.push({ kind: 'text', markdown: block.markdown });
+                        else if (block.type === 'note') events.push({ kind: 'note', title: block.title, markdown: block.markdown });
+                    }
+                } else if (part.part_kind === 'tool-call') {
+                    // Follow-up suggestions and backend plumbing are neither work nor content.
+                    if (part.tool_name === 'return_suggestions' || isAutoLoadingToolCall(part)) continue;
+                    // A note the agent wrote is content, not activity.
+                    const note = noteFromToolCall(part);
+                    if (note) {
+                        if (includeNotes) events.push({ kind: 'note', ...note });
+                    } else {
+                        events.push({ kind: 'toolCall', part });
+                    }
+                }
+            }
+        }
+    }
+    return events;
+}
+
+/**
+ * The final answer: what follows the last tool call. When a response ends
+ * with a tool call (a canceled run), the answer is the last stretch of text
+ * and notes between tool calls that has any content, kept whole.
+ */
+function finalAnswer(events: ResponseEvent[]): ResponseEvent[] {
+    const segments: ResponseEvent[][] = [[]];
+    for (const event of events) {
+        if (event.kind === 'toolCall') segments.push([]);
+        else segments[segments.length - 1].push(event);
+    }
+    const hasContent = (segment: ResponseEvent[]) =>
+        segment.some(event => event.kind !== 'toolCall' && event.markdown.trim());
+    return [...segments].reverse().find(hasContent) ?? [];
+}
+
 /**
  * The blocks of one response. A response that was continued after an error
  * spans several runs (its resume chain); pass them in order.
@@ -95,22 +155,21 @@ export function buildResponseBlocks(
     runs: AgentRun[],
     options: ResponseBlockOptions = {},
 ): ExportSourceBlock[] {
-    const includeNotes = options.includeNotes ?? true;
+    const events = responseEvents(runs, options.includeNotes ?? true);
+    const selected = (options.content ?? 'full') === 'final' ? finalAnswer(events) : events;
     const blocks: ExportSourceBlock[] = [];
-    for (const run of runs) {
-        for (const message of run.model_messages) {
-            if (!isRenderableMessage(message)) continue;
-            for (const part of message.parts) {
-                if (part.part_kind === 'text') {
-                    for (const block of splitNoteTags(part.content ?? '', includeNotes)) {
-                        if (block.type === 'markdown') pushMarkdown(blocks, block.markdown);
-                        else blocks.push(block);
-                    }
-                } else if (part.part_kind === 'tool-call' && includeNotes) {
-                    const note = noteFromToolCall(part);
-                    if (note) blocks.push({ type: 'note', ...note });
-                }
-            }
+    for (const event of selected) {
+        if (event.kind === 'text') {
+            pushMarkdown(blocks, event.markdown);
+        } else if (event.kind === 'note') {
+            blocks.push({ type: 'note', title: event.title, markdown: event.markdown });
+        } else {
+            const label = options.describeToolCall?.(event.part)?.trim();
+            if (!label) continue;
+            // Consecutive tool calls form one activity block.
+            const last = blocks[blocks.length - 1];
+            if (last?.type === 'activity') last.calls.push(label);
+            else blocks.push({ type: 'activity', calls: [label] });
         }
     }
     return blocks;

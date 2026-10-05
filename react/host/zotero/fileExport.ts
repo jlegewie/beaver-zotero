@@ -1,5 +1,5 @@
 import type { AgentRun } from '@beaver/agent-core/agents/types';
-import type { FileExportFormat, FileExportResult } from '@beaver/agent-ui/host/types';
+import type { FileExportContent, FileExportFormat, FileExportResult } from '@beaver/agent-ui/host/types';
 import { buildResponseExportSource } from '../../utils/exportSource';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
 
@@ -8,9 +8,13 @@ import { getWindowRuntime } from '../../runtime/windowRuntime';
  * where to save (parented to this window), formats citations in the citation
  * style preference, and writes the file.
  */
-async function exportResponseToFile(request: { runs: AgentRun[]; format: FileExportFormat }): Promise<FileExportResult> {
+async function exportResponseToFile(request: {
+    runs: AgentRun[];
+    format: FileExportFormat;
+    content: FileExportContent;
+}): Promise<FileExportResult> {
     const windowId = getWindowRuntime().id;
-    const source = await buildResponseExportSource(request.runs);
+    const source = await buildResponseExportSource(request.runs, request.content);
     const result = await Zotero.Beaver.exporter.run({ source, format: request.format }, { windowId });
     if (result.status !== 'saved') return { status: 'canceled' };
     return {

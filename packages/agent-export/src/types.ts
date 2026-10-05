@@ -32,7 +32,16 @@ export type ExportSourceBlock =
     /** A note the agent wrote (`create_note` body or a `<note>` tag), exported as its own section. */
     | { type: 'note'; title: string; markdown: string }
     /** A user prompt (thread export). */
-    | { type: 'user'; markdown: string };
+    | { type: 'user'; markdown: string }
+    /** What the agent did between its messages: one display label per tool call (full-response export). */
+    | { type: 'activity'; calls: string[] };
+
+/**
+ * How much of a response to export: the final answer (the text after the
+ * agent's last tool call, with any notes it wrote there), or everything it
+ * wrote, with its tool calls as activity lines.
+ */
+export type ExportContent = 'final' | 'full';
 
 /**
  * Citation metadata the source's citation tags need, captured from the
@@ -87,10 +96,17 @@ export interface CitationCluster {
 
 /** A section of the exported document. */
 export interface ExportSection {
-    kind: 'markdown' | 'note' | 'user';
+    kind: 'markdown' | 'note' | 'user' | 'activity';
     /** Section heading (notes). */
     title?: string;
     children: MdBlock[];
+    /** Tool-call labels (activity sections). */
+    calls?: string[];
+    /**
+     * Sections parsed as one markdown document (a response's text around its
+     * tool activity) share a scope; footnote references resolve within it.
+     */
+    scope: number;
 }
 
 /** Format-neutral document model. */

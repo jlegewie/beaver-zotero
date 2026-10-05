@@ -35,7 +35,13 @@ function citations(doc: ExportDoc, styleClass: 'in-text' | 'note', overrides: Pa
 async function unzip(bytes: Uint8Array) {
     const zip = await JSZip.loadAsync(bytes);
     const read = async (name: string) => (await zip.file(name)?.async('string')) ?? '';
-    return { document: await read('word/document.xml'), footnotes: await read('word/footnotes.xml'), custom: await read('docProps/custom.xml') };
+    return {
+        document: await read('word/document.xml'),
+        footnotes: await read('word/footnotes.xml'),
+        custom: await read('docProps/custom.xml'),
+        styles: await read('word/styles.xml'),
+        footer: await read('word/footer1.xml'),
+    };
 }
 
 const visibleText = (xml: string) => xml
@@ -201,6 +207,36 @@ describe('writeDocx list markers', () => {
     });
 });
 
+describe('writeDocx footnotes across activity', () => {
+    it('resolves a response footnote within the response, not in a note that reuses its label', async () => {
+        const doc = parseExportSource({ title: '', blocks: [
+            { type: 'note', title: 'N', markdown: 'Note text[^1].\n\n[^1]: Note footnote.' },
+            { type: 'markdown', markdown: 'Claim[^1].' },
+            { type: 'activity', calls: ['Item search'] },
+            { type: 'markdown', markdown: 'More.\n\n[^1]: Response footnote.' },
+        ] });
+        const result = await writeDocx({ doc, citations: citations(doc, 'in-text', { bibliography: null }), options });
+        const { footnotes } = await unzip(result.bytes);
+        expect(result.stats.footnotes).toBe(2);
+        expect(visibleText(footnotes)).toContain('Note footnote.');
+        expect(visibleText(footnotes)).toContain('Response footnote.');
+    });
+
+    it('writes a footnote whose definition follows a tool call', async () => {
+        const doc = parseExportSource({ title: '', blocks: [
+            { type: 'markdown', markdown: 'Claim[^a].' },
+            { type: 'activity', calls: ['Item search'] },
+            { type: 'markdown', markdown: 'More.\n\n[^a]: The note.' },
+        ] });
+        const result = await writeDocx({ doc, citations: citations(doc, 'in-text', { bibliography: null }), options });
+        const { document, footnotes } = await unzip(result.bytes);
+        expect(result.stats.footnotes).toBe(1);
+        expect(document).toContain('<w:footnoteReference ');
+        expect(visibleText(document)).not.toContain('[^a]');
+        expect(visibleText(footnotes)).toContain('The note.');
+    });
+});
+
 describe('writeDocx links', () => {
     it('keeps equations and citation fields inside link text, outside the hyperlink runs', async () => {
         const doc = parseExportSource({ title: '', blocks: [{ type: 'markdown', markdown: '[Eq $x^2$ and <citation id="u-AAAAAAAA"/> end](https://example.com)' }] });
@@ -214,5 +250,72 @@ describe('writeDocx links', () => {
         expect(field).not.toContain('<w:hyperlink');
         expect(visibleText(document)).toContain('Eq ');
         expect(visibleText(document)).toContain('(Smith, 2004) end');
+    });
+});
+
+describe('writeDocx theme', () => {
+    const write = async (markdown: string, locale = 'en-US', blocks?: any[]) => {
+        const doc = parseExportSource({ title: 'T', blocks: blocks ?? [{ type: 'markdown', markdown }] });
+        const formatted = citations(doc, 'in-text', { locale });
+        return unzip((await writeDocx({ doc, citations: formatted, options })).bytes);
+    };
+
+    it('defines fonts, sizes and spacing in styles, not on individual runs', async () => {
+        const { document, styles } = await write('Plain paragraph.\n\n# Heading');
+        expect(styles).toMatch(/<w:docDefaults>.*w:ascii="Times New Roman".*<w:sz w:val="24"\/>/s);
+        const bodyText = styles.match(/<w:style [^>]*w:styleId="BodyText".*?<\/w:style>/s)?.[0] ?? '';
+        expect(bodyText).toMatch(/<w:spacing [^>]*w:after="160"/);
+        expect(bodyText).toMatch(/<w:spacing [^>]*w:line="276"/);
+        // Headings are black and bold, not Word's blue.
+        expect(styles).toMatch(/w:styleId="Heading1".*?<w:b\/>.*?<w:color w:val="000000"\/>/s);
+        expect(document).toContain('<w:pStyle w:val="BodyText"/>');
+        expect(document).not.toMatch(/<w:rFonts /);
+    });
+
+    it('sets the page from the citation locale and numbers pages', async () => {
+        const letter = await write('x');
+        expect(letter.document).toMatch(/<w:pgSz w:w="12240" w:h="15840"/);
+        expect(letter.document).toMatch(/<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/);
+        expect(letter.footer).toContain('PAGE');
+        const a4 = await write('x', 'de-DE');
+        expect(a4.document).toMatch(/<w:pgSz w:w="11906" w:h="16838"/);
+    });
+
+    it('writes tables with rules above, below and under the header only', async () => {
+        const { document } = await write('| A | B |\n|---|---|\n| 1 | 2 |');
+        const tableBorders = document.match(/<w:tblBorders>.*?<\/w:tblBorders>/s)?.[0] ?? '';
+        expect(tableBorders).toMatch(/<w:top w:val="single"/);
+        expect(tableBorders).toMatch(/<w:insideV w:val="none"/);
+        expect(document).toMatch(/<w:tcBorders><w:bottom w:val="single"/);
+        expect(document).toContain('<w:pStyle w:val="TableText"/>');
+    });
+
+    it('gives the paragraph after a list a full paragraph gap', async () => {
+        const { document } = await write('Intro.\n\n- one\n- two\n\nAfter.');
+        expect(document.match(/<w:pStyle w:val="ListParagraph"\/>/g)).toHaveLength(2);
+        expect(document).toMatch(/<w:pStyle w:val="BodyText"\/><w:spacing w:before="160"\/><\/w:pPr><w:r><w:t xml:space="preserve">After\./);
+    });
+
+    it('writes tool activity as quiet lines with typographic quotes', async () => {
+        const { document, styles } = await write('', 'en-US', [
+            { type: 'markdown', markdown: 'Searching.' },
+            { type: 'activity', calls: ['Item search: "school segregation" (10 results)', 'Reading: Smith 2004'] },
+            { type: 'markdown', markdown: 'Done.' },
+        ]);
+        expect(document.match(/<w:pStyle w:val="BeaverActivity"\/>/g)).toHaveLength(2);
+        expect(visibleText(document)).toContain('Item search: \u201cschool segregation\u201d (10 results)');
+        expect(styles).toMatch(/w:styleId="BeaverActivity".*?<w:contextualSpacing\/>/s);
+    });
+
+    it('trims the layout whitespace around bibliography entries', async () => {
+        const doc = parseExportSource({ title: '', blocks: [{ type: 'markdown', markdown: 'A <citation id="u-AAAAAAAA"/>.' }] });
+        const formatted = citations(doc, 'in-text', {
+            bibliography: {
+                entries: ['  <div class="csl-entry">Smith, J. 2004. Title.</div>\n'],
+                layout: { indent: 720, firstLineIndent: -720, lineSpacing: 240, entrySpacing: 240, tabStops: [] },
+            },
+        });
+        const { document } = await unzip((await writeDocx({ doc, citations: formatted, options })).bytes);
+        expect(document).toContain('<w:t xml:space="preserve">Smith, J. 2004. Title.</w:t>');
     });
 });

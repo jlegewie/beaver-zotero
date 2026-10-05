@@ -3,8 +3,8 @@
  * the thread open in this window to a file, through the same source builder
  * and exporter the "Export to Word…" menu uses, without the save dialog.
  *
- * Request: `{ path, runId?, styleId?, locale?, liveCitations?, linkItems?,
- * includeSource? }`. `runId` names any run of the response (default: the
+ * Request: `{ path, runId?, content?: 'final' | 'full', styleId?, locale?,
+ * liveCitations?, linkItems?, includeSource? }`. `runId` names any run of the response (default: the
  * thread's last run); the whole resume chain is exported. Returns the
  * exporter's result plus the exported run ids, and the source when
  * `includeSource` is set.
@@ -22,7 +22,8 @@ export async function handleTestExportHttpRequest(request: any): Promise<any> {
         return { error: 'run_not_found', runId: runId ?? null };
     }
     const chain = store.get(resumeChainAtom(runId));
-    const source = await buildResponseExportSource(chain.length > 0 ? chain : runs.filter(run => run.id === runId));
+    const content = request.content === 'full' ? 'full' : 'final';
+    const source = await buildResponseExportSource(chain.length > 0 ? chain : runs.filter(run => run.id === runId), content);
     const result = await Zotero.Beaver.exporter.run({
         source,
         format: 'docx',

@@ -11,7 +11,7 @@
  */
 
 import type { MdBlock, MdFootnoteDefinition, MdInline } from '../mdast';
-import type { ExportDoc } from '../types';
+import type { ExportDoc, ExportSection } from '../types';
 
 export interface NotePlacement {
     /** Footnote number the cluster's text appears in. */
@@ -110,7 +110,7 @@ function walkRendered(doc: ExportDoc, walk: RenderedWalk): void {
     };
 
     for (const section of doc.sections) {
-        visitBlocks(section.children, footnoteDefinitions(section.children), false);
+        visitBlocks(section.children, sectionFootnoteDefinitions(doc, section), false);
     }
 }
 
@@ -135,6 +135,20 @@ export function renderedClusterOrder(doc: ExportDoc): number[] {
         endFootnote: () => {},
     });
     return order;
+}
+
+/**
+ * Footnote definitions a section's references resolve against: those of every
+ * section in its scope. A response's text is split into sections around tool
+ * activity, and a reference may sit in a different part than its definition;
+ * notes and other responses are separate scopes.
+ */
+export function sectionFootnoteDefinitions(doc: ExportDoc, section: ExportSection): Map<string, MdFootnoteDefinition> {
+    const definitions = new Map<string, MdFootnoteDefinition>();
+    for (const other of doc.sections) {
+        if (other.scope === section.scope) footnoteDefinitions(other.children, definitions);
+    }
+    return definitions;
 }
 
 /**

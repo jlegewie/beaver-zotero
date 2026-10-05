@@ -112,4 +112,26 @@ describe('parseExportSource', () => {
             { type: 'paragraph', children: [{ type: 'text', value: 'C' }, { type: 'break' }, { type: 'text', value: 'D wrapped' }] },
         ]);
     });
+
+    it('resolves link definitions written in another part of the response', () => {
+        const doc = parseExportSource({ title: '', blocks: [
+            { type: 'markdown', markdown: 'See [the study][s].' },
+            { type: 'activity', calls: ['Item search'] },
+            { type: 'markdown', markdown: 'Done.\n\n[s]: https://example.com' },
+        ] });
+        const paragraph = doc.sections[0].children[0] as any;
+        expect(paragraph.children[1]).toMatchObject({ type: 'link', url: 'https://example.com' });
+    });
+
+    it('keeps activity markers out of content that swallowed them', () => {
+        const doc = parseExportSource({ title: '', blocks: [
+            { type: 'markdown', markdown: 'Example:\n\n```\ncode' },
+            { type: 'activity', calls: ['Item search'] },
+            { type: 'markdown', markdown: 'After.' },
+        ] });
+        expect(JSON.stringify(doc.sections)).not.toContain('\uE003');
+        const code = doc.sections[0].children.find(node => node.type === 'code') as any;
+        expect(code.value).toBe('code\n\nAfter.');
+        expect(doc.sections.map(section => section.kind)).toEqual(['markdown', 'activity']);
+    });
 });

@@ -27,6 +27,7 @@ import type { CitationSnapshot, ExportSourceBlock } from '../types';
 export function collectCitationTags(blocks: ExportSourceBlock[]): Array<{ ref: CitationRef | null; keys: string[] }> {
     const tags: Array<{ ref: CitationRef | null; keys: string[] }> = [];
     for (const block of blocks) {
+        if (block.type === 'activity') continue;
         const pattern = new RegExp(CITATION_TAG_PATTERN.source, CITATION_TAG_PATTERN.flags);
         for (const match of unwrapBacktickedCitations(block.markdown).matchAll(pattern)) {
             const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] ?? ''));

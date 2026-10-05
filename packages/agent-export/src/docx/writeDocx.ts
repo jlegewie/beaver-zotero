@@ -8,6 +8,9 @@
  * and can refresh them, change the style and keep the bibliography current.
  * Note styles put each citation in a footnote.
  *
+ * All formatting comes from the theme (`theme.ts`): this module only picks
+ * style ids and structure.
+ *
  * Runs in any JS realm: the `docx` library and its zip writer are pure JS. In
  * a realm without `setImmediate`, the host must provide one before this module
  * is evaluated (JSZip otherwise schedules work on a channel that never fires).
@@ -18,12 +21,13 @@ import {
     BorderStyle,
     Document,
     ExternalHyperlink,
+    Footer,
     FootnoteReferenceRun,
     HeadingLevel,
     ImportedXmlComponent,
-    LevelFormat,
     LineRuleType,
     Packer,
+    PageNumber,
     Paragraph,
     ShadingType,
     Tab,
@@ -39,9 +43,22 @@ import { itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identi
 import type { MdBlock, MdFootnoteDefinition, MdInline, MdTable } from '../mdast';
 import { latexToOmml } from '../math/latexToOmml';
 import { escapeXml, stripInvalidXmlChars } from '../math/xml';
-import { footnoteDefinitions, assignNotePlacements, type NotePlacement } from '../citations/noteIndices';
+import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { parseCslHtml, type StyledSegment } from '../citations/inlineHtml';
 import { BIBLIOGRAPHY_FIELD_CODE, citationFieldCode, documentPreferenceProperties } from './zoteroFields';
+import {
+    DOCX_THEME,
+    STYLE,
+    documentStyles,
+    gapAfterBlock,
+    listContinuationIndent,
+    listLevels,
+    pageProperties,
+    quoteIndent,
+    tableBorders,
+    themeUnits,
+    type DocxTheme,
+} from './theme';
 import type {
     DocxExportOptions,
     ExportDoc,
@@ -54,6 +71,8 @@ export interface WriteDocxInput {
     doc: ExportDoc;
     citations: FormattedCitations;
     options: DocxExportOptions;
+    /** Formatting; defaults to `DOCX_THEME`. */
+    theme?: DocxTheme;
 }
 
 export interface WriteDocxResult {
@@ -88,10 +107,6 @@ const HEADINGS = [
 
 const BULLETS = 'beaver-bullets';
 const ORDERED = 'beaver-ordered';
-const CODE_FONT = 'Consolas';
-const LIST_INDENT = 360;
-const QUOTE_INDENT = 567;
-const TABLE_BORDER = { style: BorderStyle.SINGLE, size: 4, color: 'BFBFBF' };
 
 /**
  * Raw OOXML as a paragraph child. The `w:`/`m:` prefixes need no declaration
@@ -116,8 +131,8 @@ const fieldChar = (type: 'begin' | 'separate' | 'end'): Child => {
 const fieldInstruction = (code: string): Child =>
     rawXml(`<w:r><w:instrText xml:space="preserve">${escapeXml(code)}</w:instrText></w:r>`);
 
-/** A text run, with tab characters as real tabs. */
-function textRun(text: string, marks: Marks = {}, extra: { break?: number } = {}): TextRun {
+/** A text run, with tab characters as real tabs. Inline code takes the theme's mono face. */
+function textRun(text: string, marks: Marks = {}, extra: { break?: number } = {}, theme: DocxTheme = DOCX_THEME): TextRun {
     const parts = stripInvalidXmlChars(text).split('\t');
     const children: Array<string | Tab> = [];
     parts.forEach((part, index) => {
@@ -134,8 +149,8 @@ function textRun(text: string, marks: Marks = {}, extra: { break?: number } = {}
         ...(marks.subScript ? { subScript: true } : {}),
         ...(marks.smallCaps ? { smallCaps: true } : {}),
         ...(marks.underline ? { underline: {} } : {}),
-        ...(marks.hyperlink ? { style: 'Hyperlink' } : {}),
-        ...(marks.code ? { font: CODE_FONT, shading: { type: ShadingType.CLEAR, fill: 'F2F2F2', color: 'auto' } } : {}),
+        ...(marks.hyperlink ? { style: STYLE.hyperlink } : {}),
+        ...(marks.code ? { font: theme.fonts.mono, shading: { type: ShadingType.CLEAR, fill: theme.colors.codeBackground, color: 'auto' } } : {}),
     });
 }
 
@@ -153,6 +168,23 @@ function segmentRuns(segments: StyledSegment[], base: Marks = {}): TextRun[] {
         superScript: segment.superscript,
         subScript: segment.subscript,
     }, segment.lineBreak ? { break: 1 } : {}));
+}
+
+/** Typographic double quotes for a plain label (`"query"` → “query”). */
+function curlyQuotes(text: string): string {
+    return text.replace(/"([^"]*)"/g, '\u201c$1\u201d');
+}
+
+/** Drop the layout whitespace around an entry (citeproc indents its divs). */
+function trimSegments(segments: StyledSegment[]): StyledSegment[] {
+    const out = segments.map(segment => ({ ...segment }));
+    while (out.length > 0 && !out[0].text.trim() && !out[0].text.includes('\t')) out.shift();
+    while (out.length > 0 && !out[out.length - 1].text.trim()) out.pop();
+    if (out.length > 0) {
+        out[0].text = out[0].text.replace(/^[ \n]+/, '');
+        out[out.length - 1].text = out[out.length - 1].text.replace(/\s+$/, '');
+    }
+    return out;
 }
 
 /** Text of inline HTML, with `<br>` as line breaks and other tags dropped. */
@@ -177,10 +209,12 @@ class DocxWriter {
     private citationFields = 0;
     private readonly placements: Map<number, NotePlacement>;
     private readonly isNoteStyle: boolean;
+    private readonly theme: DocxTheme;
     /** Footnote currently being written, so citations inside it stay inline. */
     private insideFootnote: number | null = null;
 
     constructor(private readonly input: WriteDocxInput) {
+        this.theme = input.theme ?? DOCX_THEME;
         this.isNoteStyle = input.citations.styleClass === 'note';
         this.placements = this.isNoteStyle
             ? assignNotePlacements(input.doc, index => this.hasProcessorItems(index))
@@ -229,7 +263,8 @@ class DocxWriter {
                     lastText = 'x';
                     break;
                 case 'inlineCode':
-                    emitText(node.value, { ...marks, code: true });
+                    out.push(textRun(node.value, { ...marks, code: true }, {}, this.theme));
+                    lastText = node.value;
                     break;
                 case 'break':
                     out.push(textRun('', marks, { break: 1 }));
@@ -326,7 +361,7 @@ class DocxWriter {
                 fieldChar('begin'),
                 fieldInstruction(` NOTEREF ${footnoteBookmark(existing)} \\f \\h `),
                 fieldChar('separate'),
-                new TextRun({ text: String(existing), style: 'FootnoteReference' }),
+                new TextRun({ text: String(existing), style: STYLE.footnoteReference }),
                 fieldChar('end'),
             ];
         }
@@ -380,7 +415,7 @@ class DocxWriter {
         // The field records the footnote it actually sits in.
         const noted = { ...cluster, noteIndex: id };
         this.footnotes[String(id)] = {
-            children: [new Paragraph({ style: 'FootnoteText', children: this.citationRuns(noted, {}) })],
+            children: [new Paragraph({ style: STYLE.footnoteText, children: this.citationRuns(noted, {}) })],
         };
         return [new FootnoteReferenceRun(id)];
     }
@@ -393,15 +428,24 @@ class DocxWriter {
         definitions: Map<string, MdFootnoteDefinition>,
     ): Block[] {
         const out: Block[] = [];
-        const indent = context.quote * QUOTE_INDENT + context.depth * LIST_INDENT * 2;
+        // Inside a list item, blocks align with the item's text; quotes indent further.
+        const indent = listContinuationIndent(context.depth, this.theme) + quoteIndent(context.quote, this.theme);
         const paragraphBase = {
-            ...(this.insideFootnote !== null ? { style: 'FootnoteText' } : context.quote > 0 ? { style: 'Quote' } : {}),
-            ...(indent > 0 ? { indent: { left: indent } } : {}),
+            style: this.insideFootnote !== null ? STYLE.footnoteText : context.quote > 0 ? STYLE.quote : STYLE.body,
+            ...(indent > 0 ? { indent: { left: indent, ...(context.quote > 0 ? { right: quoteIndent(1, this.theme) } : {}) } } : {}),
+        };
+        // A list's items and a table end without a paragraph's space after; the
+        // next block makes it up.
+        let gapBefore = 0;
+        const spacedBase = () => {
+            const base = gapBefore > 0 ? { ...paragraphBase, spacing: { before: gapBefore } } : paragraphBase;
+            gapBefore = 0;
+            return base;
         };
         for (const node of nodes) {
             switch (node.type) {
                 case 'paragraph':
-                    out.push(new Paragraph({ ...paragraphBase, children: this.inlines(node.children, {}, definitions) }));
+                    out.push(new Paragraph({ ...spacedBase(), children: this.inlines(node.children, {}, definitions) }));
                     break;
                 case 'heading':
                     out.push(new Paragraph({
@@ -411,7 +455,7 @@ class DocxWriter {
                     break;
                 case 'thematicBreak':
                     out.push(new Paragraph({
-                        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'BFBFBF', space: 1 } },
+                        border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: this.theme.colors.rule, space: 1 } },
                     }));
                     break;
                 case 'blockquote':
@@ -419,21 +463,25 @@ class DocxWriter {
                     break;
                 case 'list':
                     out.push(...this.list(node.ordered ?? false, node.start ?? 1, node.children, context, definitions));
+                    gapBefore = gapAfterBlock(this.theme);
                     break;
                 case 'code': {
                     const lines = node.value.split('\n');
                     out.push(new Paragraph({
-                        style: 'Code',
+                        style: STYLE.code,
                         ...(indent > 0 ? { indent: { left: indent } } : {}),
                         children: lines.map((line, index) => textRun(line, {}, index > 0 ? { break: 1 } : {})),
                     }));
                     break;
                 }
                 case 'math':
-                    out.push(new Paragraph({ ...paragraphBase, children: [this.math(node.value, true)] }));
+                    out.push(new Paragraph({ ...spacedBase(), children: [this.math(node.value, true)] }));
                     break;
                 case 'table':
-                    if (this.insideFootnote === null) out.push(this.table(node, definitions));
+                    if (this.insideFootnote === null) {
+                        out.push(this.table(node, definitions));
+                        gapBefore = gapAfterBlock(this.theme);
+                    }
                     break;
                 case 'html':
                     // The parser turns raw HTML blocks into paragraphs.
@@ -463,13 +511,13 @@ class DocxWriter {
             // The item's marker goes on its first block; a block that cannot
             // carry it (code, table, …) gets a marker line of its own.
             if (item.children.length === 0 || !['paragraph', 'heading'].includes(item.children[0].type)) {
-                out.push(new Paragraph({ ...(context.quote > 0 ? { style: 'Quote' } : {}), numbering, children: checkbox }));
+                out.push(new Paragraph({ style: context.quote > 0 ? STYLE.quote : STYLE.listParagraph, numbering, children: checkbox }));
             }
             item.children.forEach((child, index) => {
                 const first = index === 0;
                 if (first && child.type === 'paragraph') {
                     out.push(new Paragraph({
-                        ...(context.quote > 0 ? { style: 'Quote' } : {}),
+                        style: context.quote > 0 ? STYLE.quote : STYLE.listParagraph,
                         numbering,
                         children: [...checkbox, ...this.inlines(child.children, {}, definitions)],
                     }));
@@ -504,24 +552,20 @@ class DocxWriter {
             const align = node.align?.[index];
             return align === 'center' ? AlignmentType.CENTER : align === 'right' ? AlignmentType.RIGHT : AlignmentType.LEFT;
         };
+        const borders = tableBorders(this.theme);
         return new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
-            borders: {
-                top: TABLE_BORDER,
-                bottom: TABLE_BORDER,
-                left: TABLE_BORDER,
-                right: TABLE_BORDER,
-                insideHorizontal: TABLE_BORDER,
-                insideVertical: TABLE_BORDER,
-            },
+            borders: borders.table,
             rows: node.children.map((row, rowIndex) => new TableRow({
                 tableHeader: rowIndex === 0,
+                cantSplit: true,
                 children: Array.from({ length: columns }, (_, columnIndex) => {
                     const cell = row.children[columnIndex];
                     return new TableCell({
-                        ...(rowIndex === 0 ? { shading: { type: ShadingType.CLEAR, fill: 'F2F2F2', color: 'auto' } } : {}),
-                        margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                        ...(rowIndex === 0 ? { borders: { bottom: borders.headerBottom } } : {}),
+                        margins: borders.cellMargins,
                         children: [new Paragraph({
+                            style: STYLE.tableText,
                             alignment: alignment(columnIndex),
                             children: cell ? this.inlines(cell.children, rowIndex === 0 ? { bold: true } : {}, definitions) : [],
                         })],
@@ -552,9 +596,9 @@ class DocxWriter {
         const paragraphs = bibliography.entries.map((entry, index) => {
             const children: Child[] = [];
             if (live && index === 0) children.push(fieldChar('begin'), fieldInstruction(BIBLIOGRAPHY_FIELD_CODE), fieldChar('separate'));
-            children.push(...segmentRuns(parseCslHtml(entry)));
+            children.push(...segmentRuns(trimSegments(parseCslHtml(entry))));
             if (live && index === last) children.push(fieldChar('end'));
-            return new Paragraph({ style: 'Bibliography', indent, spacing, ...(tabStops.length ? { tabStops } : {}), children });
+            return new Paragraph({ style: STYLE.bibliography, indent, spacing, ...(tabStops.length ? { tabStops } : {}), children });
         });
         return [
             new Paragraph({ heading: HeadingLevel.HEADING_1, children: [textRun(this.input.options.bibliographyTitle)] }),
@@ -567,10 +611,16 @@ class DocxWriter {
         const out: Block[] = [];
         if (doc.title.trim()) out.push(new Paragraph({ heading: HeadingLevel.TITLE, children: [textRun(doc.title.trim())] }));
         for (const section of doc.sections) {
-            const definitions = footnoteDefinitions(section.children);
+            const definitions = sectionFootnoteDefinitions(doc, section);
             if (section.kind === 'user') {
-                out.push(new Paragraph({ style: 'PromptLabel', children: [textRun('User')] }));
+                out.push(new Paragraph({ style: STYLE.promptLabel, children: [textRun('User')] }));
                 out.push(...this.blocks(section.children, { depth: 0, quote: 1 }, definitions));
+                continue;
+            }
+            if (section.kind === 'activity') {
+                for (const call of section.calls ?? []) {
+                    out.push(new Paragraph({ style: STYLE.activity, keepNext: true, children: [textRun(curlyQuotes(call))] }));
+                }
                 continue;
             }
             if (section.kind === 'note' && section.title) {
@@ -582,21 +632,32 @@ class DocxWriter {
     }
 
     private numbering() {
-        const bulletChars = ['•', '◦', '▪'];
-        const orderedFormats = [LevelFormat.DECIMAL, LevelFormat.LOWER_LETTER, LevelFormat.LOWER_ROMAN];
-        const levels = (ordered: boolean, start = 1, startLevel = 0) => Array.from({ length: 9 }, (_, level) => ({
-            level,
-            format: ordered ? orderedFormats[level % 3] : LevelFormat.BULLET,
-            text: ordered ? `%${level + 1}.` : bulletChars[level % 3],
-            alignment: AlignmentType.LEFT,
-            start: level === startLevel ? start : 1,
-            style: { paragraph: { indent: { left: LIST_INDENT * 2 * (level + 1), hanging: LIST_INDENT } } },
-        }));
-        const config = [{ reference: BULLETS, levels: levels(false) }, { reference: ORDERED, levels: levels(true) }];
+        const config = [
+            { reference: BULLETS, levels: listLevels(false, this.theme) },
+            { reference: ORDERED, levels: listLevels(true, this.theme) },
+        ];
         for (const [reference, { start, level }] of this.orderedStarts) {
-            config.push({ reference, levels: levels(true, start, level) });
+            config.push({ reference, levels: listLevels(true, this.theme, start, level) });
         }
         return { config };
+    }
+
+    /** Centered page numbers, when the theme asks for them. */
+    private footers() {
+        if (!this.theme.page.pageNumbers) return undefined;
+        return {
+            default: new Footer({
+                children: [new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 0, after: 0 },
+                    children: [new TextRun({
+                        children: [PageNumber.CURRENT],
+                        size: themeUnits.halfPoints(this.theme.sizes.pageNumber),
+                        color: this.theme.colors.muted,
+                    })],
+                })],
+            }),
+        };
     }
 
     build(): Document {
@@ -612,27 +673,12 @@ class DocxWriter {
             ...(customProperties.length > 0 ? { customProperties } : {}),
             numbering: this.numbering(),
             footnotes: this.footnotes,
-            styles: {
-                paragraphStyles: [
-                    {
-                        id: 'Quote', name: 'Quote', basedOn: 'Normal', next: 'Normal', quickFormat: true,
-                        run: { italics: true, color: '404040' },
-                        paragraph: { indent: { left: QUOTE_INDENT }, border: { left: { style: BorderStyle.SINGLE, size: 12, color: 'BFBFBF', space: 8 } } },
-                    },
-                    {
-                        id: 'PromptLabel', name: 'Prompt Label', basedOn: 'Normal', next: 'Quote',
-                        run: { bold: true, color: '595959', size: 18 },
-                        paragraph: { spacing: { before: 240, after: 60 }, keepNext: true },
-                    },
-                    {
-                        id: 'Code', name: 'Code', basedOn: 'Normal', next: 'Normal',
-                        run: { font: CODE_FONT, size: 18 },
-                        paragraph: { spacing: { before: 60, after: 120 }, shading: { type: ShadingType.CLEAR, fill: 'F2F2F2', color: 'auto' } },
-                    },
-                    { id: 'Bibliography', name: 'Bibliography', basedOn: 'Normal', next: 'Bibliography', quickFormat: true },
-                ],
-            },
-            sections: [{ children: body }],
+            styles: documentStyles(this.theme),
+            sections: [{
+                properties: { page: pageProperties(citations.locale, this.theme) },
+                ...(this.footers() ? { footers: this.footers() } : {}),
+                children: body,
+            }],
         });
     }
 

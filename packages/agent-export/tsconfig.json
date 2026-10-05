@@ -45,6 +45,7 @@
     "./src/citations/noteIndices.ts",
     "./src/docx/writeDocx.ts",
     "./src/docx/zoteroFields.ts",
+    "./src/docx/theme.ts",
     "./src/math/latexToOmml.ts",
     "./src/math/mathmlToOmml.ts",
     "./src/math/xml.ts"

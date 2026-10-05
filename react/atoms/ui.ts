@@ -167,8 +167,13 @@ export const isSkippedFilesDialogVisibleAtom = atom(false);
 export const isExternalReferenceDetailsDialogVisibleAtom = atom(false);
 export const selectedExternalReferenceAtom = atom<ExternalReference | null>(null);
 
+// Export dialog: the footer run of the response being exported, or null.
+export const exportDialogRunIdAtom = atom<string | null>(null);
+// The export dialog's last content choice, kept for this window's session.
+export const exportContentChoiceAtom = atom<'final' | 'full'>('final');
+
 // Active dialog
-export type DialogType = 'errorReport' | 'skippedFiles' | 'externalReferenceDetails' | null;
+export type DialogType = 'errorReport' | 'skippedFiles' | 'externalReferenceDetails' | 'exportResponse' | null;
 
 export const activeDialogAtom = atom<DialogType>((get) => {
     if (get(isErrorReportDialogVisibleAtom)) {
@@ -179,6 +184,9 @@ export const activeDialogAtom = atom<DialogType>((get) => {
     }
     if (get(isExternalReferenceDetailsDialogVisibleAtom)) {
         return 'externalReferenceDetails';
+    }
+    if (get(exportDialogRunIdAtom)) {
+        return 'exportResponse';
     }
     return null;
 });

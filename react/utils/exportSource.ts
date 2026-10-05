@@ -9,7 +9,7 @@
  */
 
 import { createStore } from 'jotai';
-import type { AgentRun } from '@beaver/agent-core/agents/types';
+import type { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { citationByKeyAtom, citationMapAtom, citationsAtom } from '@beaver/agent-core/citations/atoms';
 import {
     externalReferenceItemMappingAtom,
@@ -18,7 +18,10 @@ import {
 import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
 import { buildExportSource, buildResponseBlocks } from '@beaver/agent-export/source/buildSource';
 import { buildCitationSnapshot } from '@beaver/agent-export/source/citationSnapshot';
-import type { ExportSource, ExportSourceBlock } from '@beaver/agent-export/types';
+import type { ExportContent, ExportSource, ExportSourceBlock } from '@beaver/agent-export/types';
+import { mergeRunToolResults } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallLabel } from '@beaver/agent-core/run-state/toolLabels';
+import { getToolCallResultView, resolveToolCallLabelEnrichMap } from './toolCallLabelEnrich';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { currentThreadIdAtom, currentThreadNameAtom } from '../atoms/threads';
 import { store } from '../store';
@@ -34,14 +37,30 @@ export function responseExportTitle(runs: AgentRun[], threadName: string | null 
     return prompt.length > MAX_TITLE_LENGTH ? `${prompt.slice(0, MAX_TITLE_LENGTH - 1).trimEnd()}…` : prompt;
 }
 
+/**
+ * The thread-scoped state an export reads, captured in one synchronous step.
+ * Export awaits (tool labels, page data); the reader may open another thread
+ * meanwhile, and the export must still describe the thread it started from.
+ */
+function captureThreadState(runs: AgentRun[]) {
+    return {
+        title: responseExportTitle(runs, store.get(currentThreadNameAtom)),
+        threadId: store.get(currentThreadIdAtom),
+        citationContext: {
+            citationDataMap: store.get(citationMapAtom),
+            externalMapping: store.get(externalReferenceItemMappingAtom),
+            externalReferencesMap: store.get(externalReferenceMappingAtom),
+        },
+    };
+}
+
 /** Capture the citation state the blocks need. */
-async function citationSnapshotFor(blocks: ExportSourceBlock[]) {
-    const content = blocks.map(block => block.markdown).join('\n\n');
-    const context = await prepareCitationRenderContext(content, {
-        citationDataMap: store.get(citationMapAtom),
-        externalMapping: store.get(externalReferenceItemMappingAtom),
-        externalReferencesMap: store.get(externalReferenceMappingAtom),
-    });
+async function citationSnapshotFor(
+    blocks: ExportSourceBlock[],
+    citationContext: ReturnType<typeof captureThreadState>['citationContext'],
+) {
+    const content = blocks.map(block => (block.type === 'activity' ? '' : block.markdown)).join('\n\n');
+    const context = await prepareCitationRenderContext(content, citationContext);
     // Key the merged metadata exactly as the chat looks it up.
     const keyStore = createStore();
     keyStore.set(citationsAtom, Object.values(context?.citationDataMap ?? {}));
@@ -55,21 +74,43 @@ async function citationSnapshotFor(blocks: ExportSourceBlock[]) {
 }
 
 /**
- * Export source for one response. `runs` is the response's resume chain (a
- * response continued after an error spans several runs).
+ * Labels for the tool calls of a response, as the chat shows them: from each
+ * call's result view and host-resolved names.
  */
-export async function buildResponseExportSource(runs: AgentRun[]): Promise<ExportSource> {
+async function toolCallDescriber(runs: AgentRun[]): Promise<(part: ToolCallPart) => string | null> {
+    const toolResults = mergeRunToolResults(runs);
+    const enrich = await resolveToolCallLabelEnrichMap(runs, toolResults);
+    return (part) => {
+        return getToolCallLabel(part, 'completed', {
+            view: getToolCallResultView(part, toolResults),
+            enrich: enrich.get(part.tool_call_id) ?? null,
+        });
+    };
+}
+
+/**
+ * Export source for one response. `runs` is the response's resume chain (a
+ * response continued after an error spans several runs). `content` picks the
+ * final answer or the full response with its tool activity.
+ */
+export async function buildResponseExportSource(
+    runs: AgentRun[],
+    content: ExportContent = 'final',
+): Promise<ExportSource> {
+    const threadState = captureThreadState(runs);
+    const describeToolCall = content === 'full' ? await toolCallDescriber(runs) : undefined;
     // Older history names libraries by device-local id; links must be portable.
-    const blocks = buildResponseBlocks(runs).map(block => ({
-        ...block,
-        markdown: hydrateItemLinkLibraryRefs(block.markdown, libraryRefForLibraryID),
-    }));
+    const blocks: ExportSourceBlock[] = buildResponseBlocks(runs, { content, describeToolCall }).map(block => (
+        block.type === 'activity'
+            ? block
+            : { ...block, markdown: hydrateItemLinkLibraryRefs(block.markdown, libraryRefForLibraryID) }
+    ));
     return buildExportSource({
         kind: 'response',
-        title: responseExportTitle(runs, store.get(currentThreadNameAtom)),
+        title: threadState.title,
         blocks,
-        citations: await citationSnapshotFor(blocks),
-        threadId: store.get(currentThreadIdAtom),
+        citations: await citationSnapshotFor(blocks, threadState.citationContext),
+        threadId: threadState.threadId,
         runIds: runs.map(run => run.id),
     });
 }
