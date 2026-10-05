@@ -319,7 +319,10 @@ export interface RawFont {
  * A run of consecutive visible glyphs on a line that share one font and size.
  */
 export interface RawStyleRun {
+    /** Font of the run; `font.size` is truncated like the line font's. */
     font: RawFont;
+    /** Untruncated font size of the run's first glyph. */
+    exactSize?: number;
     /** Visible (non-whitespace) glyphs in the run. */
     chars: number;
     /** Letter glyphs (`\p{L}`) in the run. */

@@ -775,17 +775,19 @@ function extractRawPageDetailedOnce(
         const captureRuns = styleRuns && !!fontApi;
         let glyphFontPtr = 0;
         let glyphSize = 0;
+        let glyphExactSize = 0;
         let runFontPtr = 0;
-        let runs: { fontPtr: number; size: number; chars: number; letters: number }[] = [];
+        let runs: { fontPtr: number; size: number; exactSize: number; chars: number; letters: number }[] = [];
         const onCharFont = (fontPtr: number, size: number) => {
             glyphFontPtr = typeof fontPtr === "number" ? fontPtr : 0;
-            glyphSize = typeof size === "number" ? Math.trunc(size) : 0;
+            glyphExactSize = typeof size === "number" ? size : 0;
+            glyphSize = Math.trunc(glyphExactSize);
         };
         const countRunGlyph = (rune: string) => {
             if (!/\S/u.test(rune)) return;
             let run = runs[runs.length - 1];
             if (!run || runFontPtr !== glyphFontPtr || run.size !== glyphSize) {
-                run = { fontPtr: glyphFontPtr, size: glyphSize, chars: 0, letters: 0 };
+                run = { fontPtr: glyphFontPtr, size: glyphSize, exactSize: glyphExactSize, chars: 0, letters: 0 };
                 runs.push(run);
                 runFontPtr = glyphFontPtr;
             }
@@ -798,6 +800,7 @@ function extractRawPageDetailedOnce(
                 const f = lookupFont(r.fontPtr);
                 return {
                     font: { name: f.name, family: f.family, weight: f.weight, style: f.style, size: r.size },
+                    exactSize: r.exactSize,
                     chars: r.chars,
                     letters: r.letters,
                 };

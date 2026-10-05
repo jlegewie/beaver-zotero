@@ -1304,7 +1304,7 @@ describe('header detection', () => {
             font: string,
             chars: number,
             letters: number,
-            opts: { size?: number; bold?: boolean; italic?: boolean } = {},
+            opts: { size?: number; exactSize?: number; bold?: boolean; italic?: boolean } = {},
         ): RawStyleRun {
             return {
                 font: {
@@ -1314,6 +1314,7 @@ describe('header detection', () => {
                     style: opts.italic ? 'italic' : 'normal',
                     size: opts.size ?? 10,
                 },
+                exactSize: opts.exactSize,
                 chars,
                 letters,
             };
@@ -1325,16 +1326,16 @@ describe('header detection', () => {
 
         it('demotes a line whose bold cue is only the run-in label', () => {
             const spec: LeaderLineSpec = {
-                text: 'Keywords: undocumented immigrant; stop and frisk; education',
+                text: 'Practice points: undocumented immigrant; stop and frisk',
                 l: 0,
                 size: 10,
                 bold: true,
                 font: 'Sans-Bold',
             };
             // Without style runs the first-glyph bold reads as a bold line.
-            expect(kindOf(spec, 'Keywords:')).toBe('header');
-            const runs = [run('Sans-Bold', 9, 8, { bold: true }), run('Sans', 45, 44)];
-            expect(kindOf({ ...spec, styleRuns: runs }, 'Keywords:')).toBe('paragraph');
+            expect(kindOf(spec, 'Practice points:')).toBe('header');
+            const runs = [run('Sans-Bold', 15, 14, { bold: true }), run('Sans', 39, 37)];
+            expect(kindOf({ ...spec, styleRuns: runs }, 'Practice points:')).toBe('paragraph');
         });
 
         it('demotes a line whose italic cue is only the opening word', () => {
@@ -1461,6 +1462,74 @@ describe('header detection', () => {
             expect(all.find(it => it.text.includes('Keywords:'))!.type).toBe('paragraph');
         });
 
+        it('keeps a larger heading separate from a same-font run-in line set one point smaller', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: 'Materials and Methods',
+                        l: 0,
+                        r: 305,
+                        size: 11,
+                        bold: true,
+                        font: 'Heading-Bold',
+                        styleRuns: [run('Heading-Bold', 19, 19, { size: 11, exactSize: 11, bold: true })],
+                    },
+                    {
+                        text: 'Study design. Participants were recruited from twelve clinics',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-Bold',
+                        styleRuns: [
+                            run('Heading-Bold', 12, 11, { exactSize: 10, bold: true }),
+                            run('Sans', 44, 42, { exactSize: 10 }),
+                        ],
+                    },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Materials and Methods'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).not.toContain('Study design');
+        });
+
+        it('treats a one-point difference from size truncation as the same face', () => {
+            // An italic reference title wrapping across lines whose sizes
+            // truncate to 10 and 9 (exact 10.06 / 9.86) stays one paragraph.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: 'of Interior Immigration Enforcement on the Behaviors of',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        italic: true,
+                        font: 'Times-Italic',
+                        styleRuns: [run('Times-Italic', 50, 48, { size: 10, exactSize: 10.06, italic: true })],
+                    },
+                    {
+                        text: 'Immigrants. Report. La Jolla, CA: Policy Center and other places.',
+                        l: 0,
+                        r: 305,
+                        size: 9,
+                        italic: true,
+                        font: 'Times-Italic',
+                        styleRuns: [
+                            run('Times-Italic', 11, 10, { size: 9, exactSize: 9.86, italic: true }),
+                            run('Times-Roman', 46, 40, { size: 9, exactSize: 9.96 }),
+                        ],
+                    },
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('of Interior'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('Immigrants. Report.');
+        });
+
         it('keeps a run-in heading that wraps onto its second line in one paragraph', () => {
             // Without a gap, a full-width bold line followed by a line that
             // opens in the same bold face is a wrapped run-in heading, not a
@@ -1510,6 +1579,133 @@ describe('header detection', () => {
                 styleRuns: runs,
             };
             expect(kindOf(spec, 'Quoted words')).toBe('paragraph');
+        });
+    });
+
+    describe('figure and table labels', () => {
+        it('does not promote extended-data and supplementary caption titles', () => {
+            for (const text of [
+                'Extended Data Fig. 2 | MITOMICS profiles suggest new protein functions',
+                'Supplementary Table 5: PCR conditions and primers used for validation',
+            ]) {
+                const all = items(
+                    [...FILLERS_BEFORE_HEADING, { text, l: 0, size: 10, bold: true, font: 'Heading-Bold' }],
+                    [BODY],
+                );
+                expect(all.find(it => it.text.includes(text.slice(0, 15)))!.type).toBe('paragraph');
+            }
+        });
+    });
+
+    describe('run-in labels', () => {
+        function kindOf(text: string): string | undefined {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { text, l: 0, size: 10, bold: true, font: 'Heading-Bold' }],
+                [BODY],
+            );
+            return all.find(it => it.text.includes(text.slice(0, 12)))?.type;
+        }
+
+        it('demotes a front-matter label line set entirely in a heading face', () => {
+            expect(kindOf('Received: 5 May 2020; Accepted: 2 June 2020')).toBe('paragraph');
+            expect(kindOf('Conflict of interest: None declared')).toBe('paragraph');
+            expect(kindOf('To cite this article: Smith J (2020) A study of things')).toBe('paragraph');
+        });
+
+        it('demotes a keywords line without a colon', () => {
+            expect(kindOf('Keywords Peer influence · Adolescence · Substance use')).toBe('paragraph');
+        });
+
+        it('demotes a structured-abstract label followed by prose', () => {
+            expect(
+                kindOf('Results: We found that the treatment improved outcomes in most of the enrolled patients'),
+            ).toBe('paragraph');
+        });
+
+        it('keeps a structured-abstract word heading with a subtitle', () => {
+            expect(kindOf('Conclusion: Future Directions')).toBe('header');
+        });
+
+        it('keeps a long sentence-case subtitle that has no prose signal', () => {
+            expect(kindOf('Results: Effects of the intervention on the quality of life in older adults')).toBe('header');
+        });
+
+        it('keeps a question subtitle', () => {
+            // Ten words with auxiliaries and pronouns, past the prose-word check's floor.
+            expect(
+                kindOf('Conclusions: are there viable alternatives to the profit-maximising model of business?'),
+            ).toBe('header');
+        });
+
+        it('keeps a question subtitle containing an initialism', () => {
+            expect(
+                kindOf(
+                    'Conclusions: Are there viable alternatives to the profit-maximising model of business in the U.S. and Europe?',
+                ),
+            ).toBe('header');
+        });
+
+        it('keeps a long subtitle whose only prose-like feature is a number', () => {
+            expect(
+                kindOf('Results: Effects of the COVID-19 pandemic on the quality of life in older adults'),
+            ).toBe('header');
+        });
+
+        it('demotes a run-in that asks a question and goes on in prose', () => {
+            expect(
+                kindOf('Objective: Does peer support improve outcomes? We conducted a randomized trial in schools'),
+            ).toBe('paragraph');
+        });
+
+        it('demotes a run-in line that wraps before its sentence ends', () => {
+            expect(
+                kindOf('Results: We found that high basal area of very large trees, high volumes of standing'),
+            ).toBe('paragraph');
+        });
+
+        it('keeps a label word standing alone as a heading', () => {
+            expect(kindOf('Abstract')).toBe('header');
+            expect(kindOf('Keywords')).toBe('header');
+        });
+    });
+
+    describe('numbered CJK headings styled only by their number', () => {
+        function run(font: string, chars: number, letters: number, size: number, bold = false): RawStyleRun {
+            const weight = bold ? 'bold' : 'normal';
+            return { font: { name: font, family: font, weight, style: 'normal', size }, chars, letters };
+        }
+
+        function kindOf(text: string, runs: RawStyleRun[], size: number, bold: boolean): string | undefined {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { text, l: 0, size, bold, font: runs[0].font.name, styleRuns: runs }],
+                [BODY],
+            );
+            return all.find(it => it.text.includes(text.slice(0, 3)))?.type;
+        }
+
+        it('keeps a heading whose larger number is its only styled part', () => {
+            const runs = [run('Digits', 1, 0, 12), run('Digits', 1, 0, 12), run('Digits', 1, 0, 12), run('SimHei', 16, 16, 10)];
+            expect(kindOf('２．２ 明确对党忠诚的科学内涵及判断标准', runs, 12, false)).toBe('header');
+        });
+
+        it('keeps a heading whose bold Latin number precedes CJK heading text', () => {
+            const runs = [run('Times-Bold', 1, 0, 10, true), run('SimHei', 17, 16, 10)];
+            expect(kindOf('5．突出质量导向，实现教学评价一体化', runs, 10, true)).toBe('header');
+        });
+
+        it('does not keep a numbered CJK footnote set smaller than the body', () => {
+            const runs = [run('Times-Bold', 2, 0, 10, true), run('SimSun', 14, 13, 8)];
+            expect(kindOf('3. 这是一个较长的脚注内容说明来源', runs, 10, true)).toBe('paragraph');
+        });
+
+        it('does not keep numbered CJK prose ending in a quoted sentence', () => {
+            const runs = [run('Times-Bold', 2, 0, 10, true), run('SimSun', 27, 23, 10)];
+            expect(kindOf('2. 研究表明，这一结果可以解释为“社会环境影响个体行为。”', runs, 10, true)).toBe('paragraph');
+        });
+
+        it('does not keep a numbered Latin line', () => {
+            const runs = [run('Times-Bold', 2, 0, 10, true), run('Times-Roman', 30, 30, 10)];
+            expect(kindOf('2. Promote open discussion about the topic', runs, 10, true)).toBe('paragraph');
         });
     });
 

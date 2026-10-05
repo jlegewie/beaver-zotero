@@ -93,11 +93,13 @@ describe("detailed-walk style runs", () => {
         expect(line.styleRuns).toEqual([
             {
                 font: { name: "ABCDEF+Sans-Bold", family: "ABCDEF+Sans", weight: "bold", style: "normal", size: 9 },
+                exactSize: 9.96,
                 chars: 9,
                 letters: 8,
             },
             {
                 font: { name: "ABCDEF+Sans", family: "ABCDEF+Sans", weight: "normal", style: "normal", size: 9 },
+                exactSize: 9.96,
                 chars: 22,
                 letters: 17,
             },

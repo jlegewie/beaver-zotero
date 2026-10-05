@@ -766,6 +766,34 @@ function stylesEqual(a: TextStyle | null, b: TextStyle | null): boolean {
 }
 
 /**
+ * Whether two lines are set in the same typeface: same font, weight and
+ * slant at the same size. Reported sizes are truncated (9.96 → 9, 10.0 →
+ * 10), so lines in one face can read as two sizes; the opening runs' exact
+ * sizes settle it when style runs are recorded (within 0.5pt), otherwise
+ * truncated sizes within 1pt count as the same.
+ */
+function sameTypeface(a: PageLine, b: PageLine): boolean {
+    const sa = extractLineStyle(a);
+    const sb = extractLineStyle(b);
+    if (!sa || !sb) return false;
+    if (sa.font !== sb.font || sa.bold !== sb.bold || sa.italic !== sb.italic) return false;
+    const exactA = openingExactSize(a);
+    const exactB = openingExactSize(b);
+    if (exactA !== null && exactB !== null) return Math.abs(exactA - exactB) < 0.5;
+    return Math.abs(sa.size - sb.size) <= 1;
+}
+
+/** Exact size of the line's first style run, when recorded. */
+function openingExactSize(line: PageLine): number | null {
+    for (const span of line.spans) {
+        for (const run of span.styleRuns ?? []) {
+            if (run.chars > 0) return run.exactSize ?? null;
+        }
+    }
+    return null;
+}
+
+/**
  * Check if a line's style matches one of the document's body styles.
  *
  * Wider than `stylesEqual` because the detailed mupdf walk does not always
@@ -1136,6 +1164,11 @@ function isHeaderStyle(
 ): boolean {
     const lineStyle = extractLineStyle(line);
     if (!lineStyle) return false;
+    // Item-level only (the joined item text): boundaries are decided per line
+    // and stay as they are; a run-in label item just isn't labelled a heading.
+    if (phraseTextOverride !== null && looksLikeRunInLabel(phraseTextOverride)) {
+        return false;
+    }
     if (!matchesHeaderRules(
         line, lineStyle, true, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
     )) {
@@ -1143,9 +1176,155 @@ function isHeaderStyle(
     }
     const majority = majorityLineStyle(line, lineStyle);
     if (majority === lineStyle) return true;
-    return matchesHeaderRules(
+    if (matchesHeaderRules(
         line, majority, false, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
-    );
+    )) {
+        return true;
+    }
+    return isCJKNumberedHeading(line, bodyStyles);
+}
+
+/**
+ * Front-matter and back-matter labels that open a run-in line: "Keywords: …",
+ * "Received: 5 May 2020", "Conflict of interest: None", "To cite this
+ * article: …". Set as a bold or italic label followed by plain text, or
+ * entirely in a heading face, they read as headings to the style rules.
+ */
+const RUN_IN_LABELS = [
+    "abstract",
+    "e?-?issn",
+    "doi",
+    "received",
+    "accepted",
+    "revised",
+    "published(?:\\s+online)?",
+    "available\\s+online",
+    "article\\s+history",
+    "(?:handling\\s+|academic\\s+)?editors?(?:\\s*\\(s\\))?",
+    "copyright",
+    "citation",
+    "(?:to\\s+)?cite\\s+this\\s+article",
+    "suggested\\s+citation",
+    "correspondence",
+    "corresponding\\s+authors?",
+    "e-?mail(?:\\s+address(?:es)?)?",
+    "funding(?:\\s+information)?",
+    "conflicts?\\s+of\\s+interests?",
+    "competing\\s+interests?",
+    "declarations?\\s+of\\s+(?:competing|conflicting)\\s+interests?",
+    "abbreviations",
+    "highlights",
+    "data\\s+availability(?:\\s+statement)?",
+    "level\\s+of\\s+evidence",
+    "ethics\\s+approval",
+    "jel(?:\\s+(?:classifications?|codes?))?",
+    "notes?",
+    "sources?",
+];
+const RUN_IN_LABEL_RE = new RegExp(`^(?:${RUN_IN_LABELS.join("|")})\\s*[:.：]\\s*\\S`, "iu");
+
+/** Keyword labels, which also appear without a colon ("Keywords Peer influence · …"). */
+const KEYWORDS_LABEL_RE =
+    /^(?:key\s*-?\s*words?|index\s+terms|palabras\s+clave|mots[-\s]cl[ée]s|schl[üu]sselw[öo]rter)\s*[:.：]?\s+\S/iu;
+
+/**
+ * Structured-abstract section words. As headings they are common
+ * ("Results", "Conclusion: Future Directions"), so they count as run-in
+ * labels only when prose follows them.
+ */
+const STRUCTURED_ABSTRACT_LABEL_RE =
+    /^(?:background|objectives?|aims?|purpose|methods?|methodology|results?|conclusions?|discussion|introduction|motivation|findings|design|setting|participants|limitations|implications|summary|context|interpretation|originality\/value)\s*[:.：]\s+(\S[\s\S]*)$/iu;
+
+/**
+ * Words that mark a clause rather than a noun-phrase title: auxiliaries,
+ * pronouns and relatives ("We found…", "…were completed", "…which…").
+ */
+const PROSE_WORD_RE =
+    /\b(?:is|are|was|were|be|been|being|has|have|had|can|could|may|might|will|would|should|must|does|did|we|our|us|i|it|its|this|these|they|their|there|which|who|that)\b/iu;
+
+/**
+ * A sentence ending followed by the next sentence: a word of two or more
+ * lowercase letters or digits, terminal punctuation, then a capital. The
+ * two-character floor skips initialisms ("the U.S. and Europe").
+ */
+const SENTENCE_BREAK_RE = /[\p{Ll}\d)%]{2}[.!?]["'”’)\]]*\s+["“'‘(]?[\p{Lu}\d]/u;
+
+/** A line that wraps mid-phrase ends on a function word ("…in", "…of the"). */
+const FUNCTION_WORD_END_RE =
+    /\b(?:a|an|the|of|in|on|to|for|with|by|from|at|as|and|or|but|that|which|than|is|are|was|were|be|can|our|their|its|between|into|using|while|whether)\W*$/iu;
+
+/**
+ * Whether text after a structured-abstract label reads as prose rather than a
+ * subtitle. A heading subtitle can be long and sentence-case ("Effects of the
+ * intervention on the quality of life in older adults"), so length and case
+ * alone are not enough: prose also ends a sentence, breaks a word across the
+ * line, or carries a verb, pronoun or dangling function word. Numbers are no
+ * evidence either way ("Effects of the COVID-19 pandemic on …").
+ * A subtitle that is a single question is never prose — question headings
+ * are common.
+ */
+function isProseTail(tail: string): boolean {
+    const trimmed = tail.trimEnd();
+    const words = trimmed.match(/[^\W\d_][\w'’-]*/gu) ?? [];
+    if (words.length < 6) return false;
+    // A single question is a heading subtitle, however many auxiliaries it
+    // carries ("are there viable alternatives to …?").
+    if (/\?["'”’)\]]*$/u.test(trimmed) && !SENTENCE_BREAK_RE.test(trimmed)) return false;
+    if (/[-\u00AD]$/u.test(trimmed)) return true;
+    if (/[.!]["'”’)\]]*$/u.test(trimmed) || SENTENCE_BREAK_RE.test(trimmed)) return true;
+    if (words.length < 10) return false;
+    return PROSE_WORD_RE.test(trimmed) || FUNCTION_WORD_END_RE.test(trimmed) || /[,;:]$/u.test(trimmed);
+}
+
+/** A run-in label item: a known label followed by text on the same line. */
+function looksLikeRunInLabel(text: string): boolean {
+    const t = text.trim();
+    if (RUN_IN_LABEL_RE.test(t) || KEYWORDS_LABEL_RE.test(t)) return true;
+    const m = STRUCTURED_ABSTRACT_LABEL_RE.exec(t);
+    return !!m && isProseTail(m[1]);
+}
+
+/**
+ * Numbered CJK / Korean section headings whose number alone carries the
+ * heading styling: a bold or larger "２．２" / "5" / "(6)" before heading text
+ * set in a face MuPDF doesn't flag as bold ("２．２ 明确对党忠诚的…"). The
+ * majority-style veto would demote them; keep them when the text after the
+ * number is CJK, at least body size (numbered footnotes and running heads are
+ * set smaller) and doesn't end like a sentence.
+ */
+function isCJKNumberedHeading(line: PageLine, bodyStyles: TextStyle[] | null): boolean {
+    if (!bodyStyles || bodyStyles.length === 0) return false;
+    const span = line.spans[0];
+    const runs = (span?.styleRuns ?? []).filter(run => run.chars > 0);
+    if (runs.length < 2) return false;
+
+    // Text of each run: runs count non-whitespace glyphs in order.
+    const glyphs = Array.from(span.text).filter(c => /\S/u.test(c));
+    let offset = 0;
+    const runTexts = runs.map(run => {
+        const text = glyphs.slice(offset, offset + run.chars).join("");
+        offset += run.chars;
+        return text;
+    });
+
+    let prefixRuns = 0;
+    while (prefixRuns < runs.length && /^[\p{Nd}.．、()（）]+$/u.test(runTexts[prefixRuns])) prefixRuns++;
+    if (prefixRuns === 0 || prefixRuns === runs.length) return false;
+    const prefix = runTexts.slice(0, prefixRuns).join("");
+    if (!/^[(（]?\p{Nd}{1,3}(?:[.．]\p{Nd}{1,3}){0,3}[.．、)）]?$/u.test(prefix)) return false;
+
+    const rest = runTexts.slice(prefixRuns).join("");
+    // Sentence-final punctuation, possibly followed by closing quotes or brackets.
+    if (!hasCJKContent(rest) || /[。！？.!?]["'”’」』）)\]】]*$/u.test(rest)) return false;
+
+    const bodySize = bodyStyles[0].size;
+    let restChars = 0;
+    let bodySizedChars = 0;
+    for (const run of runs.slice(prefixRuns)) {
+        restChars += run.chars;
+        if (run.font.size >= bodySize - 0.5) bodySizedChars += run.chars;
+    }
+    return bodySizedChars / restChars >= MAJORITY_STYLE_SHARE;
 }
 
 /**
@@ -1441,9 +1620,10 @@ function matchesHeaderRules(
         return false;
     }
 
-    // Check for figure/table labels
+    // Check for figure/table labels, including "Extended Data Fig. 1" and
+    // "Supplementary Table S2"
     const prefixLabelRe =
-        /^\s*(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
+        /^\s*(?:(?:extended\s+data|supplementary|supporting(?:\s+information)?)\s+)?(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
     if (prefixLabelRe.test(text)) {
         return false;
     }
@@ -1663,7 +1843,8 @@ function startNewItem(
     // A heading followed by a line that only opens like one, e.g. a paragraph
     // starting with a bold run-in phrase. The majority-style veto makes the
     // line body text, but its opening style still differs from the
-    // heading's, which ends the heading.
+    // heading's, which ends the heading. Size-truncation jitter alone is not
+    // a style change (see `sameTypeface`).
     //
     // A same-style opening is deliberately not a boundary: with no gap,
     // indent or early line end in between, that shape is a run-in heading
@@ -1672,7 +1853,7 @@ function startNewItem(
     // paragraph. Splitting it would leave a truncated pseudo-heading.
     if (
         prevIsLocalHeader &&
-        !stylesEqual(extractLineStyle(line), extractLineStyle(prevLine)) &&
+        !sameTypeface(line, prevLine) &&
         opensWithHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps)
     ) {
         return true;
