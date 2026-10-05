@@ -46,6 +46,10 @@ import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import { DownloadIcon } from '@beaver/agent-ui/icons';
+import { exportNoteToFile, revealExportedFile } from '../../fileExport';
+import { exportWithFeedback } from '../../../../utils/fileExportFeedback';
+import { addPopupMessageAtom } from '../../../../utils/popupMessageUtils';
 
 interface ReviewActionRowProps {
     row: ReviewRow;
@@ -206,6 +210,25 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         else notifyReferenceUnavailable('item', 'library_unavailable');
     }, [openNoteTarget]);
 
+    // A note the agent wrote can be exported as it wrote it, with its citations.
+    const canExportNote = row.actionType === 'create_note';
+    const [isExporting, setIsExporting] = useState(false);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
+
+    const handleExportNote = useCallback(async () => {
+        if (isExporting) return;
+        setIsExporting(true);
+        try {
+            await exportWithFeedback(
+                () => exportNoteToFile({ runId, toolCallId: row.toolcallId, format: 'docx' }),
+                addPopupMessage,
+                revealExportedFile,
+            );
+        } finally {
+            setIsExporting(false);
+        }
+    }, [isExporting, runId, row.toolcallId, addPopupMessage]);
+
     const handleReveal = useCallback(async () => {
         if (!revealReference) return;
         // Reveal within the current collection when the item belongs to it,
@@ -280,6 +303,20 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 <div className="flex-1" />
 
                 <div className="display-flex flex-row items-center gap-2 mr-3 mt-010" style={{ flexShrink: 0 }}>
+                    {canExportNote && !isBusy && (
+                        <Tooltip content="Export to Word" showArrow singleLine>
+                            <IconButton
+                                icon={DownloadIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={handleExportNote}
+                                loading={isExporting}
+                                disabled={isExporting}
+                                ariaLabel="Export to Word"
+                            />
+                        </Tooltip>
+                    )}
+
                     {(openNoteTarget || revealReference) && !isBusy && (
                         <Tooltip content={openNoteTarget ? 'Open note' : 'Show in library'} showArrow singleLine>
                             <IconButton

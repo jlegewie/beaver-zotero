@@ -8,20 +8,17 @@ import {
     isErrorReportSendingAtom,
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom,
-    exportDialogRunIdAtom,
     DialogType,
 } from '../../atoms/ui';
 import ErrorReportDialog from './ErrorReportDialog';
 import SkippedFilesDialog from './SkippedFilesDialog';
 import ExternalReferenceDetailsDialog from './ExternalReferenceDetailsDialog';
-import ExportResponseDialog from './ExportResponseDialog';
 import { getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
 
 const dialogs: Record<Exclude<DialogType, null>, React.ComponentType<any>> = {
     errorReport: ErrorReportDialog,
     skippedFiles: SkippedFilesDialog,
     externalReferenceDetails: ExternalReferenceDetailsDialog,
-    exportResponse: ExportResponseDialog,
 };
 
 const DialogContainer: React.FC = () => {
@@ -33,7 +30,6 @@ const DialogContainer: React.FC = () => {
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
     const setIsExternalReferenceDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
     const setSelectedExternalReference = useSetAtom(selectedExternalReferenceAtom);
-    const setExportDialogRunId = useSetAtom(exportDialogRunIdAtom);
 
     const handleClose = () => {
         if (activeDialog === 'errorReport') {
@@ -45,8 +41,6 @@ const DialogContainer: React.FC = () => {
         } else if (activeDialog === 'externalReferenceDetails') {
             setIsExternalReferenceDetailsVisible(false);
             setSelectedExternalReference(null);
-        } else if (activeDialog === 'exportResponse') {
-            setExportDialogRunId(null);
         }
     };
 

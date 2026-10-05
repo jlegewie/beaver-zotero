@@ -25,7 +25,7 @@ vi.mock('../../../react/utils/toolCallLabelEnrich', () => ({
     })),
 }));
 
-import { buildResponseExportSource } from '../../../react/utils/exportSource';
+import { buildNoteExportSource, buildResponseExportSource } from '../../../react/utils/exportSource';
 import { store } from '../../../react/store';
 
 const run = {
@@ -63,5 +63,28 @@ describe('buildResponseExportSource', () => {
         expect(source.provenance.threadId).toBe('t1');
         expect(Object.keys(source.citations.citationsByKey)).toContain('zotero:u-AAAAAAAA:page3');
         expect(source.blocks.map(block => block.type)).toEqual(['markdown', 'activity', 'markdown']);
+    });
+
+    it('exports a note the agent wrote, as it wrote it', async () => {
+        store.set(currentThreadIdAtom, 't1');
+        store.set(citationsAtom, []);
+        const withNote = {
+            ...run,
+            model_messages: [{
+                kind: 'response',
+                parts: [
+                    { part_kind: 'text', content: 'Writing a note.' },
+                    { part_kind: 'tool-call', tool_name: 'create_note', tool_call_id: 'n1', args: JSON.stringify({ title: 'Key findings', content: '# Summary\n\nClaim <citation id="u-AAAAAAAA"/>.' }) },
+                ],
+            }],
+        };
+        const source = await buildNoteExportSource(withNote, 'n1');
+        expect(source).toMatchObject({
+            kind: 'note',
+            title: 'Key findings',
+            blocks: [{ type: 'markdown', markdown: '# Summary\n\nClaim <citation id="u-AAAAAAAA"/>.' }],
+            provenance: { threadId: 't1', runIds: ['r1'] },
+        });
+        expect(await buildNoteExportSource(withNote, 'missing')).toBeNull();
     });
 });

@@ -16,7 +16,7 @@ import {
     externalReferenceMappingAtom,
 } from '@beaver/agent-core/citations/externalReferences';
 import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
-import { buildExportSource, buildResponseBlocks } from '@beaver/agent-export/source/buildSource';
+import { buildExportSource, buildResponseBlocks, noteFromToolCall } from '@beaver/agent-export/source/buildSource';
 import { buildCitationSnapshot } from '@beaver/agent-export/source/citationSnapshot';
 import type { ExportContent, ExportSource, ExportSourceBlock } from '@beaver/agent-export/types';
 import { mergeRunToolResults } from '@beaver/agent-core/run-state/atoms';
@@ -114,3 +114,33 @@ export async function buildResponseExportSource(
         runIds: runs.map(run => run.id),
     });
 }
+
+/**
+ * Export source for a note the agent wrote with `create_note`: the note's
+ * title and markdown as the agent wrote them (with their citations), or null
+ * when the run has no such call.
+ */
+export async function buildNoteExportSource(run: AgentRun, toolCallId: string): Promise<ExportSource | null> {
+    const threadState = captureThreadState([run]);
+    let note: { title: string; markdown: string } | null = null;
+    for (const message of run.model_messages) {
+        if (message.kind !== 'response') continue;
+        for (const part of message.parts) {
+            if (part.part_kind === 'tool-call' && part.tool_call_id === toolCallId) note = noteFromToolCall(part);
+        }
+    }
+    if (!note) return null;
+    const blocks: ExportSourceBlock[] = [{
+        type: 'markdown',
+        markdown: hydrateItemLinkLibraryRefs(note.markdown, libraryRefForLibraryID),
+    }];
+    return buildExportSource({
+        kind: 'note',
+        title: note.title || 'Beaver note',
+        blocks,
+        citations: await citationSnapshotFor(blocks, threadState.citationContext),
+        threadId: threadState.threadId,
+        runIds: [run.id],
+    });
+}
+

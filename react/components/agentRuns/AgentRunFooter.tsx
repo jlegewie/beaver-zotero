@@ -16,7 +16,6 @@ import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { CitedSource, getCitationKey } from '@beaver/agent-core/types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
-import { exportDialogRunIdAtom } from '../../atoms/ui';
 import { allRunsAtom, mergeRunToolResults, resumeChainAtom } from '@beaver/agent-core/run-state/atoms';
 import { sumChainUsage } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { extractRunResponseContent } from '../../utils/threadContent';
@@ -29,6 +28,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
+import { exportWithFeedback } from '../../utils/fileExportFeedback';
 import { getHost } from '@beaver/agent-ui/host';
 
 interface AgentRunFooterProps {
@@ -47,7 +47,6 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
     const citationMarkerMap = useAtomValue(citationKeyToMarkerAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
-    const setExportDialogRunId = useSetAtom(exportDialogRunIdAtom);
 
     // A response that was continued after an error or an interruption spans
     // several runs but reads as one message, and only its last run carries a
@@ -177,7 +176,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         if (host.documentExport?.exportResponseToFile) {
             items.splice(noteWriter ? 3 : 1, 0, {
                 label: 'Export to Word…',
-                onClick: () => setExportDialogRunId(run.id),
+                onClick: () => exportToWord(),
                 disabled: isResolvingCitations
             });
         }
@@ -261,6 +260,22 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     /** Save as child note attached to selected/current item. */
     const saveToItem = () => saveRunNote(true);
+
+    /**
+     * Export the response's final answer (its whole resume chain) to a Word
+     * document. The host asks where to save and formats citations in the
+     * citation style setting.
+     */
+    const exportToWord = async () => {
+        const documentExport = getHost().documentExport;
+        const exportResponse = documentExport?.exportResponseToFile;
+        if (!exportResponse) return;
+        await exportWithFeedback(
+            () => exportResponse({ runs: chainRuns, format: 'docx', content: 'final' }),
+            addPopupMessage,
+            documentExport.revealExportedFile,
+        );
+    };
 
     const copyRunUrl = async () => {
         const threadId = store.get(currentThreadIdAtom);
