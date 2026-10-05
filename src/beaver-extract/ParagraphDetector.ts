@@ -16,7 +16,7 @@
  */
 
 import type { PageLine, PageLineResult, ColumnLineResult } from "./LineDetector";
-import type { BoundingBox, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
+import type { BoundingBox, RawStyleRun, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
 import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
@@ -1010,7 +1010,121 @@ export function looksLikeFragmentedCJKBody(
 }
 
 /**
- * Check if a line should be classified as a header
+ * Share of a line's visible glyphs that bold, italic or a size must reach to
+ * describe the line in `majorityLineStyle`.
+ */
+const MAJORITY_STYLE_SHARE = 0.75;
+
+/**
+ * Math fonts (TeX Computer Modern math, AMS, MathTime, txfonts, Cambria/STIX
+ * Math, Symbol). Glyphs set in them don't vote in `majorityLineStyle`: an
+ * italic variable inside a heading ("… for the k = const case") says
+ * nothing about the heading's own styling.
+ */
+const MATH_FONT_RE =
+    /^(?:CMMI|CMSY|CMEX|CMBSY|MSAM|MSBM|EUFM|EUSM|RSFS|MTMI|MTSY|MTEX|RMTMI|RBLMI|rtxmi|rtxsy|txmi|txsy|txex|Symbol|MT-Extra|Euclid|ESint|wasy|stmary|TeX_CM_Maths|[^,]*Math)/i;
+
+/**
+ * Majority styling of a line, from its per-glyph style runs.
+ *
+ * MuPDF reports a line's font from its first glyph, so a body line that
+ * opens with a bold run-in label ("Abstract: A growing literature…") or an
+ * italic word reads as bold or italic throughout. This describes the line by
+ * the styling most of its glyphs carry instead: bold / italic only when at
+ * least `MAJORITY_STYLE_SHARE` of the visible glyphs are, the size reached by
+ * that share, and the font with the most glyphs.
+ *
+ * Not every glyph votes:
+ *   - short letterless runs at either end (bullets, footnote and affiliation
+ *     markers, trailing punctuation);
+ *   - math-font glyphs (`MATH_FONT_RE`);
+ *   - size differences within one font: each run counts at its font's
+ *     largest size on the line, so fake small caps ("I. I" + "NTRODUCTION"
+ *     set smaller) and superscripts don't shrink the line.
+ *
+ * Returns `lineStyle` itself when the line has no style runs or its majority
+ * styling agrees with it.
+ */
+function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
+    const runs: RawStyleRun[] = [];
+    for (const span of line.spans) {
+        for (const run of span.styleRuns ?? []) {
+            if (run.chars > 0) runs.push(run);
+        }
+    }
+    if (runs.length === 0) return lineStyle;
+
+    let start = 0;
+    let end = runs.length;
+    while (end - start > 1 && runs[start].letters === 0 && runs[start].chars <= 3) start++;
+    while (end - start > 1 && runs[end - 1].letters === 0 && runs[end - 1].chars <= 3) end--;
+    const voters = runs
+        .slice(start, end)
+        .filter(run => !MATH_FONT_RE.test(baseFontName(run.font.name)));
+    if (voters.length === 0) return lineStyle;
+
+    const fontMaxSize = new Map<string, number>();
+    for (const run of voters) {
+        fontMaxSize.set(run.font.name, Math.max(fontMaxSize.get(run.font.name) ?? 0, run.font.size));
+    }
+
+    let total = 0;
+    let boldChars = 0;
+    let italicChars = 0;
+    const charsBySize = new Map<number, number>();
+    const charsByFont = new Map<string, number>();
+    for (const run of voters) {
+        const style = extractSpanStyle(
+            run.font.name || "unknown",
+            run.font.weight,
+            run.font.style,
+            fontMaxSize.get(run.font.name)
+        );
+        total += run.chars;
+        if (style.bold) boldChars += run.chars;
+        if (style.italic) italicChars += run.chars;
+        charsBySize.set(style.size, (charsBySize.get(style.size) ?? 0) + run.chars);
+        charsByFont.set(style.font, (charsByFont.get(style.font) ?? 0) + run.chars);
+    }
+
+    // Largest size that at least MAJORITY_STYLE_SHARE of the glyphs reach.
+    const sizes = [...charsBySize.keys()].sort((a, b) => b - a);
+    let size = sizes[sizes.length - 1];
+    let reached = 0;
+    for (const s of sizes) {
+        reached += charsBySize.get(s)!;
+        if (reached / total >= MAJORITY_STYLE_SHARE) {
+            size = s;
+            break;
+        }
+    }
+    let font = lineStyle.font;
+    let fontChars = -1;
+    for (const [name, chars] of charsByFont) {
+        if (chars > fontChars) {
+            fontChars = chars;
+            font = name;
+        }
+    }
+
+    const majority: TextStyle = {
+        size,
+        font,
+        bold: boldChars / total >= MAJORITY_STYLE_SHARE,
+        italic: italicChars / total >= MAJORITY_STYLE_SHARE,
+    };
+    return stylesEqual(majority, lineStyle) ? lineStyle : majority;
+}
+
+/**
+ * Check if a line should be classified as a header.
+ *
+ * The heading rules run on the line's reported (first-glyph) style. When the
+ * line's majority styling differs (see `majorityLineStyle`), the rules must
+ * also hold for that styling: a cue carried by the opening word alone — a
+ * bold "Keywords:", an italic "Note:" — does not make the line a heading.
+ * The majority styling only ever vetoes; it never promotes a line the
+ * first-glyph style rejects.
  */
 function isHeaderStyle(
     line: PageLine,
@@ -1020,10 +1134,53 @@ function isHeaderStyle(
     bodyAllCaps: boolean = false,
     phraseTextOverride: string | null = null
 ): boolean {
-    if (!bodyStyles || bodyStyles.length === 0) return false;
-
     const lineStyle = extractLineStyle(line);
     if (!lineStyle) return false;
+    if (!matchesHeaderRules(
+        line, lineStyle, true, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
+    )) {
+        return false;
+    }
+    const majority = majorityLineStyle(line, lineStyle);
+    if (majority === lineStyle) return true;
+    return matchesHeaderRules(
+        line, majority, false, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
+    );
+}
+
+/**
+ * Whether the line's reported (first-glyph) style alone satisfies the heading
+ * rules, i.e. `isHeaderStyle` without the majority-style veto.
+ */
+function opensWithHeaderStyle(
+    line: PageLine,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    precededByGap: boolean | null,
+    bodyAllCaps: boolean
+): boolean {
+    const lineStyle = extractLineStyle(line);
+    return !!lineStyle && matchesHeaderRules(
+        line, lineStyle, true, bodyStyles, settings, precededByGap, bodyAllCaps, null
+    );
+}
+
+/**
+ * Heading rules for `line` judged as set in `lineStyle`.
+ * `checkSpanDominance` requires `lineStyle` to cover 90% of the line's
+ * spans; it only applies to the line's reported (first-span) style.
+ */
+function matchesHeaderRules(
+    line: PageLine,
+    lineStyle: TextStyle,
+    checkSpanDominance: boolean,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    precededByGap: boolean | null,
+    bodyAllCaps: boolean,
+    phraseTextOverride: string | null
+): boolean {
+    if (!bodyStyles || bodyStyles.length === 0) return false;
 
     // Bullet-led list items and math-symbol lines: MuPDF's JSON walk
     // aggregates the leading glyph's font over the whole line, so the line
@@ -1096,7 +1253,7 @@ function isHeaderStyle(
     }
 
     // Must be highly consistent (90%+ same style)
-    if (getStyleDominance(line, lineStyle) < 0.9) {
+    if (checkSpanDominance && getStyleDominance(line, lineStyle) < 0.9) {
         return false;
     }
 
@@ -1501,6 +1658,24 @@ function startNewItem(
             return true;
         }
         return false; // Same header style continues
+    }
+
+    // A heading followed by a line that only opens like one, e.g. a paragraph
+    // starting with a bold run-in phrase. The majority-style veto makes the
+    // line body text, but its opening style still differs from the
+    // heading's, which ends the heading.
+    //
+    // A same-style opening is deliberately not a boundary: with no gap,
+    // indent or early line end in between, that shape is a run-in heading
+    // wrapping onto its second line ("Generation of Constructs for
+    // Expression in / Mammalian Cells. We cloned…"), which belongs to one
+    // paragraph. Splitting it would leave a truncated pseudo-heading.
+    if (
+        prevIsLocalHeader &&
+        !stylesEqual(extractLineStyle(line), extractLineStyle(prevLine)) &&
+        opensWithHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps)
+    ) {
+        return true;
     }
 
     // (b) Indent signal

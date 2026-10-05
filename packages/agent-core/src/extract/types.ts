@@ -316,16 +316,35 @@ export interface RawFont {
 }
 
 /**
+ * A run of consecutive visible glyphs on a line that share one font and size.
+ */
+export interface RawStyleRun {
+    font: RawFont;
+    /** Visible (non-whitespace) glyphs in the run. */
+    chars: number;
+    /** Letter glyphs (`\p{L}`) in the run. */
+    letters: number;
+}
+
+/**
  * Raw line data from MuPDF structured text JSON.
- * Each line contains text with uniform styling.
  */
 export interface RawLine {
     /** Writing mode: 0 = horizontal, 1 = vertical */
     wmode: number;
     /** Bounding box */
     bbox: BoundingBox;
-    /** Font information */
+    /**
+     * Font information. MuPDF reports one font per line, taken from the
+     * line's first glyph, so a line that opens with a bold or italic word
+     * reads as bold or italic throughout. `styleRuns` has the full picture.
+     */
     font: RawFont;
+    /**
+     * Per-glyph style runs, in reading order. Populated only by the detailed
+     * (per-glyph) walk when the schema preset enables it; absent otherwise.
+     */
+    styleRuns?: RawStyleRun[];
     /** Baseline X coordinate */
     x: number;
     /** Baseline Y coordinate */
