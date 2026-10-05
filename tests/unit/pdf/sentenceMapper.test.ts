@@ -34,10 +34,13 @@ import {
  * Every char is a 10×12 box, advancing by 10 points on x.
  */
 function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
+    // One char per code point, as the MuPDF walker emits them: a non-BMP
+    // glyph is a single char whose `c` is a two-unit surrogate pair.
+    const glyphs = Array.from(text);
     const chars: RawChar[] = [];
     const lineY = yTop;
     const charH = 12;
-    for (let i = 0; i < text.length; i++) {
+    for (let i = 0; i < glyphs.length; i++) {
         const x = xStart + i * 10;
         const quad: QuadPoint = [
             x, lineY,                // ul
@@ -46,12 +49,12 @@ function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
             x + 10, lineY + charH,   // lr
         ];
         chars.push({
-            c: text[i],
+            c: glyphs[i],
             quad,
             bbox: bboxFromXYWH(x, lineY, 10, charH, "top-left"),
         });
     }
-    const bbox = bboxFromXYWH(xStart, lineY, text.length * 10, charH, "top-left");
+    const bbox = bboxFromXYWH(xStart, lineY, glyphs.length * 10, charH, "top-left");
     return {
         wmode: 0,
         bbox,
@@ -157,6 +160,18 @@ describe('flattenPageText', () => {
         expect(pt.source[7]).toEqual({ lineIndex: 1, charIndex: 0 });
     });
 
+    it('maps both code units of a non-BMP char to the same source char', () => {
+        // Math-italic alpha (U+1D6FC) is one glyph but a surrogate pair.
+        const line = makeLine('Let 𝛼 be.', 100);
+        expect(line.text.length).toBe(line.chars.length + 1);
+        const pt = flattenPageText(makePage([line]));
+        expect(pt.text).toBe('Let 𝛼 be.');
+        expect(pt.source.length).toBe(pt.text.length);
+        expect(pt.source[4]).toEqual({ lineIndex: 0, charIndex: 4 });
+        expect(pt.source[5]).toEqual({ lineIndex: 0, charIndex: 4 });
+        expect(pt.source[6]).toEqual({ lineIndex: 0, charIndex: 5 });
+    });
+
     it('throws loudly if a line violates the text/chars invariant', () => {
         const line = makeLine('Oops.', 100);
         // Deliberately break the invariant — drop a char but leave text
@@ -235,6 +250,23 @@ describe('sentenceToBoxes', () => {
 // ---------------------------------------------------------------------------
 // buildFeasibilityReport
 // ---------------------------------------------------------------------------
+
+describe('sentenceToBoxes with non-BMP chars', () => {
+    it('keeps a surrogate-pair char in one contiguous fragment', () => {
+        const page = makePage([makeLine('Let 𝛼 be small. Then 𝜆 grows.', 100)]);
+        const sentences = extractPageWideSentences(page);
+        expect(sentences.map((s) => s.text)).toEqual([
+            'Let 𝛼 be small.',
+            'Then 𝜆 grows.',
+        ]);
+        // One fragment per sentence: the repeated source entry for the
+        // low surrogate must extend the run, not start a new one.
+        expect(sentences[0].fragments).toHaveLength(1);
+        expect(sentences[1].fragments).toHaveLength(1);
+        // "Then" starts at glyph 16 (10pt advance per glyph from x=50).
+        expect(sentences[1].bboxes[0].l).toBe(50 + 16 * 10);
+    });
+});
 
 describe('buildFeasibilityReport', () => {
     it('summarises a well-formed page', () => {

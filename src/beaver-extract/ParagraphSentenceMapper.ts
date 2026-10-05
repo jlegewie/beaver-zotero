@@ -51,7 +51,9 @@ import { detectParagraphs } from "./ParagraphDetector";
 import { detectColumns } from "./ColumnDetector";
 import { detectLinesOnPage } from "./LineDetector";
 import {
+    charCodeUnits,
     hasSentenceFinalTerminator,
+    lineTextMatchesChars,
     simpleRegexSentenceSplit,
     sentenceToBoxes,
     type PageText,
@@ -84,7 +86,8 @@ export interface ParagraphText {
      * Parallel source map. `text.length === source.length`. Real entries
      * point back to `(lineIndex, charIndex)` into `lines`; `null` marks
      * boundary filler (the inter-line space) that should be skipped when
-     * resolving sentences.
+     * resolving sentences. A non-BMP char (surrogate pair) repeats its
+     * entry for each of its two code units.
      */
     source: Array<{ lineIndex: number; charIndex: number } | null>;
     /**
@@ -351,8 +354,10 @@ export function decideLineBreakHyphen(
  * - Every real char contributes to `text` and gets a `source` entry.
  * - A single `" "` filler (with a `null` source entry) separates adjacent
  *   lines so the splitter sees word boundaries.
- * - The invariant `line.text.length === line.chars.length` is checked
- *   loudly; a violation throws.
+ * - The invariant that `line.text` has as many UTF-16 code units as its
+ *   chars contribute is checked loudly; a violation throws. A non-BMP char
+ *   (e.g. the math-italic 𝛼 common in Word / Unicode-math equations) is one
+ *   char but two code units, and gets one source entry per unit.
  *
  * Superscript footnote markers following a sentence-ending punctuation
  * (e.g. the "11" in "factor.11 The") are replaced with a single
@@ -409,10 +414,10 @@ export function buildParagraphText(
 
     for (let li = 0; li < lines.length; li++) {
         const line = lines[li];
-        if (line.text.length !== line.chars.length) {
+        if (!lineTextMatchesChars(line)) {
             throw new Error(
                 `[ParagraphSentenceMapper] text/chars length mismatch on line ${li}: ` +
-                `text.length=${line.text.length}, chars.length=${line.chars.length}`,
+                `text.length=${line.text.length}, chars code units=${charCodeUnits(line)}`,
             );
         }
         const cut = dehyphenate[li];
@@ -463,7 +468,9 @@ export function buildParagraphText(
                 lastEmittedNonWhitespaceRealChar = ch.c;
             }
             textParts.push(ch.c);
-            source.push({ lineIndex: li, charIndex: ci });
+            for (let u = 0; u < ch.c.length; u++) {
+                source.push({ lineIndex: li, charIndex: ci });
+            }
         }
         // Inter-line filler. Suppressed across a de-hyphenated break so the two
         // halves of the split word are concatenated directly.
@@ -478,8 +485,8 @@ export function buildParagraphText(
 /**
  * Safe wrapper around `buildParagraphText` that catches invariant
  * violations and returns them as `{ error }` instead of throwing.
- * Used by the pipeline for graceful degradation — a single ligature /
- * astral-plane edge case on one paragraph should not nuke the whole page.
+ * Used by the pipeline for graceful degradation — a single malformed
+ * line on one paragraph should not nuke the whole page.
  */
 export function tryBuildParagraphText(
     lines: RawLineDetailed[],
@@ -806,8 +813,7 @@ export function extractPageSentences(
         }
 
         // Degradation path 2: text/chars invariant failed on this paragraph.
-        // Caught here so one bad line (ligature, astral-plane char) doesn't
-        // crash the whole page.
+        // Caught here so one malformed line doesn't crash the whole page.
         const built = tryBuildParagraphText(
             detailedLines,
             options.compoundVocabulary,
@@ -1130,7 +1136,7 @@ export function buildPageSentenceFeasibilityReport(
         for (const block of detailedPage.blocks) {
             if (block.type !== "text" || !block.lines) continue;
             for (const line of block.lines) {
-                if (line.text.length !== line.chars.length) {
+                if (!lineTextMatchesChars(line)) {
                     invariantHolds = false;
                     break;
                 }

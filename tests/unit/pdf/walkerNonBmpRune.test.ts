@@ -9,11 +9,8 @@
  * Regression target: codepoints above 0xFFFF (emoji, U+1D400 mathematical
  * bold, extended CJK) must be decoded with `String.fromCodePoint`, not
  * `String.fromCharCode` — the latter silently truncates to a single UTF-16
- * unit and produces wrong text. The downstream
- * `ParagraphSentenceMapper.buildParagraphText` invariant
- * (`line.text.length === line.chars.length`) still trips on surrogate
- * pairs; the win here is "wrong character, no degradation" -> "correct
- * character, honest degradation", not full sentence-level granularity.
+ * unit and produces wrong text. Such a char's `c` is a two-unit surrogate
+ * pair; the sentence mappers count `line.text` in code units accordingly.
  */
 
 import { describe, it, expect } from "vitest";
