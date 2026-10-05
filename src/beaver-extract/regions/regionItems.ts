@@ -529,11 +529,12 @@ function readsAsTable(table: TableRows, leak: number, running = 0): boolean {
     if (leak >= TABLE_MAX_LEAK || table.listed) return false;
     // A table of running text must read row by row, not in fragments of its cells' sentences.
     // Rules between its rows separate them: each is whole, whatever case its cells start in.
-    if (!table.ruled && running >= TEXT_TABLE_RUNNING && fragmentRows(table.rows) > TEXT_TABLE_FRAGMENTS * table.rows.length) return false;
+    const rows = table.judged;
+    if (!table.ruled && running >= TEXT_TABLE_RUNNING && fragmentRows(rows) > TEXT_TABLE_FRAGMENTS * rows.length) return false;
 
-    if (!table.columns) return table.rows.every((row) => row.length === 1) && table.rows.length >= LIST_MIN_ROWS && leak < LIST_MAX_LEAK;
-    const aligned = table.rows.filter((row) => row.length >= 2 && row.every((c) => c.column !== undefined)).length;
-    return aligned >= TABLE_MIN_ALIGNED_ROWS * table.rows.length;
+    if (!table.columns) return rows.every((row) => row.length === 1) && rows.length >= LIST_MIN_ROWS && leak < LIST_MAX_LEAK;
+    const aligned = rows.filter((row) => row.length >= 2 && row.every((c) => c.column !== undefined)).length;
+    return aligned >= TABLE_MIN_ALIGNED_ROWS * rows.length;
 }
 
 /** A table with at least this share of its text on running lines is a table of running text... */
@@ -575,7 +576,7 @@ function fragmentRows(rows: readonly RegionCell[][]): number {
  * frames the prose there.
  */
 function tableLeak(k: number, routing: LineRouting, destination: readonly number[], table: TableRows): number {
-    const rows = table.rows;
+    const rows = table.judged;
     const mine = routing.lines.flatMap((line, i) => (destination[i] === k ? [line] : []));
     if (mine.length === 0) return 0;
     const rotCounts = new Map<ReadingRotation, number>();
@@ -865,6 +866,19 @@ const FULL_LINE_WORDS = 4;
 const FLOWING_WRAPS = 2;
 const FLOWING_LINE_WORDS = 2;
 const SENTENCE_END_RE = /[.!?;:]["'”’)\]]*$/u;
+/**
+ * A line ending on a word or sign that leaves its phrase open ("of", "and", "×", a comma, a
+ * spaced dash): the cell's text runs on to the next line, whatever case that starts in.
+ * Lower case only: "OR" (an odds ratio) or "IN" (a state) end a label.
+ */
+const OPEN_END_RE = /(?:\s(?:and|or|of|in|the|with|for|to|by|vs\.|versus|per|at|on|from|among|into|between|than|via|without|within)|[×+&/,]|\s[–—-])$/u;
+/** A value: a number with its sign, marks or a footnote letter, and no words. */
+const VALUE_RE = /^[^\p{L}]*\p{N}[^\p{L}]*\p{L}?$/u;
+/**
+ * A statistic set under a value: a bracketed number or interval (a standard error, a t value,
+ * a confidence interval, a percentage under its count), maybe with marks or a footnote letter.
+ */
+const SECONDARY_RE = /^[([][^\p{L}()[\]]*\p{N}[^\p{L}()[\]]*[)\]][^\p{L}\p{N}]*\p{L}?$/u;
 /** A word space, in type sizes. */
 const SPACE = 0.25;
 /** Share of a column's longest lines that may run past its right edge. */
@@ -881,6 +895,21 @@ function lineUnit(a: FramedCell, b: FramedCell): number {
     return size >= 0.5 * height && size <= 2 * height ? size : height;
 }
 
+/** `next` follows `above` at the spacing of a cell's lines (`WRAP_PITCH`, or the table's leading). */
+function stacked(above: FramedCell, next: FramedCell, leading: number): boolean {
+    const unit = lineUnit(above, next);
+    const pitch = next.f[1] - above.f[1];
+    return unit > 0 && pitch > 0 && pitch <= Math.max(WRAP_PITCH, WRAP_LEADING * Math.min(leading / unit, MAX_LEADING)) * unit;
+}
+
+/**
+ * `next` is a statistic of the value `above` it (a standard error, a confidence interval):
+ * a bracketed number set directly under a value, at a cell's line spacing.
+ */
+function secondary(above: FramedCell, next: FramedCell, leading: number): boolean {
+    return SECONDARY_RE.test(next.cell.text.trim()) && VALUE_RE.test(above.cell.text.trim()) && stacked(above, next, leading);
+}
+
 /**
  * How a cell line relates to the line above it in its column, from sure
  * continuation to sure break (`continuation`).
@@ -891,7 +920,8 @@ type Continuation = "continues" | "likely" | "maybe" | "starts" | "begins" | "br
  * How `next` relates to cell line `above`, the line before it in its column.
  * It "breaks" from it unless it sits tight under it, starts at its left edge
  * (or indented, or centred under it), and both hold words. Then it
- * "continues" a word broken at the line end, a bracket it left open, or a full
+ * "continues" a word broken at the line end, a bracket it left open, a phrase
+ * left open (`OPEN_END_RE`: "Prop. Black ×", "District of"), or a full
  * line of running words
  * (the next word would not have fitted before `right`, the column's right
  * edge) when it starts in lower case; after a full line that ended a
@@ -899,13 +929,22 @@ type Continuation = "continues" | "likely" | "maybe" | "starts" | "begins" | "br
  * a short line looks the same whether it wrapped or is one item of a list.
  * Any other start (a capital, a digit, a caseless script) "starts" a new
  * sentence or cell after a line that ended one, and otherwise "begins" a new
- * item: a list's entries end without a full stop.
+ * item: a list's entries end without a full stop. With `anyPitch`, lines
+ * further apart than a cell's line spacing are judged too (lines of one ruled
+ * band, set apart to centre them); without `openEnds`, an open phrase is no
+ * evidence. A line `minWords` long is a full line of running words.
  */
-function continuation(above: FramedCell, next: FramedCell, right: number, leading: number, minWords = FULL_LINE_WORDS): Continuation {
+function continuation(
+    above: FramedCell,
+    next: FramedCell,
+    right: number,
+    leading: number,
+    { minWords = FULL_LINE_WORDS, anyPitch = false, openEnds = true }: { minWords?: number; anyPitch?: boolean; openEnds?: boolean } = {},
+): Continuation {
     const a = above.f;
     const b = next.f;
     const unit = lineUnit(above, next);
-    if (unit <= 0 || b[1] <= a[1] || b[1] - a[1] > Math.max(WRAP_PITCH, WRAP_LEADING * Math.min(leading / unit, MAX_LEADING)) * unit) return "breaks";
+    if (unit <= 0 || b[1] <= a[1] || (!anyPitch && !stacked(above, next, leading))) return "breaks";
     const indent = b[0] - a[0];
     const centred = Math.abs((b[0] + b[2]) / 2 - (a[0] + a[2]) / 2) <= WRAP_ALIGN * unit;
     if (!centred && (indent < -WRAP_ALIGN * unit || indent > WRAP_INDENT * unit)) return "breaks";
@@ -915,6 +954,7 @@ function continuation(above: FramedCell, next: FramedCell, right: number, leadin
     if (/\p{L}-$/u.test(upper) && /^\p{L}/u.test(lower)) return "continues";
     // A bracket left open runs on to the line that closes it.
     if (opensBracket(upper) && closesBracket(lower)) return "continues";
+    if (openEnds && OPEN_END_RE.test(upper)) return "continues";
     const word = /^\S+/.exec(lower)?.[0] ?? lower;
     const wordWidth = next.cell.lead ?? ((b[2] - b[0]) * word.length) / Math.max(1, lower.length);
     const full = upper.split(/\s+/).length >= minWords && a[2] + SPACE * unit + wordWidth > right - WRAP_SLACK * unit;
@@ -962,20 +1002,164 @@ function joinsRowAbove(
 /** A table's rows, with the visual lines they come from and how many of those hold each column. */
 interface TableRows {
     rows: RegionCell[][];
+    /**
+     * The rows as read without the column header, statistics and open phrases joined (the
+     * plain reading of `tableRows`): whether a region reads as a table is judged on these
+     * (`readsAsTable`, `tableLeak`), so those joins change how a table reads, not whether.
+     */
+    judged: RegionCell[][];
     columns?: number;
     lines: number;
     columnLines: Map<number, number>;
     /** The columns hold one list read down them, not rows read across (`listedDown`). */
     listed: boolean;
-    /** Rules across the table separate each of its rows (`joinRuledBands`). */
+    /** Rules across the table separate each of its rows, in the plain reading (`joinRuledBands`). */
     ruled: boolean;
+}
+
+/** A table's row labels stand in the first column holding cells on at least this share of its lines. */
+const LABEL_COLUMN_LINES = 0.3;
+/** A table's column header has at most this many lines... */
+const HEADER_MAX_LINES = 6;
+/** ...and at most this share of the table's lines. */
+const HEADER_MAX_SHARE = 0.5;
+/** Header lines start right of most row labels (this share of them; a long one may reach further)... */
+const HEADER_LABEL_QUANTILE = 0.9;
+/** ...give or take this many points. */
+const HEADER_LABEL_SLACK = 2;
+/** A header line and the row under it overlapping by this share of the shorter one's height stand side by side. */
+const HEADER_INTERLEAVE = 0.2;
+
+/** The table's row-label column: the first column holding cells on `LABEL_COLUMN_LINES` of its lines. */
+function labelColumn(of: readonly (number | undefined)[][]): number | undefined {
+    const lines = new Map<number, number>();
+    for (const cols of of) for (const j of new Set(cols)) if (j !== undefined) lines.set(j, (lines.get(j) ?? 0) + 1);
+    return [...lines.keys()].sort((a, b) => a - b).find((j) => lines.get(j)! >= LABEL_COLUMN_LINES * of.length);
+}
+
+/**
+ * The lines of a table's column header, as blocks of lines that read as one row: the lines
+ * above its first row label, and the line of that label when it heads the label column (no
+ * values, and the header's rule under it or `readWithAbove` it), when there are two or more and at most
+ * `HEADER_MAX_LINES` and `HEADER_MAX_SHARE` of the table. Each line above the labels stands
+ * right of them, over the values (a title or caption set across the labels is no header line),
+ * and a rule across the table, label column included, between two of them starts a new block
+ * (a rule under a header spanning some columns does not). A block of one line is an ordinary row.
+ */
+function headerBlocks(
+    framed: FramedCell[][],
+    of: readonly (number | undefined)[][],
+    label: number | undefined,
+    separators: readonly Rect[],
+    readWithAbove: (i: number) => boolean,
+): number[][] {
+    if (label === undefined) return [];
+    const first = of.findIndex((cols) => cols.includes(label));
+    if (first < 1) return [];
+    const ends = framed.flatMap((row, i) => row.filter((_, k) => of[i][k] === label).map((c) => c.f[2])).sort((a, b) => a - b);
+    const labelsEnd = ends[Math.floor(HEADER_LABEL_QUANTILE * (ends.length - 1))];
+    if (framed.slice(0, first).some((row) => row.some((c) => c.f[0] < labelsEnd - HEADER_LABEL_SLACK))) return [];
+    const cells = framed.flat();
+    const x0 = Math.min(...cells.map((c) => c.f[0]));
+    const x1 = Math.max(...cells.map((c) => c.f[2]));
+    const centre = (row: FramedCell[]) => (Math.min(...row.map((c) => c.f[1])) + Math.max(...row.map((c) => c.f[3]))) / 2;
+    // A rule across the table, label column included, between line `i` and the next; a rule
+    // drawn as one segment per column counts whole.
+    const across = (i: number) => {
+        if (i + 1 >= framed.length) return false;
+        const between = separators.filter((r) => (r[1] + r[3]) / 2 > centre(framed[i]) && (r[1] + r[3]) / 2 < centre(framed[i + 1]));
+        return between.some((r) => {
+            const level = between.filter((o) => Math.abs((o[1] + o[3]) / 2 - (r[1] + r[3]) / 2) <= 1);
+            let covered = 0;
+            let end = x0;
+            for (const [a, , b] of [...level].sort((p, q) => p[0] - q[0])) {
+                covered += Math.max(0, Math.min(b, x1) - Math.max(a, end));
+                end = Math.max(end, Math.min(b, x1));
+            }
+            return Math.min(...level.map((o) => o[0])) < labelsEnd && covered >= RULED_ROWS_SPAN * (x1 - x0);
+        });
+    };
+    // The line of the first label ends the header when it holds no values and the rule under the
+    // header runs under it, or the plain reading reads it with the line above: the label
+    // column's own heading ("Characteristic | (n = 2074)").
+    const heading =
+        framed[first].every((c) => !VALUE_RE.test(c.cell.text.trim())) && ((!across(first - 1) && across(first)) || readWithAbove(first));
+    const count = heading ? first + 1 : first;
+    if (count < 2 || count > HEADER_MAX_LINES || count > HEADER_MAX_SHARE * framed.length) return [];
+    const blocks: number[][] = [[0]];
+    for (let i = 1; i < count; i++) {
+        if (across(i - 1)) blocks.push([i]);
+        else blocks[blocks.length - 1].push(i);
+    }
+    return blocks.filter((block) => block.length >= 2);
+}
+
+/**
+ * One row of a header block's lines: a cell per column, its lines top to bottom ("Model" over
+ * "(1)" reads "Model (1)"). A header spanning several columns is a cell of its own, with the
+ * lines its text wraps onto, ahead of the columns' cells: a line that overlaps no single column,
+ * or one ruled off from the lines below by a rule under it across two columns or more.
+ */
+function headerRow(
+    framed: FramedCell[][],
+    of: readonly (number | undefined)[][],
+    block: readonly number[],
+    separators: readonly Rect[],
+): { lines: FramedCell[]; column?: number }[] {
+    const spans = new Map<number, [number, number]>();
+    framed.forEach((row, i) =>
+        row.forEach(({ f }, k) => {
+            const j = of[i][k];
+            if (j === undefined || block.includes(i)) return;
+            const span = spans.get(j);
+            spans.set(j, span ? [Math.min(span[0], f[0]), Math.max(span[1], f[2])] : [f[0], f[2]]);
+        }),
+    );
+    const byColumn = new Map<number, FramedCell[]>();
+    const spanning: FramedCell[][] = [];
+    const centre = (row: FramedCell[]) => (Math.min(...row.map((c) => c.f[1])) + Math.max(...row.map((c) => c.f[3]))) / 2;
+    // A rule under the cell, above the block's next line, across two columns or more.
+    const spansColumns = (cell: FramedCell, n: number) =>
+        n + 1 < block.length &&
+        separators.some((r) => {
+            const y = (r[1] + r[3]) / 2;
+            if (y <= centre(framed[block[n]]) || y >= centre(framed[block[n + 1]]) || Math.min(r[2], cell.f[2]) <= Math.max(r[0], cell.f[0])) return false;
+            return [...spans.values()].filter(([l, h]) => Math.min(r[2], h) - Math.max(r[0], l) >= 0.5 * (h - l)).length >= 2;
+        });
+    for (const [n, i] of block.entries()) {
+        framed[i].forEach((cell, k) => {
+            const hits = [...spans].filter(([, [l, r]]) => Math.min(r, cell.f[2]) > Math.max(l, cell.f[0]));
+            const j = spansColumns(cell, n) ? undefined : (of[i][k] ?? (hits.length === 1 ? hits[0][0] : undefined));
+            if (j !== undefined) {
+                byColumn.set(j, [...(byColumn.get(j) ?? []), cell]);
+                return;
+            }
+            // A spanning header's next line wraps its text: it starts in lower case, or the
+            // line above leaves a phrase or word open ("Model 1: Current" / "travel time").
+            const over = spanning.find((lines) => {
+                const last = lines[lines.length - 1];
+                const upper = last.cell.text.trimEnd();
+                const wraps = /^[\p{Ll}(]/u.test(cell.cell.text.trimStart()) || OPEN_END_RE.test(upper) || /\p{L}-$/u.test(upper);
+                return wraps && Math.min(last.f[2], cell.f[2]) > Math.max(last.f[0], cell.f[0]);
+            });
+            if (over) over.push(cell);
+            else spanning.push([cell]);
+        });
+    }
+    return [
+        ...spanning.map((lines) => ({ lines })),
+        ...[...byColumn].sort((a, b) => a[0] - b[0]).map(([column, lines]) => ({ lines, column })),
+    ];
 }
 
 /**
  * Table rows of whole cells. Visual lines are grouped into rows by height
  * (`groupRows`), and a cell's text may wrap over several of them: a visual
  * row whose cells continue the cells above them (`continuation`,
- * `joinsRowAbove`), with no rule drawn between them, joins the row above.
+ * `joinsRowAbove`), with no rule drawn between them, joins the row above. So
+ * does a line of statistics under its values (standard errors, intervals),
+ * and the lines of the column header are one row (`headerBlocks`). Bands of a
+ * table that rules its rows can join further (`joinRuledBands`).
  * Each cell's lines become one text, words broken at a line end joined as in
  * prose (`decideLineBreakHyphen`). Each row's cells carry their column when
  * the table has at least two and the row aligns to them.
@@ -1018,7 +1202,7 @@ function tableRows(
         framed[i].forEach((cell, k) => {
             const j = of[i][k];
             const ka = j === undefined ? -1 : of[i - 1].indexOf(j);
-            if (ka >= 0 && continuation(framed[i - 1][ka], cell, right.get(j!)!, leading) === "continues") {
+            if (ka >= 0 && continuation(framed[i - 1][ka], cell, right.get(j!)!, leading, { openEnds: false }) === "continues") {
                 wraps.set(j!, (wraps.get(j!) ?? 0) + 1);
             }
         });
@@ -1038,37 +1222,95 @@ function tableRows(
                 Math.min(r[2], a.f[2], b.f[2]) > Math.max(r[0], a.f[0], b.f[0]),
         );
 
-    // Logical rows: per cell, its lines top to bottom and its column.
-    const logical: { lines: FramedCell[]; column?: number }[][] = [];
-    framed.forEach((row, i) => {
-        const prev = i > 0 ? logical[logical.length - 1] : undefined;
-        const above = i > 0 ? framed[i - 1] : undefined;
-        if (prev && above && of[i].every((j) => j !== undefined) && of[i - 1].every((j) => j !== undefined)) {
-            const targets = row.map((cell, k) => prev.find((c) => c.column === of[i][k]));
-            const lasts = targets.map((t) => t?.lines[t.lines.length - 1]);
-            const kinds = row.map((cell, k): Continuation => {
-                const last = lasts[k];
-                if (!last || !above.includes(last) || ruledBetween(last, cell)) return "breaks";
-                return continuation(last, cell, right.get(of[i][k]!)!, leading, minWords(of[i][k]!));
-            });
-            const ended = lasts.map((l) => !!l && SENTENCE_END_RE.test(l.cell.text.trimEnd()));
-            // A row cannot start while a cell beside it runs on mid-sentence: a new list
-            // item there is the next item of its own cell (lists set side by side in one row).
-            const items =
-                kinds.includes("continues") &&
-                row.every((cell, k) => kinds[k] === "continues" || (!!lasts[k] && !ruledBetween(lasts[k]!, cell) && nextItem(lasts[k]!, cell, leading)));
-            if (items || joinsRowAbove(kinds, of[i], ended, above.length, columns >= 2)) {
-                row.forEach((cell, k) => targets[k]!.lines.push(cell));
+    // Logical rows: per cell, its lines top to bottom and its column. The full reading also
+    // takes the column header as one row (`headerBlocks`), statistics with the values above
+    // them, and lines going on from a phrase left open. Ruled bands are judged on the plain
+    // reading (`joinRuledBands`): the rows the full one joins would hide steps that show a band
+    // runs on.
+    const label = columns >= 2 ? labelColumn(of) : undefined;
+    const header = new Map<number, number[]>();
+    const assemble = (full: boolean) => {
+        const logical: { lines: FramedCell[]; column?: number }[][] = [];
+        framed.forEach((row, i) => {
+            const block = full ? header.get(i) : undefined;
+            if (block) {
+                if (i === block[0]) logical.push(headerRow(framed, of, block, separators));
                 return;
             }
-        }
-        logical.push(row.map((cell, k) => ({ lines: [cell], column: of[i][k] })));
-    });
+            const prev = i > 0 ? logical[logical.length - 1] : undefined;
+            const above = i > 0 ? framed[i - 1] : undefined;
+            if (prev && above && of[i].every((j) => j !== undefined) && of[i - 1].every((j) => j !== undefined)) {
+                const targets = row.map((cell, k) => prev.find((c) => c.column === of[i][k]));
+                const lasts = targets.map((t) => t?.lines[t.lines.length - 1]);
+                const kinds = row.map((cell, k): Continuation => {
+                    const last = lasts[k];
+                    if (!last || !above.includes(last) || ruledBetween(last, cell)) return "breaks";
+                    return continuation(last, cell, right.get(of[i][k]!)!, leading, { minWords: minWords(of[i][k]!), openEnds: full });
+                });
+                // Statistics set under the values above them (standard errors, intervals) belong to
+                // their row, beside a label running on to this line ("Prop. Black ×" / "Boundary value").
+                const statistic = (k: number) => {
+                    const last = lasts[k];
+                    return full && !!last && above.includes(last) && !ruledBetween(last, row[k]) && secondary(last, row[k], leading);
+                };
+                if (row.some((_, k) => statistic(k)) && row.every((_, k) => statistic(k) || kinds[k] === "continues")) {
+                    row.forEach((cell, k) => targets[k]!.lines.push(cell));
+                    return;
+                }
+                const ended = lasts.map((l) => !!l && SENTENCE_END_RE.test(l.cell.text.trimEnd()));
+                // A row cannot start while a cell beside it runs on mid-sentence: a new list
+                // item there is the next item of its own cell (lists set side by side in one row).
+                const items =
+                    kinds.includes("continues") &&
+                    row.every((cell, k) => kinds[k] === "continues" || (!!lasts[k] && !ruledBetween(lasts[k]!, cell) && nextItem(lasts[k]!, cell, leading)));
+                if (items || joinsRowAbove(kinds, of[i], ended, above.length, columns >= 2)) {
+                    row.forEach((cell, k) => targets[k]!.lines.push(cell));
+                    return;
+                }
+            }
+            logical.push(row.map((cell, k) => ({ lines: [cell], column: of[i][k] })));
+        });
+        return logical;
+    };
+    const plain = assemble(false);
+    const continues = (openEnds: boolean) => (above: FramedCell, next: FramedCell, j: number) =>
+        continuation(above, next, right.get(j)!, leading, { minWords: minWords(j), openEnds });
+    // The plain reading, for judging the region (`TableRows.judged`).
+    const { rows: judged, ruled } =
+        columns >= 2 ? joinRuledBands(plain, plain, framed, separators, continues(false), () => "breaks", label) : { rows: plain, ruled: false };
+    const judgedRow = new Map<FramedCell, number>();
+    judged.forEach((row, n) => row.forEach((c) => c.lines.forEach((l) => judgedRow.set(l, n))));
+    // The plain reading reads line `i` in one row with the line above it.
+    const readWithAbove = (i: number) => i > 0 && framed[i].some((a) => framed[i - 1].some((b) => judgedRow.get(a) === judgedRow.get(b)));
+    for (const block of headerBlocks(framed, of, label, separators, readWithAbove)) {
+        // A last line running on into the row under it (a table cut mid-row above its labels),
+        // or set beside that row's label (a label centred on the lines of its record), is no
+        // header.
+        const last = framed[block[block.length - 1]];
+        const under = framed[block[block.length - 1] + 1] ?? [];
+        const runsInto = last.some((a) =>
+            under.some((b) => b.f[0] < a.f[2] && b.f[2] > a.f[0] && continuation(a, b, Infinity, leading) === "continues"),
+        );
+        const beside = under.some((b) => last.some((a) => Math.min(a.f[3], b.f[3]) - Math.max(a.f[1], b.f[1]) > HEADER_INTERLEAVE * Math.min(a.f[3] - a.f[1], b.f[3] - b.f[1])));
+        if (!runsInto && !beside) for (const i of block) header.set(i, block);
+    }
+    const logical = assemble(true);
 
-    const { rows, ruled } =
+    const { rows } =
         columns >= 2
-            ? joinRuledBands(logical, framed, separators, (above, next, j) => continuation(above, next, right.get(j)!, leading, minWords(j)))
-            : { rows: logical, ruled: false };
+            ? joinRuledBands(
+                  logical,
+                  plain,
+                  framed,
+                  separators,
+                  continues(false),
+                  (above, next, j) =>
+                      SECONDARY_RE.test(next.cell.text.trim()) && VALUE_RE.test(above.cell.text.trim())
+                          ? "secondary"
+                          : continuation(above, next, right.get(j)!, leading, { minWords: minWords(j), anyPitch: true }),
+                  label,
+              )
+            : { rows: logical };
 
     const multi = columns >= 2;
     const columnLines = new Map<number, number>();
@@ -1080,20 +1322,26 @@ function tableRows(
         listed: !ruled && listedDown(framed),
         ruled,
         ...(multi ? { columns } : {}),
-        rows: rows.map((row) => {
-            const aligned = multi && row.every((c) => c.column !== undefined);
-            return row.map(({ lines, column }) => ({
-                text: joinCellLines(lines.map((l) => l.cell.text), vocabulary),
-                bbox: toBBox(
-                    lines.reduce<Rect>(
-                        (u, l) => [Math.min(u[0], l.cell.rect[0]), Math.min(u[1], l.cell.rect[1]), Math.max(u[2], l.cell.rect[2]), Math.max(u[3], l.cell.rect[3])],
-                        [Infinity, Infinity, -Infinity, -Infinity],
-                    ),
-                ),
-                ...(aligned ? { column } : {}),
-            }));
-        }),
+        rows: regionCells(rows, multi, vocabulary),
+        judged: regionCells(judged, multi, vocabulary),
     };
+}
+
+/** Logical rows as cells: each cell's lines as one text; aligned rows keep their columns. */
+function regionCells(rows: { lines: FramedCell[]; column?: number }[][], multi: boolean, vocabulary?: ReadonlySet<string>): RegionCell[][] {
+    return rows.map((row) => {
+        const aligned = multi && row.every((c) => c.column !== undefined);
+        return row.map(({ lines, column }) => ({
+            text: joinCellLines(lines.map((l) => l.cell.text), vocabulary),
+            bbox: toBBox(
+                lines.reduce<Rect>(
+                    (u, l) => [Math.min(u[0], l.cell.rect[0]), Math.min(u[1], l.cell.rect[1]), Math.max(u[2], l.cell.rect[2]), Math.max(u[3], l.cell.rect[3])],
+                    [Infinity, Infinity, -Infinity, -Infinity],
+                ),
+            ),
+            ...(aligned ? { column } : {}),
+        }));
+    });
 }
 
 /** A table rules its rows when at least this many rules across it separate its lines. */
@@ -1110,15 +1358,27 @@ const SECTION_BANDS = 2;
  * lines), joined per ruled band: the lines between two rules are one row when their
  * cells run on from line to line (most steps down a column continue a cell, or start
  * its next sentence), as the wrapped cells of a text table do. A band of separate
- * values (one-line rows of numbers or items under a section rule) stays as it is.
- * `continues` judges a step down a column. `ruled` tells whether rules separate each row
- * (every band reads as one row), not just the head and foot of the table.
+ * values (one-line rows of numbers or items under a section rule) stays as it is. So is a
+ * band whose later rows clearly go on with its first: no row label of their own (but the
+ * label's next line), and the first column they fill goes on too (statistics under their
+ * values, a cell's next line or sentence). A lower-case line alone is no such evidence: one-line
+ * records read the same.
+ * Bands are judged on the `plain` reading of the rows, and a band that joins reads as there;
+ * the others keep the rows of `logical`, the full reading (`tableRows`), unless their rows
+ * clearly go on (above).
+ * `continues` judges a step down a column; `step` a step down a column between a band's lines,
+ * however far apart, or tells a statistic under its value. `label` is the row-label column.
+ * `ruled` tells whether
+ * rules separate each row (every band reads as one row), not just the head and foot of the table.
  */
 function joinRuledBands(
     logical: { lines: FramedCell[]; column?: number }[][],
+    plain: { lines: FramedCell[]; column?: number }[][],
     framed: FramedCell[][],
     separators: readonly Rect[],
     continues: (above: FramedCell, next: FramedCell, column: number) => Continuation,
+    step: (above: FramedCell, next: FramedCell, column: number) => Continuation | "secondary",
+    label: number | undefined,
 ): { rows: { lines: FramedCell[]; column?: number }[][]; ruled: boolean } {
     const cells = framed.flat();
     if (!cells.length) return { rows: logical, ruled: false };
@@ -1153,7 +1413,7 @@ function joinRuledBands(
     if (bands.length < RULED_ROWS_MIN) return { rows: logical, ruled: false };
     // Cells left unaligned (a row of fewer cells) take the column their lines overlap most.
     const spans = new Map<number, [number, number]>();
-    for (const row of logical) {
+    for (const row of plain) {
         for (const c of row) {
             if (c.column === undefined) continue;
             const span = spans.get(c.column);
@@ -1170,7 +1430,7 @@ function joinRuledBands(
         return hits.length === 1 ? hits[0][0] : undefined;
     };
     // The column of each cell for judging and joining a band; rows left as they are keep theirs.
-    const placed = new Map(logical.map((row) => [row, row.map((c) => ({ ...c, column: columnOf(c) }))]));
+    const placed = new Map([...plain, ...logical].map((row) => [row, row.map((c) => ({ ...c, column: columnOf(c) }))]));
     const band = (row: { lines: FramedCell[] }[]) => {
         const cy = (row[0].lines[0].f[1] + row[0].lines[0].f[3]) / 2;
         return bands.filter((y) => y < cy).length;
@@ -1188,31 +1448,81 @@ function joinRuledBands(
             const lines = cells.flatMap((row) => row.filter((c) => c.column !== column).flatMap((c) => c.lines));
             return lines.some((l) => l.f[3] < y) && lines.some((l) => l.f[1] > y) && cells.flat().some((c) => c.column === column && c.lines.some((l) => l.f[1] > y));
         });
-    const groups: { lines: FramedCell[]; column?: number }[][][] = [];
+    // Rows of a band after its first that clearly go on with it: no row label but one running
+    // on from the label above, a first value that goes on from the line above it, and no rule
+    // of their own.
+    const continuing = (cells: { lines: FramedCell[]; column?: number }[][]) => {
+        if (cells.some((row) => row.some((c) => c.column === undefined))) return false;
+        // A rule inside the band across two of its columns or more rules off a row of its own.
+        const lines = cells.flat().flatMap((c) => c.lines);
+        const top = Math.min(...lines.map((l) => l.f[1]));
+        const bottom = Math.max(...lines.map((l) => l.f[3]));
+        const divided = separators.some((r) => {
+            const y = (r[1] + r[3]) / 2;
+            return y > top && y < bottom && [...spans.values()].filter(([a, b]) => Math.min(r[2], b) - Math.max(r[0], a) >= LOCAL_RULE_SPAN * (b - a)).length >= 2;
+        });
+        if (divided) return false;
+        const last = new Map<number, FramedCell>();
+        for (const [n, row] of cells.entries()) {
+            if (n > 0) {
+                const sorted = [...row].sort((a, b) => a.column! - b.column!);
+                const name = sorted.find((c) => c.column === label);
+                const above = (c: { lines: FramedCell[]; column?: number }) => last.get(c.column!);
+                if (name && (!above(name) || step(above(name)!, name.lines[0], name.column!) !== "continues")) return false;
+                const lead = sorted.find((c) => c.column !== label);
+                if (lead && (!above(lead) || !["continues", "likely", "secondary"].includes(step(above(lead)!, lead.lines[0], lead.column!)))) return false;
+            }
+            for (const c of row) for (const line of c.lines) last.set(c.column!, line);
+        }
+        return true;
+    };
+    // Each band's rows, in both readings. Bands whose rows of the plain reading a row of the
+    // full reading joins (a header over a rule under its spanning cells) are one, read in full.
+    const plainBand = new Map<FramedCell, number>();
+    for (const row of plain) for (const c of row) for (const l of c.lines) plainBand.set(l, band(row));
+    const merged = new Map<number, number>();
     for (const row of logical) {
-        const last = groups[groups.length - 1];
-        if (last && band(row) === band(last[0])) last.push(row);
-        else groups.push([row]);
+        const ks = row.flatMap((c) => c.lines.map((l) => plainBand.get(l) ?? band(row)));
+        for (let k = Math.min(...ks); k <= Math.max(...ks); k++) merged.set(k, Math.min(...ks, merged.get(k) ?? Infinity));
     }
-    const verdicts = groups.map((group) => (group.length > 1 ? runsOn(group.map((row) => placed.get(row)!), continues, spans.size) : false));
+    const banded = (rows: { lines: FramedCell[]; column?: number }[][]) => {
+        const out = new Map<number, { lines: FramedCell[]; column?: number }[][]>();
+        for (const row of rows) {
+            const k = merged.get(band(row)) ?? band(row);
+            out.set(k, [...(out.get(k) ?? []), row]);
+        }
+        return out;
+    };
+    const plainBands = banded(plain);
+    const fullBands = banded(logical);
+    const keys = [...plainBands.keys()].sort((a, b) => a - b);
+    const crossed = (k: number) => [...merged].some(([j, m]) => m === k && j !== k);
+    const groups = keys.map((k) => plainBands.get(k)!);
+    const verdicts = groups.map((group, k) => (group.length > 1 && !crossed(keys[k]) ? runsOn(group.map((row) => placed.get(row)!), continues, spans.size) : false));
     // A band of complete rows that neither run on nor break is one row wrapped evenly in every
     // column, unless the table's bands repeat that shape: sections of one-line records.
     const records = verdicts.filter((v) => v === "unclear").length >= SECTION_BANDS;
     const out: { lines: FramedCell[]; column?: number }[][] = [];
     // Whether the rules separate each row: every band reads as one row.
     let separated = true;
+    // A band's lines joined into one row, each column's lines top to bottom, whichever rows
+    // they were first grouped in.
+    const joined = (cells: { lines: FramedCell[]; column?: number }[][]) => {
+        const byColumn = new Map<number, FramedCell[]>();
+        for (const row of cells) for (const c of row) byColumn.set(c.column!, [...(byColumn.get(c.column!) ?? []), ...c.lines]);
+        return [...byColumn].sort((a, b) => a[0] - b[0]).map(([column, lines]) => ({ lines: lines.sort((p, q) => p.f[1] - q.f[1]), column }));
+    };
     groups.forEach((group, k) => {
         const cells = group.map((row) => placed.get(row)!);
+        const full = fullBands.get(keys[k])!;
         const verdict = verdicts[k];
-        const joins = verdict === true || (verdict === "unclear" && !records) || sectioned(cells);
-        if (group.length > 1 && !joins) separated = false;
-        if (group.length > 1 && joins) {
-            const byColumn = new Map<number, FramedCell[]>();
-            for (const row of cells) for (const c of row) byColumn.set(c.column!, [...(byColumn.get(c.column!) ?? []), ...c.lines]);
-            // A column's lines read top to bottom, whichever rows they were first grouped in.
-            out.push([...byColumn].sort((a, b) => a[0] - b[0]).map(([column, lines]) => ({ lines: lines.sort((p, q) => p.f[1] - q.f[1]), column })));
+        if (group.length > 1 && (verdict === true || (verdict === "unclear" && !records) || sectioned(cells))) {
+            out.push(joined(cells));
+        } else if (full.length > 1 && continuing(full.map((row) => placed.get(row)!))) {
+            out.push(joined(full.map((row) => placed.get(row)!)));
         } else {
-            out.push(...group);
+            if (full.length > 1) separated = false;
+            out.push(...full);
         }
     });
     return { rows: out, ruled: separated };
@@ -1354,9 +1664,7 @@ const ITEM_MARKER_RE = /^\s*(?:[•●○◦▪■►▸‣∙·]\s*|(?:[–—-
 
 /** `next` is the next item of a list after `above`, set at the list's line spacing. */
 function nextItem(above: FramedCell, next: FramedCell, leading: number): boolean {
-    const unit = lineUnit(above, next);
-    const pitch = next.f[1] - above.f[1];
-    return ITEM_MARKER_RE.test(next.cell.text) && pitch > 0 && pitch <= Math.max(WRAP_PITCH, WRAP_LEADING * Math.min(leading / unit, MAX_LEADING)) * unit;
+    return ITEM_MARKER_RE.test(next.cell.text) && stacked(above, next, leading);
 }
 
 /** The text leaves a round or square bracket open. */

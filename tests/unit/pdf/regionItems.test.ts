@@ -415,10 +415,10 @@ describe("regionItemsForPage tables", () => {
     it("never joins rows of values, separate labels or rows across a rule", () => {
         const values = page([
             line(100, [[72, 150, "Age"], [250, 320, "0.23"], [400, 470, "0.19"]]),
-            line(112, [[250, 320, "(0.05)"], [400, 470, "(0.04)"]]),
+            line(112, [[72, 150, "Female"], [250, 320, "0.05"], [400, 470, "0.04"]]),
             line(124, [[72, 150, "Income"], [250, 320, "1.10"], [400, 470, "0.98"]]),
         ]);
-        expect(rowTexts(table(values).items[0])).toEqual(["Age | 0.23 | 0.19", "(0.05) | (0.04)", "Income | 1.10 | 0.98"]);
+        expect(rowTexts(table(values).items[0])).toEqual(["Age | 0.23 | 0.19", "Female | 0.05 | 0.04", "Income | 1.10 | 0.98"]);
 
         // Names filling a fitted column look like wrapped lines but start new cells.
         const names = page([
@@ -526,6 +526,214 @@ describe("regionItemsForPage tables", () => {
         expect(allText(out.page)).toEqual(lines.map((l) => l.text));
     });
 
+    it("keeps statistics under their values in the values' row", () => {
+        // Standard errors under coefficients, and a label running on beside them.
+        const p = page([
+            line(100, [[72, 180, "Boundary value"], [250, 320, "0.822**"], [400, 470, "1.078***"]]),
+            line(112, [[250, 320, "(0.358)"], [400, 470, "(0.255)"]]),
+            line(130, [[72, 200, "Prop. Black/Hispanic ×"], [250, 320, "0.195"], [400, 470, "−1.344***"]]),
+            line(142, [[72, 180, "Boundary value"], [250, 320, "(0.491)"], [400, 470, "[0.21, 0.45]"]]),
+            line(160, [[72, 180, "Constant"], [250, 320, "4.773***"], [400, 470, "2.686***"]]),
+        ]);
+        expect(rowTexts(table(p).items[0])).toEqual([
+            "Boundary value | 0.822** (0.358) | 1.078*** (0.255)",
+            "Prop. Black/Hispanic × Boundary value | 0.195 (0.491) | −1.344*** [0.21, 0.45]",
+            "Constant | 4.773*** | 2.686***",
+        ]);
+        // Not under words, across a rule, a line's spacing apart, or beside a new label.
+        const apart = page([
+            line(100, [[72, 180, "Model"], [250, 320, "Linear"], [400, 470, "Logit"]]),
+            line(112, [[250, 320, "(1)"], [400, 470, "(2)"]]),
+            line(124, [[72, 180, "Age"], [250, 320, "0.23"], [400, 470, "0.19"]]),
+            line(136, [[250, 320, "(0.05)"], [400, 470, "(0.04)"]]),
+            line(160, [[72, 180, "Income"], [250, 320, "1.10"], [400, 470, "0.98"]]),
+            line(184, [[250, 320, "(0.30)"], [400, 470, "(0.20)"]]),
+            line(196, [[72, 180, "Female"], [250, 320, "2.10"], [400, 470, "1.98"]]),
+            line(208, [[72, 180, "Male"], [250, 320, "(0.10)"], [400, 470, "(0.20)"]]),
+        ]);
+        expect(rowTexts(table(apart, () => false, [[70, 135, 472, 135.5]]).items[0])).toEqual([
+            "Model | Linear | Logit",
+            "(1) | (2)",
+            "Age | 0.23 | 0.19",
+            "(0.05) | (0.04)",
+            "Income | 1.10 | 0.98",
+            "(0.30) | (0.20)",
+            "Female | 2.10 | 1.98",
+            "Male | (0.10) | (0.20)",
+        ]);
+    });
+
+    it("joins a line that goes on from a phrase left open, whatever case it starts in", () => {
+        const p = page([
+            line(100, [[72, 160, "District of"], [250, 420, "K, 1st, 2nd, 3rd, 4th,"]]),
+            line(112, [[72, 160, "Columbia"], [250, 420, "5th, 6th, 7th, 8th"]]),
+            line(130, [[72, 160, "Florida"], [250, 420, "K, 1st, 3rd, 6th"]]),
+        ]);
+        expect(rowTexts(table(p).items[0])).toEqual(["District of Columbia | K, 1st, 2nd, 3rd, 4th, 5th, 6th, 7th, 8th", "Florida | K, 1st, 3rd, 6th"]);
+        // Upper-case abbreviations end a label: an odds ratio, a state.
+        const ends = page([
+            line(100, [[72, 160, "Adjusted OR"], [250, 320, "1.20"]]),
+            line(112, [[72, 160, "Crude OR"], [250, 320, "1.31"]]),
+        ]);
+        expect(table(ends).items[0].rows).toHaveLength(2);
+    });
+
+    it("reads a column header set over several lines as one row", () => {
+        const p = page([
+            line(100, [[250, 320, "Model"], [400, 470, "Model"]]),
+            line(112, [[250, 320, "(1)"], [400, 470, "(2)"]]),
+            line(130, [[72, 180, "Age"], [250, 320, "0.23"], [400, 470, "0.19"]]),
+            line(142, [[72, 180, "Income"], [250, 320, "1.10"], [400, 470, "0.98"]]),
+            line(154, [[72, 180, "Female"], [250, 320, "2.10"], [400, 470, "1.98"]]),
+        ]);
+        const { items } = table(p);
+        expect(rowTexts(items[0])).toEqual(["Model (1) | Model (2)", "Age | 0.23 | 0.19", "Income | 1.10 | 0.98", "Female | 2.10 | 1.98"]);
+        // The header keeps its place over the values: an empty slot for the label column.
+        expect(items[0].rows[0].map((c) => c.column)).toEqual([1, 2]);
+
+        // A header spanning columns, ruled off from the columns' headers under it, is a cell of its own.
+        const spanned = page([
+            line(100, [[300, 380, "Mediator"]]),
+            line(112, [[200, 260, "Violent"], [300, 360, "Property"]]),
+            line(124, [[200, 260, "felonies"], [300, 360, "felonies"], [400, 470, "Shootings"]]),
+            line(142, [[72, 160, "Total effect"], [200, 260, "0.823"], [300, 360, "1.042"], [400, 470, "1.013"]]),
+            line(154, [[72, 160, "Direct effect"], [200, 260, "0.547"], [300, 360, "0.841"], [400, 470, "0.891"]]),
+            line(166, [[72, 160, "Indirect effect"], [200, 260, "0.276"], [300, 360, "0.201"], [400, 470, "0.122"]]),
+        ]);
+        expect(rowTexts(table(spanned, () => false, [[198, 111, 472, 111.5]]).items[0])[0]).toBe(
+            "Mediator | Violent felonies | Property felonies | Shootings",
+        );
+
+        // A spanning header's lines stack when its text wraps onto them, not otherwise.
+        const body = [142, 154, 166, 178].map((y, k) =>
+            line(y, [[72, 160, ["Age", "Work", "Cars", "Help"][k]], [200, 230, `1.4${k}`], [290, 320, `0.5${k}`], [370, 400, `3.6${k}`], [460, 490, `0.0${k}`]]),
+        );
+        const wrapped = page([
+            line(100, [[215, 295, "Model 1: Current"], [385, 465, "Model 2: Maximum"]]),
+            line(112, [[228, 293, "travel time"], [395, 462, "prepared time"]]),
+            line(124, [[200, 230, "OR"], [290, 320, "p"], [370, 400, "OR"], [460, 490, "p"]]),
+            ...body,
+        ]);
+        expect(rowTexts(table(wrapped).items[0])[0]).toBe("Model 1: Current travel time | Model 2: Maximum prepared time | OR | p | OR | p");
+        const siblings = page([
+            line(100, [[290, 400, "Faking good responses"]]),
+            line(112, [[215, 295, "PDS Polytomous"], [385, 475, "PDS Binary scoring"]]),
+            line(124, [[200, 230, "Cut"], [290, 320, "IM"], [370, 400, "Cut"], [460, 490, "IM"]]),
+            ...body,
+        ]);
+        expect(rowTexts(table(siblings).items[0])[0]).toBe("Faking good responses | PDS Polytomous | PDS Binary scoring | Cut | IM | Cut | IM");
+
+        // The label column's heading read with the header line above it (the rows' bands run on)
+        // stays in the header, also under a header spanning columns over a rule of its own.
+        const generator = page([
+            line(100, [[280, 400, "Radionuclide generator"]]),
+            line(116, [[250, 340, "active substances"]]),
+            line(128, [[72, 180, "specification parameter"], [250, 340, "(parent radionuclide)"], [380, 470, "finished product"]]),
+            line(150, [[72, 180, "radionuclidic ID"], [250, 340, "yes"], [380, 470, "yes"]]),
+            line(170, [[72, 180, "radionuclidic impurities"], [250, 340, "yes"], [380, 470, "yes"]]),
+            line(190, [[72, 180, "radiochemical ID"], [250, 340, "yes"], [380, 470, "no"]]),
+            line(210, [[72, 180, "radiochemical purity"], [250, 340, "no"], [380, 470, "yes"]]),
+        ]);
+        const generatorRules: Rect[] = [[220, 113, 472, 113.5], [190, 143, 472, 143.5], ...[166, 186, 206].map((y): Rect => [70, y, 472, y + 0.5])];
+        expect(rowTexts(table(generator, () => false, generatorRules).items[0])[0]).toBe(
+            "Radionuclide generator | specification parameter | active substances (parent radionuclide) | finished product",
+        );
+
+        // So in a table that rules its rows, where that rule spans most of the table.
+        const ruledRows = page([
+            line(100, [[300, 360, "Mediator"]]),
+            line(112, [[200, 260, "Violent"], [300, 360, "Property"]]),
+            line(124, [[200, 260, "felonies"], [300, 360, "felonies"], [400, 470, "Shootings"]]),
+            line(142, [[72, 160, "Total effect"], [200, 260, "0.823"], [300, 360, "1.042"], [400, 470, "1.013"]]),
+            line(160, [[72, 160, "Direct effect"], [200, 260, "0.547"], [300, 360, "0.841"], [400, 470, "0.891"]]),
+            line(178, [[72, 160, "Indirect effect"], [200, 260, "0.276"], [300, 360, "0.201"], [400, 470, "0.122"]]),
+        ]);
+        const rowRules: Rect[] = [[190, 111, 472, 111.5], ...[96, 138, 156, 174, 192].map((y): Rect => [70, y, 472, y + 0.5])];
+        expect(rowTexts(table(ruledRows, () => false, rowRules).items[0])).toEqual([
+            "Mediator | Violent felonies | Property felonies | Shootings",
+            "Total effect | 0.823 | 1.042 | 1.013",
+            "Direct effect | 0.547 | 0.841 | 0.891",
+            "Indirect effect | 0.276 | 0.201 | 0.122",
+        ]);
+
+        // The label column's heading, set on the header's last line above the rule under the
+        // header, belongs to the header; a label under that rule does not.
+        const headed = page([
+            line(100, [[250, 320, "Intensified"], [400, 470, "Not Intensified"]]),
+            line(112, [[250, 320, "Before"], [400, 470, "Before"]]),
+            line(124, [[72, 180, "Characteristic"], [250, 320, "(n = 2074)"], [400, 470, "(n = 12 841)"]]),
+            line(142, [[72, 180, "Age"], [250, 320, "76.8"], [400, 470, "76.6"]]),
+            line(154, [[72, 180, "Male sex"], [250, 320, "97.5"], [400, 470, "97.8"]]),
+            line(166, [[72, 180, "White"], [250, 320, "69.9"], [400, 470, "78.2"]]),
+        ]);
+        const headerRule: Rect[] = [[70, 137, 472, 137.5]];
+        expect(rowTexts(table(headed, () => false, headerRule).items[0]).slice(0, 2)).toEqual([
+            "Characteristic | Intensified Before (n = 2074) | Not Intensified Before (n = 12 841)",
+            "Age | 76.8 | 76.6",
+        ]);
+        // So with the rule drawn as one segment per column.
+        const segments: Rect[] = [[70, 137, 182, 137.5], [182, 137, 340, 137.5], [340, 137, 472, 137.5]];
+        expect(rowTexts(table(headed, () => false, segments).items[0])[0]).toBe(
+            "Characteristic | Intensified Before (n = 2074) | Not Intensified Before (n = 12 841)",
+        );
+        // Without the rule, or with values on the label's line, the label line is a row of its own.
+        expect(rowTexts(table(headed).items[0])[1]).toBe("Characteristic | (n = 2074) | (n = 12 841)");
+        const valued = page([
+            line(100, [[250, 320, "Intensified"], [400, 470, "Not Intensified"]]),
+            line(112, [[250, 320, "Before"], [400, 470, "Before"]]),
+            line(124, [[72, 180, "Total"], [250, 320, "2074"], [400, 470, "12 841"]]),
+            line(142, [[72, 180, "Age"], [250, 320, "76.8"], [400, 470, "76.6"]]),
+            line(154, [[72, 180, "Male sex"], [250, 320, "97.5"], [400, 470, "97.8"]]),
+            line(166, [[72, 180, "White"], [250, 320, "69.9"], [400, 470, "78.2"]]),
+        ]);
+        expect(rowTexts(table(valued, () => false, headerRule).items[0])[1]).toBe("Total | 2074 | 12 841");
+
+        // A title set across the label column, and a rule across the table between header
+        // lines, keep their lines apart.
+        const titled = page([
+            line(100, [[72, 470, "Panel A. Outcomes by model"]]),
+            line(112, [[250, 320, "(1)"], [400, 470, "(2)"]]),
+            line(130, [[72, 180, "Age"], [250, 320, "0.23"], [400, 470, "0.19"]]),
+            line(142, [[72, 180, "Income"], [250, 320, "1.10"], [400, 470, "0.98"]]),
+            line(154, [[72, 180, "Female"], [250, 320, "2.10"], [400, 470, "1.98"]]),
+        ]);
+        expect(table(titled).items[0].rows).toHaveLength(5);
+        // Unlabelled lines that run on into the first labelled row (a table cut mid-row) are no header.
+        const continued = page([
+            line(100, [[250, 470, "and practice in the classroom"]]),
+            line(112, [[250, 470, "Incorporation and institution-"]]),
+            line(124, [[72, 180, "Lozano, 2006"], [250, 470, "alisation of sustainable development"]]),
+            line(136, [[72, 180, "Lozano, 2010"], [250, 470, "Diffusion of sustainable development"]]),
+            line(148, [[72, 180, "Lukman, 2009"], [250, 470, "Sustainability in higher education"]]),
+            line(160, [[72, 180, "Mlinar, 2010"], [250, 470, "Paradigm of sustainability"]]),
+        ]);
+        expect(rowTexts(table(continued).items[0])[0]).toBe("and practice in the classroom");
+        // A record's first line set above its centred label is no header line.
+        const record = (y: number, n: string, a: string, b: string) => [
+            line(y, [[150, 280, a]]),
+            line(y + 8, [[72, 90, n], [350, 390, "4.10"], [460, 490, "A"]]),
+            line(y + 16, [[150, 280, b]]),
+        ];
+        const centred = page([
+            line(100, [[150, 200, "Criterion"], [350, 390, "Rating"], [460, 490, "Group"]]),
+            ...record(114, "1", "Readiness of the logistics", "for digital transformation."),
+            ...record(146, "2", "Provision of human capital", "for digital transformation."),
+            line(178, [[72, 90, "3"], [150, 220, "Level of crime"], [350, 390, "3.87"], [460, 490, "B"]]),
+            line(194, [[72, 90, "4"], [150, 230, "Quality of roads"], [350, 390, "3.80"], [460, 490, "B"]]),
+        ]);
+        expect(rowTexts(table(centred).items[0])[0]).toBe("Criterion | Rating | Group");
+        // Unlabelled lines making most of the box (rows of a table cut above its labels) are no header.
+        const cut = page([
+            line(100, [[250, 320, "12"], [400, 470, "13"]]),
+            line(112, [[250, 320, "14"], [400, 470, "15"]]),
+            line(124, [[250, 320, "16"], [400, 470, "17"]]),
+            line(136, [[72, 180, "Age"], [250, 320, "0.23"], [400, 470, "0.19"]]),
+            line(148, [[72, 180, "Income"], [250, 320, "1.10"], [400, 470, "0.98"]]),
+        ]);
+        expect(table(cut).items[0].rows).toHaveLength(5);
+        expect(table(p, () => false, [[70, 111, 472, 111.5]]).items[0].rows).toHaveLength(5);
+    });
+
     it("reads each ruled band of a table that rules its rows as one row", () => {
         // A text table: every row ruled off; the definition wraps, the year is centred on it.
         const p = page([
@@ -555,6 +763,83 @@ describe("regionItemsForPage tables", () => {
         ]);
         const sections: Rect[] = [116, 172, 222, 240].map((y): Rect => [70, y, 462, y + 0.5]);
         expect(table(values, () => false, sections).items[0].rows).toHaveLength(9);
+    });
+
+    it("reads a ruled band whose later lines clearly go on with its first as one row", () => {
+        // Lines set apart within their band, further than a cell's lines: a label running on,
+        // statistics under values.
+        const p = page([
+            line(100, [[72, 200, "Prop. Black/Hispanic ×"], [250, 320, "0.195"], [400, 470, "−1.344***"]]),
+            line(128, [[72, 200, "Boundary value"], [250, 320, "(0.491)"], [400, 470, "(0.353)"]]),
+            line(162, [[72, 200, "Constant"], [250, 320, "4.773***"], [400, 470, "2.686***"]]),
+            line(190, [[250, 320, "(0.078)"], [400, 470, "(0.393)"]]),
+            line(224, [[72, 200, "Observations"], [250, 320, "4,604"], [400, 470, "4,604"]]),
+            line(258, [[72, 200, "Log likelihood"], [250, 320, "−32,177"], [400, 470, "−31,178"]]),
+        ]);
+        const rules: Rect[] = [96, 156, 218, 252, 286].map((y): Rect => [70, y, 472, y + 0.5]);
+        expect(rowTexts(table(p, () => false, rules).items[0])).toEqual([
+            "Prop. Black/Hispanic × Boundary value | 0.195 (0.491) | −1.344*** (0.353)",
+            "Constant | 4.773*** (0.078) | 2.686*** (0.393)",
+            "Observations | 4,604 | 4,604",
+            "Log likelihood | −32,177 | −31,178",
+        ]);
+        // A rule across some of the band's columns rules off a row of its own.
+        const divided = page([
+            line(100, [[72, 200, "Prop. Black/Hispanic ×"], [250, 320, "0.195"], [400, 470, "−1.344***"]]),
+            line(128, [[72, 200, "Boundary value"], [250, 320, "(0.491)"], [400, 470, "(0.353)"]]),
+            line(162, [[72, 200, "Constant"], [250, 320, "4.773***"], [400, 470, "2.686***"]]),
+            line(190, [[72, 200, "Observations"], [250, 320, "4,604"], [400, 470, "4,604"]]),
+            line(224, [[72, 200, "Log likelihood"], [250, 320, "−32,177"], [400, 470, "−31,178"]]),
+        ]);
+        const dividedRules: Rect[] = [...[96, 156, 182, 218, 252].map((y): Rect => [70, y, 472, y + 0.5]), [245, 114, 472, 114.5]];
+        expect(table(divided, () => false, dividedRules).items[0].rows).toHaveLength(5);
+        // Sub-rows under one label, each with values of its own, stay rows of their own; so do
+        // values under values, lower-case one-line records and a new label.
+        const grouped = page([
+            line(100, [[72, 160, "Bilateral hubs"], [200, 260, "EF"], [300, 340, "3.86"], [400, 440, ".06"]]),
+            line(112, [[200, 260, "ER"], [300, 340, "4.47"], [400, 440, ".04"]]),
+            line(132, [[72, 160, "Right hubs"], [200, 260, "EF"], [300, 340, "5.58"], [400, 440, ".02"]]),
+            line(144, [[300, 340, "8.27"], [400, 440, ".01"]]),
+            line(164, [[72, 160, "Left hubs"], [200, 260, "apple"], [300, 340, "0.69"], [400, 440, ".41"]]),
+            line(176, [[200, 260, "banana"], [300, 340, "0.32"], [400, 440, ".57"]]),
+            line(196, [[72, 160, "Hubs of"], [200, 260, "ToM"], [300, 340, "1.69"], [400, 440, ".29"]]),
+            line(208, [[72, 160, "network"], [200, 260, "SCS"], [300, 340, "0.58"], [400, 440, ".45"]]),
+            line(228, [[72, 160, "All hubs"], [200, 260, "MMSE"], [300, 340, "1.14"], [400, 440, ".29"]]),
+        ]);
+        const bands: Rect[] = [96, 126, 158, 190, 222, 242].map((y): Rect => [70, y, 442, y + 0.5]);
+        expect(table(grouped, () => false, bands).items[0].rows).toHaveLength(9);
+        // A new label over statistics starts a row, in lower case too (a variable's name).
+        const named = page([
+            line(100, [[72, 160, "cdereg"], [250, 320, "−0.203**"], [400, 470, "−0.203**"]]),
+            line(128, [[72, 160, "sdereg"], [250, 320, "(−1.97)"], [400, 470, "(−1.97)"]]),
+            line(162, [[72, 160, "Female"], [250, 320, "−0.041"], [400, 470, "−0.042"]]),
+            line(190, [[72, 160, "Male"], [250, 320, "(−0.41)"], [400, 470, "(−0.42)"]]),
+            line(224, [[72, 160, "Constant"], [250, 320, "0.372"], [400, 470, "0.371"]]),
+            line(258, [[72, 160, "Observations"], [250, 320, "4,604"], [400, 470, "4,604"]]),
+        ]);
+        const namedRules: Rect[] = [96, 156, 218, 252, 286].map((y): Rect => [70, y, 472, y + 0.5]);
+        expect(table(named, () => false, namedRules).items[0].rows).toHaveLength(6);
+    });
+
+    it("judges a ruled band as read without open phrases, which still join their own lines", () => {
+        // The first two lines join on their open phrases; the third starts with a capital. Read
+        // without the open phrases, nothing in the band runs on, so the band is no one row.
+        const p = page([
+            line(100, [[72, 160, "Alpha"], [200, 330, "first part of"], [380, 470, "x of"]]),
+            line(112, [[200, 330, "Second part"], [380, 470, "Y values"]]),
+            line(124, [[200, 330, "Third part"]]),
+            line(144, [[72, 160, "Beta"], [200, 330, "1.0"], [380, 470, "2.0"]]),
+            line(164, [[72, 160, "Gamma"], [200, 330, "3.0"], [380, 470, "4.0"]]),
+            line(184, [[72, 160, "Delta"], [200, 330, "5.0"], [380, 470, "6.0"]]),
+        ]);
+        const rules: Rect[] = [96, 140, 160, 180, 198].map((y): Rect => [70, y, 472, y + 0.5]);
+        expect(rowTexts(table(p, () => false, rules).items[0])).toEqual([
+            "Alpha | first part of Second part | x of Y values",
+            "Third part",
+            "Beta | 1.0 | 2.0",
+            "Gamma | 3.0 | 4.0",
+            "Delta | 5.0 | 6.0",
+        ]);
     });
 
     it("keeps one-line records under section rules apart when nothing runs on", () => {
@@ -822,6 +1107,22 @@ describe("regionItemsForPage tables", () => {
             "• Access is facilitated to tools and resources such as clinical and quality improvement tools. • PCN collaborates with local and provincial partners. | " +
                 "• Greater access to clinical supports is facilitated for all • PCN co-designs and tests new primary-care focused digital tools.",
         ]);
+    });
+
+    it("judges whether a region reads as a table on its rows without the header or open phrases joined", () => {
+        // A header line in lower case is a fragment of the rows read line by line, as before the
+        // header was read as one row: the table of running text stays in the prose.
+        const p = page([
+            line(100, [[250, 330, "Violent"], [400, 470, "Property"]]),
+            line(112, [[250, 330, "crimes"], [400, 470, "crimes"]]),
+            line(130, [[72, 180, "Age"], [250, 330, "Older people are less often the victims"], [400, 470, "A weaker effect than the one for violence"]]),
+            line(142, [[72, 180, "Income"], [250, 330, "Richer people are less often the victims"], [400, 470, "Richer households are more often the target"]]),
+            line(154, [[72, 180, "Gender"], [250, 330, "Men are more often the victims of assault"], [400, 470, "No difference between men and women here"]]),
+            line(166, [[72, 180, "Region"], [250, 330, "Cities have more of the reported offences"], [400, 470, "Cities again have more reported offences"]]),
+        ]);
+        const d = detection(p, [["table", [60, 60, 560, 700]]]);
+        d.routing!.flags = d.routing!.lines.map((l) => (l.words >= 6 ? LINE_RUNNING : 0));
+        expect(regionItemsForPage(p, d).items).toEqual([]);
     });
 
     it("leaves a table of running text to the prose when its rows are fragments of sentences", () => {
