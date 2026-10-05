@@ -312,6 +312,14 @@ export interface ExternalFileCitationExportRequest {
     localPathsByExtKey: Record<string, string>;
 }
 
+/** File formats a response can be exported to. */
+export type FileExportFormat = 'docx';
+
+/** Outcome of exporting to a file. `warnings` are user-facing sentences. */
+export type FileExportResult =
+    | { status: 'saved'; path: string; fileName: string; warnings: string[] }
+    | { status: 'canceled' };
+
 /**
  * Render content into the host's native document format. For Zotero this is a
  * note (CSL-formatted HTML); other clients format
@@ -328,6 +336,15 @@ export interface DocumentExportHost {
      * external-file storage omit it.
      */
     renderExternalFileCitation?(request: ExternalFileCitationExportRequest): CitationExportRender | null;
+    /**
+     * Export a response — the runs of its resume chain, in order — to a file
+     * the user chooses, with citations formatted by the host. Interaction-time:
+     * may read the client's global state. Optional; clients without file export
+     * omit it and the action is not offered.
+     */
+    exportResponseToFile?(request: { runs: AgentRun[]; format: FileExportFormat }): Promise<FileExportResult>;
+    /** Show an exported file in the system file manager. */
+    revealExportedFile?(path: string): void;
 }
 
 export type NoteSaveFormat =

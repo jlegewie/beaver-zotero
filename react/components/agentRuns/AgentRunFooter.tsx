@@ -172,6 +172,14 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
             );
         }
 
+        if (host.documentExport?.exportResponseToFile) {
+            items.splice(noteWriter ? 3 : 1, 0, {
+                label: 'Export to Word…',
+                onClick: () => exportToWord(),
+                disabled: isResolvingCitations
+            });
+        }
+
         if (host.config?.isDevelopment() ?? false) {
             items.push({
                 label: 'Copy chat ID',
@@ -251,6 +259,32 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     /** Save as child note attached to selected/current item. */
     const saveToItem = () => saveRunNote(true);
+
+    /**
+     * Export the response (its whole resume chain) to a Word document. The host
+     * asks where to save and formats citations in the citation style setting.
+     */
+    const exportToWord = async () => {
+        const documentExport = getHost().documentExport;
+        if (!documentExport?.exportResponseToFile) return;
+        try {
+            const result = await documentExport.exportResponseToFile({ runs: chainRuns, format: 'docx' });
+            if (result.status !== 'saved') return;
+            const reveal = documentExport.revealExportedFile;
+            addPopupMessage({
+                type: 'info',
+                title: 'Exported to Word',
+                text: [result.fileName, ...result.warnings].join(' — '),
+                ...(reveal ? { button: { text: 'Show File', onClick: () => reveal(result.path) } } : {}),
+            });
+        } catch (error: any) {
+            addPopupMessage({
+                type: 'error',
+                title: 'Could not export',
+                text: error?.message || 'Failed to export the response.',
+            });
+        }
+    };
 
     const copyRunUrl = async () => {
         const threadId = store.get(currentThreadIdAtom);

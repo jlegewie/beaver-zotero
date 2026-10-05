@@ -85,6 +85,7 @@ declare namespace Zotero {
         let notePreviews: import("../src/services/notePreviews").NotePreviews;
         let libraryOperations: import("../src/services/libraryOperations").LibraryOperations;
         let itemImport: import("../src/services/itemImport/service").ItemImportService;
+        let exporter: import("../src/services/export/instanceExport").InstanceExport;
         let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;
         let mutations: import("../src/services/libraryMutations").LibraryMutations;
         let syncPause: ReturnType<typeof import("../src/services/syncPause").createSyncPauseService>;
@@ -657,6 +658,12 @@ declare namespace Zotero {
              * @returns Formatted bibliography or empty string on error
              */
             formatBibliography(items: Zotero.Item | Zotero.Item[], format?: "text" | "html"): string;
+
+            /** Format a whole document's citations as one sequence (export). */
+            formatCitationSequence: import("../src/services/CitationService").CitationService["formatCitationSequence"];
+
+            /** The installed style and locale an export formats with. */
+            resolveStyle: import("../src/services/CitationService").CitationService["resolveStyle"];
 
             /**
              * Force recreation of the CSL engine on next use

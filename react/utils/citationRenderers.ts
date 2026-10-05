@@ -13,7 +13,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { UNRESOLVED_LIBRARY_ID, libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
-import { hydrateItemLinkLibraryRefs } from './itemLinks';
+import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
 import {
     baseCitationKey,
     getPageLocator,
