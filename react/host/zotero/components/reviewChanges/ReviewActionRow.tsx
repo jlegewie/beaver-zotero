@@ -330,8 +330,10 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         </Tooltip>
                     )}
 
-                    {(config.showUndo || (isBusy && activeButton === 'undo')) && (
-                        <Tooltip content={row.actionType === 'create_note' ? 'Delete' : 'Undo'} showArrow singleLine>
+                    {/* A note row is an artifact to open or export; deleting it stays
+                        on the note's own card in the response, away from those. */}
+                    {!canExportNote && (config.showUndo || (isBusy && activeButton === 'undo')) && (
+                        <Tooltip content="Undo" showArrow singleLine>
                             <IconButton
                                 icon={UndoIcon}
                                 variant="ghost-secondary"
@@ -339,7 +341,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                                 onClick={handleUndo}
                                 loading={isBusy && activeButton === 'undo'}
                                 disabled={isDisabled}
-                                ariaLabel={row.actionType === 'create_note' ? 'Delete' : 'Undo'}
+                                ariaLabel="Undo"
                             />
                         </Tooltip>
                     )}
