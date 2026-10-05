@@ -305,6 +305,8 @@ class PageWalkCache {
         private readonly fontApi: FontApi | undefined,
         /** Text repair of the op's schema preset; applies to every walk. */
         private readonly textRepair: boolean,
+        /** Whether detailed walks record per-glyph style runs. */
+        private readonly styleRuns: boolean,
         /** Region detection of the op's schema preset (structured mode). */
         readonly regions = false,
     ) {}
@@ -330,9 +332,12 @@ class PageWalkCache {
                 includeImages,
                 this.fontApi,
                 this.textRepair,
-                this.regions
-                    ? { onGraphics: (g) => this.graphics.set(pageIndex, g), fontSpans: true }
-                    : {},
+                {
+                    styleRuns: this.styleRuns,
+                    ...(this.regions
+                        ? { onGraphics: (g: GraphicsSummary) => this.graphics.set(pageIndex, g), fontSpans: true }
+                        : {}),
+                },
             );
             this.detailed.set(pageIndex, page);
         }
@@ -1556,6 +1561,7 @@ export async function opExtract(
             doc,
             fontApi,
             preset.textRepair,
+            preset.styleRuns,
             isStructured && (await regionsSupported(preset)),
         );
 
@@ -1677,7 +1683,13 @@ export async function opStructuredExtractWithDebug(
         assertDocumentHasPages(pageCount);
         const pageLabels = collectPageLabels(doc);
         const fontApi = (await ensureApi()).Font;
-        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair, await regionsSupported(preset));
+        const pageCache = new PageWalkCache(
+            doc,
+            fontApi,
+            preset.textRepair,
+            preset.styleRuns,
+            await regionsSupported(preset),
+        );
 
         if (opts.checkTextLayer) {
             const ocrProvider = ocrGateProvider(pageCache, pageCount, true);
@@ -1892,7 +1904,13 @@ export async function opAnalyzeOCRNeeds(
         const pageCount = resolveTruePageCount(doc);
         assertDocumentHasPages(pageCount);
         const fontApi = (await ensureApi()).Font;
-        const pageCache = new PageWalkCache(doc, fontApi, CURRENT_PDF_EXTRACTION_PRESET.textRepair);
+        const pageCache = new PageWalkCache(
+            doc,
+            fontApi,
+            CURRENT_PDF_EXTRACTION_PRESET.textRepair,
+            // OCR analysis reads text only.
+            false,
+        );
         const analyzer = new DocumentAnalyzer(ocrGateProvider(pageCache, pageCount, true));
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };

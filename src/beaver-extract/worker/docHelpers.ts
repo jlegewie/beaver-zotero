@@ -720,7 +720,7 @@ function extractRawPageDetailedOnce(
     textRepair = CURRENT_PDF_EXTRACTION_PRESET.textRepair,
     extras: DetailedWalkExtras = {},
 ): RawPageDataDetailed {
-    const { onGraphics, fontSpans } = extras;
+    const { onGraphics, fontSpans, styleRuns = CURRENT_PDF_EXTRACTION_PRESET.styleRuns } = extras;
     const page = doc.loadPage(pageIndex);
     try {
         const pb = page.getBounds("CropBox");
@@ -782,8 +782,71 @@ function extractRawPageDetailedOnce(
             return entry;
         };
 
-        // Font pointer of the current line's last span (region walks only).
+        // Per-glyph style runs (`RawLine.styleRuns`). Needs `fontApi` for the
+        // font names. Whitespace glyphs neither count nor split a run.
+        const captureRuns = styleRuns && !!fontApi;
+        let glyphFontPtr = 0;
+        let glyphSize = 0;
+        let glyphExactSize = 0;
+        let runFontPtr = 0;
+        let runs: { fontPtr: number; size: number; exactSize: number; chars: number; letters: number }[] = [];
+        const noteGlyphStyle = (fontPtr: number, size: number) => {
+            glyphFontPtr = typeof fontPtr === "number" ? fontPtr : 0;
+            glyphExactSize = typeof size === "number" ? size : 0;
+            glyphSize = Math.trunc(glyphExactSize);
+        };
+        const countRunGlyph = (rune: string) => {
+            if (!/\S/u.test(rune)) return;
+            let run = runs[runs.length - 1];
+            if (!run || runFontPtr !== glyphFontPtr || run.size !== glyphSize) {
+                run = { fontPtr: glyphFontPtr, size: glyphSize, exactSize: glyphExactSize, chars: 0, letters: 0 };
+                runs.push(run);
+                runFontPtr = glyphFontPtr;
+            }
+            run.chars++;
+            if (/\p{L}/u.test(rune)) run.letters++;
+        };
+        const flushRuns = (line: RawLineDetailed) => {
+            if (!captureRuns) return;
+            line.styleRuns = runs.map((r) => {
+                const f = lookupFont(r.fontPtr);
+                return {
+                    font: { name: f.name, family: f.family, weight: f.weight, style: f.style, size: r.size },
+                    exactSize: r.exactSize,
+                    chars: r.chars,
+                    letters: r.letters,
+                };
+            });
+            runs = [];
+        };
+
+        // Per-line font runs (`RawLineDetailed.spans`, region walks only).
+        // `spanFontPtr` is the font pointer of the current line's last span.
         let spanFontPtr = 0;
+        const recordFontSpan = (fontPtr: number, size: number) => {
+            if (!currentLine) return;
+            const spans = (currentLine.spans ??= []);
+            const last = spans[spans.length - 1];
+            if (last && spanFontPtr === fontPtr && last.font.size === size) return;
+            const f = lookupFont(fontPtr);
+            spanFontPtr = fontPtr;
+            spans.push({
+                start: currentLine.chars.length,
+                font: { name: f.name, family: f.family, weight: f.weight, style: f.style, size },
+            });
+        };
+
+        // Style runs and font spans share the walker's single per-glyph font
+        // callback, which is left undefined when neither is wanted (it costs
+        // two WASM calls per glyph).
+        const onCharFont =
+            captureRuns || fontSpans
+                ? (fontPtr: number, size: number) => {
+                      if (captureRuns) noteGlyphStyle(fontPtr, size);
+                      if (fontSpans) recordFontSpan(fontPtr, size);
+                  }
+                : undefined;
+
         try {
             stext.walk({
                 beginTextBlock: (bbox) => {
@@ -800,6 +863,7 @@ function extractRawPageDetailedOnce(
                     }
                 },
                 beginLine: (bbox, wmode, dir) => {
+                    runs = [];
                     currentLine = {
                         wmode,
                         bbox: tupleToBBox(bbox),
@@ -822,26 +886,14 @@ function extractRawPageDetailedOnce(
                     } as RawLineDetailed;
                 },
                 endLine: () => {
+                    if (currentLine) flushRuns(currentLine);
                     if (currentLine && currentBlock) {
                         if (textRepair) maskDetailedLineTerminators(currentLine);
                         currentBlock.lines.push(currentLine);
                     }
                     currentLine = null;
                 },
-                onCharFont: fontSpans
-                    ? (fontPtr, size) => {
-                          if (!currentLine) return;
-                          const spans = (currentLine.spans ??= []);
-                          const last = spans[spans.length - 1];
-                          if (last && spanFontPtr === fontPtr && last.font.size === size) return;
-                          const f = lookupFont(fontPtr);
-                          spanFontPtr = fontPtr;
-                          spans.push({
-                              start: currentLine.chars.length,
-                              font: { name: f.name, family: f.family, weight: f.weight, style: f.style, size },
-                          });
-                      }
-                    : undefined,
+                onCharFont,
                 onLineFont: (fontPtr, size) => {
                     if (!currentLine) return;
                     const f = lookupFont(typeof fontPtr === "number" ? fontPtr : 0);
@@ -862,6 +914,7 @@ function extractRawPageDetailedOnce(
                 },
                 onChar: (rune, quad) => {
                     if (!currentLine) return;
+                    if (captureRuns) countRunGlyph(rune);
                     currentLine.text += rune;
                     currentLine.chars.push({
                         c: rune,
@@ -1381,15 +1434,20 @@ export function extractRawPageFromDoc(
     return recovered;
 }
 
-/** Optional extras collected by the detailed walk (region detection). */
+/** Optional extras recorded by the detailed walk. */
 export interface DetailedWalkExtras {
     /**
      * Receives the page's graphics summary, collected in the same pass as the
      * text (requires `MuPDFApi.supportsGraphicsSummary`).
      */
     onGraphics?: (graphics: GraphicsSummary) => void;
-    /** Record per-line font runs (`RawLineDetailed.spans`). */
+    /** Record per-line font runs (`RawLineDetailed.spans`, region detection). */
     fontSpans?: boolean;
+    /**
+     * Record per-glyph style runs (`RawLine.styleRuns`, heading detection).
+     * Defaults to the current schema preset's `styleRuns`.
+     */
+    styleRuns?: boolean;
 }
 
 /**
@@ -1409,6 +1467,7 @@ export function extractRawPageDetailedFromDoc(
     if (!isUnmappedTextLayer(page)) return page;
     const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair, {
         fontSpans: extras.fontSpans,
+        styleRuns: extras.styleRuns,
     });
     if (!recoveredTextIsAcceptable(recovered)) return page;
     postLog("info", `Recovered unmapped text layer on page ${pageIndex}`);
