@@ -15,22 +15,24 @@ interface TestLine {
     cell?: boolean;
     /** Gaps wider than a word space inside the line. */
     gaps?: [number, number][];
+    /** Type size (default 10). */
+    size?: number;
 }
 
-function regionLine(bbox: Rect, text: string, gaps?: [number, number][]): RegionLine {
+function regionLine(bbox: Rect, text: string, gaps?: [number, number][], size = 10): RegionLine {
     const ink = text.replace(/\s/g, "").length;
     return {
         bbox,
         text,
-        size: 10,
+        size,
         rot: 0,
         words: text.split(/\s+/).length,
         nchar: text.length,
         alphaWords: text.split(/\s+/).filter((w) => /^\p{L}{3,}/u.test(w)).length,
         mathChars: 0,
         inkChars: ink,
-        minSize: 10,
-        maxSize: 10,
+        minSize: size,
+        maxSize: size,
         eqNumber: false,
         source: 0,
         pieces: 1,
@@ -41,7 +43,7 @@ function regionLine(bbox: Rect, text: string, gaps?: [number, number][]): Region
 
 /** Routes after completion for one table at `box`: "T" for the table, "-" for prose. */
 function complete(test: TestLine[], box: Rect, rules: Rect[] = []): string {
-    const lines = test.map((l) => regionLine(l.bbox, l.text, l.gaps));
+    const lines = test.map((l) => regionLine(l.bbox, l.text, l.gaps, l.size));
     const routes = test.map((l) => (l.cell ? 0 : -1));
     completeTableRows(
         {
@@ -331,6 +333,60 @@ describe("completeTableRows", () => {
         expect(complete([...row(100, "Age"), ...row(112, "Income"), ...row(124, "Sex"), ...note, ...text], [70, 98, 512, 136], rules)).toBe(
             "TTTTTTTTT-----",
         );
+    });
+
+    describe("tables that rule off each row", () => {
+        /** A row at `y` whose label and values are all routed to the table, or all prose. */
+        const ruledRow = (y: number, label: string, cell: boolean): TestLine[] =>
+            row(y, label).map((l) => ({ ...l, cell }));
+        const note: TestLine = { bbox: [72, 176, 400, 186], text: "Values are counts of documents.", running: true };
+        const labels = ["Age", "Income", "Sex", "Region", "Tenure"];
+
+        it("routes rows the box missed past the rule under its last row, down to the bottom rule", () => {
+            // A rule under every row; the box ends at the third row's rule.
+            const rules: Rect[] = [96, 112, 126, 140, 154, 168].map((y): Rect => [70, y, 512, y + 0.5]);
+            const lines = [...labels.flatMap((l, k) => ruledRow(100 + 14 * k, l, k < 3)), note, ...text];
+            expect(complete(lines, [70, 98, 512, 139], rules)).toBe("T".repeat(15) + "----");
+        });
+
+        it("routes them when the rows that show the ruling lie above the box", () => {
+            // The box holds the third and fourth rows only: one rule between its rows, until the
+            // rows above join.
+            const rules: Rect[] = [96, 112, 126, 140, 154, 168].map((y): Rect => [70, y, 512, y + 0.5]);
+            const lines = [...labels.flatMap((l, k) => ruledRow(100 + 14 * k, l, k === 2 || k === 3)), note, ...text];
+            expect(complete(lines, [70, 126, 512, 153], rules)).toBe("T".repeat(15) + "----");
+        });
+
+        it("does not cross the bottom rule of a table ruled only under its header", () => {
+            // Booktabs: top, header and bottom rules; a block of rows under a further rule below.
+            const rules: Rect[] = [96, 112, 140, 168].map((y): Rect => [70, y, 512, y + 0.5]);
+            const lines = [...labels.flatMap((l, k) => ruledRow(100 + 14 * k, l, k < 3)), note, ...text];
+            expect(complete(lines, [70, 98, 512, 139], rules)).toBe("T".repeat(9) + "-".repeat(10));
+        });
+
+        it("does not take a section heading under the bottom rule into rows past it", () => {
+            // Ruled under every row, nothing between the last row and the bottom rule; a heading in
+            // two pieces (number and title) set larger below it, and the next table's rule.
+            const rules: Rect[] = [96, 112, 126, 140, 172].map((y): Rect => [70, y, 512, y + 0.5]);
+            const heading: TestLine[] = [
+                { bbox: [72, 148, 90, 160], text: "4.4", size: 12 },
+                { bbox: [110, 148, 230, 160], text: "Ablation Study", size: 12 },
+            ];
+            const lines = [...labels.slice(0, 3).flatMap((l, k) => ruledRow(100 + 14 * k, l, true)), ...heading, ...text];
+            expect(complete(lines, [70, 98, 512, 139], rules)).toBe("T".repeat(9) + "-----");
+            // The same pieces in the table's type size are a row.
+            const row10 = heading.map((l) => ({ ...l, size: 10 }));
+            expect(complete([...labels.slice(0, 3).flatMap((l, k) => ruledRow(100 + 14 * k, l, true)), ...row10, ...text], [70, 98, 512, 139], rules)).toBe("T".repeat(11) + "---");
+        });
+
+        it("keeps its bottom where it was when no rows follow the rule it crossed", () => {
+            // A thick bar under the last row; a line set inside the bar belongs to no row.
+            const rules: Rect[] = [96, 112, 126].map((y): Rect => [70, y, 512, y + 0.5]);
+            const bar: Rect = [70, 140, 512, 152];
+            const inBar: TestLine = { bbox: [72, 142, 300, 150], text: "nique, as well as of our incubation" };
+            const lines = [...labels.slice(0, 3).flatMap((l, k) => ruledRow(100 + 14 * k, l, true)), inBar, ...text];
+            expect(complete(lines, [70, 98, 512, 139], [...rules, bar])).toBe("T".repeat(9) + "----");
+        });
     });
 
     it("routes a header row above the box past the rule that separates it", () => {

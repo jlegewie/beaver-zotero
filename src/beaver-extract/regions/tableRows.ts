@@ -82,6 +82,10 @@ const GRID_MIN_CELLS = 2;
 const REPEATED_HEADER_ROWS = 2;
 /** A table merges into another when at least this share of its cells stands in the other's grid. */
 const MERGE_FIT = 0.8;
+/** A table with at least this many rules spanning it between its rows may draw a rule under its last row too. */
+const ROW_RULES = 2;
+/** Rows past the rule under a table's rows are set in its type size, within this many points. */
+const ROW_SIZE = 1;
 
 export interface TableRowInput {
     lines: readonly RegionLine[];
@@ -765,13 +769,27 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
                 found = true;
             }
         }
-        for (const dir of [1, -1] as const) {
+        // A table with rules between its rows (at least ROW_RULES, not just one under its header)
+        // may draw one under the last row found so far too, so that rule need not be the table's
+        // bottom border: rows its box missed can follow below it. This does not tell missed rows
+        // from text under a true bottom border; the checks on each line below the rule decide.
+        // The rows found above can show the rules only after the walk up, so the walk down then
+        // runs again.
+        const rowRuled = () =>
+            spanning.filter((r) => centerY(r) > top + RULE_JOIN && centerY(r) < bottom - RULE_JOIN).length >= ROW_RULES;
+        const cellSize = median(cells.map((i) => lines[i].size));
+        let heldBelow = false;
+        for (const [pass, dir] of ([1, -1, 1] as const).entries()) {
+            if (pass === 2 && !(heldBelow && rowRuled())) break;
             // A ruled block with no lines is crossed only upward: above it, a header separator,
             // sit the column headers, which must align with the table's columns. Below the
-            // table's bottom border come its notes, never more rows.
+            // table's bottom border come its notes, never more rows; only the rule directly
+            // under the rows of a table with rules between its rows is crossed downward.
             let pastEmpty = false;
             // The first block past the cells, before any rule, may continue their last row.
             let first = true;
+            // The table's bottom before it crossed the rule under its rows, and its joined lines then.
+            let crossed: { bottom: number; joined: number } | undefined;
             for (;;) {
                 const edge = dir > 0 ? bottom : top;
                 // The next rule past the edge (each step moves the edge past a rule).
@@ -793,6 +811,21 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
                 }
                 if (!dense || (dir > 0 ? ruleY - reach : reach - ruleY) > ROW_GAP * pitch) break;
                 if (!block.length) {
+                    if (dir > 0 && first) {
+                        // Nothing at all between the rows and the rule: a caption or paragraph set
+                        // wider than the table there is no part of the block, yet ends the table.
+                        const clear = !upright.some((i) => {
+                            const b = lines[i].bbox;
+                            return b[0] < right && b[2] > left && centerY(b) > edge && centerY(b) < ruleY;
+                        });
+                        if (clear && rowRuled()) {
+                            crossed = { bottom, joined: joined.length };
+                            bottom = rule[3];
+                            first = false;
+                            continue;
+                        }
+                        heldBelow = pass === 0;
+                    }
                     if (pastEmpty || dir > 0) break;
                     pastEmpty = true;
                     first = false;
@@ -813,6 +846,9 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
                     if (!text && (proseLine(i) || inParagraph(i))) break;
                     if (height(lines[i].bbox) > TALL_LINE * lineHeight) break;
                     if (pastEmpty && !overColumn(i)) break;
+                    // Past the rule under the table's rows, rows are set in the table's type size
+                    // (a section heading under the table's bottom border is not).
+                    if (crossed && Math.abs(lines[i].size - cellSize) > ROW_SIZE) break;
                     // Caption text, above the table or beside it, ends the block.
                     if (captionChain(i).length) break;
                     // Its row-mates are this table's or free; a row shared with another region is not this table's.
@@ -847,6 +883,8 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
                 else top = rule[1];
                 first = false;
             }
+            // No rows past the rule under the table's rows: that rule was its bottom border after all.
+            if (crossed && joined.length === crossed.joined) bottom = crossed.bottom;
         }
         for (const i of joined) routes[i] = table.index;
 
