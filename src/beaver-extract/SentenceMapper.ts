@@ -184,6 +184,10 @@ export function hasSentenceFinalTerminator(text: string): boolean {
  *   - `null` — this offset is boundary filler (the space we inject between
  *     consecutive lines). Sentence mapping skips nulls so bboxes are only
  *     built from real characters.
+ *
+ * A char whose `c` is a non-BMP code point (e.g. the math-italic 𝛼,
+ * U+1D6FC) spans two UTF-16 code units, so its source entry is repeated
+ * for each unit.
  */
 export interface PageText {
     text: string;
@@ -198,6 +202,23 @@ export interface PageWideSentence {
     text: string;
     bboxes: BoundingBox[];
     fragments?: Array<{ lineIndex: number; text: string; bbox: BoundingBox }>;
+}
+
+/**
+ * Whether a detailed line's `text` has exactly as many UTF-16 code units as
+ * its chars contribute. Each char's `c` holds one code point, so a non-BMP
+ * glyph (math alphanumerics, emoji, extended CJK) contributes a two-unit
+ * surrogate pair and `text.length` legitimately exceeds `chars.length`.
+ */
+export function lineTextMatchesChars(line: RawLineDetailed): boolean {
+    return line.text.length === charCodeUnits(line);
+}
+
+/** Total UTF-16 code units contributed by a detailed line's chars. */
+export function charCodeUnits(line: RawLineDetailed): number {
+    let units = 0;
+    for (const ch of line.chars) units += ch.c.length;
+    return units;
 }
 
 /**
@@ -226,16 +247,19 @@ export function flattenPageText(page: RawPageDataDetailed): PageText {
 
             // Invariant check — the prototype must fail loudly if text and
             // chars ever get out of sync.
-            if (line.text.length !== line.chars.length) {
+            if (!lineTextMatchesChars(line)) {
                 throw new Error(
                     `[SentenceMapper] text/chars length mismatch on line ${lineIndex}: ` +
-                    `text.length=${line.text.length}, chars.length=${line.chars.length}`,
+                    `text.length=${line.text.length}, chars code units=${charCodeUnits(line)}`,
                 );
             }
 
             for (let ci = 0; ci < line.chars.length; ci++) {
-                textParts.push(line.chars[ci].c);
-                source.push({ lineIndex, charIndex: ci });
+                const c = line.chars[ci].c;
+                textParts.push(c);
+                for (let u = 0; u < c.length; u++) {
+                    source.push({ lineIndex, charIndex: ci });
+                }
             }
 
             const isLastLineInBlock = lineIdxInBlock === block.lines.length - 1;
@@ -386,13 +410,15 @@ export function sentenceToBoxes(
         }
         const last = runs.length > 0 ? runs[runs.length - 1] : null;
         // Extend a run only if we're still on the same line AND the char
-        // index advanced by exactly one (contiguous). Anything else starts a
-        // new run — this handles out-of-order mapping defensively, though in
+        // index advanced by exactly one (contiguous) or repeated (the second
+        // code unit of a surrogate-pair char). Anything else starts a new
+        // run — this handles out-of-order mapping defensively, though in
         // practice runs are always contiguous here.
         if (
             last &&
             last.lineIndex === src.lineIndex &&
-            src.charIndex === last.charEnd + 1
+            (src.charIndex === last.charEnd ||
+                src.charIndex === last.charEnd + 1)
         ) {
             last.charEnd = src.charIndex;
         } else {

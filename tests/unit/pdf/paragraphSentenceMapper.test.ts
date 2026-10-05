@@ -44,9 +44,12 @@ import {
 // ---------------------------------------------------------------------------
 
 function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
+    // One char per code point, as the MuPDF walker emits them: a non-BMP
+    // glyph is a single char whose `c` is a two-unit surrogate pair.
+    const glyphs = Array.from(text);
     const chars: RawChar[] = [];
     const charH = 12;
-    for (let i = 0; i < text.length; i++) {
+    for (let i = 0; i < glyphs.length; i++) {
         const x = xStart + i * 10;
         const quad: QuadPoint = [
             x, yTop,
@@ -55,14 +58,14 @@ function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
             x + 10, yTop + charH,
         ];
         chars.push({
-            c: text[i],
+            c: glyphs[i],
             quad,
             bbox: bboxFromXYWH(x, yTop, 10, charH, "top-left"),
         });
     }
     return {
         wmode: 0,
-        bbox: bboxFromXYWH(xStart, yTop, text.length * 10, charH, "top-left"),
+        bbox: bboxFromXYWH(xStart, yTop, glyphs.length * 10, charH, "top-left"),
         font: { name: 'Body', family: 'Body', weight: 'normal', style: 'normal', size: 12 },
         x: xStart,
         y: yTop,
@@ -119,6 +122,19 @@ describe('buildParagraphText', () => {
         expect(pt.source[0]).toEqual({ lineIndex: 0, charIndex: 0 });
         expect(pt.source[12]).toEqual({ lineIndex: 1, charIndex: 0 });
         expect(pt.lines).toBe(lines);
+    });
+
+    it('accepts non-BMP chars and repeats their source entry per code unit', () => {
+        // Inline math-italic symbols (U+1D6FC alpha, U+1D706 lambda) are
+        // one glyph each but two UTF-16 code units.
+        const lines = [makeLine('parameter 𝛼. The mean 𝜆', 100), makeLine('is modeled.', 120)];
+        const pt = buildParagraphText(lines);
+        expect(pt.text).toBe('parameter 𝛼. The mean 𝜆 is modeled.');
+        expect(pt.source.length).toBe(pt.text.length);
+        const alpha = pt.text.indexOf('𝛼');
+        expect(pt.source[alpha]).toEqual({ lineIndex: 0, charIndex: 10 });
+        expect(pt.source[alpha + 1]).toEqual({ lineIndex: 0, charIndex: 10 });
+        expect(pt.source[alpha + 2]).toEqual({ lineIndex: 0, charIndex: 11 });
     });
 
     it('throws loudly on a text/chars length mismatch', () => {
@@ -254,6 +270,23 @@ describe('extractPageSentences', () => {
                 precomputed: { paragraphResult: paraResult },
             }),
         ).toThrow(/trackItemLines/);
+    });
+
+    it('splits a paragraph with inline non-BMP math symbols into sentences', () => {
+        const page = makeMultiBlockPage([
+            [
+                makeLine('Here 𝛼 is the overdispersion.', 100),
+                makeLine('The mean 𝜆 is modeled.', 115),
+            ],
+        ]);
+        const result = extractPageSentences(page);
+        expect(result.degradation).toBeUndefined();
+        expect(result.sentences.map((s) => s.text)).toEqual([
+            'Here 𝛼 is the overdispersion.',
+            'The mean 𝜆 is modeled.',
+        ]);
+        // Per-line bboxes, not one whole-item fallback box.
+        expect(result.sentences[1].bboxes[0].t).toBe(115);
     });
 
     it('degrades gracefully on a text/chars invariant violation', () => {
