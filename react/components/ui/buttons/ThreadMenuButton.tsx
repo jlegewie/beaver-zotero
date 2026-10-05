@@ -5,6 +5,8 @@ import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
+import { getHost } from '@beaver/agent-ui/host';
+import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -28,7 +30,9 @@ import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
 import { preprocessNoteContent, renderToHTML, renderToMarkdown } from '../../../utils/citationRenderers';
 import { copyToClipboard } from '../../../utils/clipboard';
+import { exportWithFeedback, fileExportMenuItem } from '../../../utils/fileExportFeedback';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
+import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
 import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
@@ -104,6 +108,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const citationDataMap = useAtomValue(citationMapAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     const getThreadMeta = () => {
         const threadId = store.get(currentThreadIdAtom);
@@ -223,6 +228,27 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         if (!isInReader) {
             selectItem(newNote, true, win);
         }
+    };
+
+    /**
+     * Export the whole chat — every prompt, response, note and tool call — to
+     * a file. The host asks where to save and formats citations in the
+     * citation style setting.
+     */
+    const handleExportThread = async (format: FileExportFormat) => {
+        const documentExport = getHost().documentExport;
+        const exportThread = documentExport?.exportThreadToFile;
+        if (!exportThread) return;
+        // As for copying: include the streamed parts not yet applied.
+        flushPendingPartEvents();
+        const runs = store.get(allRunsAtom);
+        if (runs.length === 0) return;
+        await exportWithFeedback(
+            format,
+            () => exportThread({ runs, format }),
+            addPopupMessage,
+            { reveal: documentExport.revealExportedFile, open: documentExport.openExportedFile },
+        );
     };
 
     const handleCopyThreadUrl = async () => {
@@ -361,6 +387,9 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                 onClick: handleSaveAsChildNote,
                 disabled: !hasParent || !hasRuns,
             },
+            ...(getHost().documentExport?.exportThreadToFile
+                ? [fileExportMenuItem(handleExportThread, !hasRuns)]
+                : []),
             {
                 label: 'Copy link to chat',
                 onClick: handleCopyThreadUrl,

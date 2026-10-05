@@ -328,6 +328,30 @@ function parseResponseGroup(
     return sections;
 }
 
+/**
+ * Paragraphs of plain text, read literally as the chat shows a prompt: blank
+ * lines separate paragraphs, other line breaks are kept, and leading
+ * indentation survives as non-breaking spaces. Nothing is parsed as markdown,
+ * math or citations.
+ */
+export function plainTextBlocks(text: string): MdBlock[] {
+    return text
+        .replace(/\r\n?/g, '\n')
+        .split(/\n[ \t]*\n/)
+        .filter(paragraph => paragraph.trim())
+        .map((paragraph): MdBlock => ({
+            type: 'paragraph',
+            children: paragraph.replace(/^\n+|\n+$/g, '').split('\n').flatMap((line, index): MdInline[] => {
+                const indent = /^[ \t]*/.exec(line)![0];
+                const value = '\u00a0'.repeat(indent.replace(/\t/g, '    ').length) + line.slice(indent.length);
+                return [
+                    ...(index > 0 ? [{ type: 'break' } as const] : []),
+                    ...(value ? [{ type: 'text', value } as const] : []),
+                ];
+            }),
+        }));
+}
+
 /** Parse a source into the document model. */
 export function parseExportSource(source: Pick<ExportSource, 'title' | 'blocks'>): ExportDoc {
     const builder = new DocumentBuilder();
@@ -344,10 +368,9 @@ export function parseExportSource(source: Pick<ExportSource, 'title' | 'blocks'>
             continue;
         }
         flushGroup();
-        const children = builder.parse(block.markdown);
         sections.push(block.type === 'note'
-            ? { kind: 'note', title: block.title, children, scope: scope++ }
-            : { kind: 'user', children, scope: scope++ });
+            ? { kind: 'note', title: block.title, children: builder.parse(block.markdown), scope: scope++ }
+            : { kind: 'user', children: plainTextBlocks(block.text), scope: scope++ });
     }
     flushGroup();
     return { title: source.title, sections, clusters: builder.clusters };

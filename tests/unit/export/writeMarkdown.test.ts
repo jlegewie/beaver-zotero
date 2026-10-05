@@ -124,7 +124,7 @@ describe('writeMarkdown', () => {
 
     it('writes prompts, activity and notes as sections', () => {
         const doc = parseExportSource({ title: 'Thread', blocks: [
-            { type: 'user', markdown: 'Question?' },
+            { type: 'user', text: 'Question?' },
             { type: 'markdown', markdown: 'Looking.' },
             { type: 'activity', calls: ['Searched "networks"'] },
             { type: 'note', title: 'Summary', markdown: 'Text.' },

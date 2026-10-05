@@ -25,7 +25,7 @@ vi.mock('../../../react/utils/toolCallLabelEnrich', () => ({
     })),
 }));
 
-import { buildNoteExportSource, buildResponseExportSource } from '../../../react/utils/exportSource';
+import { buildNoteExportSource, buildResponseExportSource, buildThreadExportSource } from '../../../react/utils/exportSource';
 import { store } from '../../../react/store';
 
 const run = {
@@ -86,5 +86,48 @@ describe('buildResponseExportSource', () => {
             provenance: { threadId: 't1', runIds: ['r1'] },
         });
         expect(await buildNoteExportSource(withNote, 'missing')).toBeNull();
+    });
+});
+
+describe('buildThreadExportSource', () => {
+    it('exports every prompt, response, note and tool call of the thread in order', async () => {
+        store.set(currentThreadIdAtom, 't1');
+        store.set(currentThreadNameAtom, 'Whole thread');
+        store.set(citationsAtom, []);
+        const second = {
+            ...run,
+            id: 'r2',
+            user_prompt: { content: 'Write it up' },
+            model_messages: [{
+                kind: 'response',
+                parts: [
+                    { part_kind: 'tool-call', tool_name: 'create_note', tool_call_id: 'n1', args: JSON.stringify({ title: 'Findings', content: 'Body' }) },
+                    { part_kind: 'text', content: 'Done.' },
+                ],
+            }],
+        };
+        // A continuation of the second response: no prompt of its own.
+        const continuation = {
+            ...run,
+            id: 'r3',
+            user_prompt: { content: '' },
+            model_messages: [{ kind: 'response', parts: [{ part_kind: 'text', content: 'Continued.' }] }],
+        };
+
+        const pending = buildThreadExportSource([run, second, continuation]);
+        state.releaseLabels();
+        const source = await pending;
+
+        expect(source.kind).toBe('thread');
+        expect(source.title).toBe('Whole thread');
+        expect(source.provenance).toEqual({ threadId: 't1', runIds: ['r1', 'r2', 'r3'] });
+        expect(source.blocks.map(block => block.type)).toEqual([
+            'user', 'markdown', 'activity', 'markdown',
+            'user', 'note', 'markdown',
+            'markdown',
+        ]);
+        expect(source.blocks[0]).toEqual({ type: 'user', text: 'Question' });
+        expect(source.blocks[4]).toEqual({ type: 'user', text: 'Write it up' });
+        expect(source.blocks[2]).toMatchObject({ type: 'activity', calls: [expect.any(String)] });
     });
 });

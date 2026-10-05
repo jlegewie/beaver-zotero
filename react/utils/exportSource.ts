@@ -16,7 +16,7 @@ import {
     externalReferenceMappingAtom,
 } from '@beaver/agent-core/citations/externalReferences';
 import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
-import { buildExportSource, buildResponseBlocks, noteFromToolCall } from '@beaver/agent-export/source/buildSource';
+import { buildExportSource, buildResponseBlocks, buildThreadBlocks, noteFromToolCall } from '@beaver/agent-export/source/buildSource';
 import { buildCitationSnapshot } from '@beaver/agent-export/source/citationSnapshot';
 import type { ExportContent, ExportSource, ExportSourceBlock } from '@beaver/agent-export/types';
 import { mergeRunToolResults } from '@beaver/agent-core/run-state/atoms';
@@ -59,7 +59,7 @@ async function citationSnapshotFor(
     blocks: ExportSourceBlock[],
     citationContext: ReturnType<typeof captureThreadState>['citationContext'],
 ) {
-    const content = blocks.map(block => (block.type === 'activity' ? '' : block.markdown)).join('\n\n');
+    const content = blocks.map(block => (block.type === 'activity' || block.type === 'user' ? '' : block.markdown)).join('\n\n');
     const context = await prepareCitationRenderContext(content, citationContext);
     // Key the merged metadata exactly as the chat looks it up.
     const keyStore = createStore();
@@ -71,6 +71,13 @@ async function citationSnapshotFor(
         externalItemMapping: context?.externalMapping ?? {},
         pageLabelsByAttachmentId: context?.pageLabelsByAttachmentId ?? {},
     });
+}
+
+/** Older history names libraries by device-local id; links in agent text must be portable. */
+function withPortableItemLinks(block: ExportSourceBlock): ExportSourceBlock {
+    return block.type === 'markdown' || block.type === 'note'
+        ? { ...block, markdown: hydrateItemLinkLibraryRefs(block.markdown, libraryRefForLibraryID) }
+        : block;
 }
 
 /**
@@ -99,14 +106,28 @@ export async function buildResponseExportSource(
 ): Promise<ExportSource> {
     const threadState = captureThreadState(runs);
     const describeToolCall = content === 'full' ? await toolCallDescriber(runs) : undefined;
-    // Older history names libraries by device-local id; links must be portable.
-    const blocks: ExportSourceBlock[] = buildResponseBlocks(runs, { content, describeToolCall }).map(block => (
-        block.type === 'activity'
-            ? block
-            : { ...block, markdown: hydrateItemLinkLibraryRefs(block.markdown, libraryRefForLibraryID) }
-    ));
+    const blocks = buildResponseBlocks(runs, { content, describeToolCall }).map(withPortableItemLinks);
     return buildExportSource({
         kind: 'response',
+        title: threadState.title,
+        blocks,
+        citations: await citationSnapshotFor(blocks, threadState.citationContext),
+        threadId: threadState.threadId,
+        runIds: runs.map(run => run.id),
+    });
+}
+
+/**
+ * Export source for a whole thread: every run in order, each user prompt
+ * followed by the full response — its text, the notes it wrote, and its tool
+ * calls as activity lines.
+ */
+export async function buildThreadExportSource(runs: AgentRun[]): Promise<ExportSource> {
+    const threadState = captureThreadState(runs);
+    const describeToolCall = await toolCallDescriber(runs);
+    const blocks = buildThreadBlocks(runs, { content: 'full', describeToolCall }).map(withPortableItemLinks);
+    return buildExportSource({
+        kind: 'thread',
         title: threadState.title,
         blocks,
         citations: await citationSnapshotFor(blocks, threadState.citationContext),

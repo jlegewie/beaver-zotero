@@ -2,7 +2,7 @@ import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import type { ExportSource } from '@beaver/agent-export/types';
 import type { FileExportContent, FileExportFormat, FileExportResult } from '@beaver/agent-ui/host/types';
-import { buildNoteExportSource, buildResponseExportSource } from '../../utils/exportSource';
+import { buildNoteExportSource, buildResponseExportSource, buildThreadExportSource } from '../../utils/exportSource';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
 import { store } from '../../store';
 
@@ -14,11 +14,14 @@ import { store } from '../../store';
 async function saveExport(source: ExportSource, format: FileExportFormat, windowId: string): Promise<FileExportResult> {
     const result = await Zotero.Beaver.exporter.run({ source, format }, { windowId });
     if (result.status !== 'saved') return { status: 'canceled' };
+    const folder = PathUtils.parent(result.path);
     return {
         status: 'saved',
         path: result.path,
-        // A LaTeX export also names its .bib file.
-        fileName: result.files.map(file => PathUtils.filename(file)).join(', '),
+        fileName: PathUtils.filename(result.path),
+        folderName: folder ? PathUtils.filename(folder) || folder : '',
+        // A LaTeX export also writes its .bib file.
+        companionFileNames: result.files.filter(file => file !== result.path).map(file => PathUtils.filename(file)),
         warnings: result.warnings.map(warning => warning.message),
     };
 }
@@ -31,6 +34,16 @@ async function exportResponseToFile(request: {
 }): Promise<FileExportResult> {
     const windowId = getWindowRuntime().id;
     const source = await buildResponseExportSource(request.runs, request.content);
+    return saveExport(source, request.format, windowId);
+}
+
+/** Export a whole thread, with its prompts and tool activity, to a file. */
+async function exportThreadToFile(request: {
+    runs: AgentRun[];
+    format: FileExportFormat;
+}): Promise<FileExportResult> {
+    const windowId = getWindowRuntime().id;
+    const source = await buildThreadExportSource(request.runs);
     return saveExport(source, request.format, windowId);
 }
 
@@ -50,12 +63,18 @@ export async function exportNoteToFile(request: {
     return saveExport(source, request.format, windowId);
 }
 
-export function revealExportedFile(path: string): void {
-    Zotero.Beaver.exporter.reveal(path);
+export function revealExportedFile(path: string): Promise<void> {
+    return Zotero.Beaver.exporter.reveal(path);
+}
+
+export function openExportedFile(path: string): Promise<void> {
+    return Zotero.Beaver.exporter.open(path);
 }
 
 /** Zotero implementation of the file-export methods of the document export slice. */
 export const zoteroFileExport = {
     exportResponseToFile,
+    exportThreadToFile,
     revealExportedFile,
+    openExportedFile,
 };

@@ -185,7 +185,7 @@ export function buildThreadBlocks(
     for (const run of runs) {
         // A continuation run carries no prompt of its own.
         const prompt = run.user_prompt?.content?.trim();
-        if (includeUserPrompts && prompt) blocks.push({ type: 'user', markdown: prompt });
+        if (includeUserPrompts && prompt) blocks.push({ type: 'user', text: prompt });
         blocks.push(...buildResponseBlocks([run], options));
     }
     return blocks;

@@ -306,12 +306,21 @@ export class InstanceExport {
     }
 
     /** Show an exported file in the system file manager. */
-    reveal(path: string): void {
+    async reveal(path: string): Promise<void> {
         try {
-            Zotero.File.reveal(path);
+            await Zotero.File.reveal(path);
         } catch (error) {
             logger(`InstanceExport: could not reveal ${path}: ${error}`, 2);
+            throw new Error('The exported file could not be found. It may have been moved or deleted.');
         }
+    }
+
+    /** Open an exported file in the system's default application for its type. */
+    async open(path: string): Promise<void> {
+        if (!await IOUtils.exists(path)) {
+            throw new Error('The exported file could not be found. It may have been moved or deleted.');
+        }
+        Zotero.launchFile(path);
     }
 
     dispose(): void {

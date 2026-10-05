@@ -5,9 +5,10 @@
  * needed, so tests can export hand-written markdown with any citations. Without
  * it, the request is forwarded to a window (`windowId`, default the main
  * window), which exports a response of its open thread (`runId`, default the
- * last run). Common fields: `{ path, format?: 'docx' | 'pdf' | 'markdown' |
- * 'latex', styleId?, locale?, liveCitations?, linkItems?, includeHtml?,
- * frontMatter?, citationPackage?, standalone? }` (`includeHtml` returns the
+ * last run) or, with `scope: 'thread'`, the whole thread. Common fields:
+ * `{ path, format?: 'docx' | 'pdf' | 'markdown' | 'latex', styleId?, locale?,
+ * liveCitations?, linkItems?, includeHtml?, frontMatter?, citationPackage?,
+ * standalone? }` (`includeHtml` returns the
  * HTML a PDF was printed from; `frontMatter` is Markdown's, `citationPackage`
  * and `standalone` LaTeX's).
  */

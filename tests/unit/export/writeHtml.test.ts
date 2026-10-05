@@ -143,7 +143,7 @@ describe('writeHtml', () => {
 
     it('writes a user prompt and tool activity distinctly', () => {
         const doc = parseExportSource({ title: '', blocks: [
-            { type: 'user', markdown: 'Summarize' },
+            { type: 'user', text: 'Summarize' },
             { type: 'activity', calls: ['Searched "networks"'] },
             { type: 'note', title: 'My note', markdown: 'Body' },
         ] });

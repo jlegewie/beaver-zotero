@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { buildResponseBlocks, buildThreadBlocks, splitNoteTags } from '@beaver/agent-export/source/buildSource';
+import { parseExportSource } from '@beaver/agent-export/parse/parseExportDoc';
 
 function run(id: string, prompt: string, parts: any[]): AgentRun {
     return {
@@ -86,10 +87,42 @@ describe('buildThreadBlocks', () => {
             run('r2', '', [{ part_kind: 'text', content: 'A1 continued' }]),
         ]);
         expect(blocks).toEqual([
-            { type: 'user', markdown: 'First question' },
+            { type: 'user', text: 'First question' },
             { type: 'markdown', markdown: 'A1' },
             { type: 'markdown', markdown: 'A1 continued' },
         ]);
+    });
+});
+
+describe('user prompts in an export', () => {
+    /** Block types, and the text with line breaks as newlines, of a parsed prompt. */
+    function parsed(text: string) {
+        const doc = parseExportSource({ title: '', blocks: [{ type: 'user', text }] });
+        const blocks = doc.sections[0].children as any[];
+        const textOf = (node: any): string => (node.type === 'break' ? '\n'
+            : node.type === 'text' ? node.value
+            : (node.children ?? []).map(textOf).join(''));
+        return { types: blocks.map(node => node.type), text: blocks.map(textOf).join('\n\n'), clusters: doc.clusters.length };
+    }
+
+    it('keeps every line break of a prompt', () => {
+        expect(parsed('Line one\nLine two\n\nNew paragraph')).toEqual({
+            types: ['paragraph', 'paragraph'],
+            text: 'Line one\nLine two\n\nNew paragraph',
+            clusters: 0,
+        });
+    });
+
+    it('reads markup, math and citation tags literally', () => {
+        const prompt = '# Not a heading\n- not a list\n1. not numbered\n> not a quote\n---\n*a* _b_ `c` $x$ \\(y\\) Compare [Smith 2020] <citation id="u-AAAAAAAA"/> a|b ~~s~~ &amp;';
+        expect(parsed(prompt)).toEqual({ types: ['paragraph'], text: prompt, clusters: 0 });
+    });
+
+    it('keeps leading indentation without making a code block', () => {
+        expect(parsed('Steps:\n    indented line')).toMatchObject({
+            types: ['paragraph'],
+            text: 'Steps:\n\u00a0\u00a0\u00a0\u00a0indented line',
+        });
     });
 });
 

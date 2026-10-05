@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, ReactNode } 
 import React from 'react';
 import ReactDOM from 'react-dom';
 import Icon from '../icons/Icon';
+import ArrowRightIcon from '../icons/ArrowRightIcon';
 import { getWindowFromElement, getDocumentFromElement } from '../utils/windowContext';
 
 /**
@@ -58,7 +59,16 @@ export interface MenuItem {
     }[];
     /** Function called when editing is complete (for rename functionality) */
     onEditComplete?: (newName: string) => void;
+    /**
+     * Items of a submenu that opens beside this item (on hover, click, Enter
+     * or ArrowRight). The item's own `onClick` is not called; choosing a
+     * submenu item closes the whole menu.
+     */
+    submenu?: MenuItem[];
 }
+
+/** How long the pointer may cross other items on its way into an open submenu. */
+const SUBMENU_CLOSE_DELAY_MS = 250;
 
 /**
 * Position interface for menu placement
@@ -174,6 +184,37 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
     const [arrowPosition, setArrowPosition] = useState<string>('50%');
     const [placement, setPlacement] = useState<'top' | 'bottom' | 'left' | 'right'>('bottom');
+    // The open submenu: the index of its parent item, and the submenu item with
+    // keyboard focus (-1 while the keyboard is still on the parent menu).
+    const [openSubmenuIndex, setOpenSubmenuIndex] = useState<number>(-1);
+    const [submenuFocusedIndex, setSubmenuFocusedIndex] = useState<number>(-1);
+    const [submenuPosition, setSubmenuPosition] = useState<MenuPosition | null>(null);
+    const submenuRef = useRef<HTMLDivElement | null>(null);
+    const submenuItemRefs = useRef<Array<HTMLDivElement | null>>([]);
+    const submenuCloseTimer = useRef<number | null>(null);
+    const submenuItems = openSubmenuIndex >= 0 ? menuItems[openSubmenuIndex]?.submenu ?? null : null;
+
+    const cancelSubmenuClose = useCallback(() => {
+        if (submenuCloseTimer.current === null) return;
+        getWindowFromElement(menuRef.current)?.clearTimeout(submenuCloseTimer.current);
+        submenuCloseTimer.current = null;
+    }, []);
+
+    const closeSubmenu = useCallback(() => {
+        cancelSubmenuClose();
+        setOpenSubmenuIndex(-1);
+        setSubmenuFocusedIndex(-1);
+        setSubmenuPosition(null);
+    }, [cancelSubmenuClose]);
+
+    /** Open the submenu of item `index`; `focusFirst` moves keyboard focus into it. */
+    const openSubmenu = useCallback((index: number, focusFirst: boolean) => {
+        cancelSubmenuClose();
+        const items = menuItems[index]?.submenu ?? [];
+        if (index !== openSubmenuIndex) setSubmenuPosition(null);
+        setOpenSubmenuIndex(index);
+        setSubmenuFocusedIndex(focusFirst ? items.findIndex(item => !item.disabled && !item.isGroupHeader && !item.isDivider) : -1);
+    }, [cancelSubmenuClose, menuItems, openSubmenuIndex]);
 
     const isFocusableItem = (item: MenuItem): boolean => {
         return !item.disabled && !item.isGroupHeader && !item.isDivider;
@@ -346,6 +387,11 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         const handleEscape = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
+                // An open submenu closes first, back to its parent item.
+                if (openSubmenuIndex >= 0) {
+                    closeSubmenu();
+                    return;
+                }
                 onClose();
                 if (onAfterClose) onAfterClose();
             }
@@ -358,7 +404,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             doc.removeEventListener('mousedown', handleClickOutside);
             doc.removeEventListener('keydown', handleEscape);
         };
-    }, [isOpen, onClose, onAfterClose]);
+    }, [isOpen, onClose, onAfterClose, openSubmenuIndex, closeSubmenu]);
     
     // Handle keyboard navigation
     useEffect(() => {
@@ -369,15 +415,74 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         if (!doc) return;
 
         const handleKeyNav = (e: KeyboardEvent) => {
+            // Keyboard focus is inside the open submenu.
+            if (submenuItems && submenuFocusedIndex >= 0) {
+                const isFocusable = (item: MenuItem) => !item.disabled && !item.isGroupHeader && !item.isDivider;
+                const step = (from: number, delta: 1 | -1) => {
+                    for (let checked = 1; checked <= submenuItems.length; checked++) {
+                        const index = (from + delta * checked + submenuItems.length) % submenuItems.length;
+                        if (isFocusable(submenuItems[index])) return index;
+                    }
+                    return from;
+                };
+                switch (e.key) {
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        setSubmenuFocusedIndex(prev => step(prev, 1));
+                        return;
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        setSubmenuFocusedIndex(prev => step(prev, -1));
+                        return;
+                    case 'ArrowLeft':
+                        e.preventDefault();
+                        closeSubmenu();
+                        return;
+                    case 'Enter':
+                    case ' ': {
+                        e.preventDefault();
+                        const item = submenuItems[submenuFocusedIndex];
+                        if (item && isFocusable(item)) {
+                            item.onClick();
+                            onClose();
+                            if (onAfterClose) onAfterClose();
+                        }
+                        return;
+                    }
+                    case 'Tab':
+                        // Tab and Shift+Tab stay in the submenu; Ctrl/Alt/Meta+Tab
+                        // are host shortcuts (tab switching) and pass through.
+                        if (!e.ctrlKey && !e.altKey && !e.metaKey) e.preventDefault();
+                        return;
+                    default:
+                        return;
+                }
+            }
             switch (e.key) {
+                case 'ArrowRight': {
+                    const item = menuItems[focusedIndex];
+                    if (item?.submenu && isFocusableItem(item)) {
+                        e.preventDefault();
+                        openSubmenu(focusedIndex, true);
+                    }
+                    break;
+                }
+                case 'ArrowLeft':
+                    if (openSubmenuIndex >= 0) {
+                        e.preventDefault();
+                        closeSubmenu();
+                    }
+                    break;
                 case 'ArrowDown':
                     e.preventDefault();
+                    if (openSubmenuIndex >= 0) closeSubmenu();
                     setFocusedIndex((prev: number) => {
                         return findFocusableIndex(prev >= 0 ? prev + 1 : 0, 1);
                     });
                     break;
                 case 'ArrowUp':
                     e.preventDefault();
+                    if (openSubmenuIndex >= 0) closeSubmenu();
                     setFocusedIndex((prev: number) => {
                         return findFocusableIndex(prev >= 0 ? prev - 1 : menuItems.length - 1, -1);
                     });
@@ -419,7 +524,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         break;
                     }
                     e.preventDefault();
-                    if (focusedIndex >= 0 && !menuItems[focusedIndex].disabled && 
+                    if (focusedIndex >= 0 && menuItems[focusedIndex].submenu && isFocusableItem(menuItems[focusedIndex])) {
+                        openSubmenu(focusedIndex, true);
+                    } else if (focusedIndex >= 0 && !menuItems[focusedIndex].disabled && 
                         !menuItems[focusedIndex].isGroupHeader && !menuItems[focusedIndex].isDivider) {
                         menuItems[focusedIndex].onClick();
                         onClose();
@@ -434,7 +541,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         doc.addEventListener('keydown', handleKeyNav);
         return () => doc.removeEventListener('keydown', handleKeyNav);
-    }, [isOpen, menuItems, focusedIndex, footer, onClose, onAfterClose]);
+    }, [isOpen, menuItems, focusedIndex, footer, onClose, onAfterClose, submenuItems, submenuFocusedIndex, openSubmenuIndex, openSubmenu, closeSubmenu]);
     
     // Set initial focus
     useEffect(() => {
@@ -451,10 +558,53 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         // Reset hovered index when menu opens/closes
         setHoveredIndex(-1);
         setIsFooterFocused(false);
+        closeSubmenu();
     }, [isOpen]);
 
+    // A submenu whose parent item is gone or disabled (the items were rebuilt) closes.
     useEffect(() => {
-        if (!isOpen || focusedIndex < 0) {
+        if (openSubmenuIndex < 0) return;
+        const parent = menuItems[openSubmenuIndex];
+        if (!parent?.submenu || !isFocusableItem(parent)) closeSubmenu();
+    }, [menuItems, openSubmenuIndex, closeSubmenu]);
+
+    useEffect(() => cancelSubmenuClose, [cancelSubmenuClose]);
+
+    // Place the submenu beside its parent item: to the right, or to the left
+    // when the right side has no room, and within the viewport vertically. It
+    // is position: fixed, so it is not clipped by the scrolling menu.
+    useLayoutEffect(() => {
+        if (!isOpen || openSubmenuIndex < 0 || !submenuRef.current) return;
+        const parentItem = itemRefs.current[openSubmenuIndex];
+        const win = getWindowFromElement(submenuRef.current);
+        if (!parentItem || !win) return;
+        const itemRect = parentItem.getBoundingClientRect();
+        const subRect = submenuRef.current.getBoundingClientRect();
+        const margin = 8;
+        let x = itemRect.right + 4;
+        if (x + subRect.width > win.innerWidth - margin) {
+            const left = itemRect.left - subRect.width - 4;
+            x = left >= margin ? left : Math.max(margin, win.innerWidth - subRect.width - margin);
+        }
+        // Align the first submenu item with the parent item (the menu's padding is 4px).
+        let y = itemRect.top - 5;
+        if (y + subRect.height > win.innerHeight - margin) y = Math.max(margin, win.innerHeight - subRect.height - margin);
+        if (!submenuPosition || submenuPosition.x !== x || submenuPosition.y !== y) setSubmenuPosition({ x, y });
+    }, [isOpen, openSubmenuIndex, submenuItems, adjustedPosition, submenuPosition]);
+
+    useEffect(() => {
+        if (submenuFocusedIndex < 0) return;
+        const element = submenuItemRefs.current[submenuFocusedIndex];
+        if (!element) return;
+        try {
+            element.focus({ preventScroll: true });
+        } catch (e) {
+            element.focus();
+        }
+    }, [submenuFocusedIndex, submenuPosition]);
+
+    useEffect(() => {
+        if (!isOpen || focusedIndex < 0 || submenuFocusedIndex >= 0) {
             return;
         }
 
@@ -470,7 +620,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             focusedItem.focus();
         }
         scrollItemIntoMenuView(menuElement, focusedItem);
-    }, [focusedIndex, isOpen]);
+    }, [focusedIndex, isOpen, submenuFocusedIndex]);
     
     if (!isOpen) return null;
     
@@ -511,13 +661,17 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                           item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' :
                           `beaver-menu-item display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
                           ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                          ${((focusedIndex === index && !isFooterFocused) || hoveredIndex === index) && !item.disabled ? 'bg-quinary' : ''}`
+                          ${((focusedIndex === index && !isFooterFocused) || hoveredIndex === index || openSubmenuIndex === index) && !item.disabled ? 'bg-quinary' : ''}`
                         }
                     `}
                     style={!item.isDivider && !item.isGroupHeader ? { maxWidth: '100%', minWidth: 0 } : undefined}
                     onClick={(e) => {
                         e.stopPropagation();
                         if (!item.isGroupHeader && !item.isDivider && !item.disabled) {
+                            if (item.submenu) {
+                                openSubmenu(index, false);
+                                return;
+                            }
                             item.onClick();
                             onClose();
                             if (onAfterClose) onAfterClose();
@@ -528,6 +682,20 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                             setHoveredIndex(index);
                             setFocusedIndex(index);
                             setActiveActionsIndex(index);
+                            if (item.submenu) {
+                                openSubmenu(index, false);
+                            } else if (openSubmenuIndex >= 0 && submenuCloseTimer.current === null) {
+                                // Leave time to cross this item on the way into the submenu.
+                                const win = getWindowFromElement(menuRef.current);
+                                if (win) {
+                                    submenuCloseTimer.current = win.setTimeout(() => {
+                                        submenuCloseTimer.current = null;
+                                        closeSubmenu();
+                                    }, SUBMENU_CLOSE_DELAY_MS);
+                                } else {
+                                    closeSubmenu();
+                                }
+                            }
                         }
                     }}
                     onMouseLeave={() => {
@@ -547,6 +715,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                             : undefined
                     }
                     aria-label={!item.isGroupHeader && !item.isDivider ? item.label : undefined}
+                    aria-haspopup={item.submenu ? 'menu' : undefined}
+                    aria-expanded={item.submenu ? openSubmenuIndex === index : undefined}
                 >
                     {item.isDivider ? null : item.isGroupHeader ? (
                         // Render group header
@@ -589,10 +759,79 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                                 <Icon icon={item.icon} size={14} className={itemIconClassName}/>
                             )}
                             <span className={itemLabelClassName}>{item.label}</span>
+                            {item.submenu && (
+                                <Icon icon={ArrowRightIcon} size={12} className="font-color-tertiary flex-shrink-0" />
+                            )}
                         </span>
                     )}
                 </div>
             ))}
+
+            {/* Open submenu, beside its parent item */}
+            {submenuItems && (
+                <div
+                    ref={submenuRef}
+                    className="bg-overlay border-popup rounded-md p-1 overflow-y-auto scrollbar outline-none z-1000 shadow-md"
+                    style={{
+                        position: 'fixed',
+                        // Placed by a layout effect before the first paint. Not
+                        // hidden until then: a hidden item cannot take focus.
+                        top: submenuPosition?.y ?? 0,
+                        left: submenuPosition?.x ?? 0,
+                        minWidth: '9rem',
+                        maxHeight: '80vh',
+                    }}
+                    role="menu"
+                    aria-orientation="vertical"
+                    aria-label={menuItems[openSubmenuIndex]?.label}
+                    onMouseEnter={cancelSubmenuClose}
+                >
+                    {submenuItems.map((subItem, subIndex) => (
+                        <div
+                            key={subIndex}
+                            ref={(element) => {
+                                submenuItemRefs.current[subIndex] = element;
+                            }}
+                            role={subItem.isGroupHeader || subItem.isDivider ? 'presentation' : subItem.role ?? 'menuitem'}
+                            tabIndex={submenuFocusedIndex === subIndex ? 0 : -1}
+                            className={
+                                subItem.isDivider ? 'border-t border-top-quinary my-1'
+                                : subItem.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0'
+                                : `beaver-menu-item display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
+                                    ${subItem.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                                    ${submenuFocusedIndex === subIndex && !subItem.disabled ? 'bg-quinary' : ''}`
+                            }
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (subItem.isGroupHeader || subItem.isDivider || subItem.disabled) return;
+                                subItem.onClick();
+                                onClose();
+                                if (onAfterClose) onAfterClose();
+                            }}
+                            onMouseEnter={() => {
+                                if (!subItem.isGroupHeader && !subItem.isDivider && !subItem.disabled) {
+                                    setSubmenuFocusedIndex(subIndex);
+                                }
+                            }}
+                            aria-disabled={!subItem.isGroupHeader && !subItem.isDivider ? subItem.disabled : undefined}
+                            aria-label={!subItem.isGroupHeader && !subItem.isDivider ? subItem.label : undefined}
+                        >
+                            {subItem.isDivider ? null : subItem.isGroupHeader ? (
+                                <span className="truncate">{subItem.label}</span>
+                            ) : subItem.customContent ? (
+                                subItem.customContent
+                            ) : (
+                                <span className="display-flex items-center gap-2 w-full min-w-0">
+                                    {subItem.icon && (
+                                        <Icon icon={subItem.icon} size={14} className={itemIconClassName}/>
+                                    )}
+                                    <span className={itemLabelClassName}>{subItem.label}</span>
+                                </span>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
             
             {/* Custom footer section */}
             {footer && (

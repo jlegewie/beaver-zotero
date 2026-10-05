@@ -49,8 +49,8 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { DownloadIcon } from '@beaver/agent-ui/icons';
 import type { FileExportFormat } from '@beaver/agent-ui/host/types';
-import { exportNoteToFile, revealExportedFile } from '../../fileExport';
-import { exportWithFeedback, FILE_EXPORT_MENU } from '../../../../utils/fileExportFeedback';
+import { exportNoteToFile, openExportedFile, revealExportedFile } from '../../fileExport';
+import { exportWithFeedback, fileExportFormatMenuItems } from '../../../../utils/fileExportFeedback';
 import { addPopupMessageAtom } from '../../../../utils/popupMessageUtils';
 
 interface ReviewActionRowProps {
@@ -225,7 +225,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 format,
                 () => exportNoteToFile({ runId, toolCallId: row.toolcallId, format }),
                 addPopupMessage,
-                revealExportedFile,
+                { reveal: revealExportedFile, open: openExportedFile },
             );
         } finally {
             setIsExporting(false);
@@ -320,10 +320,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                             icon={DownloadIcon}
                             variant="ghost-secondary"
                             iconClassName="font-color-secondary scale-10"
-                            menuItems={FILE_EXPORT_MENU.map(({ format, label }) => ({
-                                label,
-                                onClick: () => handleExportNote(format),
-                            }))}
+                            menuItems={fileExportFormatMenuItems(handleExportNote)}
                             tooltipContent="Export"
                             ariaLabel="Export"
                         />

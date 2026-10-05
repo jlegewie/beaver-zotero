@@ -28,7 +28,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
-import { exportWithFeedback, FILE_EXPORT_MENU } from '../../utils/fileExportFeedback';
+import { exportWithFeedback, fileExportMenuItem } from '../../utils/fileExportFeedback';
 import { getHost } from '@beaver/agent-ui/host';
 import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 
@@ -175,11 +175,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
 
         if (host.documentExport?.exportResponseToFile) {
-            items.splice(noteWriter ? 3 : 1, 0, ...FILE_EXPORT_MENU.map(({ format, label }) => ({
-                label,
-                onClick: () => exportToFile(format),
-                disabled: isResolvingCitations
-            })));
+            items.splice(noteWriter ? 3 : 1, 0, fileExportMenuItem(exportToFile, isResolvingCitations));
         }
 
         if (host.config?.isDevelopment() ?? false) {
@@ -275,7 +271,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
             format,
             () => exportResponse({ runs: chainRuns, format, content: 'final' }),
             addPopupMessage,
-            documentExport.revealExportedFile,
+            { reveal: documentExport.revealExportedFile, open: documentExport.openExportedFile },
         );
     };
 

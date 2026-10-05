@@ -31,8 +31,8 @@ export type ExportSourceBlock =
     | { type: 'markdown'; markdown: string }
     /** A note the agent wrote (`create_note` body or a `<note>` tag), exported as its own section. */
     | { type: 'note'; title: string; markdown: string }
-    /** A user prompt (thread export). */
-    | { type: 'user'; markdown: string }
+    /** A user prompt as typed: plain text, not markdown (thread export). */
+    | { type: 'user'; text: string }
     /** What the agent did between its messages: one display label per tool call (full-response export). */
     | { type: 'activity'; calls: string[] };
 

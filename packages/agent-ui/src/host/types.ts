@@ -320,7 +320,18 @@ export type FileExportContent = 'final' | 'full';
 
 /** Outcome of exporting to a file. `warnings` are user-facing sentences. */
 export type FileExportResult =
-    | { status: 'saved'; path: string; fileName: string; warnings: string[] }
+    | {
+        status: 'saved';
+        /** The exported document. */
+        path: string;
+        /** Its file name. */
+        fileName: string;
+        /** The folder it was saved in, as shown to the user. */
+        folderName: string;
+        /** Names of files written beside it (a LaTeX export's .bib file). */
+        companionFileNames: string[];
+        warnings: string[];
+    }
     | { status: 'canceled' };
 
 /**
@@ -346,8 +357,16 @@ export interface DocumentExportHost {
      * omit it and the action is not offered.
      */
     exportResponseToFile?(request: { runs: AgentRun[]; format: FileExportFormat; content: FileExportContent }): Promise<FileExportResult>;
-    /** Show an exported file in the system file manager. */
-    revealExportedFile?(path: string): void;
+    /**
+     * Export a whole thread — every run in order, with the user's prompts and
+     * the agent's tool activity — to a file the user chooses. Same contract as
+     * `exportResponseToFile`.
+     */
+    exportThreadToFile?(request: { runs: AgentRun[]; format: FileExportFormat }): Promise<FileExportResult>;
+    /** Show an exported file in the system file manager. Rejects when it is gone. */
+    revealExportedFile?(path: string): Promise<void>;
+    /** Open an exported file in the system's default application. Rejects when it is gone. */
+    openExportedFile?(path: string): Promise<void>;
 }
 
 export type NoteSaveFormat =
