@@ -3863,6 +3863,13 @@
     --beaver-column-pad: 0.75rem;
 }
 
+/* The popup overlay is positioned against the prompt's padding box, so it takes
+ * the prompt's padding (gutter included) to stay as wide as the composer. */
+#beaver-pane-window #beaver-prompt > .beaver-popup-overlay {
+    padding-left: inherit;
+    padding-right: inherit;
+}
+
 /* ── Duplicate review: find_duplicates results ──
  * Records are referred to by neutral letter badges so the field comparison can
  * point back at them. */
