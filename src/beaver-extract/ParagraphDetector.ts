@@ -100,6 +100,11 @@ interface ColumnThresholds {
      * paragraph.
      */
     gapExcessThreshold: number;
+    /**
+     * The column's normal line gap (median), or the page-wide value when the
+     * column has too few gaps to estimate locally.
+     */
+    medianGap: number;
 }
 
 /**
@@ -966,13 +971,13 @@ function calculateColumnThresholds(
         if (gap < 50 && gap > -5) colGaps.push(gap);
     }
     let gapExcessThreshold = pageThresholds.gapExcessThreshold;
+    const medianGap = colGaps.length >= 3 ? median(colGaps) : pageThresholds.medianGap;
     if (colGaps.length >= 3) {
-        const colMedianGap = median(colGaps);
         const minMeaningfulIncrease = Math.max(1.0, 0.08 * pageThresholds.medianHeight);
         gapExcessThreshold = Math.max(
             settings.minGapPx,
-            colMedianGap + minMeaningfulIncrease,
-            colMedianGap * 1.25,
+            medianGap + minMeaningfulIncrease,
+            medianGap * 1.25,
             0.4 * pageThresholds.medianHeight
         );
     }
@@ -986,6 +991,7 @@ function calculateColumnThresholds(
         indentExcessThreshold,
         earlyEndExcessThreshold,
         gapExcessThreshold,
+        medianGap,
     };
 }
 
@@ -1099,6 +1105,7 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
     let total = 0;
     let boldChars = 0;
     let italicChars = 0;
+    let heavyChars = 0;
     const charsBySize = new Map<number, number>();
     const charsByFont = new Map<string, number>();
     for (const run of voters) {
@@ -1111,6 +1118,7 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
         total += run.chars;
         if (style.bold) boldChars += run.chars;
         if (style.italic) italicChars += run.chars;
+        if (hasHeavyWeightToken(style.font)) heavyChars += run.chars;
         charsBySize.set(style.size, (charsBySize.get(style.size) ?? 0) + run.chars);
         charsByFont.set(style.font, (charsByFont.get(style.font) ?? 0) + run.chars);
     }
@@ -1126,9 +1134,17 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
             break;
         }
     }
+    // The font with the most glyphs. A Medium / Semibold face carries a
+    // heading cue in its name (Rule 2b), so like bold it must cover
+    // MAJORITY_STYLE_SHARE of the glyphs to describe the line: a semibold
+    // run-in label ahead of plain text ("Peer review information Nature
+    // Medicine thanks…") can outnumber each of the plain faces it is
+    // followed by without making the line a heading.
+    const heavyMajority = heavyChars / total >= MAJORITY_STYLE_SHARE;
     let font = lineStyle.font;
     let fontChars = -1;
     for (const [name, chars] of charsByFont) {
+        if (!heavyMajority && hasHeavyWeightToken(name)) continue;
         if (chars > fontChars) {
             fontChars = chars;
             font = name;
@@ -1657,6 +1673,115 @@ function matchesHeaderRules(
 // Step 4: Start New Item Detection
 // ============================================================================
 
+/** Whether the line carries per-glyph style runs (see `RawLine.styleRuns`). */
+function hasStyleRuns(line: PageLine): boolean {
+    return line.spans.some(span => (span.styleRuns?.length ?? 0) > 0);
+}
+
+/** Gaps between a line's spans wider than 1.5 em: the column gaps of a table row. */
+function countWideGaps(line: PageLine): number {
+    const boxes = [...line.bboxes].sort((a, b) => a.l - b.l);
+    const em = line.fontSize ?? 10;
+    let count = 0;
+    for (let k = 1; k < boxes.length; k++) {
+        if (boxes[k].l - boxes[k - 1].r > 1.5 * em) count++;
+    }
+    return count;
+}
+
+/**
+ * Whether `line`, a body line, ends the heading item `currentLines` although
+ * nothing visual separates them.
+ *
+ * Many journals set the first paragraph after a heading flush left at normal
+ * leading, so the gap, indent and font-size signals stay silent. Short
+ * headings still break on the early line end, but a heading that runs most of
+ * the way across the column ("Neighborhood racial boundaries versus other
+ * forms of spatial interdependence") merges into its paragraph, which is then
+ * no longer a heading. The change of style is the boundary instead.
+ *
+ * Lines that read as headings line by line are common outside headings —
+ * table header rows, labels in author and contact blocks, italic titles in
+ * reference entries — and stay harmless only while they merge into the text
+ * after them. The boundary therefore requires all of:
+ *
+ *   - Per-glyph style runs on the heading and the line. MuPDF reports a
+ *     line's font from its first glyph; without the runs, a prose line that
+ *     opens with a bold phrase reads as a heading line.
+ *   - Every heading line passing the heading rules on the item's joined text
+ *     (the test `processCurrentLinesAsItem` applies), and the line passing
+ *     the body-style test on its majority styling.
+ *   - The heading's last line ending clearly short of the column's right
+ *     edge. A line filling the measure wraps into the next one, e.g. a run-in
+ *     heading set mostly in bold ("Applications of single-cell
+ *     transcriptomics. One major / …").
+ *   - The line not continuing the heading: joined to it, the heading rules
+ *     fail (an all-caps heading whose single-word last line,
+ *     "PREFIGURATION?", fails the multi-word caps test on its own).
+ *   - When the line opens in the heading's own face, more than the column's
+ *     normal line spacing between them. At normal leading that shape is a run-in heading
+ *     wrapping onto the line before its paragraph text starts ("Generation
+ *     of Constructs for Expression in / Mammalian Cells. We cloned…"); a
+ *     heading followed by a paragraph with its own run-in lead ("A.5.2
+ *     Effect of k" / "Accuracy. Small k…") sits slightly apart. A heading in
+ *     the body face (all caps) has no such ambiguity.
+ *   - For an italic heading, no journal citation across the heading and the
+ *     line (an italic journal name over its "21, 1234–1248 (2024)." tail),
+ *     the test `isHeaderStyle` applies to a single italic line.
+ *   - The line not opening in lowercase or with a parenthesis. That continues
+ *     the sentence or the entry above ("Dr. Jean Kim has / worked to…",
+ *     "S1 Appendix. Search strategy. / (DOCX)").
+ *   - The heading not ending in a colon. That is a label introducing what
+ *     follows ("Contact:", "The PDF file includes:").
+ *   - No table row: no wide gap in the line, and at most one in a heading
+ *     line (after a section number, "4.2   Power absorption…").
+ *   - Horizontal heading lines. A diagonal watermark ("For Peer Review") has
+ *     a box far taller than its type.
+ *   - Real fonts, not an OCR text layer, whose sizes are too noisy to mark
+ *     headings (see `processCurrentLinesAsItem`).
+ */
+function headingEndsBeforeBodyLine(
+    line: PageLine,
+    prevLine: PageLine,
+    currentLines: PageLine[],
+    columnThresholds: ColumnThresholds,
+    pageThresholds: PageThresholds,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    bodyAllCaps: boolean
+): boolean {
+    if (!bodyStyles || bodyStyles.length === 0 || currentLines.length === 0) return false;
+    if (isOcrTextLayerFont(bodyStyles[0].font)) return false;
+    if (!hasStyleRuns(line) || !currentLines.every(hasStyleRuns)) return false;
+    if (!currentLines.every(l => !l.fontSize || bboxHeight(l.bbox) <= 2.5 * l.fontSize)) return false;
+    if (countWideGaps(line) > 0 || currentLines.some(l => countWideGaps(l) >= 2)) return false;
+    if (/^[\p{Ll}([]/u.test(line.text.trim())) return false;
+
+    const lineStyle = extractLineStyle(line);
+    if (!lineStyle || !matchesBodyStyle(majorityLineStyle(line, lineStyle), bodyStyles)) return false;
+    const normalGap = columnThresholds.medianGap + Math.max(1, 0.1 * pageThresholds.medianHeight);
+    if (
+        sameTypeface(line, prevLine) &&
+        !matchesBodyStyle(lineStyle, bodyStyles) &&
+        line.bbox.t - prevLine.bbox.b <= normalGap
+    ) {
+        return false;
+    }
+
+    const measure = columnThresholds.rightEdgeMode - columnThresholds.leftEdgeMode;
+    const shortfall = columnThresholds.rightEdgeMode - prevLine.bbox.r;
+    if (shortfall <= Math.max(pageThresholds.medianHeight, 0.03 * measure)) return false;
+
+    const headingText = joinLines(currentLines.map(l => l.text), settings.removeHyphenation);
+    if (headingText.length >= settings.maxHeaderLength || /[:：]\s*$/u.test(headingText)) return false;
+    if (!currentLines.every(l => isHeaderStyle(l, bodyStyles, settings, null, bodyAllCaps, headingText))) {
+        return false;
+    }
+    const joinedText = joinLines([...currentLines, line].map(l => l.text), settings.removeHyphenation);
+    if (extractLineStyle(currentLines[0])?.italic && looksLikeJournalCitation(joinedText)) return false;
+    return !isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps, joinedText);
+}
+
 /**
  * Determine if current line should start a new item
  */
@@ -1855,6 +1980,18 @@ function startNewItem(
         prevIsLocalHeader &&
         !sameTypeface(line, prevLine) &&
         opensWithHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps)
+    ) {
+        return true;
+    }
+
+    // A heading followed by a body line with no gap, indent or early line end
+    // between them (see `headingEndsBeforeBodyLine`).
+    if (
+        prevIsLocalHeader &&
+        !isLocalHeader &&
+        headingEndsBeforeBodyLine(
+            line, prevLine, currentLines, columnThresholds, pageThresholds, bodyStyles, settings, bodyAllCaps
+        )
     ) {
         return true;
     }
