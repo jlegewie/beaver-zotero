@@ -30,6 +30,7 @@ import { prepareCitationRenderContext } from '../../utils/citationRenderContext'
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { exportWithFeedback } from '../../utils/fileExportFeedback';
 import { getHost } from '@beaver/agent-ui/host';
+import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -174,11 +175,18 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
 
         if (host.documentExport?.exportResponseToFile) {
-            items.splice(noteWriter ? 3 : 1, 0, {
-                label: 'Export to Word…',
-                onClick: () => exportToWord(),
-                disabled: isResolvingCitations
-            });
+            items.splice(noteWriter ? 3 : 1, 0,
+                {
+                    label: 'Export to Word…',
+                    onClick: () => exportToFile('docx'),
+                    disabled: isResolvingCitations
+                },
+                {
+                    label: 'Export to PDF…',
+                    onClick: () => exportToFile('pdf'),
+                    disabled: isResolvingCitations
+                },
+            );
         }
 
         if (host.config?.isDevelopment() ?? false) {
@@ -263,15 +271,16 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     /**
      * Export the response's final answer (its whole resume chain) to a Word
-     * document. The host asks where to save and formats citations in the
-     * citation style setting.
+     * document or PDF. The host asks where to save and formats citations in
+     * the citation style setting.
      */
-    const exportToWord = async () => {
+    const exportToFile = async (format: FileExportFormat) => {
         const documentExport = getHost().documentExport;
         const exportResponse = documentExport?.exportResponseToFile;
         if (!exportResponse) return;
         await exportWithFeedback(
-            () => exportResponse({ runs: chainRuns, format: 'docx', content: 'final' }),
+            format,
+            () => exportResponse({ runs: chainRuns, format, content: 'final' }),
             addPopupMessage,
             documentExport.revealExportedFile,
         );

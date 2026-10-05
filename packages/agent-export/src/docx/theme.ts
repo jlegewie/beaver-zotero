@@ -20,6 +20,7 @@ import {
     UnderlineType,
     type IStylesOptions,
 } from 'docx';
+import { paperSize, type PaperSizeSetting } from '../page';
 
 export interface DocxTheme {
     fonts: {
@@ -78,7 +79,7 @@ export interface DocxTheme {
         /** Inches on every side. */
         margin: number;
         /** `auto` picks US Letter for US/Canadian English citation locales, A4 otherwise. */
-        size: 'auto' | 'letter' | 'a4';
+        size: PaperSizeSetting;
         pageNumbers: boolean;
     };
 }
@@ -297,8 +298,7 @@ export function tableBorders(theme: DocxTheme = DOCX_THEME) {
 
 /** Page size and margins for a citation locale. */
 export function pageProperties(locale: string, theme: DocxTheme = DOCX_THEME) {
-    const letter = theme.page.size === 'letter'
-        || (theme.page.size === 'auto' && /^en-(US|CA)$/i.test(locale));
+    const letter = paperSize(locale, theme.page.size) === 'letter';
     const margin = inches(theme.page.margin);
     return {
         size: letter ? { width: 12240, height: 15840 } : { width: 11906, height: 16838 },

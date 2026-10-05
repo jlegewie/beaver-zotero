@@ -46,7 +46,9 @@ import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { DownloadIcon } from '@beaver/agent-ui/icons';
+import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 import { exportNoteToFile, revealExportedFile } from '../../fileExport';
 import { exportWithFeedback } from '../../../../utils/fileExportFeedback';
 import { addPopupMessageAtom } from '../../../../utils/popupMessageUtils';
@@ -210,17 +212,18 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         else notifyReferenceUnavailable('item', 'library_unavailable');
     }, [openNoteTarget]);
 
-    // A note the agent wrote can be exported as it wrote it, with its citations.
-    const canExportNote = row.actionType === 'create_note';
+    // A note row is an artifact: exported as the agent wrote it, with its citations.
+    const isNoteArtifact = row.actionType === 'create_note';
     const [isExporting, setIsExporting] = useState(false);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
-    const handleExportNote = useCallback(async () => {
+    const handleExportNote = useCallback(async (format: FileExportFormat) => {
         if (isExporting) return;
         setIsExporting(true);
         try {
             await exportWithFeedback(
-                () => exportNoteToFile({ runId, toolCallId: row.toolcallId, format: 'docx' }),
+                format,
+                () => exportNoteToFile({ runId, toolCallId: row.toolcallId, format }),
                 addPopupMessage,
                 revealExportedFile,
             );
@@ -303,19 +306,28 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 <div className="flex-1" />
 
                 <div className="display-flex flex-row items-center gap-2 mr-3 mt-010" style={{ flexShrink: 0 }}>
-                    {canExportNote && !isBusy && (
-                        <Tooltip content="Export to Word" showArrow singleLine>
-                            <IconButton
-                                icon={DownloadIcon}
-                                variant="ghost-secondary"
-                                iconClassName="font-color-secondary scale-10"
-                                onClick={handleExportNote}
-                                loading={isExporting}
-                                disabled={isExporting}
-                                ariaLabel="Export to Word"
-                            />
-                        </Tooltip>
-                    )}
+                    {isNoteArtifact && !isBusy && (isExporting ? (
+                        <IconButton
+                            icon={DownloadIcon}
+                            variant="ghost-secondary"
+                            iconClassName="font-color-secondary scale-10"
+                            onClick={() => {}}
+                            loading
+                            ariaLabel="Exporting"
+                        />
+                    ) : (
+                        <MenuButton
+                            icon={DownloadIcon}
+                            variant="ghost-secondary"
+                            iconClassName="font-color-secondary scale-10"
+                            menuItems={[
+                                { label: 'Export to Word…', onClick: () => handleExportNote('docx') },
+                                { label: 'Export to PDF…', onClick: () => handleExportNote('pdf') },
+                            ]}
+                            tooltipContent="Export"
+                            ariaLabel="Export"
+                        />
+                    ))}
 
                     {(openNoteTarget || revealReference) && !isBusy && (
                         <Tooltip content={openNoteTarget ? 'Open note' : 'Show in library'} showArrow singleLine>
@@ -332,7 +344,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
 
                     {/* A note row is an artifact to open or export; deleting it stays
                         on the note's own card in the response, away from those. */}
-                    {!canExportNote && (config.showUndo || (isBusy && activeButton === 'undo')) && (
+                    {!isNoteArtifact && (config.showUndo || (isBusy && activeButton === 'undo')) && (
                         <Tooltip content="Undo" showArrow singleLine>
                             <IconButton
                                 icon={UndoIcon}

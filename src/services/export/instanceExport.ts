@@ -4,17 +4,19 @@
  * A renderer builds the `ExportSource` from its run history and citation
  * state and passes it here as plain data; everything else happens in this
  * realm: parsing, resolving and formatting citations against the library,
- * writing the file, and the save dialog (parented to the requesting window).
+ * writing the file (a PDF is printed from the HTML writer's page), and the
+ * save dialog (parented to the requesting window).
  */
 
 import type { ExportSource, ExportWarning } from '@beaver/agent-export/types';
-import type { WriteDocxResult } from '@beaver/agent-export/runtime';
+import type { WriteDocxResult, WriteHtmlResult } from '@beaver/agent-export/runtime';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { loadExportRuntime, type ExportRuntime } from './exportRuntime';
 import { formatExportCitations } from './exportCitations';
+import { printHtmlToPdf } from './printPdf';
 import { CitationService } from '../CitationService';
 
-export type ExportFormat = 'docx';
+export type ExportFormat = 'docx' | 'pdf';
 
 export interface ExportRequest {
     source: ExportSource;
@@ -23,20 +25,28 @@ export interface ExportRequest {
     styleId?: string;
     /** CSL locale; defaults to the citation locale preference. */
     locale?: string;
-    /** Write citations as Zotero fields (default true). */
+    /** Write citations as Zotero fields (Word; default true). */
     liveCitations?: boolean;
-    /** Link item references to the library (default true). */
+    /**
+     * Link item references to the library (default: true for Word, false for
+     * PDF, where `zotero://` links are of little use).
+     */
     linkItems?: boolean;
     /** Write to this path without a save dialog (development endpoints). */
     path?: string;
+    /** Return the HTML a PDF was printed from (development endpoints). */
+    includeHtml?: boolean;
 }
 
+type ExportStats = (WriteDocxResult['stats'] | WriteHtmlResult['stats']) & { clusters: number; bibliographyEntries: number };
+
 export type ExportResult =
-    | { status: 'saved'; path: string; warnings: ExportWarning[]; stats: WriteDocxResult['stats'] & { clusters: number; bibliographyEntries: number } }
+    | { status: 'saved'; path: string; warnings: ExportWarning[]; stats: ExportStats; html?: string }
     | { status: 'canceled' };
 
 const FORMATS: Record<ExportFormat, { extension: string; filterTitle: string }> = {
     docx: { extension: 'docx', filterTitle: 'Word Document' },
+    pdf: { extension: 'pdf', filterTitle: 'PDF' },
 };
 
 function windowUnavailable(): Error {
@@ -110,23 +120,34 @@ export class InstanceExport {
         const started = Date.now();
         const runtime = this.getRuntime();
         const doc = runtime.parseExportSource(request.source);
-        const liveCitations = request.liveCitations ?? true;
+        const liveCitations = request.format === 'docx' && (request.liveCitations ?? true);
         const { citations, warnings } = await formatExportCitations(doc, request.source.citations, citationService, {
             styleId: request.styleId,
             locale: request.locale,
             liveCitations,
         });
-        const written = await runtime.writeDocx({
-            doc,
-            citations,
-            options: {
-                liveCitations,
-                linkItems: request.linkItems ?? true,
-                bibliographyTitle: citations.styleClass === 'note' ? 'Bibliography' : 'References',
-            },
-        });
-        await IOUtils.write(path, written.bytes);
-        logger(`InstanceExport: wrote ${request.format} (${written.bytes.length} bytes, ${doc.clusters.length} citations) in ${Date.now() - started} ms`, 3);
+        const bibliographyTitle = citations.styleClass === 'note' ? 'Bibliography' : 'References';
+        let written: { warnings: ExportWarning[]; stats: WriteDocxResult['stats'] | WriteHtmlResult['stats'] };
+        let html: string | undefined;
+        if (request.format === 'pdf') {
+            const result = runtime.writeHtml({
+                doc,
+                citations,
+                options: { linkItems: request.linkItems ?? false, bibliographyTitle, notesTitle: 'Notes' },
+            });
+            await printHtmlToPdf(result.html, path, { title: doc.title.trim() || 'Beaver export', page: result.page });
+            written = result;
+            if (request.includeHtml) html = result.html;
+        } else {
+            const result = await runtime.writeDocx({
+                doc,
+                citations,
+                options: { liveCitations, linkItems: request.linkItems ?? true, bibliographyTitle },
+            });
+            await IOUtils.write(path, result.bytes);
+            written = result;
+        }
+        logger(`InstanceExport: wrote ${request.format} (${doc.clusters.length} citations) in ${Date.now() - started} ms`, 3);
 
         return {
             status: 'saved',
@@ -137,6 +158,7 @@ export class InstanceExport {
                 clusters: doc.clusters.length,
                 bibliographyEntries: citations.bibliography?.entries.length ?? 0,
             },
+            ...(html !== undefined ? { html } : {}),
         };
     }
 

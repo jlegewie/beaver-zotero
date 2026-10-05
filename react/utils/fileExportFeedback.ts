@@ -1,7 +1,13 @@
-import type { FileExportResult } from '@beaver/agent-ui/host/types';
+import type { FileExportFormat, FileExportResult } from '@beaver/agent-ui/host/types';
 import type { PopupMessage } from '../types/popupMessage';
 
 type Notify = (message: Omit<PopupMessage, 'id'>) => void;
+
+/** How a format is named to the user. */
+export const FILE_EXPORT_FORMAT_NAMES: Record<FileExportFormat, string> = {
+    docx: 'Word',
+    pdf: 'PDF',
+};
 
 /**
  * Run a file export and tell the user how it went: a confirmation naming the
@@ -9,6 +15,7 @@ type Notify = (message: Omit<PopupMessage, 'id'>) => void;
  * files), nothing when the save dialog was canceled, an error otherwise.
  */
 export async function exportWithFeedback(
+    format: FileExportFormat,
     exportFile: () => Promise<FileExportResult>,
     notify: Notify,
     reveal?: (path: string) => void,
@@ -18,7 +25,7 @@ export async function exportWithFeedback(
         if (result.status !== 'saved') return;
         notify({
             type: 'info',
-            title: 'Exported to Word',
+            title: `Exported to ${FILE_EXPORT_FORMAT_NAMES[format]}`,
             text: [result.fileName, ...result.warnings].join(' — '),
             ...(reveal ? { button: { text: 'Show File', onClick: () => reveal(result.path) } } : {}),
         });

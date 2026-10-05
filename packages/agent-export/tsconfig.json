@@ -46,6 +46,10 @@
     "./src/docx/writeDocx.ts",
     "./src/docx/zoteroFields.ts",
     "./src/docx/theme.ts",
+    "./src/html/writeHtml.ts",
+    "./src/html/escape.ts",
+    "./src/html/theme.ts",
+    "./src/page.ts",
     "./src/math/latexToOmml.ts",
     "./src/math/mathmlToOmml.ts",
     "./src/math/xml.ts"

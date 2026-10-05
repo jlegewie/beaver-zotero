@@ -6,6 +6,7 @@ describe('exportWithFeedback', () => {
         const notify = vi.fn();
         const reveal = vi.fn();
         await exportWithFeedback(
+            'docx',
             async () => ({ status: 'saved', path: '/tmp/a.docx', fileName: 'a.docx', warnings: ['1 equation exported as LaTeX text.'] }),
             notify,
             reveal,
@@ -19,11 +20,17 @@ describe('exportWithFeedback', () => {
         expect(reveal).toHaveBeenCalledWith('/tmp/a.docx');
     });
 
+    it('names the format the file was exported to', async () => {
+        const notify = vi.fn();
+        await exportWithFeedback('pdf', async () => ({ status: 'saved', path: '/tmp/a.pdf', fileName: 'a.pdf', warnings: [] }), notify);
+        expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Exported to PDF', text: 'a.pdf' }));
+    });
+
     it('says nothing when the save dialog is canceled and reports failures', async () => {
         const notify = vi.fn();
-        await exportWithFeedback(async () => ({ status: 'canceled' }), notify);
+        await exportWithFeedback('pdf', async () => ({ status: 'canceled' }), notify);
         expect(notify).not.toHaveBeenCalled();
-        await exportWithFeedback(async () => { throw new Error('Disk full'); }, notify);
+        await exportWithFeedback('pdf', async () => { throw new Error('Disk full'); }, notify);
         expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', text: 'Disk full' }));
     });
 });

@@ -313,7 +313,7 @@ export interface ExternalFileCitationExportRequest {
 }
 
 /** File formats a response can be exported to. */
-export type FileExportFormat = 'docx';
+export type FileExportFormat = 'docx' | 'pdf';
 
 /** The final answer only, or the full response with the agent's tool activity. */
 export type FileExportContent = 'final' | 'full';

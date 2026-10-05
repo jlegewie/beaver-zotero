@@ -238,6 +238,15 @@ export interface DocxExportOptions {
     bibliographyTitle: string;
 }
 
+export interface HtmlExportOptions {
+    /** Link item references to `zotero://select/...` (only useful where Zotero is installed). */
+    linkItems: boolean;
+    /** Heading for the bibliography. */
+    bibliographyTitle: string;
+    /** Heading for the endnotes (note-style citations and markdown footnotes). */
+    notesTitle: string;
+}
+
 /** A non-fatal problem worth telling the user about. */
 export interface ExportWarning {
     code: 'unresolved_citations' | 'math_as_text' | 'style_unavailable';

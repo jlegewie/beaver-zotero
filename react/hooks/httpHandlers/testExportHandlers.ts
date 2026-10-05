@@ -1,10 +1,11 @@
 /**
  * Dev-only window command behind `/beaver/test/export`: export a response of
  * the thread open in this window to a file, through the same source builder
- * and exporter the "Export to Word…" menu uses, without the save dialog.
+ * and exporter the "Export to Word…" / "Export to PDF…" menu items use,
+ * without the save dialog.
  *
- * Request: `{ path, runId?, content?: 'final' | 'full', styleId?, locale?,
- * liveCitations?, linkItems?, includeSource? }`. `runId` names any run of the response (default: the
+ * Request: `{ path, format?: 'docx' | 'pdf', runId?, content?: 'final' | 'full',
+ * styleId?, locale?, liveCitations?, linkItems?, includeSource?, includeHtml? }`. `runId` names any run of the response (default: the
  * thread's last run); the whole resume chain is exported. Returns the
  * exporter's result plus the exported run ids, and the source when
  * `includeSource` is set.
@@ -26,12 +27,13 @@ export async function handleTestExportHttpRequest(request: any): Promise<any> {
     const source = await buildResponseExportSource(chain.length > 0 ? chain : runs.filter(run => run.id === runId), content);
     const result = await Zotero.Beaver.exporter.run({
         source,
-        format: 'docx',
+        format: request.format === 'pdf' ? 'pdf' : 'docx',
         path: request.path,
         styleId: request.styleId,
         locale: request.locale,
         liveCitations: request.liveCitations,
         linkItems: request.linkItems,
+        includeHtml: request.includeHtml,
     }, { windowId: getWindowRuntime().id });
     return {
         ...result,
