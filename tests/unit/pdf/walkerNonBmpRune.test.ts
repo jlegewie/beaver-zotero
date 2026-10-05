@@ -213,6 +213,23 @@ describe("StructuredText.walk rune decoding", () => {
         expect(onChar.length).toBe(4);
     });
 
+    it("emits onCharFont before every onChar when the walker defines it", () => {
+        const api = makeDocumentApi(makeFakeLibMuPdf([0x41, 0x20, 0x42]));
+        const doc = api.Document.openDocument(new Uint8Array(8));
+        const page = doc.loadPage(0);
+        const stext = page.toStructuredText("preserve-whitespace");
+        const events: string[] = [];
+        stext.walk({
+            onCharFont: (fontPtr, size) => events.push(`font:${fontPtr}:${size}`),
+            onChar: (rune) => events.push(`char:${rune}`),
+        });
+        stext.destroy();
+        page.destroy();
+        doc.destroy();
+        const font = `font:${FONT_PTR}:12`;
+        expect(events).toEqual([font, "char:A", font, "char: ", font, "char:B"]);
+    });
+
     it("emits onLineFont exactly once per non-empty line", () => {
         const { lineFonts } = walkOneLine([0x41, 0x42, 0x43]);
         expect(lineFonts.length).toBe(1);

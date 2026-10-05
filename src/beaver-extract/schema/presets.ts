@@ -15,13 +15,19 @@ export interface PdfExtractionPreset {
      * control-character replacement on the final result.
      */
     textRepair: boolean;
+    /**
+     * Record per-glyph style runs in the detailed walk (`RawLine.styleRuns`),
+     * so heading detection judges a line by its majority styling rather than
+     * by its first glyph.
+     */
+    styleRuns: boolean;
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */
     idScheme: ExtractIdScheme;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, idScheme: "document" },
-    "5": { schemaVersion: "5", textRepair: true, idScheme: "page" },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, idScheme: "document" },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, idScheme: "page" },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

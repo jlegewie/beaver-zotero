@@ -292,6 +292,8 @@ class PageWalkCache {
         private readonly fontApi: FontApi | undefined,
         /** Text repair of the op's schema preset; applies to every walk. */
         private readonly textRepair: boolean,
+        /** Whether detailed walks record per-glyph style runs. */
+        private readonly styleRuns: boolean,
     ) {}
 
     getPlain(pageIndex: number, includeImages: boolean): RawPageData {
@@ -315,6 +317,7 @@ class PageWalkCache {
                 includeImages,
                 this.fontApi,
                 this.textRepair,
+                this.styleRuns,
             );
             this.detailed.set(pageIndex, page);
         }
@@ -1427,7 +1430,7 @@ export async function opExtract(
         // spread of pages and the pipeline walks them again; sharing the
         // walk here keeps an expensive-to-walk page from being processed
         // twice (gate + extraction).
-        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair);
+        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair, preset.styleRuns);
 
         if (opts.checkTextLayer) {
             // Run the gate over the SAME walk the pipeline will reuse —
@@ -1547,7 +1550,7 @@ export async function opStructuredExtractWithDebug(
         assertDocumentHasPages(pageCount);
         const pageLabels = collectPageLabels(doc);
         const fontApi = (await ensureApi()).Font;
-        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair);
+        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair, preset.styleRuns);
 
         if (opts.checkTextLayer) {
             const ocrProvider = ocrGateProvider(pageCache, pageCount, true);
@@ -1762,7 +1765,13 @@ export async function opAnalyzeOCRNeeds(
         const pageCount = resolveTruePageCount(doc);
         assertDocumentHasPages(pageCount);
         const fontApi = (await ensureApi()).Font;
-        const pageCache = new PageWalkCache(doc, fontApi, CURRENT_PDF_EXTRACTION_PRESET.textRepair);
+        const pageCache = new PageWalkCache(
+            doc,
+            fontApi,
+            CURRENT_PDF_EXTRACTION_PRESET.textRepair,
+            // OCR analysis reads text only.
+            false,
+        );
         const analyzer = new DocumentAnalyzer(ocrGateProvider(pageCache, pageCount, true));
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };

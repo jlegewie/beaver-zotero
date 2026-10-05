@@ -716,6 +716,7 @@ function extractRawPageDetailedOnce(
     fontApi?: FontApi,
     recoverUnmappedGlyphs?: boolean,
     textRepair = CURRENT_PDF_EXTRACTION_PRESET.textRepair,
+    styleRuns = CURRENT_PDF_EXTRACTION_PRESET.styleRuns,
 ): RawPageDataDetailed {
     const page = doc.loadPage(pageIndex);
     try {
@@ -769,8 +770,47 @@ function extractRawPageDetailedOnce(
             return entry;
         };
 
+        // Per-glyph style runs (`RawLine.styleRuns`). Needs `fontApi` for the
+        // font names. Whitespace glyphs neither count nor split a run.
+        const captureRuns = styleRuns && !!fontApi;
+        let glyphFontPtr = 0;
+        let glyphSize = 0;
+        let glyphExactSize = 0;
+        let runFontPtr = 0;
+        let runs: { fontPtr: number; size: number; exactSize: number; chars: number; letters: number }[] = [];
+        const onCharFont = (fontPtr: number, size: number) => {
+            glyphFontPtr = typeof fontPtr === "number" ? fontPtr : 0;
+            glyphExactSize = typeof size === "number" ? size : 0;
+            glyphSize = Math.trunc(glyphExactSize);
+        };
+        const countRunGlyph = (rune: string) => {
+            if (!/\S/u.test(rune)) return;
+            let run = runs[runs.length - 1];
+            if (!run || runFontPtr !== glyphFontPtr || run.size !== glyphSize) {
+                run = { fontPtr: glyphFontPtr, size: glyphSize, exactSize: glyphExactSize, chars: 0, letters: 0 };
+                runs.push(run);
+                runFontPtr = glyphFontPtr;
+            }
+            run.chars++;
+            if (/\p{L}/u.test(rune)) run.letters++;
+        };
+        const flushRuns = (line: RawLineDetailed) => {
+            if (!captureRuns) return;
+            line.styleRuns = runs.map((r) => {
+                const f = lookupFont(r.fontPtr);
+                return {
+                    font: { name: f.name, family: f.family, weight: f.weight, style: f.style, size: r.size },
+                    exactSize: r.exactSize,
+                    chars: r.chars,
+                    letters: r.letters,
+                };
+            });
+            runs = [];
+        };
+
         try {
             stext.walk({
+                ...(captureRuns ? { onCharFont } : {}),
                 beginTextBlock: (bbox) => {
                     currentBlock = {
                         type: "text",
@@ -785,6 +825,7 @@ function extractRawPageDetailedOnce(
                     }
                 },
                 beginLine: (bbox, wmode, dir) => {
+                    runs = [];
                     currentLine = {
                         wmode,
                         bbox: tupleToBBox(bbox),
@@ -807,6 +848,7 @@ function extractRawPageDetailedOnce(
                     } as RawLineDetailed;
                 },
                 endLine: () => {
+                    if (currentLine) flushRuns(currentLine);
                     if (currentLine && currentBlock) {
                         if (textRepair) maskDetailedLineTerminators(currentLine);
                         currentBlock.lines.push(currentLine);
@@ -833,6 +875,7 @@ function extractRawPageDetailedOnce(
                 },
                 onChar: (rune, quad) => {
                     if (!currentLine) return;
+                    if (captureRuns) countRunGlyph(rune);
                     currentLine.text += rune;
                     currentLine.chars.push({
                         c: rune,
@@ -1359,10 +1402,11 @@ export function extractRawPageDetailedFromDoc(
     includeImages: boolean,
     fontApi?: FontApi,
     textRepair?: boolean,
+    styleRuns?: boolean,
 ): RawPageDataDetailed {
-    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair);
+    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair, styleRuns);
     if (!isUnmappedTextLayer(page)) return page;
-    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair);
+    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair, styleRuns);
     if (!recoveredTextIsAcceptable(recovered)) return page;
     postLog("info", `Recovered unmapped text layer on page ${pageIndex}`);
     return recovered;

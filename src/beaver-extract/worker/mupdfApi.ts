@@ -133,6 +133,11 @@ export interface StructuredTextWalker {
      */
     onLineFont?(fontPtr: number, size: number): void;
     endLine?(): void;
+    /**
+     * Fires before each `onChar` with that glyph's font pointer and size.
+     * Opt-in: defining it adds two WASM calls per glyph.
+     */
+    onCharFont?(fontPtr: number, size: number): void;
     onChar?(rune: string, quad: QuadTuple): void;
     onImageBlock?(bbox: RectTuple, transform: unknown, image: unknown): void;
 }
@@ -278,8 +283,8 @@ export interface ColorSpacePalette {
 
 /**
  * Direct accessors over a font pointer produced by the structured-text
- * walker. The walker passes `fontPtr` (a wasm pointer) to its `onChar`
- * callback; consumers that want family/weight/style without parsing the
+ * walker. The walker passes `fontPtr` (a wasm pointer) to its `onLineFont`
+ * and `onCharFont` callbacks; consumers that want family/weight/style without parsing the
  * full JSON serializer use these wrappers.
  */
 export interface FontApi {
@@ -1210,10 +1215,9 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                         }
                         if (walker.onChar || walker.onLineFont) {
                             let ch = libmupdf._wasm_stext_line_get_first_char(line);
-                            // Font/size are line-level in every consumer
-                            // today, so we read them only off the first
-                            // char and skip the per-char WASM trampolines
-                            // for the rest of the line.
+                            // The line font is read off the first char only;
+                            // per-char font/size cost two extra WASM calls per
+                            // glyph and are fetched only for `onCharFont`.
                             if (ch && walker.onLineFont) {
                                 const fontPtr = libmupdf._wasm_stext_char_get_font(ch);
                                 const size = libmupdf._wasm_stext_char_get_size(ch);
@@ -1230,6 +1234,12 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                                     // never reaches the wire. See its docstring.
                                     const rune = sanitizeRune(runeCode);
                                     const quad = fromQuad(libmupdf._wasm_stext_char_get_quad(ch));
+                                    if (walker.onCharFont) {
+                                        walker.onCharFont(
+                                            libmupdf._wasm_stext_char_get_font(ch),
+                                            libmupdf._wasm_stext_char_get_size(ch),
+                                        );
+                                    }
                                     walker.onChar(rune, quad);
                                     ch = libmupdf._wasm_stext_char_get_next(ch);
                                 }

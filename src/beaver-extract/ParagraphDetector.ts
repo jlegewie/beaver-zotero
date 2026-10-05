@@ -16,7 +16,7 @@
  */
 
 import type { PageLine, PageLineResult, ColumnLineResult } from "./LineDetector";
-import type { BoundingBox, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
+import type { BoundingBox, RawStyleRun, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
 import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
@@ -766,6 +766,34 @@ function stylesEqual(a: TextStyle | null, b: TextStyle | null): boolean {
 }
 
 /**
+ * Whether two lines are set in the same typeface: same font, weight and
+ * slant at the same size. Reported sizes are truncated (9.96 → 9, 10.0 →
+ * 10), so lines in one face can read as two sizes; the opening runs' exact
+ * sizes settle it when style runs are recorded (within 0.5pt), otherwise
+ * truncated sizes within 1pt count as the same.
+ */
+function sameTypeface(a: PageLine, b: PageLine): boolean {
+    const sa = extractLineStyle(a);
+    const sb = extractLineStyle(b);
+    if (!sa || !sb) return false;
+    if (sa.font !== sb.font || sa.bold !== sb.bold || sa.italic !== sb.italic) return false;
+    const exactA = openingExactSize(a);
+    const exactB = openingExactSize(b);
+    if (exactA !== null && exactB !== null) return Math.abs(exactA - exactB) < 0.5;
+    return Math.abs(sa.size - sb.size) <= 1;
+}
+
+/** Exact size of the line's first style run, when recorded. */
+function openingExactSize(line: PageLine): number | null {
+    for (const span of line.spans) {
+        for (const run of span.styleRuns ?? []) {
+            if (run.chars > 0) return run.exactSize ?? null;
+        }
+    }
+    return null;
+}
+
+/**
  * Check if a line's style matches one of the document's body styles.
  *
  * Wider than `stylesEqual` because the detailed mupdf walk does not always
@@ -1010,7 +1038,121 @@ export function looksLikeFragmentedCJKBody(
 }
 
 /**
- * Check if a line should be classified as a header
+ * Share of a line's visible glyphs that bold, italic or a size must reach to
+ * describe the line in `majorityLineStyle`.
+ */
+const MAJORITY_STYLE_SHARE = 0.75;
+
+/**
+ * Math fonts (TeX Computer Modern math, AMS, MathTime, txfonts, Cambria/STIX
+ * Math, Symbol). Glyphs set in them don't vote in `majorityLineStyle`: an
+ * italic variable inside a heading ("… for the k = const case") says
+ * nothing about the heading's own styling.
+ */
+const MATH_FONT_RE =
+    /^(?:CMMI|CMSY|CMEX|CMBSY|MSAM|MSBM|EUFM|EUSM|RSFS|MTMI|MTSY|MTEX|RMTMI|RBLMI|rtxmi|rtxsy|txmi|txsy|txex|Symbol|MT-Extra|Euclid|ESint|wasy|stmary|TeX_CM_Maths|[^,]*Math)/i;
+
+/**
+ * Majority styling of a line, from its per-glyph style runs.
+ *
+ * MuPDF reports a line's font from its first glyph, so a body line that
+ * opens with a bold run-in label ("Abstract: A growing literature…") or an
+ * italic word reads as bold or italic throughout. This describes the line by
+ * the styling most of its glyphs carry instead: bold / italic only when at
+ * least `MAJORITY_STYLE_SHARE` of the visible glyphs are, the size reached by
+ * that share, and the font with the most glyphs.
+ *
+ * Not every glyph votes:
+ *   - short letterless runs at either end (bullets, footnote and affiliation
+ *     markers, trailing punctuation);
+ *   - math-font glyphs (`MATH_FONT_RE`);
+ *   - size differences within one font: each run counts at its font's
+ *     largest size on the line, so fake small caps ("I. I" + "NTRODUCTION"
+ *     set smaller) and superscripts don't shrink the line.
+ *
+ * Returns `lineStyle` itself when the line has no style runs or its majority
+ * styling agrees with it.
+ */
+function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
+    const runs: RawStyleRun[] = [];
+    for (const span of line.spans) {
+        for (const run of span.styleRuns ?? []) {
+            if (run.chars > 0) runs.push(run);
+        }
+    }
+    if (runs.length === 0) return lineStyle;
+
+    let start = 0;
+    let end = runs.length;
+    while (end - start > 1 && runs[start].letters === 0 && runs[start].chars <= 3) start++;
+    while (end - start > 1 && runs[end - 1].letters === 0 && runs[end - 1].chars <= 3) end--;
+    const voters = runs
+        .slice(start, end)
+        .filter(run => !MATH_FONT_RE.test(baseFontName(run.font.name)));
+    if (voters.length === 0) return lineStyle;
+
+    const fontMaxSize = new Map<string, number>();
+    for (const run of voters) {
+        fontMaxSize.set(run.font.name, Math.max(fontMaxSize.get(run.font.name) ?? 0, run.font.size));
+    }
+
+    let total = 0;
+    let boldChars = 0;
+    let italicChars = 0;
+    const charsBySize = new Map<number, number>();
+    const charsByFont = new Map<string, number>();
+    for (const run of voters) {
+        const style = extractSpanStyle(
+            run.font.name || "unknown",
+            run.font.weight,
+            run.font.style,
+            fontMaxSize.get(run.font.name)
+        );
+        total += run.chars;
+        if (style.bold) boldChars += run.chars;
+        if (style.italic) italicChars += run.chars;
+        charsBySize.set(style.size, (charsBySize.get(style.size) ?? 0) + run.chars);
+        charsByFont.set(style.font, (charsByFont.get(style.font) ?? 0) + run.chars);
+    }
+
+    // Largest size that at least MAJORITY_STYLE_SHARE of the glyphs reach.
+    const sizes = [...charsBySize.keys()].sort((a, b) => b - a);
+    let size = sizes[sizes.length - 1];
+    let reached = 0;
+    for (const s of sizes) {
+        reached += charsBySize.get(s)!;
+        if (reached / total >= MAJORITY_STYLE_SHARE) {
+            size = s;
+            break;
+        }
+    }
+    let font = lineStyle.font;
+    let fontChars = -1;
+    for (const [name, chars] of charsByFont) {
+        if (chars > fontChars) {
+            fontChars = chars;
+            font = name;
+        }
+    }
+
+    const majority: TextStyle = {
+        size,
+        font,
+        bold: boldChars / total >= MAJORITY_STYLE_SHARE,
+        italic: italicChars / total >= MAJORITY_STYLE_SHARE,
+    };
+    return stylesEqual(majority, lineStyle) ? lineStyle : majority;
+}
+
+/**
+ * Check if a line should be classified as a header.
+ *
+ * The heading rules run on the line's reported (first-glyph) style. When the
+ * line's majority styling differs (see `majorityLineStyle`), the rules must
+ * also hold for that styling: a cue carried by the opening word alone — a
+ * bold "Keywords:", an italic "Note:" — does not make the line a heading.
+ * The majority styling only ever vetoes; it never promotes a line the
+ * first-glyph style rejects.
  */
 function isHeaderStyle(
     line: PageLine,
@@ -1020,10 +1162,204 @@ function isHeaderStyle(
     bodyAllCaps: boolean = false,
     phraseTextOverride: string | null = null
 ): boolean {
-    if (!bodyStyles || bodyStyles.length === 0) return false;
-
     const lineStyle = extractLineStyle(line);
     if (!lineStyle) return false;
+    // Item-level only (the joined item text): boundaries are decided per line
+    // and stay as they are; a run-in label item just isn't labelled a heading.
+    if (phraseTextOverride !== null && looksLikeRunInLabel(phraseTextOverride)) {
+        return false;
+    }
+    if (!matchesHeaderRules(
+        line, lineStyle, true, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
+    )) {
+        return false;
+    }
+    const majority = majorityLineStyle(line, lineStyle);
+    if (majority === lineStyle) return true;
+    if (matchesHeaderRules(
+        line, majority, false, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
+    )) {
+        return true;
+    }
+    return isCJKNumberedHeading(line, bodyStyles);
+}
+
+/**
+ * Front-matter and back-matter labels that open a run-in line: "Keywords: …",
+ * "Received: 5 May 2020", "Conflict of interest: None", "To cite this
+ * article: …". Set as a bold or italic label followed by plain text, or
+ * entirely in a heading face, they read as headings to the style rules.
+ */
+const RUN_IN_LABELS = [
+    "abstract",
+    "e?-?issn",
+    "doi",
+    "received",
+    "accepted",
+    "revised",
+    "published(?:\\s+online)?",
+    "available\\s+online",
+    "article\\s+history",
+    "(?:handling\\s+|academic\\s+)?editors?(?:\\s*\\(s\\))?",
+    "copyright",
+    "citation",
+    "(?:to\\s+)?cite\\s+this\\s+article",
+    "suggested\\s+citation",
+    "correspondence",
+    "corresponding\\s+authors?",
+    "e-?mail(?:\\s+address(?:es)?)?",
+    "funding(?:\\s+information)?",
+    "conflicts?\\s+of\\s+interests?",
+    "competing\\s+interests?",
+    "declarations?\\s+of\\s+(?:competing|conflicting)\\s+interests?",
+    "abbreviations",
+    "highlights",
+    "data\\s+availability(?:\\s+statement)?",
+    "level\\s+of\\s+evidence",
+    "ethics\\s+approval",
+    "jel(?:\\s+(?:classifications?|codes?))?",
+    "notes?",
+    "sources?",
+];
+const RUN_IN_LABEL_RE = new RegExp(`^(?:${RUN_IN_LABELS.join("|")})\\s*[:.：]\\s*\\S`, "iu");
+
+/** Keyword labels, which also appear without a colon ("Keywords Peer influence · …"). */
+const KEYWORDS_LABEL_RE =
+    /^(?:key\s*-?\s*words?|index\s+terms|palabras\s+clave|mots[-\s]cl[ée]s|schl[üu]sselw[öo]rter)\s*[:.：]?\s+\S/iu;
+
+/**
+ * Structured-abstract section words. As headings they are common
+ * ("Results", "Conclusion: Future Directions"), so they count as run-in
+ * labels only when prose follows them.
+ */
+const STRUCTURED_ABSTRACT_LABEL_RE =
+    /^(?:background|objectives?|aims?|purpose|methods?|methodology|results?|conclusions?|discussion|introduction|motivation|findings|design|setting|participants|limitations|implications|summary|context|interpretation|originality\/value)\s*[:.：]\s+(\S[\s\S]*)$/iu;
+
+/**
+ * Words that mark a clause rather than a noun-phrase title: auxiliaries,
+ * pronouns and relatives ("We found…", "…were completed", "…which…").
+ */
+const PROSE_WORD_RE =
+    /\b(?:is|are|was|were|be|been|being|has|have|had|can|could|may|might|will|would|should|must|does|did|we|our|us|i|it|its|this|these|they|their|there|which|who|that)\b/iu;
+
+/**
+ * A sentence ending followed by the next sentence: a word of two or more
+ * lowercase letters or digits, terminal punctuation, then a capital. The
+ * two-character floor skips initialisms ("the U.S. and Europe").
+ */
+const SENTENCE_BREAK_RE = /[\p{Ll}\d)%]{2}[.!?]["'”’)\]]*\s+["“'‘(]?[\p{Lu}\d]/u;
+
+/** A line that wraps mid-phrase ends on a function word ("…in", "…of the"). */
+const FUNCTION_WORD_END_RE =
+    /\b(?:a|an|the|of|in|on|to|for|with|by|from|at|as|and|or|but|that|which|than|is|are|was|were|be|can|our|their|its|between|into|using|while|whether)\W*$/iu;
+
+/**
+ * Whether text after a structured-abstract label reads as prose rather than a
+ * subtitle. A heading subtitle can be long and sentence-case ("Effects of the
+ * intervention on the quality of life in older adults"), so length and case
+ * alone are not enough: prose also ends a sentence, breaks a word across the
+ * line, or carries a verb, pronoun or dangling function word. Numbers are no
+ * evidence either way ("Effects of the COVID-19 pandemic on …").
+ * A subtitle that is a single question is never prose — question headings
+ * are common.
+ */
+function isProseTail(tail: string): boolean {
+    const trimmed = tail.trimEnd();
+    const words = trimmed.match(/[^\W\d_][\w'’-]*/gu) ?? [];
+    if (words.length < 6) return false;
+    // A single question is a heading subtitle, however many auxiliaries it
+    // carries ("are there viable alternatives to …?").
+    if (/\?["'”’)\]]*$/u.test(trimmed) && !SENTENCE_BREAK_RE.test(trimmed)) return false;
+    if (/[-\u00AD]$/u.test(trimmed)) return true;
+    if (/[.!]["'”’)\]]*$/u.test(trimmed) || SENTENCE_BREAK_RE.test(trimmed)) return true;
+    if (words.length < 10) return false;
+    return PROSE_WORD_RE.test(trimmed) || FUNCTION_WORD_END_RE.test(trimmed) || /[,;:]$/u.test(trimmed);
+}
+
+/** A run-in label item: a known label followed by text on the same line. */
+function looksLikeRunInLabel(text: string): boolean {
+    const t = text.trim();
+    if (RUN_IN_LABEL_RE.test(t) || KEYWORDS_LABEL_RE.test(t)) return true;
+    const m = STRUCTURED_ABSTRACT_LABEL_RE.exec(t);
+    return !!m && isProseTail(m[1]);
+}
+
+/**
+ * Numbered CJK / Korean section headings whose number alone carries the
+ * heading styling: a bold or larger "２．２" / "5" / "(6)" before heading text
+ * set in a face MuPDF doesn't flag as bold ("２．２ 明确对党忠诚的…"). The
+ * majority-style veto would demote them; keep them when the text after the
+ * number is CJK, at least body size (numbered footnotes and running heads are
+ * set smaller) and doesn't end like a sentence.
+ */
+function isCJKNumberedHeading(line: PageLine, bodyStyles: TextStyle[] | null): boolean {
+    if (!bodyStyles || bodyStyles.length === 0) return false;
+    const span = line.spans[0];
+    const runs = (span?.styleRuns ?? []).filter(run => run.chars > 0);
+    if (runs.length < 2) return false;
+
+    // Text of each run: runs count non-whitespace glyphs in order.
+    const glyphs = Array.from(span.text).filter(c => /\S/u.test(c));
+    let offset = 0;
+    const runTexts = runs.map(run => {
+        const text = glyphs.slice(offset, offset + run.chars).join("");
+        offset += run.chars;
+        return text;
+    });
+
+    let prefixRuns = 0;
+    while (prefixRuns < runs.length && /^[\p{Nd}.．、()（）]+$/u.test(runTexts[prefixRuns])) prefixRuns++;
+    if (prefixRuns === 0 || prefixRuns === runs.length) return false;
+    const prefix = runTexts.slice(0, prefixRuns).join("");
+    if (!/^[(（]?\p{Nd}{1,3}(?:[.．]\p{Nd}{1,3}){0,3}[.．、)）]?$/u.test(prefix)) return false;
+
+    const rest = runTexts.slice(prefixRuns).join("");
+    // Sentence-final punctuation, possibly followed by closing quotes or brackets.
+    if (!hasCJKContent(rest) || /[。！？.!?]["'”’」』）)\]】]*$/u.test(rest)) return false;
+
+    const bodySize = bodyStyles[0].size;
+    let restChars = 0;
+    let bodySizedChars = 0;
+    for (const run of runs.slice(prefixRuns)) {
+        restChars += run.chars;
+        if (run.font.size >= bodySize - 0.5) bodySizedChars += run.chars;
+    }
+    return bodySizedChars / restChars >= MAJORITY_STYLE_SHARE;
+}
+
+/**
+ * Whether the line's reported (first-glyph) style alone satisfies the heading
+ * rules, i.e. `isHeaderStyle` without the majority-style veto.
+ */
+function opensWithHeaderStyle(
+    line: PageLine,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    precededByGap: boolean | null,
+    bodyAllCaps: boolean
+): boolean {
+    const lineStyle = extractLineStyle(line);
+    return !!lineStyle && matchesHeaderRules(
+        line, lineStyle, true, bodyStyles, settings, precededByGap, bodyAllCaps, null
+    );
+}
+
+/**
+ * Heading rules for `line` judged as set in `lineStyle`.
+ * `checkSpanDominance` requires `lineStyle` to cover 90% of the line's
+ * spans; it only applies to the line's reported (first-span) style.
+ */
+function matchesHeaderRules(
+    line: PageLine,
+    lineStyle: TextStyle,
+    checkSpanDominance: boolean,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    precededByGap: boolean | null,
+    bodyAllCaps: boolean,
+    phraseTextOverride: string | null
+): boolean {
+    if (!bodyStyles || bodyStyles.length === 0) return false;
 
     // Bullet-led list items and math-symbol lines: MuPDF's JSON walk
     // aggregates the leading glyph's font over the whole line, so the line
@@ -1096,7 +1432,7 @@ function isHeaderStyle(
     }
 
     // Must be highly consistent (90%+ same style)
-    if (getStyleDominance(line, lineStyle) < 0.9) {
+    if (checkSpanDominance && getStyleDominance(line, lineStyle) < 0.9) {
         return false;
     }
 
@@ -1284,9 +1620,10 @@ function isHeaderStyle(
         return false;
     }
 
-    // Check for figure/table labels
+    // Check for figure/table labels, including "Extended Data Fig. 1" and
+    // "Supplementary Table S2"
     const prefixLabelRe =
-        /^\s*(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
+        /^\s*(?:(?:extended\s+data|supplementary|supporting(?:\s+information)?)\s+)?(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
     if (prefixLabelRe.test(text)) {
         return false;
     }
@@ -1501,6 +1838,25 @@ function startNewItem(
             return true;
         }
         return false; // Same header style continues
+    }
+
+    // A heading followed by a line that only opens like one, e.g. a paragraph
+    // starting with a bold run-in phrase. The majority-style veto makes the
+    // line body text, but its opening style still differs from the
+    // heading's, which ends the heading. Size-truncation jitter alone is not
+    // a style change (see `sameTypeface`).
+    //
+    // A same-style opening is deliberately not a boundary: with no gap,
+    // indent or early line end in between, that shape is a run-in heading
+    // wrapping onto its second line ("Generation of Constructs for
+    // Expression in / Mammalian Cells. We cloned…"), which belongs to one
+    // paragraph. Splitting it would leave a truncated pseudo-heading.
+    if (
+        prevIsLocalHeader &&
+        !sameTypeface(line, prevLine) &&
+        opensWithHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps)
+    ) {
+        return true;
     }
 
     // (b) Indent signal
