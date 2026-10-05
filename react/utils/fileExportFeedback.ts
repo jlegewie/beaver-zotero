@@ -7,7 +7,17 @@ type Notify = (message: Omit<PopupMessage, 'id'>) => void;
 export const FILE_EXPORT_FORMAT_NAMES: Record<FileExportFormat, string> = {
     docx: 'Word',
     pdf: 'PDF',
+    markdown: 'Markdown',
+    latex: 'LaTeX',
 };
+
+/** Menu entries for each export format, in menu order. */
+export const FILE_EXPORT_MENU: Array<{ format: FileExportFormat; label: string }> = [
+    { format: 'docx', label: 'Export to Word…' },
+    { format: 'pdf', label: 'Export to PDF…' },
+    { format: 'markdown', label: 'Export to Markdown…' },
+    { format: 'latex', label: 'Export to LaTeX…' },
+];
 
 /**
  * Run a file export and tell the user how it went: a confirmation naming the

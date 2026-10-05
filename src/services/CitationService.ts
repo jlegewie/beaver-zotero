@@ -38,6 +38,8 @@ export type CitationSequenceResult = {
     styleId: string;
     locale: string;
     styleClass: "in-text" | "note";
+    /** The style's CSL citation format (`author-date`, `numeric`, `note`, …), when it declares one. */
+    citationFormat: string | null;
     /** Whether the style defines a bibliography. */
     hasBibliography: boolean;
     /** Aligned with the request's clusters; null for empty clusters. */
@@ -308,6 +310,7 @@ export class CitationService {
             styleId: style.styleID,
             locale,
             styleClass: htmlEngine.opt.class === "note" ? "note" : "in-text",
+            citationFormat: typeof style.categories === "string" && style.categories ? style.categories : null,
             hasBibliography,
             clusters,
             itemData,

@@ -17,7 +17,8 @@ async function saveExport(source: ExportSource, format: FileExportFormat, window
     return {
         status: 'saved',
         path: result.path,
-        fileName: PathUtils.filename(result.path),
+        // A LaTeX export also names its .bib file.
+        fileName: result.files.map(file => PathUtils.filename(file)).join(', '),
         warnings: result.warnings.map(warning => warning.message),
     };
 }

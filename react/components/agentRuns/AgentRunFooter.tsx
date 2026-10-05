@@ -28,7 +28,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
-import { exportWithFeedback } from '../../utils/fileExportFeedback';
+import { exportWithFeedback, FILE_EXPORT_MENU } from '../../utils/fileExportFeedback';
 import { getHost } from '@beaver/agent-ui/host';
 import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 
@@ -175,18 +175,11 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
 
         if (host.documentExport?.exportResponseToFile) {
-            items.splice(noteWriter ? 3 : 1, 0,
-                {
-                    label: 'Export to Word…',
-                    onClick: () => exportToFile('docx'),
-                    disabled: isResolvingCitations
-                },
-                {
-                    label: 'Export to PDF…',
-                    onClick: () => exportToFile('pdf'),
-                    disabled: isResolvingCitations
-                },
-            );
+            items.splice(noteWriter ? 3 : 1, 0, ...FILE_EXPORT_MENU.map(({ format, label }) => ({
+                label,
+                onClick: () => exportToFile(format),
+                disabled: isResolvingCitations
+            })));
         }
 
         if (host.config?.isDevelopment() ?? false) {
@@ -270,8 +263,8 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const saveToItem = () => saveRunNote(true);
 
     /**
-     * Export the response's final answer (its whole resume chain) to a Word
-     * document or PDF. The host asks where to save and formats citations in
+     * Export the response's final answer (its whole resume chain) to a file
+     * (Word, PDF, Markdown or LaTeX). The host asks where to save and formats citations in
      * the citation style setting.
      */
     const exportToFile = async (format: FileExportFormat) => {

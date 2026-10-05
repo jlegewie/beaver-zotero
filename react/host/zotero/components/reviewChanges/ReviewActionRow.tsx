@@ -50,7 +50,7 @@ import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { DownloadIcon } from '@beaver/agent-ui/icons';
 import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 import { exportNoteToFile, revealExportedFile } from '../../fileExport';
-import { exportWithFeedback } from '../../../../utils/fileExportFeedback';
+import { exportWithFeedback, FILE_EXPORT_MENU } from '../../../../utils/fileExportFeedback';
 import { addPopupMessageAtom } from '../../../../utils/popupMessageUtils';
 
 interface ReviewActionRowProps {
@@ -320,10 +320,10 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                             icon={DownloadIcon}
                             variant="ghost-secondary"
                             iconClassName="font-color-secondary scale-10"
-                            menuItems={[
-                                { label: 'Export to Word…', onClick: () => handleExportNote('docx') },
-                                { label: 'Export to PDF…', onClick: () => handleExportNote('pdf') },
-                            ]}
+                            menuItems={FILE_EXPORT_MENU.map(({ format, label }) => ({
+                                label,
+                                onClick: () => handleExportNote(format),
+                            }))}
                             tooltipContent="Export"
                             ariaLabel="Export"
                         />

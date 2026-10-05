@@ -11,4 +11,9 @@ describe('exportFileName', () => {
         expect(exportFileName('x'.repeat(200), 'docx')).toBe(`${'x'.repeat(80)}.docx`);
         expect(exportFileName('  ', 'docx')).toBe('Beaver export.docx');
     });
+
+    it('keeps characters out of .tex names that TeX cannot open', () => {
+        expect(exportFileName('Growth 50% at $5 #1', 'tex')).toBe('Growth 50 at 5 #1.tex');
+        expect(exportFileName('Growth 50%', 'md')).toBe('Growth 50%.md');
+    });
 });

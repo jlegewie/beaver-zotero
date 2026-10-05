@@ -215,6 +215,12 @@ export interface FormattedCitations {
     styleId: string;
     locale: string;
     styleClass: 'in-text' | 'note';
+    /**
+     * The style's citation format (CSL `citation-format`: `author-date`,
+     * `numeric`, `note`, `label`, `author`), when known. Lets formats that cite
+     * with their own machinery (LaTeX) pick a matching style.
+     */
+    citationFormat?: string;
     /** Aligned with `ExportDoc.clusters`. */
     clusters: FormattedCluster[];
     bibliography: FormattedBibliography | null;
@@ -247,9 +253,39 @@ export interface HtmlExportOptions {
     notesTitle: string;
 }
 
+export interface MarkdownExportOptions {
+    /** Link item references to `zotero://select/...` (only useful where Zotero is installed). */
+    linkItems: boolean;
+    /** Heading for the bibliography. */
+    bibliographyTitle: string;
+    /**
+     * YAML front matter fields after the title (e.g. `date`, `source`), or null
+     * for none. With front matter, the title is a front matter field instead of
+     * a heading.
+     */
+    frontMatter: Record<string, string> | null;
+}
+
+/** Citation commands of a LaTeX export: biblatex (with Biber) or natbib (with BibTeX). */
+export type LatexCitationPackage = 'biblatex' | 'natbib';
+
+export interface LatexExportOptions {
+    citationPackage: LatexCitationPackage;
+    /** A complete document with preamble and bibliography, or only the body to paste into a project. */
+    standalone: boolean;
+    /** File name of the bibliography written next to the .tex file, or null when nothing is cited. */
+    bibFileName: string | null;
+    /** Link item references to `zotero://select/...`. */
+    linkItems: boolean;
+    /** Heading for the bibliography. */
+    bibliographyTitle: string;
+    /** Date under the title of a standalone document; omitted when empty. */
+    date: string;
+}
+
 /** A non-fatal problem worth telling the user about. */
 export interface ExportWarning {
-    code: 'unresolved_citations' | 'math_as_text' | 'style_unavailable';
+    code: 'unresolved_citations' | 'math_as_text' | 'style_unavailable' | 'citations_as_text';
     message: string;
     count?: number;
 }

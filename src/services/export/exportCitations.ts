@@ -293,6 +293,7 @@ export async function formatExportCitations(
             styleId: sequence.styleId,
             locale: sequence.locale,
             styleClass: sequence.styleClass,
+            ...(sequence.citationFormat ? { citationFormat: sequence.citationFormat } : {}),
             clusters,
             bibliography: sequence.bibliography,
             documentData: options.liveCitations

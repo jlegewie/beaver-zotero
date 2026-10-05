@@ -5,9 +5,11 @@
  * needed, so tests can export hand-written markdown with any citations. Without
  * it, the request is forwarded to a window (`windowId`, default the main
  * window), which exports a response of its open thread (`runId`, default the
- * last run). Common fields: `{ path, format?: 'docx' | 'pdf', styleId?, locale?,
- * liveCitations?, linkItems?, includeHtml? }` (`includeHtml` returns the HTML a
- * PDF was printed from).
+ * last run). Common fields: `{ path, format?: 'docx' | 'pdf' | 'markdown' |
+ * 'latex', styleId?, locale?, liveCitations?, linkItems?, includeHtml?,
+ * frontMatter?, citationPackage?, standalone? }` (`includeHtml` returns the
+ * HTML a PDF was printed from; `frontMatter` is Markdown's, `citationPackage`
+ * and `standalone` LaTeX's).
  */
 
 export async function handleTestExportHttpRequest(request: any): Promise<any> {
@@ -24,6 +26,9 @@ export async function handleTestExportHttpRequest(request: any): Promise<any> {
             liveCitations: request.liveCitations,
             linkItems: request.linkItems,
             includeHtml: request.includeHtml,
+            frontMatter: request.frontMatter,
+            citationPackage: request.citationPackage,
+            standalone: request.standalone,
         });
     }
     return Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/export', request);

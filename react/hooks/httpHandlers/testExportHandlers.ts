@@ -1,11 +1,12 @@
 /**
  * Dev-only window command behind `/beaver/test/export`: export a response of
  * the thread open in this window to a file, through the same source builder
- * and exporter the "Export to Word…" / "Export to PDF…" menu items use,
- * without the save dialog.
+ * and exporter the "Export to …" menu items use, without the save dialog.
  *
- * Request: `{ path, format?: 'docx' | 'pdf', runId?, content?: 'final' | 'full',
- * styleId?, locale?, liveCitations?, linkItems?, includeSource?, includeHtml? }`. `runId` names any run of the response (default: the
+ * Request: `{ path, format?: 'docx' | 'pdf' | 'markdown' | 'latex', runId?,
+ * content?: 'final' | 'full', styleId?, locale?, liveCitations?, linkItems?,
+ * includeSource?, includeHtml?, frontMatter?, citationPackage?, standalone? }`.
+ * `runId` names any run of the response (default: the
  * thread's last run); the whole resume chain is exported. Returns the
  * exporter's result plus the exported run ids, and the source when
  * `includeSource` is set.
@@ -15,6 +16,8 @@ import { allRunsAtom, resumeChainAtom } from '@beaver/agent-core/run-state/atoms
 import { store } from '../../store';
 import { buildResponseExportSource } from '../../utils/exportSource';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
+
+const EXPORT_FORMATS = ['docx', 'pdf', 'markdown', 'latex'];
 
 export async function handleTestExportHttpRequest(request: any): Promise<any> {
     const runs = store.get(allRunsAtom);
@@ -27,13 +30,16 @@ export async function handleTestExportHttpRequest(request: any): Promise<any> {
     const source = await buildResponseExportSource(chain.length > 0 ? chain : runs.filter(run => run.id === runId), content);
     const result = await Zotero.Beaver.exporter.run({
         source,
-        format: request.format === 'pdf' ? 'pdf' : 'docx',
+        format: EXPORT_FORMATS.includes(request.format) ? request.format : 'docx',
         path: request.path,
         styleId: request.styleId,
         locale: request.locale,
         liveCitations: request.liveCitations,
         linkItems: request.linkItems,
         includeHtml: request.includeHtml,
+        frontMatter: request.frontMatter,
+        citationPackage: request.citationPackage,
+        standalone: request.standalone,
     }, { windowId: getWindowRuntime().id });
     return {
         ...result,
