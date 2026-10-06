@@ -32,20 +32,34 @@ export type AgentViewBoxKind =
     | 'equation'
     | 'table_row'
     | 'sentence'
-    | 'item';
+    | 'item'
+    // Earlier extraction stages (see `stageViewModel.ts`).
+    | 'column'
+    | 'line';
 
 export interface AgentViewBox {
     kind: AgentViewBoxKind;
-    /** The id the model sees and cites (`s4.12`, `table4.1`, `heading4.1`, …). */
+    /**
+     * Label drawn on the box: the id the model sees and cites (`s4.12`,
+     * `table4.1`, `heading4.1`, …), or a stage label (`C1`, `L12`).
+     */
     id: string;
-    /** Kind of the extracted item the box belongs to. */
-    itemKind: DocumentItemKind;
     /** Rects in the public extraction frame; one box may span several. */
     rects: Rect[];
-    /** The tagged text the model receives for this element. */
-    modelText: string;
-    /** Alternates between neighbouring sentences (and table rows) so they stay distinguishable. */
+    /** Hover tooltip heading. */
+    title: string;
+    /** Hover tooltip body: the tagged text the model receives, or the stage's text. */
+    text: string;
+    /** Alternates between neighbouring sentences (table rows, lines) so they stay distinguishable. */
     shade: 0 | 1;
+}
+
+/** One page of boxes to draw, in the public extraction frame. */
+export interface ViewPage {
+    pageIndex: number;
+    width: number;
+    height: number;
+    boxes: AgentViewBox[];
 }
 
 export interface AgentViewPageCounts {
@@ -59,12 +73,8 @@ export interface AgentViewPageCounts {
     unlocatedSentences: number;
 }
 
-export interface AgentViewPage {
-    pageIndex: number;
+export interface AgentViewPage extends ViewPage {
     label?: string;
-    width: number;
-    height: number;
-    boxes: AgentViewBox[];
     counts: AgentViewPageCounts;
 }
 
@@ -81,6 +91,19 @@ function escapeXml(text: string): string {
 
 function tag(id: string, text: string): string {
     return `<${id}>${escapeXml(text)}</${id}>`;
+}
+
+const KIND_LABELS: Partial<Record<AgentViewBoxKind, string>> = {
+    table: 'Table',
+    figure: 'Figure',
+    equation: 'Equation',
+    table_row: 'Table row',
+    sentence: 'Sentence',
+    item: 'Item',
+};
+
+function citeTitle(kind: AgentViewBoxKind, id: string): string {
+    return `${KIND_LABELS[kind]} · cite as ${id}`;
 }
 
 function itemText(item: DocumentItem): string {
@@ -122,9 +145,9 @@ export function buildAgentViewPage(page: StructuredPage): AgentViewPage {
             boxes.push({
                 kind: 'table',
                 id: item.id,
-                itemKind: item.kind,
                 rects: [item.bbox],
-                modelText: [`<${item.id}>`, ...rows, `</${item.id}>`].join('\n'),
+                title: citeTitle('table', item.id),
+                text: [`<${item.id}>`, ...rows, `</${item.id}>`].join('\n'),
                 shade: 0,
             });
             counts.tables++;
@@ -136,9 +159,9 @@ export function buildAgentViewPage(page: StructuredPage): AgentViewPage {
                 boxes.push({
                     kind: 'table_row',
                     id: sentence.id,
-                    itemKind: item.kind,
                     rects: sentence.bboxes,
-                    modelText: tag(sentence.id, sentence.text),
+                    title: citeTitle('table_row', sentence.id),
+                    text: tag(sentence.id, sentence.text),
                     shade: (rowIndex % 2) as 0 | 1,
                 });
                 counts.tableRows++;
@@ -155,9 +178,9 @@ export function buildAgentViewPage(page: StructuredPage): AgentViewPage {
                 boxes.push({
                     kind: 'sentence',
                     id: sentence.id,
-                    itemKind: item.kind,
                     rects: sentence.bboxes,
-                    modelText: tag(sentence.id, sentence.text),
+                    title: citeTitle('sentence', sentence.id),
+                    text: tag(sentence.id, sentence.text),
                     shade: (sentenceShade++ % 2) as 0 | 1,
                 });
                 counts.sentences++;
@@ -169,9 +192,9 @@ export function buildAgentViewPage(page: StructuredPage): AgentViewPage {
         boxes.push({
             kind,
             id: item.id,
-            itemKind: item.kind,
             rects: [item.bbox],
-            modelText: tag(item.id, itemText(item)),
+            title: citeTitle(kind, item.id),
+            text: tag(item.id, itemText(item)),
             shade: 0,
         });
         if (kind === 'table') counts.tables++;

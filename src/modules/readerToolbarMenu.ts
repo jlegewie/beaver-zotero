@@ -153,13 +153,8 @@ function injectIntoExistingReader(reader: any): void {
 // (which owns the visualizer code in the webpack bundle) can run it.
 async function dispatchVisualizerAction(
     action:
-        | 'columns'
-        | 'lines'
         | 'items'
         | 'sentences'
-        | 'columns-graphics'
-        | 'items-graphics'
-        | 'sentences-graphics'
         | 'clear'
         | 'copy-extract-fixture-command'
         | 'copy-ocr-fixture-command',
@@ -282,7 +277,8 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
 
     // ---- Visualize what the agent sees (PDF only) ----
     // Checkbox items: choosing the checked one hides the view, the other
-    // switches to that schema. The dev-only section below opens with its own
+    // switches to that schema. The view's panel switches between columns,
+    // lines and items. The dev-only section below opens with its own
     // separator, which closes this group.
     if (SHOW_AGENT_PAGE_VIEW && isPdf) {
         appendSeparator();
@@ -300,25 +296,15 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
         }
     }
 
-    // ---- Dev-only: extraction visualizer controls ----
+    // ---- Dev-only: EPUB extraction visualizer, PDF fixture commands ----
     // Dropped from production builds at compile time.
     if (process.env.NODE_ENV === 'development' && (isPdf || isEpub)) {
         appendSeparator();
-        appendVisualizerItem('Visualize Items', 'items');
-        appendVisualizerItem('Visualize Sentences', 'sentences');
-        appendVisualizerItem('Clear Visualization', 'clear');
-
-        if (isPdf) {
-            appendSeparator();
-            appendVisualizerItem('Visualize Columns', 'columns');
-            appendVisualizerItem('Visualize Lines', 'lines');
-
-            appendSeparator();
-            appendVisualizerItem('Visualize Columns (graphics)', 'columns-graphics');
-            appendVisualizerItem('Visualize Items (graphics)', 'items-graphics');
-            appendVisualizerItem('Visualize Sentences (graphics)', 'sentences-graphics');
-
-            appendSeparator();
+        if (isEpub) {
+            appendVisualizerItem('Visualize Items', 'items');
+            appendVisualizerItem('Visualize Sentences', 'sentences');
+            appendVisualizerItem('Clear Visualization', 'clear');
+        } else {
             appendVisualizerItem('Copy Extract Fixture Command', 'copy-extract-fixture-command');
             appendVisualizerItem('Copy OCR Fixture Command', 'copy-ocr-fixture-command');
         }

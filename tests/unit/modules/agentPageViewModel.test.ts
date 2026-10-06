@@ -39,7 +39,7 @@ describe('buildAgentViewPage', () => {
             ['sentence', 's4.1', 0],
             ['sentence', 's4.2', 1],
         ]);
-        expect(view.boxes[0].modelText).toBe('<s4.1>One.</s4.1>');
+        expect(view.boxes[0].text).toBe('<s4.1>One.</s4.1>');
         expect(view.counts.sentences).toBe(2);
     });
 
@@ -63,7 +63,7 @@ describe('buildAgentViewPage', () => {
             ['table_row', 's4.1'],
             ['table_row', 's4.2'],
         ]);
-        expect(view.boxes[0].modelText).toBe(
+        expect(view.boxes[0].text).toBe(
             '<table4.1>\n  <s4.1>a | b</s4.1>\n  <s4.2>1 | &lt;2</s4.2>\n</table4.1>',
         );
         expect(view.boxes[1].rects).toHaveLength(2);
@@ -79,7 +79,7 @@ describe('buildAgentViewPage', () => {
             { ...base, id: 'table4.1', kind: 'table', order: 4, text: '' },
         ]));
 
-        expect(view.boxes.map((box) => [box.kind, box.id, box.modelText])).toEqual([
+        expect(view.boxes.map((box) => [box.kind, box.id, box.text])).toEqual([
             ['item', 'heading4.1', '<heading4.1>Results</heading4.1>'],
             ['figure', 'fig4.1', '<fig4.1>Wage\nYear</fig4.1>'],
             ['figure', 'fig4.2', '<fig4.2></fig4.2>'],
