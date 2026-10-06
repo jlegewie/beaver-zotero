@@ -169,6 +169,9 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // it edits: the mutation vocabulary is what a client (and the test corpus that
 // pins it) calls to change a stored table, and nothing inside the package
 // applies a mutation.
+// `identity/itemLinks.ts` parses the Zotero object links the model writes in
+// chat markdown. Clients render and export them; nothing inside the package
+// follows a link, so it is a root too.
 // Voice is a standalone session API, independent of the agent-run protocol.
 // Its controller and injectable fakes are separate roots consumed by hosts/tests.
 const entryPaths = [
@@ -210,6 +213,7 @@ const entryPaths = [
   "src/citations/externalReferences.ts",
   "src/layouts/table.ts",
   "src/layouts/tableMutations.ts",
+  "src/identity/itemLinks.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));
