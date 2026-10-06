@@ -643,7 +643,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "Create items from DOIs, URLs, or files.",
             },
         ],
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.26.0-beta.2" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.26.0-beta.3" target='_blank'>Full changelog</a>`,
     },
 ];
 
