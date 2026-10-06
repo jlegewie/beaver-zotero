@@ -248,6 +248,96 @@ function isIncreasingSequence(numbers: number[]): boolean {
     return true;
 }
 
+type PageNumberEntry = { el: MarginElement; value: number };
+
+/**
+ * Minimum pages a run of page numbers needs. Not relaxed for short documents:
+ * a run is accepted without the rest of its zone's numerals agreeing.
+ */
+const MIN_OFFSET_RUN_PAGES = 3;
+
+/**
+ * Runs of page numbers in one margin zone.
+ *
+ * A printed page number advances in lockstep with the page index, so
+ * `value - pageIndex` is constant across a run of numbered pages. Grouping
+ * by that offset finds the runs even when the zone also holds stray numerals
+ * (wrapped DOI tails or table cells in a reference list or table that reaches
+ * the bottom margin) or when numbering restarts (compiled theses and edited
+ * volumes that reprint each part with its own pagination). Chapter numbers,
+ * footnote numbers and years do not advance with the page index. Unnumbered
+ * pages that the numbering skips shift the offset and split a run in two.
+ *
+ * Expects at most one entry per page. Returns the entries of every run that
+ * spans `minPages` pages or more.
+ */
+function constantOffsetRuns(
+    entries: PageNumberEntry[],
+    minPages: number,
+): PageNumberEntry[] {
+    const runs = new Map<number, PageNumberEntry[]>();
+    for (const entry of entries) {
+        const offset = entry.value - entry.el.pageIndex;
+        let run = runs.get(offset);
+        if (!run) {
+            run = [];
+            runs.set(offset, run);
+        }
+        run.push(entry);
+    }
+    return Array.from(runs.values())
+        .filter((run) => run.length >= minPages)
+        .flat();
+}
+
+/**
+ * Page-number-shaped elements of one margin zone, skipping texts in
+ * `covered`, split into a bare-Roman and a non-Roman bucket.
+ *
+ * The split keeps a document with a Roman preface (iii, iv, …) followed by an
+ * Arabic body (1, 2, …) — the standard dissertation, thesis, and book layout
+ * — from being rejected because the concatenated value list resets at the
+ * script boundary (e.g. [3,4,5,…,11,1,2,3,…] never strictly increases).
+ *
+ * `onePerPage` collapses each bucket to one entry per page, sorted by page
+ * index. If a page emits two numeric margin elements (e.g. `1` in left
+ * header + `1` in right header), the raw value list `[1, 1, 2, 2, 3, 3, …]`
+ * never strictly increases and a real page sequence is missed. It keeps the
+ * lowest value per page — for the typical failure shape (two slots showing
+ * the same page number) the choice doesn't matter; for the rarer case of two
+ * legitimately-different numbers per page, the lowest is the better proxy
+ * for "the page label."
+ */
+function pageNumberBuckets(
+    elements: MarginElement[],
+    covered: ReadonlySet<string>,
+): { entries: PageNumberEntry[]; onePerPage: PageNumberEntry[] }[] {
+    const romanBucket: PageNumberEntry[] = [];
+    const nonRomanBucket: PageNumberEntry[] = [];
+    for (const el of elements) {
+        if (covered.has(normalizeText(el.text))) continue;
+        if (!isPageNumberPattern(el.text)) continue;
+        const value = parsePageNumber(el.text);
+        if (value === null) continue;
+        (isBareRoman(el.text) ? romanBucket : nonRomanBucket).push({ el, value });
+    }
+
+    return [romanBucket, nonRomanBucket]
+        .filter((entries) => entries.length > 0)
+        .map((entries) => {
+            const perPage = new Map<number, PageNumberEntry>();
+            for (const entry of entries) {
+                const existing = perPage.get(entry.el.pageIndex);
+                if (!existing || entry.value < existing.value) {
+                    perPage.set(entry.el.pageIndex, entry);
+                }
+            }
+            const onePerPage = Array.from(perPage.values())
+                .sort((a, b) => a.el.pageIndex - b.el.pageIndex);
+            return { entries, onePerPage };
+        });
+}
+
 // ============================================================================
 // Margin Zone Detection
 // ============================================================================
@@ -569,6 +659,9 @@ export class MarginFilter {
      *   `{ topBottom, leftRight }` for per-position thresholds (used by the
      *   short-doc relaxation in `getEffectiveRepeatThreshold`).
      * @param detectPageSequences - Whether to detect page number sequences
+     * @param pageNumberRuns - Also detect runs of page numbers that advance
+     *   with the page index in the header and footer zones (see
+     *   `constantOffsetRuns`). Off in the schema-4 preset.
      * @returns Removal result with candidates and lookup structures
      */
     static identifyElementsToRemove(
@@ -576,10 +669,14 @@ export class MarginFilter {
         requiredCount:
             | number
             | { topBottom: number; leftRight: number } = 3,
-        detectPageSequences: boolean = true
+        detectPageSequences: boolean = true,
+        pageNumberRuns: boolean = true,
     ): MarginRemovalResult {
         const candidates: RemovalCandidate[] = [];
         const textsToRemove = new Set<string>();
+        // `textsToRemove` minus what page-number runs added. The whole-zone
+        // sequence check reads this, so runs never change what it sees.
+        const textsBeforeRuns = new Set<string>();
         const removalsByPage = new Map<number, Set<string>>();
 
         // Process each margin position
@@ -590,6 +687,8 @@ export class MarginFilter {
                     : position === "top" || position === "bottom"
                         ? requiredCount.topBottom
                         : requiredCount.leftRight;
+            // Texts this position's repeat and identifier passes remove.
+            const positionTexts = new Set<string>();
 
             // Group elements by structural template if structured, else by
             // normalized exact text. The bucket tracks each variant's own
@@ -658,6 +757,8 @@ export class MarginFilter {
 
                 for (const [variant, variantPages] of bucket.variantPages) {
                     textsToRemove.add(variant);
+                    textsBeforeRuns.add(variant);
+                    positionTexts.add(variant);
                     for (const p of variantPages) {
                         if (!removalsByPage.has(p)) {
                             removalsByPage.set(p, new Set());
@@ -693,6 +794,8 @@ export class MarginFilter {
                 bucket.pageIndices.add(el.pageIndex);
 
                 textsToRemove.add(normalized);
+                textsBeforeRuns.add(normalized);
+                positionTexts.add(normalized);
                 if (!removalsByPage.has(el.pageIndex)) {
                     removalsByPage.set(el.pageIndex, new Set());
                 }
@@ -713,94 +816,10 @@ export class MarginFilter {
 
             // Detect page number sequences
             if (detectPageSequences) {
-                // Collect elements that match page number patterns. Skip
-                // elements already covered by the repeat/templating pass
-                // for this position — otherwise a co-located "Page K"
-                // family (already removed) and a "K of 13" family would
-                // interleave into [1,1,2,2,3,3,...], breaking strict
-                // increase and silently dropping the second family.
-                const pageNumberElements: { el: MarginElement; value: number }[] = [];
-
-                for (const el of elements) {
-                    const normalized = normalizeText(el.text);
-                    if (textsToRemove.has(normalized)) continue;
-                    if (isPageNumberPattern(el.text)) {
-                        const value = parsePageNumber(el.text);
-                        if (value !== null) {
-                            pageNumberElements.push({ el, value });
-                        }
-                    }
-                }
-
-                // Partition into bare-Roman vs non-Roman buckets so a
-                // document with a Roman preface (iii, iv, …) followed by
-                // an Arabic body (1, 2, …) — the standard dissertation,
-                // thesis, and book layout — isn't rejected because the
-                // concatenated value list resets at the script boundary
-                // (e.g. [3,4,5,…,11,1,2,3,…] never strictly increases).
-                // Each bucket runs the existing per-page collapse +
-                // distinct-page guard + isIncreasingSequence + marking
-                // pass independently. When only one bucket is non-empty
-                // (the overwhelmingly common single-script case), the
-                // surviving bucket runs the same code path it always did.
-                const romanBucket: typeof pageNumberElements = [];
-                const nonRomanBucket: typeof pageNumberElements = [];
-                for (const entry of pageNumberElements) {
-                    if (isBareRoman(entry.el.text)) {
-                        romanBucket.push(entry);
-                    } else {
-                        nonRomanBucket.push(entry);
-                    }
-                }
-
-                for (const bucketElements of [romanBucket, nonRomanBucket]) {
-                    if (bucketElements.length === 0) continue;
-
-                    // Collapse to one candidate per page BEFORE the
-                    // increasing-sequence check. If a page emits two
-                    // numeric margin elements (e.g. `1` in left header +
-                    // `1` in right header), the raw value list
-                    // `[1, 1, 2, 2, 3, 3, …]` never strictly increases
-                    // and a real page sequence is missed. Pick the lowest
-                    // value per page — for the typical failure shape
-                    // (two slots showing the same page number) the choice
-                    // doesn't matter; for the rarer case of two
-                    // legitimately-different numbers per page, the lowest
-                    // is the better proxy for "the page label."
-                    const perPage = new Map<number, { el: MarginElement; value: number }>();
-                    for (const entry of bucketElements) {
-                        const existing = perPage.get(entry.el.pageIndex);
-                        if (!existing || entry.value < existing.value) {
-                            perPage.set(entry.el.pageIndex, entry);
-                        }
-                    }
-                    const oneCandidatePerPage = Array.from(perPage.values());
-
-                    // Distinct-page guard: count distinct pages, not raw
-                    // element count. With the relaxed threshold of 2, a
-                    // single page that emits two numeric-looking margin
-                    // elements would otherwise pass the gate and be
-                    // classified as a "sequence" of length 1.
-                    if (oneCandidatePerPage.length < requiredForPosition) continue;
-
-                    // Sort by page index
-                    oneCandidatePerPage.sort((a, b) => a.el.pageIndex - b.el.pageIndex);
-
-                    // Check if values form an increasing sequence (one per page)
-                    const values = oneCandidatePerPage.map((p) => p.value);
-                    if (!isIncreasingSequence(values)) continue;
-
-                    // These are page numbers - mark all bucket-local
-                    // elements on the matched pages. Iterating the
-                    // bucket (not the combined `pageNumberElements`)
-                    // keeps cross-bucket text from being marked when a
-                    // page legitimately carries both scripts.
-                    const matchedPageIndices = new Set(
-                        oneCandidatePerPage.map((p) => p.el.pageIndex),
-                    );
+                // Mark `entries` as page numbers on their pages.
+                const markPageNumbers = (entries: PageNumberEntry[], fromRuns: boolean) => {
                     const seenTexts = new Set<string>();
-                    for (const { el } of bucketElements) {
-                        if (!matchedPageIndices.has(el.pageIndex)) continue;
+                    for (const { el } of entries) {
                         const normalized = normalizeText(el.text);
 
                         if (!seenTexts.has(normalized) && !textsToRemove.has(normalized)) {
@@ -816,15 +835,84 @@ export class MarginFilter {
                         }
 
                         textsToRemove.add(normalized);
+                        if (!fromRuns) textsBeforeRuns.add(normalized);
 
                         if (!removalsByPage.has(el.pageIndex)) {
                             removalsByPage.set(el.pageIndex, new Set());
                         }
                         removalsByPage.get(el.pageIndex)!.add(normalized);
                     }
+                };
+
+                // Skip elements already covered by the repeat/templating
+                // pass — otherwise a co-located "Page K" family (already
+                // removed) and a "K of 13" family would interleave into
+                // [1,1,2,2,3,3,...], breaking strict increase and silently
+                // dropping the second family. This pass skips texts removed
+                // in ANY position so far, which also keeps numerals that
+                // another zone's page numbers account for out of this
+                // zone's increasing-sequence check.
+                for (const { entries, onePerPage } of pageNumberBuckets(elements, textsBeforeRuns)) {
+                    // Distinct-page guard: count distinct pages, not raw
+                    // element count. With the relaxed threshold of 2, a
+                    // single page that emits two numeric-looking margin
+                    // elements would otherwise pass the gate and be
+                    // classified as a "sequence" of length 1.
+                    if (onePerPage.length < requiredForPosition) continue;
+
+                    // Check if values form an increasing sequence (one per page)
+                    const values = onePerPage.map((p) => p.value);
+                    if (!isIncreasingSequence(values)) continue;
+
+                    // These are page numbers - mark all bucket-local
+                    // elements on the matched pages. Iterating the
+                    // bucket (not the combined page-number elements)
+                    // keeps cross-bucket text from being marked when a
+                    // page legitimately carries both scripts.
+                    const matchedPageIndices = new Set(
+                        onePerPage.map((p) => p.el.pageIndex),
+                    );
+                    markPageNumbers(
+                        entries.filter(({ el }) => matchedPageIndices.has(el.pageIndex)),
+                        false,
+                    );
 
                     if (isAnalyzerLoggingEnabled()) {
                         pdfLog(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`, 3);
+                    }
+                }
+
+                // Runs of page numbers that advance with the page index.
+                // They catch what the whole-zone check above misses: a
+                // zone whose numerals do not form one increasing sequence
+                // (stray numerals, numbering restarts), and page numbers
+                // skipped there because another zone removed the same
+                // text on other pages (a reprinted article's own
+                // pagination in the header of a thesis numbered in the
+                // footer). A run is strong evidence on its own, so this
+                // pass reads every numeral in this zone that its repeat
+                // and identifier passes left, and marks only the run's
+                // value on each page. Header and footer only: in the side
+                // zones, footnote markers and numbered items at the text
+                // edge also advance one per page.
+                if (pageNumberRuns && (position === "top" || position === "bottom")) {
+                    for (const { entries, onePerPage } of pageNumberBuckets(elements, positionTexts)) {
+                        const runs = constantOffsetRuns(
+                            onePerPage,
+                            Math.max(requiredForPosition, MIN_OFFSET_RUN_PAGES),
+                        );
+                        if (runs.length === 0) continue;
+                        const runValueByPage = new Map(
+                            runs.map((p) => [p.el.pageIndex, p.value]),
+                        );
+                        markPageNumbers(
+                            entries.filter(({ el, value }) => runValueByPage.get(el.pageIndex) === value),
+                            true,
+                        );
+
+                        if (isAnalyzerLoggingEnabled()) {
+                            pdfLog(`[MarginFilter] Detected page number runs in ${position} zone: ${runs.slice(0, 5).map((p) => p.value).join(", ")}...`, 3);
+                        }
                     }
                 }
             }
