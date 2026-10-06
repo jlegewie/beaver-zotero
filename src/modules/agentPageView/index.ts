@@ -1,7 +1,9 @@
 /**
  * "Visualize (Schema N)" for the PDF reader, a development tool: shows what the
  * Beaver agent sees on each page and what it can cite — table, figure and
- * equation regions, table rows, sentences, and items cited as a whole.
+ * equation regions, table rows, sentences, and items cited as a whole. The
+ * panel can also show the columns and lines detected in earlier extraction
+ * stages, for every page of the document.
  *
  * Every run extracts the document afresh in the requested PDF schema version,
  * with the arguments production extraction uses, so changes to the extractor
@@ -15,8 +17,14 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getMuPDFWorkerClient } from '../../beaver-extract';
 import { createAbortController } from '../../utils/abortController';
-import { AgentPageOverlay } from './agentPageOverlay';
-import { buildAgentViewPage, totalAgentViewCounts, type AgentViewPageCounts } from './agentPageViewModel';
+import { AgentPageOverlay, type AgentViewMode } from './agentPageOverlay';
+import {
+    buildAgentViewPage,
+    totalAgentViewCounts,
+    type AgentViewPageCounts,
+    type ViewPage,
+} from './agentPageViewModel';
+import { buildColumnViewPage, buildLineViewPage } from './stageViewModel';
 
 interface ActiveView {
     schemaVersion: string;
@@ -33,6 +41,11 @@ function readerKey(reader: any): string | null {
 function pdfViewWindow(reader: any): Window | null {
     const win = reader?._internalReader?._primaryView?._iframeWindow;
     return win?.document?.getElementById('viewer') ? win : null;
+}
+
+function pdfPageCount(win: Window): number {
+    const count = (win as any).PDFViewerApplication?.pdfViewer?.pagesCount;
+    return typeof count === 'number' ? count : 0;
 }
 
 /** The schema version the reader is currently visualizing, or `null`. */
@@ -60,7 +73,20 @@ function disposeView(key: string): void {
     view.overlay.dispose();
 }
 
-function summarize(counts: AgentViewPageCounts, pageCount: number): string {
+function boxCount(pages: ViewPage[]): number {
+    return pages.reduce((sum, page) => sum + page.boxes.length, 0);
+}
+
+function summarizeColumns(pages: ViewPage[], pageCount: number): string {
+    const multiColumn = pages.filter((page) => page.boxes.length > 1).length;
+    return `${pageCount} pages: ${boxCount(pages)} columns, ${multiColumn} pages with more than one.`;
+}
+
+function summarizeLines(pages: ViewPage[], pageCount: number): string {
+    return `${pageCount} pages: ${boxCount(pages)} lines.`;
+}
+
+function summarizeItems(counts: AgentViewPageCounts, pageCount: number): string {
     const parts = [
         `${counts.sentences} sentences`,
         `${counts.items} whole items`,
@@ -82,6 +108,8 @@ export async function showAgentPageView(reader: any, schemaVersion: string): Pro
     const hostWin: Window | undefined = reader._window;
     if (!key || !win || !hostWin || reader.type !== 'pdf') return;
 
+    // Switching schema keeps the selected view.
+    const mode: AgentViewMode = activeViews.get(key)?.overlay.currentMode ?? 'items';
     disposeView(key);
     const abort = createAbortController();
     const overlay = new AgentPageOverlay(
@@ -89,6 +117,7 @@ export async function showAgentPageView(reader: any, schemaVersion: string): Pro
         hostWin,
         `What Beaver sees (schema ${schemaVersion})`,
         () => disposeView(key),
+        mode,
     );
     const onUnload = () => disposeView(key);
     win.addEventListener('unload', onUnload, { once: true });
@@ -129,10 +158,13 @@ export async function showAgentPageView(reader: any, schemaVersion: string): Pro
         if (!filePath) throw new Error('The PDF file is not available on this device.');
         const pdfData = await IOUtils.read(filePath);
         if (!isCurrent()) return;
-        extracted = await getMuPDFWorkerClient('hot').extract(pdfData, {
-            mode: 'structured',
+        // The debug variant runs the same structured extraction and also
+        // returns each captured page's columns and lines.
+        extracted = await getMuPDFWorkerClient('hot').structuredExtractWithDebug(pdfData, {
             settings: { checkTextLayer: true },
             schemaVersion,
+            capturePages: Array.from({ length: pdfPageCount(win) }, (_, index) => index),
+            debugMode: 'full',
         }, abort.signal);
     } catch (error) {
         if (!isCurrent()) return;
@@ -141,12 +173,15 @@ export async function showAgentPageView(reader: any, schemaVersion: string): Pro
         return;
     }
     if (!isCurrent()) return;
-    if (extracted.mode !== 'structured') {
-        overlay.setStatus('The extractor did not return a structured document.', 'error');
-        return;
-    }
 
-    const pages = extracted.document.pages.map(buildAgentViewPage);
-    overlay.setPages(pages);
-    overlay.setStatus(summarize(totalAgentViewCounts(pages), extracted.document.pageCount));
+    const { document: structuredDoc } = extracted.result;
+    const debugPages = Object.values(extracted.debug.pages ?? {});
+    const itemPages = structuredDoc.pages.map(buildAgentViewPage);
+    const columnPages = debugPages.map(buildColumnViewPage);
+    const linePages = debugPages.map(buildLineViewPage);
+    overlay.setViews({
+        columns: { pages: columnPages, summary: summarizeColumns(columnPages, structuredDoc.pageCount) },
+        lines: { pages: linePages, summary: summarizeLines(linePages, structuredDoc.pageCount) },
+        items: { pages: itemPages, summary: summarizeItems(totalAgentViewCounts(itemPages), structuredDoc.pageCount) },
+    });
 }

@@ -25,7 +25,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 it('targets the originating reader instance even when the destination displays the same paper', async () => {
-    await mocks.handler({ action: 'columns', readerInstanceID: 'source' });
+    await mocks.handler({ action: 'items', readerInstanceID: 'source' });
     expect(mocks.pdf).toHaveBeenCalledWith({ reader: source });
     await mocks.handler({ action: 'clear', readerInstanceID: 'source' });
     expect(mocks.clear).toHaveBeenCalledWith(source);
@@ -38,7 +38,7 @@ it('routes EPUB visualization to the source reader', async () => {
 });
 it('does not fall back to the destination when the source is closed or missing', async () => {
     source._window.closed = true;
-    await mocks.handler({ action: 'columns', readerInstanceID: 'source' });
-    await mocks.handler({ action: 'columns', readerInstanceID: 'missing' });
+    await mocks.handler({ action: 'items', readerInstanceID: 'source' });
+    await mocks.handler({ action: 'items', readerInstanceID: 'missing' });
     expect(mocks.pdf).not.toHaveBeenCalled();
 });

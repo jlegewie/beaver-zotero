@@ -1,7 +1,9 @@
 /**
- * Draws the agent's view of a PDF (see `agentPageViewModel.ts`) over the pages
- * of a Zotero PDF reader, with a small legend panel and a hover tooltip that
- * shows the exact text the model receives for an element.
+ * Draws a PDF extraction over the pages of a Zotero PDF reader, with a small
+ * panel and a hover tooltip. The panel switches between three views: the
+ * detected columns and lines (`stageViewModel.ts`), and the items the agent
+ * sees (`agentPageViewModel.ts`), where the tooltip shows the exact text the
+ * model receives for an element.
  *
  * The layer lives inside each PDF.js `.page` div and is positioned in
  * percentages of the page, so it follows zoom and scrolling without
@@ -14,7 +16,16 @@
  * testing is done from a `mousemove` listener against the model's rects.
  */
 
-import type { AgentViewBox, AgentViewBoxKind, AgentViewPage } from './agentPageViewModel';
+import type { AgentViewBox, AgentViewBoxKind, ViewPage } from './agentPageViewModel';
+
+export type AgentViewMode = 'columns' | 'lines' | 'items';
+
+/** One view the panel can switch to. */
+export interface AgentViewLayer {
+    pages: ViewPage[];
+    /** Shown in the panel while the view is selected. */
+    summary: string;
+}
 
 const PREFIX = 'beaver-agent-view';
 const STYLE_ID = `${PREFIX}-style`;
@@ -22,23 +33,29 @@ const LAYER_CLASS = `${PREFIX}-layer`;
 const HIDE_IDS_CLASS = `${PREFIX}-hide-ids`;
 const TOOLTIP_MAX_CHARS = 1500;
 
-const KIND_LABELS: Record<AgentViewBoxKind, string> = {
-    table: 'Table',
-    figure: 'Figure',
-    equation: 'Equation',
-    table_row: 'Table row',
-    sentence: 'Sentence',
-    item: 'Item',
-};
-
-const LEGEND: { kind: AgentViewBoxKind; label: string }[] = [
-    { kind: 'sentence', label: 'Sentence' },
-    { kind: 'item', label: 'Whole item (heading, unsplit text)' },
-    { kind: 'table', label: 'Table' },
-    { kind: 'table_row', label: 'Table row (one sentence)' },
-    { kind: 'figure', label: 'Figure (label text only)' },
-    { kind: 'equation', label: 'Equation' },
+/** Panel switcher, in pipeline order. */
+const MODES: { mode: AgentViewMode; label: string }[] = [
+    { mode: 'columns', label: 'Columns' },
+    { mode: 'lines', label: 'Lines' },
+    { mode: 'items', label: 'Items' },
 ];
+
+const LEGENDS: Record<AgentViewMode, { kind: AgentViewBoxKind; label: string }[]> = {
+    columns: [
+        { kind: 'column', label: 'Column' },
+    ],
+    lines: [
+        { kind: 'line', label: 'Line (shades alternate)' },
+    ],
+    items: [
+        { kind: 'sentence', label: 'Sentence' },
+        { kind: 'item', label: 'Whole item (heading, unsplit text)' },
+        { kind: 'table', label: 'Table' },
+        { kind: 'table_row', label: 'Table row (one sentence)' },
+        { kind: 'figure', label: 'Figure (label text only)' },
+        { kind: 'equation', label: 'Equation' },
+    ],
+};
 
 const STYLESHEET = `
 .${LAYER_CLASS} {
@@ -60,6 +77,9 @@ const STYLESHEET = `
 .${PREFIX}-box[data-kind="sentence"][data-shade="1"] { background: rgba(255, 204, 0, 0.24); box-shadow: inset 0 -1px rgba(214, 160, 0, 0.7); }
 .${PREFIX}-box[data-kind="table_row"][data-shade="0"] { background: rgba(48, 176, 199, 0.22); }
 .${PREFIX}-box[data-kind="table_row"][data-shade="1"] { background: rgba(88, 86, 214, 0.16); }
+.${PREFIX}-box[data-kind="column"] { border: 2px solid rgba(0, 150, 136, 0.9); background: rgba(0, 150, 136, 0.05); }
+.${PREFIX}-box[data-kind="line"][data-shade="0"] { background: rgba(0, 122, 255, 0.14); box-shadow: inset 0 -1px rgba(0, 122, 255, 0.55); }
+.${PREFIX}-box[data-kind="line"][data-shade="1"] { background: rgba(255, 149, 0, 0.18); box-shadow: inset 0 -1px rgba(214, 120, 0, 0.7); }
 .${PREFIX}-box.is-hovered { outline: 2px solid rgba(0, 0, 0, 0.75); outline-offset: 1px; }
 .${PREFIX}-chip {
     position: absolute;
@@ -79,6 +99,9 @@ const STYLESHEET = `
 .${PREFIX}-chip[data-kind="sentence"][data-shade="1"] { background: rgb(190, 140, 0); }
 .${PREFIX}-chip[data-kind="table_row"] { background: rgb(30, 140, 165); transform: translateX(-100%); border-radius: 3px 0 0 3px; }
 .${PREFIX}-chip[data-kind="table_row"][data-shade="1"] { background: rgb(88, 86, 214); }
+.${PREFIX}-chip[data-kind="column"] { background: rgb(0, 137, 123); }
+.${PREFIX}-chip[data-kind="line"] { background: rgb(0, 100, 220); transform: translateX(-100%); border-radius: 3px 0 0 3px; }
+.${PREFIX}-chip[data-kind="line"][data-shade="1"] { background: rgb(200, 110, 0); }
 .${HIDE_IDS_CLASS} .${PREFIX}-chip { display: none; }
 
 .${PREFIX}-panel, .${PREFIX}-tooltip {
@@ -94,6 +117,10 @@ const STYLESHEET = `
 .${PREFIX}-panel { top: 10px; right: 10px; width: 250px; padding: 8px 10px; }
 .${PREFIX}-panel-header { display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 4px; }
 .${PREFIX}-close { border: none; background: none; font-size: 16px; line-height: 1; cursor: pointer; color: inherit; padding: 0 2px; }
+.${PREFIX}-modes { display: flex; gap: 2px; margin: 2px 0 8px; padding: 2px; border-radius: 6px; background: rgba(0, 0, 0, 0.07); }
+.${PREFIX}-modes[hidden] { display: none; }
+.${PREFIX}-modes button { flex: 1; border: none; border-radius: 4px; padding: 2px 0; background: none; color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
+.${PREFIX}-modes button[aria-pressed="true"] { background: #fff; font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
 .${PREFIX}-status { margin-bottom: 6px; white-space: pre-line; }
 .${PREFIX}-status[data-tone="error"] { color: #c62828; }
 .${PREFIX}-legend { display: grid; grid-template-columns: 14px 1fr; gap: 3px 6px; align-items: center; margin: 6px 0; }
@@ -106,6 +133,8 @@ const STYLESHEET = `
     .${PREFIX}-panel, .${PREFIX}-tooltip { color: #f5f5f7; background: rgba(40, 40, 42, 0.97); border-color: rgba(255, 255, 255, 0.15); }
     .${PREFIX}-status[data-tone="error"] { color: #ff8a80; }
     .${PREFIX}-box.is-hovered { outline-color: rgba(255, 255, 255, 0.85); }
+    .${PREFIX}-modes { background: rgba(255, 255, 255, 0.1); }
+    .${PREFIX}-modes button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.22); }
 }
 `;
 
@@ -117,18 +146,23 @@ function boxArea(box: AgentViewBox): number {
     return box.rects.reduce((sum, [l, t, r, b]) => sum + Math.max(0, r - l) * Math.max(0, b - t), 0);
 }
 
-/** One reader's overlay: page layers, legend panel and hover tooltip. */
+/** One reader's overlay: page layers, panel (view switcher and legend) and hover tooltip. */
 export class AgentPageOverlay {
     private readonly doc: Document;
     private readonly viewer: Element | null;
     private readonly container: Element | null;
-    private pages = new Map<number, AgentViewPage>();
+    private views: Record<AgentViewMode, AgentViewLayer> | null = null;
+    private pages = new Map<number, ViewPage>();
     private observer: MutationObserver | null = null;
     private ensureTimer: number | null = null;
     private panel: HTMLElement | null = null;
+    private modesEl: HTMLElement | null = null;
     private statusEl: HTMLElement | null = null;
     private detailsEl: HTMLElement | null = null;
+    private legendEl: HTMLElement | null = null;
     private tooltip: HTMLElement | null = null;
+    /** The box whose text the tooltip holds. */
+    private tooltipBox: AgentViewBox | null = null;
     private hovered: { pageIndex: number; boxIndex: number } | null = null;
     private disposed = false;
 
@@ -137,12 +171,14 @@ export class AgentPageOverlay {
      * @param hostWin  The chrome window hosting the reader; owns the observer and timers.
      * @param title  Panel heading.
      * @param onClose  Called when the user closes the panel.
+     * @param mode  The view shown once the extraction arrives.
      */
     constructor(
         private readonly win: Window,
         private readonly hostWin: Window,
         private readonly title: string,
         private readonly onClose: () => void,
+        private mode: AgentViewMode = 'items',
     ) {
         this.doc = win.document;
         this.viewer = this.doc.getElementById('viewer');
@@ -162,19 +198,39 @@ export class AgentPageOverlay {
         this.statusEl.dataset.tone = tone;
     }
 
-    /** Draw these pages and reveal the legend. */
-    setPages(pages: AgentViewPage[]): void {
+    /** The selected view. */
+    get currentMode(): AgentViewMode {
+        return this.mode;
+    }
+
+    /** Provide every view, reveal the switcher and legend, and draw the selected view. */
+    setViews(views: Record<AgentViewMode, AgentViewLayer>): void {
         if (this.disposed) return;
-        this.pages = new Map(pages.map((page) => [page.pageIndex, page]));
-        this.removeLayers();
+        this.views = views;
+        if (this.modesEl) this.modesEl.hidden = false;
         if (this.detailsEl) this.detailsEl.hidden = false;
-        this.ensureLayers();
+        this.showMode(this.mode);
         if (!this.observer && this.viewer) {
             // Chrome-side observer: its callback runs in this realm.
             const observer = new this.hostWin.MutationObserver(() => this.scheduleEnsureLayers());
             observer.observe(this.viewer, { childList: true, subtree: true });
             this.observer = observer;
         }
+    }
+
+    private showMode(mode: AgentViewMode): void {
+        if (this.disposed || !this.views) return;
+        this.mode = mode;
+        const view = this.views[mode];
+        this.setHovered(null);
+        this.pages = new Map(view.pages.map((page) => [page.pageIndex, page]));
+        this.removeLayers();
+        this.ensureLayers();
+        this.setStatus(view.summary);
+        this.renderLegend();
+        this.modesEl?.querySelectorAll('button').forEach((button: HTMLButtonElement) => {
+            button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
+        });
     }
 
     dispose(): void {
@@ -228,7 +284,7 @@ export class AgentPageOverlay {
         });
     }
 
-    private buildLayer(page: AgentViewPage): HTMLElement {
+    private buildLayer(page: ViewPage): HTMLElement {
         const layer = this.doc.createElement('div');
         layer.className = LAYER_CLASS;
         layer.dataset.pageIndex = String(page.pageIndex);
@@ -319,12 +375,12 @@ export class AgentPageOverlay {
         if (!tooltip) return;
         const title = tooltip.firstElementChild as HTMLElement;
         const body = tooltip.lastElementChild as HTMLElement;
-        const titleText = `${KIND_LABELS[box.kind]} · cite as ${box.id}`;
-        if (title.textContent !== titleText) {
-            title.textContent = titleText;
-            body.textContent = box.modelText.length > TOOLTIP_MAX_CHARS
-                ? `${box.modelText.slice(0, TOOLTIP_MAX_CHARS)}…`
-                : box.modelText;
+        if (this.tooltipBox !== box) {
+            this.tooltipBox = box;
+            title.textContent = box.title;
+            body.textContent = box.text.length > TOOLTIP_MAX_CHARS
+                ? `${box.text.slice(0, TOOLTIP_MAX_CHARS)}…`
+                : box.text;
         }
         tooltip.style.display = 'block';
         const margin = 14;
@@ -363,6 +419,17 @@ export class AgentPageOverlay {
         close.addEventListener('click', () => this.onClose());
         header.append(title, close);
 
+        const modes = doc.createElement('div');
+        modes.className = `${PREFIX}-modes`;
+        modes.hidden = true;
+        for (const entry of MODES) {
+            const button = doc.createElement('button');
+            button.dataset.mode = entry.mode;
+            button.textContent = entry.label;
+            button.addEventListener('click', () => this.showMode(entry.mode));
+            modes.appendChild(button);
+        }
+
         const status = doc.createElement('div');
         status.className = `${PREFIX}-status`;
 
@@ -370,15 +437,6 @@ export class AgentPageOverlay {
         details.hidden = true;
         const legend = doc.createElement('div');
         legend.className = `${PREFIX}-legend`;
-        for (const entry of LEGEND) {
-            const swatch = doc.createElement('div');
-            swatch.className = `${PREFIX}-box`;
-            swatch.dataset.kind = entry.kind;
-            swatch.dataset.shade = '0';
-            const label = doc.createElement('span');
-            label.textContent = entry.label;
-            legend.append(swatch, label);
-        }
         const toggle = doc.createElement('label');
         toggle.className = `${PREFIX}-toggle`;
         const checkbox = doc.createElement('input');
@@ -390,12 +448,29 @@ export class AgentPageOverlay {
         toggle.append(checkbox, doc.createTextNode('Show ids'));
 
         details.append(legend, toggle);
-        panel.append(header, status, details);
+        panel.append(header, modes, status, details);
         (doc.body ?? doc.documentElement).appendChild(panel);
 
         this.panel = panel;
+        this.modesEl = modes;
         this.statusEl = status;
         this.detailsEl = details;
+        this.legendEl = legend;
+    }
+
+    private renderLegend(): void {
+        const legend = this.legendEl;
+        if (!legend) return;
+        legend.replaceChildren();
+        for (const entry of LEGENDS[this.mode]) {
+            const swatch = this.doc.createElement('div');
+            swatch.className = `${PREFIX}-box`;
+            swatch.dataset.kind = entry.kind;
+            swatch.dataset.shade = '0';
+            const label = this.doc.createElement('span');
+            label.textContent = entry.label;
+            legend.append(swatch, label);
+        }
     }
 
     private buildTooltip(): void {
