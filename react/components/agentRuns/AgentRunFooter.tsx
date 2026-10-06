@@ -29,6 +29,7 @@ import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { exportWithFeedback, fileExportMenuItem } from '../../utils/fileExportFeedback';
+import { menuDivider, saveAsNoteMenuItem } from '../../utils/saveNoteMenu';
 import { getHost } from '@beaver/agent-ui/host';
 import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 
@@ -138,11 +139,11 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         [chainRuns],
     );
 
-    // Build share menu items
+    // Build share menu items: the clipboard, then notes and files, then
+    // developer tools.
     const getShareMenuItems = () => {
         const host = getHost();
         const noteWriter = host.noteWriter;
-        const hasParent = noteWriter?.canSaveAsChildNote() ?? false;
 
         const items: MenuItem[] = [
             {
@@ -153,40 +154,35 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 label: 'Copy link to message',
                 onClick: () => copyRunUrl()
             },
-            {
-                label: 'Copy message ID',
-                onClick: () => copyRunId()
-            }
         ];
 
+        const output: MenuItem[] = [];
         if (noteWriter) {
-            items.splice(1, 0,
-                {
-                    label: 'Save as note',
-                    onClick: () => saveToLibrary(),
-                    disabled: isResolvingCitations
-                },
-                {
-                    label: 'Save as child note',
-                    onClick: () => saveToItem(),
-                    disabled: !hasParent || isResolvingCitations
-                },
-            );
+            output.push(saveAsNoteMenuItem({
+                onSaveStandalone: () => saveToLibrary(),
+                onSaveChild: () => saveToItem(),
+                hasParent: noteWriter.canSaveAsChildNote(),
+                parentTitle: noteWriter.childNoteParentTitle?.(),
+                disabled: isResolvingCitations,
+            }));
         }
-
         if (host.documentExport?.exportResponseToFile) {
-            items.splice(noteWriter ? 3 : 1, 0, fileExportMenuItem(exportToFile, isResolvingCitations));
+            output.push(fileExportMenuItem(exportToFile, isResolvingCitations));
         }
+        if (output.length > 0) items.push(menuDivider('output-divider'), ...output);
 
         if (host.config?.isDevelopment() ?? false) {
-            items.push({
-                label: 'Copy chat ID',
-                onClick: () => copyThreadId()
-            });
-            items.push({
-                label: 'Copy citation metadata',
-                onClick: () => copyCitationMetadata()
-            });
+            items.push(
+                menuDivider('developer-divider'),
+                {
+                    label: 'Copy message ID',
+                    onClick: () => copyRunId()
+                },
+                {
+                    label: 'Copy citation metadata (JSON)',
+                    onClick: () => copyCitationMetadata()
+                },
+            );
         }
 
         return items;
@@ -287,10 +283,6 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     const copyCitationMetadata = async () => {
         await copyToClipboard(JSON.stringify(runCitations, null, 2));
-    };
-
-    const copyThreadId = async () => {
-        await copyToClipboard(store.get(currentThreadIdAtom ) || '');
     };
 
     const threadReadOnly = useAtomValue(threadReadOnlyAtom);

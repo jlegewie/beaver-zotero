@@ -17,6 +17,14 @@ export interface MenuItem {
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     /** Whether the item is disabled */
     disabled?: boolean;
+    /** Keyboard shortcut shown after the label (e.g. `⌘F`); display only. */
+    shortcut?: string;
+    /**
+     * The same shortcut for assistive technology, in `aria-keyshortcuts`
+     * syntax (`Meta+F`, `Control+F`). Kept apart from `shortcut`, whose
+     * display glyphs are not valid there.
+     */
+    ariaKeyShortcuts?: string;
     /** 
      * Optional custom content to render instead of the default label and icon.
      * 
@@ -716,6 +724,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     }
                     aria-label={!item.isGroupHeader && !item.isDivider ? item.label : undefined}
                     aria-haspopup={item.submenu ? 'menu' : undefined}
+                    aria-keyshortcuts={item.ariaKeyShortcuts}
                     aria-expanded={item.submenu ? openSubmenuIndex === index : undefined}
                 >
                     {item.isDivider ? null : item.isGroupHeader ? (
@@ -759,6 +768,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                                 <Icon icon={item.icon} size={14} className={itemIconClassName}/>
                             )}
                             <span className={itemLabelClassName}>{item.label}</span>
+                            {item.shortcut && (
+                                <span className="text-sm font-color-tertiary flex-shrink-0 ml-2">{item.shortcut}</span>
+                            )}
                             {item.submenu && (
                                 <Icon icon={ArrowRightIcon} size={12} className="font-color-tertiary flex-shrink-0" />
                             )}
@@ -779,6 +791,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         top: submenuPosition?.y ?? 0,
                         left: submenuPosition?.x ?? 0,
                         minWidth: '9rem',
+                        // Long labels (an item title) truncate rather than widen it.
+                        maxWidth: 'min(20rem, calc(100vw - 16px))',
                         maxHeight: '80vh',
                     }}
                     role="menu"

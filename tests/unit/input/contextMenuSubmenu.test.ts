@@ -133,6 +133,20 @@ describe("ContextMenu submenus", () => {
         expect(byLabel("Word…")).toBeDefined();
     });
 
+    it("shows a shortcut hint after the label and announces it in ARIA key syntax", () => {
+        mount([
+            { label: "Find in chat", shortcut: "⌘F", ariaKeyShortcuts: "Meta+F", onClick: vi.fn() },
+            { label: "Find elsewhere", shortcut: "Ctrl+F", ariaKeyShortcuts: "Control+F", onClick: vi.fn() },
+            { label: "Hint only", shortcut: "⌘K", onClick: vi.fn() },
+        ]);
+        const mac = byLabel("Find in chat")!;
+        expect(mac.textContent).toBe("Find in chat⌘F");
+        expect(mac.getAttribute("aria-keyshortcuts")).toBe("Meta+F");
+        expect(byLabel("Find elsewhere")!.getAttribute("aria-keyshortcuts")).toBe("Control+F");
+        // A display glyph is never used as the ARIA value.
+        expect(byLabel("Hint only")!.hasAttribute("aria-keyshortcuts")).toBe(false);
+    });
+
     it("does not open the submenu of a disabled item", () => {
         const { menuItems } = exportMenu();
         menuItems[1].disabled = true;

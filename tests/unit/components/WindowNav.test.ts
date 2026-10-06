@@ -100,7 +100,7 @@ describe('thread row menu', () => {
         expect(menu()!.style.left).toBe('120px');
         expect(menu()!.style.top).toBe('240px');
         const labels = Array.from(menu()!.querySelectorAll('[role="menuitem"]')).map(el => el.getAttribute('aria-label'));
-        expect(labels).toEqual(['Rename chat', 'Pin chat', 'Delete chat']);
+        expect(labels).toEqual(['Rename chat', 'Pin chat', 'Delete chat…']);
         expect(row().classList.contains('beaver-window-nav-row-menu-open')).toBe(true);
     });
 

@@ -31,6 +31,7 @@ import { prepareCitationRenderContext } from '../../../utils/citationRenderConte
 import { preprocessNoteContent, renderToHTML, renderToMarkdown } from '../../../utils/citationRenderers';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { exportWithFeedback, fileExportMenuItem } from '../../../utils/fileExportFeedback';
+import { menuDivider, saveAsNoteMenuItem } from '../../../utils/saveNoteMenu';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
@@ -309,17 +310,22 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         await confirmAndDeleteThread(threadId, surfaceWindow);
     };
 
+    const handleCopyThreadId = async () => {
+        await copyToClipboard(store.get(currentThreadIdAtom) || '');
+    };
+
     const getMenuItems = (): MenuItem[] => {
         const hasRuns = runsCount > 0;
+        const host = getHost();
         const context = getZoteroTargetContextSync();
         const hasParent = context.parentReference !== null;
         const pinPending = !!threadId && isPinPending(pinsPending, threadId);
 
-        // The chat's own housekeeping first, then ways to look at it, then
-        // ways to take it elsewhere.
+        // The chat's own housekeeping, ways to look at it, the clipboard, notes
+        // and files made from it, and last, apart, deleting it.
         const items: MenuItem[] = [
             {
-                label: 'Rename chat',
+                label: 'Rename chat…',
                 onClick: handleRenameChat,
                 disabled: !threadId,
             },
@@ -336,20 +342,12 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                     </span>
                 ) : undefined,
             },
+            menuDivider('thread-actions-divider'),
             {
-                label: 'Delete chat',
-                onClick: handleDeleteChat,
-                disabled: !threadId,
-            },
-            {
-                label: 'thread-actions-divider',
-                onClick: () => {},
-                isDivider: true,
-            },
-            {
-                // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
-                // that also opens the bar is not shown here.
                 label: 'Find in chat',
+                // Display only: the chord itself is handled by the sidebar.
+                shortcut: Zotero.isMac ? '⌘F' : 'Ctrl+F',
+                ariaKeyShortcuts: Zotero.isMac ? 'Meta+F' : 'Control+F',
                 onClick: findControls.open,
                 disabled: !hasRuns || !findControls.isAvailable,
             },
@@ -367,32 +365,40 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                         }).then(result => { if (result?.message) surfaceWindow.alert(result.message); }).catch(Zotero.logError);
                 },
             }] : []),
+            menuDivider('clipboard-divider'),
             {
-                label: 'find-in-chat-divider',
-                onClick: () => {},
-                isDivider: true,
-            },
-            {
-                label: 'Copy entire chat',
+                label: 'Copy chat',
                 onClick: handleCopyThread,
                 disabled: !hasRuns,
             },
             {
-                label: 'Save chat as note',
-                onClick: handleSaveAsNote,
-                disabled: !hasRuns,
-            },
-            {
-                label: 'Save chat as child note',
-                onClick: handleSaveAsChildNote,
-                disabled: !hasParent || !hasRuns,
-            },
-            ...(getHost().documentExport?.exportThreadToFile
-                ? [fileExportMenuItem(handleExportThread, !hasRuns)]
-                : []),
-            {
                 label: 'Copy link to chat',
                 onClick: handleCopyThreadUrl,
+                disabled: !threadId,
+            },
+            menuDivider('output-divider'),
+            saveAsNoteMenuItem({
+                onSaveStandalone: handleSaveAsNote,
+                onSaveChild: handleSaveAsChildNote,
+                hasParent,
+                parentTitle: hasParent ? host.noteWriter?.childNoteParentTitle?.() : null,
+                disabled: !hasRuns,
+            }),
+            ...(host.documentExport?.exportThreadToFile
+                ? [fileExportMenuItem(handleExportThread, !hasRuns)]
+                : []),
+            ...((host.config?.isDevelopment() ?? false) ? [
+                menuDivider('developer-divider'),
+                {
+                    label: 'Copy chat ID',
+                    onClick: handleCopyThreadId,
+                    disabled: !threadId,
+                },
+            ] : []),
+            menuDivider('delete-divider'),
+            {
+                label: 'Delete chat…',
+                onClick: handleDeleteChat,
                 disabled: !threadId,
             },
         ];

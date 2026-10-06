@@ -418,6 +418,11 @@ export interface NoteWriterHost {
     isCurrentLibraryEditable(): boolean;
     /** Render-time: whether the current Zotero context has a parent item target. */
     canSaveAsChildNote(): boolean;
+    /**
+     * Render-time: display title of the item a child note would be saved
+     * under, or null when there is none or it cannot be named.
+     */
+    childNoteParentTitle?(): string | null;
     /** Interaction-time: create a note in the host library and optionally reveal it. */
     saveNote(request: SaveNoteRequest): Promise<SavedNoteReference | null>;
 }
