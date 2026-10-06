@@ -772,7 +772,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                                 <span className="text-sm font-color-tertiary flex-shrink-0 ml-2">{item.shortcut}</span>
                             )}
                             {item.submenu && (
-                                <Icon icon={ArrowRightIcon} size={12} className="font-color-tertiary flex-shrink-0" />
+                                <Icon icon={ArrowRightIcon} size={12} className="font-color-secondary flex-shrink-0" />
                             )}
                         </span>
                     )}
