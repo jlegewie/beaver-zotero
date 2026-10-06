@@ -626,6 +626,25 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         inPanel: false,
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0" target='_blank'>Full changelog</a>`,
     },
+    {
+        version: "0.26.0-beta.2",
+        title: "Export to Word, PDF, and LaTeX",
+        featureList: [
+            {
+                title: "Export to Word, PDF, LaTeX, and Markdown",
+                description: "Save a created note, a response or a whole chat as a file, with formatted citations.",
+            },
+            {
+                title: "Find and merge duplicates",
+                description: "Review each merge, choose what to keep, and undo it later.",
+            },
+            {
+                title: "Improved item import",
+                description: "Create items from DOIs, URLs, or files.",
+            },
+        ],
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.26.0-beta.2" target='_blank'>Full changelog</a>`,
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
