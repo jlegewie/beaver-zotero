@@ -42,7 +42,7 @@ import {
 import { itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identity/itemLinks';
 import type { MdBlock, MdFootnoteDefinition, MdInline, MdTable } from '../mdast';
 import { latexToOmml } from '../math/latexToOmml';
-import { escapeXml, stripInvalidXmlChars } from '../math/xml';
+import { escapeXml, parseXml, stripInvalidXmlChars, type XmlNode } from '../math/xml';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { parseCslHtml, type StyledSegment } from '../citations/inlineHtml';
 import { BIBLIOGRAPHY_FIELD_CODE, citationFieldCode, documentPreferenceProperties } from './zoteroFields';
@@ -54,6 +54,7 @@ import {
     listContinuationIndent,
     listLevels,
     pageProperties,
+    taskLevels,
     quoteIndent,
     tableBorders,
     themeUnits,
@@ -107,15 +108,34 @@ const HEADINGS = [
 
 const BULLETS = 'beaver-bullets';
 const ORDERED = 'beaver-ordered';
+const TASKS_OPEN = 'beaver-tasks-open';
+const TASKS_DONE = 'beaver-tasks-done';
+
+/** Elements whose text is content, kept even when it is only spaces. */
+const TEXT_ELEMENTS = new Set(['w:t', 'm:t', 'w:instrText']);
+
+function xmlComponent(node: XmlNode, parentName: string): ImportedXmlComponent | string | null {
+    if (node.type === 'text') {
+        return node.value.trim() || TEXT_ELEMENTS.has(parentName) ? node.value : null;
+    }
+    const component = new ImportedXmlComponent(node.name, Object.keys(node.attributes).length > 0 ? node.attributes : undefined);
+    for (const child of node.children) {
+        const converted = xmlComponent(child, node.name);
+        if (converted !== null) component.push(converted);
+    }
+    return component;
+}
 
 /**
  * Raw OOXML as a paragraph child. The `w:`/`m:` prefixes need no declaration
- * here: the parser does not resolve namespaces, and the document root declares
- * both.
+ * here: nothing resolves namespaces, and the document root declares both.
+ * Parsed here rather than with `ImportedXmlComponent.fromXmlString`, which
+ * drops text that is only whitespace — the em spaces of `\quad` included.
  */
 function rawXml(xml: string): Child {
-    // `root` is the parsed element list; the first entry is the element itself.
-    return (ImportedXmlComponent.fromXmlString(xml) as unknown as { root: Child[] }).root[0];
+    const element = parseXml(xml).find(node => node.type === 'element');
+    if (!element) throw new Error('Raw XML has no element');
+    return xmlComponent(element, '') as Child;
 }
 
 /** Field begin/end runs, so link handling can keep a field's runs together. */
@@ -199,6 +219,8 @@ function isWebLink(url: string): boolean {
 
 class DocxWriter {
     private readonly footnotes: Record<string, { children: Paragraph[] }> = {};
+    /** A markdown footnote is being written and its first text still needs its leading space. */
+    private footnoteLeadPending = false;
     private footnoteCount = 0;
     private readonly writtenFootnotes = new Map<MdFootnoteDefinition, number>();
     private bookmarkCount = 0;
@@ -368,10 +390,14 @@ class DocxWriter {
         const id = ++this.footnoteCount;
         this.writtenFootnotes.set(definition, id);
         const previous = this.insideFootnote;
+        const previousLead = this.footnoteLeadPending;
         this.insideFootnote = id;
+        // A note that opens with a list or code has no text run to lead.
+        this.footnoteLeadPending = definition.children[0]?.type === 'paragraph';
         const paragraphs = this.blocks(definition.children, { depth: 0, quote: 0 }, definitions)
             .filter((block): block is Paragraph => block instanceof Paragraph);
         this.insideFootnote = previous;
+        this.footnoteLeadPending = previousLead;
         this.footnotes[String(id)] = { children: paragraphs.length > 0 ? paragraphs : [new Paragraph({})] };
         const bookmark = ++this.bookmarkCount;
         return [
@@ -415,7 +441,7 @@ class DocxWriter {
         // The field records the footnote it actually sits in.
         const noted = { ...cluster, noteIndex: id };
         this.footnotes[String(id)] = {
-            children: [new Paragraph({ style: STYLE.footnoteText, children: this.citationRuns(noted, {}) })],
+            children: [new Paragraph({ style: STYLE.footnoteText, children: [textRun(' '), ...this.citationRuns(noted, {})] })],
         };
         return [new FootnoteReferenceRun(id)];
     }
@@ -426,6 +452,8 @@ class DocxWriter {
         nodes: MdBlock[],
         context: { depth: number; quote: number },
         definitions: Map<string, MdFootnoteDefinition>,
+        /** Space owed by a list or table just before these blocks. */
+        leadingGap = 0,
     ): Block[] {
         const out: Block[] = [];
         // Inside a list item, blocks align with the item's text; quotes indent further.
@@ -436,16 +464,28 @@ class DocxWriter {
         };
         // A list's items and a table end without a paragraph's space after; the
         // next block makes it up.
-        let gapBefore = 0;
+        let gapBefore = leadingGap;
+        // Word shades a paragraph's spacing too: a code block right after
+        // another code block or a table would merge into it or touch it, so an
+        // unshaded spacer goes between them.
+        let previous: 'code' | 'table' | 'other' | null = null;
+        const spacer = () => new Paragraph({
+            spacing: { before: 0, after: 0, line: gapAfterBlock(this.theme), lineRule: LineRuleType.EXACT },
+            children: [],
+        });
         const spacedBase = () => {
             const base = gapBefore > 0 ? { ...paragraphBase, spacing: { before: gapBefore } } : paragraphBase;
             gapBefore = 0;
             return base;
         };
         for (const node of nodes) {
+            const kind = node.type === 'code' ? 'code' : node.type === 'table' ? 'table' : 'other';
             switch (node.type) {
                 case 'paragraph':
-                    out.push(new Paragraph({ ...spacedBase(), children: this.inlines(node.children, {}, definitions) }));
+                    out.push(new Paragraph({
+                        ...spacedBase(),
+                        children: [...this.footnoteLead(), ...this.inlines(node.children, {}, definitions)],
+                    }));
                     break;
                 case 'heading':
                     out.push(new Paragraph({
@@ -459,7 +499,8 @@ class DocxWriter {
                     }));
                     break;
                 case 'blockquote':
-                    out.push(...this.blocks(node.children, { ...context, quote: context.quote + 1 }, definitions));
+                    out.push(...this.blocks(node.children, { ...context, quote: context.quote + 1 }, definitions, gapBefore));
+                    gapBefore = 0;
                     break;
                 case 'list':
                     out.push(...this.list(node.ordered ?? false, node.start ?? 1, node.children, context, definitions));
@@ -467,6 +508,8 @@ class DocxWriter {
                     break;
                 case 'code': {
                     const lines = node.value.split('\n');
+                    if (previous === 'code' || previous === 'table') out.push(spacer());
+                    gapBefore = 0;
                     out.push(new Paragraph({
                         style: STYLE.code,
                         ...(indent > 0 ? { indent: { left: indent } } : {}),
@@ -490,8 +533,19 @@ class DocxWriter {
                     // Written where it is referenced.
                     break;
             }
+            previous = kind;
         }
         return out;
+    }
+
+    /**
+     * A space after the footnote number, before the note's first text, as
+     * Word and Zotero write notes. Given once per note.
+     */
+    private footnoteLead(): Child[] {
+        if (!this.footnoteLeadPending) return [];
+        this.footnoteLeadPending = false;
+        return [textRun(' ')];
     }
 
     private list(
@@ -506,8 +560,12 @@ class DocxWriter {
         const reference = ordered ? this.orderedReference(start, level) : BULLETS;
         const instance = ++this.listInstance;
         for (const item of items) {
-            const checkbox = item.checked == null ? [] : [textRun(item.checked ? '☒ ' : '☐ ')];
-            const numbering = { reference, level, instance };
+            // A bullet task item's checkbox takes the bullet's place; a
+            // numbered one keeps its number, with the checkbox after it.
+            const isTask = item.checked != null;
+            const itemReference = isTask && !ordered ? (item.checked ? TASKS_DONE : TASKS_OPEN) : reference;
+            const checkbox = isTask && ordered ? [textRun(item.checked ? '☒ ' : '☐ ')] : [];
+            const numbering = { reference: itemReference, level, instance };
             // The item's marker goes on its first block; a block that cannot
             // carry it (code, table, …) gets a marker line of its own.
             if (item.children.length === 0 || !['paragraph', 'heading'].includes(item.children[0].type)) {
@@ -635,6 +693,8 @@ class DocxWriter {
         const config = [
             { reference: BULLETS, levels: listLevels(false, this.theme) },
             { reference: ORDERED, levels: listLevels(true, this.theme) },
+            { reference: TASKS_OPEN, levels: taskLevels(false, this.theme) },
+            { reference: TASKS_DONE, levels: taskLevels(true, this.theme) },
         ];
         for (const [reference, { start, level }] of this.orderedStarts) {
             config.push({ reference, levels: listLevels(true, this.theme, start, level) });

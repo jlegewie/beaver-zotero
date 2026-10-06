@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseExportSource } from '@beaver/agent-export/parse/parseExportDoc';
 import { writeHtml } from '@beaver/agent-export/html/writeHtml';
-import { sanitizeCslHtml } from '@beaver/agent-export/html/escape';
+import { keepUrlStartsTogether, sanitizeCslHtml } from '@beaver/agent-export/html/escape';
 import { paperSize } from '@beaver/agent-export/page';
 import type { ExportDoc, FormattedCitations, FormattedCluster } from '@beaver/agent-export/types';
 
@@ -212,6 +212,28 @@ describe('sanitizeCslHtml', () => {
     it('decodes and re-escapes text and balances tags', () => {
         expect(sanitizeCslHtml('A &#38; B &lt;c&gt; <i>open')).toBe('A &amp; B &lt;c&gt; <i>open</i>');
         expect(sanitizeCslHtml('<i><b>x</i>y')).toBe('<i><b>x</b></i>y');
+    });
+});
+
+describe('writeHtml task lists', () => {
+    it('hides the marker of a bullet task item only, so a numbered one keeps its number', () => {
+        const doc = parseExportSource({ title: 'T', blocks: [{ type: 'markdown', markdown: '1. [x] done' }] });
+        const { html } = writeHtml({ doc, citations: { styleId: 's', locale: 'en-US', styleClass: 'in-text', clusters: [], bibliography: null, documentData: null } as any, options: { linkItems: false, bibliographyTitle: 'References', notesTitle: 'Notes' } });
+        expect(html).toContain('ul > li.task { list-style-type: none; }');
+        expect(html).not.toMatch(/(^|\n)li\.task \{/);
+        expect(html).toContain('<ol>\n<li class="task"><p>☒ done</p>');
+    });
+});
+
+describe('keepUrlStartsTogether', () => {
+    it('keeps a URL\'s scheme and host on one line, leaving tags, attributes and code alone', () => {
+        const html = '<p>See https://doi.org/10.1000/xyz and <a href="https://example.com/a">https://example.com/a</a>.</p>'
+            + '<pre><code>curl https://api.example.com/v1</code></pre>';
+        expect(keepUrlStartsTogether(html)).toBe(
+            '<p>See <span class="url-start">https://doi.org/</span>10.1000/xyz and '
+            + '<a href="https://example.com/a"><span class="url-start">https://example.com/</span>a</a>.</p>'
+            + '<pre><code>curl https://api.example.com/v1</code></pre>',
+        );
     });
 });
 

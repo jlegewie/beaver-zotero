@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { exportWithFeedback, fileExportMenuItem } from '../../../react/utils/fileExportFeedback';
+import { exportErrorMessage, exportWithFeedback, fileExportMenuItem } from '../../../react/utils/fileExportFeedback';
 import type { FileExportResult } from '@beaver/agent-ui/host/types';
 
 function saved(overrides: Partial<Extract<FileExportResult, { status: 'saved' }>> = {}): FileExportResult {
@@ -71,7 +71,20 @@ describe('exportWithFeedback', () => {
         await exportWithFeedback('pdf', async () => ({ status: 'canceled' }), notify);
         expect(notify).not.toHaveBeenCalled();
         await exportWithFeedback('pdf', async () => { throw new Error('Disk full'); }, notify);
-        expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', text: 'Disk full' }));
+        expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', text: 'There is not enough disk space to save the file.' }));
+    });
+});
+
+describe('exportErrorMessage', () => {
+    it('explains file-system failures instead of showing platform codes', () => {
+        const denied = Object.assign(new Error('Could not open the file at /Volumes/ro/a.docx for writing (NS_ERROR_FILE_ACCESS_DENIED)'), { name: 'NotAllowedError' });
+        expect(exportErrorMessage(denied)).toBe('Beaver cannot save to that location. Choose a folder you can write to and try again.');
+        expect(exportErrorMessage(new Error('Write failed (NS_ERROR_FILE_NO_DEVICE_SPACE)'))).toBe('There is not enough disk space to save the file.');
+        expect(exportErrorMessage(new Error('NS_ERROR_FAILURE'))).toBe('The file could not be saved.');
+    });
+
+    it('keeps messages that are already meant for the user', () => {
+        expect(exportErrorMessage(new Error('An export is already waiting for a file name.'))).toBe('An export is already waiting for a file name.');
     });
 });
 

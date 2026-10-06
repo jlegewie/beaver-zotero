@@ -20,7 +20,7 @@ import type { MdBlock, MdFootnoteDefinition, MdInline, MdTable } from '../mdast'
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { paperSize } from '../page';
 import type { ExportDoc, ExportWarning, FormattedCitations, FormattedCluster, LatexExportOptions } from '../types';
-import { escapeLatex, latexUrl } from './escape';
+import { escapeLatex, escapeLatexCode, latexUrl } from './escape';
 
 export interface WriteLatexInput {
     doc: ExportDoc;
@@ -53,7 +53,44 @@ const MATH_PACKAGES: Array<[RegExp, string]> = [
     [/\\(?:color|textcolor|colorbox)(?![a-zA-Z])/, 'xcolor'],
     [/\\bm(?![a-zA-Z])/, 'bm'],
     [/\\mathscr(?![a-zA-Z])/, 'mathrsfs'],
+    [/\\centernot(?![a-zA-Z])/, 'centernot'],
+    [/\\(?:coloneqq|eqqcolon|Coloneqq|vcentcolon|mathclap|mathllap|mathrlap)(?![a-zA-Z])/, 'mathtools'],
 ];
+
+/** Chinese, Japanese or Korean script, which pdfLaTeX cannot typeset. */
+const CJK_TEXT = /[\u1100-\u11ff\u3040-\u30ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/;
+/** Korean script: needs a font with Hangul, which the Japanese setup lacks. */
+const HANGUL_TEXT = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/;
+
+/**
+ * URLs and access dates only for web pages, as CSL styles print them:
+ * biblatex's default styles add them to every entry and full citation.
+ */
+const BIBLATEX_URL_LINES = [
+    '\\newcommand{\\BeaverClearUrl}{\\ifentrytype{online}{}{\\clearfield{url}\\clearfield{urlyear}\\clearfield{urlmonth}\\clearfield{urlday}}}',
+    '\\AtEveryBibitem{\\BeaverClearUrl}',
+    '\\AtEveryCitekey{\\BeaverClearUrl}',
+];
+
+/**
+ * Equation numbers (`\tag`) where LaTeX allows them. KaTeX accepts a tag
+ * inside `aligned` or `gathered`; amsmath does not. An equation that is one
+ * such block becomes the display environment (`align*`, `gather*`), where each
+ * line may carry a tag; a single tag nested anywhere else moves to the end of
+ * the display. A complete display environment (`equation`, `align`, …) is
+ * left as written: its tags are already where LaTeX allows them.
+ */
+export function liftTags(source: string): string {
+    if (!/\\tag\*?\{/.test(source) || DISPLAY_ENVIRONMENT.test(source)) return source;
+    const whole = /^\\begin\{(aligned|gathered)\}([\s\S]*)\\end\{\1\}$/.exec(source.trim());
+    if (whole) {
+        const environment = whole[1] === 'aligned' ? 'align*' : 'gather*';
+        return `\\begin{${environment}}${whole[2]}\\end{${environment}}`;
+    }
+    const tags = source.match(/\\tag\*?\{[^{}]*\}/g) ?? [];
+    if (tags.length !== 1 || !/\\begin\{/.test(source)) return source;
+    return `${source.replace(tags[0], '').trimEnd()} ${tags[0]}`;
+}
 
 /** Footnote counter at the start of body-only output. */
 const FOOTNOTE_BASE = '\\BeaverFootnoteBase';
@@ -150,6 +187,8 @@ class LatexWriter {
     /** Notes of the table cell being written, or null outside tables. */
     private tableNotes: TableNote[] | null = null;
     private readonly packages = new Set<string>();
+    /** The body as written, for script detection in the preamble. */
+    private bodyText = '';
     private readonly shorthands = new Set<string>();
     private hasCitations = false;
     /** Body-only output numbers footnotes from the insertion point. */
@@ -201,7 +240,7 @@ class LatexWriter {
                     lastText = 'x';
                     break;
                 case 'inlineCode':
-                    out += `\\texttt{${escapeLatex(node.value)}}`;
+                    out += `\\texttt{${escapeLatexCode(node.value)}}`;
                     lastText = node.value;
                     break;
                 case 'break':
@@ -323,7 +362,7 @@ class LatexWriter {
     }
 
     private displayMath(latex: string): string {
-        const source = this.mathSource(latex);
+        const source = liftTags(this.mathSource(latex));
         return DISPLAY_ENVIRONMENT.test(source) ? source : `\\[\n${source}\n\\]`;
     }
 
@@ -478,11 +517,13 @@ class LatexWriter {
                 return this.list(node.ordered ?? false, node.start ?? 1, node.children, definitions, context);
             case 'code': {
                 if (context.inArgument) {
-                    return node.value.split('\n').map(line => `\\texttt{${escapeLatex(line)}}`).join('\\newline\n');
+                    return node.value.split('\n').map(line => `\\texttt{${escapeLatexCode(line)}}`).join('\\newline\n');
                 }
-                // Nothing inside `verbatim` is interpreted except its own end.
-                const value = node.value.replace(/\\end\{verbatim\}/g, '\\end {verbatim}');
-                return `\\begin{verbatim}\n${value}\n\\end{verbatim}`;
+                // Nothing inside `Verbatim` is interpreted except its own end;
+                // long lines wrap (fvextra) instead of running off the page.
+                this.packages.add('fvextra');
+                const value = node.value.replace(/\\end\{Verbatim\}/g, '\\end {Verbatim}');
+                return `\\begin{Verbatim}[breaklines,breakanywhere]\n${value}\n\\end{Verbatim}`;
             }
             case 'math':
                 return this.displayMath(node.value);
@@ -522,8 +563,12 @@ class LatexWriter {
             out += `\\setcounter{enum${['i', 'ii', 'iii', 'iv'][depth]}}{${first - 1}}\n`;
         }
         for (const item of items) {
-            const label = item.checked == null ? '' : item.checked ? '[$\\boxtimes$]' : '[$\\square$]';
-            const content = this.blocks(item.children, definitions, inner);
+            // A bullet task item's checkbox replaces the bullet; a numbered one
+            // keeps its number, with the checkbox after it.
+            const box = item.checked == null ? '' : item.checked ? '$\\boxtimes$' : '$\\square$';
+            const label = box && !ordered ? `[${box}]` : '';
+            const body = this.blocks(item.children, definitions, inner);
+            const content = box && ordered ? `${box} ${body}`.trimEnd() : body;
             // A bracket at the start would read as the item's optional label.
             out += `\\item${label}${content ? ` ${!label && content.startsWith('[') ? '{}' : ''}${content}` : ''}\n`;
         }
@@ -610,7 +655,12 @@ class LatexWriter {
         return parts.filter(Boolean).join('\n\n');
     }
 
+    /** biblatex style options; `isbn=false` also drops ISSNs, which CSL styles leave out. */
     private biblatexOptions(): string {
+        return `${this.biblatexStyle()},isbn=false`;
+    }
+
+    private biblatexStyle(): string {
         switch (this.input.citations.citationFormat) {
             case 'numeric':
                 return 'style=numeric-comp,sorting=none';
@@ -623,6 +673,35 @@ class LatexWriter {
         }
     }
 
+    /** Whether the text (body or references) has Chinese, Japanese or Korean script. */
+    private get cjk(): { any: boolean; hangul: boolean } {
+        const text = `${this.bodyText}\n${(this.input.citations.bibliography?.entries ?? []).join('\n')}`;
+        return { any: CJK_TEXT.test(text), hangul: HANGUL_TEXT.test(text) };
+    }
+
+    /** Preamble lines that typeset CJK script under LuaLaTeX and XeLaTeX. */
+    private cjkLines(): string[] {
+        const { any, hangul } = this.cjk;
+        if (!any) return [];
+        return [
+            '\\ifPDFTeX',
+            `  \\errmessage{This document contains ${hangul ? 'Korean' : 'Chinese, Japanese or Korean'} text. Compile it with ${hangul ? 'LuaLaTeX' : 'LuaLaTeX or XeLaTeX'}}`,
+            '\\fi',
+            '\\ifLuaTeX',
+            ...(hangul
+                ? ['  \\usepackage{luatexko}']
+                // Curly quotes stay Latin punctuation, not Japanese characters with their own spacing.
+                : ['  \\usepackage{luatexja-fontspec}', '  \\ltjsetparameter{jacharrange={-9}}']),
+            '\\fi',
+            '\\ifXeTeX',
+            // xeCJK's default font has no Hangul, so Korean would vanish.
+            hangul
+                ? '  \\errmessage{This document contains Korean text, which the default XeLaTeX CJK font lacks. Compile it with LuaLaTeX}'
+                : '  \\usepackage{xeCJK}',
+            '\\fi',
+        ];
+    }
+
     private natbibSetup(): { options: string; style: string } {
         return this.input.citations.citationFormat === 'numeric'
             ? { options: 'numbers,sort&compress', style: 'unsrtnat' }
@@ -632,7 +711,7 @@ class LatexWriter {
     /** Packages the body uses, in load order. */
     private packageLines(): string[] {
         const lines: string[] = [];
-        for (const pkg of ['booktabs', 'longtable', 'xltabular', 'ulem', 'cancel', 'xcolor', 'bm', 'mathrsfs']) {
+        for (const pkg of ['booktabs', 'longtable', 'xltabular', 'ulem', 'fvextra', 'mathtools', 'cancel', 'centernot', 'xcolor', 'bm', 'mathrsfs']) {
             if (!this.packages.has(pkg)) continue;
             lines.push(pkg === 'ulem' ? '\\usepackage[normalem]{ulem}' : `\\usepackage{${pkg}}`);
         }
@@ -649,9 +728,12 @@ class LatexWriter {
         const bib = this.hasCitations ? options.bibFileName : null;
         const bibBase = bib?.replace(/\.bib$/i, '') ?? '';
         const paper = paperSize(citations.locale) === 'a4' ? 'a4paper' : 'letterpaper';
+        const engines = this.cjk.hangul
+            ? 'LuaLaTeX (the text has Korean script)'
+            : this.cjk.any ? 'LuaLaTeX or XeLaTeX (not pdfLaTeX: the text has CJK script)' : 'LuaLaTeX, XeLaTeX or pdfLaTeX';
         const lines = [
             ...(title ? [`% ${title.replace(/\s+/g, ' ')}`] : []),
-            `% Exported by Beaver. Compile with LuaLaTeX, XeLaTeX or pdfLaTeX${bib ? (this.biblatex ? ' and Biber' : ' and BibTeX') : ''},`,
+            `% Exported by Beaver. Compile with ${engines}${bib ? (this.biblatex ? ' and Biber' : ' and BibTeX') : ''},`,
             '% for example: latexmk -lualatex <file>.tex',
             '\\documentclass[11pt]{article}',
             '\\usepackage{iftex}',
@@ -662,12 +744,20 @@ class LatexWriter {
             '\\else',
             '  \\usepackage{fontspec}',
             '\\fi',
+            ...this.cjkLines(),
             `\\usepackage[${paper},margin=1in]{geometry}`,
+            // Paragraphs separated by space, not indented, as in the other formats.
+            '\\usepackage{parskip}',
             '\\usepackage{amsmath,amssymb}',
             ...this.packageLines(),
         ];
         if (bib && this.biblatex) {
-            lines.push('\\usepackage{csquotes}', `\\usepackage[backend=biber,${this.biblatexOptions()}]{biblatex}`, `\\addbibresource{${bib}}`);
+            lines.push(
+                '\\usepackage{csquotes}',
+                `\\usepackage[backend=biber,${this.biblatexOptions()}]{biblatex}`,
+                `\\addbibresource{${bib}}`,
+                ...BIBLATEX_URL_LINES,
+            );
         } else if (bib) {
             lines.push(`\\usepackage[${this.natbibSetup().options}]{natbib}`);
         }
@@ -701,6 +791,11 @@ class LatexWriter {
         } else if (bib) {
             lines.push(`% Cites with natbib (${this.natbibSetup().options}); add \\bibliography{${bib.replace(/\.bib$/i, '')}} where the references go.`);
         }
+        if (this.cjk.any) {
+            lines.push(this.cjk.hangul
+                ? '% Has Korean text: compile with LuaLaTeX (package luatexko).'
+                : '% Has Chinese, Japanese or Korean text: compile with LuaLaTeX (package luatexja-fontspec, with \\ltjsetparameter{jacharrange={-9}}) or XeLaTeX (package xeCJK).');
+        }
         const shorthands = this.shorthandLines();
         if (shorthands.length > 0) lines.push('% Equations use these shorthands:', ...shorthands.map(line => `%   ${line}`));
         lines.push('');
@@ -711,6 +806,7 @@ class LatexWriter {
 
     build(): string {
         const body = this.body();
+        this.bodyText = body;
         return this.input.options.standalone ? this.standalone(body) : this.bodyOnly(body);
     }
 

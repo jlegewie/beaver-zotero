@@ -13,13 +13,14 @@
  */
 
 import katex from 'katex';
+import { KATEX_MACROS, katexSource } from '../math/latexToOmml';
 import { itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identity/itemLinks';
 import type { MdBlock, MdFootnoteDefinition, MdInline, MdTable } from '../mdast';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { decodeHtmlEntities } from '../citations/inlineHtml';
 import { paperSize } from '../page';
 import type { ExportDoc, ExportWarning, FormattedCitations, FormattedCluster, HtmlExportOptions } from '../types';
-import { escapeHtml, isWebLink, sanitizeCslHtml } from './escape';
+import { escapeHtml, isWebLink, keepUrlStartsTogether, sanitizeCslHtml } from './escape';
 import { HTML_THEME, stylesheet, type HtmlTheme } from './theme';
 
 export interface WriteHtmlInput {
@@ -216,12 +217,13 @@ class HtmlWriter {
         this.equations += 1;
         let html: string;
         try {
-            html = katex.renderToString(source, {
+            html = katex.renderToString(katexSource(source), {
                 output: 'mathml',
                 displayMode: display,
                 throwOnError: true,
                 strict: 'ignore',
                 trust: false,
+                macros: { ...KATEX_MACROS },
             });
         } catch {
             this.equationsAsText += 1;
@@ -440,7 +442,7 @@ class HtmlWriter {
             `<style>\n${stylesheet(this.theme, citations.bibliography?.layout ?? null)}\n</style>`,
             '</head>',
             '<body>',
-            body + back,
+            keepUrlStartsTogether(body + back),
             '</body>',
             '</html>',
             '',

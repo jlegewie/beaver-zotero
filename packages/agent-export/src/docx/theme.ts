@@ -203,6 +203,8 @@ export function documentStyles(theme: DocxTheme = DOCX_THEME): IStylesOptions {
                 id: STYLE.quote, name: 'Quote', basedOn: STYLE.body, next: STYLE.body, quickFormat: true,
                 paragraph: {
                     indent: { left: inches(theme.indents.quote), right: inches(theme.indents.quote) },
+                    // A rule marks the quote, so it does not read as part of a list above it.
+                    border: { left: { style: BorderStyle.SINGLE, size: 12, color: theme.colors.rule, space: 8 } },
                 },
             },
             {
@@ -244,6 +246,11 @@ export function documentStyles(theme: DocxTheme = DOCX_THEME): IStylesOptions {
 
 const BULLET_CHARS = ['•', '–', '◦'];
 const ORDERED_FORMATS = [LevelFormat.DECIMAL, LevelFormat.LOWER_LETTER, LevelFormat.LOWER_ROMAN];
+
+/** Numbering levels of a task list: the checkbox is the item's marker. */
+export function taskLevels(checked: boolean, theme: DocxTheme = DOCX_THEME) {
+    return listLevels(false, theme).map(level => ({ ...level, text: checked ? '☒' : '☐' }));
+}
 
 /** Numbering levels of a bullet or ordered list. `start` applies at `startLevel`. */
 export function listLevels(ordered: boolean, theme: DocxTheme = DOCX_THEME, start = 1, startLevel = 0) {

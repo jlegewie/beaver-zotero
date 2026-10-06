@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { latexToOmml } from '@beaver/agent-export/math/latexToOmml';
+import { katexSource, latexToOmml } from '@beaver/agent-export/math/latexToOmml';
 
 const omml = (latex: string, display = false) => latexToOmml(latex, display);
 
@@ -71,5 +71,35 @@ describe('latexToOmml', () => {
 
     it('escapes XML special characters', () => {
         expect(omml('a < b').xml).toContain('&lt;');
+    });
+
+    it('keeps explicit spacing as spaces Word does not drop, \\qquad twice as wide as \\quad', () => {
+        const xml = (latex: string) => omml(latex).xml ?? '';
+        expect(xml(String.raw`a \quad b`)).toContain('>\u2003<');
+        expect(xml(String.raw`a \qquad b`)).toContain('>\u2003\u2003<');
+        // Thin and thick spaces arrive as Unicode space text and pass through.
+        expect(xml(String.raw`a \, b`)).toMatch(/>[\u2005-\u200a\u205f]+</);
+        expect(xml(String.raw`a \; b`)).toMatch(/>[\u2005-\u200a\u205f]+</);
+    });
+
+    it('converts \\centernot, which KaTeX lacks, as a negated relation', () => {
+        const { converted, xml } = omml(String.raw`a \centernot\implies b`);
+        expect(converted).toBe(true);
+        expect(xml).not.toContain('centernot');
+    });
+
+    it('writes \\centernot before a relation as its negated symbol, so the slash goes through it', () => {
+        expect(katexSource(String.raw`a \centernot\implies b`)).toBe(String.raw`a \nRightarrow b`);
+        expect(katexSource(String.raw`x \centernot = y`)).toBe(String.raw`x \neq y`);
+        // No negated symbol: left for the \not fallback.
+        expect(katexSource(String.raw`X \centernot\perp Y`)).toBe(String.raw`X \centernot\perp Y`);
+        expect(omml(String.raw`X \centernot\perp Y`).converted).toBe(true);
+    });
+
+    it('strikes a negated symbol through with a diagonal, which Word draws (the combining slash it does not)', () => {
+        const xml = omml(String.raw`X \centernot\perp Y`).xml ?? '';
+        expect(xml).toContain('<m:strikeBLTR m:val="1"/>');
+        expect(xml).toMatch(/<m:e><m:r>.*⊥<\/m:t><\/m:r><\/m:e><\/m:borderBox>/);
+        expect(xml).not.toContain('̸');
     });
 });

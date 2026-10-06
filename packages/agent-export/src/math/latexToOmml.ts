@@ -35,16 +35,45 @@ function linearText(latex: string): string {
     return `<m:r><m:rPr><m:nor/></m:rPr><m:t xml:space="preserve">${escapeXml(latex)}</m:t></m:r>`;
 }
 
+/**
+ * LaTeX commands KaTeX lacks, as KaTeX equivalents. Pass a copy per render:
+ * KaTeX may write `\gdef` definitions into the object.
+ */
+export const KATEX_MACROS: Readonly<Record<string, string>> = {
+    // `centernot` package: a slash through the following relation.
+    '\\centernot': '\\not',
+};
+
+/** Relations `\centernot` negates, as the negated symbol KaTeX has. */
+const CENTERNOT_SYMBOLS: Record<string, string> = {
+    '\\implies': '\\nRightarrow', '\\Rightarrow': '\\nRightarrow', '\\Longrightarrow': '\\nRightarrow',
+    '\\Leftarrow': '\\nLeftarrow', '\\impliedby': '\\nLeftarrow',
+    '\\iff': '\\nLeftrightarrow', '\\Leftrightarrow': '\\nLeftrightarrow',
+    '\\rightarrow': '\\nrightarrow', '\\to': '\\nrightarrow', '\\leftarrow': '\\nleftarrow',
+    '\\leftrightarrow': '\\nleftrightarrow',
+    '=': '\\neq', '\\in': '\\notin', '\\sim': '\\nsim', '\\mid': '\\nmid', '\\cong': '\\ncong',
+};
+
+/**
+ * LaTeX as KaTeX should read it: `\centernot` before a relation with a
+ * negated symbol becomes that symbol (`\centernot\implies` → `\nRightarrow`);
+ * any other `\centernot` falls back to `\not` through `KATEX_MACROS`.
+ */
+export function katexSource(latex: string): string {
+    return latex.trim().replace(/\\centernot\s*(\\[a-zA-Z]+|=)/g, (match, relation: string) => CENTERNOT_SYMBOLS[relation] ?? match);
+}
+
 /** Convert LaTeX to OMML. Never throws. */
 export function latexToOmml(latex: string, display: boolean): OmmlResult {
     const source = latex.trim();
     try {
-        const mathml = katex.renderToString(source, {
+        const mathml = katex.renderToString(katexSource(source), {
             output: 'mathml',
             displayMode: display,
             throwOnError: true,
             strict: 'ignore',
             trust: false,
+            macros: { ...KATEX_MACROS },
         });
         const math = findMath(parseXml(mathml));
         if (!math) throw new UnsupportedMathError('KaTeX produced no MathML');

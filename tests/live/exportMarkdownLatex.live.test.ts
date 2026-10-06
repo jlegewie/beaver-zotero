@@ -156,7 +156,7 @@ describe('LaTeX export (live)', () => {
         expect(new Set(cited)).toEqual(new Set(keys));
         expect(text).toMatch(/\\parencite\[2\]\{[^}]+\}/);
         expect(text).toContain(`\\addbibresource{${basename(bibPath)}}`);
-        expect(text).toContain('\\usepackage[backend=biber,style=authoryear]{biblatex}');
+        expect(text).toContain('\\usepackage[backend=biber,style=authoryear,isbn=false]{biblatex}');
         expect(text).toContain('\\footnote{A remark with 50\\% \\& \\$5 costs.}');
         expect(result.stats).toMatchObject({ citations: 5, citationsAsText: 0, equations: 1 });
 

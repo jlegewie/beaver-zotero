@@ -56,6 +56,18 @@ function run(text: string, variant: Variant = 'italic', script?: string): string
     return `<m:r>${rPr}${MATH_FONT}<m:t xml:space="preserve">${escapeXml(text)}</m:t></m:r>`;
 }
 
+/**
+ * An `mspace` (`\quad`, `\qquad`, `\hspace`; width in em) as Unicode
+ * spaces of about that width: Word's math layout drops ordinary spaces but
+ * keeps these.
+ */
+function mathSpace(width: number): string {
+    if (!(width > 0.1)) return '';
+    if (width < 0.2) return run('\u2009', 'plain');
+    if (width < 0.9) return run('\u2005', 'plain');
+    return run('\u2003'.repeat(Math.max(1, Math.round(width))), 'plain');
+}
+
 /** Map a MathML `mathvariant` to OMML style and script. */
 function tokenStyle(element: XmlElement, text: string): { variant: Variant; script?: string } {
     const mathvariant = element.attributes.mathvariant;
@@ -136,10 +148,8 @@ class OmmlConverter {
             case 'mtext':
             case 'ms':
                 return this.token(element);
-            case 'mspace': {
-                const width = Number.parseFloat(element.attributes.width ?? '0');
-                return width >= 0.2 ? run(width >= 0.9 ? ' ' : ' ', 'plain') : '';
-            }
+            case 'mspace':
+                return mathSpace(Number.parseFloat(element.attributes.width ?? '0'));
             case 'msup':
             case 'msub':
             case 'msubsup':
@@ -205,6 +215,14 @@ class OmmlConverter {
         if (element.name === 'mtext' || element.name === 'ms') return run(text, 'normal-text');
         // Invisible operators: function application, times, separator.
         if (element.name === 'mo' && (text === FUNCTION_APPLICATION || text === '\u2062' || text === '\u2063')) return '';
+        // `\not X`: KaTeX writes the symbol with a combining long solidus, which
+        // Word's math font does not overlay; Word strikes a symbol through with
+        // a diagonal in an invisible border box.
+        const negated = element.name === 'mo' ? /^([^\u0338])\u0338$/u.exec(text) : null;
+        if (negated) {
+            const hidden = '<m:hideTop m:val="1"/><m:hideBot m:val="1"/><m:hideLeft m:val="1"/><m:hideRight m:val="1"/>';
+            return `<m:borderBox><m:borderBoxPr>${hidden}<m:strikeBLTR m:val="1"/></m:borderBoxPr><m:e>${run(negated[1], 'plain')}</m:e></m:borderBox>`;
+        }
         if (element.name === 'mo' || element.name === 'mn') {
             // Numbers and operators are upright unless a variant says otherwise (`\mathbb{1}`).
             if (!element.attributes.mathvariant) return run(text, 'plain');

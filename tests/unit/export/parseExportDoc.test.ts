@@ -93,6 +93,99 @@ describe('parseExportSource', () => {
         expect(JSON.stringify(blocks)).toContain('After');
     });
 
+    it('reads display math with attached $$ delimiters as one equation, keeping what follows', () => {
+        const doc = parse([
+            'Before.',
+            '',
+            '$$\\begin{aligned}',
+            'a &= b \\\\',
+            'c &= d',
+            '\\end{aligned}$$',
+            '',
+            '## Next section',
+            '',
+            'After <citation id="u-AAAAAAAA"/>.',
+        ].join('\n'));
+        const blocks = doc.sections[0].children as any[];
+        expect(blocks.map(block => block.type)).toEqual(['paragraph', 'math', 'heading', 'paragraph']);
+        expect(blocks[1].value).toBe('\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}');
+        expect(doc.clusters).toHaveLength(1);
+    });
+
+    it('shows $$…$$ inside a paragraph as display math, as the chat does', () => {
+        const blocks = parse('So $$x = y$$ holds.').sections[0].children as any[];
+        expect(blocks.map(block => block.type)).toEqual(['paragraph', 'math', 'paragraph']);
+        expect(blocks[1].value).toBe('x = y');
+    });
+
+    it('keeps display math written in a list item, with the text after it, inside the item', () => {
+        const blocks = parse('- Before $$x=y$$ after\n- Next').sections[0].children as any[];
+        expect(blocks.map(block => block.type)).toEqual(['list']);
+        const [first, second] = blocks[0].children;
+        expect(first.children.map((child: any) => child.type)).toEqual(['paragraph', 'math', 'paragraph']);
+        expect(first.children[1].value).toBe('x=y');
+        expect(second.children[0].children[0].value).toBe('Next');
+    });
+
+    it('keeps display math written in a block quote inside the quote', () => {
+        const blocks = parse('> Quote $$\\begin{aligned}\n> a &= b\n> \\end{aligned}$$ end.\n\nAfter.').sections[0].children as any[];
+        expect(blocks.map(block => block.type)).toEqual(['blockquote', 'paragraph']);
+        expect(blocks[0].children.map((child: any) => child.type)).toEqual(['paragraph', 'math', 'paragraph']);
+        expect(blocks[0].children[1].value).toBe('\\begin{aligned}\na &= b\n\\end{aligned}');
+    });
+
+    it('keeps display math in a table cell inline, so the row stays whole', () => {
+        const blocks = parse('| A | B |\n|---|---|\n| $$x=y$$ | next |').sections[0].children as any[];
+        expect(blocks.map(block => block.type)).toEqual(['table']);
+        const cells = blocks[0].children[1].children;
+        expect(cells).toHaveLength(2);
+        expect(cells[0].children[0]).toMatchObject({ type: 'inlineMath', value: 'x=y' });
+    });
+
+    it('leaves an equation already fenced in a quote as written', () => {
+        const blocks = parse('> $$\n> a=b\n> $$').sections[0].children as any[];
+        expect(blocks.map(block => block.type)).toEqual(['blockquote']);
+        expect(blocks[0].children).toMatchObject([{ type: 'math', value: 'a=b' }]);
+    });
+
+    it('keeps display math in a footnote inside the footnote', () => {
+        const doc = parseExportSource({ title: 'T', blocks: [{ type: 'markdown', markdown: 'Claim.[^n]\n\n[^n]: $$x=y$$\n\nAfter.' }] });
+        const children = doc.sections[0].children as any[];
+        const definition = children.find(block => block.type === 'footnoteDefinition');
+        expect(definition.children).toMatchObject([{ type: 'math', value: 'x=y' }]);
+        expect(children.filter(block => block.type === 'math')).toHaveLength(0);
+    });
+
+    it('keeps display math in a quote inside a list item inside the quote', () => {
+        const blocks = parse('- > Quote $$x=y$$ end').sections[0].children as any[];
+        const quote = blocks[0].children[0].children[0];
+        expect(quote.type).toBe('blockquote');
+        expect(quote.children.map((child: any) => child.type)).toEqual(['paragraph', 'math', 'paragraph']);
+    });
+
+    it('separates attached delimiters of a fence nested in a list and a quote, keeping both', () => {
+        const blocks = parse('- > $$\\begin{aligned}\n  > a &= b\n  > \\end{aligned}$$\n  > end\n- next').sections[0].children as any[];
+        expect(blocks.map(block => block.type)).toEqual(['list']);
+        const quote = blocks[0].children[0].children[0];
+        expect(quote.type).toBe('blockquote');
+        expect(quote.children[0]).toMatchObject({ type: 'math', value: '\\begin{aligned}\na &= b\n\\end{aligned}' });
+        expect(blocks[0].children).toHaveLength(2);
+    });
+
+    it('keeps display math inline in a table without outer pipes', () => {
+        const blocks = parse('A | B\n---|---\n$$x=y$$ | next').sections[0].children as any[];
+        expect(blocks.map(block => block.type)).toEqual(['table']);
+        const cells = blocks[0].children[1].children;
+        expect(cells).toHaveLength(2);
+        expect(cells[0].children[0]).toMatchObject({ type: 'inlineMath', value: 'x=y' });
+    });
+
+    it('leaves $$ inside code alone', () => {
+        const blocks = parse('```tex\n$$\\begin{aligned}\na\n\\end{aligned}$$\n```\n\nAfter').sections[0].children as any[];
+        expect(blocks.map(block => block.type)).toEqual(['code', 'paragraph']);
+        expect(blocks[0].value).toBe('$$\\begin{aligned}\na\n\\end{aligned}$$');
+    });
+
     it('keeps citations inside raw HTML blocks', () => {
         const doc = parse('<p>Claim <citation id="u-AAAAAAAA"/> &amp; more.</p>\n<p>Second <citation id="u-BBBBBBBB"/>.</p>');
         expect(doc.clusters.map(cluster => cluster.items[0].requestedKey)).toEqual(['zotero:u-AAAAAAAA', 'zotero:u-BBBBBBBB']);

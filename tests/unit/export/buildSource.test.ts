@@ -126,6 +126,18 @@ describe('user prompts in an export', () => {
     });
 });
 
+describe('buildResponseBlocks activity', () => {
+    it('collapses a run of identical tool-call lines into one with a count', () => {
+        const call = (id: string, name: string) => ({ part_kind: 'tool-call', tool_name: name, tool_call_id: id, args: {} });
+        const blocks = buildResponseBlocks([run('r1', 'Q', [
+            call('a', 'create_collection'), call('b', 'create_collection'), call('c', 'create_collection'),
+            call('d', 'organize_items'),
+            call('e', 'create_collection'),
+        ])], { describeToolCall: (part: any) => (part.tool_name === 'create_collection' ? 'Create collection' : 'Organize items') });
+        expect(blocks).toEqual([{ type: 'activity', calls: ['Create collection ×3', 'Organize items', 'Create collection'] }]);
+    });
+});
+
 describe('buildResponseBlocks content', () => {
     // Two model responses: work in progress around tool calls, then the answer.
     const runs = () => [run('r1', 'Q', [

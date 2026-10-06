@@ -178,8 +178,13 @@ ul ul { list-style-type: "– "; }
 ul ul ul { list-style-type: circle; }
 ol ol { list-style-type: lower-alpha; }
 ol ol ol { list-style-type: lower-roman; }
-li.task { list-style-type: none; }
-blockquote { margin: 0 ${indents.quote}in ${spacing.paragraphAfter}pt; padding: 0; }
+/* A bullet task item's checkbox replaces the bullet; a numbered one keeps its number. */
+ul > li.task { list-style-type: none; }
+blockquote {
+    margin: 0 ${indents.quote}in ${spacing.paragraphAfter}pt;
+    padding: 0 0 0 8pt;
+    border-left: 1.5pt solid ${colors.rule};
+}
 blockquote blockquote { margin-right: 0; }
 code, pre { font-family: ${fonts.mono}; font-size: ${sizes.code}pt; }
 code { background: ${colors.codeBackground}; padding: 0 0.15em; }
@@ -217,7 +222,13 @@ thead th { border-bottom: 0.5pt solid ${colors.text}; }
     margin: ${spacing.headingBefore}pt 0 2pt;
     break-after: avoid;
 }
-.prompt { margin-left: ${indents.quote}in; margin-right: ${indents.quote}in; }
+.prompt {
+    margin-left: ${indents.quote}in;
+    margin-right: ${indents.quote}in;
+    padding-left: 8pt;
+    border-left: 1.5pt solid ${colors.rule};
+}
+.url-start { white-space: nowrap; }
 .activity {
     font-size: ${sizes.activity}pt;
     color: ${colors.muted};

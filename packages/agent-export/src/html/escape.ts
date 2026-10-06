@@ -18,6 +18,24 @@ export function escapeHtml(text: string): string {
         .replace(/"/g, '&quot;');
 }
 
+/**
+ * Keeps the start of each URL in text (`https://doi.org/`) on one line, so a
+ * line never breaks right after `//`; the rest may still wrap at its slashes.
+ * Tags, attributes and preformatted text are left alone.
+ */
+export function keepUrlStartsTogether(html: string): string {
+    let preDepth = 0;
+    return html.split(/(<[^>]*>)/).map(part => {
+        if (part.startsWith('<')) {
+            if (/^<pre\b/i.test(part)) preDepth += 1;
+            else if (/^<\/pre>/i.test(part)) preDepth = Math.max(0, preDepth - 1);
+            return part;
+        }
+        if (preDepth > 0) return part;
+        return part.replace(/\bhttps?:\/\/[^\s/<]+\/?/gi, start => `<span class="url-start">${start}</span>`);
+    }).join('');
+}
+
 /** Whether a URL may be a link target in an exported document. */
 export function isWebLink(url: string): boolean {
     return /^(https?:|mailto:)/i.test(url.trim());

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseExportSource } from '@beaver/agent-export/parse/parseExportDoc';
-import { wrappingColumns, writeLatex } from '@beaver/agent-export/latex/writeLatex';
+import { liftTags, wrappingColumns, writeLatex } from '@beaver/agent-export/latex/writeLatex';
 import { escapeLatex, latexUrl } from '@beaver/agent-export/latex/escape';
 import type { ExportDoc, FieldCitationItem, FormattedCitations, LatexExportOptions } from '@beaver/agent-export/types';
 
@@ -45,6 +45,26 @@ function write(markdown: string, styleClass: 'in-text' | 'note' = 'in-text', ext
 /** The body after the header comments. */
 const body = (tex: string) => tex.replace(/^(%.*\n)+\n/, '');
 
+describe('liftTags', () => {
+    it('turns an aligned block with tags into align*, where each line may carry one', () => {
+        expect(liftTags(String.raw`\begin{aligned} a &= b \\ c &= d \tag{2}\end{aligned}`))
+            .toBe(String.raw`\begin{align*} a &= b \\ c &= d \tag{2}\end{align*}`);
+    });
+
+    it('leaves the tags of a complete display environment where they are', () => {
+        const equation = String.raw`\begin{equation}x=y\tag{A}\end{equation}`;
+        expect(liftTags(equation)).toBe(equation);
+        const { tex } = write('$$\\begin{equation}x=y\\tag{A}\\end{equation}$$');
+        expect(tex).toContain(equation);
+        expect(tex).not.toContain('\\[');
+    });
+
+    it('moves a single nested tag to the end of the display and leaves top-level tags alone', () => {
+        expect(liftTags(String.raw`x = \begin{cases} 1 \tag{3} \end{cases}`)).toBe(String.raw`x = \begin{cases} 1  \end{cases} \tag{3}`);
+        expect(liftTags(String.raw`E[Y] = 0 \tag{1}`)).toBe(String.raw`E[Y] = 0 \tag{1}`);
+    });
+});
+
 describe('escapeLatex', () => {
     it('escapes special characters and keeps hyphen pairs apart', () => {
         expect(escapeLatex('\\ { } $ & # % _ ^ ~ < > |')).toBe(
@@ -59,6 +79,24 @@ describe('escapeLatex', () => {
 
     it('writes straight double quotes as typographic quotes', () => {
         expect(escapeLatex('a "quoted" word and 5" more')).toBe('a \u201cquoted\u201d word and 5\\textquotedbl{} more');
+    });
+
+    it('makes a quoted phrase in single quotes typographic, and leaves apostrophes alone', () => {
+        expect(escapeLatex("say 'single quotes' and ('x y')")).toBe('say \u2018single quotes\u2019 and (\u2018x y\u2019)');
+        // Apostrophes print right in LaTeX as they are.
+        expect(escapeLatex("don't, the '90s, rock 'n' roll, the students' work")).toBe("don't, the '90s, rock 'n' roll, the students' work");
+    });
+
+    it('leaves the quotes of inline code exactly as written', () => {
+        const { tex } = write('Run `print(\'hi\', "x")` now.');
+        expect(tex).toContain("\\texttt{print('hi', \\textquotedbl{}x\\textquotedbl{})}");
+    });
+
+    it('keeps the number of a numbered task item, with the checkbox after it', () => {
+        const { tex } = write('1. [x] done\n2. [ ] open\n\n- [x] bullet');
+        expect(tex).toContain('\\item $\\boxtimes$ done');
+        expect(tex).toContain('\\item $\\square$ open');
+        expect(tex).toContain('\\item[$\\boxtimes$] bullet');
     });
 });
 
@@ -92,9 +130,9 @@ describe('writeLatex', () => {
             'quoted',
             '\\end{quote}',
             '',
-            '\\begin{verbatim}',
+            '\\begin{Verbatim}[breaklines,breakanywhere]',
             'raw \\x',
-            '\\end{verbatim}',
+            '\\end{Verbatim}',
             '',
             '\\begin{center}',
             '\\rule{0.5\\linewidth}{0.4pt}',
@@ -196,7 +234,10 @@ describe('writeLatex', () => {
         const { tex } = write('A <citation id="u-AAAAAAAA"/>.', 'in-text', { standalone: true }, 'numeric');
         expect(tex).toContain('\\documentclass[11pt]{article}');
         expect(tex).toContain('\\usepackage[letterpaper,margin=1in]{geometry}');
-        expect(tex).toContain('\\usepackage[backend=biber,style=numeric-comp,sorting=none]{biblatex}\n\\addbibresource{refs.bib}');
+        expect(tex).toContain('\\usepackage[backend=biber,style=numeric-comp,sorting=none,isbn=false]{biblatex}\n\\addbibresource{refs.bib}');
+        // URLs and access dates only for web pages, as CSL styles show them.
+        expect(tex).toContain('\\AtEveryBibitem{\\BeaverClearUrl}\n\\AtEveryCitekey{\\BeaverClearUrl}');
+        expect(tex).toContain('\\usepackage{parskip}');
         expect(tex).toContain('\\title{Report}\n\\author{}\n\\date{October 5, 2026}');
         expect(tex).toContain('\\maketitle\n\nA \\parencite{smith_title_2004}.\n\n\\printbibliography[title={References}]\n\n\\end{document}\n');
 
@@ -213,7 +254,46 @@ describe('writeLatex', () => {
 
     it('describes what the including document must provide in body-only output', () => {
         const { tex } = write('A <citation id="u-AAAAAAAA"/>.');
-        expect(tex).toContain('% Cites with biblatex (style=authoryear); add \\addbibresource{refs.bib} to the preamble.');
+        expect(tex).toContain('% Cites with biblatex (style=authoryear,isbn=false); add \\addbibresource{refs.bib} to the preamble.');
+        // The including document keeps its own paragraph style.
+        expect(tex).not.toContain('parskip');
+    });
+
+    it('wraps long code lines and loads the package that does it', () => {
+        const { tex } = write('```\nx = 1\n\\end{Verbatim}\n```', 'in-text', { standalone: true });
+        expect(tex).toContain('\\usepackage{fvextra}');
+        expect(tex).toContain('\\begin{Verbatim}[breaklines,breakanywhere]\nx = 1\n\\end {Verbatim}\n\\end{Verbatim}');
+    });
+
+    it('writes a tagged aligned equation as align*, without \\[ \\] around it', () => {
+        const { tex } = write('$$\\begin{aligned}\na &= b \\tag{2}\n\\end{aligned}$$');
+        expect(tex).toContain('\\begin{align*}\na &= b \\tag{2}\n\\end{align*}');
+        expect(tex).not.toContain('\\[');
+    });
+
+    it('loads the packages of math commands beyond amsmath', () => {
+        const { tex } = write('$$X \\centernot\\perp Y \\quad a \\coloneqq b$$', 'in-text', { standalone: true });
+        expect(tex).toContain('\\usepackage{mathtools}');
+        expect(tex).toContain('\\usepackage{centernot}');
+    });
+
+    it('sets up CJK script for LuaLaTeX and XeLaTeX, and says pdfLaTeX cannot compile it', () => {
+        const chinese = write('Wang Xiaoming (王小明) argues…', 'in-text', { standalone: true }).tex;
+        expect(chinese).toContain('Compile with LuaLaTeX or XeLaTeX (not pdfLaTeX');
+        expect(chinese).toContain('\\usepackage{luatexja-fontspec}\n  \\ltjsetparameter{jacharrange={-9}}');
+        expect(chinese).toContain('\\usepackage{xeCJK}');
+        expect(chinese).toContain('\\errmessage{This document contains Chinese, Japanese or Korean text');
+        // Hangul needs a font the Japanese setup and xeCJK's default lack: LuaLaTeX only.
+        const korean = write('김철수 argues…', 'in-text', { standalone: true }).tex;
+        expect(korean).toContain('\\usepackage{luatexko}');
+        expect(korean).toContain('Compile with LuaLaTeX (the text has Korean script)');
+        expect(korean).not.toContain('\\usepackage{xeCJK}');
+        expect(korean).toContain('Compile it with LuaLaTeX}');
+        const latin = write('Plain text.', 'in-text', { standalone: true }).tex;
+        expect(latin).not.toContain('xeCJK');
+        expect(latin).toContain('LuaLaTeX, XeLaTeX or pdfLaTeX');
+        expect(write('王小明').tex).toContain('% Has Chinese, Japanese or Korean text: compile with LuaLaTeX (package luatexja-fontspec');
+        expect(write('김철수').tex).toContain('% Has Korean text: compile with LuaLaTeX (package luatexko).');
     });
 
     it('numbers body-only footnotes from where the body is inserted', () => {

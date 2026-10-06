@@ -318,4 +318,68 @@ describe('writeDocx theme', () => {
         const { document } = await unzip((await writeDocx({ doc, citations: formatted, options })).bytes);
         expect(document).toContain('<w:t xml:space="preserve">Smith, J. 2004. Title.</w:t>');
     });
+
+    describe('block layout', () => {
+        const write = async (markdown: string, styleClass: 'in-text' | 'note' = 'in-text') => {
+            const doc = parseExportSource({ title: 'Export', blocks: [{ type: 'markdown', markdown }] });
+            const result = await writeDocx({ doc, citations: citations(doc, styleClass), options });
+            const zip = await JSZip.loadAsync(result.bytes);
+            return {
+                ...(await unzip(result.bytes)),
+                numbering: (await zip.file('word/numbering.xml')?.async('string')) ?? '',
+            };
+        };
+        const paragraphs = (xml: string) => xml.match(/<w:p>[\s\S]*?<\/w:p>|<w:p [\s\S]*?<\/w:p>|<w:tbl>[\s\S]*?<\/w:tbl>/g) ?? [];
+
+        it('keeps the em spaces of \\quad and \\qquad in the written equation', async () => {
+            const { document } = await write('$$a \\qquad b \\quad c$$');
+            expect(document).toContain('<m:t xml:space="preserve">\u2003\u2003</m:t>');
+            expect(document).toContain('<m:t xml:space="preserve">\u2003</m:t>');
+        });
+
+        it('keeps a numbered task item\'s number, with the checkbox after it', async () => {
+            const { document } = await write('1. [x] done\n2. [ ] open');
+            expect(visibleText(document)).toContain('☒ done');
+            expect(visibleText(document)).toContain('☐ open');
+        });
+
+        it('leads only a note that opens with text', async () => {
+            const { footnotes } = await write('Claim.[^a]\n\n[^a]: - first\n    - second\n\n    And a paragraph.');
+            expect(visibleText(footnotes)).toContain('And a paragraph.');
+            expect(visibleText(footnotes)).not.toContain(' And a paragraph.');
+        });
+
+        it('makes a task item\'s checkbox its marker instead of adding one to a bullet', async () => {
+            const { document, numbering } = await write('- [ ] open task\n- [x] done task');
+            expect(visibleText(document)).not.toMatch(/[☐☒]/);
+            expect(numbering).toContain('w:val="☐"');
+            expect(numbering).toContain('w:val="☒"');
+        });
+
+        it('separates adjacent code blocks, and a table and a code block, with an unshaded spacer', async () => {
+            const { document } = await write('```\none\n```\n\n```\ntwo\n```\n\n| A |\n|---|\n| 1 |\n\n```\nthree\n```');
+            const blocks = paragraphs(document).map(block => (
+                block.startsWith('<w:tbl') ? 'table'
+                    : /w:val="Code"/.test(block) ? 'code'
+                        : /w:lineRule="exact"/.test(block) && !/<w:t[ >]/.test(block) ? 'spacer' : 'other'
+            ));
+            const start = blocks.indexOf('code');
+            expect(blocks.slice(start, start + 6)).toEqual(['code', 'spacer', 'code', 'table', 'spacer', 'code']);
+        });
+
+        it('gives a quote after a list its gap, and marks quotes with a rule', async () => {
+            const { document, styles } = await write('- item\n\n> quoted');
+            const quote = paragraphs(document).find(block => block.includes('quoted'))!;
+            expect(quote).toContain('w:val="Quote"');
+            expect(quote).toMatch(/<w:spacing w:before="\d+"/);
+            expect(styles).toMatch(/w:styleId="Quote"[\s\S]*?<w:left w:val="single"/);
+        });
+
+        it('puts a space between the footnote number and the note', async () => {
+            const { footnotes } = await write('Claim.[^a]\n\n[^a]: The note.');
+            expect(footnotes).toMatch(/<w:footnoteRef\/><\/w:r>(?:<w:r>(?:<w:rPr>[\s\S]*?<\/w:rPr>)?<w:t xml:space="preserve"> <\/w:t><\/w:r>)/);
+            const cited = await write('Claim <citation id="u-AAAAAAAA"/>.', 'note');
+            expect(cited.footnotes).toMatch(/<w:footnoteRef\/><\/w:r><w:r>(?:<w:rPr>[\s\S]*?<\/w:rPr>)?<w:t xml:space="preserve"> <\/w:t>/);
+        });
+    });
 });

@@ -16,7 +16,7 @@ import {
     unwrapBacktickedCitations,
 } from '@beaver/agent-core/citations/citationGrammar';
 import type { CitationCluster, CitationOccurrence, ExportDoc, ExportSection, ExportSource, ExportSourceBlock } from '../types';
-import type { MdBlock, MdDefinition, MdInline, MdParagraph, MdRoot } from '../mdast';
+import type { MdBlock, MdDefinition, MdInline, MdInlineMath, MdParagraph, MdRoot } from '../mdast';
 import { codeRanges, markdownProcessor as processor } from './markdown';
 import { decodeHtmlEntities } from '../citations/inlineHtml';
 
@@ -44,24 +44,61 @@ function htmlText(html: string): string {
 function convertMathDelimiters(text: string): string {
     return text
         .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, math: string) => `$${math}$`)
-        // Multiline display math needs the delimiters on their own lines, or the
-        // first line reads as fence metadata.
-        .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, math: string) =>
-            (math.includes('\n') ? `\n$$\n${math.trim()}\n$$\n` : `$$${math}$$`));
+        .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, math: string) => `$$${math}$$`);
+}
+
+/** Text outside code: `transform` applied between code ranges. */
+function outsideCode(text: string, transform: (segment: string, offset: number) => string): string {
+    let out = '';
+    let cursor = 0;
+    for (const [start, end] of codeRanges(text)) {
+        if (start < cursor) continue;
+        out += transform(text.slice(cursor, start), cursor) + text.slice(start, end);
+        cursor = end;
+    }
+    return out + transform(text.slice(cursor), cursor);
+}
+
+/** A line start holding only container markup: block quotes, list markers, a footnote label. */
+const CONTAINER_ONLY = /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])|\[\^[^\]\s]+\]:))*[ \t]*$/;
+
+/**
+ * Display math whose delimiters are attached to its content
+ * (`$$\begin{aligned}` … `\end{aligned}$$`) where `$$` opens a block: there
+ * the opening line reads as a fence whose first line is metadata, and the
+ * fence never closes, swallowing the rest of the document. The delimiters move
+ * onto lines of their own, continuing the containers the fence opened in
+ * (quote markers kept, list markers and footnote labels as indentation).
+ * Anything else is left as written: fences already on their own lines, and
+ * `$$…$$` inside a paragraph or table cell, which the parser reads as inline
+ * math (see `splitDisplayMath`).
+ */
+function separateAttachedFences(text: string): string {
+    return outsideCode(text, (segment, offset) => segment.replace(/\$\$([^$]+)\$\$/g, (match, math: string, index: number) => {
+        if (!math.includes('\n')) return match;
+        const position = offset + index;
+        const before = text.slice(text.lastIndexOf('\n', position - 1) + 1, position);
+        if (!CONTAINER_ONLY.test(before)) return match;
+        const lastLine = math.slice(math.lastIndexOf('\n') + 1);
+        const attachedStart = !/^[ \t]*\n/.test(math);
+        const attachedEnd = !CONTAINER_ONLY.test(lastLine);
+        if (!attachedStart && !attachedEnd) return match;
+        const continuation = before.replace(/[^\s>]/g, ' ');
+        const end = position + match.length;
+        const restOfLine = text.slice(end, text.indexOf('\n', end) === -1 ? text.length : text.indexOf('\n', end));
+        return '$$'
+            + (attachedStart ? `\n${continuation}${math.replace(/^[ \t]+/, '')}` : math)
+            + (attachedEnd ? `\n${continuation}` : '')
+            + '$$'
+            + (restOfLine.trim() ? `\n${continuation}` : '');
+    }));
 }
 
 /** Normalize model output the way the chat renderer does before parsing, leaving code untouched. */
 export function normalizeMarkdown(markdown: string): string {
     const text = unwrapBacktickedCitations(markdown);
-    if (!/\\[([]/.test(text)) return text;
-    let out = '';
-    let cursor = 0;
-    for (const [start, end] of codeRanges(text)) {
-        if (start < cursor) continue;
-        out += convertMathDelimiters(text.slice(cursor, start)) + text.slice(start, end);
-        cursor = end;
-    }
-    return out + convertMathDelimiters(text.slice(cursor));
+    if (!/\\[([]|\$\$/.test(text)) return text;
+    return separateAttachedFences(outsideCode(text, segment => convertMathDelimiters(segment)));
 }
 
 function parseOccurrence(rawTag: string, attributes: string): CitationOccurrence {
@@ -198,15 +235,13 @@ class DocumentBuilder {
         const out: MdBlock[] = [];
         for (const child of children) {
             switch (child.type) {
-                case 'paragraph': {
-                    const display = asDisplayMath(child, source);
-                    if (display) {
-                        out.push({ type: 'math', value: this.restore(display) });
-                    } else {
-                        out.push({ ...child, children: this.inlines(child.children) });
+                case 'paragraph':
+                    for (const part of splitDisplayMath(child, source)) {
+                        out.push(typeof part === 'string'
+                            ? { type: 'math', value: this.restore(part) }
+                            : { ...child, children: this.inlines(part) });
                     }
                     break;
-                }
                 case 'heading':
                     out.push({ ...child, children: this.inlines(child.children) });
                     break;
@@ -260,15 +295,40 @@ class DocumentBuilder {
 }
 
 /**
- * A paragraph holding nothing but `$$…$$` is display math written inline
- * (`$$x$$` on its own line parses as inline math).
+ * A paragraph split at its `$$…$$` math, which the chat shows as display math
+ * even inside a sentence: runs of inline content, and the math (a string)
+ * between them. Done on the parsed tree, so the parts stay in whatever list,
+ * quote or footnote held the paragraph; table cells hold no paragraphs and
+ * keep such math inline.
  */
-function asDisplayMath(paragraph: MdParagraph, source: string): string | null {
-    const content = paragraph.children.filter(child => !(child.type === 'text' && child.value.trim() === ''));
-    if (content.length !== 1 || content[0].type !== 'inlineMath') return null;
-    const offset = content[0].position?.start.offset;
-    if (offset == null || source.slice(offset, offset + 2) !== '$$') return null;
-    return content[0].value;
+function splitDisplayMath(paragraph: MdParagraph, source: string): Array<MdInline[] | string> {
+    const isDisplay = (node: MdInline) => {
+        const offset = node.position?.start.offset;
+        return node.type === 'inlineMath' && offset != null && source.slice(offset, offset + 2) === '$$';
+    };
+    if (!paragraph.children.some(isDisplay)) return [paragraph.children];
+    const parts: Array<MdInline[] | string> = [];
+    let run: MdInline[] = [];
+    const flush = () => {
+        // Whitespace and line breaks around the math belonged to the sentence's flow.
+        while (run.length > 0 && run[0].type === 'break') run.shift();
+        while (run.length > 0 && run[run.length - 1].type === 'break') run.pop();
+        if (run[0]?.type === 'text') run[0] = { ...run[0], value: run[0].value.replace(/^\s+/, '') };
+        const last = run[run.length - 1];
+        if (last?.type === 'text') run[run.length - 1] = { ...last, value: last.value.replace(/\s+$/, '') };
+        if (run.some(node => node.type !== 'text' || node.value.trim())) parts.push(run);
+        run = [];
+    };
+    for (const node of paragraph.children) {
+        if (isDisplay(node)) {
+            flush();
+            parts.push((node as MdInlineMath).value);
+        } else {
+            run.push(node);
+        }
+    }
+    flush();
+    return parts;
 }
 
 /** Marks where an activity block sits inside a response's markdown. */

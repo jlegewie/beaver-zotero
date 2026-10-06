@@ -172,7 +172,20 @@ export function buildResponseBlocks(
             else blocks.push({ type: 'activity', calls: [label] });
         }
     }
-    return blocks;
+    return blocks.map(block => (block.type === 'activity' ? { ...block, calls: collapseRepeats(block.calls) } : block));
+}
+
+/** Runs of the same call label as one line with a count (`Create collection ×10`). */
+function collapseRepeats(calls: string[]): string[] {
+    const out: string[] = [];
+    let index = 0;
+    while (index < calls.length) {
+        let end = index + 1;
+        while (end < calls.length && calls[end] === calls[index]) end++;
+        out.push(end - index > 1 ? `${calls[index]} ×${end - index}` : calls[index]);
+        index = end;
+    }
+    return out;
 }
 
 /** The blocks of a whole thread: each run's prompt followed by its response. */

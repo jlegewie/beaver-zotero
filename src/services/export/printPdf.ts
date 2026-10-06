@@ -72,12 +72,25 @@ function printSettings(path: string, title: string, page: HtmlPageSetup): any {
     return settings;
 }
 
+/** Attempts at loading the page: Zotero gives a hidden browser a fixed 5 s, which a slow content-process start can miss. */
+const LOAD_ATTEMPTS = 2;
+
+/** One print at a time across windows: concurrent hidden-browser loads compete and time out. */
+let printQueue: Promise<unknown> = Promise.resolve();
+
 /**
  * Print `html` to a PDF at `path`. Resolves when the file is written. The PDF
  * is printed next to the HTML in the temp directory and moved into place only
  * when complete, so a failed print never leaves a partial file at `path`.
+ * Prints run one after another.
  */
-export async function printHtmlToPdf(html: string, path: string, options: { title: string; page: HtmlPageSetup }): Promise<void> {
+export function printHtmlToPdf(html: string, path: string, options: { title: string; page: HtmlPageSetup }): Promise<void> {
+    const print = printQueue.then(() => printOnce(html, path, options));
+    printQueue = print.catch(() => {});
+    return print;
+}
+
+async function printOnce(html: string, path: string, options: { title: string; page: HtmlPageSetup }): Promise<void> {
     if (!Zotero.getMainWindow()) {
         throw new Error('PDF export needs an open Zotero window.');
     }
@@ -86,13 +99,24 @@ export async function printHtmlToPdf(html: string, path: string, options: { titl
     const source = `${base}.html`;
     const printed = `${base}.pdf`;
     await IOUtils.writeUTF8(source, html);
-    const browser = new HiddenBrowser({ useHiddenFrame: false });
     const timers = getSystemTimers();
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let browser: any = null;
+    // Set once the caller has its answer; a load that returns after that stops there.
+    let settled = false;
     try {
         const work = (async () => {
-            if (!await browser.load(Zotero.File.pathToFileURI(source))) {
-                throw new Error('The document could not be prepared for printing.');
+            for (let attempt = 1; ; attempt++) {
+                // Held before loading, so a timeout destroys it even if the load never returns.
+                browser = new HiddenBrowser({ useHiddenFrame: false });
+                const loaded = await browser.load(Zotero.File.pathToFileURI(source));
+                // The caller already has its answer, and `finally` destroyed this browser.
+                if (settled) return;
+                if (loaded) break;
+                browser.destroy();
+                browser = null;
+                if (attempt >= LOAD_ATTEMPTS) throw new Error('The document could not be prepared for printing.');
+                logger(`printHtmlToPdf: page load attempt ${attempt} failed; retrying`, 2);
             }
             // `load()` resolves when the address changes, before the page has
             // loaded; printing then captures an empty page.
@@ -116,8 +140,9 @@ export async function printHtmlToPdf(html: string, path: string, options: { titl
             throw new Error(`Could not save the PDF to ${path}.`);
         }
     } finally {
+        settled = true;
         if (timeout !== undefined) timers.clearTimeout(timeout);
-        browser.destroy();
+        browser?.destroy();
         for (const file of [source, printed]) {
             IOUtils.remove(file, { ignoreAbsent: true })
                 .catch((error: unknown) => logger(`printHtmlToPdf: could not remove ${file}: ${error}`, 2));

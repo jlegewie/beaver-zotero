@@ -50,11 +50,22 @@ const ESCAPE_PATTERN = new RegExp(
     'g',
 );
 
-/** Text as LaTeX source that prints the same text. */
+/**
+ * Prose as LaTeX source that prints the same text, with straight quotes made
+ * typographic. A straight double quote alone prints as a closing quote, and so
+ * does a single quote opening a quotation; a pair of either becomes opening and
+ * closing quotes. A single quote that is not part of a quoted phrase is an
+ * apostrophe (`don't`, `'90s`, `rock 'n' roll`), which LaTeX already prints.
+ */
 export function escapeLatex(text: string): string {
-    return text
-        // Paired straight quotes become typographic quotes.
+    return escapeLatexCode(text
         .replace(/"([^"\n]*)"/g, '\u201c$1\u201d')
+        .replace(/(?<![\p{L}\p{N}])'([^'\s\d][^'\n]*?[^'\s])'(?![\p{L}\p{N}])/gu, '\u2018$1\u2019'));
+}
+
+/** Text as LaTeX source that prints exactly these characters (code): no typographic quotes. */
+export function escapeLatexCode(text: string): string {
+    return text
         .replace(ESCAPE_PATTERN, char => SPECIALS[char] ?? `\\ensuremath{${MATH_SYMBOLS[char]}}`)
         // `--` and `---` are dash ligatures; a hyphen pair as written stays two
         // hyphens. A kern separates them in every engine (LuaTeX ligatures
