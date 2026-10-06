@@ -28,6 +28,7 @@ export interface BackendLocator {
         | 'equation'
         | 'table'
         | 'margin'
+        | 'reference'
         | 'page'
         | 'unknown';
     value: string;

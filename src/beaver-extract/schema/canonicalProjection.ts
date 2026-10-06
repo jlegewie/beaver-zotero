@@ -106,6 +106,12 @@ export function projectStructuredPage(
                     kind: "formula",
                     text: item.text,
                 };
+            case "reference":
+                return {
+                    ...base,
+                    kind: "reference",
+                    text: item.text,
+                };
             case "table":
                 return { ...base, kind: "table" };
             case "picture":

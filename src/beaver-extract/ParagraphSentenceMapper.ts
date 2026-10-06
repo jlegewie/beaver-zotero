@@ -35,6 +35,7 @@ import type {
     ItemLine,
     RawLineDetailed,
     RawPageDataDetailed,
+    ReferenceItem,
     SectionHeaderItem,
     SentenceItem,
     TextBearingItem,
@@ -524,7 +525,8 @@ function itemFromContentItem(
     pageIndex: number,
     index: number,
     lines: ItemLine[],
-): TextItem | SectionHeaderItem {
+    reference = false,
+): TextItem | SectionHeaderItem | ReferenceItem {
     const base: Omit<TextBearingItem, "kind"> = {
         id: `p${pageIndex}:i${index}`,
         pageIndex,
@@ -534,6 +536,11 @@ function itemFromContentItem(
         text: item.text,
         lines: lines.length > 0 ? lines : [{ text: item.text, bbox: item.bbox }],
     };
+    if (reference) {
+        // The detector marks headings with "## "; a reference entry it read
+        // as a heading keeps its plain text.
+        return { ...base, text: item.text.replace(/^## /, ""), kind: "reference" };
+    }
     if (item.type === "header") {
         return { ...base, kind: "section_header", level: 1 };
     }
@@ -707,6 +714,11 @@ export interface PageSentenceOptions {
      * `collectHyphenatedCompounds` / `decideLineBreakHyphen`.
      */
     compoundVocabulary?: ReadonlySet<string>;
+    /**
+     * Indices into the paragraph result's items to emit as `reference`
+     * items: one bibliographic entry each, with lines but no sentences.
+     */
+    referenceItems?: ReadonlySet<number>;
 }
 
 /**
@@ -789,6 +801,7 @@ export function extractPageSentences(
             group,
             detailedLookup,
         );
+        const isReference = options.referenceItems?.has(i) ?? false;
 
         // Degradation path 1: paragraph could not be mapped back to any
         // detailed line. We still want a usable SentenceItem for the
@@ -799,6 +812,7 @@ export function extractPageSentences(
                 detailedPage.pageIndex,
                 i,
                 [{ text: item.text, bbox: item.bbox }],
+                isReference,
             );
             degradedCount++;
             degradedItems.add(docItem.id);
@@ -824,6 +838,7 @@ export function extractPageSentences(
                 detailedPage.pageIndex,
                 i,
                 [{ text: item.text, bbox: item.bbox }],
+                isReference,
             );
             degradedCount++;
             degradedItems.add(docItem.id);
@@ -848,11 +863,20 @@ export function extractPageSentences(
             detailedPage.pageIndex,
             i,
             itemLinesFromDetailed(detailedLines, item.text, item.bbox),
+            isReference,
         );
 
-        // Heading path: never split headings, and exclude them from the
-        // flattened sentence view.
-        if (docItem.kind === "section_header") {
+        // Heading and reference paths: never split into sentences, and
+        // exclude them from the flattened sentence view.
+        if (docItem.kind === "section_header" || docItem.kind === "reference") {
+            if (docItem.kind === "reference") {
+                // A reference has no sentences to carry the repaired text, so
+                // its own text takes it: line-break hyphens are resolved per
+                // the compound vocabulary and URLs ("…/research-" + "article.pdf"
+                // keeps its hyphen), unlike the detector's naive join.
+                const repaired = paragraphText.text.replace(/ +/g, " ").trim();
+                if (repaired) docItem.text = repaired;
+            }
             items.push(docItem);
             continue;
         }

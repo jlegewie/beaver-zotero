@@ -158,6 +158,12 @@ export interface PageParagraphResult {
      * grouped into each paragraph without re-running detection.
      */
     itemLines?: PageLine[][];
+    /**
+     * Hanging-indent role of each line in `itemLines` (see
+     * `detectHangingRoles`), aligned with it. Populated with `itemLines`;
+     * all `null` unless `hangingIndentBlocks` is on.
+     */
+    itemLineRoles?: HangingRole[][];
 }
 
 /**
@@ -652,7 +658,7 @@ function computeBodyAllCaps(
 /**
  * Join lines with optional hyphenation removal
  */
-function joinLines(lines: string[], removeHyphenation: boolean = true): string {
+export function joinLines(lines: string[], removeHyphenation: boolean = true): string {
     let text = lines.join("\n");
 
     if (removeHyphenation) {
@@ -1669,7 +1675,7 @@ function matchesHeaderRules(
  * the outer edge after a continuation at the inner edge; `continuation` is a
  * wrapped line at the inner edge.
  */
-type HangingRole = "entry" | "continuation" | null;
+export type HangingRole = "entry" | "continuation" | null;
 
 /** Indent step between the outer and inner edge, in median line heights. */
 const HANGING_MIN_INDENT_EM = 0.5;
@@ -2599,16 +2605,19 @@ function processColumnLines(
     pageContent: string;
     items: ContentItem[];
     itemLines: PageLine[][];
+    itemLineRoles: HangingRole[][];
     paragraphCount: number;
     headerCount: number;
 } {
     let pageContent = initialPageContent;
     const items: ContentItem[] = [];
     const itemLines: PageLine[][] = [];
+    const itemLineRoles: HangingRole[][] = [];
     let paragraphIndex = 0;
     let headerIndex = 0;
 
     let currentLines: PageLine[] = [];
+    let currentRoles: HangingRole[] = [];
     const hangingRoles: HangingRole[] = settings.hangingIndentBlocks
         ? detectHangingRoles(lines, pageThresholds.medianHeight)
         : new Array(lines.length).fill(null);
@@ -2655,6 +2664,7 @@ function processColumnLines(
                 pageContent = result.pageContent;
                 items.push(result.item);
                 itemLines.push(currentLines);
+                itemLineRoles.push(currentRoles);
 
                 if (result.item.type === "header") {
                     headerIndex++;
@@ -2664,8 +2674,10 @@ function processColumnLines(
             }
 
             currentLines = [line];
+            currentRoles = [hangingRoles[i]];
         } else {
             currentLines.push(line);
+            currentRoles.push(hangingRoles[i]);
         }
     }
 
@@ -2690,6 +2702,7 @@ function processColumnLines(
         pageContent = result.pageContent;
         items.push(result.item);
         itemLines.push(currentLines);
+        itemLineRoles.push(currentRoles);
 
         if (result.item.type === "header") {
             headerIndex++;
@@ -2702,6 +2715,7 @@ function processColumnLines(
         pageContent,
         items,
         itemLines,
+        itemLineRoles,
         paragraphCount: paragraphIndex,
         headerCount: headerIndex,
     };
@@ -2747,6 +2761,7 @@ export function detectParagraphs(
     let pageContent = "";
     const allItems: ContentItem[] = [];
     const allItemLines: PageLine[][] = [];
+    const allItemLineRoles: HangingRole[][] = [];
     let totalParagraphs = 0;
     let totalHeaders = 0;
 
@@ -2783,6 +2798,7 @@ export function detectParagraphs(
         allItems.push(...result.items);
         if (options.trackItemLines) {
             allItemLines.push(...result.itemLines);
+            allItemLineRoles.push(...result.itemLineRoles);
         }
         totalParagraphs += result.paragraphCount;
         totalHeaders += result.headerCount;
@@ -2805,6 +2821,7 @@ export function detectParagraphs(
 
     if (options.trackItemLines) {
         baseResult.itemLines = allItemLines;
+        baseResult.itemLineRoles = allItemLineRoles;
     }
 
     return baseResult;
