@@ -199,8 +199,10 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
     return detection;
 }
 
-/** A paragraph's next line starts at most this many of its line heights below the line above. */
+/** A paragraph's next line starts at most this many of its line heights below the line above... */
 const PARAGRAPH_GAP = 0.6;
+/** ...or at most this many times the paragraph's own line pitch (loosely leaded text). */
+const PARAGRAPH_PITCH = 1.15;
 /** A paragraph's line has at most this share of math characters. */
 const PARAGRAPH_MATH = 0.2;
 /** A sentence ends: terminal punctuation, maybe followed by a closing quote or bracket. */
@@ -210,10 +212,11 @@ const SENTENCE_END_RE = /[.!?][\])"'”’]*$/u;
  * A line that a picture or formula box took from a paragraph goes back to it: a
  * line of text set directly under a paragraph line (running text with another
  * paragraph line above it), at its left edge, in its type size and within its
- * width, when that line's sentence goes on. Running-text detection judges lines
- * one by one and misses such a line when it holds mostly numbers or symbols (a
- * statistic, a citation); the paragraph it continues says what it is. The lines
- * that follow it the same way go back too.
+ * width, at the paragraph's line spacing, when that line's sentence goes on.
+ * Running-text detection judges lines one by one and misses such a line when it
+ * holds mostly numbers or symbols (a statistic, a citation) or few words (the
+ * last line of a sentence leading into a display); the paragraph it continues
+ * says what it is. The lines that follow it the same way go back too.
  */
 function keepParagraphTails(lines: readonly RegionLine[], flags: readonly number[], regions: readonly DetectedRegion[], routes: number[]): void {
     const order = lines
@@ -236,7 +239,9 @@ function keepParagraphTails(lines: readonly RegionLine[], flags: readonly number
         }
         return best;
     };
-    const continues = (i: number, j: number): boolean => {
+    // Baseline to baseline, read off whichever edge sub- and superscripts leave in place.
+    const pitch = (upper: Rect, lower: Rect) => Math.min(lower[1] - upper[1], lower[3] - upper[3]);
+    const continues = (i: number, j: number, before: number): boolean => {
         const a = lines[j];
         const b = lines[i];
         const h = Math.max(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1]);
@@ -244,7 +249,7 @@ function keepParagraphTails(lines: readonly RegionLine[], flags: readonly number
             // Text, not a display equation set at the margin under its lead-in.
             /\p{L}{3,}/u.test(b.text) &&
             b.mathChars <= PARAGRAPH_MATH * b.inkChars &&
-            b.bbox[1] - a.bbox[3] <= PARAGRAPH_GAP * h &&
+            (b.bbox[1] - a.bbox[3] <= PARAGRAPH_GAP * h || pitch(a.bbox, b.bbox) <= PARAGRAPH_PITCH * pitch(lines[before].bbox, a.bbox)) &&
             Math.abs(b.bbox[0] - a.bbox[0]) <= 2 &&
             b.bbox[2] <= a.bbox[2] + 2 &&
             Math.abs(b.size - a.size) <= 1 &&
@@ -255,10 +260,10 @@ function keepParagraphTails(lines: readonly RegionLine[], flags: readonly number
         const k = routes[i];
         if (k < 0 || (regions[k].label !== "picture" && regions[k].label !== "formula")) continue;
         const j = above(i);
-        if (j < 0 || !paragraph.has(j) || !continues(i, j)) continue;
+        if (j < 0 || !paragraph.has(j)) continue;
         // The line above is a paragraph's when a paragraph line stands over it too.
         const before = above(j);
-        if (before < 0 || !paragraph.has(before)) continue;
+        if (before < 0 || !paragraph.has(before) || !continues(i, j, before)) continue;
         routes[i] = -1;
         paragraph.add(i);
     }

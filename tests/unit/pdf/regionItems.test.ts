@@ -315,6 +315,31 @@ describe("regionItemsForPage", () => {
         expect(regionItemsForPage(alone, detection(alone, [["formula", [54, 98, 295, 130]]])).items[0].bbox).toMatchObject({ t: 98, b: 130 });
     });
 
+    it("starts an equation's box at its own text, not at a lead-in on the row of its top", () => {
+        // The lead-in ends the paragraph at the margin, level with the top of the
+        // equation's numerator, so the box cannot start below it.
+        const para = line(86, [[54, 290, PROSE]]);
+        const lead = line(100, [[54, 120, "consumption are"]]);
+        const eq = [line(102, [[160, 170, "m"]]), line(110, [[140, 158, "z ="], [180, 210, "(1 + H)"], [279, 295, "(4.5)"]]), line(118, [[155, 175, "1 + m"]])];
+        const prose = (t: string) => t === PROSE || t === "consumption are";
+        const p = page([para, lead], eq);
+        const d = detection(p, [["formula", [54, 98, 295, 130]]], prose);
+        const { items, page: rest } = regionItemsForPage(p, d);
+        expect(allText(rest)).toEqual([PROSE, "consumption are"]);
+        expect(items[0].bbox).toMatchObject({ l: 140, t: 98, r: 295, b: 130 });
+        // Rules drawn in the box stay inside it.
+        d.routing!.rules = [[135, 113, 175, 114]];
+        expect(regionItemsForPage(p, d).items[0].bbox.l).toBe(135);
+        // Text beside the equation lower down leaves the box as it is.
+        const side = page([para, line(118, [[54, 120, "another column"]])], eq);
+        const sd = detection(side, [["formula", [54, 98, 295, 130]]], (t) => t === PROSE || t === "another column");
+        expect(regionItemsForPage(side, sd).items[0].bbox.l).toBe(54);
+        // So does a display's own text that went to the prose: it starts inside the column.
+        const centred = page([para, line(100, [[80, 250, "total effect equals direct plus indirect"]]), line(100, [[279, 295, "(10.3)"]])]);
+        const cd = detection(centred, [["formula", [80, 98, 295, 112]]], (t) => t === PROSE || t.startsWith("total effect"));
+        expect(regionItemsForPage(centred, cd).items[0].bbox.l).toBe(80);
+    });
+
     it("leaves a formula that is one line of its paragraph, set with inline math, in the prose", () => {
         const full = (y: number, text = "the conditional treatment effect among the stops,") => line(y, [[72, 290, text]]);
         const math = (y: number) => line(y, [[72, 290, "Σx ATEx Pr(Xi = x), Σx ATEx Pr"]]);

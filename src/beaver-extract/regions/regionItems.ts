@@ -269,25 +269,48 @@ function hadText(rect: Rect, routing: LineRouting): boolean {
     });
 }
 
+/** A lead-in beside an equation's top starts at most this many of its heights below the equation's text. */
+const LEAD_IN_ROW = 0.5;
+
 /**
- * An equation's box without the prose it took above or below its own lines: its top
- * moves below the lines inside it over the equation's text (they went elsewhere), and
- * its bottom above those under it. Rules, radicals and delimiters drawn as paths keep
- * the rest of the box.
+ * An equation's box without the prose it took above or below its own lines, or
+ * before its first row: its top moves below the lines inside it over the
+ * equation's text (they went elsewhere), and its bottom above those under it.
+ * Rules, radicals and delimiters drawn as paths keep the rest of the box. A
+ * lead-in left of the equation's text, level with its top (words of a sentence
+ * ending beside the top of tall brackets or a numerator, starting at the text
+ * column's margin as the running lines do), moves the box's left edge in to the
+ * equation's text and rules. A display's own text that went to the prose starts
+ * further in, and keeps the box. Text beside the equation lower down, or right
+ * of it, is left alone: it is usually another column's, and the box's reach
+ * across the gutter is what splits an equation box merged across columns.
  */
 function withoutReturnedProse(box: BoundingBox, cells: readonly { bbox: BoundingBox }[], routing: LineRouting): BoundingBox {
     const top = Math.min(...cells.map((c) => c.bbox.t));
     const bottom = Math.max(...cells.map((c) => c.bbox.b));
-    let t = box.t;
-    let b = box.b;
+    const left = Math.min(...cells.map((c) => c.bbox.l));
+    const inside = (r: Rect) => {
+        const cx = (r[0] + r[2]) / 2;
+        const cy = (r[1] + r[3]) / 2;
+        return cx >= box.l && cx <= box.r && cy >= box.t && cy <= box.b;
+    };
+    // Where the equation starts across: its text and the rules drawn in its box.
+    const rules = [...(routing.rules ?? []), ...(routing.verticalRules ?? [])].filter(inside);
+    const from = Math.min(left, ...rules.map((r) => r[0]));
+    const running = routing.lines.filter((l, i) => routing.flags[i] & LINE_RUNNING && !l.rot);
+    const leadIn = (l: RegionLine) =>
+        l.bbox[2] <= left &&
+        l.bbox[1] <= top + LEAD_IN_ROW * (l.bbox[3] - l.bbox[1]) &&
+        l.mathChars <= FORMULA_TEXT_MATH * l.inkChars &&
+        running.some((r) => Math.abs(r.bbox[0] - l.bbox[0]) <= 2 && r.bbox[2] > l.bbox[2]);
+    let { l: x0, t, b } = box;
     routing.lines.forEach((l) => {
-        const cx = (l.bbox[0] + l.bbox[2]) / 2;
-        const cy = (l.bbox[1] + l.bbox[3]) / 2;
-        if (cx < box.l || cx > box.r || cy < box.t || cy > box.b) return;
+        if (!inside(l.bbox)) return;
         if (l.bbox[3] <= top) t = Math.max(t, l.bbox[3]);
         else if (l.bbox[1] >= bottom) b = Math.min(b, l.bbox[1]);
+        else if (leadIn(l)) x0 = Math.max(x0, from);
     });
-    return { ...box, t, b };
+    return { ...box, l: x0, t, b };
 }
 
 /**
