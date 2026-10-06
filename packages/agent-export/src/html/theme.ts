@@ -42,6 +42,8 @@ export interface HtmlTheme {
         headings: string;
         /** Secondary text: tool activity, prompt labels. */
         muted: string;
+        /** The action of a tool-call line. */
+        mutedStrong: string;
         link: string;
         /** Table rules, quote bars. */
         rule: string;
@@ -75,34 +77,38 @@ export interface HtmlTheme {
 
 export const HTML_THEME: HtmlTheme = {
     fonts: {
-        body: '"Times New Roman", Times, "Liberation Serif", serif',
-        headings: '"Times New Roman", Times, "Liberation Serif", serif',
+        // A PDF embeds the fonts of the computer that prints it: Charter on
+        // macOS, Sitka or Cambria on Windows, then common fallbacks.
+        body: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, "Liberation Serif", serif',
+        headings: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, "Liberation Serif", serif',
         mono: 'Consolas, Menlo, "DejaVu Sans Mono", monospace',
-        ui: '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif',
+        ui: 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, "Liberation Sans", sans-serif',
     },
+    // Charter sets large for its size: 11 pt reads like 12 pt Times.
     sizes: {
-        body: 12,
-        title: 17,
+        body: 11,
+        title: 18,
         heading1: 14,
-        heading2: 12.5,
-        heading3: 12,
-        heading4: 12,
-        note: 10,
-        activity: 9,
-        code: 10,
-        table: 11,
+        heading2: 12,
+        heading3: 11,
+        heading4: 11,
+        note: 9.5,
+        activity: 8.5,
+        code: 9.5,
+        table: 10,
     },
     colors: {
         text: '#000000',
         headings: '#000000',
-        muted: '#595959',
+        muted: '#6B6F76',
+        mutedStrong: '#3F4247',
         link: '#1F4E79',
         rule: '#808080',
         codeBackground: '#F2F2F2',
         promptBackground: '#EEF1F4',
     },
     spacing: {
-        lineHeight: 1.35,
+        lineHeight: 1.45,
         paragraphAfter: 8,
         titleAfter: 16,
         headingBefore: 16,
@@ -241,12 +247,13 @@ thead th { border-bottom: 0.5pt solid ${colors.text}; }
     font-family: ${fonts.ui};
     font-size: ${sizes.activity}pt;
     color: ${colors.muted};
-    line-height: 1.35;
+    line-height: 1.45;
     margin: ${spacing.blockBefore}pt 0 ${spacing.paragraphAfter}pt;
     break-after: avoid;
 }
 .activity p { margin: 0; }
-.activity-mark { padding-right: 0.45em; }
+.activity-mark { color: ${colors.rule}; font-weight: 600; padding-right: 0.5em; }
+.activity-action { color: ${colors.mutedStrong}; font-weight: 600; }
 .notes { font-size: ${sizes.note}pt; line-height: 1.25; }
 .notes ol { padding-left: 0.3in; margin: 0; }
 .notes li { margin-bottom: 3pt; }

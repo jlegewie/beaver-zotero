@@ -53,6 +53,7 @@
     "./src/latex/writeLatex.ts",
     "./src/latex/escape.ts",
     "./src/page.ts",
+    "./src/activity.ts",
     "./src/math/latexToOmml.ts",
     "./src/math/mathmlToOmml.ts",
     "./src/math/xml.ts"

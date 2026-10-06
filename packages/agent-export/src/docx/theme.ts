@@ -43,6 +43,8 @@ export interface DocxTheme {
         footnote: number;
         /** Tool activity lines in full-response exports. */
         activity: number;
+        /** The label of a user prompt's card. */
+        promptLabel: number;
         code: number;
         table: number;
         pageNumber: number;
@@ -53,6 +55,8 @@ export interface DocxTheme {
         headings: string;
         /** Secondary text: tool activity, prompt labels. */
         muted: string;
+        /** The action of a tool-call line. */
+        mutedStrong: string;
         link: string;
         /** Table rules, quote and activity bars. */
         rule: string;
@@ -89,10 +93,13 @@ export interface DocxTheme {
 
 export const DOCX_THEME: DocxTheme = {
     fonts: {
-        body: 'Times New Roman',
-        headings: 'Times New Roman',
+        // Fonts every Microsoft Office install has, on Windows and Mac, with
+        // metric-compatible substitutes in LibreOffice (Caladea, Carlito).
+        // Cambria matches Word's equation font, Cambria Math.
+        body: 'Cambria',
+        headings: 'Cambria',
         mono: 'Consolas',
-        ui: 'Arial',
+        ui: 'Calibri',
     },
     sizes: {
         body: 12,
@@ -102,7 +109,8 @@ export const DOCX_THEME: DocxTheme = {
         heading3: 12,
         heading4: 12,
         footnote: 10,
-        activity: 9,
+        activity: 10,
+        promptLabel: 8,
         code: 10,
         table: 11,
         pageNumber: 10,
@@ -110,7 +118,8 @@ export const DOCX_THEME: DocxTheme = {
     colors: {
         text: '000000',
         headings: '000000',
-        muted: '595959',
+        muted: '6B6F76',
+        mutedStrong: '3F4247',
         link: '1F4E79',
         rule: '808080',
         codeBackground: 'F2F2F2',
@@ -244,7 +253,7 @@ export function documentStyles(theme: DocxTheme = DOCX_THEME): IStylesOptions {
                 // color for padding. Word draws consecutive paragraphs with the
                 // same borders as one box, so the label and the prompt share it.
                 id: STYLE.promptLabel, name: 'Prompt Label', basedOn: 'Normal', next: STYLE.prompt,
-                run: { font: theme.fonts.ui, bold: true, allCaps: true, characterSpacing: 10, color: theme.colors.muted, size: halfPoints(theme.sizes.activity - 1) },
+                run: { font: theme.fonts.ui, bold: true, allCaps: true, characterSpacing: 10, color: theme.colors.muted, size: halfPoints(theme.sizes.promptLabel) },
                 paragraph: { ...promptCard(theme), spacing: { before: 0, after: twips(3), ...lineSpacing(1) }, keepNext: true },
             },
             {

@@ -14,6 +14,7 @@
 
 import katex from 'katex';
 import { KATEX_MACROS, katexSource } from '../math/latexToOmml';
+import { activityLabelParts } from '../activity';
 import { itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identity/itemLinks';
 import type { MdBlock, MdFootnoteDefinition, MdInline, MdTable } from '../mdast';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
@@ -387,7 +388,13 @@ class HtmlWriter {
             if (section.kind === 'activity') {
                 const calls = section.calls ?? [];
                 if (calls.length > 0) {
-                    out += `<div class="activity">\n${calls.map(call => `<p><span class="activity-mark">›</span>${escapeHtml(curlyQuotes(call))}</p>`).join('\n')}\n</div>\n`;
+                    out += `<div class="activity">\n${calls.map(call => {
+                        const { action, detail } = activityLabelParts(curlyQuotes(call));
+                        const label = action
+                            ? `<span class="activity-action">${escapeHtml(action)}</span> ${escapeHtml(detail)}`
+                            : escapeHtml(detail);
+                        return `<p><span class="activity-mark">›</span>${label}</p>`;
+                    }).join('\n')}\n</div>\n`;
                 }
                 continue;
             }

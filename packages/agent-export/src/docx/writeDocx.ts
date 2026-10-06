@@ -42,6 +42,7 @@ import {
 import { itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identity/itemLinks';
 import type { MdBlock, MdFootnoteDefinition, MdInline, MdTable } from '../mdast';
 import { latexToOmml } from '../math/latexToOmml';
+import { activityLabelParts } from '../activity';
 import { escapeXml, parseXml, stripInvalidXmlChars, type XmlNode } from '../math/xml';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { parseCslHtml, type StyledSegment } from '../citations/inlineHtml';
@@ -689,7 +690,17 @@ class DocxWriter {
             }
             if (section.kind === 'activity') {
                 for (const call of section.calls ?? []) {
-                    out.push(new Paragraph({ style: STYLE.activity, keepNext: true, children: [textRun(`›\u00a0\u00a0${curlyQuotes(call)}`)] }));
+                    // Sanitized whole: these runs bypass `textRun`, which would do it.
+                    const { action, detail } = activityLabelParts(stripInvalidXmlChars(curlyQuotes(call)));
+                    out.push(new Paragraph({
+                        style: STYLE.activity,
+                        keepNext: true,
+                        children: [
+                            new TextRun({ text: '›\u00a0\u00a0', bold: true, color: this.theme.colors.rule }),
+                            ...(action ? [new TextRun({ text: `${action} `, bold: true, color: this.theme.colors.mutedStrong })] : []),
+                            new TextRun({ text: detail }),
+                        ],
+                    }));
                 }
                 continue;
             }

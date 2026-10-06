@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { buildResponseBlocks, buildThreadBlocks, splitNoteTags } from '@beaver/agent-export/source/buildSource';
 import { parseExportSource } from '@beaver/agent-export/parse/parseExportDoc';
+import { activityLabelParts } from '@beaver/agent-export/activity';
 
 function run(id: string, prompt: string, parts: any[]): AgentRun {
     return {
@@ -123,6 +124,16 @@ describe('user prompts in an export', () => {
             types: ['paragraph'],
             text: 'Steps:\n\u00a0\u00a0\u00a0\u00a0indented line',
         });
+    });
+});
+
+describe('activityLabelParts', () => {
+    it('sets the action apart from what it acted on', () => {
+        expect(activityLabelParts('Extracting: core findings (1 result)')).toEqual({ action: 'Extracting:', detail: 'core findings (1 result)' });
+        // No action: the whole label is plain.
+        expect(activityLabelParts('Citations to Legewie et al. 2022 (7 results)')).toEqual({ action: '', detail: 'Citations to Legewie et al. 2022 (7 results)' });
+        // A colon late in a sentence is not an action.
+        expect(activityLabelParts('Searched the library for the phrase that reads: x').action).toBe('');
     });
 });
 

@@ -262,7 +262,7 @@ describe('writeDocx theme', () => {
 
     it('defines fonts, sizes and spacing in styles, not on individual runs', async () => {
         const { document, styles } = await write('Plain paragraph.\n\n# Heading');
-        expect(styles).toMatch(/<w:docDefaults>.*w:ascii="Times New Roman".*<w:sz w:val="24"\/>/s);
+        expect(styles).toMatch(/<w:docDefaults>.*w:ascii="Cambria".*<w:sz w:val="24"\/>/s);
         const bodyText = styles.match(/<w:style [^>]*w:styleId="BodyText".*?<\/w:style>/s)?.[0] ?? '';
         expect(bodyText).toMatch(/<w:spacing [^>]*w:after="160"/);
         expect(bodyText).toMatch(/<w:spacing [^>]*w:line="276"/);
@@ -307,6 +307,15 @@ describe('writeDocx theme', () => {
         expect(styles).toMatch(/w:styleId="BeaverActivity".*?<w:contextualSpacing\/>/s);
     });
 
+    it('drops characters XML cannot hold from tool-call labels, in the action too', async () => {
+        const { document } = await write('', 'en-US', [
+            { type: 'activity', calls: ['Networks\u0001: A study\u000b of ties'] },
+        ]);
+        const invalid = [...document].filter(char => char.charCodeAt(0) < 0x20 && !'\t\n\r'.includes(char));
+        expect(invalid).toEqual([]);
+        expect(visibleText(document)).toContain('Networks: A study of ties');
+    });
+
     it('writes a user prompt as a labeled card, set apart by unshaded gaps', async () => {
         const { document, styles } = await write('', 'en-US', [
             { type: 'user', text: 'First line\nsecond line\n\nAnother paragraph' },
@@ -324,7 +333,9 @@ describe('writeDocx theme', () => {
         // One box: the label and the prompt share fill and borders.
         expect(styles).toMatch(/w:styleId="BeaverPrompt"[\s\S]*?<w:pBdr>[\s\S]*?<w:shd [^>]*w:fill="EEF1F4"/);
         expect(styles).toMatch(/w:styleId="PromptLabel"[\s\S]*?<w:caps\/>/);
+        // The action set apart from what it acted on.
         expect(visibleText(document)).toContain('›\u00a0\u00a0Reading: Smith 2004');
+        expect(document).toMatch(/<w:b\/>[^]*?<w:t xml:space="preserve">Reading: <\/w:t>[^]*?<w:t xml:space="preserve">Smith 2004<\/w:t>/);
     });
 
     it('trims the layout whitespace around bibliography entries', async () => {
