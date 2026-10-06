@@ -2,6 +2,7 @@ import { setHost } from '@beaver/agent-ui/host';
 import { zoteroNavigation } from './navigation';
 import { zoteroItemData } from './itemData';
 import { zoteroDocumentExport } from './citationExport';
+import { zoteroFileExport } from './fileExport';
 import { zoteroNoteWriter } from './noteWriter';
 import { zoteroConfig } from './config';
 import { zoteroComponents } from './components';
@@ -17,7 +18,7 @@ export function registerZoteroHost(): void {
     setHost({
         navigation: zoteroNavigation,
         itemData: zoteroItemData,
-        documentExport: zoteroDocumentExport,
+        documentExport: { ...zoteroDocumentExport, ...zoteroFileExport },
         noteWriter: zoteroNoteWriter,
         config: zoteroConfig,
         components: zoteroComponents,

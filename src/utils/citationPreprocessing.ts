@@ -7,11 +7,15 @@
 
 import {
     baseCitationKey,
+    CITATION_TAG_PATTERN,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
+    unwrapBacktickedCitations,
 } from '@beaver/agent-core/citations/citationGrammar';
 import type { NormalizedCitationAttrs } from '@beaver/agent-core/types/citations';
+
+export { CITATION_TAG_PATTERN };
 
 /**
  * State for tracking consecutive citations across preprocessing calls.
@@ -147,25 +151,6 @@ export function preprocessCitationMatch(
 }
 
 /**
- * Unwrap backtick-wrapped citation tags (common LLM mistake).
- * Matches: `<citation id="...">` → <citation id="...">
- *
- * Handles every citation form supported by CITATION_TAG_PATTERN (self-closing,
- * opening-only, and full pair), and multiple adjacent tags sharing one pair of
- * backticks (e.g. consecutive citations of the same item):
- * `<citation .../><citation .../>` → <citation .../><citation .../>
- */
-const UNWRAP_BACKTICK_PATTERN = /`(<citation[^>]*>(?:<\/citation>)?(?:\s*<citation[^>]*>(?:<\/citation>)?)*)`/g;
-
-/**
- * Regex pattern for matching citation tags in all formats:
- * - Self-closing: <citation id="..."/>
- * - Opening only (missing /): <citation id="...">
- * - Full pair: <citation id="..."></citation>
- */
-export const CITATION_TAG_PATTERN = /<citation(?:\s+([^>]*?))?\s*(?:\/>|>(?:<\/citation>)?)/g;
-
-/**
  * Preprocess citations in markdown content.
  * 
  * Handles various LLM output formats gracefully:
@@ -189,7 +174,7 @@ export function preprocessCitations(
     state: CitationPreprocessState = createPreprocessState()
 ): string {
     // Unwrap backtick-wrapped citation tags (common LLM mistake)
-    content = content.replace(UNWRAP_BACKTICK_PATTERN, '$1');
+    content = unwrapBacktickedCitations(content);
 
     // Reset the regex lastIndex for each call
     CITATION_TAG_PATTERN.lastIndex = 0;
