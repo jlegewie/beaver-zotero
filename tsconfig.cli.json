@@ -15,6 +15,7 @@
     "src/beaver-extract/debug",
     "tests/unit/pdf/cliEnvelope.test.ts",
     "tests/unit/pdf/cliFixtureCommand.test.ts",
+    "tests/unit/pdf/cliReferencesCommand.test.ts",
     "tests/unit/pdf/debugOverlayBuilders.test.ts",
     "tests/unit/pdf/nodeApiSerialization.test.ts",
     "tests/unit/pdf/overlaySvg.test.ts",

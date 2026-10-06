@@ -365,3 +365,38 @@ describe('extractPageSentences line-break de-hyphenation', () => {
         expect(text).toContain('brown fox');
     });
 });
+
+// ---------------------------------------------------------------------------
+// Reference items: no sentences, so the item text carries the repaired text
+// ---------------------------------------------------------------------------
+
+describe('extractPageSentences reference items', () => {
+    function referenceText(page: RawPageDataDetailed, vocab?: ReadonlySet<string>): string {
+        const result = extractPageSentences(page, { compoundVocabulary: vocab, referenceItems: new Set([0]) });
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0].kind).toBe('reference');
+        expect(result.sentences).toHaveLength(0);
+        return 'text' in result.items[0] ? result.items[0].text : '';
+    }
+
+    it('keeps the hyphen of a URL wrapped across lines', () => {
+        const page = makeSingleBlockPage([
+            makeLine('Smith, J. 2020. Report. https://example.com/research-', 100),
+            makeLine('article.pdf', 115),
+        ]);
+        expect(referenceText(page)).toBe('Smith, J. 2020. Report. https://example.com/research-article.pdf');
+    });
+
+    it('keeps an attested compound and joins a soft hyphen, as sentence text does', () => {
+        const page = makeSingleBlockPage([
+            makeLine('Smith, J. 2020. Aggressive broken-', 100),
+            makeLine('windows policing and its con-', 115),
+            makeLine('sequences. Journal 3: 1-9.', 130),
+        ]);
+        const vocab = new Set(['broken-windows']);
+        expect(referenceText(page, vocab)).toBe(
+            'Smith, J. 2020. Aggressive broken-windows policing and its consequences. Journal 3: 1-9.',
+        );
+        expect(referenceText(page, vocab)).toBe(allSentenceText(page, vocab));
+    });
+});

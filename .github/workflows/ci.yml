@@ -39,6 +39,11 @@ jobs:
       - name: Typecheck agent-ui
         run: npm run typecheck:ui
 
+      # The export pipeline package: ECMAScript-only lib, agent-core as its
+      # only in-repo dependency, closure verified like the other two.
+      - name: Typecheck agent-export
+        run: npm run typecheck:export
+
       # eslint directly rather than lint:check — the prettier half of that
       # script is a separate, repo-wide formatting decision.
       - name: Lint

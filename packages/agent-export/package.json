@@ -1,0 +1,26 @@
+{
+  "name": "@beaver/agent-export",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "typesVersions": {
+    "*": {
+      "*": ["src/*"]
+    }
+  },
+  "dependencies": {
+    "docx": "^9.8.1",
+    "katex": "^0.16.47",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
+    "unified": "^11.0.5"
+  },
+  "peerDependencies": {
+    "@beaver/agent-core": "*"
+  }
+}

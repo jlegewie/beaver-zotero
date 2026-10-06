@@ -30,7 +30,8 @@ vi.mock('../../../react/components/preferences/BillingSection', () => ({ formatP
 vi.mock('../../../react/components/ChatLoadFailure', () => ({ default: () => null }));
 vi.mock('../../../react/components/icons/icons', () => {
     const NullIcon = () => null;
-    return { Icon: NullIcon, MoreHorizontalIcon: NullIcon, PlusSignIcon: NullIcon, SearchIcon: NullIcon, UserIcon: NullIcon, CancelIcon: NullIcon };
+    return { Icon: NullIcon, MoreHorizontalIcon: NullIcon, PlusSignIcon: NullIcon, SearchIcon: NullIcon, UserIcon: NullIcon, CancelIcon: NullIcon,
+        DeleteIcon: NullIcon, EditIcon: NullIcon, PinIcon: NullIcon, PinOffIcon: NullIcon };
 });
 vi.mock('@beaver/agent-ui/icons/Spinner', () => ({ default: () => null }));
 vi.mock('@beaver/agent-ui/primitives/MenuButton', () => ({ default: () => null }));
@@ -100,7 +101,7 @@ describe('thread row menu', () => {
         expect(menu()!.style.left).toBe('120px');
         expect(menu()!.style.top).toBe('240px');
         const labels = Array.from(menu()!.querySelectorAll('[role="menuitem"]')).map(el => el.getAttribute('aria-label'));
-        expect(labels).toEqual(['Rename chat', 'Pin chat', 'Delete chat']);
+        expect(labels).toEqual(['Rename chat', 'Pin chat', 'Delete chat…']);
         expect(row().classList.contains('beaver-window-nav-row-menu-open')).toBe(true);
     });
 

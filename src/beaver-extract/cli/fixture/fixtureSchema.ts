@@ -290,6 +290,7 @@ const allowedKinds = new Set<DocumentItemKind>([
     "formula",
     "table",
     "picture",
+    "reference",
     "margin",
 ]);
 
@@ -300,6 +301,7 @@ const textBearingKinds = new Set<DocumentItemKind>([
     "caption",
     "footnote",
     "formula",
+    "reference",
     "margin",
 ]);
 
