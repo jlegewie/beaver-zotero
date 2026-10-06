@@ -61,6 +61,7 @@ export const OVERLAY_COLORS = {
     itemFormula: "#ff9f0a",
     itemTable: "#007aff",
     itemPicture: "#bf5af2",
+    itemReference: "#a2845e",
     // Back-compat aliases for callers/tests that still talk in terms of
     // paragraph/header overlays.
     paragraph: "#34c759",
@@ -90,6 +91,7 @@ export const ITEM_KIND_STYLE: Record<DocItem["kind"], { color: string; prefix: s
     formula: { color: OVERLAY_COLORS.itemFormula, prefix: "M" },
     table: { color: OVERLAY_COLORS.itemTable, prefix: "T" },
     picture: { color: OVERLAY_COLORS.itemPicture, prefix: "I" },
+    reference: { color: OVERLAY_COLORS.itemReference, prefix: "R" },
 };
 
 function itemStyle(item: DocItem): { color: string; prefix: string } {
@@ -398,6 +400,7 @@ export function buildItemOverlayFromPage(
             formulas: kindCounts.formula ?? 0,
             tables: kindCounts.table ?? 0,
             pictures: kindCounts.picture ?? 0,
+            references: kindCounts.reference ?? 0,
         },
     };
 }
@@ -489,6 +492,7 @@ export function buildItemOverlayFromDebugPage(page: PageDebugData): OverlayResul
             formulas: kindCounts.formula ?? 0,
             tables: kindCounts.table ?? 0,
             pictures: kindCounts.picture ?? 0,
+            references: kindCounts.reference ?? 0,
         },
     };
 }

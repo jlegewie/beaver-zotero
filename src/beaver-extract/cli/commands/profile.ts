@@ -84,7 +84,7 @@ interface ProfileEnvelopeResult {
  * Numeric fields on `StructuredPagePhaseTimings` that we want to
  * aggregate. Kept as a tuple of `[label, key]` so the printed phase
  * order matches the pipeline order: detailed walk → font bridge →
- * filter sub-phases → sentence map. Order matters — the printed
+ * filter sub-phases → reference classification → sentence map. Order matters — the printed
  * table is read top-to-bottom by the perf-tracker.
  */
 const PHASE_KEYS: ReadonlyArray<[string, keyof StructuredPagePhaseTimings]> = [
@@ -95,6 +95,9 @@ const PHASE_KEYS: ReadonlyArray<[string, keyof StructuredPagePhaseTimings]> = [
     ["  columnDetect", "columnDetectMs"],
     ["  lineDetect", "lineDetectMs"],
     ["  paragraphDetect", "paragraphDetectMs"],
+    // Each page's share of the document-level reference pass; 0 for
+    // schema presets without reference items.
+    ["references", "referencesMs"],
     ["sentenceMap", "sentenceMapMs"],
 ];
 
@@ -171,6 +174,7 @@ function aggregate(
         "detailedWalkMs",
         "fontBridgeMs",
         "filteredParagraphsMs",
+        "referencesMs",
         "sentenceMapMs",
     ];
     const denomMs = topLevelPhases.reduce(

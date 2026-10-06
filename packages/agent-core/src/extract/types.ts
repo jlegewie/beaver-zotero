@@ -532,6 +532,11 @@ export interface FormulaItem extends TextBearingItem {
     kind: "formula";
 }
 
+/** A reference-list entry (see the public `ReferenceItem`). */
+export interface ReferenceItem extends TextBearingItem {
+    kind: "reference";
+}
+
 export interface TableItem extends DocItemBase {
     kind: "table";
 }
@@ -549,7 +554,8 @@ export type DocItem =
     | MarginItem
     | FormulaItem
     | TableItem
-    | PictureItem;
+    | PictureItem
+    | ReferenceItem;
 
 export type DegradationReason =
     | "unmapped"
@@ -782,6 +788,12 @@ export interface StructuredPagePhaseTimings {
     paragraphDetectMs: number;
     /** `extractPageSentences` — item-scoped sentence mapping. */
     sentenceMapMs: number;
+    /**
+     * This page's share of reference classification (presets with
+     * `referenceItems`); the document-level pass is split across pages by
+     * item count.
+     */
+    referencesMs?: number;
     /** Total character count on the target page (post-detailed-walk). */
     charCount: number;
     /** Total line count on the target page (post-detailed-walk). */
