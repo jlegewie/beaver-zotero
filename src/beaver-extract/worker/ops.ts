@@ -29,9 +29,12 @@ import type { PageLine } from "../LineDetector";
 import {
     collectMarginItemsFromFilteredPage,
     detectFilteredParagraphs,
+    documentBodyExtents,
+    regionFurnitureLines,
     reindexMarginItems,
 } from "../FilteredParagraphPipeline";
 import {
+    detectDominantTextOrientation,
     inverseRotateBBox,
     type RotationAngle,
 } from "../PageRotationNormalizer";
@@ -56,6 +59,7 @@ import type {
     PDFSearchResult,
     InternalProcessedPage,
     PageGeometry,
+    RawLine,
     RawPageData,
     RawPageDataDetailed,
     StructuredPagePhaseTimings,
@@ -102,6 +106,7 @@ import {
     mapPageSentences,
     runSentenceExtractionFromDoc,
     type PageParagraphs,
+    type PageSentenceArgs,
 } from "./sentenceExtraction";
 import { resolveSplitter } from "./splitterResolver";
 import type { SentenceSplitter } from "../SentenceMapper";
@@ -129,6 +134,12 @@ import {
     searchPageInDoc,
 } from "./docHelpers";
 import type { DocumentLike, FontApi } from "./mupdfApi";
+import type { GraphicsSummary } from "./graphicsSummary";
+import { detectRegions } from "../regions/RegionDetector";
+import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
+import { regionItemsForPage, type PageRegionItems, type RegionItemDraft } from "../regions/regionItems";
+import { REGION_MODEL } from "../regions/weights";
+import { DEFAULT_REGION_CONTEXT_PAGES } from "./regionOps";
 
 export interface OpReply<T = unknown> {
     result: T;
@@ -285,11 +296,14 @@ export async function opRenderPages(
  *  - `getPlain`    — JSON-walk pages for the markdown engines and the
  *                    markdown-mode gate.
  *  - `getDetailed` — per-char detailed-walk pages for structured
- *                    extraction and the structured-mode gate.
+ *                    extraction and the structured-mode gate. With `regions`,
+ *                    the walk also records font runs and the page's graphics
+ *                    summary (`graphicsFor`) for region detection.
  */
 class PageWalkCache {
     private readonly plain = new Map<number, RawPageData>();
     private readonly detailed = new Map<number, RawPageDataDetailed>();
+    private readonly graphics = new Map<number, GraphicsSummary>();
 
     constructor(
         private readonly doc: DocumentLike,
@@ -298,6 +312,8 @@ class PageWalkCache {
         private readonly textRepair: boolean,
         /** Whether detailed walks record per-glyph style runs. */
         private readonly styleRuns: boolean,
+        /** Region detection of the op's schema preset (structured mode). */
+        readonly regions = false,
     ) {}
 
     getPlain(pageIndex: number, includeImages: boolean): RawPageData {
@@ -321,11 +337,21 @@ class PageWalkCache {
                 includeImages,
                 this.fontApi,
                 this.textRepair,
-                this.styleRuns,
+                {
+                    styleRuns: this.styleRuns,
+                    ...(this.regions
+                        ? { onGraphics: (g: GraphicsSummary) => this.graphics.set(pageIndex, g), fontSpans: true }
+                        : {}),
+                },
             );
             this.detailed.set(pageIndex, page);
         }
         return page;
+    }
+
+    /** Graphics summary of a page walked by `getDetailed` (with `regions`). */
+    graphicsFor(pageIndex: number): GraphicsSummary | undefined {
+        return this.graphics.get(pageIndex);
     }
 }
 
@@ -811,19 +837,77 @@ export function runExtractFromIndices(
                 "runExtractFromIndices: engine='structured' requires a resolved `splitter` argument",
             );
         }
+        const regionImages = pageCache?.regions ? new Map<number, Set<number>>() : undefined;
+        // Region detection keeps the document's running headers and footers out of regions.
+        const bodyExtents = regionImages
+            ? documentBodyExtents(analysisPages, { marginRemoval, styleProfile, margins: opts.margins, marginZone: opts.marginZone })
+            : new Map<string, { top: number; bottom: number }>();
+        const runningRepeat = getEffectiveRepeatThreshold({
+            requested: requestedRepeatThreshold,
+            totalPageCount: pageCount,
+            analysisPageCount: analysisPages.length,
+        }).topBottom;
+        if (regionImages) {
+            for (const i of effectiveTargetIndices) {
+                const graphics = pageCache!.graphicsFor(i);
+                if (graphics) regionImages.set(i, pageImageHashes(graphics));
+            }
+        }
         // Paragraphs for every page first: reference classification is a
         // document-level decision that edits paragraphs before sentence
         // mapping.
         const sentenceArgs = { paragraphSettings, splitter, compoundVocabulary };
-        const prepared: Array<{ rawPage: RawPageData; paragraphs: PageParagraphs; ms: number }> = [];
+        const prepared: Array<{
+            rawPage: RawPageData;
+            paragraphs: PageParagraphs;
+            regions?: Pick<PageSentenceArgs, "regionItems" | "regionMargin" | "regionsMs">;
+            ms: number;
+        }> = [];
         for (const i of effectiveTargetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
             const preWalkedDetailedMs = preWalkedDetailedMsByTarget!.get(i) ?? 0;
+            let detailed = preWalkedDetailedTargets!.get(i);
+            let regionItems: RegionItemDraft[] | undefined;
+            let regionMargin: RawLine[] | undefined;
+            let regionsMs: number | undefined;
+            let pageRotation: RotationAngle | undefined;
+            let pagesForTarget = analysisPages;
+            if (regionImages && detailed) {
+                const tRegions = performance.now();
+                // Orientation is read from the full page: removing region text can
+                // leave too little text to detect it.
+                const rotation = detectDominantTextOrientation(detailed, opts.marginZone);
+                // Running headers, footers and page numbers stay page furniture.
+                const margin = regionFurnitureLines(detailed, {
+                    marginRemoval,
+                    marginAnalysis,
+                    styleProfile,
+                    margins: opts.margins,
+                    marginZone: opts.marginZone,
+                    pageRotation: rotation,
+                    repeat: runningRepeat,
+                    bodyExtents,
+                });
+                const regions = pageRegions(detailed, pageCache!.graphicsFor(i), regionImages, pageCount, compoundVocabulary, margin);
+                if (regions.page !== detailed) {
+                    // The target without absorbed lines replaces the walked page, so
+                    // paragraph detection never sees them (and no font bridge runs).
+                    pageRotation = rotation;
+                    const stripped = regions.page;
+                    pagesForTarget = analysisPages.map((p) =>
+                        p.pageIndex === i ? (stripped as unknown as RawPageData) : p,
+                    );
+                    detailed = stripped;
+                }
+                regionItems = regions.items;
+                regionMargin = regions.margin;
+                regionsMs = performance.now() - tRegions;
+            }
             const paragraphs = detectPageParagraphs({
                 doc,
                 pageIndex: rawPage.pageIndex,
-                analysisPages,
+                analysisPages: pagesForTarget,
                 splitter,
                 paragraphSettings,
                 marginRemoval,
@@ -835,10 +919,19 @@ export function runExtractFromIndices(
                 // Reuse the detailed walk done before
                 // `buildAnalysisFromDoc` so we don't pay a second
                 // walk per target page.
-                preWalkedDetailed: preWalkedDetailedTargets!.get(i),
+                preWalkedDetailed: detailed,
                 preWalkedDetailedMs,
+                regionItems,
+                regionMargin,
+                regionsMs,
+                pageRotation,
             });
-            prepared.push({ rawPage, paragraphs, ms: preWalkedDetailedMs + (performance.now() - tPage) });
+            prepared.push({
+                rawPage,
+                paragraphs,
+                regions: regionItems !== undefined ? { regionItems, regionMargin, regionsMs } : undefined,
+                ms: preWalkedDetailedMs + (performance.now() - tPage),
+            });
         }
 
         let plans: ReferencePagePlan[] | undefined;
@@ -855,7 +948,7 @@ export function runExtractFromIndices(
             itemTotal = inputs.reduce((n, page) => n + page.items.length, 0);
         }
 
-        prepared.forEach(({ rawPage, paragraphs, ms }, k) => {
+        prepared.forEach(({ rawPage, paragraphs, regions, ms }, k) => {
             const tPage = performance.now();
             const { filteredResult } = paragraphs;
             let referenceItems: Set<number> | undefined;
@@ -873,7 +966,7 @@ export function runExtractFromIndices(
                     : referencesMs / prepared.length;
             }
             const { sentenceResult, phaseTimings } = mapPageSentences(
-                sentenceArgs,
+                { ...sentenceArgs, ...regions },
                 paragraphs,
                 referenceItems,
                 pageReferencesMs,
@@ -990,6 +1083,36 @@ export function runExtractFromIndices(
     return baseResult;
     } finally {
         setAnalyzerLogging(false);
+    }
+}
+
+/**
+ * Region items of one page and the page without the lines they absorb. A page
+ * the detector fails on keeps its text as prose; the failure is logged.
+ */
+function pageRegions(
+    page: RawPageDataDetailed,
+    graphics: GraphicsSummary | undefined,
+    imagesByPage: ReadonlyMap<number, ReadonlySet<number>>,
+    pageCount: number,
+    vocabulary: ReadonlySet<string>,
+    margin: ReadonlySet<RawLine>,
+): PageRegionItems {
+    if (!graphics || !REGION_MODEL) {
+        throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
+    }
+    try {
+        const detection = detectRegions(page, graphics, {
+            pageIndex: page.pageIndex,
+            doc: pageRegionDocContext(page.pageIndex, imagesByPage, pageCount, DEFAULT_REGION_CONTEXT_PAGES),
+            model: REGION_MODEL,
+            route: true,
+            margin,
+        });
+        return regionItemsForPage(page, detection, vocabulary);
+    } catch (err) {
+        postLog("warn", `[mupdf-worker] region detection failed on page ${page.pageIndex}: ${String(err)}`);
+        return { page, items: [], margin: [] };
     }
 }
 
@@ -1418,6 +1541,21 @@ export interface ReferenceStage {
  * resolves the actual splitter via `resolveSplitter`. Default:
  * `{ type: "sentencex" }`.
  */
+/**
+ * Whether the preset detects regions. Its output depends on the graphics
+ * summary, so a WASM build without one cannot produce this schema version.
+ */
+async function regionsSupported(preset: PdfExtractionPreset): Promise<boolean> {
+    if (!preset.regions) return false;
+    if (!(await ensureApi()).supportsGraphicsSummary) {
+        throw workerError(
+            ERROR_CODES.WASM_ERROR,
+            `PDF schema ${preset.schemaVersion} needs a MuPDF build with graphics summary support`,
+        );
+    }
+    return true;
+}
+
 export async function opExtract(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
@@ -1505,7 +1643,13 @@ export async function opExtract(
         // spread of pages and the pipeline walks them again; sharing the
         // walk here keeps an expensive-to-walk page from being processed
         // twice (gate + extraction).
-        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair, preset.styleRuns);
+        const pageCache = new PageWalkCache(
+            doc,
+            fontApi,
+            preset.textRepair,
+            preset.styleRuns,
+            isStructured && (await regionsSupported(preset)),
+        );
 
         if (opts.checkTextLayer) {
             // Run the gate over the SAME walk the pipeline will reuse —
@@ -1636,7 +1780,13 @@ async function withStructuredRun<T>(
         assertDocumentHasPages(pageCount);
         const pageLabels = collectPageLabels(doc);
         const fontApi = (await ensureApi()).Font;
-        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair, preset.styleRuns);
+        const pageCache = new PageWalkCache(
+            doc,
+            fontApi,
+            preset.textRepair,
+            preset.styleRuns,
+            await regionsSupported(preset),
+        );
 
         if (opts.checkTextLayer) {
             const ocrProvider = ocrGateProvider(pageCache, pageCount, true);

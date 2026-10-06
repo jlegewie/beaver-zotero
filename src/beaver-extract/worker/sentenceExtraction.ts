@@ -49,10 +49,12 @@ import type { PageSentenceResult } from "../ParagraphSentenceMapper";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import {
     detectFilteredParagraphs,
+    marginItemsForLines,
     reindexMarginItems,
     type FilteredParagraphResult,
 } from "../FilteredParagraphPipeline";
 import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
+import type { RotationAngle } from "../PageRotationNormalizer";
 import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
@@ -64,6 +66,7 @@ import type {
     GraphicsLayerMode,
     MarginRemovalResult,
     MarginSettings,
+    RawLine,
     RawPageData,
     RawPageDataDetailed,
     StructuredPagePhaseTimings,
@@ -80,6 +83,7 @@ import {
 import type { DocumentLike, FontApi } from "./mupdfApi";
 import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
+import { placeRegionItems, splitRegionItems, type RegionItemDraft } from "../regions/regionItems";
 
 /** Arguments of the per-page structured work (`extractSentencesForPage`). */
 export interface PageSentenceArgs {
@@ -141,6 +145,23 @@ export interface PageSentenceArgs {
      * empty fonts and downstream heading detection silently degrades.
      */
     fontApi?: FontApi;
+    /**
+     * Region items for this page (`regionItemsForPage`). `preWalkedDetailed`
+     * must then be the page without the lines they absorbed.
+     */
+    regionItems?: readonly RegionItemDraft[];
+    /**
+     * Lines region detection set aside as page furniture (`PageRegionItems.margin`);
+     * they become margin items. `preWalkedDetailed` must then be the page without them.
+     */
+    regionMargin?: readonly RawLine[];
+    /** Time spent detecting regions before this call, reported in the phase timings. */
+    regionsMs?: number;
+    /**
+     * Dominant text orientation of the page before region lines were removed
+     * from `preWalkedDetailed` (`detectDominantTextOrientation`).
+     */
+    pageRotation?: RotationAngle;
 }
 
 /** First half of the per-page work: paragraphs, before sentence mapping. */
@@ -204,6 +225,13 @@ export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
         paragraphSettings: args.paragraphSettings,
         fillBoundaries,
         dividerLines,
+        regionBarriers: args.regionItems?.map((region) => ({
+            bbox: region.bbox,
+            // An equation's lines are its content. A figure's graphics and a
+            // table's grid fill their box: cells leave gaps anywhere.
+            ...(region.kind === "formula" ? { content: region.rows.flat().map((cell) => cell.bbox) } : {}),
+        })),
+        pageRotation: args.pageRotation,
     });
     const filteredParagraphsMs = performance.now() - tFiltered;
     return { detailed, filteredResult, detailedWalkMs, fontBridgeMs, filteredParagraphsMs };
@@ -215,7 +243,10 @@ export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
  * as `reference` items without sentences.
  */
 export function mapPageSentences(
-    args: Pick<PageSentenceArgs, "paragraphSettings" | "splitter" | "compoundVocabulary">,
+    args: Pick<
+        PageSentenceArgs,
+        "paragraphSettings" | "splitter" | "compoundVocabulary" | "regionItems" | "regionMargin" | "regionsMs"
+    >,
     paragraphs: PageParagraphs,
     referenceItems?: ReadonlySet<number>,
     referenceMs = 0,
@@ -238,10 +269,30 @@ export function mapPageSentences(
             sourceHeight: filteredResult.sourceHeight,
         },
     });
+    let regionsMs = args.regionsMs ?? 0;
+    if (args.regionItems?.length) {
+        const tRegions = performance.now();
+        // Column detection split equation boxes that merged one equation from
+        // each column; the items follow, so each is placed in its own column.
+        const regionItems = splitRegionItems(args.regionItems, filteredResult.columnResult.regionPieces);
+        const placed = placeRegionItems(detailed.pageIndex, sentenceResult.items, regionItems, {
+            rotation: filteredResult.pageRotation,
+            sourceWidth: filteredResult.sourceWidth,
+            sourceHeight: filteredResult.sourceHeight,
+        });
+        sentenceResult.items = placed.items;
+        sentenceResult.sentences = placed.sentences;
+        if (sentenceResult.degradation) {
+            for (const note of sentenceResult.degradation.notes) {
+                note.itemId = placed.renamed.get(note.itemId) ?? note.itemId;
+            }
+        }
+        regionsMs += performance.now() - tRegions;
+    }
     sentenceResult.items = [
         ...sentenceResult.items,
         ...reindexMarginItems(
-            filteredResult.marginItems,
+            [...filteredResult.marginItems, ...marginItemsForLines(detailed.pageIndex, args.regionMargin ?? [])],
             sentenceResult.items.length,
         ),
     ];
@@ -258,6 +309,7 @@ export function mapPageSentences(
         lineDetectMs: filteredResult.timings.lineDetectMs,
         paragraphDetectMs: filteredResult.timings.paragraphDetectMs,
         sentenceMapMs,
+        ...(args.regionItems !== undefined ? { regionsMs } : {}),
         ...(referenceItems !== undefined ? { referencesMs: referenceMs } : {}),
         charCount,
         lineCount,

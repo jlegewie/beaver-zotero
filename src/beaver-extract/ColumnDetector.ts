@@ -22,6 +22,16 @@ export interface Rect {
     h: number;
 }
 
+/** A region's box and, for a region made of lines of text, the boxes of those lines. */
+export interface RegionBarrier {
+    box: Rect;
+    /**
+     * Where the region's content is, when it is lines of text (an equation's
+     * lines). Absent or empty: the content fills the box (a figure, a table).
+     */
+    content?: ReadonlyArray<Rect>;
+}
+
 /** Column detection result */
 export interface ColumnDetectionResult {
     /** Detected column rectangles in reading order */
@@ -30,6 +40,21 @@ export interface ColumnDetectionResult {
     isBroken: boolean;
     /** Number of columns detected */
     columnCount: number;
+    /**
+     * For each of `ColumnDetectionOptions.regionBarriers`, the column-local
+     * pieces its content was laid out as (`regionLayout`), left to right:
+     * one piece when the region was narrowed to one column, several when it
+     * was split. Undefined when the region was laid out as its whole box.
+     */
+    regionPieces?: (RegionPiece[] | undefined)[];
+}
+
+/** A column-local piece of a region, as indices into its `RegionBarrier.content`. */
+export interface RegionPiece {
+    /** Every content box of the piece, labels included. */
+    members: number[];
+    /** The boxes that place the piece in its column: its body, without labels. */
+    body: number[];
 }
 
 /** Options for column detection */
@@ -74,6 +99,16 @@ export interface ColumnDetectionOptions {
         end: number;
         thickness: number;
     }>;
+    /**
+     * Regions (tables, figures, equations) whose text was removed from the
+     * page. Each becomes a horizontal divider through its middle (`regionLayout`),
+     * so the text above it stays apart from the text below it, as the region's
+     * own lines would keep it. A region spanning columns divides the reading
+     * order too: text above it in every column is read before text below it.
+     * A region within one column of a multi-column page keeps that column one
+     * unit in reading order (`columnUnits`): the column is read through it.
+     */
+    regionBarriers?: ReadonlyArray<RegionBarrier>;
     /** Enable verbose column-detection phase logging (default false). */
     debug?: boolean;
 }
@@ -88,6 +123,7 @@ const DEFAULT_OPTIONS: Required<ColumnDetectionOptions> = {
     bodyStyles: [],
     fillBoundaries: [],
     dividerLines: [],
+    regionBarriers: [],
     debug: false,
 };
 
@@ -594,6 +630,7 @@ export function detectColumns(
     // code path stays the default behavior.
     if (!opts.fillBoundaries) opts.fillBoundaries = [];
     if (!opts.dividerLines) opts.dividerLines = [];
+    if (!opts.regionBarriers) opts.regionBarriers = [];
 
     // Check if page is broken
     const isBroken = pageIsBroken(page);
@@ -608,6 +645,55 @@ export function detectColumns(
         return { columns: [], isBroken, columnCount: 0 };
     }
 
+    // Phases 2–4.5: merge blocks into columns. Every region then divides
+    // the blocks above it from those below it, as its own lines would, and
+    // the merge runs again. A region within one column joins the blocks it
+    // separates into one unit for reading order (`columnUnits`), so that
+    // column is read through it.
+    let layoutOpts = opts;
+    let rejoined = buildColumnBlocks(filteredBlocks, opts, page.pageIndex);
+    let units: Rect[][] = [];
+    let regionPieces: (RegionPiece[] | undefined)[] | undefined;
+    if (opts.regionBarriers.length > 0) {
+        // A column runs past a line of body text; without body styles, any block does.
+        const bodySize = Math.max(0, ...opts.bodyStyles.map((style) => style.size));
+        const layouts = opts.regionBarriers.map((region) => regionLayout(region, rejoined, bodySize * COLUMN_MIN_LINE_HEIGHTS));
+        const placed = layouts.flatMap((layout) => layout.boxes);
+        regionPieces = layouts.map((layout) => layout.pieces);
+        layoutOpts = { ...opts, dividerLines: [...opts.dividerLines, ...placed.map(regionDivider)] };
+        rejoined = buildColumnBlocks(filteredBlocks, layoutOpts, page.pageIndex);
+        units = columnUnits(placed, rejoined, opts.dividerLines);
+    }
+
+    // Phase 5: Final reading order sort. When fill-zone boundaries are
+    // supplied, route through a zone-aware sort that treats each fill
+    // zone as a single virtual block in the outer ordering and only
+    // recurses inside it for the inner ordering. This prevents a clean
+    // vertical gutter that exists ONLY because of the colored aside
+    // box from splitting the surrounding body text in half during
+    // reading-order traversal (DDS69CQI p36: top-body wraps L→R *above*
+    // the big box; xyCut otherwise reads top-L → box-left → page-number
+    // → top-R → box-right because of the gutter inside the box). Column
+    // units of regions are virtual blocks in the same way.
+    const sortedColumns =
+        layoutOpts.fillBoundaries.length > 0 || layoutOpts.dividerLines.length > 0
+            ? sortForReadingOrderWithZones(rejoined, layoutOpts, units)
+            : sortForReadingOrder(rejoined, layoutOpts);
+
+    return {
+        columns: sortedColumns,
+        isBroken,
+        columnCount: sortedColumns.length,
+        ...(regionPieces ? { regionPieces } : {}),
+    };
+}
+
+/** Phases 2–4.5: merge the filtered blocks into column blocks. */
+function buildColumnBlocks(
+    filteredBlocks: Rect[],
+    opts: Required<ColumnDetectionOptions>,
+    pageIndex: number,
+): Rect[] {
     // Phase 2: Merge blocks into columns
     const mergedBlocks = mergeBlocks(filteredBlocks, opts);
 
@@ -615,7 +701,7 @@ export function detectColumns(
     const joinedBlocks = joinAndSort(mergedBlocks, opts);
 
     if (opts.debug) {
-        pdfLog(`[ColumnDetector] Page ${page.pageIndex}: After Phase 3 (join): ${joinedBlocks.length} blocks`, 3);
+        pdfLog(`[ColumnDetector] Page ${pageIndex}: After Phase 3 (join): ${joinedBlocks.length} blocks`, 3);
         for (const b of joinedBlocks) {
             pdfLog(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`, 3);
         }
@@ -625,7 +711,7 @@ export function detectColumns(
     const { blocks: bridgeMerged, bridgeFlags } = mergeBridgeElements(joinedBlocks, opts);
 
     if (opts.debug && bridgeMerged.length !== joinedBlocks.length) {
-        pdfLog(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4 (bridge): ${bridgeMerged.length} blocks`, 3);
+        pdfLog(`[ColumnDetector] Page ${pageIndex}: After Phase 4 (bridge): ${bridgeMerged.length} blocks`, 3);
         for (const b of bridgeMerged) {
             const flags = bridgeFlags.get(b);
             const flagStr = flags ? ` [top=${flags.headingAtTop} bot=${flags.headingAtBottom}]` : '';
@@ -649,30 +735,197 @@ export function detectColumns(
     const rejoined = joinAndSort(bridgeMerged, opts, /* relaxed */ true, bridgeFlags);
 
     if (opts.debug && rejoined.length !== bridgeMerged.length) {
-        pdfLog(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4.5 (rejoin): ${rejoined.length} blocks`, 3);
+        pdfLog(`[ColumnDetector] Page ${pageIndex}: After Phase 4.5 (rejoin): ${rejoined.length} blocks`, 3);
         for (const b of rejoined) {
             pdfLog(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`, 3);
         }
     }
 
-    // Phase 5: Final reading order sort. When fill-zone boundaries are
-    // supplied, route through a zone-aware sort that treats each fill
-    // zone as a single virtual block in the outer ordering and only
-    // recurses inside it for the inner ordering. This prevents a clean
-    // vertical gutter that exists ONLY because of the colored aside
-    // box from splitting the surrounding body text in half during
-    // reading-order traversal (DDS69CQI p36: top-body wraps L→R *above*
-    // the big box; xyCut otherwise reads top-L → box-left → page-number
-    // → top-R → box-right because of the gutter inside the box).
-    const sortedColumns =
-        opts.fillBoundaries.length > 0 || opts.dividerLines.length > 0
-            ? sortForReadingOrderWithZones(rejoined, opts)
-            : sortForReadingOrder(rejoined, opts);
+    return rejoined;
+}
 
+const xOverlap = (a: Rect, b: Rect) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+
+/**
+ * A column is taller than this many body font sizes: more than two lines of
+ * text (a line with inline math can stand twice the font size tall).
+ */
+const COLUMN_MIN_LINE_HEIGHTS = 3;
+
+/** How many times wider than a label (an equation number) the equation it tags must be. */
+const TAG_WIDTH_RATIO = 3;
+
+/** A label's lines are a few characters: at most this many line heights wide. */
+const LABEL_MAX_LINE_HEIGHTS = 4;
+
+/** Share of the wider block's width two blocks must overlap to be one column. */
+const UNIT_COLUMN_OVERLAP = 0.8;
+
+/**
+ * Blocks within a region's x-span that border it: each runs through it, or
+ * reaches it with no other block of its column in the gap.
+ */
+function borderingBlocks(region: Rect, blocks: readonly Rect[]): Rect[] {
+    const top = region.y;
+    const bottom = region.y + region.h;
+    const borders = (b: Rect) => {
+        if (b.y < bottom && b.y + b.h > top) return true;
+        const [lo, hi] = b.y + b.h <= top ? [b.y + b.h, top] : [bottom, b.y];
+        return !blocks.some(
+            (c) => c !== b && xOverlap(c, b) > 0 && c.y < hi - DIVIDER_SLOP && c.y + c.h > lo + DIVIDER_SLOP,
+        );
+    };
+    return blocks.filter((b) => inSpan(b, region) && borders(b));
+}
+
+/** Whether most of a block lies within a region's x-span. */
+function inSpan(b: Rect, region: Rect): boolean {
+    return xOverlap(b, region) >= 0.5 * b.w;
+}
+
+/**
+ * The boxes a region divides the page's column blocks with and, when they
+ * are column-local pieces of its content, those pieces, left to right.
+ *
+ * - A region that crosses a column gutter spans those columns: two columns
+ *   side by side within its x-span border it, and its content spans the
+ *   whitespace between them. A full-width block between the region and the
+ *   columns (a caption, a heading) divides them already.
+ * - Lines of text that leave every such gutter empty (equations set in each
+ *   column, merged into one box) are column-local pieces, one per column. A
+ *   piece that only tags lines of another (an equation number) is part of it,
+ *   and the equation lies in its body's column.
+ * - Any other region lies within one column.
+ */
+function regionLayout(
+    { box: region, content }: RegionBarrier,
+    blocks: readonly Rect[],
+    columnMinHeight: number,
+): { boxes: Rect[]; pieces?: RegionPiece[] } {
+    // A gutter: the whitespace between two side-by-side columns, narrowed by
+    // every bordering block wholly left or right of it (a ragged last line
+    // does not widen it). A column runs down the page: one of the two must be
+    // taller than two lines (pieces of one line split at inline math are not).
+    const columns = borderingBlocks(region, blocks);
+    const gutters: [number, number][] = [];
+    for (const a of columns) {
+        for (const b of columns) {
+            if (b.x < a.x + a.w) continue;
+            if (Math.max(a.h, b.h) < columnMinHeight) continue;
+            const lo = Math.max(...columns.filter((c) => c.x + c.w <= b.x).map((c) => c.x + c.w));
+            const hi = Math.min(...columns.filter((c) => c.x >= a.x + a.w).map((c) => c.x));
+            if (hi - lo < MIN_V_CUT_GAP) continue;
+            if (!content?.length || content.some((c) => c.x < hi && c.x + c.w > lo)) return { boxes: [region] };
+            gutters.push([lo, hi]);
+        }
+    }
+    if (gutters.length > 0) {
+        const pieces = new Map<number, { box: Rect; members: number[]; body: number[] }>();
+        content!.forEach((c, i) => {
+            const side = gutters.filter(([lo]) => c.x >= lo).length;
+            const piece = pieces.get(side);
+            if (piece) {
+                piece.box = unionRect(piece.box, c);
+                piece.members.push(i);
+                piece.body.push(i);
+            } else pieces.set(side, { box: { ...c }, members: [i], body: [i] });
+        });
+        const sides = [...pieces.keys()].sort((a, b) => a - b).map((side) => pieces.get(side)!);
+        // An equation number or a margin mark beside an equation is not an
+        // equation of its own. It is a label: a few characters on each line
+        // (`LABEL_MAX_LINE_HEIGHTS`), sitting on lines of a piece several times
+        // as wide, and set flush with or beyond the outer edge of the text on its
+        // side, where a display equation is centred in its column. A label joins
+        // that piece's lines. The equation still lies in its body's column, so
+        // the layout box stays the body's.
+        const onLine = (a: Rect, b: Rect) =>
+            Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) >= 0.5 * Math.min(a.h, b.h);
+        const textLeft = Math.min(...columns.map((c) => c.x));
+        const textRight = Math.max(...columns.map((c) => c.x + c.w));
+        const flushOutside = (tag: Rect, host: Rect) =>
+            tag.x >= host.x + host.w ? textRight - (tag.x + tag.w) <= MIN_V_CUT_GAP : tag.x - textLeft <= MIN_V_CUT_GAP;
+        for (const tag of [...sides].sort((a, b) => a.box.w - b.box.w)) {
+            const host = sides.find(
+                (p) =>
+                    p !== tag &&
+                    p.box.w >= TAG_WIDTH_RATIO * tag.box.w &&
+                    tag.members.every((i) => content![i].w <= LABEL_MAX_LINE_HEIGHTS * content![i].h) &&
+                    tag.members.every((i) => p.members.some((j) => onLine(content![i], content![j]))) &&
+                    flushOutside(tag.box, p.box),
+            );
+            if (!host) continue;
+            host.members.push(...tag.members);
+            sides.splice(sides.indexOf(tag), 1);
+        }
+        const boxes = sides.map(({ box }) => ({ x: box.x, y: region.y, w: box.w, h: region.h }));
+        const byIndex = (a: number, b: number) => a - b;
+        return { boxes, pieces: sides.map(({ members, body }) => ({ members: members.sort(byIndex), body: body.sort(byIndex) })) };
+    }
+    return { boxes: [region] };
+}
+
+/**
+ * Units of column blocks that regions within one column separate: the one
+ * block bordering a region from above and the one from below (a region
+ * spanning columns borders several), joined across regions in the same
+ * column. The two must be one column, each spanning most of the other's
+ * width (not a running head over a caption in a figure grid), and the unit
+ * must stand a column gutter clear of the blocks beside it, so that reading
+ * order can still cut between them. No other region or rule reaching past
+ * the column may lie across the unit: text above a table spanning the
+ * columns stays before it.
+ */
+function columnUnits(
+    regions: readonly Rect[],
+    blocks: readonly Rect[],
+    rules: Required<ColumnDetectionOptions>["dividerLines"],
+): Rect[][] {
+    const unitOf = new Map<Rect, Rect[]>();
+    const regionsOf = new Map<Rect[], Rect[]>();
+    for (const region of regions) {
+        const bordering = borderingBlocks(region, blocks);
+        const above = bordering.filter((b) => b.y + b.h <= region.y + DIVIDER_SLOP);
+        const below = bordering.filter((b) => b.y >= region.y + region.h - DIVIDER_SLOP);
+        if (above.length !== 1 || below.length !== 1 || bordering.length !== 2) continue;
+        if (xOverlap(above[0], below[0]) < UNIT_COLUMN_OVERLAP * Math.max(above[0].w, below[0].w)) continue;
+        const a = unitOf.get(above[0]) ?? [above[0]];
+        const b = unitOf.get(below[0]) ?? [below[0]];
+        if (a === b) continue;
+        const members = [...a, ...b];
+        const own = [...(regionsOf.get(a) ?? []), ...(regionsOf.get(b) ?? []), region];
+        const extent = members.reduce<Rect | null>((u, m) => unionRect(u, m), null)!;
+        const crowded = blocks.some(
+            (c) =>
+                !members.includes(c) &&
+                c.y < extent.y + extent.h &&
+                c.y + c.h > extent.y &&
+                xOverlap(c, extent) > -MIN_V_CUT_GAP,
+        );
+        // A divider across the unit that reaches past its column.
+        const across = (position: number, start: number, end: number) =>
+            position > extent.y &&
+            position < extent.y + extent.h &&
+            end > extent.x &&
+            start < extent.x + extent.w &&
+            (start < extent.x - DIVIDER_SLOP || end > extent.x + extent.w + DIVIDER_SLOP);
+        const crossed =
+            regions.some((r) => !own.includes(r) && across(r.y + r.h / 2, r.x, r.x + r.w)) ||
+            rules.some((d) => d.orientation === "horizontal" && across(d.position, d.start, d.end));
+        if (crowded || crossed) continue;
+        for (const m of members) unitOf.set(m, members);
+        regionsOf.set(members, own);
+    }
+    return [...new Set(unitOf.values())];
+}
+
+/** A region's divider: a horizontal line through its middle, across its width. */
+function regionDivider(region: Rect): Required<ColumnDetectionOptions>["dividerLines"][number] {
     return {
-        columns: sortedColumns,
-        isBroken,
-        columnCount: sortedColumns.length,
+        orientation: "horizontal",
+        position: region.y + region.h / 2,
+        start: region.x,
+        end: region.x + region.w,
+        thickness: 0,
     };
 }
 
@@ -1663,9 +1916,10 @@ function findDividerCut(
 function sortForReadingOrderWithZones(
     blocks: Rect[],
     opts: Required<ColumnDetectionOptions>,
+    units: readonly Rect[][] = [],
 ): Rect[] {
     if (blocks.length <= 1) return blocks.slice();
-    if (opts.fillBoundaries.length === 0) return xyCut(blocks, opts);
+    if (opts.fillBoundaries.length === 0 && units.length === 0) return xyCut(blocks, opts);
 
     // Group each block by its innermost fill zone (or "outside" =
     // index -1). Same zone-id semantics as Phase 2's mergeBlocks guard,
@@ -1675,6 +1929,13 @@ function sortForReadingOrderWithZones(
     for (const b of blocks) {
         zoneIdOf.set(b, fillZoneFor(b, opts.fillBoundaries));
     }
+    // A column unit (`columnUnits`) is a zone of its own, keyed past the fill
+    // zones; a unit reaching into a fill zone joins that zone instead.
+    units.forEach((unit, k) => {
+        const zones = new Set(unit.map((b) => zoneIdOf.get(b)));
+        const id = zones.size === 1 && !zones.has(null) ? zoneIdOf.get(unit[0])! : opts.fillBoundaries.length + k;
+        if (zones.size === 1) for (const b of unit) zoneIdOf.set(b, id);
+    });
     const zoneToMembers = new Map<number, Rect[]>();
     const outsideMembers: Rect[] = [];
     for (const b of blocks) {

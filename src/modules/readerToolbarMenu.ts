@@ -13,6 +13,12 @@ import { captureReaderActionLocation } from '../runtime/readerActionLocation';
 import { resolveChatWindow } from '../runtime/navigation';
 
 import { getMergedActions } from './zoteroContextMenu';
+import {
+    activeAgentPageViewSchema,
+    disposeAllAgentPageViews,
+    hideAgentPageView,
+    showAgentPageView,
+} from './agentPageView';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { ActionCategory, KnownActionCategory } from '@beaver/agent-core/types/actions';
 
@@ -30,6 +36,14 @@ const ICON_URL = 'chrome://beaver/content/icons/beaver_bw.png';
 
 // Inline SVG dropmarker matching the reader's IconChevronDown8 (8x8, currentColor)
 const BUTTON_CLASS = 'beaver-reader-toolbar-button';
+
+// "Visualize (Schema N)" (what the agent sees on each page) is a development
+// tool, present only in development and staging builds.
+const SHOW_AGENT_PAGE_VIEW =
+    process.env.NODE_ENV === 'development' || process.env.BUILD_ENV === 'staging';
+
+/** PDF schema versions the agent-view visualizer offers, newest first. */
+const AGENT_PAGE_VIEW_SCHEMAS = ['5', '4'];
 
 const DROPMARKER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" fill="none"><path fill="currentColor" d="m0 2.707 4 4 4-4L7.293 2 4 5.293.707 2z"/></svg>`;
 
@@ -266,6 +280,26 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     });
     popup.appendChild(addItem);
 
+    // ---- Visualize what the agent sees (PDF only) ----
+    // Checkbox items: choosing the checked one hides the view, the other
+    // switches to that schema. The dev-only section below opens with its own
+    // separator, which closes this group.
+    if (SHOW_AGENT_PAGE_VIEW && isPdf) {
+        appendSeparator();
+        const activeSchema = activeAgentPageViewSchema(reader);
+        for (const schemaVersion of AGENT_PAGE_VIEW_SCHEMAS) {
+            const menuitem = xulDoc.createXULElement('menuitem');
+            menuitem.setAttribute('label', `Visualize (Schema ${schemaVersion})`);
+            menuitem.setAttribute('type', 'checkbox');
+            if (activeSchema === schemaVersion) menuitem.setAttribute('checked', 'true');
+            menuitem.addEventListener('command', () => {
+                if (activeSchema === schemaVersion) hideAgentPageView(reader);
+                else void showAgentPageView(reader, schemaVersion).catch(Zotero.logError);
+            });
+            popup.appendChild(menuitem);
+        }
+    }
+
     // ---- Dev-only: extraction visualizer controls ----
     // Dropped from production builds at compile time.
     if (process.env.NODE_ENV === 'development' && (isPdf || isEpub)) {
@@ -347,6 +381,8 @@ export async function initReaderToolbarMenu(): Promise<void> {
 }
 
 export function cleanupReaderToolbarMenu(): void {
+    disposeAllAgentPageViews();
+
     if (toolbarHandler) {
         removeListenerSafely('renderToolbar', toolbarHandler);
         toolbarHandler = null;

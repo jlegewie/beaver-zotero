@@ -46,7 +46,8 @@ function attachSentences(
         publicItem.kind !== "text" &&
         publicItem.kind !== "caption" &&
         publicItem.kind !== "footnote" &&
-        publicItem.kind !== "list_item"
+        publicItem.kind !== "list_item" &&
+        publicItem.kind !== "table"
     ) {
         return publicItem;
     }
@@ -113,9 +114,15 @@ export function projectStructuredPage(
                     text: item.text,
                 };
             case "table":
-                return { ...base, kind: "table" };
+                return attachSentences({
+                    ...base,
+                    kind: "table",
+                    text: item.text,
+                }, item, sentencesByParent, bboxPrecision);
             case "picture":
-                return { ...base, kind: "picture" };
+                return item.text
+                    ? { ...base, kind: "picture", text: item.text }
+                    : { ...base, kind: "picture" };
         }
     });
 
