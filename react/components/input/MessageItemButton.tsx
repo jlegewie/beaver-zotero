@@ -3,7 +3,7 @@ import { isTableAttachment } from '../../../src/services/artifacts/tableItemIden
 import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { getContextWindow } from '../../runtime/windowRuntime';
 import React, { forwardRef } from 'react';
-import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, PdfIcon, NoteIcon, FileViewIcon } from "../icons/icons";
+import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, NoteIcon, FileViewIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
@@ -206,7 +206,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // the one in view.
         const useItemMenu = !isTableAttachment(item) && !revealInCollectionKey;
         const revealMenuItems: MenuItem[] = useItemMenu ? [] : isAnnotation
-            ? [{ label: 'Reveal in PDF', icon: PdfIcon, onClick: () => navigateToAnnotation(item) }]
+            ? [{ label: 'Reveal in PDF', icon: FileViewIcon, onClick: () => navigateToAnnotation(item) }]
             : item.isNote()
                 ? [
                     { label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary },

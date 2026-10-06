@@ -3,7 +3,7 @@ import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRun } from '@beaver/agent-core/agents/types';
-import { RepeatIcon, MoreHorizontalIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
+import { RepeatIcon, MoreHorizontalIcon, ArrowDownIcon, ArrowRightIcon, CopyIcon, LinkIcon, ToolsIcon } from '../icons/icons';
 import { copyToClipboard } from '../../utils/clipboard';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
@@ -148,10 +148,12 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         const items: MenuItem[] = [
             {
                 label: 'Copy',
+                icon: CopyIcon,
                 onClick: () => handleCopy()
             },
             {
                 label: 'Copy link to message',
+                icon: LinkIcon,
                 onClick: () => copyRunUrl()
             },
         ];
@@ -176,10 +178,12 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 menuDivider('developer-divider'),
                 {
                     label: 'Copy message ID',
+                    icon: ToolsIcon,
                     onClick: () => copyRunId()
                 },
                 {
                     label: 'Copy citation metadata (JSON)',
+                    icon: ToolsIcon,
                     onClick: () => copyCitationMetadata()
                 },
             );

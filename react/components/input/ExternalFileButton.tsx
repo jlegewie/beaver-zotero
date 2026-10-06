@@ -3,7 +3,7 @@ import { CSSItemTypeIcon, CSSIcon, Icon } from "../icons/icons";
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
-import { FileViewIcon, ExternalLinkIcon } from '../icons/icons';
+import { FileViewIcon, ExternalLinkIcon, FolderDetailIcon } from '../icons/icons';
 import type { ExternalFileContentKind } from '@beaver/agent-core/types/attachments/apiTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ChipWithPopup, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
@@ -89,8 +89,8 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
         // in Finder/Explorer. Each no-ops gracefully when the copy is
         // unavailable on this device.
         const fileMenuItems: MenuItem[] = [
-            { label: 'Open File', icon: ExternalLinkIcon, onClick: openFile },
-            { label: 'Show File', icon: FileViewIcon, onClick: showFile },
+            { label: 'Open File', icon: FileViewIcon, onClick: openFile },
+            { label: 'Show File', icon: FolderDetailIcon, onClick: showFile },
         ];
 
         const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
