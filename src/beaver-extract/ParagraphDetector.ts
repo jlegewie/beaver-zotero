@@ -1773,12 +1773,12 @@ const BRACKETED_ENUMERATOR_RE =
 
 /**
  * Sentence end, optionally followed by a citation marker ("….[17,26]",
- * "…. [17]", "….12", "….298,299"). Includes CJK full-width terminators. Only
- * a bracketed marker may follow a space: a bare number after one is text
- * ("pp. 12").
+ * "…. [17]", "….12", "….298,299", "….¹²"). Includes CJK full-width
+ * terminators. Only a bracketed marker may follow a space: a bare number
+ * after one is text ("pp. 12").
  */
 const SENTENCE_END_RE =
-    /[.!?。！？]["'”’)\]」』）]?(?:\s*\[[\d,;\s–-]+\]|\d{1,3}(?:[,–-]\d{1,3})*)?$/u;
+    /[.!?。！？]["'”’)\]」』）]?(?:\s*\[[\d,;\s–-]+\]|\d{1,3}(?:[,–-]\d{1,3})*|[⁰¹²³⁴⁵⁶⁷⁸⁹]+(?:[,–-][⁰¹²³⁴⁵⁶⁷⁸⁹]+)*)?$/u;
 
 /**
  * Label the rows of one two-level run when it reads as a hanging block.
@@ -2133,7 +2133,12 @@ function startNewItem(
     const headerGapPasses = gapBreak || prevIsLocalHeader;
     // A hanging continuation wraps the line above it, so it cannot open a
     // heading — e.g. an italic title line that the body-size rule would
-    // otherwise promote mid-entry. It can still continue a heading.
+    // otherwise promote mid-entry, or a URL set in a larger face. It can
+    // still continue a heading. A heading after the last entry keeps its
+    // boundary only when spacing above it ends the continuation: one set at
+    // the inner edge with no more than normal leading merges into that
+    // entry. Font size cannot rescue it, since larger-set continuation lines
+    // are common in reference lists.
     const isLocalHeader =
         !(hangingRole === "continuation" && !prevIsLocalHeader) &&
         isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
