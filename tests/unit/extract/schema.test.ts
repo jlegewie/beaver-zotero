@@ -14,6 +14,7 @@ import {
     SCHEMA_VERSION,
     type StructuredPage,
 } from "../../../src/beaver-extract/schema";
+import { DEFAULT_EXTRACTION_SETTINGS } from "@beaver/agent-core/extract/types";
 
 describe("canonical extraction schema helpers", () => {
     it("rounds top-left bboxes to tuple rects and rejects other origins", () => {
@@ -175,5 +176,90 @@ describe("canonical extraction schema helpers", () => {
         ).rejects.toMatchObject({
             code: ExtractionErrorCode.STRUCTURED_PAGE_SELECTION_REJECTED,
         });
+    });
+});
+
+describe("reference items", () => {
+    it("defaults the item classifier to 'off'", () => {
+        expect(DEFAULT_EXTRACTION_SETTINGS.itemClassifier).toBe("off");
+    });
+
+    it("projects internal reference items with their text and sentences", () => {
+        const page = projectStructuredPage({
+            index: 0,
+            width: 100,
+            height: 100,
+            viewBox: [0, 0, 100, 100],
+            rotation: 0,
+            items: [
+                {
+                    id: "p0:i0",
+                    kind: "reference",
+                    pageIndex: 0,
+                    index: 0,
+                    bbox: { l: 0, t: 0, r: 90, b: 20, origin: "top-left" },
+                    columnIndex: 0,
+                    text: "Smith, J. (2020). A paper. Journal, 1(2), 3-4.",
+                    lines: [],
+                },
+            ],
+            sentences: [
+                {
+                    parentId: "p0:i0",
+                    index: 0,
+                    text: "Smith, J. (2020).",
+                    bboxes: [{ l: 0, t: 0, r: 40, b: 20, origin: "top-left" }],
+                },
+            ],
+        });
+        expect(page.items[0]).toMatchObject({
+            kind: "reference",
+            text: "Smith, J. (2020). A paper. Journal, 1(2), 3-4.",
+            sentences: [{ text: "Smith, J. (2020).", bboxes: [[0, 0, 40, 20]] }],
+        });
+    });
+
+    it("assigns the 'ref' id prefix and indexes reference sentences", () => {
+        const pages: StructuredPage[] = [
+            {
+                index: 0,
+                width: 100,
+                height: 100,
+                viewBox: [0, 0, 100, 100],
+                rotation: 0,
+                items: [
+                    {
+                        id: "old",
+                        kind: "reference",
+                        pageIndex: 0,
+                        order: 0,
+                        text: "Smith, J. (2020).",
+                        bbox: [0, 0, 90, 20],
+                        sentences: [
+                            {
+                                id: "tmp",
+                                order: 0,
+                                text: "Smith, J. (2020).",
+                                bboxes: [[0, 0, 90, 20]],
+                            },
+                        ],
+                    },
+                    {
+                        id: "old2",
+                        kind: "reference",
+                        pageIndex: 0,
+                        order: 1,
+                        text: "Doe, A. (2021).",
+                        bbox: [0, 20, 90, 40],
+                    },
+                ],
+            },
+        ];
+        assignDocumentIds(pages);
+        expect(pages[0].items.map((item) => item.id)).toEqual(["ref1", "ref2"]);
+
+        const citationIndex = buildCitationIndex(pages);
+        expect(citationIndex.ref1.kind).toBe("item");
+        expect(citationIndex.s1).toMatchObject({ kind: "sentence", itemId: "ref1" });
     });
 });
