@@ -9,7 +9,7 @@ import {
 import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
 describe("PDF extraction presets", () => {
-    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, reference items and regions off and ids document-wide for schema 4", () => {
+    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, reference items, regions and page-number runs off and ids document-wide for schema 4", () => {
         expect(pdfExtractionPreset("4")).toEqual({
             schemaVersion: "4",
             textRepair: false,
@@ -19,10 +19,11 @@ describe("PDF extraction presets", () => {
             referenceItems: false,
             idScheme: "document",
             regions: false,
+            pageNumberRuns: false,
         });
     });
 
-    it("turns text repair, style runs, hanging-indent blocks, heading label filters, reference items and regions on and ids page-scoped for schema 5", () => {
+    it("turns text repair, style runs, hanging-indent blocks, heading label filters, reference items, regions and page-number runs on and ids page-scoped for schema 5", () => {
         expect(pdfExtractionPreset("5")).toEqual({
             schemaVersion: "5",
             textRepair: true,
@@ -32,6 +33,7 @@ describe("PDF extraction presets", () => {
             referenceItems: true,
             idScheme: "page",
             regions: true,
+            pageNumberRuns: true,
         });
     });
 
