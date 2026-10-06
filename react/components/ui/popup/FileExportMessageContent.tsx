@@ -12,8 +12,8 @@ interface FileExportMessageContentProps {
 
 /**
  * Confirmation of a finished file export: the format's icon on a tile in the
- * format's colour, the file and the folder it went to, any warnings, and
- * buttons to show the file or open it.
+ * format's colour beside what happened, the file, the folder it went to and
+ * any warnings, then buttons to show the file or open it.
  */
 const FileExportMessageContent: React.FC<FileExportMessageContentProps> = ({ message, onDismiss }) => {
     const data = message.fileExport;
@@ -32,7 +32,9 @@ const FileExportMessageContent: React.FC<FileExportMessageContentProps> = ({ mes
 
     return (
         <div className="display-flex flex-col gap-3 w-full min-w-0">
-            <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
+            {/* Icon, text and dismiss share a top edge, so the tile anchors the
+                title however many lines (folder, warnings) follow it. */}
+            <div className="display-flex flex-row items-start gap-3 w-full min-w-0">
                 <div
                     className="display-flex items-center justify-center rounded-lg flex-shrink-0"
                     style={{
@@ -46,16 +48,27 @@ const FileExportMessageContent: React.FC<FileExportMessageContentProps> = ({ mes
                 >
                     <Icon icon={icon} size={22} />
                 </div>
+                {/* Three steps of emphasis: what happened, the file, where it is. */}
                 <div className="display-flex flex-col gap-05 flex-1 min-w-0">
                     <div className="text-base font-medium font-color-primary truncate">
                         {message.title}
                     </div>
-                    <div className="text-sm font-color-secondary truncate" title={data.fileName}>
+                    <div className="text-sm font-color-primary truncate" title={data.fileName}>
                         {data.fileName}
                     </div>
                     {location && (
-                        <div className="text-xs font-color-tertiary truncate" title={location}>
+                        <div className="text-sm font-color-secondary truncate" title={location}>
                             {location}
+                        </div>
+                    )}
+                    {data.warnings.length > 0 && (
+                        <div className="display-flex flex-col gap-1 w-full mt-1">
+                            {data.warnings.map((warning, index) => (
+                                <div key={index} className="display-flex flex-row items-start gap-15 text-sm font-color-secondary">
+                                    <Icon icon={AlertIcon} className="font-color-orange flex-shrink-0 mt-020" />
+                                    <span>{warning}</span>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>
@@ -64,20 +77,9 @@ const FileExportMessageContent: React.FC<FileExportMessageContentProps> = ({ mes
                     variant="ghost-secondary"
                     onClick={onDismiss}
                     ariaLabel="Dismiss"
-                    className="flex-shrink-0 align-self-start"
+                    className="flex-shrink-0"
                 />
             </div>
-
-            {data.warnings.length > 0 && (
-                <div className="display-flex flex-col gap-1 w-full">
-                    {data.warnings.map((warning, index) => (
-                        <div key={index} className="display-flex flex-row items-start gap-2 text-sm font-color-secondary">
-                            <Icon icon={AlertIcon} className="font-color-orange flex-shrink-0 mt-020" />
-                            <span>{warning}</span>
-                        </div>
-                    ))}
-                </div>
-            )}
 
             {(data.onReveal || data.onOpen) && (
                 <div className="display-flex flex-row gap-2 justify-end w-full">
