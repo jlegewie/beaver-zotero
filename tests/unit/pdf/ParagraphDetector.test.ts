@@ -1616,6 +1616,277 @@ describe('header detection', () => {
         });
     });
 
+    describe('numbered headings with the number in the body face', () => {
+        // "2.4 Freeing Up Women's Time": the section number is set in the
+        // body face and the title in italic.
+        function numbered(text: string, titleChars: number, r: number, withRuns = true): LeaderLineSpec {
+            const numberChars = text.split(' ')[0].length;
+            return {
+                text,
+                l: 0,
+                r,
+                size: 10,
+                font: 'Times-Roman',
+                styleRuns: withRuns
+                    ? [run('Times-Roman', numberChars, 0), run('Times-Italic', titleChars, titleChars, { italic: true })]
+                    : undefined,
+            };
+        }
+        const BODY_AFTER: LeaderLineSpec[] = FILLERS.slice(0, 2);
+
+        it('promotes a numbered title set in a heading face', () => {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, numbered('2.4 Freeing Up Women’s Time', 22, 140), ...BODY_AFTER],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Freeing Up'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).not.toContain('Filler');
+        });
+
+        it('keeps a wrapped numbered title in one heading', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    numbered('2.1 Relaxing the Grip of Poverty through', 34, 200),
+                    {
+                        text: 'Economic Development',
+                        l: 0,
+                        r: 105,
+                        size: 10,
+                        italic: true,
+                        font: 'Times-Italic',
+                        styleRuns: [run('Times-Italic', 19, 19, { italic: true })],
+                        gapAfter: 8,
+                    },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Relaxing the Grip'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).toContain('Economic Development');
+        });
+
+        it('does not promote a numbered line whose text opens in the body face', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: '2. The book Wealth of Nations is cited throughout.',
+                        l: 0,
+                        r: 250,
+                        size: 10,
+                        font: 'Times-Roman',
+                        styleRuns: [
+                            run('Times-Roman', 10, 8),
+                            run('Times-Italic', 15, 15, { italic: true }),
+                            run('Times-Roman', 17, 16),
+                        ],
+                    },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('Wealth of Nations'))!.type).toBe('paragraph');
+        });
+
+        it('keeps a numbered run-in heading that wraps into its paragraph', () => {
+            // The title wraps onto a line that opens in the same bold face and
+            // switches to body prose at normal leading.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: '2.4 Generation of Constructs for Expression in',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        font: 'Times-Roman',
+                        styleRuns: [run('Times-Roman', 3, 0), run('Times-Bold', 38, 38, { bold: true })],
+                    },
+                    {
+                        text: 'Mammalian Cells. We cloned the full-length coding sequence into',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Times-Bold',
+                        styleRuns: [run('Times-Bold', 15, 14, { bold: true }), run('Times-Roman', 48, 46)],
+                    },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('Generation of Constructs'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('Mammalian Cells. We cloned');
+        });
+
+        it('does not promote a table row whose first cell is a numbered label', () => {
+            // "1. Placebo treatment | 40 | 50": the label and the value cells
+            // are separate spans; only the label is bold.
+            const page = makeColumnPageResult([...FILLERS_BEFORE_HEADING, ...BODY_AFTER]);
+            const lines = page.columnResults[0].lines;
+            const top = lines[FILLERS_BEFORE_HEADING.length - 1].bbox.b + 14;
+            const cell = (text: string, l: number, runs: RawStyleRun[]): DetectedSpan => ({
+                text,
+                bbox: bbox(l, top, l + text.length * 5, top + 10),
+                lineBBox: bbox(l, top, l + text.length * 5, top + 10),
+                size: 10,
+                fontName: 'Times-Roman',
+                fontWeight: 'normal',
+                fontStyle: 'normal',
+                styleRuns: runs,
+            });
+            const spans = [
+                cell('1. Placebo treatment', 0, [run('Times-Roman', 2, 0), run('Times-Bold', 16, 16, { bold: true })]),
+                cell('40', 200, [run('Times-Roman', 2, 0)]),
+                cell('50', 260, [run('Times-Roman', 2, 0)]),
+            ];
+            const row: PageLine = {
+                spans,
+                bboxes: spans.map(s => s.lineBBox),
+                bbox: bbox(0, top, 270, top + 12),
+                text: '1. Placebo treatment 40 50',
+                fontSize: 10,
+            };
+            // Shift the body lines below the row.
+            for (const line of lines.slice(FILLERS_BEFORE_HEADING.length)) {
+                const shift = 30;
+                line.bbox = bbox(line.bbox.l, line.bbox.t + shift, line.bbox.r, line.bbox.b + shift);
+            }
+            lines.splice(FILLERS_BEFORE_HEADING.length, 0, row);
+            page.allLines = lines;
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('Placebo'))!.type).toBe('paragraph');
+        });
+
+        it('promotes a numbered title that continues in a second span', () => {
+            // The title is split across two spans, both in the title's face.
+            const page = makeColumnPageResult([...FILLERS_BEFORE_HEADING, ...BODY_AFTER]);
+            const lines = page.columnResults[0].lines;
+            const top = lines[FILLERS_BEFORE_HEADING.length - 1].bbox.b + 14;
+            const span = (text: string, l: number, font: string, runs: RawStyleRun[]): DetectedSpan => ({
+                text,
+                bbox: bbox(l, top, l + text.length * 5, top + 10),
+                lineBBox: bbox(l, top, l + text.length * 5, top + 10),
+                size: 10,
+                fontName: font,
+                fontWeight: 'normal',
+                fontStyle: font.includes('Italic') ? 'italic' : 'normal',
+                styleRuns: runs,
+            });
+            const spans = [
+                span('4.2 Power absorption', 0, 'Times-Roman', [
+                    run('Times-Roman', 3, 0),
+                    run('Times-Italic', 15, 15, { italic: true }),
+                ]),
+                span('of particle suspensions', 105, 'Times-Italic', [run('Times-Italic', 21, 21, { italic: true })]),
+            ];
+            const heading: PageLine = {
+                spans,
+                bboxes: spans.map(s => s.lineBBox),
+                bbox: bbox(0, top, 220, top + 12),
+                text: '4.2 Power absorption of particle suspensions',
+                fontSize: 10,
+            };
+            for (const line of lines.slice(FILLERS_BEFORE_HEADING.length)) {
+                line.bbox = bbox(line.bbox.l, line.bbox.t + 30, line.bbox.r, line.bbox.b + 30);
+            }
+            lines.splice(FILLERS_BEFORE_HEADING.length, 0, heading);
+            page.allLines = lines;
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('Power absorption'))!.type).toBe('header');
+        });
+
+        it('promotes a numbered title with a math-font span', () => {
+            const page = makeColumnPageResult([...FILLERS_BEFORE_HEADING, ...BODY_AFTER]);
+            const lines = page.columnResults[0].lines;
+            const top = lines[FILLERS_BEFORE_HEADING.length - 1].bbox.b + 14;
+            const span = (text: string, l: number, font: string, runs: RawStyleRun[]): DetectedSpan => ({
+                text,
+                bbox: bbox(l, top, l + text.length * 5, top + 10),
+                lineBBox: bbox(l, top, l + text.length * 5, top + 10),
+                size: 10,
+                fontName: font,
+                fontWeight: 'normal',
+                fontStyle: 'italic',
+                styleRuns: runs,
+            });
+            const spans = [
+                span('2. Case of the entangled state', 0, 'Times-Roman', [
+                    run('Times-Roman', 2, 0),
+                    run('Times-Italic', 24, 24, { italic: true }),
+                ]),
+                span('Ψ', 155, 'CMMI10', [run('CMMI10', 1, 1, { italic: true })]),
+            ];
+            const heading: PageLine = {
+                spans,
+                bboxes: spans.map(s => s.lineBBox),
+                bbox: bbox(0, top, 160, top + 12),
+                text: '2. Case of the entangled state Ψ',
+                fontSize: 10,
+            };
+            for (const line of lines.slice(FILLERS_BEFORE_HEADING.length)) {
+                line.bbox = bbox(line.bbox.l, line.bbox.t + 30, line.bbox.r, line.bbox.b + 30);
+            }
+            lines.splice(FILLERS_BEFORE_HEADING.length, 0, heading);
+            page.allLines = lines;
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('entangled state'))!.type).toBe('header');
+        });
+
+        it('does not promote a bare page number before a running head', () => {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { ...numbered('90 Aoife O’Donoghue and Adam Rowe', 25, 180), gapAfter: 12 }, ...BODY_AFTER],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('Aoife'))!.type).toBe('paragraph');
+        });
+
+        it('does not promote an affiliation behind a smaller marker number', () => {
+            const spec = { ...numbered('2. Center for Anxiety and Traumatic Stress Disorders', 46, 260), gapAfter: 12 };
+            spec.styleRuns = [run('Times-Roman', 2, 0, { size: 6, exactSize: 6 }), run('Times-Italic', 46, 46, { italic: true })];
+            const all = items([...FILLERS_BEFORE_HEADING, spec, ...BODY_AFTER], [BODY]);
+            expect(all.find(it => it.text.includes('Center for Anxiety'))!.type).toBe('paragraph');
+        });
+
+        it('does not promote a contents entry with dot leaders', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { ...numbered('12.9.5. Grupo familiar . . . . . . . . . 45', 30, 300), gapAfter: 12 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('Grupo familiar'))!.type).toBe('paragraph');
+        });
+
+        it('does not promote a numbered entry set smaller than the body', () => {
+            const spec: LeaderLineSpec = {
+                text: '89. Sandhu S, Lemmon ME, Eisenson H, Crowder C',
+                l: 0,
+                r: 230,
+                size: 8,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', 3, 0, { size: 8 }), run('Times-Bold', 36, 30, { size: 8, bold: true })],
+                gapAfter: 12,
+            };
+            const all = items([...FILLERS_BEFORE_HEADING, spec, ...BODY_AFTER], [BODY]);
+            expect(all.find(it => it.text.includes('Sandhu'))!.type).toBe('paragraph');
+        });
+
+        it('leaves the line alone without style runs', () => {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, numbered('2.4 Freeing Up Women’s Time', 22, 140, false), ...BODY_AFTER],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('Freeing Up'))!.type).toBe('paragraph');
+        });
+    });
+
     describe('heading followed by a flush-left paragraph', () => {
         // The column's right edge sits at 305 (filler lines). A long heading
         // that stops short of it by less than the early-line-end threshold
@@ -1887,6 +2158,36 @@ describe('header detection', () => {
             expect(item!.text).toContain('1234–1248');
         });
 
+        it('keeps a numbered italic journal name with its citation tail', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: '2. International Journal of Environmental Research and Public Health',
+                        l: 0,
+                        r: 250,
+                        size: 10,
+                        font: 'Times-Roman',
+                        styleRuns: [run('Times-Roman', 2, 0), run('Times-Italic', 58, 58, { italic: true })],
+                    },
+                    {
+                        text: '21, 1234–1248 (2024).',
+                        l: 0,
+                        r: 105,
+                        size: 10,
+                        font: 'Times-Roman',
+                        styleRuns: [run('Times-Roman', 19, 0)],
+                        gapAfter: 14,
+                    },
+                    ...FILLERS,
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('International Journal'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('1234–1248');
+        });
+
         it('judges a run-in continuation by its own leading on a mixed-leading page', () => {
             // A dense reference column pulls the page's median gap to 1pt;
             // the body column is set with 13pt gaps.
@@ -2088,6 +2389,11 @@ describe('header detection', () => {
         it('keeps a heading whose bold Latin number precedes CJK heading text', () => {
             const runs = [run('Times-Bold', 1, 0, 10, true), run('SimHei', 17, 16, 10)];
             expect(kindOf('5．突出质量导向，实现教学评价一体化', runs, 10, true)).toBe('header');
+        });
+
+        it('keeps a heading whose bold ASCII number precedes Latin and CJK text', () => {
+            const runs = [run('Times-Bold', 2, 0, 10, true), run('Times-Roman', 4, 4, 10), run('SimSun', 5, 5, 10)];
+            expect(kindOf('2. VOCs 挥发性有机物', runs, 10, true)).toBe('header');
         });
 
         it('does not keep a numbered CJK footnote set smaller than the body', () => {

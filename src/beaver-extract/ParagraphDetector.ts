@@ -790,11 +790,12 @@ function stylesEqual(a: TextStyle | null, b: TextStyle | null): boolean {
  * slant at the same size. Reported sizes are truncated (9.96 → 9, 10.0 →
  * 10), so lines in one face can read as two sizes; the opening runs' exact
  * sizes settle it when style runs are recorded (within 0.5pt), otherwise
- * truncated sizes within 1pt count as the same.
+ * truncated sizes within 1pt count as the same. A numbered title is judged
+ * by its title's face, not its section number's (see `openingLineStyle`).
  */
 function sameTypeface(a: PageLine, b: PageLine): boolean {
-    const sa = extractLineStyle(a);
-    const sb = extractLineStyle(b);
+    const sa = openingLineStyle(a);
+    const sb = openingLineStyle(b);
     if (!sa || !sb) return false;
     if (sa.font !== sb.font || sa.bold !== sb.bold || sa.italic !== sb.italic) return false;
     const exactA = openingExactSize(a);
@@ -803,11 +804,17 @@ function sameTypeface(a: PageLine, b: PageLine): boolean {
     return Math.abs(sa.size - sb.size) <= 1;
 }
 
-/** Exact size of the line's first style run, when recorded. */
+/** Exact size of the line's opening style run (after a section number), when recorded. */
 function openingExactSize(line: PageLine): number | null {
+    let skip = numberedTitleStyle(line)?.numberRuns ?? 0;
     for (const span of line.spans) {
         for (const run of span.styleRuns ?? []) {
-            if (run.chars > 0) return run.exactSize ?? null;
+            if (run.chars === 0) continue;
+            if (skip > 0) {
+                skip--;
+                continue;
+            }
+            return run.exactSize ?? null;
         }
     }
     return null;
@@ -1085,7 +1092,8 @@ const MATH_FONT_RE =
  *
  * Not every glyph votes:
  *   - short letterless runs at either end (bullets, footnote and affiliation
- *     markers, trailing punctuation);
+ *     markers, trailing punctuation) and a leading section number
+ *     (`numberedTitleStyle`);
  *   - math-font glyphs (`MATH_FONT_RE`);
  *   - size differences within one font: each run counts at its font's
  *     largest size on the line, so fake small caps ("I. I" + "NTRODUCTION"
@@ -1103,7 +1111,7 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
     }
     if (runs.length === 0) return lineStyle;
 
-    let start = 0;
+    let start = numberedTitleStyle(line)?.numberRuns ?? 0;
     let end = runs.length;
     while (end - start > 1 && runs[start].letters === 0 && runs[start].chars <= 3) start++;
     while (end - start > 1 && runs[end - 1].letters === 0 && runs[end - 1].chars <= 3) end--;
@@ -1176,6 +1184,65 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
 }
 
 /**
+ * Section number opening a line, as its own style runs: "2.4", "3.", "1.2.3".
+ * A dotted number of at most two leading digits: a bare integer in another
+ * face than the text after it is a page number in a running head ("90 Aoife
+ * O'Donoghue and Adam Rowe"), a superscript, or part of an equation.
+ */
+const SECTION_NUMBER_RE = /^\d{1,2}(?:(?:\.\d{1,3}){1,3}\.?|\.)$/;
+
+/**
+ * Style of a numbered heading's title when its section number is set in
+ * another face: "2.4 *Freeing Up Women's Time*", the number in the body face
+ * and the title in italic. MuPDF reports the line's style from the number's
+ * first glyph, so the line reads as body text. The title's opening style
+ * describes the line instead, the way an unnumbered heading is described by
+ * its first glyph.
+ *
+ * Needs per-glyph style runs: the line must open with runs that hold exactly
+ * a plain (not bold or italic) section number (`SECTION_NUMBER_RE`), followed
+ * by a run in a different style at the number's size (a smaller number is an affiliation or footnote
+ * marker). Contents entries with dot leaders are excluded. Returns null
+ * otherwise.
+ */
+function numberedTitleStyle(line: PageLine): { style: TextStyle; numberRuns: number } | null {
+    const span = line.spans[0];
+    const runs = (span?.styleRuns ?? []).filter(run => run.chars > 0);
+    if (runs.length < 2 || !SECTION_PREFIX_RE.test(line.text) || /(?:\.\s?){4}/.test(line.text)) return null;
+
+    // Text of each run: runs count non-whitespace glyphs in order.
+    const glyphs = Array.from(span.text).filter(c => /\S/u.test(c));
+    let offset = 0;
+    let number = "";
+    let numberRuns = 0;
+    while (numberRuns < runs.length - 1) {
+        const text = glyphs.slice(offset, offset + runs[numberRuns].chars).join("");
+        if (!/^[\d.]+$/.test(text)) break;
+        number += text;
+        offset += runs[numberRuns].chars;
+        numberRuns++;
+    }
+    if (numberRuns === 0 || !SECTION_NUMBER_RE.test(number)) return null;
+
+    // A bold or italic number carries the heading cue itself (see
+    // `isCJKNumberedHeading`); only a plain number defers to its title.
+    for (const run of runs.slice(0, numberRuns)) {
+        const numberStyle = extractSpanStyle(run.font.name || "unknown", run.font.weight, run.font.style, run.font.size);
+        if (numberStyle.bold || numberStyle.italic || hasHeavyWeightToken(numberStyle.font)) return null;
+    }
+    const title = runs[numberRuns];
+    const sizeOf = (run: RawStyleRun) => run.exactSize ?? run.font.size;
+    if (runs.slice(0, numberRuns).some(run => Math.abs(sizeOf(run) - sizeOf(title)) > 1)) return null;
+    const style = extractSpanStyle(title.font.name || "unknown", title.font.weight, title.font.style, title.font.size);
+    return stylesEqual(style, extractLineStyle(line)) ? null : { style, numberRuns };
+}
+
+/** The line's opening style: a numbered title's style, else its first glyph's. */
+function openingLineStyle(line: PageLine): TextStyle | null {
+    return numberedTitleStyle(line)?.style ?? extractLineStyle(line);
+}
+
+/**
  * Check if a line should be classified as a header.
  *
  * The heading rules run on the line's reported (first-glyph) style. When the
@@ -1193,7 +1260,28 @@ function isHeaderStyle(
     bodyAllCaps: boolean = false,
     phraseTextOverride: string | null = null
 ): boolean {
-    const lineStyle = extractLineStyle(line);
+    // A numbered title's style stands in for the section number's (see
+    // `numberedTitleStyle`). A numbered title set smaller than the body is an
+    // entry in a numbered reference or note list, not a section heading.
+    let numbered = numberedTitleStyle(line);
+    if (numbered && bodyStyles && bodyStyles.length > 0 && numbered.style.size < bodyStyles[0].size - 0.5) {
+        numbered = null;
+    }
+    // The span-dominance check still applies to the spans after the first,
+    // which holds the number: in a table row ("1. Placebo treatment | 40 |
+    // 50") the other cells are spans in another style. Math-font spans don't
+    // count, as in `majorityLineStyle` ("2. Case |Ψ⟩").
+    const titleSpans = line.spans
+        .slice(1)
+        .filter(span => !MATH_FONT_RE.test(baseFontName(span.fontName || "")));
+    if (
+        numbered &&
+        titleSpans.length > 0 &&
+        getStyleDominance({ ...line, spans: titleSpans }, numbered.style) < 0.9
+    ) {
+        numbered = null;
+    }
+    const lineStyle = numbered?.style ?? extractLineStyle(line);
     if (!lineStyle) return false;
     // Item-level only (the joined item text): boundaries are decided per line
     // and stay as they are; a run-in label item just isn't labelled a heading.
@@ -1205,7 +1293,7 @@ function isHeaderStyle(
         return false;
     }
     if (!matchesHeaderRules(
-        line, lineStyle, true, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
+        line, lineStyle, !numbered, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
     )) {
         return false;
     }
@@ -2097,7 +2185,7 @@ function headingEndsBeforeBodyLine(
         return false;
     }
     const joinedText = joinLines([...currentLines, line].map(l => l.text), settings.removeHyphenation);
-    if (extractLineStyle(currentLines[0])?.italic && looksLikeJournalCitation(joinedText)) return false;
+    if (openingLineStyle(currentLines[0])?.italic && looksLikeJournalCitation(joinedText)) return false;
     return !isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps, joinedText);
 }
 
@@ -2288,8 +2376,8 @@ function startNewItem(
     if (isLocalHeader && prevIsLocalHeader) {
         // Different header style. A hanging continuation stays with the
         // heading-styled line it wraps (a bold list label, an italic title).
-        const lineStyle = extractLineStyle(line);
-        const prevStyle = extractLineStyle(prevLine);
+        const lineStyle = openingLineStyle(line);
+        const prevStyle = openingLineStyle(prevLine);
         if (!stylesEqual(lineStyle, prevStyle) && hangingRole !== "continuation") {
             return true;
         }
