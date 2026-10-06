@@ -681,6 +681,20 @@ describe("routeLines paragraphs", () => {
         expect(routeLines(lines, flags, [region([40, 20, 560, 470], "picture")])).toEqual([-1, -1, -1, -1, 0, 0]);
     });
 
+    it("returns a loosely leaded paragraph's last line to it at the paragraph's line pitch", () => {
+        const region = (bbox: Rect, label: DetectedRegion["label"]): DetectedRegion => ({ bbox, anchored: false, features: [], label });
+        // Lines 18 apart, 11 high: the gap between them is wider than a tight paragraph's.
+        const lead = (y: number) => [
+            line([42, 100, 291, 111], "Specifically, using equations (4.5) and (4.7) we can"),
+            line([42, 118, 291, 129], "derive the equilibrium time that agent i devotes to"),
+            line([42, y, 100, y + 11], "violence as"),
+        ];
+        const eq = (y: number) => region([40, y - 1, 300, y + 40], "formula");
+        expect(routeLines(lead(136), [LINE_RUNNING, LINE_RUNNING, 0], [eq(136)])).toEqual([-1, -1, -1]);
+        // Set off by display space, it is not the paragraph's line.
+        expect(routeLines(lead(150), [LINE_RUNNING, LINE_RUNNING, 0], [eq(150)])).toEqual([-1, -1, 0]);
+    });
+
     it("leaves a display equation set at the margin under its lead-in to the formula", () => {
         const region = (bbox: Rect, label: DetectedRegion["label"]): DetectedRegion => ({ bbox, anchored: false, features: [], label });
         const lines = [
