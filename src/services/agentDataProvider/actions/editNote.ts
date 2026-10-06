@@ -35,6 +35,7 @@ import { preloadExternalFileCitations } from '../../../utils/externalFileCitatio
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import {
     buildUnresolvedLocatorWarning,
+    ensureCitedLibrariesLoaded,
     expandToRawHtml,
     preloadNotePageLabels,
     preloadPageLabelsForNewCitations,
@@ -416,7 +417,10 @@ async function validateEditNoteAction(
         rawHtml = stripPreviewMarkers(rawHtml);
     }
 
-    // 8. Simplify note (needed for both modes)
+    // 8. Simplify note (needed for both modes). Load every library the note
+    //    and the edit cite first: simplification, prechecks and expansion
+    //    resolve cited items synchronously.
+    await ensureCitedLibrariesLoaded([rawHtml, new_string, old_string], [resolvedLibraryId]);
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
     const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
@@ -823,6 +827,10 @@ async function executeEditNoteAction(
     }
 
     const externalRefContext = await getExternalRefContext(new_string, request.operation);
+
+    // Load every library the edit cites: expansion resolves cited items
+    // synchronously.
+    await ensureCitedLibrariesLoaded([new_string, old_string], [resolvedLibraryId]);
 
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.

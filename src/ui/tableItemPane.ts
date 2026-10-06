@@ -212,7 +212,8 @@ async function annotationDates(item: Zotero.Item): Promise<string[]> {
     try {
         if (!item.isFileAttachment()) return [];
         await item.loadDataType('childItems');
-        return (item.getAnnotations() as Zotero.Item[])
+        const annotations = await Zotero.Items.getAsync([...item.getAnnotations(false, true)]);
+        return annotations
             .map((annotation) => annotation?.dateAdded)
             .filter((date): date is string => typeof date === 'string' && !!date);
     } catch (error) {
@@ -667,7 +668,7 @@ export async function describeTableItemPane(
         actions: tableSectionActions(win, false),
     };
 
-    const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryID, ref.key) as
         | Zotero.Item
         | false;
     if (!item) {

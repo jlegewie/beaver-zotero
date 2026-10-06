@@ -54,6 +54,17 @@ function makeParentItem(id: number, key: string) {
     };
 }
 
+// Only the async lookup resolves; the sync one throws, as Zotero does for items
+// of a library that has not been loaded yet.
+function itemLookups(lookup: (libraryId: number, key: string) => unknown) {
+    return {
+        getByLibraryAndKey: vi.fn(() => {
+            throw new Error('Item 1 not yet loaded');
+        }),
+        getByLibraryAndKeyAsync: vi.fn(async (libraryId: number, key: string) => lookup(libraryId, key)),
+    };
+}
+
 describe('preloadPageLabelsForContent', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -76,7 +87,7 @@ describe('preloadPageLabelsForContent', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -97,7 +108,7 @@ describe('preloadPageLabelsForContent', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -116,7 +127,7 @@ describe('preloadPageLabelsForContent', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -135,7 +146,7 @@ describe('preloadPageLabelsForContent', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -154,7 +165,7 @@ describe('preloadPageLabelsForContent', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -175,7 +186,7 @@ describe('preloadPageLabelsForContent', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => parent),
+            ...itemLookups(() => parent),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -201,7 +212,7 @@ describe('preloadPageLabelsForContent', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => parent),
+            ...itemLookups(() => parent),
             get: vi.fn((itemID: number) => itemID === 77 ? attachment : false),
             getAsync: vi.fn(async (itemIDs: number[]) => itemIDs.map((id) => id === 77 ? attachment : false)),
             loadDataTypes: vi.fn().mockResolvedValue(undefined),
@@ -225,7 +236,7 @@ describe('preloadPageLabelsForContent', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -246,7 +257,7 @@ describe('preloadPageLabelsForContent', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn((_libId: number, key: string) => {
+            ...itemLookups((_libId: number, key: string) => {
                 if (key === 'QRST7890') return item1;
                 if (key === 'UVWX1234') return item2;
                 return null;
@@ -284,7 +295,7 @@ describe('preloadPageLabelsForCitations', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -305,7 +316,7 @@ describe('preloadPageLabelsForCitations', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -323,7 +334,7 @@ describe('preloadPageLabelsForCitations', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => parent),
+            ...itemLookups(() => parent),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -345,7 +356,7 @@ describe('preloadPageLabelsForCitations', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -371,7 +382,7 @@ describe('preloadPageLabelsForCitations', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => parent),
+            ...itemLookups(() => parent),
             get: vi.fn((itemID: number) => itemID === 78 ? attachment : false),
             getAsync: vi.fn(async (itemIDs: number[]) => itemIDs.map((id) => id === 78 ? attachment : false)),
             loadDataTypes: vi.fn().mockResolvedValue(undefined),
@@ -397,7 +408,7 @@ describe('preloadPageLabelsForCitations', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
@@ -428,7 +439,7 @@ describe('preloadPageLabelsForCitations', () => {
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            ...itemLookups(() => item),
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 

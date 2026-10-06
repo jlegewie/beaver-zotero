@@ -9,11 +9,8 @@
  * Regression target: codepoints above 0xFFFF (emoji, U+1D400 mathematical
  * bold, extended CJK) must be decoded with `String.fromCodePoint`, not
  * `String.fromCharCode` — the latter silently truncates to a single UTF-16
- * unit and produces wrong text. The downstream
- * `ParagraphSentenceMapper.buildParagraphText` invariant
- * (`line.text.length === line.chars.length`) still trips on surrogate
- * pairs; the win here is "wrong character, no degradation" -> "correct
- * character, honest degradation", not full sentence-level granularity.
+ * unit and produces wrong text. Such a char's `c` is a two-unit surrogate
+ * pair; the sentence mappers count `line.text` in code units accordingly.
  */
 
 import { describe, it, expect } from "vitest";
@@ -214,6 +211,23 @@ describe("StructuredText.walk rune decoding", () => {
         expect(onChar.join("")).toBe("Hi \u{1F600}");
         // chars-array length still tracks codepoints, not UTF-16 units.
         expect(onChar.length).toBe(4);
+    });
+
+    it("emits onCharFont before every onChar when the walker defines it", () => {
+        const api = makeDocumentApi(makeFakeLibMuPdf([0x41, 0x20, 0x42]));
+        const doc = api.Document.openDocument(new Uint8Array(8));
+        const page = doc.loadPage(0);
+        const stext = page.toStructuredText("preserve-whitespace");
+        const events: string[] = [];
+        stext.walk({
+            onCharFont: (fontPtr, size) => events.push(`font:${fontPtr}:${size}`),
+            onChar: (rune) => events.push(`char:${rune}`),
+        });
+        stext.destroy();
+        page.destroy();
+        doc.destroy();
+        const font = `font:${FONT_PTR}:12`;
+        expect(events).toEqual([font, "char:A", font, "char: ", font, "char:B"]);
     });
 
     it("emits onLineFont exactly once per non-empty line", () => {

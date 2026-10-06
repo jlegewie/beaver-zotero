@@ -480,7 +480,7 @@ export async function handleTestTableReadHttpRequest(
 ): Promise<any> {
     if (!request.key) return { ok: false, code: 'invalid_request', error: 'key is required' };
     const libraryID = request.libraryID ?? Zotero.Libraries.userLibraryID;
-    const item = Zotero.Items.getByLibraryAndKey(libraryID, request.key) as
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, request.key) as
         | Zotero.Item
         | false;
     if (!item) {

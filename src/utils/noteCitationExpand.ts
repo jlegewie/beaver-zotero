@@ -69,8 +69,9 @@ import {
     translatePageLabelToNumber,
     translatePageNumberToLabel,
 } from './pageLabelTranslation';
-import { extractItemKeyFromUri } from './zoteroUri';
+import { citationItemRefFromUri } from './zoteroUri';
 import { isPdfDocument } from './attachmentFiles';
+import { ensureLibraryItemsLoaded } from './zoteroDataLoading';
 import {
     modelObjectId,
     modelObjectIdFromReference,
@@ -118,6 +119,68 @@ export interface StructuralLocatorPreload {
 // =============================================================================
 
 /**
+ * Load the libraries that citations in the given texts point to, plus any
+ * extra library ids (typically the note's own library).
+ *
+ * Citation expansion, validation and simplification resolve cited items with
+ * synchronous Zotero lookups, which throw for items in a library that has not
+ * been opened this session. Await this before those synchronous passes.
+ * Covers simplified `<citation .../>` tags, `data-citation` URIs and Zotero
+ * link citations, including the items of compound tags read from a note.
+ * Unavailable libraries are skipped. Excluded libraries are skipped too
+ * (expansion rejects those citations) unless `includeExcluded` is set for
+ * render paths, which must keep showing persisted history.
+ * Returns the ids of the libraries this call loaded.
+ */
+export async function ensureCitedLibrariesLoaded(
+    texts: (string | null | undefined)[],
+    extraLibraryIds: (number | null | undefined)[] = [],
+    { includeExcluded = false }: { includeExcluded?: boolean } = {},
+): Promise<number[]> {
+    const libraryIds = new Set<number>();
+    const add = (libraryId: number | null | undefined) => {
+        if (typeof libraryId !== 'number' || libraryId === UNRESOLVED_LIBRARY_ID) return;
+        if (!includeExcluded && checkLibraryExcluded(libraryId)) return;
+        libraryIds.add(libraryId);
+    };
+    extraLibraryIds.forEach(add);
+
+    for (const text of texts) {
+        if (!text) continue;
+        const tagRegex = noteCitationTagPattern();
+        let match: RegExpExecArray | null;
+        while ((match = tagRegex.exec(text)) !== null) {
+            const attrs = parseRawCitationAttributes(match[1]);
+            const normalized = normalizeCitationTag(attrs);
+            if (normalized.ok && normalized.ref.kind === 'zotero') add(normalized.ref.library_id);
+            // Compound tags list their items as "id:page,id:page".
+            for (const entry of attrs.items?.split(',') ?? []) {
+                add(resolveObjectId(entry.trim().split(':')[0])?.library_id);
+            }
+        }
+        for (const link of text.matchAll(zoteroLinkCitationPattern())) {
+            const parsed = parseZoteroCitationLinkHref(link[3]);
+            if (parsed) add(parsed.libraryId);
+        }
+        for (const citation of text.matchAll(/data-citation="([^"]*)"/g)) {
+            try {
+                const citationData = JSON.parse(decodeURIComponent(citation[1]));
+                for (const ci of citationData.citationItems || []) {
+                    const uri = ci?.uris?.[0];
+                    if (!uri) continue;
+                    const info = (Zotero.URI as any).getURIItemLibraryKey(uri);
+                    if (info) add(info.libraryID);
+                }
+            } catch {
+                // Malformed citation metadata is reported by the simplifier.
+            }
+        }
+    }
+
+    return ensureLibraryItemsLoaded(libraryIds);
+}
+
+/**
  * Resolve page labels for citations in a string that carry page locators.
  *
  * Returns a `PageLabelsByAttachmentId` map (attachment item ID → 0-based page
@@ -132,6 +195,7 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
     const labelsByAttachmentId: PageLabelsByAttachmentId = {};
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return labelsByAttachmentId;
+    await ensureCitedLibrariesLoaded([str]);
 
     const seen = new Set<number>();
     const regex = noteCitationTagPattern();
@@ -151,9 +215,13 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
         if (checkLibraryExcluded(normalized.ref.library_id)) continue;
 
         let attachmentItem: any = null;
-        const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
-        if (item && typeof item !== 'boolean') {
-            attachmentItem = item.isAttachment() ? item : getBestPDFAttachment(item);
+        try {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(normalized.ref.library_id, normalized.ref.zotero_key);
+            if (item) {
+                attachmentItem = item.isAttachment() ? item : await getBestPDFAttachmentAsync(item);
+            }
+        } catch {
+            // Expansion reports items that cannot be resolved.
         }
 
         if (!attachmentItem || seen.has(attachmentItem.id)) continue;
@@ -208,6 +276,7 @@ export async function preloadNotePageLabels(
     const labelsByItemId: Record<string, PageLabels> = {};
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return labelsByItemId;
+    await ensureCitedLibrariesLoaded([rawHtml], [libraryID]);
 
     const seen = new Set<string>();
     // Keyed with the simplifier's portable item id so lookups in
@@ -218,8 +287,8 @@ export async function preloadNotePageLabels(
         if (seen.has(itemId)) return;
         seen.add(itemId);
         try {
-            const item = Zotero.Items.getByLibraryAndKey(targetLibraryID, itemKey);
-            const attachmentItem = item && typeof item !== 'boolean'
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(targetLibraryID, itemKey);
+            const attachmentItem = item
                 ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
                 : null;
             if (!attachmentItem) return;
@@ -257,10 +326,11 @@ export async function preloadNotePageLabels(
                 const locator = ci?.locator != null ? String(ci.locator) : '';
                 if (!locator || (ci?.label != null && ci.label !== 'page')) continue;
 
-                const uri = ci?.uris?.[0] || '';
-                const itemKey = extractItemKeyFromUri(uri);
-                if (!itemKey) continue;
-                await loadLabels(libraryID, itemKey);
+                // Resolved the same way as the simplifier, so the cited item's
+                // own library keys (and loads) the labels.
+                const itemRef = citationItemRefFromUri(ci?.uris?.[0] || '', libraryID);
+                if (!itemRef || checkLibraryExcluded(itemRef.libraryID)) continue;
+                await loadLabels(itemRef.libraryID, itemRef.key);
             }
         } catch {
             // Skip malformed citation metadata or attachments that can't load.
@@ -342,6 +412,7 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
     const unavailable: string[] = [];
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return { pages, unresolved, unavailable };
+    await ensureCitedLibrariesLoaded([str]);
 
     const seen = new Set<string>();
     // Keyed by attachment (or external file) and schema version.
@@ -413,7 +484,7 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
 
         const describe = `id="${modelObjectIdFromReference(normalized.ref)}" loc="${loc.raw}"`;
         try {
-            const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(normalized.ref.library_id, normalized.ref.zotero_key);
             // Use the async helper so a regular parent item's child attachments
             // are loaded before lookup — the sync variant calls getAttachments()
             // which throws or returns nothing when childItems is lazily unloaded.

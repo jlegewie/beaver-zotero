@@ -10,7 +10,7 @@ import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import Button from '@beaver/agent-ui/primitives/Button';
 import CitedSourcesList from '@beaver/agent-ui/chat/CitedSourcesList';
-import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
+import { renderToHTML, preprocessNoteContent, renderToMarkdownAsync } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
@@ -189,7 +189,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const handleCopy = async () => {
-        const formattedContent = renderToMarkdown(await buildRunContent());
+        const formattedContent = await renderToMarkdownAsync(await buildRunContent());
         await copyToClipboard(formattedContent);
     };
 
@@ -373,7 +373,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     >
                         <CopyButton
                             content={buildRunContent}
-                            formatContent={renderToMarkdown}
+                            formatContent={renderToMarkdownAsync}
                             className="scale-11"
                         />
                     </Tooltip>

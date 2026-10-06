@@ -18,7 +18,7 @@
  *   8. Merge overlapping lines (handles drop caps, subscripts, etc.)
  */
 
-import type { BoundingBox, RawPageData, RawBlock, RawLine } from "@beaver/agent-core/extract/types";
+import type { BoundingBox, RawPageData, RawBlock, RawLine, RawStyleRun } from "@beaver/agent-core/extract/types";
 import { bboxHeight, bboxWidth, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
@@ -45,6 +45,8 @@ export interface DetectedSpan {
     fontWeight?: string;
     /** Font style */
     fontStyle?: string;
+    /** Per-glyph style runs of the source line, when recorded (see `RawLine.styleRuns`) */
+    styleRuns?: RawStyleRun[];
 }
 
 /**
@@ -202,6 +204,7 @@ function extractSpansInColumn(
                 fontName: line.font?.name,
                 fontWeight: line.font?.weight,
                 fontStyle: line.font?.style,
+                styleRuns: line.styleRuns,
             });
         }
     }

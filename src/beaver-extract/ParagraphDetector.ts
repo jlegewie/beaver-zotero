@@ -16,7 +16,7 @@
  */
 
 import type { PageLine, PageLineResult, ColumnLineResult } from "./LineDetector";
-import type { BoundingBox, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
+import type { BoundingBox, RawStyleRun, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
 import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
@@ -47,6 +47,19 @@ export interface ParagraphDetectionSettings {
     maxHeaderLength?: number;
     /** Whether to remove hyphenation when joining lines (default: true) */
     removeHyphenation?: boolean;
+    /**
+     * Read hanging-indent blocks (reference lists, footnotes, lists whose
+     * wrapped lines sit at an inner edge) as entries with continuations; see
+     * `detectHangingRoles` (default: false). Enabled by the PDF schema preset.
+     */
+    hangingIndentBlocks?: boolean;
+    /**
+     * Whether heading detection demotes run-in label items ("Keywords: …",
+     * "Received: …", a structured-abstract label followed by prose) and
+     * supplementary / extended-data figure and table captions (default: true).
+     * PDF schema 4 turns it off so its document-wide ids keep resolving.
+     */
+    headingLabelFilters?: boolean;
 }
 
 const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
@@ -59,6 +72,8 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     minHeaderLength: 3,
     maxHeaderLength: 200,
     removeHyphenation: true,
+    hangingIndentBlocks: false,
+    headingLabelFilters: true,
 };
 
 /**
@@ -766,6 +781,34 @@ function stylesEqual(a: TextStyle | null, b: TextStyle | null): boolean {
 }
 
 /**
+ * Whether two lines are set in the same typeface: same font, weight and
+ * slant at the same size. Reported sizes are truncated (9.96 → 9, 10.0 →
+ * 10), so lines in one face can read as two sizes; the opening runs' exact
+ * sizes settle it when style runs are recorded (within 0.5pt), otherwise
+ * truncated sizes within 1pt count as the same.
+ */
+function sameTypeface(a: PageLine, b: PageLine): boolean {
+    const sa = extractLineStyle(a);
+    const sb = extractLineStyle(b);
+    if (!sa || !sb) return false;
+    if (sa.font !== sb.font || sa.bold !== sb.bold || sa.italic !== sb.italic) return false;
+    const exactA = openingExactSize(a);
+    const exactB = openingExactSize(b);
+    if (exactA !== null && exactB !== null) return Math.abs(exactA - exactB) < 0.5;
+    return Math.abs(sa.size - sb.size) <= 1;
+}
+
+/** Exact size of the line's first style run, when recorded. */
+function openingExactSize(line: PageLine): number | null {
+    for (const span of line.spans) {
+        for (const run of span.styleRuns ?? []) {
+            if (run.chars > 0) return run.exactSize ?? null;
+        }
+    }
+    return null;
+}
+
+/**
  * Check if a line's style matches one of the document's body styles.
  *
  * Wider than `stylesEqual` because the detailed mupdf walk does not always
@@ -1010,7 +1053,121 @@ export function looksLikeFragmentedCJKBody(
 }
 
 /**
- * Check if a line should be classified as a header
+ * Share of a line's visible glyphs that bold, italic or a size must reach to
+ * describe the line in `majorityLineStyle`.
+ */
+const MAJORITY_STYLE_SHARE = 0.75;
+
+/**
+ * Math fonts (TeX Computer Modern math, AMS, MathTime, txfonts, Cambria/STIX
+ * Math, Symbol). Glyphs set in them don't vote in `majorityLineStyle`: an
+ * italic variable inside a heading ("… for the k = const case") says
+ * nothing about the heading's own styling.
+ */
+const MATH_FONT_RE =
+    /^(?:CMMI|CMSY|CMEX|CMBSY|MSAM|MSBM|EUFM|EUSM|RSFS|MTMI|MTSY|MTEX|RMTMI|RBLMI|rtxmi|rtxsy|txmi|txsy|txex|Symbol|MT-Extra|Euclid|ESint|wasy|stmary|TeX_CM_Maths|[^,]*Math)/i;
+
+/**
+ * Majority styling of a line, from its per-glyph style runs.
+ *
+ * MuPDF reports a line's font from its first glyph, so a body line that
+ * opens with a bold run-in label ("Abstract: A growing literature…") or an
+ * italic word reads as bold or italic throughout. This describes the line by
+ * the styling most of its glyphs carry instead: bold / italic only when at
+ * least `MAJORITY_STYLE_SHARE` of the visible glyphs are, the size reached by
+ * that share, and the font with the most glyphs.
+ *
+ * Not every glyph votes:
+ *   - short letterless runs at either end (bullets, footnote and affiliation
+ *     markers, trailing punctuation);
+ *   - math-font glyphs (`MATH_FONT_RE`);
+ *   - size differences within one font: each run counts at its font's
+ *     largest size on the line, so fake small caps ("I. I" + "NTRODUCTION"
+ *     set smaller) and superscripts don't shrink the line.
+ *
+ * Returns `lineStyle` itself when the line has no style runs or its majority
+ * styling agrees with it.
+ */
+function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
+    const runs: RawStyleRun[] = [];
+    for (const span of line.spans) {
+        for (const run of span.styleRuns ?? []) {
+            if (run.chars > 0) runs.push(run);
+        }
+    }
+    if (runs.length === 0) return lineStyle;
+
+    let start = 0;
+    let end = runs.length;
+    while (end - start > 1 && runs[start].letters === 0 && runs[start].chars <= 3) start++;
+    while (end - start > 1 && runs[end - 1].letters === 0 && runs[end - 1].chars <= 3) end--;
+    const voters = runs
+        .slice(start, end)
+        .filter(run => !MATH_FONT_RE.test(baseFontName(run.font.name)));
+    if (voters.length === 0) return lineStyle;
+
+    const fontMaxSize = new Map<string, number>();
+    for (const run of voters) {
+        fontMaxSize.set(run.font.name, Math.max(fontMaxSize.get(run.font.name) ?? 0, run.font.size));
+    }
+
+    let total = 0;
+    let boldChars = 0;
+    let italicChars = 0;
+    const charsBySize = new Map<number, number>();
+    const charsByFont = new Map<string, number>();
+    for (const run of voters) {
+        const style = extractSpanStyle(
+            run.font.name || "unknown",
+            run.font.weight,
+            run.font.style,
+            fontMaxSize.get(run.font.name)
+        );
+        total += run.chars;
+        if (style.bold) boldChars += run.chars;
+        if (style.italic) italicChars += run.chars;
+        charsBySize.set(style.size, (charsBySize.get(style.size) ?? 0) + run.chars);
+        charsByFont.set(style.font, (charsByFont.get(style.font) ?? 0) + run.chars);
+    }
+
+    // Largest size that at least MAJORITY_STYLE_SHARE of the glyphs reach.
+    const sizes = [...charsBySize.keys()].sort((a, b) => b - a);
+    let size = sizes[sizes.length - 1];
+    let reached = 0;
+    for (const s of sizes) {
+        reached += charsBySize.get(s)!;
+        if (reached / total >= MAJORITY_STYLE_SHARE) {
+            size = s;
+            break;
+        }
+    }
+    let font = lineStyle.font;
+    let fontChars = -1;
+    for (const [name, chars] of charsByFont) {
+        if (chars > fontChars) {
+            fontChars = chars;
+            font = name;
+        }
+    }
+
+    const majority: TextStyle = {
+        size,
+        font,
+        bold: boldChars / total >= MAJORITY_STYLE_SHARE,
+        italic: italicChars / total >= MAJORITY_STYLE_SHARE,
+    };
+    return stylesEqual(majority, lineStyle) ? lineStyle : majority;
+}
+
+/**
+ * Check if a line should be classified as a header.
+ *
+ * The heading rules run on the line's reported (first-glyph) style. When the
+ * line's majority styling differs (see `majorityLineStyle`), the rules must
+ * also hold for that styling: a cue carried by the opening word alone — a
+ * bold "Keywords:", an italic "Note:" — does not make the line a heading.
+ * The majority styling only ever vetoes; it never promotes a line the
+ * first-glyph style rejects.
  */
 function isHeaderStyle(
     line: PageLine,
@@ -1020,10 +1177,208 @@ function isHeaderStyle(
     bodyAllCaps: boolean = false,
     phraseTextOverride: string | null = null
 ): boolean {
-    if (!bodyStyles || bodyStyles.length === 0) return false;
-
     const lineStyle = extractLineStyle(line);
     if (!lineStyle) return false;
+    // Item-level only (the joined item text): boundaries are decided per line
+    // and stay as they are; a run-in label item just isn't labelled a heading.
+    if (
+        settings.headingLabelFilters &&
+        phraseTextOverride !== null &&
+        looksLikeRunInLabel(phraseTextOverride)
+    ) {
+        return false;
+    }
+    if (!matchesHeaderRules(
+        line, lineStyle, true, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
+    )) {
+        return false;
+    }
+    const majority = majorityLineStyle(line, lineStyle);
+    if (majority === lineStyle) return true;
+    if (matchesHeaderRules(
+        line, majority, false, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
+    )) {
+        return true;
+    }
+    return isCJKNumberedHeading(line, bodyStyles);
+}
+
+/**
+ * Front-matter and back-matter labels that open a run-in line: "Keywords: …",
+ * "Received: 5 May 2020", "Conflict of interest: None", "To cite this
+ * article: …". Set as a bold or italic label followed by plain text, or
+ * entirely in a heading face, they read as headings to the style rules.
+ */
+const RUN_IN_LABELS = [
+    "abstract",
+    "e?-?issn",
+    "doi",
+    "received",
+    "accepted",
+    "revised",
+    "published(?:\\s+online)?",
+    "available\\s+online",
+    "article\\s+history",
+    "(?:handling\\s+|academic\\s+)?editors?(?:\\s*\\(s\\))?",
+    "copyright",
+    "citation",
+    "(?:to\\s+)?cite\\s+this\\s+article",
+    "suggested\\s+citation",
+    "correspondence",
+    "corresponding\\s+authors?",
+    "e-?mail(?:\\s+address(?:es)?)?",
+    "funding(?:\\s+information)?",
+    "conflicts?\\s+of\\s+interests?",
+    "competing\\s+interests?",
+    "declarations?\\s+of\\s+(?:competing|conflicting)\\s+interests?",
+    "abbreviations",
+    "highlights",
+    "data\\s+availability(?:\\s+statement)?",
+    "level\\s+of\\s+evidence",
+    "ethics\\s+approval",
+    "jel(?:\\s+(?:classifications?|codes?))?",
+    "notes?",
+    "sources?",
+];
+const RUN_IN_LABEL_RE = new RegExp(`^(?:${RUN_IN_LABELS.join("|")})\\s*[:.：]\\s*\\S`, "iu");
+
+/** Keyword labels, which also appear without a colon ("Keywords Peer influence · …"). */
+const KEYWORDS_LABEL_RE =
+    /^(?:key\s*-?\s*words?|index\s+terms|palabras\s+clave|mots[-\s]cl[ée]s|schl[üu]sselw[öo]rter)\s*[:.：]?\s+\S/iu;
+
+/**
+ * Structured-abstract section words. As headings they are common
+ * ("Results", "Conclusion: Future Directions"), so they count as run-in
+ * labels only when prose follows them.
+ */
+const STRUCTURED_ABSTRACT_LABEL_RE =
+    /^(?:background|objectives?|aims?|purpose|methods?|methodology|results?|conclusions?|discussion|introduction|motivation|findings|design|setting|participants|limitations|implications|summary|context|interpretation|originality\/value)\s*[:.：]\s+(\S[\s\S]*)$/iu;
+
+/**
+ * Words that mark a clause rather than a noun-phrase title: auxiliaries,
+ * pronouns and relatives ("We found…", "…were completed", "…which…").
+ */
+const PROSE_WORD_RE =
+    /\b(?:is|are|was|were|be|been|being|has|have|had|can|could|may|might|will|would|should|must|does|did|we|our|us|i|it|its|this|these|they|their|there|which|who|that)\b/iu;
+
+/**
+ * A sentence ending followed by the next sentence: a word of two or more
+ * lowercase letters or digits, terminal punctuation, then a capital. The
+ * two-character floor skips initialisms ("the U.S. and Europe").
+ */
+const SENTENCE_BREAK_RE = /[\p{Ll}\d)%]{2}[.!?]["'”’)\]]*\s+["“'‘(]?[\p{Lu}\d]/u;
+
+/** A line that wraps mid-phrase ends on a function word ("…in", "…of the"). */
+const FUNCTION_WORD_END_RE =
+    /\b(?:a|an|the|of|in|on|to|for|with|by|from|at|as|and|or|but|that|which|than|is|are|was|were|be|can|our|their|its|between|into|using|while|whether)\W*$/iu;
+
+/**
+ * Whether text after a structured-abstract label reads as prose rather than a
+ * subtitle. A heading subtitle can be long and sentence-case ("Effects of the
+ * intervention on the quality of life in older adults"), so length and case
+ * alone are not enough: prose also ends a sentence, breaks a word across the
+ * line, or carries a verb, pronoun or dangling function word. Numbers are no
+ * evidence either way ("Effects of the COVID-19 pandemic on …").
+ * A subtitle that is a single question is never prose — question headings
+ * are common.
+ */
+function isProseTail(tail: string): boolean {
+    const trimmed = tail.trimEnd();
+    const words = trimmed.match(/[^\W\d_][\w'’-]*/gu) ?? [];
+    if (words.length < 6) return false;
+    // A single question is a heading subtitle, however many auxiliaries it
+    // carries ("are there viable alternatives to …?").
+    if (/\?["'”’)\]]*$/u.test(trimmed) && !SENTENCE_BREAK_RE.test(trimmed)) return false;
+    if (/[-\u00AD]$/u.test(trimmed)) return true;
+    if (/[.!]["'”’)\]]*$/u.test(trimmed) || SENTENCE_BREAK_RE.test(trimmed)) return true;
+    if (words.length < 10) return false;
+    return PROSE_WORD_RE.test(trimmed) || FUNCTION_WORD_END_RE.test(trimmed) || /[,;:]$/u.test(trimmed);
+}
+
+/** A run-in label item: a known label followed by text on the same line. */
+function looksLikeRunInLabel(text: string): boolean {
+    const t = text.trim();
+    if (RUN_IN_LABEL_RE.test(t) || KEYWORDS_LABEL_RE.test(t)) return true;
+    const m = STRUCTURED_ABSTRACT_LABEL_RE.exec(t);
+    return !!m && isProseTail(m[1]);
+}
+
+/**
+ * Numbered CJK / Korean section headings whose number alone carries the
+ * heading styling: a bold or larger "２．２" / "5" / "(6)" before heading text
+ * set in a face MuPDF doesn't flag as bold ("２．２ 明确对党忠诚的…"). The
+ * majority-style veto would demote them; keep them when the text after the
+ * number is CJK, at least body size (numbered footnotes and running heads are
+ * set smaller) and doesn't end like a sentence.
+ */
+function isCJKNumberedHeading(line: PageLine, bodyStyles: TextStyle[] | null): boolean {
+    if (!bodyStyles || bodyStyles.length === 0) return false;
+    const span = line.spans[0];
+    const runs = (span?.styleRuns ?? []).filter(run => run.chars > 0);
+    if (runs.length < 2) return false;
+
+    // Text of each run: runs count non-whitespace glyphs in order.
+    const glyphs = Array.from(span.text).filter(c => /\S/u.test(c));
+    let offset = 0;
+    const runTexts = runs.map(run => {
+        const text = glyphs.slice(offset, offset + run.chars).join("");
+        offset += run.chars;
+        return text;
+    });
+
+    let prefixRuns = 0;
+    while (prefixRuns < runs.length && /^[\p{Nd}.．、()（）]+$/u.test(runTexts[prefixRuns])) prefixRuns++;
+    if (prefixRuns === 0 || prefixRuns === runs.length) return false;
+    const prefix = runTexts.slice(0, prefixRuns).join("");
+    if (!/^[(（]?\p{Nd}{1,3}(?:[.．]\p{Nd}{1,3}){0,3}[.．、)）]?$/u.test(prefix)) return false;
+
+    const rest = runTexts.slice(prefixRuns).join("");
+    // Sentence-final punctuation, possibly followed by closing quotes or brackets.
+    if (!hasCJKContent(rest) || /[。！？.!?]["'”’」』）)\]】]*$/u.test(rest)) return false;
+
+    const bodySize = bodyStyles[0].size;
+    let restChars = 0;
+    let bodySizedChars = 0;
+    for (const run of runs.slice(prefixRuns)) {
+        restChars += run.chars;
+        if (run.font.size >= bodySize - 0.5) bodySizedChars += run.chars;
+    }
+    return bodySizedChars / restChars >= MAJORITY_STYLE_SHARE;
+}
+
+/**
+ * Whether the line's reported (first-glyph) style alone satisfies the heading
+ * rules, i.e. `isHeaderStyle` without the majority-style veto.
+ */
+function opensWithHeaderStyle(
+    line: PageLine,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    precededByGap: boolean | null,
+    bodyAllCaps: boolean
+): boolean {
+    const lineStyle = extractLineStyle(line);
+    return !!lineStyle && matchesHeaderRules(
+        line, lineStyle, true, bodyStyles, settings, precededByGap, bodyAllCaps, null
+    );
+}
+
+/**
+ * Heading rules for `line` judged as set in `lineStyle`.
+ * `checkSpanDominance` requires `lineStyle` to cover 90% of the line's
+ * spans; it only applies to the line's reported (first-span) style.
+ */
+function matchesHeaderRules(
+    line: PageLine,
+    lineStyle: TextStyle,
+    checkSpanDominance: boolean,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    precededByGap: boolean | null,
+    bodyAllCaps: boolean,
+    phraseTextOverride: string | null
+): boolean {
+    if (!bodyStyles || bodyStyles.length === 0) return false;
 
     // Bullet-led list items and math-symbol lines: MuPDF's JSON walk
     // aggregates the leading glyph's font over the whole line, so the line
@@ -1096,7 +1451,7 @@ function isHeaderStyle(
     }
 
     // Must be highly consistent (90%+ same style)
-    if (getStyleDominance(line, lineStyle) < 0.9) {
+    if (checkSpanDominance && getStyleDominance(line, lineStyle) < 0.9) {
         return false;
     }
 
@@ -1284,9 +1639,11 @@ function isHeaderStyle(
         return false;
     }
 
-    // Check for figure/table labels
-    const prefixLabelRe =
-        /^\s*(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
+    // Check for figure/table labels, including "Extended Data Fig. 1" and
+    // "Supplementary Table S2" (those only with `headingLabelFilters`)
+    const prefixLabelRe = settings.headingLabelFilters
+        ? /^\s*(?:(?:extended\s+data|supplementary|supporting(?:\s+information)?)\s+)?(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i
+        : /^\s*(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
     if (prefixLabelRe.test(text)) {
         return false;
     }
@@ -1317,6 +1674,305 @@ function isHeaderStyle(
 }
 
 // ============================================================================
+// Hanging-Indent Blocks
+// ============================================================================
+
+/**
+ * Role of a line inside a hanging-indent block: `entry` opens an entry at
+ * the outer edge after a continuation at the inner edge; `continuation` is a
+ * wrapped line at the inner edge.
+ */
+type HangingRole = "entry" | "continuation" | null;
+
+/** Indent step between the outer and inner edge, in median line heights. */
+const HANGING_MIN_INDENT_EM = 0.5;
+const HANGING_MAX_INDENT_EM = 4.5;
+
+/**
+ * Find hanging-indent blocks in a column and label their lines.
+ *
+ * A candidate block is a run of consecutive rows whose left edges take
+ * exactly two levels, an outer edge O and an inner edge I = O + 0.5–4.5 em
+ * (see `labelHangingRun` for when a run counts as hanging). Inside a block,
+ * an inner row that continues a wrapped row is a `continuation` and an outer
+ * row after an inner row opens an `entry`.
+ *
+ * The column's left-edge mode cannot tell these blocks apart from indented
+ * prose: it lands on O or I depending on the share of multi-line entries on
+ * the page, so either every continuation reads as a first-line indent or no
+ * entry start produces a break.
+ */
+function detectHangingRoles(lines: PageLine[], medianHeight: number): HangingRole[] {
+    const roles: HangingRole[] = new Array(lines.length).fill(null);
+    const mh = medianHeight > 0 ? medianHeight : 10;
+    const tol = Math.max(1.6, 0.2 * mh);
+    const rows = groupRows(lines, mh);
+
+    let start = 0;
+    while (start < rows.length) {
+        const levels = [rows[start].l];
+        let end = start + 1;
+        let brokeOnLevel = false;
+        for (; end < rows.length; end++) {
+            if (rows[end].t - rows[end - 1].b > 2.5 * mh) break;
+            const x = rows[end].l;
+            if (levels.some(lv => Math.abs(x - lv) <= tol)) continue;
+            if (levels.length === 1) {
+                const d = Math.abs(x - levels[0]);
+                if (d >= HANGING_MIN_INDENT_EM * mh && d <= HANGING_MAX_INDENT_EM * mh) {
+                    levels.push(x);
+                    continue;
+                }
+            }
+            brokeOnLevel = levels.length === 2;
+            break;
+        }
+        if (levels.length === 2) {
+            labelHangingRun(rows, start, end, Math.min(...levels), Math.max(...levels), mh, tol, roles);
+        }
+        start = brokeOnLevel && end - 1 > start ? end - 1 : end;
+    }
+    return roles;
+}
+
+/** One visual text row: consecutive lines sharing a baseline band. */
+interface TextRow {
+    /** Index of the row's first line in the column. */
+    first: number;
+    head: PageLine;
+    l: number;
+    r: number;
+    t: number;
+    b: number;
+    text: string;
+}
+
+/**
+ * Group consecutive column lines into rows. The line detector splits a row
+ * at a wide gap — a bullet glyph set apart from its text, a bold author name,
+ * a justified word gap — and the left edge of such a fragment is not a line
+ * start.
+ */
+function groupRows(lines: PageLine[], mh: number): TextRow[] {
+    const rows: TextRow[] = [];
+    lines.forEach((line, k) => {
+        const row = rows[rows.length - 1];
+        const center = (line.bbox.t + line.bbox.b) / 2;
+        const prev = lines[k - 1];
+        if (
+            row &&
+            line.bbox.l > prev.bbox.l &&
+            Math.abs(center - (prev.bbox.t + prev.bbox.b) / 2) < 0.3 * mh
+        ) {
+            row.r = Math.max(row.r, line.bbox.r);
+            row.b = Math.max(row.b, line.bbox.b);
+            row.text += " " + line.text;
+            return;
+        }
+        rows.push({
+            first: k, head: line, l: line.bbox.l, r: line.bbox.r,
+            t: line.bbox.t, b: line.bbox.b, text: line.text,
+        });
+    });
+    return rows;
+}
+
+/** The end of a reference entry without terminal punctuation: a URL, DOI or page range. */
+const ENTRY_TAIL_RE = /(?:https?:\/\/|www\.|doi:)\S*$|\d+\s*[–-]\s*\d+$/iu;
+
+/** A bracketed list enumerator opening a line: "[5]", "(a)", "（3）", "(iv)". */
+const BRACKETED_ENUMERATOR_RE =
+    /^\s*[(（[［]\s*(?:\d{1,3}|[a-zA-Z]|[ivxlc]{1,5})\s*[)）\]］]/u;
+
+/**
+ * Sentence end, optionally followed by a citation marker ("….[17,26]",
+ * "…. [17]", "….12", "….298,299", "….¹²"). Includes CJK full-width
+ * terminators. Only a bracketed marker may follow a space: a bare number
+ * after one is text ("pp. 12").
+ */
+const SENTENCE_END_RE =
+    /[.!?。！？]["'”’)\]」』）]?(?:\s*\[[\d,;\s–-]+\]|\d{1,3}(?:[,–-]\d{1,3})*|[⁰¹²³⁴⁵⁶⁷⁸⁹]+(?:[,–-][⁰¹²³⁴⁵⁶⁷⁸⁹]+)*)?$/u;
+
+/**
+ * Label the rows of one two-level run when it reads as a hanging block.
+ *
+ * What separates a hanging block from first-line-indented prose is the outer
+ * row before each O→I step. In a hanging block it is an entry's first line:
+ * it wraps to the right margin mid-sentence, and the indented row continues
+ * it. In indented prose it ends a paragraph body. The run is hanging when it
+ * has at least two steps, at least 80% of them follow a wrapped row, and at
+ * least half of those follow an entry's first line.
+ *
+ * `wraps` allows a ragged right edge: a row wraps when it ends within 1.5 em
+ * or 10% of the block width of the block's right margin.
+ */
+function labelHangingRun(
+    rows: TextRow[],
+    start: number,
+    end: number,
+    outer: number,
+    inner: number,
+    mh: number,
+    tol: number,
+    roles: HangingRole[]
+): void {
+    const maxStepGap = 1.2 * mh;
+    let right = -Infinity;
+    for (let k = start; k < end; k++) right = Math.max(right, rows[k].r);
+    const width = right - outer;
+    const wraps = (row: TextRow) => right - row.r <= Math.max(1.5 * mh, 0.1 * width);
+    const isInner = (row: TextRow) => Math.abs(row.l - inner) <= tol;
+    const endsSentence = (row: TextRow) => SENTENCE_END_RE.test(row.text.trimEnd());
+    const follows = (row: TextRow, prev: TextRow) => row.t - prev.b <= maxStepGap;
+    const opensListItem = (row: TextRow) =>
+        isIconBulletLine(row.head) || isTextHangingIndentLeader({ ...row.head, text: row.text });
+
+    /** Row k steps from the outer to the inner edge right below its predecessor. */
+    const isStep = (k: number) =>
+        k > start && isInner(rows[k]) && !isInner(rows[k - 1]) && follows(rows[k], rows[k - 1]);
+
+    /**
+     * Whether the outer row before step k is an entry's first line: it wraps
+     * mid-sentence and does not itself continue a wrapped outer row. In
+     * first-line-indented prose that row ends a paragraph body instead.
+     */
+    const isEntryStep = (k: number) => {
+        const prev = rows[k - 1];
+        if (!wraps(prev) || endsSentence(prev)) return false;
+        const beforePrev = k - 2 >= start ? rows[k - 2] : null;
+        const continuesOuterRow =
+            beforePrev !== null &&
+            !isInner(beforePrev) &&
+            follows(prev, beforePrev) &&
+            wraps(beforePrev) &&
+            !endsSentence(beforePrev);
+        return !continuesOuterRow;
+    };
+
+    /**
+     * Whether step k opens an indented paragraph: the row before the step is
+     * finished, and the inner row wraps mid-sentence into an outer row that
+     * continues the paragraph, where a wrapped entry would continue at the
+     * inner edge. The outer row shows it continues the paragraph either
+     *   - by opening in lowercase, which an entry never does — the row
+     *     before may then also end like an entry (a URL, DOI or page range)
+     *     rather than a sentence; or
+     *   - after a finished sentence, by wrapping mid-sentence into yet
+     *     another outer row (a paragraph body runs on at the outer edge, a
+     *     wrapped entry's first line continues at the inner edge). An
+     *     unpunctuated one-line entry has the same shape, so an entry-like
+     *     ending does not count here.
+     * An inner row that opens with a URL or DOI continues a reference.
+     * An outer row that opens with a list marker ("26. Snyder …") is the
+     * next numbered entry, not paragraph text. An inner row after an
+     * unfinished row is a continuation, however it is indented.
+     *
+     * Not caught, and left to the hanging reading: an indented paragraph
+     * whose second line opens with a capital and either is its last line or
+     * ends a sentence at the margin. Both have the shape of an entry whose
+     * last line wraps into the next entry (a one-line entry, in the second
+     * case), which is the more common reading in reference lists.
+     */
+    const opensIndentedParagraph = (k: number) => {
+        const row = rows[k];
+        const next = k + 1 < end ? rows[k + 1] : null;
+        const before = rows[k - 1];
+        const beforeEndsSentence = endsSentence(before);
+        if (
+            !(beforeEndsSentence || ENTRY_TAIL_RE.test(before.text.trimEnd())) ||
+            /^\s*(?:https?:|www\.|doi:)/iu.test(row.text) ||
+            !wraps(row) ||
+            endsSentence(row) ||
+            next === null ||
+            isInner(next) ||
+            !follows(next, row) ||
+            opensListItem(next)
+        ) {
+            return false;
+        }
+        if (/^\s*\p{Ll}/u.test(next.text)) return true;
+        const afterNext = k + 2 < end ? rows[k + 2] : null;
+        return (
+            beforeEndsSentence &&
+            afterNext !== null &&
+            !isInner(afterNext) &&
+            follows(afterNext, next) &&
+            wraps(next) &&
+            !endsSentence(next)
+        );
+    };
+
+    // An opening bracket whose glyph box includes blank space (a full-width
+    // "（", a protruding "(") shifts its line left by about half an em. Rows
+    // offset only by that are one level, not a hanging indent. A bracketed
+    // enumerator ("[5]", "(a)", "（3）") is a list marker, so such rows stay
+    // evidence for a hanging block. The em is the run's own line height:
+    // smaller text elsewhere on the page can pull the page-wide median below
+    // it.
+    const rowEm = Math.max(mh, median(rows.slice(start, end).map(row => row.b - row.t)));
+    if (inner - outer < 0.6 * rowEm) {
+        let outerRows = 0;
+        let punctuationLed = 0;
+        for (let k = start; k < end; k++) {
+            if (isInner(rows[k])) continue;
+            outerRows++;
+            const text = rows[k].text;
+            if (/^\s*[（「『【〔［〈《([]/u.test(text) && !BRACKETED_ENUMERATOR_RE.test(text)) {
+                punctuationLed++;
+            }
+        }
+        if (punctuationLed >= 0.5 * outerRows) return;
+    }
+
+    let steps = 0;
+    let wrappedSteps = 0;
+    let entrySteps = 0;
+    for (let k = start + 1; k < end; k++) {
+        if (!isStep(k)) continue;
+        steps++;
+        if (!wraps(rows[k - 1])) continue;
+        wrappedSteps++;
+        if (isEntryStep(k)) entrySteps++;
+    }
+    if (
+        steps < 2 ||
+        wrappedSteps < 0.8 * steps ||
+        entrySteps < Math.max(1, 0.5 * wrappedSteps)
+    ) {
+        return;
+    }
+
+    // The vote covers the run as a whole, but a run can also hold ordinary
+    // prose before or after the block. Labelling pauses at an indented
+    // paragraph and resumes at the next entry-like step.
+    let inProse = false;
+    for (let k = start + 1; k < end; k++) {
+        const prev = rows[k - 1];
+        const row = rows[k];
+        if (isStep(k)) {
+            if (opensIndentedParagraph(k)) inProse = true;
+            else if (inProse && isEntryStep(k)) inProse = false;
+        }
+        if (inProse || !follows(row, prev)) continue;
+        if (isInner(row)) {
+            // A list marker or nested outline number ("2.1.1 …") opens a
+            // sub-entry, and a row ending in dot leaders and a page number is
+            // a finished table-of-contents entry; none of them is wrapped.
+            if (
+                wraps(prev) &&
+                !opensListItem(row) &&
+                !/^\s*\d+(?:\.\d+)+\.?\s+\p{L}/u.test(row.text) &&
+                !/(?:\.\s?){3,}\s*[\divxlcIVXLC]{1,6}\s*$/u.test(prev.text)
+            ) {
+                roles[row.first] = "continuation";
+            }
+        } else if (isInner(prev)) {
+            if (!/^\s*(?:\p{Ll}|https?:|www\.)/u.test(row.text)) roles[row.first] = "entry";
+        }
+    }
+}
+
+// ============================================================================
 // Step 4: Start New Item Detection
 // ============================================================================
 
@@ -1333,7 +1989,8 @@ function startNewItem(
     pageThresholds: PageThresholds,
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
-    bodyAllCaps: boolean = false
+    bodyAllCaps: boolean = false,
+    hangingRole: HangingRole = null
 ): boolean {
     if (i === 0) return true;
     if (!prevLine) return true;
@@ -1487,20 +2144,50 @@ function startNewItem(
     // lost as a distinct heading.
     const prevIsLocalHeader = isHeaderStyle(prevLine, bodyStyles, settings, null, bodyAllCaps);
     const headerGapPasses = gapBreak || prevIsLocalHeader;
-    const isLocalHeader = isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
+    // A hanging continuation wraps the line above it, so it cannot open a
+    // heading — e.g. an italic title line that the body-size rule would
+    // otherwise promote mid-entry, or a URL set in a larger face. It can
+    // still continue a heading. A heading after the last entry keeps its
+    // boundary only when spacing above it ends the continuation: one set at
+    // the inner edge with no more than normal leading merges into that
+    // entry. Font size cannot rescue it, since larger-set continuation lines
+    // are common in reference lists.
+    const isLocalHeader =
+        !(hangingRole === "continuation" && !prevIsLocalHeader) &&
+        isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
 
     if (isLocalHeader && !prevIsLocalHeader) {
         return true; // Header after non-header
     }
 
     if (isLocalHeader && prevIsLocalHeader) {
-        // Different header style
+        // Different header style. A hanging continuation stays with the
+        // heading-styled line it wraps (a bold list label, an italic title).
         const lineStyle = extractLineStyle(line);
         const prevStyle = extractLineStyle(prevLine);
-        if (!stylesEqual(lineStyle, prevStyle)) {
+        if (!stylesEqual(lineStyle, prevStyle) && hangingRole !== "continuation") {
             return true;
         }
         return false; // Same header style continues
+    }
+
+    // A heading followed by a line that only opens like one, e.g. a paragraph
+    // starting with a bold run-in phrase. The majority-style veto makes the
+    // line body text, but its opening style still differs from the
+    // heading's, which ends the heading. Size-truncation jitter alone is not
+    // a style change (see `sameTypeface`).
+    //
+    // A same-style opening is deliberately not a boundary: with no gap,
+    // indent or early line end in between, that shape is a run-in heading
+    // wrapping onto its second line ("Generation of Constructs for
+    // Expression in / Mammalian Cells. We cloned…"), which belongs to one
+    // paragraph. Splitting it would leave a truncated pseudo-heading.
+    if (
+        prevIsLocalHeader &&
+        !sameTypeface(line, prevLine) &&
+        opensWithHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps)
+    ) {
+        return true;
     }
 
     // (b) Indent signal
@@ -1729,13 +2416,26 @@ function startNewItem(
         }
     }
 
+    // Hanging-indent block roles (see `detectHangingRoles`). A continuation's
+    // inner-edge indent is not a paragraph indent, and the line it wraps
+    // reaches the margin; an entry starts at the outer edge with no other
+    // visual break.
+    let hangingEntryBreak = false;
+    if (hangingRole === "continuation") {
+        indentBreak = false;
+        earlyEndBreak = false;
+    } else if (hangingRole === "entry") {
+        hangingEntryBreak = true;
+    }
+
     // Combine signals
     const visualBreak =
         gapBreak ||
         indentBreak ||
         earlyEndBreak ||
         fontSizeBreak ||
-        leaderAfterContinuationBreak;
+        leaderAfterContinuationBreak ||
+        hangingEntryBreak;
     return visualBreak;
 }
 
@@ -1934,6 +2634,9 @@ function processColumnLines(
     let headerIndex = 0;
 
     let currentLines: PageLine[] = [];
+    const hangingRoles: HangingRole[] = settings.hangingIndentBlocks
+        ? detectHangingRoles(lines, pageThresholds.medianHeight)
+        : new Array(lines.length).fill(null);
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -1952,7 +2655,8 @@ function processColumnLines(
                 pageThresholds,
                 bodyStyles,
                 settings,
-                bodyAllCaps
+                bodyAllCaps,
+                hangingRoles[i]
             );
 
         if (shouldStartNew) {

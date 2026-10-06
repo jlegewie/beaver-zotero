@@ -258,7 +258,7 @@ export async function preloadStandaloneAttachmentLinks(
         if (seen.has(identity)) continue;
         seen.add(identity);
         try {
-            const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
             if (item && isStandaloneAttachment(item)) items.push(item);
         } catch {
             // Skip unavailable targets without preventing other titles from loading.

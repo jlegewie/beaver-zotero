@@ -20,7 +20,7 @@ import {
     zoteroLinkCitationPattern,
 } from './zoteroLinkCitation';
 import { translatePageLabelToNumber } from './pageLabelTranslation';
-import { extractItemKeyFromUri } from './zoteroUri';
+import { citationItemRefFromUri, extractItemKeyFromUri } from './zoteroUri';
 import { modelObjectId } from './libraryIdentity';
 import type { PageLabels } from '../services/documentCache';
 
@@ -299,8 +299,9 @@ export function simplifyNoteHtml(
                     // Single citation
                     const ci = citationItems[0];
                     const uri = ci.uris?.[0] || '';
-                    const itemKey = extractItemKeyFromUri(uri) || 'unknown';
-                    const itemId = modelObjectId(libraryID, itemKey);
+                    const itemRef = citationItemRefFromUri(uri, libraryID);
+                    const itemKey = itemRef?.key ?? 'unknown';
+                    const itemId = modelObjectId(itemRef?.libraryID ?? libraryID, itemKey);
                     const rawPage = ci.locator != null ? String(ci.locator) : '';
                     let page = rawPage;
                     let pageConvention: 'number' | 'label' | undefined = page ? 'label' : undefined;
@@ -349,8 +350,8 @@ export function simplifyNoteHtml(
                     // Build items attribute: "LIB-KEY1:page=P1, LIB-KEY2:page=P2"
                     const itemsAttr = citationItems.map((ci: any) => {
                         const uri = ci.uris?.[0] || '';
-                        const key = extractItemKeyFromUri(uri) || 'unknown';
-                        const itemId = modelObjectId(libraryID, key);
+                        const itemRef = citationItemRefFromUri(uri, libraryID);
+                        const itemId = modelObjectId(itemRef?.libraryID ?? libraryID, itemRef?.key ?? 'unknown');
                         let page = ci.locator != null ? String(ci.locator) : '';
                         const pageLabels = pageLabelsByItemId?.[itemId];
                         if (page && pageLabels && (ci.label == null || ci.label === 'page')) {

@@ -7,6 +7,7 @@ import {
 import type { AttachmentInfo, ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 import { parseItemReference } from '../utils/libraryIdentity';
+import { getParentItemAsync, isInTrashAsync } from '../utils/zoteroDataLoading';
 
 export type ItemValidationResultState = 'readable' | 'unreadable' | 'blocked';
 export type ItemValidationSeverity = 'info' | 'error';
@@ -241,23 +242,23 @@ class ItemValidationManager {
     /**
      * Validate cheap item-level constraints that do not require file analysis.
      */
-    private validateItemShell(
+    private async validateItemShell(
         item: Zotero.Item,
         options: ItemValidationOptions,
-    ): BasicValidationResult {
+    ): Promise<BasicValidationResult> {
         const libraryCheck = this.checkLibrarySearchable(item, options.searchableLibraryIds);
         if (libraryCheck.state === 'blocked') {
             return libraryCheck;
         }
 
         if (item.isRegularItem()) {
-            return item.isInTrash()
+            return (await isInTrashAsync(item))
                 ? blockedResult('Item is in trash')
                 : readableResult();
         }
 
         if (item.isAttachment()) {
-            return item.isInTrash()
+            return (await isInTrashAsync(item))
                 ? blockedResult('Attachment is in trash')
                 : readableResult();
         }
@@ -274,7 +275,7 @@ class ItemValidationManager {
             ) {
                 return blockedResult('Annotation is empty');
             }
-            const parent = item.parentItem;
+            const parent = await getParentItemAsync(item);
             if (!parent || !parent.isAttachment()) {
                 return blockedResult('Parent item is not an attachment');
             }
@@ -282,7 +283,7 @@ class ItemValidationManager {
         }
 
         if (item.isNote()) {
-            return item.isInTrash()
+            return (await isInTrashAsync(item))
                 ? blockedResult('Note is in trash')
                 : readableResult();
         }
@@ -323,7 +324,7 @@ class ItemValidationManager {
     ): Promise<ItemValidationResult> {
         try {
             logger(`ItemValidationManager: Starting validation for ${attachmentId(item)}`, 4);
-            const shellValidation = this.validateItemShell(item, options);
+            const shellValidation = await this.validateItemShell(item, options);
             if (shellValidation.state === 'blocked') {
                 return shellValidation;
             }
@@ -354,7 +355,7 @@ class ItemValidationManager {
         }
 
         logger(`ItemValidationManager: Starting validation for regular item ${attachmentId(item)}`, 4);
-        const itemValidation = this.validateItemShell(item, options);
+        const itemValidation = await this.validateItemShell(item, options);
         if (itemValidation.state === 'blocked') {
             return {
                 ...itemValidation,

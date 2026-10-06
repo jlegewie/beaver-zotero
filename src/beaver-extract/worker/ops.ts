@@ -292,6 +292,8 @@ class PageWalkCache {
         private readonly fontApi: FontApi | undefined,
         /** Text repair of the op's schema preset; applies to every walk. */
         private readonly textRepair: boolean,
+        /** Whether detailed walks record per-glyph style runs. */
+        private readonly styleRuns: boolean,
     ) {}
 
     getPlain(pageIndex: number, includeImages: boolean): RawPageData {
@@ -315,6 +317,7 @@ class PageWalkCache {
                 includeImages,
                 this.fontApi,
                 this.textRepair,
+                this.styleRuns,
             );
             this.detailed.set(pageIndex, page);
         }
@@ -1300,6 +1303,21 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
     };
 }
 
+/**
+ * Paragraph settings with the schema preset's switches applied. The caller may
+ * override `hangingIndentBlocks`; `headingLabelFilters` always follows the preset.
+ */
+function presetParagraphSettings(
+    preset: PdfExtractionPreset,
+    settings: ParagraphDetectionSettings | undefined,
+): ParagraphDetectionSettings {
+    return {
+        hangingIndentBlocks: preset.hangingIndentBlocks,
+        ...settings,
+        headingLabelFilters: preset.headingLabelFilters,
+    };
+}
+
 function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtractionPreset {
     if (schemaVersion == null) return CURRENT_PDF_EXTRACTION_PRESET;
     const preset = pdfExtractionPreset(schemaVersion);
@@ -1427,7 +1445,7 @@ export async function opExtract(
         // spread of pages and the pipeline walks them again; sharing the
         // walk here keeps an expensive-to-walk page from being processed
         // twice (gate + extraction).
-        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair);
+        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair, preset.styleRuns);
 
         if (opts.checkTextLayer) {
             // Run the gate over the SAME walk the pipeline will reuse —
@@ -1475,7 +1493,7 @@ export async function opExtract(
             pageCount,
             pageLabels,
             engine,
-            args.paragraphSettings,
+            presetParagraphSettings(preset, args.paragraphSettings),
             splitter,
             fontApi,
             pageCache,
@@ -1547,7 +1565,7 @@ export async function opStructuredExtractWithDebug(
         assertDocumentHasPages(pageCount);
         const pageLabels = collectPageLabels(doc);
         const fontApi = (await ensureApi()).Font;
-        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair);
+        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair, preset.styleRuns);
 
         if (opts.checkTextLayer) {
             const ocrProvider = ocrGateProvider(pageCache, pageCount, true);
@@ -1581,7 +1599,7 @@ export async function opStructuredExtractWithDebug(
             pageCount,
             pageLabels,
             "structured",
-            args.paragraphSettings,
+            presetParagraphSettings(preset, args.paragraphSettings),
             splitter,
             fontApi,
             pageCache,
@@ -1762,7 +1780,13 @@ export async function opAnalyzeOCRNeeds(
         const pageCount = resolveTruePageCount(doc);
         assertDocumentHasPages(pageCount);
         const fontApi = (await ensureApi()).Font;
-        const pageCache = new PageWalkCache(doc, fontApi, CURRENT_PDF_EXTRACTION_PRESET.textRepair);
+        const pageCache = new PageWalkCache(
+            doc,
+            fontApi,
+            CURRENT_PDF_EXTRACTION_PRESET.textRepair,
+            // OCR analysis reads text only.
+            false,
+        );
         const analyzer = new DocumentAnalyzer(ocrGateProvider(pageCache, pageCount, true));
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };
@@ -1943,7 +1967,7 @@ export async function opExtractSentenceDebug(
             pageCount,
             splitterConfig: opts?.splitterConfig,
             analysisWindow: opts?.analysisWindow,
-            paragraphSettings: opts?.paragraphSettings,
+            paragraphSettings: presetParagraphSettings(CURRENT_PDF_EXTRACTION_PRESET, opts?.paragraphSettings),
             margins: opts?.margins,
             marginZone: opts?.marginZone,
             repeatThreshold: opts?.repeatThreshold,
