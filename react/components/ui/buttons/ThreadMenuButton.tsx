@@ -5,6 +5,8 @@ import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
+import { getHost } from '@beaver/agent-ui/host';
+import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -28,7 +30,10 @@ import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
 import { preprocessNoteContent, renderToHTML, renderToMarkdownAsync } from '../../../utils/citationRenderers';
 import { copyToClipboard } from '../../../utils/clipboard';
+import { exportWithFeedback, fileExportMenuItem } from '../../../utils/fileExportFeedback';
+import { menuDivider, saveAsNoteMenuItem } from '../../../utils/saveNoteMenu';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
+import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
 import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
@@ -104,6 +109,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const citationDataMap = useAtomValue(citationMapAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     const getThreadMeta = () => {
         const threadId = store.get(currentThreadIdAtom);
@@ -225,6 +231,27 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         }
     };
 
+    /**
+     * Export the whole chat — every prompt, response, note and tool call — to
+     * a file. The host asks where to save and formats citations in the
+     * citation style setting.
+     */
+    const handleExportThread = async (format: FileExportFormat) => {
+        const documentExport = getHost().documentExport;
+        const exportThread = documentExport?.exportThreadToFile;
+        if (!exportThread) return;
+        // As for copying: include the streamed parts not yet applied.
+        flushPendingPartEvents();
+        const runs = store.get(allRunsAtom);
+        if (runs.length === 0) return;
+        await exportWithFeedback(
+            format,
+            () => exportThread({ runs, format }),
+            addPopupMessage,
+            { reveal: documentExport.revealExportedFile, open: documentExport.openExportedFile },
+        );
+    };
+
     const handleCopyThreadUrl = async () => {
         const threadId = store.get(currentThreadIdAtom);
         if (!threadId) return;
@@ -283,17 +310,22 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         await confirmAndDeleteThread(threadId, surfaceWindow);
     };
 
+    const handleCopyThreadId = async () => {
+        await copyToClipboard(store.get(currentThreadIdAtom) || '');
+    };
+
     const getMenuItems = (): MenuItem[] => {
         const hasRuns = runsCount > 0;
+        const host = getHost();
         const context = getZoteroTargetContextSync();
         const hasParent = context.parentReference !== null;
         const pinPending = !!threadId && isPinPending(pinsPending, threadId);
 
-        // The chat's own housekeeping first, then ways to look at it, then
-        // ways to take it elsewhere.
+        // The chat's own housekeeping, ways to look at it, the clipboard, notes
+        // and files made from it, and last, apart, deleting it.
         const items: MenuItem[] = [
             {
-                label: 'Rename chat',
+                label: 'Rename chat…',
                 onClick: handleRenameChat,
                 disabled: !threadId,
             },
@@ -310,20 +342,12 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                     </span>
                 ) : undefined,
             },
+            menuDivider('thread-actions-divider'),
             {
-                label: 'Delete chat',
-                onClick: handleDeleteChat,
-                disabled: !threadId,
-            },
-            {
-                label: 'thread-actions-divider',
-                onClick: () => {},
-                isDivider: true,
-            },
-            {
-                // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
-                // that also opens the bar is not shown here.
                 label: 'Find in chat',
+                // Display only: the chord itself is handled by the sidebar.
+                shortcut: Zotero.isMac ? '⌘F' : 'Ctrl+F',
+                ariaKeyShortcuts: Zotero.isMac ? 'Meta+F' : 'Control+F',
                 onClick: findControls.open,
                 disabled: !hasRuns || !findControls.isAvailable,
             },
@@ -341,29 +365,40 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                         }).then(result => { if (result?.message) surfaceWindow.alert(result.message); }).catch(Zotero.logError);
                 },
             }] : []),
+            menuDivider('clipboard-divider'),
             {
-                label: 'find-in-chat-divider',
-                onClick: () => {},
-                isDivider: true,
-            },
-            {
-                label: 'Copy entire chat',
+                label: 'Copy chat',
                 onClick: handleCopyThread,
                 disabled: !hasRuns,
             },
             {
-                label: 'Save chat as note',
-                onClick: handleSaveAsNote,
-                disabled: !hasRuns,
-            },
-            {
-                label: 'Save chat as child note',
-                onClick: handleSaveAsChildNote,
-                disabled: !hasParent || !hasRuns,
-            },
-            {
                 label: 'Copy link to chat',
                 onClick: handleCopyThreadUrl,
+                disabled: !threadId,
+            },
+            menuDivider('output-divider'),
+            saveAsNoteMenuItem({
+                onSaveStandalone: handleSaveAsNote,
+                onSaveChild: handleSaveAsChildNote,
+                hasParent,
+                parentTitle: hasParent ? host.noteWriter?.childNoteParentTitle?.() : null,
+                disabled: !hasRuns,
+            }),
+            ...(host.documentExport?.exportThreadToFile
+                ? [fileExportMenuItem(handleExportThread, !hasRuns)]
+                : []),
+            ...((host.config?.isDevelopment() ?? false) ? [
+                menuDivider('developer-divider'),
+                {
+                    label: 'Copy chat ID',
+                    onClick: handleCopyThreadId,
+                    disabled: !threadId,
+                },
+            ] : []),
+            menuDivider('delete-divider'),
+            {
+                label: 'Delete chat…',
+                onClick: handleDeleteChat,
                 disabled: !threadId,
             },
         ];

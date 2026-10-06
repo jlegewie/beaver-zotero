@@ -169,7 +169,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
             isDivider: true,
         },
         {
-            label: 'Delete chat',
+            label: 'Delete chat…',
             onClick: () => onDelete(thread),
         },
     ];

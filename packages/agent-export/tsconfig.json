@@ -1,0 +1,61 @@
+{
+  // Standalone typecheck for the export pipeline (source building, parsing,
+  // citation data, writers). Like agent-core it is compiled with an
+  // ECMAScript-only `lib` and no ambient @types, so a writer that reaches for a
+  // DOM or Zotero global fails here instead of in whichever realm lacks it.
+  //
+  // The one ambient file is agent-core's globals.d.ts: this package compiles
+  // agent-core modules from source, and those rely on the narrow host globals
+  // the core declares. It is listed explicitly, and `verify-program.mjs`
+  // asserts it is the only file from outside this package in `files`.
+  //
+  // `skipLibCheck: true` mirrors agent-core: dependency declarations (docx,
+  // KaTeX, unified) are not checked against this bare lib, while the
+  // package's own code is fully checked against them.
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "types": [],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@beaver/agent-core/*": ["../agent-core/src/*"]
+    }
+  },
+  // The full transitive closure of the package's own files, listed explicitly
+  // so the surface is readable. `verify-program.mjs` keeps this list honest.
+  "files": [
+    "../agent-core/src/globals.d.ts",
+    "./src/types.ts",
+    "./src/mdast.ts",
+    "./src/runtime.ts",
+    "./src/source/buildSource.ts",
+    "./src/source/citationSnapshot.ts",
+    "./src/parse/parseExportDoc.ts",
+    "./src/parse/markdown.ts",
+    "./src/citations/citationTargets.ts",
+    "./src/citations/externalCsl.ts",
+    "./src/citations/inlineHtml.ts",
+    "./src/citations/noteIndices.ts",
+    "./src/docx/writeDocx.ts",
+    "./src/docx/zoteroFields.ts",
+    "./src/docx/theme.ts",
+    "./src/html/writeHtml.ts",
+    "./src/html/escape.ts",
+    "./src/html/theme.ts",
+    "./src/markdown/writeMarkdown.ts",
+    "./src/latex/writeLatex.ts",
+    "./src/latex/escape.ts",
+    "./src/page.ts",
+    "./src/activity.ts",
+    "./src/math/latexToOmml.ts",
+    "./src/math/mathmlToOmml.ts",
+    "./src/math/xml.ts"
+  ]
+}

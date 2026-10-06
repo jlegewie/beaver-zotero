@@ -612,6 +612,31 @@ export default tseslint.config(
             "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
         },
     },
+    // The export pipeline (source building, parsing, citation data, writers)
+    // is client-agnostic like the core: no Zotero, no React, no app graph, and
+    // no agent-ui. Zotero specifics (citation lookup and formatting, files) are
+    // implemented by the host in src/services/export. `npm run typecheck:export`
+    // is the stronger gate; this block covers every file as you write it.
+    {
+        files: ["packages/agent-export/src/**/*.ts"],
+        rules: {
+            "no-restricted-globals": ["error", ...l1CoreGlobals],
+            "no-restricted-imports": [
+                "error",
+                {
+                    paths: l1CorePackageBans,
+                    patterns: [
+                        ...l1CoreImportBans,
+                        {
+                            group: ["@beaver/agent-ui", "@beaver/agent-ui/**"],
+                            message: "The export pipeline must not import the shared React layer.",
+                        },
+                    ],
+                },
+            ],
+            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
+        },
+    },
     // The shared React layer (theme, icons, primitives, render components) is
     // consumed by the Zotero plugin and the Word add-in from the same source, so
     // it must not name either host. Client behavior reaches it through the host

@@ -312,6 +312,28 @@ export interface ExternalFileCitationExportRequest {
     localPathsByExtKey: Record<string, string>;
 }
 
+/** File formats a response can be exported to. */
+export type FileExportFormat = 'docx' | 'pdf' | 'markdown' | 'latex';
+
+/** The final answer only, or the full response with the agent's tool activity. */
+export type FileExportContent = 'final' | 'full';
+
+/** Outcome of exporting to a file. `warnings` are user-facing sentences. */
+export type FileExportResult =
+    | {
+        status: 'saved';
+        /** The exported document. */
+        path: string;
+        /** Its file name. */
+        fileName: string;
+        /** The folder it was saved in, as shown to the user. */
+        folderName: string;
+        /** Names of files written beside it (a LaTeX export's .bib file). */
+        companionFileNames: string[];
+        warnings: string[];
+    }
+    | { status: 'canceled' };
+
 /**
  * Render content into the host's native document format. For Zotero this is a
  * note (CSL-formatted HTML); other clients format
@@ -328,6 +350,23 @@ export interface DocumentExportHost {
      * external-file storage omit it.
      */
     renderExternalFileCitation?(request: ExternalFileCitationExportRequest): CitationExportRender | null;
+    /**
+     * Export a response — the runs of its resume chain, in order — to a file
+     * the user chooses, with citations formatted by the host. Interaction-time:
+     * may read the client's global state. Optional; clients without file export
+     * omit it and the action is not offered.
+     */
+    exportResponseToFile?(request: { runs: AgentRun[]; format: FileExportFormat; content: FileExportContent }): Promise<FileExportResult>;
+    /**
+     * Export a whole thread — every run in order, with the user's prompts and
+     * the agent's tool activity — to a file the user chooses. Same contract as
+     * `exportResponseToFile`.
+     */
+    exportThreadToFile?(request: { runs: AgentRun[]; format: FileExportFormat }): Promise<FileExportResult>;
+    /** Show an exported file in the system file manager. Rejects when it is gone. */
+    revealExportedFile?(path: string): Promise<void>;
+    /** Open an exported file in the system's default application. Rejects when it is gone. */
+    openExportedFile?(path: string): Promise<void>;
 }
 
 export type NoteSaveFormat =
@@ -379,6 +418,11 @@ export interface NoteWriterHost {
     isCurrentLibraryEditable(): boolean;
     /** Render-time: whether the current Zotero context has a parent item target. */
     canSaveAsChildNote(): boolean;
+    /**
+     * Render-time: display title of the item a child note would be saved
+     * under, or null when there is none or it cannot be named.
+     */
+    childNoteParentTitle?(): string | null;
     /** Interaction-time: create a note in the host library and optionally reveal it. */
     saveNote(request: SaveNoteRequest): Promise<SavedNoteReference | null>;
 }

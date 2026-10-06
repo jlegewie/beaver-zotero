@@ -57,6 +57,7 @@ import {
     handleTestTableOpenReaderHttpRequest,
 } from './httpHandlers/testTableHandlers';
 import { handleTestVersionPopupHttpRequest } from './httpHandlers/testVersionPopupHandlers';
+import { handleTestExportHttpRequest } from './httpHandlers/testExportHandlers';
 import { captureOperationContext } from '../runtime/operationContext';
 export function registerWindowTestCommands(
     runtime: WindowRuntime,
@@ -100,6 +101,7 @@ export function registerWindowTestCommands(
         '/beaver/test/quick-prompt': handleTestQuickPromptHttpRequest,
         '/beaver/test/version-popup': handleTestVersionPopupHttpRequest,
         '/beaver/test/saved-actions': handleTestListSavedActionsHttpRequest,
+        '/beaver/test/export': handleTestExportHttpRequest,
         'render-markdown': async (request: { content: string }) => captureOperationContext(false).renderMarkdown!(request.content),
     };
     Zotero.Beaver.runtime.registerWindowCommands(runtime, handlers);
