@@ -40,7 +40,19 @@ import { extractThreadContent, ExtractThreadContentOptions } from '../../../util
 import { confirmAndDeleteThread, renameThread } from '../../../utils/threadActions';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
 import { getZoteroTargetContextSync } from '../../../utils/zoteroTargetContext';
-import { MoreHorizontalIcon } from '../../icons/icons';
+import {
+    CopyIcon,
+    DeleteIcon,
+    EditIcon,
+    Icon,
+    LinkIcon,
+    MoreHorizontalIcon,
+    PictureInPictureIcon,
+    PinIcon,
+    PinOffIcon,
+    SearchIcon,
+    ToolsIcon,
+} from '../../icons/icons';
 
 interface ThreadMenuButtonProps {
     className?: string;
@@ -326,11 +338,13 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const items: MenuItem[] = [
             {
                 label: 'Rename chat…',
+                icon: EditIcon,
                 onClick: handleRenameChat,
                 disabled: !threadId,
             },
             {
                 label: isPinned ? 'Unpin chat' : 'Pin chat',
+                icon: isPinned ? PinOffIcon : PinIcon,
                 onClick: handleTogglePin,
                 disabled: !threadId || isPinned === null || pinPending,
                 customContent: pinPending ? (
@@ -345,6 +359,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             menuDivider('thread-actions-divider'),
             {
                 label: 'Find in chat',
+                icon: SearchIcon,
                 // Display only: the chord itself is handled by the sidebar.
                 shortcut: Zotero.isMac ? '⌘F' : 'Ctrl+F',
                 ariaKeyShortcuts: Zotero.isMac ? 'Meta+F' : 'Control+F',
@@ -353,11 +368,17 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             },
             ...(!inWindow ? [{
                 label: "Open in Beaver window",
+                icon: PictureInPictureIcon,
                 disabled: !canOpenFinishedChat,
-                customContent: !canOpenFinishedChat && !availabilityPending ? <div>
-                    <div>Open in Beaver window</div>
-                    <div className="text-xs">{RESPONSE_FINISH_MESSAGE}</div>
-                </div> : undefined,
+                customContent: !canOpenFinishedChat && !availabilityPending ? (
+                    <span className="display-flex items-start gap-2">
+                        <Icon icon={PictureInPictureIcon} size={14} className="mt-010" />
+                        <span>
+                            <div>Open in Beaver window</div>
+                            <div className="text-xs">{RESPONSE_FINISH_MESSAGE}</div>
+                        </span>
+                    </span>
+                ) : undefined,
                 onClick: () => {
                     if (threadId)
                         void BeaverUIFactory.commandBeaverWindow("open-chat", {
@@ -368,11 +389,13 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             menuDivider('clipboard-divider'),
             {
                 label: 'Copy chat',
+                icon: CopyIcon,
                 onClick: handleCopyThread,
                 disabled: !hasRuns,
             },
             {
                 label: 'Copy link to chat',
+                icon: LinkIcon,
                 onClick: handleCopyThreadUrl,
                 disabled: !threadId,
             },
@@ -391,6 +414,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                 menuDivider('developer-divider'),
                 {
                     label: 'Copy chat ID',
+                    icon: ToolsIcon,
                     onClick: handleCopyThreadId,
                     disabled: !threadId,
                 },
@@ -398,6 +422,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             menuDivider('delete-divider'),
             {
                 label: 'Delete chat…',
+                icon: DeleteIcon,
                 onClick: handleDeleteChat,
                 disabled: !threadId,
             },

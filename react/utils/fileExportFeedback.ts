@@ -1,6 +1,6 @@
 import type { FileExportFormat, FileExportResult } from '@beaver/agent-ui/host/types';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
-import { DocIcon, MarkdownIcon, PdfIcon, TexIcon } from '@beaver/agent-ui/icons';
+import { DocIcon, DownloadIcon, MarkdownIcon, PdfIcon, TexIcon } from '@beaver/agent-ui/icons';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { PopupMessage } from '../types/popupMessage';
 
@@ -47,6 +47,7 @@ export function fileExportMenuItem(
 ): MenuItem {
     return {
         label: 'Export',
+        icon: DownloadIcon,
         onClick: () => {},
         disabled,
         submenu: fileExportFormatMenuItems(onSelect, disabled),

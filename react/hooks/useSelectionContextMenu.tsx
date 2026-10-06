@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { MenuPosition } from '@beaver/agent-ui/primitives/ContextMenu';
+import { MenuItem, MenuPosition } from '@beaver/agent-ui/primitives/ContextMenu';
+import { CopyIcon } from '../components/icons/icons';
 import { getWindowFromElement, getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
 
 interface UseSelectionContextMenuOptions {
@@ -16,11 +17,7 @@ interface UseSelectionContextMenuResult {
     menuPosition: MenuPosition;
     closeMenu: () => void;
     handleContextMenu: (e: React.MouseEvent) => void;
-    menuItems: Array<{
-        label: string;
-        onClick: () => void;
-        disabled?: boolean;
-    }>;
+    menuItems: MenuItem[];
 }
 
 /**
@@ -128,9 +125,10 @@ export default function useSelectionContextMenu(
     };
     
     // Generate menu items - default Copy action plus any custom items
-    const menuItems = [
+    const menuItems: MenuItem[] = [
         {
             label: 'Copy',
+            icon: CopyIcon,
             onClick: defaultCopyHandler
         },
         ...(options.customMenuItems?.map(item => ({

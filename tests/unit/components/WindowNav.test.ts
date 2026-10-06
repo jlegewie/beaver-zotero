@@ -30,7 +30,8 @@ vi.mock('../../../react/components/preferences/BillingSection', () => ({ formatP
 vi.mock('../../../react/components/ChatLoadFailure', () => ({ default: () => null }));
 vi.mock('../../../react/components/icons/icons', () => {
     const NullIcon = () => null;
-    return { Icon: NullIcon, MoreHorizontalIcon: NullIcon, PlusSignIcon: NullIcon, SearchIcon: NullIcon, UserIcon: NullIcon, CancelIcon: NullIcon };
+    return { Icon: NullIcon, MoreHorizontalIcon: NullIcon, PlusSignIcon: NullIcon, SearchIcon: NullIcon, UserIcon: NullIcon, CancelIcon: NullIcon,
+        DeleteIcon: NullIcon, EditIcon: NullIcon, PinIcon: NullIcon, PinOffIcon: NullIcon };
 });
 vi.mock('@beaver/agent-ui/icons/Spinner', () => ({ default: () => null }));
 vi.mock('@beaver/agent-ui/primitives/MenuButton', () => ({ default: () => null }));
