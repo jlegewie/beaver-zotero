@@ -21,13 +21,19 @@ export interface PdfExtractionPreset {
      * by its first glyph.
      */
     styleRuns: boolean;
+    /**
+     * Read hanging-indent blocks (reference lists, footnotes, lists whose
+     * wrapped lines sit at an inner edge) as entries with continuations
+     * (`ParagraphDetectionSettings.hangingIndentBlocks`).
+     */
+    hangingIndentBlocks: boolean;
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */
     idScheme: ExtractIdScheme;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, idScheme: "document" },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, idScheme: "page" },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, idScheme: "document" },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, idScheme: "page" },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

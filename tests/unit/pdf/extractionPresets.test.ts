@@ -9,20 +9,22 @@ import {
 import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
 describe("PDF extraction presets", () => {
-    it("keeps text repair and style runs off and ids document-wide for schema 4", () => {
+    it("keeps text repair, style runs and hanging-indent blocks off and ids document-wide for schema 4", () => {
         expect(pdfExtractionPreset("4")).toEqual({
             schemaVersion: "4",
             textRepair: false,
             styleRuns: false,
+            hangingIndentBlocks: false,
             idScheme: "document",
         });
     });
 
-    it("turns text repair and style runs on and ids page-scoped for schema 5", () => {
+    it("turns text repair, style runs and hanging-indent blocks on and ids page-scoped for schema 5", () => {
         expect(pdfExtractionPreset("5")).toEqual({
             schemaVersion: "5",
             textRepair: true,
             styleRuns: true,
+            hangingIndentBlocks: true,
             idScheme: "page",
         });
     });
