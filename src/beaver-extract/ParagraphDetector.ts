@@ -1764,16 +1764,21 @@ function groupRows(lines: PageLine[], mh: number): TextRow[] {
     return rows;
 }
 
+/** The end of a reference entry without terminal punctuation: a URL, DOI or page range. */
+const ENTRY_TAIL_RE = /(?:https?:\/\/|www\.|doi:)\S*$|\d+\s*[–-]\s*\d+$/iu;
+
 /** A bracketed list enumerator opening a line: "[5]", "(a)", "（3）", "(iv)". */
 const BRACKETED_ENUMERATOR_RE =
     /^\s*[(（[［]\s*(?:\d{1,3}|[a-zA-Z]|[ivxlc]{1,5})\s*[)）\]］]/u;
 
 /**
  * Sentence end, optionally followed by a citation marker ("….[17,26]",
- * "….12", "….298,299"). Includes CJK full-width terminators.
+ * "…. [17]", "….12", "….298,299"). Includes CJK full-width terminators. Only
+ * a bracketed marker may follow a space: a bare number after one is text
+ * ("pp. 12").
  */
 const SENTENCE_END_RE =
-    /[.!?。！？]["'”’)\]」』）]?(?:\[[\d,;\s–-]+\]|\d{1,3}(?:[,–-]\d{1,3})*)?$/u;
+    /[.!?。！？]["'”’)\]」』）]?(?:\s*\[[\d,;\s–-]+\]|\d{1,3}(?:[,–-]\d{1,3})*)?$/u;
 
 /**
  * Label the rows of one two-level run when it reads as a hanging block.
@@ -1832,23 +1837,31 @@ function labelHangingRun(
     };
 
     /**
-     * Whether step k opens an indented paragraph: the outer row before it
-     * finishes a sentence, and the inner row wraps mid-sentence into an
-     * outer row that continues the paragraph — either in lowercase (an entry
-     * never opens in lowercase) or by itself wrapping mid-sentence into
-     * another outer row (a wrapped entry would continue at the inner edge).
+     * Whether step k opens an indented paragraph: the row before the step is
+     * finished — it ends a sentence, or ends like an entry (a URL, DOI or
+     * page range) — and the inner row wraps mid-sentence into an outer row
+     * that continues the paragraph, where a wrapped entry would continue at
+     * the inner edge. The outer row shows it continues the paragraph either
+     *   - by opening in lowercase, which an entry never does; or
+     *   - by wrapping mid-sentence into yet another outer row (a paragraph
+     *     body runs on at the outer edge, a wrapped entry's first line
+     *     continues at the inner edge).
      * An outer row that opens with a list marker ("26. Snyder …") is the
-     * next numbered entry, not paragraph text.
+     * next numbered entry, not paragraph text. An inner row after an
+     * unfinished row is a continuation, however it is indented.
      *
-     * A two-line paragraph whose second line opens with a capital is not
-     * caught: it has the same shape as an entry whose last line wraps into
-     * the next entry, and is left to the hanging reading.
+     * Not caught, and left to the hanging reading: an indented paragraph
+     * whose second line opens with a capital and either is its last line or
+     * ends a sentence at the margin. Both have the shape of an entry whose
+     * last line wraps into the next entry (a one-line entry, in the second
+     * case), which is the more common reading in reference lists.
      */
     const opensIndentedParagraph = (k: number) => {
         const row = rows[k];
         const next = k + 1 < end ? rows[k + 1] : null;
+        const before = rows[k - 1];
         if (
-            !endsSentence(rows[k - 1]) ||
+            !(endsSentence(before) || ENTRY_TAIL_RE.test(before.text.trimEnd())) ||
             !wraps(row) ||
             endsSentence(row) ||
             next === null ||

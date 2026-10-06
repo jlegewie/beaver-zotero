@@ -220,6 +220,56 @@ describe('hanging-indent blocks', () => {
         ]);
     });
 
+
+    it('keeps an indented paragraph out of a last entry that ends without punctuation', () => {
+        const texts = paragraphTexts([
+            ...REFERENCES.slice(0, 4),
+            { text: 'Brown, L. 2012. A single-line reference ending in https://doi.org/10.1/x', l: 0, r: RIGHT_MARGIN },
+            { text: 'The first line of an indented paragraph continues on', l: INDENT, r: RIGHT_MARGIN },
+            { text: 'the next line flush with the margin and ends here.', l: 0, r: 250 },
+        ]);
+        expect(texts.slice(-2)).toEqual([
+            'Brown, L. 2012. A single-line reference ending in https://doi.org/10.1/x',
+            'The first line of an indented paragraph continues on the next line flush with the margin and ends here.',
+        ]);
+    });
+
+    it('keeps an indented line inside a paragraph after the list as a continuation', () => {
+        // The middle line sits at the inner edge (as when its first word is
+        // lost) but continues an unfinished sentence, so it starts nothing.
+        const texts = paragraphTexts([
+            ...REFERENCES,
+            { text: 'A body paragraph starts at the margin and keeps going until the', l: 0, r: RIGHT_MARGIN, gap: 20 },
+            { text: 'line wraps here because a word went missing from its start and', l: INDENT, r: RIGHT_MARGIN },
+            { text: 'the paragraph then continues at the margin until it ends.', l: 0, r: 260 },
+        ]);
+        expect(texts.slice(-1)).toEqual([
+            'A body paragraph starts at the margin and keeps going until the line wraps here because a word went missing from its start and the paragraph then continues at the margin until it ends.',
+        ]);
+    });
+
+    it('treats a sentence followed by a spaced citation marker as finished', () => {
+        // Two-line first-line-indented paragraphs whose last lines run close
+        // to the margin and end ". [17]".
+        const paragraph = (n: number): RowSpec[] => [
+            { text: `Paragraph ${n} opens with an indent and runs on until it reaches the`, l: INDENT, r: RIGHT_MARGIN },
+            { text: `Margin, then it ends close to the edge with a citation marker. [${n}]`, l: 0, r: 390 },
+        ];
+        // A flush-left paragraph above anchors the column's left edge, as body
+        // text does on a real page.
+        const body: RowSpec[] = Array.from({ length: 5 }, (_, i) => ({
+            text: `Body text line ${i + 1} runs across the full width of the column and`,
+            l: 0,
+            r: RIGHT_MARGIN,
+        }));
+        const specs = [...body, ...paragraph(1), ...paragraph(2), ...paragraph(3)];
+        const expected = [1, 2, 3].map(
+            n => `Paragraph ${n} opens with an indent and runs on until it reaches the Margin, then it ends close to the edge with a citation marker. [${n}]`,
+        );
+        expect(paragraphTexts(specs, false).slice(-3)).toEqual(expected);
+        expect(paragraphTexts(specs).slice(-3)).toEqual(expected);
+    });
+
     it('keeps a first-line-indented paragraph after the list out of the last entry', () => {
         const texts = paragraphTexts([
             ...REFERENCES,
@@ -239,4 +289,9 @@ describe('hanging-indent blocks', () => {
     // entry (the abbreviation case above), so it still merges into the last
     // entry before it.
     it.todo('keeps a two-line indented paragraph with a capitalised second line out of the last entry');
+    // Likewise for a longer paragraph whose second line opens with a capital
+    // and ends a sentence at the margin: it has the shape of an entry whose
+    // last line runs into a one-line entry ending in a period, which is the
+    // reading reference lists need.
+    it.todo('keeps an indented paragraph out of the last entry when its capitalised second line ends a sentence');
 });
