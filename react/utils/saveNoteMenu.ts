@@ -1,4 +1,5 @@
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
+import { NoteIcon } from '@beaver/agent-ui/icons';
 
 /** Longest parent title shown in the child-note item before it is cut. */
 const MAX_PARENT_TITLE_LENGTH = 40;
@@ -32,6 +33,7 @@ export function saveAsNoteMenuItem(options: {
             : 'Child note';
     return {
         label: 'Save as note',
+        icon: NoteIcon,
         onClick: () => {},
         disabled,
         submenu: [
