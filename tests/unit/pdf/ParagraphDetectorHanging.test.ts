@@ -234,6 +234,40 @@ describe('hanging-indent blocks', () => {
         ]);
     });
 
+    it('keeps an indented DOI line with its reference', () => {
+        // The DOI reaches the margin, and the next entry is an unpunctuated
+        // one-line entry followed by another entry.
+        const texts = paragraphTexts([
+            REFERENCES[0],
+            REFERENCES[1],
+            { text: 'Jones, K. 2011. Another study title. Review of Stuff 15: 125-150.', l: 0, r: RIGHT_MARGIN },
+            { text: 'https://doi.org/10.1234/review.2011.015.125.extended-identifier', l: INDENT, r: 395 },
+            { text: 'Brown, L. 2012. A one-line reference that fills the line 4: 5-9', l: 0, r: RIGHT_MARGIN },
+            { text: 'Davis, M. 2013. A short last reference.', l: 0, r: 250 },
+        ]);
+        expect(texts[1]).toBe(
+            'Jones, K. 2011. Another study title. Review of Stuff 15: 125-150. https://doi.org/10.1234/review.2011.015.125.extended-identifier',
+        );
+        expect(texts[2]).toMatch(/^Brown, L\. 2012\./);
+    });
+
+    it('needs a finished sentence before an indented line read as a paragraph continued by a capitalised line', () => {
+        // The entry's first line ends in a page range without a period, so it
+        // reads as finished for the lowercase check only.
+        const texts = paragraphTexts([
+            REFERENCES[0],
+            REFERENCES[1],
+            { text: 'Jones, K. 2011. Another study title. Review of Stuff 15: 125-150', l: 0, r: RIGHT_MARGIN },
+            { text: 'Edited volume with further notes on the collection and its', l: INDENT, r: 395 },
+            { text: 'Brown, L. 2012. A one-line reference that fills the line 4: 5-9', l: 0, r: RIGHT_MARGIN },
+            { text: 'Davis, M. 2013. A short last reference.', l: 0, r: 250 },
+        ]);
+        expect(texts[1]).toBe(
+            'Jones, K. 2011. Another study title. Review of Stuff 15: 125-150 Edited volume with further notes on the collection and its',
+        );
+        expect(texts[2]).toMatch(/^Brown, L\. 2012\./);
+    });
+
     it('keeps an indented line inside a paragraph after the list as a continuation', () => {
         // The middle line sits at the inner edge (as when its first word is
         // lost) but continues an unfinished sentence, so it starts nothing.

@@ -1838,14 +1838,18 @@ function labelHangingRun(
 
     /**
      * Whether step k opens an indented paragraph: the row before the step is
-     * finished — it ends a sentence, or ends like an entry (a URL, DOI or
-     * page range) — and the inner row wraps mid-sentence into an outer row
-     * that continues the paragraph, where a wrapped entry would continue at
-     * the inner edge. The outer row shows it continues the paragraph either
-     *   - by opening in lowercase, which an entry never does; or
-     *   - by wrapping mid-sentence into yet another outer row (a paragraph
-     *     body runs on at the outer edge, a wrapped entry's first line
-     *     continues at the inner edge).
+     * finished, and the inner row wraps mid-sentence into an outer row that
+     * continues the paragraph, where a wrapped entry would continue at the
+     * inner edge. The outer row shows it continues the paragraph either
+     *   - by opening in lowercase, which an entry never does — the row
+     *     before may then also end like an entry (a URL, DOI or page range)
+     *     rather than a sentence; or
+     *   - after a finished sentence, by wrapping mid-sentence into yet
+     *     another outer row (a paragraph body runs on at the outer edge, a
+     *     wrapped entry's first line continues at the inner edge). An
+     *     unpunctuated one-line entry has the same shape, so an entry-like
+     *     ending does not count here.
+     * An inner row that opens with a URL or DOI continues a reference.
      * An outer row that opens with a list marker ("26. Snyder …") is the
      * next numbered entry, not paragraph text. An inner row after an
      * unfinished row is a continuation, however it is indented.
@@ -1860,8 +1864,10 @@ function labelHangingRun(
         const row = rows[k];
         const next = k + 1 < end ? rows[k + 1] : null;
         const before = rows[k - 1];
+        const beforeEndsSentence = endsSentence(before);
         if (
-            !(endsSentence(before) || ENTRY_TAIL_RE.test(before.text.trimEnd())) ||
+            !(beforeEndsSentence || ENTRY_TAIL_RE.test(before.text.trimEnd())) ||
+            /^\s*(?:https?:|www\.|doi:)/iu.test(row.text) ||
             !wraps(row) ||
             endsSentence(row) ||
             next === null ||
@@ -1874,6 +1880,7 @@ function labelHangingRun(
         if (/^\s*\p{Ll}/u.test(next.text)) return true;
         const afterNext = k + 2 < end ? rows[k + 2] : null;
         return (
+            beforeEndsSentence &&
             afterNext !== null &&
             !isInner(afterNext) &&
             follows(afterNext, next) &&
