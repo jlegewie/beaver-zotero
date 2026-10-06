@@ -633,8 +633,7 @@ class LatexWriter {
             const definitions = sectionFootnoteDefinitions(doc, section);
             const context: BlockContext = { inArgument: false, itemize: 0, enumerate: 0, headingBase: responseBase, headingOffset: 0 };
             if (section.kind === 'user') {
-                parts.push('\\noindent\\textbf{User}');
-                parts.push(`\\begin{quote}\n${this.blocks(section.children, definitions, context)}\n\\end{quote}`);
+                parts.push(`\\begin{quote}\n\\textbf{User:} ${this.blocks(section.children, definitions, context)}\n\\end{quote}`);
                 continue;
             }
             if (section.kind === 'activity') {

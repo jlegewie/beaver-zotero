@@ -17,6 +17,8 @@ export interface HtmlTheme {
         body: string;
         headings: string;
         mono: string;
+        /** Chat chrome: the prompt label and tool activity lines. */
+        ui: string;
     };
     /** Font sizes in points. */
     sizes: {
@@ -41,9 +43,11 @@ export interface HtmlTheme {
         /** Secondary text: tool activity, prompt labels. */
         muted: string;
         link: string;
-        /** Table rules, activity bars. */
+        /** Table rules, quote bars. */
         rule: string;
         codeBackground: string;
+        /** Fill of a user prompt's card. */
+        promptBackground: string;
     };
     /** Spacing in points; `lineHeight` is a CSS line-height multiple. */
     spacing: {
@@ -59,7 +63,6 @@ export interface HtmlTheme {
     indents: {
         list: number;
         quote: number;
-        activity: number;
     };
     page: {
         /** Inches on every side. */
@@ -75,6 +78,7 @@ export const HTML_THEME: HtmlTheme = {
         body: '"Times New Roman", Times, "Liberation Serif", serif',
         headings: '"Times New Roman", Times, "Liberation Serif", serif',
         mono: 'Consolas, Menlo, "DejaVu Sans Mono", monospace',
+        ui: '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif',
     },
     sizes: {
         body: 12,
@@ -84,7 +88,7 @@ export const HTML_THEME: HtmlTheme = {
         heading3: 12,
         heading4: 12,
         note: 10,
-        activity: 10,
+        activity: 9,
         code: 10,
         table: 11,
     },
@@ -95,6 +99,7 @@ export const HTML_THEME: HtmlTheme = {
         link: '#1F4E79',
         rule: '#808080',
         codeBackground: '#F2F2F2',
+        promptBackground: '#EEF1F4',
     },
     spacing: {
         lineHeight: 1.35,
@@ -108,7 +113,6 @@ export const HTML_THEME: HtmlTheme = {
     indents: {
         list: 0.25,
         quote: 0.4,
-        activity: 0.15,
     },
     page: {
         margin: 1,
@@ -215,30 +219,34 @@ thead th { border-bottom: 0.5pt solid ${colors.text}; }
 .math-display { margin: ${spacing.blockBefore}pt 0 ${spacing.paragraphAfter}pt; text-align: center; break-inside: avoid; }
 .math-source { background: none; padding: 0; }
 .note-ref { font-size: 0.7em; vertical-align: super; line-height: 0; }
+.prompt {
+    background: ${colors.promptBackground};
+    border-radius: 6pt;
+    padding: 7pt 10pt 8pt;
+    margin: ${spacing.headingBefore}pt 0 ${spacing.paragraphAfter}pt;
+}
 .prompt-label {
-    font-size: ${sizes.activity}pt;
+    font-family: ${fonts.ui};
+    font-size: ${sizes.activity - 1}pt;
     font-weight: bold;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     color: ${colors.muted};
-    margin: ${spacing.headingBefore}pt 0 2pt;
+    margin: 0 0 3pt;
     break-after: avoid;
 }
-.prompt {
-    margin-left: ${indents.quote}in;
-    margin-right: ${indents.quote}in;
-    padding-left: 8pt;
-    border-left: 1.5pt solid ${colors.rule};
-}
+.prompt p:last-child { margin-bottom: 0; }
 .url-start { white-space: nowrap; }
 .activity {
+    font-family: ${fonts.ui};
     font-size: ${sizes.activity}pt;
     color: ${colors.muted};
-    line-height: 1.2;
-    margin: ${spacing.blockBefore}pt 0 ${spacing.paragraphAfter}pt ${indents.activity}in;
-    padding-left: 6pt;
-    border-left: 1.5pt solid ${colors.rule};
+    line-height: 1.35;
+    margin: ${spacing.blockBefore}pt 0 ${spacing.paragraphAfter}pt;
     break-after: avoid;
 }
 .activity p { margin: 0; }
+.activity-mark { padding-right: 0.45em; }
 .notes { font-size: ${sizes.note}pt; line-height: 1.25; }
 .notes ol { padding-left: 0.3in; margin: 0; }
 .notes li { margin-bottom: 3pt; }

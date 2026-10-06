@@ -148,8 +148,9 @@ describe('writeHtml', () => {
             { type: 'note', title: 'My note', markdown: 'Body' },
         ] });
         const { html } = writeHtml({ doc, citations: citations(doc, 'in-text', { bibliography: null }), options });
-        expect(html).toContain('<p class="prompt-label">User</p>\n<div class="prompt">\n<p>Summarize</p>');
-        expect(html).toContain('<div class="activity">\n<p>Searched “networks”</p>');
+        // The label sits inside the prompt's card.
+        expect(html).toContain('<div class="prompt">\n<p class="prompt-label">User</p>\n<p>Summarize</p>');
+        expect(html).toContain('<div class="activity">\n<p><span class="activity-mark">›</span>Searched “networks”</p>');
         expect(html).toContain('<h1>My note</h1>\n<p>Body</p>');
     });
 

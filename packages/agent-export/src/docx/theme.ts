@@ -28,6 +28,8 @@ export interface DocxTheme {
         headings: string;
         /** Code and inline code. */
         mono: string;
+        /** Chat chrome: the prompt label and tool activity lines. */
+        ui: string;
     };
     /** Font sizes in points. */
     sizes: {
@@ -55,6 +57,8 @@ export interface DocxTheme {
         /** Table rules, quote and activity bars. */
         rule: string;
         codeBackground: string;
+        /** Fill of a user prompt's card. */
+        promptBackground: string;
     };
     /** Spacing in points, line spacing as a multiple of single spacing. */
     spacing: {
@@ -73,7 +77,6 @@ export interface DocxTheme {
         /** Hanging indent of list markers. */
         listHanging: number;
         quote: number;
-        activity: number;
     };
     page: {
         /** Inches on every side. */
@@ -89,6 +92,7 @@ export const DOCX_THEME: DocxTheme = {
         body: 'Times New Roman',
         headings: 'Times New Roman',
         mono: 'Consolas',
+        ui: 'Arial',
     },
     sizes: {
         body: 12,
@@ -98,7 +102,7 @@ export const DOCX_THEME: DocxTheme = {
         heading3: 12,
         heading4: 12,
         footnote: 10,
-        activity: 10,
+        activity: 9,
         code: 10,
         table: 11,
         pageNumber: 10,
@@ -110,6 +114,7 @@ export const DOCX_THEME: DocxTheme = {
         link: '1F4E79',
         rule: '808080',
         codeBackground: 'F2F2F2',
+        promptBackground: 'EEF1F4',
     },
     spacing: {
         lineSpacing: 1.15,
@@ -124,7 +129,6 @@ export const DOCX_THEME: DocxTheme = {
         list: 0.25,
         listHanging: 0.25,
         quote: 0.4,
-        activity: 0.15,
     },
     page: {
         margin: 1,
@@ -146,6 +150,7 @@ export const STYLE = {
     hyperlink: 'Hyperlink',
     tableText: 'TableText',
     promptLabel: 'PromptLabel',
+    prompt: 'BeaverPrompt',
     activity: 'BeaverActivity',
 } as const;
 
@@ -153,6 +158,17 @@ const halfPoints = (points: number) => Math.round(points * 2);
 const twips = (points: number) => Math.round(points * 20);
 const inches = (value: number) => Math.round(value * 1440);
 const lineSpacing = (multiple: number) => ({ line: Math.round(240 * multiple), lineRule: LineRuleType.AUTO });
+
+/** Paragraph shading and borders of a prompt card; the borders pad the text inside the fill. */
+function promptCard(theme: DocxTheme) {
+    const edge = { style: BorderStyle.SINGLE, size: 4, color: theme.colors.promptBackground, space: 6 };
+    return {
+        shading: { type: ShadingType.CLEAR, fill: theme.colors.promptBackground, color: 'auto' },
+        border: { top: edge, bottom: edge, left: edge, right: edge },
+        // Inside the margins: the borders' padding reaches past the text.
+        indent: { left: twips(7), right: twips(7) },
+    };
+}
 
 /** Word styles for the theme: document defaults, built-in overrides and Beaver's own styles. */
 export function documentStyles(theme: DocxTheme = DOCX_THEME): IStylesOptions {
@@ -224,20 +240,25 @@ export function documentStyles(theme: DocxTheme = DOCX_THEME): IStylesOptions {
                 id: STYLE.bibliography, name: 'Bibliography', basedOn: 'Normal', next: STYLE.bibliography, quickFormat: true,
             },
             {
-                id: STYLE.promptLabel, name: 'Prompt Label', basedOn: 'Normal', next: STYLE.quote,
-                run: { bold: true, color: theme.colors.muted, size: halfPoints(theme.sizes.activity) },
-                paragraph: { spacing: { before: twips(theme.spacing.headingBefore), after: twips(2) }, keepNext: true },
+                // A user prompt is a card: a soft fill, with borders in the fill's
+                // color for padding. Word draws consecutive paragraphs with the
+                // same borders as one box, so the label and the prompt share it.
+                id: STYLE.promptLabel, name: 'Prompt Label', basedOn: 'Normal', next: STYLE.prompt,
+                run: { font: theme.fonts.ui, bold: true, allCaps: true, characterSpacing: 10, color: theme.colors.muted, size: halfPoints(theme.sizes.activity - 1) },
+                paragraph: { ...promptCard(theme), spacing: { before: 0, after: twips(3), ...lineSpacing(1) }, keepNext: true },
             },
             {
-                // A quiet, ruled line per tool call. Consecutive lines share the
-                // rule and, through contextual spacing, sit tight together.
+                id: STYLE.prompt, name: 'Beaver Prompt', basedOn: STYLE.body, next: STYLE.body,
+                paragraph: { ...promptCard(theme), spacing: { before: 0, after: twips(4) } },
+            },
+            {
+                // A quiet line per tool call, in the interface face. Consecutive
+                // lines sit tight together through contextual spacing.
                 id: STYLE.activity, name: 'Beaver Activity', basedOn: 'Normal', next: 'Normal',
-                run: { size: halfPoints(theme.sizes.activity), color: theme.colors.muted },
+                run: { font: theme.fonts.ui, size: halfPoints(theme.sizes.activity), color: theme.colors.muted },
                 paragraph: {
-                    indent: { left: inches(theme.indents.activity) },
                     spacing: { before: twips(theme.spacing.blockBefore), after: twips(theme.spacing.paragraphAfter), ...lineSpacing(1) },
                     contextualSpacing: true,
-                    border: { left: { style: BorderStyle.SINGLE, size: 12, color: theme.colors.rule, space: 6 } },
                 },
             },
         ],

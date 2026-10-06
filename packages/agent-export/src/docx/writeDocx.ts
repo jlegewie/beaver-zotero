@@ -469,10 +469,7 @@ class DocxWriter {
         // another code block or a table would merge into it or touch it, so an
         // unshaded spacer goes between them.
         let previous: 'code' | 'table' | 'other' | null = null;
-        const spacer = () => new Paragraph({
-            spacing: { before: 0, after: 0, line: gapAfterBlock(this.theme), lineRule: LineRuleType.EXACT },
-            children: [],
-        });
+        const spacer = () => this.gap(this.theme.spacing.paragraphAfter);
         const spacedBase = () => {
             const base = gapBefore > 0 ? { ...paragraphBase, spacing: { before: gapBefore } } : paragraphBase;
             gapBefore = 0;
@@ -536,6 +533,14 @@ class DocxWriter {
             previous = kind;
         }
         return out;
+    }
+
+    /** An empty, unshaded paragraph exactly `points` tall. */
+    private gap(points: number): Paragraph {
+        return new Paragraph({
+            spacing: { before: 0, after: 0, line: Math.round(points * 20), lineRule: LineRuleType.EXACT },
+            children: [],
+        });
     }
 
     /**
@@ -671,13 +676,20 @@ class DocxWriter {
         for (const section of doc.sections) {
             const definitions = sectionFootnoteDefinitions(doc, section);
             if (section.kind === 'user') {
+                // A card: Word shades a paragraph's spacing too, so the space
+                // around it is kept by unshaded gaps instead.
+                out.push(this.gap(this.theme.spacing.headingBefore));
                 out.push(new Paragraph({ style: STYLE.promptLabel, children: [textRun('User')] }));
-                out.push(...this.blocks(section.children, { depth: 0, quote: 1 }, definitions));
+                for (const block of section.children) {
+                    if (block.type !== 'paragraph') continue;
+                    out.push(new Paragraph({ style: STYLE.prompt, children: this.inlines(block.children, {}, definitions) }));
+                }
+                out.push(this.gap(this.theme.spacing.paragraphAfter));
                 continue;
             }
             if (section.kind === 'activity') {
                 for (const call of section.calls ?? []) {
-                    out.push(new Paragraph({ style: STYLE.activity, keepNext: true, children: [textRun(curlyQuotes(call))] }));
+                    out.push(new Paragraph({ style: STYLE.activity, keepNext: true, children: [textRun(`›\u00a0\u00a0${curlyQuotes(call)}`)] }));
                 }
                 continue;
             }

@@ -66,6 +66,9 @@ function printSettings(path: string, title: string, page: HtmlPageSetup): any {
         settings[key] = '';
     }
     if (page.pageNumbers) settings.footerStrCenter = '&P';
+    // The footer sits this far (inches) from the paper's edge; at the default
+    // it nearly touches the bottom. Halfway into the margin reads as intended.
+    settings.edgeTop = settings.edgeBottom = Math.min(0.5, page.margin / 2);
     // Code blocks and table shading are backgrounds.
     settings.printBGColors = true;
     settings.printBGImages = false;

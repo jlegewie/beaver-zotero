@@ -343,8 +343,16 @@ class MarkdownWriter {
         for (const section of doc.sections) {
             const definitions = sectionFootnoteDefinitions(doc, section);
             if (section.kind === 'user') {
-                out.push({ type: 'paragraph', children: [{ type: 'strong', children: [{ type: 'text', value: 'User' }] }] });
-                out.push({ type: 'blockquote', children: this.blocks(section.children, definitions) });
+                // `> **User:** …`: the quote marks the prompt; the reply follows unquoted.
+                const children = this.blocks(section.children, definitions);
+                const label: MdInline[] = [{ type: 'strong', children: [{ type: 'text', value: 'User:' }] }, { type: 'text', value: ' ' }];
+                const [first, ...rest] = children;
+                out.push({
+                    type: 'blockquote',
+                    children: first?.type === 'paragraph'
+                        ? [{ ...first, children: [...label, ...first.children] }, ...rest]
+                        : [{ type: 'paragraph', children: label.slice(0, 1) }, ...children],
+                });
                 continue;
             }
             if (section.kind === 'activity') {

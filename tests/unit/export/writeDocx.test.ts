@@ -307,6 +307,26 @@ describe('writeDocx theme', () => {
         expect(styles).toMatch(/w:styleId="BeaverActivity".*?<w:contextualSpacing\/>/s);
     });
 
+    it('writes a user prompt as a labeled card, set apart by unshaded gaps', async () => {
+        const { document, styles } = await write('', 'en-US', [
+            { type: 'user', text: 'First line\nsecond line\n\nAnother paragraph' },
+            { type: 'markdown', markdown: 'Reply.' },
+            { type: 'activity', calls: ['Reading: Smith 2004'] },
+        ]);
+        const order = [...document.matchAll(/<w:p>(?:(?!<\/w:p>)[\s\S])*?<\/w:p>/g)].map(([block]) => (
+            /w:val="PromptLabel"/.test(block) ? 'label'
+                : /w:val="BeaverPrompt"/.test(block) ? 'prompt'
+                    : /w:lineRule="exact"/.test(block) && !/<w:t[ >]/.test(block) ? 'gap'
+                        : /Reply\./.test(block) ? 'reply' : /BeaverActivity/.test(block) ? 'activity' : 'other'
+        ));
+        const start = order.indexOf('gap');
+        expect(order.slice(start, start + 7)).toEqual(['gap', 'label', 'prompt', 'prompt', 'gap', 'reply', 'activity']);
+        // One box: the label and the prompt share fill and borders.
+        expect(styles).toMatch(/w:styleId="BeaverPrompt"[\s\S]*?<w:pBdr>[\s\S]*?<w:shd [^>]*w:fill="EEF1F4"/);
+        expect(styles).toMatch(/w:styleId="PromptLabel"[\s\S]*?<w:caps\/>/);
+        expect(visibleText(document)).toContain('›\u00a0\u00a0Reading: Smith 2004');
+    });
+
     it('trims the layout whitespace around bibliography entries', async () => {
         const doc = parseExportSource({ title: '', blocks: [{ type: 'markdown', markdown: 'A <citation id="u-AAAAAAAA"/>.' }] });
         const formatted = citations(doc, 'in-text', {

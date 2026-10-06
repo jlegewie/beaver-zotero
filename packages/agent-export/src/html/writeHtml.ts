@@ -381,14 +381,13 @@ class HtmlWriter {
         for (const section of doc.sections) {
             const definitions = sectionFootnoteDefinitions(doc, section);
             if (section.kind === 'user') {
-                out += '<p class="prompt-label">User</p>\n';
-                out += `<div class="prompt">\n${this.blocks(section.children, definitions)}</div>\n`;
+                out += `<div class="prompt">\n<p class="prompt-label">User</p>\n${this.blocks(section.children, definitions)}</div>\n`;
                 continue;
             }
             if (section.kind === 'activity') {
                 const calls = section.calls ?? [];
                 if (calls.length > 0) {
-                    out += `<div class="activity">\n${calls.map(call => `<p>${escapeHtml(curlyQuotes(call))}</p>`).join('\n')}\n</div>\n`;
+                    out += `<div class="activity">\n${calls.map(call => `<p><span class="activity-mark">›</span>${escapeHtml(curlyQuotes(call))}</p>`).join('\n')}\n</div>\n`;
                 }
                 continue;
             }

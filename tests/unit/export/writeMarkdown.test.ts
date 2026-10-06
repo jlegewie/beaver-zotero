@@ -130,7 +130,7 @@ describe('writeMarkdown', () => {
             { type: 'note', title: 'Summary', markdown: 'Text.' },
         ] });
         const { markdown } = writeMarkdown({ doc, citations: citations(doc, 'in-text', { bibliography: null }), options });
-        expect(markdown).toBe('# Thread\n\n**User**\n\n> Question?\n\nLooking.\n\n*Searched “networks”*\n\n# Summary\n\nText.\n');
+        expect(markdown).toBe('# Thread\n\n> **User:** Question?\n\nLooking.\n\n*Searched “networks”*\n\n# Summary\n\nText.\n');
     });
 
     it('keeps citations the processor could not format as plain text', () => {
