@@ -1,6 +1,7 @@
 import { handleDuplicatesRequest } from '../duplicates/discovery';
 import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCacheHandlers';
 import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
+import { handleTestExportHttpRequest } from './handlers/testExportHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
 import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
 import {
@@ -1208,6 +1209,10 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/version-popup'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/version-popup', request));
 
         endpoints['/beaver/test/saved-actions'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/saved-actions', request));
+
+        // File export without the save dialog: a given source, or a response of
+        // a window's open thread.
+        endpoints['/beaver/test/export'] = createEndpoint(handleTestExportHttpRequest);
     }
 
     const releases = Object.entries(endpoints).map(([path, handler]) =>

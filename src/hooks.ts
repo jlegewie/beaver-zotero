@@ -938,6 +938,7 @@ async function disposeAppServices(): Promise<void> {
     });
     await attempt('citationService.dispose', () => addon.citationService?.dispose());
     addon.citationService = undefined;
+    await attempt('exporter.dispose', () => addon.exporter.dispose());
 }
 
 let instanceDisposal: Promise<void> | undefined;

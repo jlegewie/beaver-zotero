@@ -14,9 +14,11 @@
       // globals.d.ts declares narrowed `navigator`/`crypto`/`URL` that would
       // clash with lib.dom here. Both packages' sources still enter this
       // program by being imported, and each has its own standalone gate
-      // (`npm run typecheck:core` / `npm run typecheck:ui`).
+      // (`npm run typecheck:core` / `npm run typecheck:ui` /
+      // `npm run typecheck:export`).
       "@beaver/agent-core/*": ["./packages/agent-core/src/*"],
-      "@beaver/agent-ui/*": ["./packages/agent-ui/src/*"]
+      "@beaver/agent-ui/*": ["./packages/agent-ui/src/*"],
+      "@beaver/agent-export/*": ["./packages/agent-export/src/*"]
     },
     "jsx": "react",
     "esModuleInterop": true,
