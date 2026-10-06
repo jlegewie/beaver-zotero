@@ -1303,6 +1303,21 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
     };
 }
 
+/**
+ * Paragraph settings with the schema preset's switches applied. The caller may
+ * override `hangingIndentBlocks`; `headingLabelFilters` always follows the preset.
+ */
+function presetParagraphSettings(
+    preset: PdfExtractionPreset,
+    settings: ParagraphDetectionSettings | undefined,
+): ParagraphDetectionSettings {
+    return {
+        hangingIndentBlocks: preset.hangingIndentBlocks,
+        ...settings,
+        headingLabelFilters: preset.headingLabelFilters,
+    };
+}
+
 function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtractionPreset {
     if (schemaVersion == null) return CURRENT_PDF_EXTRACTION_PRESET;
     const preset = pdfExtractionPreset(schemaVersion);
@@ -1478,7 +1493,7 @@ export async function opExtract(
             pageCount,
             pageLabels,
             engine,
-            args.paragraphSettings,
+            presetParagraphSettings(preset, args.paragraphSettings),
             splitter,
             fontApi,
             pageCache,
@@ -1584,7 +1599,7 @@ export async function opStructuredExtractWithDebug(
             pageCount,
             pageLabels,
             "structured",
-            args.paragraphSettings,
+            presetParagraphSettings(preset, args.paragraphSettings),
             splitter,
             fontApi,
             pageCache,
@@ -1952,7 +1967,7 @@ export async function opExtractSentenceDebug(
             pageCount,
             splitterConfig: opts?.splitterConfig,
             analysisWindow: opts?.analysisWindow,
-            paragraphSettings: opts?.paragraphSettings,
+            paragraphSettings: presetParagraphSettings(CURRENT_PDF_EXTRACTION_PRESET, opts?.paragraphSettings),
             margins: opts?.margins,
             marginZone: opts?.marginZone,
             repeatThreshold: opts?.repeatThreshold,
