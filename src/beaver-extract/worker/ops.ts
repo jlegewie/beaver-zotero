@@ -1303,12 +1303,19 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
     };
 }
 
-/** Paragraph settings with the preset's switches applied; explicit settings win. */
+/**
+ * Paragraph settings with the schema preset's switches applied. The caller may
+ * override `hangingIndentBlocks`; `headingLabelFilters` always follows the preset.
+ */
 function presetParagraphSettings(
     preset: PdfExtractionPreset,
     settings: ParagraphDetectionSettings | undefined,
 ): ParagraphDetectionSettings {
-    return { hangingIndentBlocks: preset.hangingIndentBlocks, ...settings };
+    return {
+        hangingIndentBlocks: preset.hangingIndentBlocks,
+        ...settings,
+        headingLabelFilters: preset.headingLabelFilters,
+    };
 }
 
 function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtractionPreset {

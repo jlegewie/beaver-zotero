@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import {
     looksLikeFragmentedCJKBody,
     detectParagraphs,
+    type ParagraphDetectionSettings,
 } from '../../../src/beaver-extract/ParagraphDetector';
 import type {
     PageLine,
@@ -1215,8 +1216,8 @@ describe('header detection', () => {
         i === FILLERS.length - 1 ? { ...f, gapAfter: 14 } : f,
     );
 
-    function items(specs: LeaderLineSpec[], bodyStyles: TextStyle[]) {
-        return detectParagraphs(makeColumnPageResult(specs), bodyStyles).items;
+    function items(specs: LeaderLineSpec[], bodyStyles: TextStyle[], settings: ParagraphDetectionSettings = {}) {
+        return detectParagraphs(makeColumnPageResult(specs), bodyStyles, settings).items;
     }
 
     describe('heading-capitalization guard', () => {
@@ -1595,16 +1596,36 @@ describe('header detection', () => {
                 expect(all.find(it => it.text.includes(text.slice(0, 15)))!.type).toBe('paragraph');
             }
         });
-    });
 
-    describe('run-in labels', () => {
-        function kindOf(text: string): string | undefined {
+        it('keeps extended-data and supplementary caption titles as headings without heading label filters', () => {
+            const text = 'Supplementary Table 5: PCR conditions and primers used for validation';
             const all = items(
                 [...FILLERS_BEFORE_HEADING, { text, l: 0, size: 10, bold: true, font: 'Heading-Bold' }],
                 [BODY],
+                { headingLabelFilters: false },
+            );
+            expect(all.find(it => it.text.includes(text.slice(0, 15)))!.type).toBe('header');
+        });
+    });
+
+    describe('run-in labels', () => {
+        function kindOf(text: string, settings: ParagraphDetectionSettings = {}): string | undefined {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { text, l: 0, size: 10, bold: true, font: 'Heading-Bold' }],
+                [BODY],
+                settings,
             );
             return all.find(it => it.text.includes(text.slice(0, 12)))?.type;
         }
+
+        it('keeps run-in label lines as headings without heading label filters', () => {
+            const off = { headingLabelFilters: false };
+            expect(kindOf('Received: 5 May 2020; Accepted: 2 June 2020', off)).toBe('header');
+            expect(kindOf('Keywords Peer influence · Adolescence · Substance use', off)).toBe('header');
+            expect(
+                kindOf('Results: We found that the treatment improved outcomes in most of the enrolled patients', off),
+            ).toBe('header');
+        });
 
         it('demotes a front-matter label line set entirely in a heading face', () => {
             expect(kindOf('Received: 5 May 2020; Accepted: 2 June 2020')).toBe('paragraph');

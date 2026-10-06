@@ -53,6 +53,13 @@ export interface ParagraphDetectionSettings {
      * `detectHangingRoles` (default: false). Enabled by the PDF schema preset.
      */
     hangingIndentBlocks?: boolean;
+    /**
+     * Whether heading detection demotes run-in label items ("Keywords: …",
+     * "Received: …", a structured-abstract label followed by prose) and
+     * supplementary / extended-data figure and table captions (default: true).
+     * PDF schema 4 turns it off so its document-wide ids keep resolving.
+     */
+    headingLabelFilters?: boolean;
 }
 
 const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
@@ -66,6 +73,7 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     maxHeaderLength: 200,
     removeHyphenation: true,
     hangingIndentBlocks: false,
+    headingLabelFilters: true,
 };
 
 /**
@@ -1173,7 +1181,11 @@ function isHeaderStyle(
     if (!lineStyle) return false;
     // Item-level only (the joined item text): boundaries are decided per line
     // and stay as they are; a run-in label item just isn't labelled a heading.
-    if (phraseTextOverride !== null && looksLikeRunInLabel(phraseTextOverride)) {
+    if (
+        settings.headingLabelFilters &&
+        phraseTextOverride !== null &&
+        looksLikeRunInLabel(phraseTextOverride)
+    ) {
         return false;
     }
     if (!matchesHeaderRules(
@@ -1628,9 +1640,10 @@ function matchesHeaderRules(
     }
 
     // Check for figure/table labels, including "Extended Data Fig. 1" and
-    // "Supplementary Table S2"
-    const prefixLabelRe =
-        /^\s*(?:(?:extended\s+data|supplementary|supporting(?:\s+information)?)\s+)?(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
+    // "Supplementary Table S2" (those only with `headingLabelFilters`)
+    const prefixLabelRe = settings.headingLabelFilters
+        ? /^\s*(?:(?:extended\s+data|supplementary|supporting(?:\s+information)?)\s+)?(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i
+        : /^\s*(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
     if (prefixLabelRe.test(text)) {
         return false;
     }
