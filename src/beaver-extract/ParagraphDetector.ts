@@ -48,6 +48,12 @@ export interface ParagraphDetectionSettings {
     /** Whether to remove hyphenation when joining lines (default: true) */
     removeHyphenation?: boolean;
     /**
+     * Read hanging-indent blocks (reference lists, footnotes, lists whose
+     * wrapped lines sit at an inner edge) as entries with continuations; see
+     * `detectHangingRoles` (default: false). Enabled by the PDF schema preset.
+     */
+    hangingIndentBlocks?: boolean;
+    /**
      * Whether heading detection demotes run-in label items ("Keywords: …",
      * "Received: …", a structured-abstract label followed by prose) and
      * supplementary / extended-data figure and table captions (default: true).
@@ -66,6 +72,7 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     minHeaderLength: 3,
     maxHeaderLength: 200,
     removeHyphenation: true,
+    hangingIndentBlocks: false,
     headingLabelFilters: true,
 };
 
@@ -1667,6 +1674,305 @@ function matchesHeaderRules(
 }
 
 // ============================================================================
+// Hanging-Indent Blocks
+// ============================================================================
+
+/**
+ * Role of a line inside a hanging-indent block: `entry` opens an entry at
+ * the outer edge after a continuation at the inner edge; `continuation` is a
+ * wrapped line at the inner edge.
+ */
+type HangingRole = "entry" | "continuation" | null;
+
+/** Indent step between the outer and inner edge, in median line heights. */
+const HANGING_MIN_INDENT_EM = 0.5;
+const HANGING_MAX_INDENT_EM = 4.5;
+
+/**
+ * Find hanging-indent blocks in a column and label their lines.
+ *
+ * A candidate block is a run of consecutive rows whose left edges take
+ * exactly two levels, an outer edge O and an inner edge I = O + 0.5–4.5 em
+ * (see `labelHangingRun` for when a run counts as hanging). Inside a block,
+ * an inner row that continues a wrapped row is a `continuation` and an outer
+ * row after an inner row opens an `entry`.
+ *
+ * The column's left-edge mode cannot tell these blocks apart from indented
+ * prose: it lands on O or I depending on the share of multi-line entries on
+ * the page, so either every continuation reads as a first-line indent or no
+ * entry start produces a break.
+ */
+function detectHangingRoles(lines: PageLine[], medianHeight: number): HangingRole[] {
+    const roles: HangingRole[] = new Array(lines.length).fill(null);
+    const mh = medianHeight > 0 ? medianHeight : 10;
+    const tol = Math.max(1.6, 0.2 * mh);
+    const rows = groupRows(lines, mh);
+
+    let start = 0;
+    while (start < rows.length) {
+        const levels = [rows[start].l];
+        let end = start + 1;
+        let brokeOnLevel = false;
+        for (; end < rows.length; end++) {
+            if (rows[end].t - rows[end - 1].b > 2.5 * mh) break;
+            const x = rows[end].l;
+            if (levels.some(lv => Math.abs(x - lv) <= tol)) continue;
+            if (levels.length === 1) {
+                const d = Math.abs(x - levels[0]);
+                if (d >= HANGING_MIN_INDENT_EM * mh && d <= HANGING_MAX_INDENT_EM * mh) {
+                    levels.push(x);
+                    continue;
+                }
+            }
+            brokeOnLevel = levels.length === 2;
+            break;
+        }
+        if (levels.length === 2) {
+            labelHangingRun(rows, start, end, Math.min(...levels), Math.max(...levels), mh, tol, roles);
+        }
+        start = brokeOnLevel && end - 1 > start ? end - 1 : end;
+    }
+    return roles;
+}
+
+/** One visual text row: consecutive lines sharing a baseline band. */
+interface TextRow {
+    /** Index of the row's first line in the column. */
+    first: number;
+    head: PageLine;
+    l: number;
+    r: number;
+    t: number;
+    b: number;
+    text: string;
+}
+
+/**
+ * Group consecutive column lines into rows. The line detector splits a row
+ * at a wide gap — a bullet glyph set apart from its text, a bold author name,
+ * a justified word gap — and the left edge of such a fragment is not a line
+ * start.
+ */
+function groupRows(lines: PageLine[], mh: number): TextRow[] {
+    const rows: TextRow[] = [];
+    lines.forEach((line, k) => {
+        const row = rows[rows.length - 1];
+        const center = (line.bbox.t + line.bbox.b) / 2;
+        const prev = lines[k - 1];
+        if (
+            row &&
+            line.bbox.l > prev.bbox.l &&
+            Math.abs(center - (prev.bbox.t + prev.bbox.b) / 2) < 0.3 * mh
+        ) {
+            row.r = Math.max(row.r, line.bbox.r);
+            row.b = Math.max(row.b, line.bbox.b);
+            row.text += " " + line.text;
+            return;
+        }
+        rows.push({
+            first: k, head: line, l: line.bbox.l, r: line.bbox.r,
+            t: line.bbox.t, b: line.bbox.b, text: line.text,
+        });
+    });
+    return rows;
+}
+
+/** The end of a reference entry without terminal punctuation: a URL, DOI or page range. */
+const ENTRY_TAIL_RE = /(?:https?:\/\/|www\.|doi:)\S*$|\d+\s*[–-]\s*\d+$/iu;
+
+/** A bracketed list enumerator opening a line: "[5]", "(a)", "（3）", "(iv)". */
+const BRACKETED_ENUMERATOR_RE =
+    /^\s*[(（[［]\s*(?:\d{1,3}|[a-zA-Z]|[ivxlc]{1,5})\s*[)）\]］]/u;
+
+/**
+ * Sentence end, optionally followed by a citation marker ("….[17,26]",
+ * "…. [17]", "….12", "….298,299", "….¹²"). Includes CJK full-width
+ * terminators. Only a bracketed marker may follow a space: a bare number
+ * after one is text ("pp. 12").
+ */
+const SENTENCE_END_RE =
+    /[.!?。！？]["'”’)\]」』）]?(?:\s*\[[\d,;\s–-]+\]|\d{1,3}(?:[,–-]\d{1,3})*|[⁰¹²³⁴⁵⁶⁷⁸⁹]+(?:[,–-][⁰¹²³⁴⁵⁶⁷⁸⁹]+)*)?$/u;
+
+/**
+ * Label the rows of one two-level run when it reads as a hanging block.
+ *
+ * What separates a hanging block from first-line-indented prose is the outer
+ * row before each O→I step. In a hanging block it is an entry's first line:
+ * it wraps to the right margin mid-sentence, and the indented row continues
+ * it. In indented prose it ends a paragraph body. The run is hanging when it
+ * has at least two steps, at least 80% of them follow a wrapped row, and at
+ * least half of those follow an entry's first line.
+ *
+ * `wraps` allows a ragged right edge: a row wraps when it ends within 1.5 em
+ * or 10% of the block width of the block's right margin.
+ */
+function labelHangingRun(
+    rows: TextRow[],
+    start: number,
+    end: number,
+    outer: number,
+    inner: number,
+    mh: number,
+    tol: number,
+    roles: HangingRole[]
+): void {
+    const maxStepGap = 1.2 * mh;
+    let right = -Infinity;
+    for (let k = start; k < end; k++) right = Math.max(right, rows[k].r);
+    const width = right - outer;
+    const wraps = (row: TextRow) => right - row.r <= Math.max(1.5 * mh, 0.1 * width);
+    const isInner = (row: TextRow) => Math.abs(row.l - inner) <= tol;
+    const endsSentence = (row: TextRow) => SENTENCE_END_RE.test(row.text.trimEnd());
+    const follows = (row: TextRow, prev: TextRow) => row.t - prev.b <= maxStepGap;
+    const opensListItem = (row: TextRow) =>
+        isIconBulletLine(row.head) || isTextHangingIndentLeader({ ...row.head, text: row.text });
+
+    /** Row k steps from the outer to the inner edge right below its predecessor. */
+    const isStep = (k: number) =>
+        k > start && isInner(rows[k]) && !isInner(rows[k - 1]) && follows(rows[k], rows[k - 1]);
+
+    /**
+     * Whether the outer row before step k is an entry's first line: it wraps
+     * mid-sentence and does not itself continue a wrapped outer row. In
+     * first-line-indented prose that row ends a paragraph body instead.
+     */
+    const isEntryStep = (k: number) => {
+        const prev = rows[k - 1];
+        if (!wraps(prev) || endsSentence(prev)) return false;
+        const beforePrev = k - 2 >= start ? rows[k - 2] : null;
+        const continuesOuterRow =
+            beforePrev !== null &&
+            !isInner(beforePrev) &&
+            follows(prev, beforePrev) &&
+            wraps(beforePrev) &&
+            !endsSentence(beforePrev);
+        return !continuesOuterRow;
+    };
+
+    /**
+     * Whether step k opens an indented paragraph: the row before the step is
+     * finished, and the inner row wraps mid-sentence into an outer row that
+     * continues the paragraph, where a wrapped entry would continue at the
+     * inner edge. The outer row shows it continues the paragraph either
+     *   - by opening in lowercase, which an entry never does — the row
+     *     before may then also end like an entry (a URL, DOI or page range)
+     *     rather than a sentence; or
+     *   - after a finished sentence, by wrapping mid-sentence into yet
+     *     another outer row (a paragraph body runs on at the outer edge, a
+     *     wrapped entry's first line continues at the inner edge). An
+     *     unpunctuated one-line entry has the same shape, so an entry-like
+     *     ending does not count here.
+     * An inner row that opens with a URL or DOI continues a reference.
+     * An outer row that opens with a list marker ("26. Snyder …") is the
+     * next numbered entry, not paragraph text. An inner row after an
+     * unfinished row is a continuation, however it is indented.
+     *
+     * Not caught, and left to the hanging reading: an indented paragraph
+     * whose second line opens with a capital and either is its last line or
+     * ends a sentence at the margin. Both have the shape of an entry whose
+     * last line wraps into the next entry (a one-line entry, in the second
+     * case), which is the more common reading in reference lists.
+     */
+    const opensIndentedParagraph = (k: number) => {
+        const row = rows[k];
+        const next = k + 1 < end ? rows[k + 1] : null;
+        const before = rows[k - 1];
+        const beforeEndsSentence = endsSentence(before);
+        if (
+            !(beforeEndsSentence || ENTRY_TAIL_RE.test(before.text.trimEnd())) ||
+            /^\s*(?:https?:|www\.|doi:)/iu.test(row.text) ||
+            !wraps(row) ||
+            endsSentence(row) ||
+            next === null ||
+            isInner(next) ||
+            !follows(next, row) ||
+            opensListItem(next)
+        ) {
+            return false;
+        }
+        if (/^\s*\p{Ll}/u.test(next.text)) return true;
+        const afterNext = k + 2 < end ? rows[k + 2] : null;
+        return (
+            beforeEndsSentence &&
+            afterNext !== null &&
+            !isInner(afterNext) &&
+            follows(afterNext, next) &&
+            wraps(next) &&
+            !endsSentence(next)
+        );
+    };
+
+    // An opening bracket whose glyph box includes blank space (a full-width
+    // "（", a protruding "(") shifts its line left by about half an em. Rows
+    // offset only by that are one level, not a hanging indent. A bracketed
+    // enumerator ("[5]", "(a)", "（3）") is a list marker, so such rows stay
+    // evidence for a hanging block. The em is the run's own line height:
+    // smaller text elsewhere on the page can pull the page-wide median below
+    // it.
+    const rowEm = Math.max(mh, median(rows.slice(start, end).map(row => row.b - row.t)));
+    if (inner - outer < 0.6 * rowEm) {
+        let outerRows = 0;
+        let punctuationLed = 0;
+        for (let k = start; k < end; k++) {
+            if (isInner(rows[k])) continue;
+            outerRows++;
+            const text = rows[k].text;
+            if (/^\s*[（「『【〔［〈《([]/u.test(text) && !BRACKETED_ENUMERATOR_RE.test(text)) {
+                punctuationLed++;
+            }
+        }
+        if (punctuationLed >= 0.5 * outerRows) return;
+    }
+
+    let steps = 0;
+    let wrappedSteps = 0;
+    let entrySteps = 0;
+    for (let k = start + 1; k < end; k++) {
+        if (!isStep(k)) continue;
+        steps++;
+        if (!wraps(rows[k - 1])) continue;
+        wrappedSteps++;
+        if (isEntryStep(k)) entrySteps++;
+    }
+    if (
+        steps < 2 ||
+        wrappedSteps < 0.8 * steps ||
+        entrySteps < Math.max(1, 0.5 * wrappedSteps)
+    ) {
+        return;
+    }
+
+    // The vote covers the run as a whole, but a run can also hold ordinary
+    // prose before or after the block. Labelling pauses at an indented
+    // paragraph and resumes at the next entry-like step.
+    let inProse = false;
+    for (let k = start + 1; k < end; k++) {
+        const prev = rows[k - 1];
+        const row = rows[k];
+        if (isStep(k)) {
+            if (opensIndentedParagraph(k)) inProse = true;
+            else if (inProse && isEntryStep(k)) inProse = false;
+        }
+        if (inProse || !follows(row, prev)) continue;
+        if (isInner(row)) {
+            // A list marker or nested outline number ("2.1.1 …") opens a
+            // sub-entry, and a row ending in dot leaders and a page number is
+            // a finished table-of-contents entry; none of them is wrapped.
+            if (
+                wraps(prev) &&
+                !opensListItem(row) &&
+                !/^\s*\d+(?:\.\d+)+\.?\s+\p{L}/u.test(row.text) &&
+                !/(?:\.\s?){3,}\s*[\divxlcIVXLC]{1,6}\s*$/u.test(prev.text)
+            ) {
+                roles[row.first] = "continuation";
+            }
+        } else if (isInner(prev)) {
+            if (!/^\s*(?:\p{Ll}|https?:|www\.)/u.test(row.text)) roles[row.first] = "entry";
+        }
+    }
+}
+
+// ============================================================================
 // Step 4: Start New Item Detection
 // ============================================================================
 
@@ -1683,7 +1989,8 @@ function startNewItem(
     pageThresholds: PageThresholds,
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
-    bodyAllCaps: boolean = false
+    bodyAllCaps: boolean = false,
+    hangingRole: HangingRole = null
 ): boolean {
     if (i === 0) return true;
     if (!prevLine) return true;
@@ -1837,17 +2144,28 @@ function startNewItem(
     // lost as a distinct heading.
     const prevIsLocalHeader = isHeaderStyle(prevLine, bodyStyles, settings, null, bodyAllCaps);
     const headerGapPasses = gapBreak || prevIsLocalHeader;
-    const isLocalHeader = isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
+    // A hanging continuation wraps the line above it, so it cannot open a
+    // heading — e.g. an italic title line that the body-size rule would
+    // otherwise promote mid-entry, or a URL set in a larger face. It can
+    // still continue a heading. A heading after the last entry keeps its
+    // boundary only when spacing above it ends the continuation: one set at
+    // the inner edge with no more than normal leading merges into that
+    // entry. Font size cannot rescue it, since larger-set continuation lines
+    // are common in reference lists.
+    const isLocalHeader =
+        !(hangingRole === "continuation" && !prevIsLocalHeader) &&
+        isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
 
     if (isLocalHeader && !prevIsLocalHeader) {
         return true; // Header after non-header
     }
 
     if (isLocalHeader && prevIsLocalHeader) {
-        // Different header style
+        // Different header style. A hanging continuation stays with the
+        // heading-styled line it wraps (a bold list label, an italic title).
         const lineStyle = extractLineStyle(line);
         const prevStyle = extractLineStyle(prevLine);
-        if (!stylesEqual(lineStyle, prevStyle)) {
+        if (!stylesEqual(lineStyle, prevStyle) && hangingRole !== "continuation") {
             return true;
         }
         return false; // Same header style continues
@@ -2098,13 +2416,26 @@ function startNewItem(
         }
     }
 
+    // Hanging-indent block roles (see `detectHangingRoles`). A continuation's
+    // inner-edge indent is not a paragraph indent, and the line it wraps
+    // reaches the margin; an entry starts at the outer edge with no other
+    // visual break.
+    let hangingEntryBreak = false;
+    if (hangingRole === "continuation") {
+        indentBreak = false;
+        earlyEndBreak = false;
+    } else if (hangingRole === "entry") {
+        hangingEntryBreak = true;
+    }
+
     // Combine signals
     const visualBreak =
         gapBreak ||
         indentBreak ||
         earlyEndBreak ||
         fontSizeBreak ||
-        leaderAfterContinuationBreak;
+        leaderAfterContinuationBreak ||
+        hangingEntryBreak;
     return visualBreak;
 }
 
@@ -2303,6 +2634,9 @@ function processColumnLines(
     let headerIndex = 0;
 
     let currentLines: PageLine[] = [];
+    const hangingRoles: HangingRole[] = settings.hangingIndentBlocks
+        ? detectHangingRoles(lines, pageThresholds.medianHeight)
+        : new Array(lines.length).fill(null);
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -2321,7 +2655,8 @@ function processColumnLines(
                 pageThresholds,
                 bodyStyles,
                 settings,
-                bodyAllCaps
+                bodyAllCaps,
+                hangingRoles[i]
             );
 
         if (shouldStartNew) {
