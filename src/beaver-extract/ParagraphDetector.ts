@@ -53,6 +53,13 @@ export interface ParagraphDetectionSettings {
      * `detectHangingRoles` (default: false). Enabled by the PDF schema preset.
      */
     hangingIndentBlocks?: boolean;
+    /**
+     * Whether heading detection demotes run-in label items ("Keywords: …",
+     * "Received: …", a structured-abstract label followed by prose) and
+     * supplementary / extended-data figure and table captions (default: true).
+     * PDF schema 4 turns it off so its document-wide ids keep resolving.
+     */
+    headingLabelFilters?: boolean;
 }
 
 const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
@@ -66,6 +73,7 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     maxHeaderLength: 200,
     removeHyphenation: true,
     hangingIndentBlocks: false,
+    headingLabelFilters: true,
 };
 
 /**
@@ -1179,7 +1187,11 @@ function isHeaderStyle(
     if (!lineStyle) return false;
     // Item-level only (the joined item text): boundaries are decided per line
     // and stay as they are; a run-in label item just isn't labelled a heading.
-    if (phraseTextOverride !== null && looksLikeRunInLabel(phraseTextOverride)) {
+    if (
+        settings.headingLabelFilters &&
+        phraseTextOverride !== null &&
+        looksLikeRunInLabel(phraseTextOverride)
+    ) {
         return false;
     }
     if (!matchesHeaderRules(
@@ -1634,9 +1646,10 @@ function matchesHeaderRules(
     }
 
     // Check for figure/table labels, including "Extended Data Fig. 1" and
-    // "Supplementary Table S2"
-    const prefixLabelRe =
-        /^\s*(?:(?:extended\s+data|supplementary|supporting(?:\s+information)?)\s+)?(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
+    // "Supplementary Table S2" (those only with `headingLabelFilters`)
+    const prefixLabelRe = settings.headingLabelFilters
+        ? /^\s*(?:(?:extended\s+data|supplementary|supporting(?:\s+information)?)\s+)?(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i
+        : /^\s*(?:fig(?:ure)?|tab(?:le)?|eq(?:uation)?)\s*\.?\s+[A-Z]?\d{1,3}[a-z]?/i;
     if (prefixLabelRe.test(text)) {
         return false;
     }
@@ -1779,12 +1792,12 @@ const BRACKETED_ENUMERATOR_RE =
 
 /**
  * Sentence end, optionally followed by a citation marker ("….[17,26]",
- * "…. [17]", "….12", "….298,299"). Includes CJK full-width terminators. Only
- * a bracketed marker may follow a space: a bare number after one is text
- * ("pp. 12").
+ * "…. [17]", "….12", "….298,299", "….¹²"). Includes CJK full-width
+ * terminators. Only a bracketed marker may follow a space: a bare number
+ * after one is text ("pp. 12").
  */
 const SENTENCE_END_RE =
-    /[.!?。！？]["'”’)\]」』）]?(?:\s*\[[\d,;\s–-]+\]|\d{1,3}(?:[,–-]\d{1,3})*)?$/u;
+    /[.!?。！？]["'”’)\]」』）]?(?:\s*\[[\d,;\s–-]+\]|\d{1,3}(?:[,–-]\d{1,3})*|[⁰¹²³⁴⁵⁶⁷⁸⁹]+(?:[,–-][⁰¹²³⁴⁵⁶⁷⁸⁹]+)*)?$/u;
 
 /**
  * Label the rows of one two-level run when it reads as a hanging block.
@@ -1844,14 +1857,18 @@ function labelHangingRun(
 
     /**
      * Whether step k opens an indented paragraph: the row before the step is
-     * finished — it ends a sentence, or ends like an entry (a URL, DOI or
-     * page range) — and the inner row wraps mid-sentence into an outer row
-     * that continues the paragraph, where a wrapped entry would continue at
-     * the inner edge. The outer row shows it continues the paragraph either
-     *   - by opening in lowercase, which an entry never does; or
-     *   - by wrapping mid-sentence into yet another outer row (a paragraph
-     *     body runs on at the outer edge, a wrapped entry's first line
-     *     continues at the inner edge).
+     * finished, and the inner row wraps mid-sentence into an outer row that
+     * continues the paragraph, where a wrapped entry would continue at the
+     * inner edge. The outer row shows it continues the paragraph either
+     *   - by opening in lowercase, which an entry never does — the row
+     *     before may then also end like an entry (a URL, DOI or page range)
+     *     rather than a sentence; or
+     *   - after a finished sentence, by wrapping mid-sentence into yet
+     *     another outer row (a paragraph body runs on at the outer edge, a
+     *     wrapped entry's first line continues at the inner edge). An
+     *     unpunctuated one-line entry has the same shape, so an entry-like
+     *     ending does not count here.
+     * An inner row that opens with a URL or DOI continues a reference.
      * An outer row that opens with a list marker ("26. Snyder …") is the
      * next numbered entry, not paragraph text. An inner row after an
      * unfinished row is a continuation, however it is indented.
@@ -1866,8 +1883,10 @@ function labelHangingRun(
         const row = rows[k];
         const next = k + 1 < end ? rows[k + 1] : null;
         const before = rows[k - 1];
+        const beforeEndsSentence = endsSentence(before);
         if (
-            !(endsSentence(before) || ENTRY_TAIL_RE.test(before.text.trimEnd())) ||
+            !(beforeEndsSentence || ENTRY_TAIL_RE.test(before.text.trimEnd())) ||
+            /^\s*(?:https?:|www\.|doi:)/iu.test(row.text) ||
             !wraps(row) ||
             endsSentence(row) ||
             next === null ||
@@ -1880,6 +1899,7 @@ function labelHangingRun(
         if (/^\s*\p{Ll}/u.test(next.text)) return true;
         const afterNext = k + 2 < end ? rows[k + 2] : null;
         return (
+            beforeEndsSentence &&
             afterNext !== null &&
             !isInner(afterNext) &&
             follows(afterNext, next) &&
@@ -2132,7 +2152,12 @@ function startNewItem(
     const headerGapPasses = gapBreak || prevIsLocalHeader;
     // A hanging continuation wraps the line above it, so it cannot open a
     // heading — e.g. an italic title line that the body-size rule would
-    // otherwise promote mid-entry. It can still continue a heading.
+    // otherwise promote mid-entry, or a URL set in a larger face. It can
+    // still continue a heading. A heading after the last entry keeps its
+    // boundary only when spacing above it ends the continuation: one set at
+    // the inner edge with no more than normal leading merges into that
+    // entry. Font size cannot rescue it, since larger-set continuation lines
+    // are common in reference lists.
     const isLocalHeader =
         !(hangingRole === "continuation" && !prevIsLocalHeader) &&
         isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);

@@ -23,6 +23,10 @@ interface RowSpec {
     h?: number;
     /** Gap above the line (default `LINE_GAP`). */
     gap?: number;
+    /** Reported (truncated) font size (default `BODY.size`). */
+    size?: number;
+    /** Exact font size, recorded as a per-glyph style run. */
+    exact?: number;
 }
 
 function bbox(l: number, t: number, r: number, b: number): BoundingBox {
@@ -31,16 +35,24 @@ function bbox(l: number, t: number, r: number, b: number): BoundingBox {
 
 function makeLine(spec: RowSpec, top: number): PageLine {
     const box = bbox(spec.l, top, spec.r, top + (spec.h ?? LINE_HEIGHT));
+    const size = spec.size ?? BODY.size;
+    const glyphs = spec.text.replace(/\s/g, '').length;
     const span: DetectedSpan = {
         text: spec.text,
         bbox: box,
         lineBBox: box,
-        size: BODY.size,
+        size,
         fontName: BODY.font,
         fontWeight: 'normal',
         fontStyle: 'normal',
+        styleRuns: spec.exact === undefined ? undefined : [{
+            font: { name: BODY.font, family: BODY.font, weight: 'normal', style: 'normal', size },
+            exactSize: spec.exact,
+            chars: glyphs,
+            letters: (spec.text.match(/\p{L}/gu) ?? []).length,
+        }],
     };
-    return { spans: [span], bboxes: [box], bbox: box, text: spec.text, fontSize: BODY.size };
+    return { spans: [span], bboxes: [box], bbox: box, text: spec.text, fontSize: size };
 }
 
 function makeColumn(specs: RowSpec[]): PageLineResult {
@@ -234,6 +246,60 @@ describe('hanging-indent blocks', () => {
         ]);
     });
 
+    it('keeps an indented DOI line with its reference', () => {
+        // The DOI reaches the margin, and the next entry is an unpunctuated
+        // one-line entry followed by another entry.
+        const texts = paragraphTexts([
+            REFERENCES[0],
+            REFERENCES[1],
+            { text: 'Jones, K. 2011. Another study title. Review of Stuff 15: 125-150.', l: 0, r: RIGHT_MARGIN },
+            { text: 'https://doi.org/10.1234/review.2011.015.125.extended-identifier', l: INDENT, r: 395 },
+            { text: 'Brown, L. 2012. A one-line reference that fills the line 4: 5-9', l: 0, r: RIGHT_MARGIN },
+            { text: 'Davis, M. 2013. A short last reference.', l: 0, r: 250 },
+        ]);
+        expect(texts[1]).toBe(
+            'Jones, K. 2011. Another study title. Review of Stuff 15: 125-150. https://doi.org/10.1234/review.2011.015.125.extended-identifier',
+        );
+        expect(texts[2]).toMatch(/^Brown, L\. 2012\./);
+    });
+
+    it('needs a finished sentence before an indented line read as a paragraph continued by a capitalised line', () => {
+        // The entry's first line ends in a page range without a period, so it
+        // reads as finished for the lowercase check only.
+        const texts = paragraphTexts([
+            REFERENCES[0],
+            REFERENCES[1],
+            { text: 'Jones, K. 2011. Another study title. Review of Stuff 15: 125-150', l: 0, r: RIGHT_MARGIN },
+            { text: 'Edited volume with further notes on the collection and its', l: INDENT, r: 395 },
+            { text: 'Brown, L. 2012. A one-line reference that fills the line 4: 5-9', l: 0, r: RIGHT_MARGIN },
+            { text: 'Davis, M. 2013. A short last reference.', l: 0, r: 250 },
+        ]);
+        expect(texts[1]).toBe(
+            'Jones, K. 2011. Another study title. Review of Stuff 15: 125-150 Edited volume with further notes on the collection and its',
+        );
+        expect(texts[2]).toMatch(/^Brown, L\. 2012\./);
+    });
+
+
+    it('treats a sentence followed by a superscript citation as finished', () => {
+        const body: RowSpec[] = Array.from({ length: 5 }, (_, i) => ({
+            text: `Body text line ${i + 1} runs across the full width of the column and`,
+            l: 0,
+            r: RIGHT_MARGIN,
+        }));
+        const marks = ['¹', '¹²', '¹,³'];
+        const paragraph = (n: number): RowSpec[] => [
+            { text: `Paragraph ${n} opens with an indent and runs on until it reaches the`, l: INDENT, r: RIGHT_MARGIN },
+            { text: `Margin, then it ends close to the edge with a citation marker.${marks[n - 1]}`, l: 0, r: 390 },
+        ];
+        const specs = [...body, ...paragraph(1), ...paragraph(2), ...paragraph(3)];
+        const expected = [1, 2, 3].map(
+            n => `Paragraph ${n} opens with an indent and runs on until it reaches the Margin, then it ends close to the edge with a citation marker.${marks[n - 1]}`,
+        );
+        expect(paragraphTexts(specs, false).slice(-3)).toEqual(expected);
+        expect(paragraphTexts(specs).slice(-3)).toEqual(expected);
+    });
+
     it('keeps an indented line inside a paragraph after the list as a continuation', () => {
         // The middle line sits at the inner edge (as when its first word is
         // lost) but continues an unfinished sentence, so it starts nothing.
@@ -294,4 +360,19 @@ describe('hanging-indent blocks', () => {
     // last line runs into a one-line entry ending in a period, which is the
     // reading reference lists need.
     it.todo('keeps an indented paragraph out of the last entry when its capitalised second line ends a sentence');
+    // Known limitation: a heading set at the inner edge directly under the
+    // last entry, with no more than normal leading, reads as that entry's
+    // continuation and merges into it. Font size does not separate it: within
+    // reference lists, larger-set continuation lines (URLs in a wider face)
+    // are far more common. `it.fails` keeps the reproduction running and
+    // flags the day it starts passing.
+    it.fails('keeps a larger heading set directly under the last entry as its own item', () => {
+        const texts = paragraphTexts([
+            ...REFERENCES.map(spec => ({ ...spec, exact: 10 })),
+            { text: 'Acknowledgments', l: INDENT, r: 110, size: 11, exact: 11 },
+            { text: 'We thank the reviewers for their comments.', l: 0, r: 260, exact: 10 },
+        ]);
+        expect(texts).toContain('## Acknowledgments');
+        expect(texts).toContain('Brown, L. 2012. A single-line reference that fills the line.');
+    });
 });

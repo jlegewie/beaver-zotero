@@ -28,6 +28,12 @@ export interface PdfExtractionPreset {
      */
     hangingIndentBlocks: boolean;
     /**
+     * Heading detection demotes run-in label lines ("Keywords: …",
+     * "Received: …") and supplementary / extended-data figure and table
+     * captions (`ParagraphDetectionSettings.headingLabelFilters`).
+     */
+    headingLabelFilters: boolean;
+    /**
      * Classify reference-list entries in structured extraction and emit them
      * as `reference` items (see `references/classify.ts`).
      */
@@ -37,8 +43,8 @@ export interface PdfExtractionPreset {
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, referenceItems: false, idScheme: "document" },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, referenceItems: true, idScheme: "page" },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, referenceItems: false, idScheme: "document" },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, referenceItems: true, idScheme: "page" },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */
