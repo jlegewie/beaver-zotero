@@ -27,6 +27,15 @@ const EDGE_TOLERANCE = 3;
 /** Relation signs that start a separate equation on a new row. */
 const RELATION_RE = /[=≤≥<>≈≡∝≠≃≅∼]/;
 const LEADING_RELATION_RE = /^[=≤≥<>≈≡∝≠≃≅∼]/;
+/** A number, maybe signed, in scientific notation, or a percentage: "1.25", "−3", "1.2e−3", "1.2 × 10⁻³", "12%". */
+const VALUE = String.raw`[−–-]?(?:\d[\d.,]*|\.\d+)(?:\s*[eE][−–+-]?\d+|\s*[×x·]\s*10[⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+|\s*[×x·]\s*10\^?[−–+-]?\d+)?\s*%?`;
+/** A unit; one letter only as an SI symbol, so that "2 x" stays a term of an equation. */
+const UNIT = String.raw`(?:[%‰]|°\s*[CFK]?|[gmsKLVAWJNT]|[A-Za-zµμΩ][A-Za-zµμΩ/·²³\d]{1,7})`;
+/**
+ * A measurement: a value, maybe given as a bound or with its uncertainty, maybe with a
+ * unit ("1.25 kg", "<0.05", "≥ 10 kg", "5 ± 2", "5 ± 2 kg", "0.4 +/- 0.1", "37 °C").
+ */
+const MEASURE_RE = new RegExp(String.raw`^\s*(?:[<>≤≥]\s*)?${VALUE}(?:\s*(?:±|∓|\+\s*/\s*[−–-])\s*${VALUE})?\s*${UNIT}?\s*$`, "u");
 /** A numeric table cell such as "0.45", "−1.2***" or "12,345". */
 const NUMBER_CELL_RE = /^[−–-]?(?:\d[\d.,]*|\.\d+)[*†‡]*$/;
 /** Rules this close (in body sizes) above or below a group join it (table rules). */
@@ -92,6 +101,10 @@ const INLINE_GAP = 0.6;
 const INLINE_SIZE = 1.5;
 /** A text column runs through a row when running lines within this many body sizes above and below span it. */
 const COLUMN_REACH = 8;
+/** A table of symbols beside measurements shows its row pattern on at least this many rows. */
+const SYMBOL_TABLE_ROWS = 3;
+/** Lines of one text column start within this many body sizes of each other (a paragraph indent). */
+const COLUMN_INDENT = 2.5;
 /** A line that ends a sentence (or a clause before a display: "…, yielding:"). */
 const SENTENCE_END_RE = /[.!?][\])"'”’]*$/u;
 const CLAUSE_END_RE = /[.!?:;,][\])"'”’]*$/u;
@@ -187,6 +200,39 @@ export function spansColumn(l: RegionLine, column: readonly RegionLine[], indent
             l.bbox[0] <= r.bbox[0] + indent &&
             r.bbox[2] - r.bbox[0] > 0,
     );
+}
+
+/**
+ * The nearest running line within `COLUMN_REACH` body sizes above (`up`) or below
+ * `o` that spans its x-extent (or, with `overlap`, only overlaps it): the text
+ * column `o` stands in at that side.
+ */
+function nearestSpanning(running: Iterable<RegionLine>, o: RegionLine, up: boolean, bs: number, overlap = false): RegionLine | undefined {
+    let best: RegionLine | undefined;
+    let bestGap = COLUMN_REACH * bs;
+    for (const r of running) {
+        if (r.rot) continue;
+        if (overlap ? r.bbox[0] >= o.bbox[2] || r.bbox[2] <= o.bbox[0] : r.bbox[0] > o.bbox[0] + 2 || r.bbox[2] < o.bbox[2] - 2) continue;
+        const gap = up ? o.bbox[1] - r.bbox[3] : r.bbox[1] - o.bbox[3];
+        if (gap < -0.5 * (o.bbox[3] - o.bbox[1]) || gap > bestGap) continue;
+        best = r;
+        bestGap = gap;
+    }
+    return best;
+}
+
+/** Mostly words of letters, without a relation sign or much math: a line of text or a text cell. */
+function plainWords(l: RegionLine): boolean {
+    return l.alphaWords >= 1 && l.alphaWords >= 0.5 * l.words && !RELATION_RE.test(l.text) && l.mathChars < 0.2 * l.inkChars;
+}
+
+/** A table cell: words of text or a number (with significance marks), without a relation sign or much math. */
+function tableCell(l: RegionLine): boolean {
+    const text = l.text.replace(/[*†‡§]+\s*$/u, "");
+    // A measurement is a value, bounds ("<0.05", "≥ 10 kg") included; other relations are equations.
+    if (MEASURE_RE.test(text)) return true;
+    if (!NUMERIC_RE.test(text)) return plainWords(l);
+    return !RELATION_RE.test(text) && l.mathChars < 0.2 * l.inkChars;
 }
 
 /** Pieces of one line read as a single line: their union box, text and counts. */
@@ -285,23 +331,11 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
     const sameSize = (a: RegionLine, b: RegionLine) => Math.abs(a.size - b.size) <= 0.5;
     const aligned = (a: RegionLine, b: RegionLine) =>
         Math.abs(a.bbox[3] - b.bbox[3]) <= ROW_ALIGN * Math.min(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1]);
-    const nearestSpanning = (o: RegionLine, up: boolean): RegionLine | undefined => {
-        let best: RegionLine | undefined;
-        let bestGap = COLUMN_REACH * bs;
-        for (const r of running) {
-            if (r.rot || r.bbox[0] > o.bbox[0] + 2 || r.bbox[2] < o.bbox[2] - 2) continue;
-            const gap = up ? o.bbox[1] - r.bbox[3] : r.bbox[1] - o.bbox[3];
-            if (gap < -0.5 * (o.bbox[3] - o.bbox[1]) || gap > bestGap) continue;
-            best = r;
-            bestGap = gap;
-        }
-        return best;
-    };
     const inOtherColumn = (l: RegionLine, o: RegionLine) => {
         if (o.bbox[2] > l.bbox[0]) return false;
         if (/\p{L}{2}/u.test(o.text) && !RELATION_RE.test(o.text) && o.mathChars < 0.5 * o.inkChars) return false;
-        const up = nearestSpanning(o, true);
-        const down = nearestSpanning(o, false);
+        const up = nearestSpanning(running, o, true, bs);
+        const down = nearestSpanning(running, o, false, bs);
         return !!up && !!down && up.bbox[2] < l.bbox[0] && down.bbox[2] < l.bbox[0];
     };
     // Within a paragraph, pieces of one line split by inline math are not each
@@ -584,7 +618,64 @@ export function textGroups(
         const y = (a.bbox[1] + a.bbox[3]) / 2;
         return !gutterBetween(columnsAt(y), Math.min(a.bbox[2], b.bbox[2]), Math.max(a.bbox[0], b.bbox[0]));
     };
-    const eqNumbers = equationNumbers(pool, bs, (a, b) => sameRow(a, b) && rowJoins(a, b));
+    // Lines on either side of a column gutter stand in different text columns when
+    // each one's column runs through their row: the nearest running lines above and
+    // below each line, over it, stay on its side of the gap and share a left margin
+    // (up to a paragraph indent). A display equation and a line of the next column
+    // (a heading, inline math, words the running-text test missed) then never form
+    // one group, however narrow the gutter, and a full-width block further away (a
+    // figure's notes) does not hide the gutter.
+    // Within one column, its full lines reach across both lines; centred cells of a
+    // text table that read as prose keep no margin. Two lines of plain words are
+    // never set apart: left-aligned cells of a text table whose columns hold prose
+    // look exactly like two text columns.
+    const columnEnds = new Map<RegionLine, [RegionLine | undefined, RegionLine | undefined]>();
+    const columnOf = (l: RegionLine) => {
+        let ends = columnEnds.get(l);
+        if (!ends) {
+            ends = [nearestSpanning(runningList, l, true, bs, true), nearestSpanning(runningList, l, false, bs, true)];
+            columnEnds.set(l, ends);
+        }
+        return ends;
+    };
+    const apart = (a: RegionLine, b: RegionLine) => {
+        if (plainWords(a) && plainWords(b)) return false;
+        const [left, right] = a.bbox[0] <= b.bbox[0] ? [a, b] : [b, a];
+        if (left.bbox[2] > right.bbox[0]) return false;
+        const [lu, ld] = columnOf(left);
+        const [ru, rd] = columnOf(right);
+        if (!lu || !ld || !ru || !rd) return false;
+        const indent = COLUMN_INDENT * bs;
+        return (
+            lu.bbox[2] <= right.bbox[0] && ld.bbox[2] <= right.bbox[0] &&
+            ru.bbox[0] >= left.bbox[2] && rd.bbox[0] >= left.bbox[2] &&
+            Math.abs(lu.bbox[0] - ld.bbox[0]) <= indent && Math.abs(ru.bbox[0] - rd.bbox[0]) <= indent &&
+            !rowRepeats(left, right)
+        );
+    };
+    // Cells of a table across the gutter (a wide table between two-column prose) repeat
+    // their row: another row nearby holds lines over both, on one baseline. Cells hold
+    // words or numbers; the rows of equations set side by side in two columns hold math.
+    // A column of symbols (parameter names) beside a column of measurements is a table
+    // too when the pattern holds over at least `SYMBOL_TABLE_ROWS` rows.
+    const overX = (a: RegionLine, b: RegionLine) => Math.min(a.bbox[2], b.bbox[2]) - Math.max(a.bbox[0], b.bbox[0]) > 0;
+    const measure = (l: RegionLine) => MEASURE_RE.test(l.text.replace(/[*†‡§]+\s*$/u, ""));
+    const rowRepeats = (left: RegionLine, right: RegionLine) => {
+        const cells = tableCell(left) && tableCell(right);
+        const leftValue = !cells && measure(left);
+        const rightValue = !cells && measure(right);
+        if (!cells && !leftValue && !rightValue) return false;
+        // Rows as far apart as `mergeAligned` takes a table's rows to be (over two rows when
+        // looking for a symbols-and-values table's third row).
+        const reach = (cells ? 1 : SYMBOL_TABLE_ROWS - 1) * ALIGNED_GAP * bs;
+        const fits = (l: RegionLine, cell: boolean, value: boolean) =>
+            (cells ? cell && tableCell(l) : !value || measure(l)) && vgap(l.bbox, left.bbox) <= reach;
+        const lefts = pool.filter((l) => l !== left && fits(l, true, leftValue) && overX(l, left) && !sameRow(l, left));
+        const rights = pool.filter((l) => l !== right && fits(l, true, rightValue) && overX(l, right) && !sameRow(l, right));
+        const rows = lefts.filter((l) => rights.some((r) => sameRow(l, r)));
+        return rows.length >= (cells ? 1 : SYMBOL_TABLE_ROWS - 1);
+    };
+    const eqNumbers = equationNumbers(pool, bs, (a, b) => sameRow(a, b) && rowJoins(a, b) && !apart(a, b));
 
     const uf = new UnionFind(pool.length);
     const numbers: number[] = [];
@@ -596,8 +687,8 @@ export function textGroups(
             if (b.bbox[1] > a.bbox[3] + STACK_GAP * bs) break;
             if (eqNumbers.has(a) || eqNumbers.has(b)) continue; // numbers attach below
             if (sameRow(a, b)) {
-                if (rowJoins(a, b)) uf.union(i, j);
-            } else if (vgap(a.bbox, b.bbox) <= STACK_GAP * bs && hgap(a.bbox, b.bbox) <= 1.5 * bs) {
+                if (rowJoins(a, b) && !apart(a, b)) uf.union(i, j);
+            } else if (vgap(a.bbox, b.bbox) <= STACK_GAP * bs && hgap(a.bbox, b.bbox) <= 1.5 * bs && !apart(a, b)) {
                 uf.union(i, j);
             }
         }
@@ -609,7 +700,7 @@ export function textGroups(
         let bestGap = Infinity;
         for (let j = 0; j < pool.length; j++) {
             const b = pool[j].bbox;
-            if (j === n || eqNumbers.has(pool[j]) || b[2] > nb[0] + 1) continue;
+            if (j === n || eqNumbers.has(pool[j]) || b[2] > nb[0] + 1 || apart(pool[j], pool[n])) continue;
             const vOverlap = Math.min(b[3], nb[3]) - Math.max(b[1], nb[1]);
             if (vOverlap <= 0.3 * Math.min(b[3] - b[1], nb[3] - nb[1]) && vgap(b, nb) > 0.5 * bs) continue;
             const gap = nb[0] - b[2];

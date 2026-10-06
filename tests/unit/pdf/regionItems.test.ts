@@ -315,6 +315,73 @@ describe("regionItemsForPage", () => {
         expect(regionItemsForPage(alone, detection(alone, [["formula", [54, 98, 295, 130]]])).items[0].bbox).toMatchObject({ t: 98, b: 130 });
     });
 
+    it("leaves a formula that is one line of its paragraph, set with inline math, in the prose", () => {
+        const full = (y: number, text = "the conditional treatment effect among the stops,") => line(y, [[72, 290, text]]);
+        const math = (y: number) => line(y, [[72, 290, "Σx ATEx Pr(Xi = x), Σx ATEx Pr"]]);
+        const after = (y: number) => line(y, [[72, 290, "(Xi = x)]. In the appendix we outline a procedure"]]);
+        const run = (lines: RawLineDetailed[], eq: Rect) => {
+            const p = page(lines);
+            const prose = (t: string) => !t.startsWith("Σx");
+            return regionItemsForPage(p, detection(p, [["formula", eq]], prose)).items;
+        };
+        expect(run([full(100), full(113), math(126), after(141)], [70, 124, 292, 139])).toEqual([]);
+        // Text before a display ends short of the margin, or introduces it; display space sets it off.
+        expect(run([full(100), line(113, [[72, 180, "bounded as"]]), math(126), after(141)], [70, 124, 292, 139])).toHaveLength(1);
+        expect(run([full(100), full(113, "the treatment effect is bounded as follows:"), math(126), after(141)], [70, 124, 292, 139])).toHaveLength(1);
+        expect(run([full(100), full(113), math(136), after(160)], [70, 134, 292, 149])).toHaveLength(1);
+        // An equation standing between finished sentences is a display, however wide.
+        expect(run([full(100), full(113, "the treatment effect is bounded by the stops."), math(126), after(141)], [70, 124, 292, 139])).toHaveLength(1);
+        // A display equation, centred in its column.
+        const centred = page([full(100), full(113), line(126, [[120, 240, "Σx ATEx Pr(Xi = x)"]]), after(141)]);
+        expect(regionItemsForPage(centred, detection(centred, [["formula", [118, 124, 242, 139]]], (t) => !t.startsWith("Σx"))).items).toHaveLength(1);
+    });
+
+    it("leaves the sentence leading into a display at the column's margin in the prose", () => {
+        const para = line(84, [[72, 290, PROSE]]);
+        const lead = line(100, [[72, 200, "b) Select next feature using"]]);
+        const eq = [line(116, [[110, 233, "F = F ∪ {f}, S = S ∪ {f}"], [279, 295, "(11)"]]), line(130, [[120, 233, "I(f; C) = max I(fj; C)."]])];
+        const p = page([para, lead, ...eq]);
+        const prose = (t: string) => t === PROSE;
+        const { items, page: rest } = regionItemsForPage(p, detection(p, [["formula", [70, 98, 295, 143]]], prose));
+        expect(rowTexts(items[0], " ")).toEqual(["F = F ∪ {f}, S = S ∪ {f} (11)", "I(f; C) = max I(fj; C)."]);
+        expect(allText(rest)).toEqual([PROSE, lead.text]);
+        expect(items[0].bbox.t).toBe(lead.bbox.b);
+        // A first row of the display itself (indented like the rest, or holding a relation) stays.
+        const indented = page([para, line(100, [[110, 233, "subject to the budget"]]), ...eq]);
+        expect(regionItemsForPage(indented, detection(indented, [["formula", [70, 98, 295, 143]]], prose)).items[0].rows).toHaveLength(3);
+        const relation = page([para, line(100, [[72, 200, "Select feature f = argmax"]]), ...eq]);
+        expect(regionItemsForPage(relation, detection(relation, [["formula", [70, 98, 295, 143]]], prose)).items[0].rows).toHaveLength(3);
+        // A word equation wrapped before its relation sign keeps its left-hand side.
+        const wrapped = page([para, line(100, [[72, 200, "Total treatment effect"]]), line(116, [[110, 233, "= direct effect + indirect effect"]])]);
+        expect(regionItemsForPage(wrapped, detection(wrapped, [["formula", [70, 98, 295, 130]]], prose)).items[0].rows).toHaveLength(2);
+        // So does one wrapped before an operator.
+        const term = page([para, line(100, [[72, 200, "Total treatment effect"]]), line(116, [[110, 233, "+ β × indirect treatment"]]), line(130, [[110, 233, "= γ × combined effect"]])]);
+        expect(regionItemsForPage(term, detection(term, [["formula", [70, 98, 295, 143]]], prose)).items[0].rows).toHaveLength(3);
+        // Set relations and operators mark display rows too.
+        const member = page([para, line(100, [[72, 200, "chosen feature ∈ feasible set"]]), ...eq]);
+        expect(regionItemsForPage(member, detection(member, [["formula", [70, 98, 295, 143]]], prose)).items[0].rows).toHaveLength(3);
+        for (const next of ["∪ control units in region", "÷ total population"]) {
+            const wrappedOp = page([para, line(100, [[72, 200, "selected treatment units"]]), line(116, [[110, 233, next]])]);
+            expect(regionItemsForPage(wrappedOp, detection(wrappedOp, [["formula", [70, 98, 295, 130]]], prose)).items[0].rows).toHaveLength(2);
+        }
+        // A numerator over its fraction bar is part of the formula, not a lead-in.
+        const fraction = page([para, line(100, [[72, 200, "number of successful outcomes"]]), line(116, [[100, 180, "number of all outcomes"]])]);
+        const fd = detection(fraction, [["formula", [70, 98, 295, 130]]], prose);
+        fd.routing!.rules = [[72, 113, 200, 114]];
+        expect(regionItemsForPage(fraction, fd).items[0].rows).toHaveLength(2);
+        // A lead-in ending with ":" stays a lead-in over a row that opens with a sign.
+        const intro = page([para, line(100, [[72, 200, "where K is a constant:"]]), line(116, [[110, 233, "− δ K = exp(τL) < 1"]])]);
+        expect(regionItemsForPage(intro, detection(intro, [["formula", [70, 98, 295, 130]]], prose)).items[0].rows).toHaveLength(1);
+        // A lead-in that refers to an equation by number is still a lead-in.
+        const reference = page([para, line(100, [[72, 200, "as shown in Equation (8)"]]), ...eq]);
+        expect(regionItemsForPage(reference, detection(reference, [["formula", [70, 98, 295, 143]]], prose)).items[0].rows).toHaveLength(2);
+        // But a display row whose equation number ends its text is no lead-in.
+        for (const number of ["(1)", "(B.2)", "(A-1)", "[12]"]) {
+            const numbered = page([para, line(100, [[72, 200, `x within feasible region ${number}`]]), ...eq]);
+            expect(regionItemsForPage(numbered, detection(numbered, [["formula", [70, 98, 295, 143]]], prose)).items[0].rows).toHaveLength(3);
+        }
+    });
+
     it("caps figure label text", () => {
         const labels = Array.from({ length: 60 }, (_, i) => line(100 + 12 * i, [[100, 500, `label ${i} ${"x".repeat(50)}`]]));
         const p = page(labels);

@@ -190,6 +190,69 @@ describe("text candidates", () => {
         expect(groups[0].bbox.map(Math.round)).toEqual([220, 125, 390, 137]);
     });
 
+    it("keeps lines of two text columns apart on one row, however narrow the gutter", () => {
+        const left = (y: number): Spec => ({ box: [72, y, 295, y + 11], text: PROSE });
+        const right = (y: number): Spec => ({ box: [315, y, 540, y + 11], text: PROSE });
+        const columns = [left(100), left(113), left(126), right(100), right(113), right(126), left(170), left(183), right(170), right(183)];
+        const equations: Spec[] = [
+            { box: [150, 146, 294, 158], text: "Δ = Y1 − Y0 + ε", font: "CMMI10" },
+            { box: [318, 146, 460, 158], text: "Σx ATEx = θ", font: "CMMI10" },
+        ];
+        expect(textGroups([...columns, ...equations]).map((g) => g.bbox.map(Math.round))).toEqual([
+            [150, 146, 294, 158],
+            [318, 146, 460, 158],
+        ]);
+        // A full-width block further up (a figure's notes) does not hide the gutter from far lines.
+        const notes: Spec = { box: [72, 60, 540, 71], text: PROSE };
+        const far: Spec[] = [equations[0], { ...equations[1], box: [340, 146, 460, 158] }];
+        expect(textGroups([notes, ...columns, ...far])).toHaveLength(2);
+        // Two cells of plain words stay one row: a text table's columns of prose look the same.
+        const words: Spec[] = [
+            { box: [150, 146, 294, 158], text: "Once a month, Never" },
+            { box: [318, 146, 460, 158], text: "Thirty minutes vigorously" },
+        ];
+        expect(textGroups([...columns, ...words])).toHaveLength(1);
+        // Without a text column running through the row (a wide table under two-column
+        // prose), its cells on either side of the gutter stay one row.
+        const cells: Spec[] = [
+            { box: [100, 150, 160, 161], text: "1.25" },
+            { box: [230, 150, 290, 161], text: "0.75" },
+            { box: [318, 150, 378, 161], text: "2.50" },
+        ];
+        expect(textGroups([...columns.slice(0, 6), ...cells])).toHaveLength(1);
+        // Nor with two-column prose above and below a wide table of numbers.
+        const rows = [150, 163].flatMap((y) => cells.map((c, i): Spec => ({ ...c, box: [c.box[0], y, c.box[2], y + 11], text: `${i + 1}.${y}` })));
+        expect(textGroups([...columns, ...rows])).toHaveLength(1);
+        // Numbers with significance marks are cells too.
+        const marked = rows.map((r) => ({ ...r, text: `${r.text}†` }));
+        expect(textGroups([...columns, ...marked])).toHaveLength(1);
+        // So are bounds ("<0.05", "≤0.05", "≥10").
+        for (const bound of ["<0.05", "≤0.05", "≥10"]) {
+            const bounds = rows.map((r, i) => (i % 3 === 2 ? { ...r, text: bound } : r));
+            expect(textGroups([...columns, ...bounds])).toHaveLength(1);
+        }
+        // And quantities with units or in scientific notation.
+        for (const value of ["1.25 kg", "1.25e−3", "3 mg/L", "5 ± 2", "5 ± 2 kg", "≥ 10 kg"]) {
+            const quantities = rows.map((r) => ({ ...r, text: value }));
+            expect(textGroups([...columns, ...quantities])).toHaveLength(1);
+        }
+        // Rows of symbols beside a column of values are one table; rows of math on both
+        // sides are two columns' equations.
+        const symbolRows = [150, 163, 176].flatMap((y): Spec[] => [
+            { box: [100, y, 140, y + 11], text: "α_i β", font: "CMMI10" },
+            { box: [230, y, 294, y + 11], text: "γ_t δ", font: "CMMI10" },
+            { box: [318, y, 378, y + 11], text: `0.${y}` },
+        ]);
+        const symbolColumns = [left(100), left(113), left(126), right(100), right(113), right(126), left(200), left(213), right(200), right(213)];
+        expect(textGroups([...symbolColumns, ...symbolRows])).toHaveLength(1);
+        const mathRows = symbolRows.map((r) => (r.box[0] === 318 ? { ...r, text: "ε_t = ρ", font: "CMMI10" } : r));
+        expect(textGroups([...symbolColumns, ...mathRows]).length).toBeGreaterThan(1);
+        // And rows as far apart as a table's rows may be (a gap of three body sizes).
+        const spaced = [150, 190].flatMap((y) => cells.map((c, i): Spec => ({ ...c, box: [c.box[0], y, c.box[2], y + 11], text: `${i + 1}.${y}` })));
+        const around = [left(100), left(113), left(126), right(100), right(113), right(126), left(215), left(228), right(215), right(228)];
+        expect(textGroups([...around, ...spaced])).toHaveLength(1);
+    });
+
     it("groups a table whose header sits apart from its body", () => {
         const cells: Spec[] = [];
         const cols = [72, 250, 400];

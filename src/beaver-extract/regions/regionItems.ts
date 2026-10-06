@@ -40,7 +40,7 @@ import { decideLineBreakHyphen } from "../ParagraphSentenceMapper";
 import { rotateBBox, type RotationAngle } from "../PageRotationNormalizer";
 import type { Rect } from "./geometry";
 import type { RegionClass } from "./model";
-import { sourceLines, type RegionLine } from "./pageSignals";
+import { EQUATION_NUMBER_END_RE, EQUATION_REFERENCE_END_RE, sourceLines, type RegionLine } from "./pageSignals";
 import { LINE_CAPTION, LINE_FURNITURE, LINE_GUTTER, LINE_MARGIN, LINE_RUNNING, LINE_SKEWED, type LineRouting, type RegionDetection } from "./RegionDetector";
 
 export type RegionItemKind = "table" | "picture" | "formula";
@@ -342,6 +342,8 @@ function formulaProseRows(routing: LineRouting, regions: RegionDetection["candid
             return inside && member && height(i) <= FORMULA_ROW_HEIGHT * typical ? [i] : [];
         });
         inBox.sort((a, b) => routing.lines[a].bbox[1] - routing.lines[b].bbox[1]);
+        for (const i of leadIn(routing, inBox.filter((i) => routing.routes[i] === k), running)) prose.add(i);
+        if (paragraphLine(routing, members, running)) for (const i of members) prose.add(i);
         let row: number[] = [];
         let top = 0;
         let bottom = 0;
@@ -401,6 +403,120 @@ function formulaProseRows(routing: LineRouting, regions: RegionDetection["candid
         close();
     });
     return prose;
+}
+
+/** A line that closes its sentence or introduces what follows: no paragraph continues past it. */
+const SENTENCE_CLOSED_RE = /[.!?:][\])"'”’]*$/u;
+/** Lines of a paragraph sit at most this many line heights apart. */
+const PARAGRAPH_LEADING = 0.8;
+
+/**
+ * A formula of one row that is a line of its paragraph, set with inline math:
+ * it runs from its text column's margin to its right edge, between full lines
+ * of the paragraph at the paragraph's leading, and the line before it leaves its
+ * sentence open. A display equation is centred or indented and set off by display
+ * space, and the text before it ends short of the margin, introduces it (":") or
+ * ends its sentence (an equation standing between sentences).
+ */
+function paragraphLine(routing: LineRouting, members: readonly number[], running: readonly RegionLine[]): boolean {
+    // An equation number marks a display.
+    if (!members.length || members.some((i) => routing.lines[i].eqNumber || EQUATION_NUMBER_END_RE.test(routing.lines[i].text))) return false;
+    const boxes = members.map((i) => routing.lines[i].bbox);
+    const y0 = Math.min(...boxes.map((b) => b[1]));
+    const y1 = Math.max(...boxes.map((b) => b[3]));
+    // One row: every piece overlaps the row's middle band.
+    const mid = (y0 + y1) / 2;
+    if (boxes.some((b) => b[1] > mid || b[3] < mid)) return false;
+    const x0 = Math.min(...boxes.map((b) => b[0]));
+    const x1 = Math.max(...boxes.map((b) => b[2]));
+    const size = Math.max(1, ...members.map((i) => routing.lines[i].size));
+    const neighbour = (up: boolean) => {
+        let best: RegionLine | undefined;
+        let bestGap = Infinity;
+        for (const r of running) {
+            if (r.rot || r.bbox[2] <= x0 || r.bbox[0] >= x1) continue;
+            const gap = up ? y0 - r.bbox[3] : r.bbox[1] - y1;
+            const h = r.bbox[3] - r.bbox[1];
+            if (gap < -0.5 * h || gap >= bestGap || (up ? r.bbox[1] >= y0 : r.bbox[3] <= y1)) continue;
+            best = r;
+            bestGap = gap;
+        }
+        return best && bestGap <= PARAGRAPH_LEADING * (best.bbox[3] - best.bbox[1]) ? best : undefined;
+    };
+    const above = neighbour(true);
+    const below = neighbour(false);
+    if (!above || !below) return false;
+    const indent = 2.5 * size;
+    return (
+        Math.abs(above.bbox[2] - x1) <= 3 &&
+        x0 >= above.bbox[0] - 2 - indent &&
+        x0 <= Math.min(above.bbox[0], below.bbox[0]) + indent &&
+        !SENTENCE_CLOSED_RE.test(above.text) &&
+        Math.abs(below.bbox[0] - above.bbox[0]) <= indent
+    );
+}
+
+/** A lead-in holds at least this many words of text... */
+const LEAD_IN_WORDS = 2;
+/** ...and the display under it starts at least this many ems of its type further right. */
+const LEAD_IN_INDENT = 1;
+const LEAD_IN_RELATION_RE = /[=≤≥<>≈≡∝≠≃≅∼]/u;
+/** Set relations and arrows, which prose also sets inline ("there exists D ∈ L with"). */
+const LEAD_IN_SET_RELATION_RE = /[∈∉∋⊂⊃⊆⊇⊄⊊⊋≺≻⪯⪰→←↔⇒⇐⇔↦⟹⟺⊢⊨]/u;
+/** Function words of a sentence; a display row of word-valued terms has (almost) none. */
+const FUNCTION_WORDS = new Set([
+    "a", "an", "the", "is", "are", "was", "be", "been", "and", "or", "of", "to", "in", "on", "at", "for", "with", "by",
+    "as", "from", "that", "which", "where", "when", "then", "there", "this", "these", "between", "into", "its", "it",
+    "we", "let", "if", "case", "such", "given", "exists",
+]);
+/** A display row that continues the row above: it opens with a relation sign or an operator. */
+const LEAD_IN_CONTINUES_RE = /^\s*[=≤≥<>≈≡∝≠≃≅∼∈∉∋⊂⊃⊆⊇≺≻→⇒⇔↦+−\-×·÷/∪∩∖⊕⊗∘∧∨]/u;
+
+/**
+ * The top row of a formula when it is the sentence leading into the display
+ * ("b) Select next feature using", "T being defined as"): words of text without a
+ * relation sign, starting at its text column's margin, over a display row set
+ * further right (centred or indented). `members` are the formula's lines, top to
+ * bottom.
+ */
+function leadIn(routing: LineRouting, members: readonly number[], running: readonly RegionLine[]): number[] {
+    if (members.length < 2) return [];
+    const box = (i: number) => routing.lines[i].bbox;
+    const first = box(members[0]);
+    const row = members.filter((i) => Math.min(box(i)[3], first[3]) - Math.max(box(i)[1], first[1]) >= 0.5 * Math.min(box(i)[3] - box(i)[1], first[3] - first[1]));
+    const rest = members.filter((i) => !row.includes(i));
+    if (!rest.length) return [];
+    const lines = row.map((i) => routing.lines[i]);
+    // An equation number, its own piece or ending the row's text, marks a display row;
+    // a sentence that refers to an equation ("given by Eq. (8)", "(70) and (71).") does not.
+    const numbered = (l: RegionLine) => EQUATION_NUMBER_END_RE.test(l.text) && !EQUATION_REFERENCE_END_RE.test(l.text);
+    if (lines.some((l) => l.eqNumber || numbered(l) || LEAD_IN_RELATION_RE.test(l.text) || l.mathChars > FORMULA_TEXT_MATH * l.inkChars)) return [];
+    // A set relation or arrow marks a display row unless the row reads as a sentence.
+    const sentence = (l: RegionLine) => l.text.toLowerCase().split(/[^\p{L}]+/u).filter((w) => FUNCTION_WORDS.has(w)).length >= 2;
+    if (lines.some((l) => LEAD_IN_SET_RELATION_RE.test(l.text) && !sentence(l))) return [];
+    if (lines.reduce((n, l) => n + textWords(l), 0) < LEAD_IN_WORDS) return [];
+    const x0 = Math.min(...lines.map((l) => l.bbox[0]));
+    const x1 = Math.max(...lines.map((l) => l.bbox[2]));
+    const atMargin = running.some((r) => Math.abs(r.bbox[0] - x0) <= 2 && r.bbox[2] > x1);
+    // The display it introduces: the row directly under it.
+    const display = rest.filter((i) => !routing.lines[i].eqNumber);
+    if (!display.length) return [];
+    const top = box(display[0]);
+    const next = display.filter((i) => Math.min(box(i)[3], top[3]) - Math.max(box(i)[1], top[1]) >= 0.5 * Math.min(box(i)[3] - box(i)[1], top[3] - top[1]));
+    // A row that opens with a relation sign or an operator continues the top row: the top
+    // row is the equation's first term, wrapped before it, unless it introduces the
+    // display (":").
+    const leftmost = [...next].sort((a, b) => box(a)[0] - box(b)[0])[0];
+    const introduces = lines.some((l) => /:\s*$/u.test(l.text));
+    if (!introduces && LEAD_IN_CONTINUES_RE.test(routing.lines[leftmost].text)) return [];
+    // A rule between the two rows is a fraction bar: the top row is a numerator.
+    const y0 = Math.max(...row.map((i) => box(i)[3])) - 1;
+    const y1 = Math.min(...next.map((i) => box(i)[1])) + 1;
+    const bar = (routing.rules ?? []).some((r) => r[1] >= y0 && r[3] <= y1 && Math.min(r[2], x1) - Math.max(r[0], x0) > 0);
+    if (bar) return [];
+    const below = Math.min(...next.map((i) => box(i)[0]));
+    const em = Math.max(...lines.map((l) => l.size));
+    return atMargin && below >= x0 + LEAD_IN_INDENT * em ? row : [];
 }
 
 /**

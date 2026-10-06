@@ -61,6 +61,16 @@ export const NUMERIC_RE = /^[\s\d.,\-–−+%()*<>=±$€/:;a-zA-Z]{0,3}\d[\d.,\
  * standing alone on its line.
  */
 export const EQUATION_NUMBER_RE = /^[(（[]\s*[A-Z]{0,3}[.-]?\d{1,3}(?:[.\-–]\d{1,3})*[a-z]?\s*[)）\]]$/;
+/** An equation number (`EQUATION_NUMBER_RE`) that ends a line's text, as in "x = y (B.2)". */
+export const EQUATION_NUMBER_END_RE = new RegExp(`(?:^|\\s)${EQUATION_NUMBER_RE.source.slice(1, -1)}\\s*[.,;:]?\\s*$`);
+/**
+ * Trailing equation numbers that a sentence refers to: "given by Eq. (8)", "(70) and (71).",
+ * "using Equation (4) [28]:".
+ */
+export const EQUATION_REFERENCE_END_RE = new RegExp(
+    `\\b(?:eqs?|equations?|formulas?|formulae|expressions?|relations?|and|or|to|in|of|from|by|see)\\.?(?:\\s*,?\\s*${EQUATION_NUMBER_RE.source.slice(1, -1)})+\\s*[.,;:]?\\s*$`,
+    "iu",
+);
 
 /** Fonts whose glyphs are mathematics (TeX math families, OpenType math, Symbol). */
 const MATH_FONT_RE =

@@ -9,7 +9,7 @@
  *   equations; see `textCandidates.ts`).
  * Candidates are classified afterwards (see `features.ts`).
  */
-import { clusterRects } from "./cluster";
+import { UnionFind, clusterRects } from "./cluster";
 import { dilate, hgap, overlapFrac, rectArea, touches, unionRect, vgap, type Rect } from "./geometry";
 import {
     NOTE_CAPTION_RE,
@@ -142,9 +142,41 @@ export function findCandidates(
     const captionList = [...captionText];
     const clustered = kept.filter((p) => CLUSTERED.has(p.kind));
     const primitives = clustered.filter((p) => !isContainer(p, clustered, runningList, captionList, H));
+    // Text a framed figure or table may keep inside its frame: not caption text and not a
+    // margin stamp. A figure's labels (legends, axis titles) are not lines of a paragraph
+    // (a stack of more than `LABEL_BLOCK_LINES` running lines; a wrapped title is a short
+    // stack); a table's cells may be (wrapped prose cells). `framedContent` decides which
+    // of it belongs to the content.
+    const frameText = lines.filter((l) => !captionText.has(l) && !l.skewed && l.bbox[3] - l.bbox[1] <= 0.5 * H);
+    let labelCache: RegionLine[] | undefined;
+    const frameLabels = (table: boolean): RegionLine[] => {
+        if (table) return frameText;
+        if (labelCache) return labelCache;
+        const stacks = new UnionFind(runningList.length);
+        for (let i = 0; i < runningList.length; i++) {
+            const a = runningList[i];
+            if (a.rot || captionText.has(a)) continue;
+            for (let j = i + 1; j < runningList.length; j++) {
+                const b = runningList[j];
+                if (b.rot || captionText.has(b) || Math.min(a.bbox[2], b.bbox[2]) - Math.max(a.bbox[0], b.bbox[0]) <= 0) continue;
+                const stacked = a.bbox[3] <= b.bbox[1] + 1 || b.bbox[3] <= a.bbox[1] + 1;
+                if (stacked && vgap(a.bbox, b.bbox) <= Math.min(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1])) stacks.union(i, j);
+            }
+        }
+        const stackSize = new Map<number, number>();
+        runningList.forEach((_, i) => stackSize.set(stacks.find(i), (stackSize.get(stacks.find(i)) ?? 0) + 1));
+        const runningIndex = new Map(runningList.map((l, i) => [l, i]));
+        const inParagraph = (l: RegionLine) => {
+            const i = runningIndex.get(l);
+            return i !== undefined && (stackSize.get(stacks.find(i)) ?? 1) > LABEL_BLOCK_LINES;
+        };
+        // Widths are judged against the frame.
+        labelCache = frameText.filter((l) => !inParagraph(l));
+        return labelCache;
+    };
     const rects = primitives.map((p) => p.bbox);
 
-    let candidates: Candidate[] = [];
+    const clusters: Candidate[] = [];
     for (const group of rects.length ? clusterRects(rects, Math.max(4, 0.8 * bs)) : []) {
         let bbox = rects[group[0]];
         for (const i of group) bbox = unionRect(bbox, rects[i]);
@@ -154,8 +186,26 @@ export function findCandidates(
             return k === "hrule" || k === "vrule" || k === "box";
         });
         if (onlyRulesOrBoxes && group.length <= 3) continue; // lone rules/boxes are never a region
-        candidates.push({ bbox, members: group, anchored: false, source: "graphics" });
+        clusters.push({ bbox, members: group, anchored: false, source: "graphics" });
     }
+    // A framed figure becomes its content (`framedContent`), taking the clusters set
+    // inside its frame (panels inset from the frame) along.
+    const inside = (outer: Rect, r: Rect) => r[0] >= outer[0] && r[1] >= outer[1] && r[2] <= outer[2] && r[3] <= outer[3];
+    const absorbed = new Set<Candidate>();
+    const framed = new Map<Candidate, Candidate>();
+    // Only a frame with a numbered caption inside qualifies; the search for its inner
+    // clusters runs once that holds.
+    const numberedCaptions = [...figureCaptions, ...tableCaptions];
+    for (const c of numberedCaptions.length ? clusters : []) {
+        if (absorbed.has(c)) continue;
+        let inner: Candidate[] = [];
+        const innerOf = () => (inner = clusters.filter((o) => o !== c && !absorbed.has(o) && !framed.has(o) && inside(c.bbox, o.bbox)));
+        const content = framedContent(c, innerOf, primitives, numberedCaptions, new Set(tableCaptions), frameLabels, running, bs);
+        if (!content) continue;
+        framed.set(c, content);
+        for (const o of inner) absorbed.add(o);
+    }
+    let candidates: Candidate[] = clusters.filter((c) => !absorbed.has(c)).map((c) => framed.get(c) ?? c);
 
     const grow = (start: Rect): Rect => {
         // Absorb touching non-prose lines: axis labels, legends, panel letters.
@@ -237,6 +287,141 @@ export function findCandidates(
         width: W,
         height: H,
     };
+}
+
+/** Frame rules lie within this many points of the cluster's edge... */
+const FRAME_EDGE = 2;
+/** ...and run along at least this share of it. */
+const FRAME_SPAN = 0.8;
+/** Figure text inside a frame joins the drawing across gaps of at most this many body sizes. */
+const FRAME_LABEL_REACH = 3;
+/** A stack of more running lines than this inside a frame is a paragraph, not a (wrapped) label. */
+const LABEL_BLOCK_LINES = 3;
+
+/**
+ * A cluster drawn inside its own frame (a rectangle, or rules along all four of
+ * its edges) that also encloses a numbered caption (`captions`: figure and table
+ * caption blocks) above or below its content — a figure or table set in a box
+ * with its caption and notes: the candidate is the content inside the frame,
+ * without the frame, with the clusters set inside it (`inner`: inset panels, when
+ * the frame's own cluster holds drawing too) and figure text near it (`labels`:
+ * legends, axis titles) on its side of the caption.
+ * The caption then lies outside it, as for an unframed figure, and is not read as
+ * text inside the region. Undefined when the cluster is no such frame.
+ */
+function framedContent(
+    c: Candidate,
+    inner: () => readonly Candidate[],
+    prims: readonly Primitive[],
+    captions: readonly RegionLine[],
+    tableCaptions: ReadonlySet<RegionLine>,
+    labels: (table: boolean) => readonly RegionLine[],
+    running: ReadonlySet<RegionLine>,
+    bs: number,
+): Candidate | undefined {
+    const [x0, y0, x1, y1] = c.bbox;
+    const w = x1 - x0;
+    const h = y1 - y0;
+    const near = (a: number, b: number) => Math.abs(a - b) <= FRAME_EDGE;
+    const sides = new Set<number>();
+    const frame = new Set<number>();
+    for (const i of c.members) {
+        const p = prims[i];
+        const [a0, b0, a1, b1] = p.bbox;
+        if ((p.rect || p.kind === "box") && near(a0, x0) && near(b0, y0) && near(a1, x1) && near(b1, y1)) {
+            for (const side of [0, 1, 2, 3]) sides.add(side);
+            frame.add(i);
+        } else if (p.kind === "hrule" && a1 - a0 >= FRAME_SPAN * w && (near(b0, y0) || near(b1, y1))) {
+            sides.add(near(b0, y0) ? 1 : 3);
+            frame.add(i);
+        } else if (p.kind === "vrule" && b1 - b0 >= FRAME_SPAN * h && (near(a0, x0) || near(a1, x1))) {
+            sides.add(near(a0, x0) ? 0 : 2);
+            frame.add(i);
+        }
+    }
+    if (sides.size < 4) return undefined;
+    const center = (b: Rect) => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+    const enclosed = captions.filter((l) => {
+        const [cx, cy] = center(l.bbox);
+        return cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1;
+    });
+    if (!enclosed.length) return undefined;
+    // The drawing: the frame's other members and, when it has some, the clusters set
+    // inside it (`inner`, panels further from the frame). A frame alone in its cluster
+    // stays part of the figure it encloses.
+    const own = c.members.filter((i) => !frame.has(i));
+    if (!own.length) return undefined;
+    const members = [...own, ...inner().flatMap((o) => o.members)];
+    let bbox = prims[members[0]].bbox;
+    for (const i of members) bbox = unionRect(bbox, prims[i].bbox);
+    // Labels chain outward from the drawing, above or below it (or rotated beside it)
+    // within `FRAME_LABEL_REACH` body sizes, never past a caption: text beyond it
+    // continues the caption or its notes.
+    const drawing = bbox;
+    const sideOfDrawing = (b: Rect) =>
+        enclosed.every((cap) =>
+            cap.bbox[1] >= drawing[3] ? b[3] <= cap.bbox[1] : cap.bbox[3] <= drawing[1] ? b[1] >= cap.bbox[3] : true,
+        );
+    // Figure text: what `grow` takes (short or small labels), or a line centred on the
+    // drawing along its axis (an axis title of many words), not other prose a frame holds.
+    // A line standing alone, centred along the drawing and shorter than it.
+    const centred = (l: RegionLine) => {
+        const [cx, cy] = center(l.bbox);
+        const [d0, d1] = l.rot ? [drawing[1], drawing[3]] : [drawing[0], drawing[2]];
+        const [c, len] = l.rot ? [cy, l.bbox[3] - l.bbox[1]] : [cx, l.bbox[2] - l.bbox[0]];
+        return Math.abs(c - (d0 + d1) / 2) <= 0.25 * (d1 - d0) && len <= 0.8 * (d1 - d0);
+    };
+    // A table's frame holds rows of any text (wide cells, symbols) beyond its rules.
+    const table = enclosed.some((cap) => tableCaptions.has(cap));
+    const figureText = (l: RegionLine) =>
+        table || (!running.has(l) && !isProse(l, bs) && (l.words <= 8 || l.size < bs - 0.5)) || centred(l);
+    const pool = labels(table).filter((l) => {
+        const [cx, cy] = center(l.bbox);
+        return (
+            cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 && l.bbox[2] - l.bbox[0] <= w &&
+            sideOfDrawing(l.bbox) && figureText(l)
+        );
+    });
+    // No running text stands above or below `l` beside the drawing (within its height): a
+    // legend, not the head of a text column the frame also holds.
+    const freeStrip = (l: RegionLine) =>
+        ![...running].some(
+            (r) =>
+                r !== l && !r.rot &&
+                Math.min(r.bbox[3], drawing[3]) - Math.max(r.bbox[1], drawing[1]) > 0 &&
+                Math.min(r.bbox[2], l.bbox[2]) - Math.max(r.bbox[0], l.bbox[0]) > 0,
+        );
+    // Each label joins at most once, so the growth ends (a zero-size box never "overlaps").
+    const taken = new Set<RegionLine>();
+    for (let grew = true; grew; ) {
+        grew = false;
+        for (const l of pool) {
+            if (taken.has(l)) continue;
+            // Above or below the drawing across a wider gap, and so is an axis title set
+            // along its side (rotated) or a legend beside it in a strip of the frame free of
+            // running text; other text beside it joins only within a body size.
+            const across = Math.min(l.bbox[2], bbox[2]) - Math.max(l.bbox[0], bbox[0]) > 0;
+            const wide = table || across || l.rot || freeStrip(l);
+            if (!touches(dilate(bbox, wide ? FRAME_LABEL_REACH * bs : bs), l.bbox)) continue;
+            taken.add(l);
+            bbox = unionRect(bbox, l.bbox);
+            grew = true;
+        }
+    }
+    // Labels set just outside the frame (an axis title against its border) belong to the
+    // figure as `grow` would have taken them for the framed box: within a body size of
+    // the frame, figure text by `grow`'s own test.
+    for (const l of labels(table)) {
+        const [cx, cy] = center(l.bbox);
+        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) continue;
+        if (running.has(l) || isProse(l, bs) || (l.words > 8 && l.size >= bs - 0.5) || l.bbox[2] - l.bbox[0] > w) continue;
+        if (!touches(dilate(c.bbox, bs), l.bbox) || !sideOfDrawing(l.bbox)) continue;
+        bbox = unionRect(bbox, l.bbox);
+    }
+    // Caption text sits between the frame and the content, above or below it; text
+    // set among the drawing (labels matched as captions) is no frame's caption.
+    if (enclosed.some((l) => l.bbox[3] > bbox[1] + 1 && l.bbox[1] < bbox[3] - 1)) return undefined;
+    return { ...c, bbox, members };
 }
 
 /** Running-text lines a container must enclose to be a text box rather than part of a figure. */

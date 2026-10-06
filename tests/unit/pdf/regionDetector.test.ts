@@ -267,6 +267,126 @@ describe("findCandidates", () => {
         expect(boxes).toEqual([[300, 60, 560, 200]]);
     });
 
+    it("takes the content inside a frame that also encloses the figure's caption and notes", () => {
+        const frame: Rec[] = [
+            { kind: GS_KIND.strokePath, bbox: [300, 52, 540, 52] },
+            { kind: GS_KIND.strokePath, bbox: [300, 260, 540, 260] },
+            { kind: GS_KIND.strokePath, bbox: [300, 52, 300, 260] },
+            { kind: GS_KIND.strokePath, bbox: [540, 52, 540, 260] },
+        ];
+        const drawing: Rec[] = [
+            { kind: GS_KIND.strokePath, bbox: [304, 76, 536, 230], flags: GS_FLAG.hasCurve, rgb: 0xff0000 },
+            { kind: GS_KIND.fillPath, bbox: [400, 120, 420, 140], flags: GS_FLAG.hasCurve },
+        ];
+        const caption = line([306, 60, 520, 70], "Figure 1. Directed acyclic graph of the effect");
+        const notes = line([306, 236, 520, 246], "Notes: Observed covariates are left implicit here.", 8);
+        const boxes = (recs: Rec[], lines: RegionLine[]) =>
+            findCandidates([...lines, prose(300), prose(312)], pagePrimitives(summary(recs), W, H, BS), W, H, BS)
+                .candidates.filter((c) => c.source === "graphics")
+                .map((c) => c.bbox);
+        expect(boxes([...frame, ...drawing], [caption, notes])).toEqual([[304, 76, 536, 230]]);
+        // A legend set inside the frame, apart from the drawing, stays in the figure.
+        const legend = line([420, 232, 500, 240], "Treatment group", 7);
+        const notesBelow = line([306, 246, 520, 255], "Notes: Observed covariates are left implicit here.", 8);
+        expect(boxes([...frame, ...drawing.map((r) => ({ ...r, bbox: [r.bbox[0], r.bbox[1], r.bbox[2], Math.min(r.bbox[3], 210)] as Rect }))], [caption, legend, notesBelow])).toEqual([
+            [304, 76, 536, 240],
+        ]);
+        // An axis title of many words, centred under the drawing, stays in the figure too.
+        const title = line([360, 232, 480, 242], "Number of students enrolled in the program");
+        expect(boxes([...frame, ...drawing.map((r) => ({ ...r, bbox: [r.bbox[0], r.bbox[1], r.bbox[2], Math.min(r.bbox[3], 210)] as Rect }))], [caption, title, notesBelow])).toEqual([
+            [304, 76, 536, 242],
+        ]);
+        // Also in a full-width frame, where the title is wider than half the page.
+        const wideFrame: Rec[] = [
+            { kind: GS_KIND.strokePath, bbox: [50, 52, 562, 52] },
+            { kind: GS_KIND.strokePath, bbox: [50, 280, 562, 280] },
+            { kind: GS_KIND.strokePath, bbox: [50, 52, 50, 280] },
+            { kind: GS_KIND.strokePath, bbox: [562, 52, 562, 280] },
+        ];
+        const wideDrawing: Rec[] = [
+            { kind: GS_KIND.strokePath, bbox: [54, 76, 558, 210], flags: GS_FLAG.hasCurve, rgb: 0xff0000 },
+            { kind: GS_KIND.fillPath, bbox: [300, 120, 320, 140], flags: GS_FLAG.hasCurve },
+        ];
+        const wideTitle = line([135, 232, 477, 242], "Number of students enrolled in the program by local treatment group and year");
+        const wideCaption = line([60, 60, 520, 70], "Figure 1. Directed acyclic graph of the effect");
+        const wideNotes = line([60, 262, 520, 271], "Notes: Observed covariates are left implicit here.", 8);
+        expect(boxes([...wideFrame, ...wideDrawing], [wideCaption, wideTitle, wideNotes])).toEqual([[54, 76, 558, 242]]);
+        // So does one wrapped over two lines.
+        const wrapped = [
+            line([350, 232, 490, 242], "Number of students enrolled in the"),
+            line([345, 244, 495, 254], "program for each local treatment group"),
+        ];
+        const notesLow = line([306, 262, 520, 271], "Notes: Observed covariates are left implicit here.", 8);
+        const tallFrame: Rec[] = frame.map((r) => ({
+            ...r,
+            bbox: [r.bbox[0], r.bbox[1] === 260 ? 280 : r.bbox[1], r.bbox[2], r.bbox[3] === 260 ? 280 : r.bbox[3]] as Rect,
+        }));
+        expect(boxes([...tallFrame, ...drawing.map((r) => ({ ...r, bbox: [r.bbox[0], r.bbox[1], r.bbox[2], Math.min(r.bbox[3], 210)] as Rect }))], [caption, ...wrapped, notesLow])).toEqual([
+            [304, 76, 536, 254],
+        ]);
+        // A rotated axis title along the drawing's side, inside the frame, stays in the figure.
+        const narrow: Rec[] = [{ ...drawing[0], bbox: [330, 76, 536, 230] }, drawing[1]];
+        const axis = line([306, 120, 315, 200], "Share of respondents", 8, "Helvetica", 90);
+        expect(boxes([...frame, ...narrow], [caption, axis, notes])[0][0]).toBeLessThanOrEqual(306);
+        // An axis title just outside the frame, against its border, stays with the figure.
+        const outside = line([284, 120, 293, 200], "Share of respondents", 8, "Helvetica", 90);
+        expect(boxes([...frame, ...narrow], [caption, outside, notes])[0][0]).toBe(284);
+        // Unrotated text beside it, as far away, heading running text there is no label of the drawing.
+        const heading = line([302, 130, 316, 140], "References");
+        const entries = [line([302, 146, 326, 156], PROSE_TEXT), line([302, 158, 326, 168], PROSE_TEXT), line([302, 170, 326, 180], PROSE_TEXT)];
+        expect(boxes([...frame, ...narrow], [caption, heading, ...entries, notes])[0][0]).toBe(330);
+        // A legend beside the drawing, in a strip of the frame without running text, stays too.
+        const left: Rec[] = [{ ...drawing[0], bbox: [304, 76, 450, 230] }, { ...drawing[1], bbox: [400, 120, 420, 140] }];
+        const legend2 = line([480, 140, 530, 150], "Treatment group");
+        expect(boxes([...frame, ...left], [caption, legend2, notes])[0][2]).toBe(530);
+        // A heading over running text in that strip heads a text column the frame holds.
+        const column = [line([480, 156, 536, 166], PROSE_TEXT), line([480, 168, 536, 178], PROSE_TEXT), line([480, 180, 536, 190], PROSE_TEXT)];
+        expect(boxes([...frame, ...left], [caption, line([480, 140, 530, 150], "References"), ...column, notes])[0][2]).toBe(450);
+        // A label without width (a zero-size text box) joins once; extraction completes.
+        const flat = line([420, 232, 420, 240], "x", 7);
+        expect(boxes([...frame, ...drawing], [caption, flat, notes])[0][3]).toBeGreaterThanOrEqual(230);
+        // Panels inside the frame, one inset apart from it, stay one figure.
+        const panels: Rec[] = [
+            { kind: GS_KIND.strokePath, bbox: [304, 76, 400, 230], flags: GS_FLAG.hasCurve, rgb: 0xff0000 },
+            { kind: GS_KIND.strokePath, bbox: [460, 100, 520, 200], flags: GS_FLAG.hasCurve, rgb: 0x0000ff },
+        ];
+        expect(boxes([...frame, ...panels], [caption, notes])).toEqual([[304, 76, 520, 230]]);
+        // A table framed with its caption keeps its rows beyond its inner rules, of any text.
+        const tableCaption = line([306, 60, 520, 70], "Table 1. Estimated effects of the treatment");
+        const rules: Rec[] = [
+            ...frame,
+            { kind: GS_KIND.strokePath, bbox: [306, 110, 534, 110] },
+            { kind: GS_KIND.strokePath, bbox: [306, 230, 534, 230] },
+            { kind: GS_KIND.strokePath, bbox: [306, 170, 534, 170] },
+        ];
+        const tableRows = [
+            line([306, 85, 534, 95], "Outcome variable measured over the full follow-up period"),
+            line([306, 120, 534, 130], "β1 = 0.25 (0.10)", BS, "CMMI10"),
+            line([306, 245, 534, 255], "Observations and fixed effects for every model"),
+        ];
+        expect(boxes(rules, [tableCaption, ...tableRows, notes.bbox[1] > 255 ? notes : line([306, 262, 520, 271], "Notes: Standard errors in parentheses.", 8)])).toEqual([
+            [306, 85, 534, 255],
+        ]);
+        // Including a wrapped prose cell below the last inner rule, however many lines it runs.
+        const tallFrame2: Rec[] = frame.map((r) => ({
+            ...r,
+            bbox: [r.bbox[0], r.bbox[1] === 260 ? 290 : r.bbox[1], r.bbox[2], r.bbox[3] === 260 ? 290 : r.bbox[3]] as Rect,
+        }));
+        const upperRules: Rec[] = [
+            { kind: GS_KIND.strokePath, bbox: [306, 110, 534, 110] },
+            { kind: GS_KIND.strokePath, bbox: [306, 200, 534, 200] },
+        ];
+        const cell = [210, 222, 234, 246].map((y) => line([306, y, 534, y + 11], PROSE_TEXT));
+        expect(boxes([...tallFrame2, ...upperRules], [tableCaption, line([306, 120, 534, 130], "Outcome 0.25 (0.10)"), ...cell])[0][3]).toBe(257);
+        // A frame with no caption inside it is part of the figure.
+        expect(boxes([...frame, ...drawing], [])).toEqual([[300, 52, 540, 260]]);
+        // Rules along three edges are no frame.
+        expect(boxes([frame[0], frame[1], frame[2], ...drawing], [caption, notes])).toEqual([[300, 52, 540, 260]]);
+        // Nor is caption text set beside the drawing a frame's caption.
+        const beside = line([306, 140, 380, 150], "Figure 1. Directed acyclic graph");
+        expect(boxes([...frame, ...drawing], [beside])).toEqual([[300, 52, 540, 260]]);
+    });
+
     it("keeps a full-width photo on a born-digital page", () => {
         const g = summary([{ kind: GS_KIND.image, bbox: [0, 72, W, 400] }]);
         const found = findCandidates([prose(420), prose(435), prose(450)], pagePrimitives(g, W, H, BS), W, H, BS);
