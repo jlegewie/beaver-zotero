@@ -545,6 +545,11 @@ export interface FormulaItem extends TextBearingItem {
     kind: "formula";
 }
 
+/** A reference-list entry (see the public `ReferenceItem`). */
+export interface ReferenceItem extends TextBearingItem {
+    kind: "reference";
+}
+
 /** A table: one line and one sentence per row (see the public `TableItem`). */
 export interface TableItem extends TextBearingItem {
     kind: "table";
@@ -565,7 +570,8 @@ export type DocItem =
     | MarginItem
     | FormulaItem
     | TableItem
-    | PictureItem;
+    | PictureItem
+    | ReferenceItem;
 
 export type DegradationReason =
     | "unmapped"
@@ -800,6 +806,12 @@ export interface StructuredPagePhaseTimings {
     sentenceMapMs: number;
     /** Region detection and region items (schema presets with `regions`). */
     regionsMs?: number;
+    /**
+     * This page's share of reference classification (presets with
+     * `referenceItems`); the document-level pass is split across pages by
+     * item count.
+     */
+    referencesMs?: number;
     /** Total character count on the target page (post-detailed-walk). */
     charCount: number;
     /** Total line count on the target page (post-detailed-walk). */

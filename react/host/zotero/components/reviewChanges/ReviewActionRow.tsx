@@ -46,6 +46,12 @@ import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { DownloadIcon } from '@beaver/agent-ui/icons';
+import type { FileExportFormat } from '@beaver/agent-ui/host/types';
+import { exportNoteToFile, openExportedFile, revealExportedFile } from '../../fileExport';
+import { exportWithFeedback, fileExportFormatMenuItems } from '../../../../utils/fileExportFeedback';
+import { addPopupMessageAtom } from '../../../../utils/popupMessageUtils';
 
 interface ReviewActionRowProps {
     row: ReviewRow;
@@ -206,6 +212,26 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         else notifyReferenceUnavailable('item', 'library_unavailable');
     }, [openNoteTarget]);
 
+    // A note row is an artifact: exported as the agent wrote it, with its citations.
+    const isNoteArtifact = row.actionType === 'create_note';
+    const [isExporting, setIsExporting] = useState(false);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
+
+    const handleExportNote = useCallback(async (format: FileExportFormat) => {
+        if (isExporting) return;
+        setIsExporting(true);
+        try {
+            await exportWithFeedback(
+                format,
+                () => exportNoteToFile({ runId, toolCallId: row.toolcallId, format }),
+                addPopupMessage,
+                { reveal: revealExportedFile, open: openExportedFile },
+            );
+        } finally {
+            setIsExporting(false);
+        }
+    }, [isExporting, runId, row.toolcallId, addPopupMessage]);
+
     const handleReveal = useCallback(async () => {
         if (!revealReference) return;
         // Reveal within the current collection when the item belongs to it,
@@ -280,6 +306,26 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 <div className="flex-1" />
 
                 <div className="display-flex flex-row items-center gap-2 mr-3 mt-010" style={{ flexShrink: 0 }}>
+                    {isNoteArtifact && !isBusy && (isExporting ? (
+                        <IconButton
+                            icon={DownloadIcon}
+                            variant="ghost-secondary"
+                            iconClassName="font-color-secondary scale-10"
+                            onClick={() => {}}
+                            loading
+                            ariaLabel="Exporting"
+                        />
+                    ) : (
+                        <MenuButton
+                            icon={DownloadIcon}
+                            variant="ghost-secondary"
+                            iconClassName="font-color-secondary scale-10"
+                            menuItems={fileExportFormatMenuItems(handleExportNote)}
+                            tooltipContent="Export"
+                            ariaLabel="Export"
+                        />
+                    ))}
+
                     {(openNoteTarget || revealReference) && !isBusy && (
                         <Tooltip content={openNoteTarget ? 'Open note' : 'Show in library'} showArrow singleLine>
                             <IconButton
@@ -293,8 +339,10 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         </Tooltip>
                     )}
 
-                    {(config.showUndo || (isBusy && activeButton === 'undo')) && (
-                        <Tooltip content={row.actionType === 'create_note' ? 'Delete' : 'Undo'} showArrow singleLine>
+                    {/* A note row is an artifact to open or export; deleting it stays
+                        on the note's own card in the response, away from those. */}
+                    {!isNoteArtifact && (config.showUndo || (isBusy && activeButton === 'undo')) && (
+                        <Tooltip content="Undo" showArrow singleLine>
                             <IconButton
                                 icon={UndoIcon}
                                 variant="ghost-secondary"
@@ -302,7 +350,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                                 onClick={handleUndo}
                                 loading={isBusy && activeButton === 'undo'}
                                 disabled={isDisabled}
-                                ariaLabel={row.actionType === 'create_note' ? 'Delete' : 'Undo'}
+                                ariaLabel="Undo"
                             />
                         </Tooltip>
                     )}

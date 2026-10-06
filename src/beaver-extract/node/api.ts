@@ -16,7 +16,7 @@
  * `Promise.all` (the `info` command does exactly that). The worker
  * dispatcher uses the same queue, so this matches the worker contract.
  */
-import { ensureExtractionRuntime } from "./bootstrap";
+import { ensureExtractionRuntime, resetMuPDFNode } from "./bootstrap";
 import {
     opAnalyzeLayout,
     opAnalyzeOCRNeeds,
@@ -24,6 +24,7 @@ import {
     opExtractRawPageDetailed,
     opGetMetadata,
     opGetPageCount,
+    opReferenceInputs,
     opRenderPages,
     opStructuredExtractWithDebug,
 } from "../worker/ops";
@@ -134,6 +135,30 @@ export async function structuredExtractWithDebug(
     await ensureExtractionRuntime();
     const reply = await enqueue(() => opStructuredExtractWithDebug(input));
     return reply.result;
+}
+
+/**
+ * Full-document structured extraction returning the reference classifier's
+ * per-page inputs (training export and debugging).
+ */
+export async function referenceInputs(
+    input: Pick<ExtractInput, "pdfData" | "settings" | "paragraphSettings" | "analysisWindow" | "schemaVersion"> & {
+        /** Classify too: return plans and the emitted items. */
+        classify?: boolean;
+    },
+): Promise<Awaited<ReturnType<typeof opReferenceInputs>>["result"]> {
+    await ensureExtractionRuntime();
+    const reply = await enqueue(() => opReferenceInputs(input));
+    return reply.result;
+}
+
+/**
+ * Replace the MuPDF runtime after a fatal WASM error (trap or heap
+ * exhaustion) so the next operation starts on a fresh instance. Batch
+ * callers use it between documents; the next op re-initializes lazily.
+ */
+export function resetExtractionRuntime(): void {
+    resetMuPDFNode();
 }
 
 export async function analyzeLayout(

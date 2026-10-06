@@ -1,7 +1,7 @@
 {
     "name": "beaver-zotero",
     "type": "module",
-    "version": "0.25.3",
+    "version": "0.26.0-beta.3",
     "description": "Academic research agent that lives in Zotero, instantly searching through all your documents and explaining complex concepts as you read.",
     "config": {
         "addonName": "Beaver",
@@ -22,9 +22,9 @@
     "license": "AGPL-3.0-or-later",
     "scripts": {
         "start": "npm run copy:agent-ui-css && concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
-        "build": "npm run copy:agent-ui-css && NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run check:bundle",
-        "build:dev": "npm run copy:agent-ui-css && NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && NODE_ENV=development npm run pack:xpi && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run check:bundle",
-        "build:staging": "npm run copy:agent-ui-css && BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run check:bundle",
+        "build": "npm run copy:agent-ui-css && NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run typecheck:export && npm run check:bundle",
+        "build:dev": "npm run copy:agent-ui-css && NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && NODE_ENV=development npm run pack:xpi && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run typecheck:export && npm run check:bundle",
+        "build:staging": "npm run copy:agent-ui-css && BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run typecheck:export && npm run check:bundle",
         "check:bundle": "node scripts/check-esbuild-graph.mjs",
         "lint:check": "prettier --check . && eslint .",
         "lint:fix": "prettier --write . && eslint . --fix",
@@ -49,6 +49,7 @@
         "typecheck:cli": "tsc -p tsconfig.cli.json --noEmit",
         "typecheck:core": "tsc -p packages/agent-core --noEmit && node packages/agent-core/verify-program.mjs",
         "typecheck:ui": "tsc -p packages/agent-ui --noEmit && node packages/agent-ui/verify-program.mjs",
+        "typecheck:export": "tsc -p packages/agent-export --noEmit && node packages/agent-export/verify-program.mjs",
         "test:cli-smoke": "vitest run --config vitest.smoke.config.ts"
     },
     "dependencies": {
@@ -60,7 +61,9 @@
         "date-fns-tz": "^3.2.0",
         "deepmerge": "^4.3.1",
         "diff": "^8.0.4",
+        "docx": "^9.8.1",
         "jotai": "^2.12.1",
+        "katex": "^0.16.47",
         "lexical": "^0.43.0",
         "p-queue": "^9.0.1",
         "pako": "^1.0.11",
@@ -77,6 +80,9 @@
         "rehype-sanitize": "^6.0.0",
         "remark-gfm": "^4.0.1",
         "remark-math": "^6.0.0",
+        "remark-parse": "^11.0.0",
+        "remark-stringify": "^11.0.0",
+        "unified": "^11.0.5",
         "uuid": "^11.0.5",
         "zotero-plugin-toolkit": "^5.0.1"
     },

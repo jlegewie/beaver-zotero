@@ -120,6 +120,7 @@ export type DocumentItemKind =
     | "formula"
     | "table"
     | "picture"
+    | "reference"
     | "margin";
 
 export const ID_PREFIXES = {
@@ -133,6 +134,7 @@ export const ID_PREFIXES = {
     formula: "eq",
     table: "table",
     picture: "fig",
+    reference: "ref",
     margin: "margin",
 } as const satisfies Record<DocumentItemKind | "sentence" | "line", string>;
 
@@ -197,6 +199,15 @@ export interface MarginItem extends TextBearingItem {
 }
 
 /**
+ * One entry of a bibliographic reference list (or a piece of one that a
+ * column or page break split off). Cited as a whole; never split into
+ * sentences.
+ */
+export interface ReferenceItem extends TextBearingItem {
+    kind: "reference";
+}
+
+/**
  * A table. `text` holds its rows, one per line, cells joined by " | "; each
  * row is one sentence, so rows are citable on their own.
  */
@@ -224,6 +235,7 @@ export type DocumentItem =
     | FormulaItem
     | TableItem
     | PictureItem
+    | ReferenceItem
     | MarginItem;
 
 export interface Sentence {

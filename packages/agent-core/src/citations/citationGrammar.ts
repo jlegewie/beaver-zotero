@@ -3,6 +3,29 @@ import { parseExtractId, parseExtractIdValue, type ExtractIdScheme } from '../ex
 import { resolveObjectIdReference } from '../identity/libraryRef';
 import type { ZoteroItemReference } from '../types/zotero';
 
+/**
+ * Citation tags in every form the model writes them:
+ * - Self-closing: <citation id="..."/>
+ * - Opening only (missing /): <citation id="...">
+ * - Full pair: <citation id="..."></citation>
+ *
+ * Group 1 is the attribute string. Global: create a copy with `new RegExp`
+ * before iterating with `exec`, since `lastIndex` is shared state.
+ */
+export const CITATION_TAG_PATTERN = /<citation(?:\s+([^>]*?))?\s*(?:\/>|>(?:<\/citation>)?)/g;
+
+/**
+ * Backtick-wrapped citation tags (a common model mistake), in every form
+ * `CITATION_TAG_PATTERN` accepts, including several adjacent tags sharing one
+ * pair of backticks.
+ */
+const BACKTICKED_CITATIONS_PATTERN = /`(<citation[^>]*>(?:<\/citation>)?(?:\s*<citation[^>]*>(?:<\/citation>)?)*)`/g;
+
+/** Unwrap backtick-wrapped citation tags: `<citation id="..."/>` → <citation id="..."/>. */
+export function unwrapBacktickedCitations(content: string): string {
+    return content.replace(BACKTICKED_CITATIONS_PATTERN, '$1');
+}
+
 export type LocatorKind =
     | 'page'
     | 'sentence'
@@ -16,6 +39,7 @@ export type LocatorKind =
     | 'equation'
     | 'table'
     | 'margin'
+    | 'reference'
     | 'unknown';
 
 export interface Locator {
@@ -84,6 +108,7 @@ const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boo
     { prefix: 'margin', kind: 'margin', numericOnly: true },
     { prefix: 'table', kind: 'table', numericOnly: true },
     { prefix: 'page', kind: 'page' },
+    { prefix: 'ref', kind: 'reference', numericOnly: true },
     { prefix: 'list', kind: 'list', numericOnly: true },
     { prefix: 'l', kind: 'line', numericOnly: true },
     { prefix: 'fig', kind: 'figure', numericOnly: true },
@@ -105,6 +130,7 @@ const CITATION_INDEX_PREFIXES: Partial<Record<LocatorKind, string>> = {
     equation: ID_PREFIXES.formula,
     table: ID_PREFIXES.table,
     margin: ID_PREFIXES.margin,
+    reference: ID_PREFIXES.reference,
 };
 
 function stripClobberPrefix(value: string): string {

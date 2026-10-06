@@ -28,6 +28,7 @@ import { buildOcrFixtureCommand } from "../cli/commands/ocrFixture";
 import { buildOverlayCommand } from "../cli/commands/overlay";
 import { buildProfileCommand } from "../cli/commands/profile";
 import { buildRawDetailedCommand } from "../cli/commands/rawDetailed";
+import { buildReferencesCommand } from "../cli/commands/references";
 import { buildRegionsCommand } from "../cli/commands/regions";
 import { buildRenderCommand } from "../cli/commands/render";
 import { buildTraceCommand } from "../cli/commands/trace";
@@ -90,7 +91,8 @@ export function buildProgram(deps: CliDeps): Command {
         .addCommand(buildRegionsCommand(deps))
         .addCommand(buildRenderCommand(deps))
         .addCommand(buildFixtureCommand(deps))
-        .addCommand(buildOcrFixtureCommand(deps));
+        .addCommand(buildOcrFixtureCommand(deps))
+        .addCommand(buildReferencesCommand(deps));
     program.exitOverride();
     return program;
 }

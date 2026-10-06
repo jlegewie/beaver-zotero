@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react'
-import { Icon, TextAlignLeftIcon, PdfIcon, FileViewIcon } from "../icons/icons"
+import { Icon, TextAlignLeftIcon, FileViewIcon } from "../icons/icons"
 import { useAtomValue, useSetAtom } from 'jotai'
 import { effectiveReaderTextSelectionAtom, stagedReaderActionContextAtom } from '../../atoms/messageComposition'
 import { openReader } from '../../runtime/navigation'
@@ -54,7 +54,6 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         const readerTypeName = readerType === 'epub' ? 'EPUB'
             : readerType === 'snapshot' ? 'Snapshot'
             : 'Document';
-        const revealIcon = isPdf ? PdfIcon : FileViewIcon;
         const revealLabel = isPdf
             ? (selection.page != null ? `Reveal page ${selection.page} in PDF` : 'Reveal in PDF')
             : `Reveal in ${readerTypeName}`;
@@ -69,7 +68,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             // Mirror the button click: scroll the reader to the selection's page.
             extraMenuItems: [{
                 label: revealLabel,
-                icon: revealIcon,
+                icon: FileViewIcon,
                 onClick: () => { revealSelection(); },
             }],
         })
@@ -80,9 +79,9 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                 icon: <Icon icon={TextAlignLeftIcon} className="scale-90 font-color-primary mt-020" />,
                 title: 'Text Selection',
                 subtitle: selectionText ? { text: selectionText } : null,
-                action: { icon: revealIcon, label: revealLabel },
+                action: { icon: FileViewIcon, label: revealLabel },
             };
-        }, [selection.text, revealIcon, revealLabel]);
+        }, [selection.text, revealLabel]);
 
         const normalIcon = (
             <Icon icon={TextAlignLeftIcon} className="mt-015 font-color-secondary" />

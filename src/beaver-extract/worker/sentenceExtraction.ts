@@ -85,18 +85,8 @@ import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
 import { placeRegionItems, splitRegionItems, type RegionItemDraft } from "../regions/regionItems";
 
-/**
- * Per-page sentence work given pre-walked context. Cheap to call in a
- * loop — the caller resolves the splitter, walks the analysis pages,
- * and builds the analysis context once and reuses them across pages.
- *
- * Returns both the sentence result and the `FilteredParagraphResult`
- * so the multi-page caller can populate `InternalProcessedPage.content` /
- * `columns` / `lines` from the same call (the paragraph-engine
- * markdown text is already produced inside the filter step as
- * `paragraphResult.pageContent`).
- */
-export function extractSentencesForPage(args: {
+/** Arguments of the per-page structured work (`extractSentencesForPage`). */
+export interface PageSentenceArgs {
     doc: DocumentLike;
     pageIndex: number;
     /**
@@ -172,11 +162,24 @@ export function extractSentencesForPage(args: {
      * from `preWalkedDetailed` (`detectDominantTextOrientation`).
      */
     pageRotation?: RotationAngle;
-}): {
-    sentenceResult: PageSentenceResult;
+}
+
+/** First half of the per-page work: paragraphs, before sentence mapping. */
+export interface PageParagraphs {
+    detailed: RawPageDataDetailed;
     filteredResult: FilteredParagraphResult;
-    phaseTimings: StructuredPagePhaseTimings;
-} {
+    detailedWalkMs: number;
+    fontBridgeMs: number;
+    filteredParagraphsMs: number;
+}
+
+/**
+ * Walk (or reuse) the detailed target page and detect its paragraphs. The
+ * multi-page caller runs this for every page before `mapPageSentences`, so
+ * document-level decisions (reference classification) can edit the
+ * paragraphs in between.
+ */
+export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
     const tDetailed = performance.now();
     const detailed =
         args.preWalkedDetailed ??
@@ -231,12 +234,34 @@ export function extractSentencesForPage(args: {
         pageRotation: args.pageRotation,
     });
     const filteredParagraphsMs = performance.now() - tFiltered;
+    return { detailed, filteredResult, detailedWalkMs, fontBridgeMs, filteredParagraphsMs };
+}
 
+/**
+ * Second half of the per-page work: map paragraphs to sentence bboxes.
+ * `referenceItems` (indices into the paragraph result's items) are emitted
+ * as `reference` items without sentences.
+ */
+export function mapPageSentences(
+    args: Pick<
+        PageSentenceArgs,
+        "paragraphSettings" | "splitter" | "compoundVocabulary" | "regionItems" | "regionMargin" | "regionsMs"
+    >,
+    paragraphs: PageParagraphs,
+    referenceItems?: ReadonlySet<number>,
+    referenceMs = 0,
+): {
+    sentenceResult: PageSentenceResult;
+    filteredResult: FilteredParagraphResult;
+    phaseTimings: StructuredPagePhaseTimings;
+} {
+    const { detailed, filteredResult } = paragraphs;
     const tSentence = performance.now();
     const sentenceResult = extractPageSentences(detailed, {
         paragraphSettings: args.paragraphSettings,
         splitter: args.splitter,
         compoundVocabulary: args.compoundVocabulary,
+        referenceItems,
         precomputed: {
             paragraphResult: filteredResult.paragraphResult,
             pageRotation: filteredResult.pageRotation,
@@ -250,7 +275,7 @@ export function extractSentencesForPage(args: {
         // Column detection split equation boxes that merged one equation from
         // each column; the items follow, so each is placed in its own column.
         const regionItems = splitRegionItems(args.regionItems, filteredResult.columnResult.regionPieces);
-        const placed = placeRegionItems(args.pageIndex, sentenceResult.items, regionItems, {
+        const placed = placeRegionItems(detailed.pageIndex, sentenceResult.items, regionItems, {
             rotation: filteredResult.pageRotation,
             sourceWidth: filteredResult.sourceWidth,
             sourceHeight: filteredResult.sourceHeight,
@@ -267,7 +292,7 @@ export function extractSentencesForPage(args: {
     sentenceResult.items = [
         ...sentenceResult.items,
         ...reindexMarginItems(
-            [...filteredResult.marginItems, ...marginItemsForLines(args.pageIndex, args.regionMargin ?? [])],
+            [...filteredResult.marginItems, ...marginItemsForLines(detailed.pageIndex, args.regionMargin ?? [])],
             sentenceResult.items.length,
         ),
     ];
@@ -275,16 +300,17 @@ export function extractSentencesForPage(args: {
 
     const { charCount, lineCount } = countDetailedPageSizes(detailed);
     const phaseTimings: StructuredPagePhaseTimings = {
-        pageIndex: args.pageIndex,
-        detailedWalkMs,
-        fontBridgeMs,
-        filteredParagraphsMs,
+        pageIndex: detailed.pageIndex,
+        detailedWalkMs: paragraphs.detailedWalkMs,
+        fontBridgeMs: paragraphs.fontBridgeMs,
+        filteredParagraphsMs: paragraphs.filteredParagraphsMs,
         marginFilterMs: filteredResult.timings.marginFilterMs,
         columnDetectMs: filteredResult.timings.columnDetectMs,
         lineDetectMs: filteredResult.timings.lineDetectMs,
         paragraphDetectMs: filteredResult.timings.paragraphDetectMs,
         sentenceMapMs,
         ...(args.regionItems !== undefined ? { regionsMs } : {}),
+        ...(referenceItems !== undefined ? { referencesMs: referenceMs } : {}),
         charCount,
         lineCount,
         itemCount: sentenceResult.items.length,
@@ -292,6 +318,26 @@ export function extractSentencesForPage(args: {
     };
 
     return { sentenceResult, filteredResult, phaseTimings };
+}
+
+/**
+ * Per-page sentence work given pre-walked context: `detectPageParagraphs`
+ * followed by `mapPageSentences`. Cheap to call in a loop — the caller
+ * resolves the splitter, walks the analysis pages, and builds the analysis
+ * context once and reuses them across pages.
+ *
+ * Returns both the sentence result and the `FilteredParagraphResult`
+ * so the multi-page caller can populate `InternalProcessedPage.content` /
+ * `columns` / `lines` from the same call (the paragraph-engine
+ * markdown text is already produced inside the filter step as
+ * `paragraphResult.pageContent`).
+ */
+export function extractSentencesForPage(args: PageSentenceArgs): {
+    sentenceResult: PageSentenceResult;
+    filteredResult: FilteredParagraphResult;
+    phaseTimings: StructuredPagePhaseTimings;
+} {
+    return mapPageSentences(args, detectPageParagraphs(args));
 }
 
 /**

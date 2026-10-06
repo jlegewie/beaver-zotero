@@ -15,7 +15,7 @@ import {
 import { processPartialContent } from '../../utils/markdownPartialContent';
 import { getHost } from '@beaver/agent-ui/host';
 import { resolveObjectIdReference } from '@beaver/agent-core/identity/libraryRef';
-import { itemLinkExportHref, parseItemLinkHref, type ItemLinkTarget } from '../../utils/itemLinks';
+import { itemLinkExportHref, parseItemLinkHref, type ItemLinkTarget } from '@beaver/agent-core/identity/itemLinks';
 import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
 import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
 
@@ -385,7 +385,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
                 return (
                     <div key={`markdown-${index}`} className={className}>
                         <ReactMarkdown
-                            remarkPlugins={[remarkMath, remarkGfm]}
+                            // Strikethrough needs `~~`: models write subscripts as `P~lac~`
+                            // and approximations as `~5`, which single tildes would strike.
+                            remarkPlugins={[remarkMath, [remarkGfm, { singleTilde: false }]]}
                             rehypePlugins={rehypePlugins}
                             urlTransform={exportRendering ? exportUrlTransform : urlTransform}
                             components={{

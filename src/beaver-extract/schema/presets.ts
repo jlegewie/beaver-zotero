@@ -21,6 +21,23 @@ export interface PdfExtractionPreset {
      * by its first glyph.
      */
     styleRuns: boolean;
+    /**
+     * Read hanging-indent blocks (reference lists, footnotes, lists whose
+     * wrapped lines sit at an inner edge) as entries with continuations
+     * (`ParagraphDetectionSettings.hangingIndentBlocks`).
+     */
+    hangingIndentBlocks: boolean;
+    /**
+     * Heading detection demotes run-in label lines ("Keywords: …",
+     * "Received: …") and supplementary / extended-data figure and table
+     * captions (`ParagraphDetectionSettings.headingLabelFilters`).
+     */
+    headingLabelFilters: boolean;
+    /**
+     * Classify reference-list entries in structured extraction and emit them
+     * as `reference` items (see `references/classify.ts`).
+     */
+    referenceItems: boolean;
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */
     idScheme: ExtractIdScheme;
     /**
@@ -32,8 +49,8 @@ export interface PdfExtractionPreset {
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, idScheme: "document", regions: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, idScheme: "page", regions: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, referenceItems: false, idScheme: "document", regions: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, referenceItems: true, idScheme: "page", regions: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */
