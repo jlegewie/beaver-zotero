@@ -18,10 +18,8 @@
  */
 
 import { DocumentAnalyzer, type RawPageProvider } from "../DocumentAnalyzer";
-import { StyleAnalyzer } from "../StyleAnalyzer";
-import { MarginFilter, getEffectiveRepeatThreshold } from "../MarginFilter";
+import { MarginFilter } from "../MarginFilter";
 import { PageExtractor } from "../PageExtractor";
-import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
 import { setAnalyzerLogging } from "../logging";
@@ -29,12 +27,9 @@ import type { PageLine } from "../LineDetector";
 import {
     collectMarginItemsFromFilteredPage,
     detectFilteredParagraphs,
-    documentBodyExtents,
-    regionFurnitureLines,
     reindexMarginItems,
 } from "../FilteredParagraphPipeline";
 import {
-    detectDominantTextOrientation,
     inverseRotateBBox,
     type RotationAngle,
 } from "../PageRotationNormalizer";
@@ -47,8 +42,6 @@ import type {
     ExtractionSettings,
     ItemLine,
     LayoutAnalysisResult,
-    MarginAnalysis,
-    MarginRemovalResult,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageImageOptions,
@@ -59,7 +52,6 @@ import type {
     PDFSearchResult,
     InternalProcessedPage,
     PageGeometry,
-    RawLine,
     RawPageData,
     RawPageDataDetailed,
     StructuredPagePhaseTimings,
@@ -72,17 +64,15 @@ import {
     DEFAULT_PDF_SEARCH_OPTIONS,
     DEFAULT_SEARCH_SCORING_OPTIONS,
     shouldProbeGraphicsLayer,
-    bboxFromXYWH,
     bboxHeight,
     bboxWidth,
 } from "@beaver/agent-core/extract/types";
 import {
     CURRENT_PDF_EXTRACTION_PRESET,
+    ITEM_KINDS,
     SCHEMA_VERSION,
-    assignDocumentIds,
     pdfExtractionPreset,
     type PdfExtractionPreset,
-    projectStructuredPage,
     type BeaverExtractResult,
     type ExtractionDebug,
     type DebugSentence,
@@ -100,19 +90,12 @@ import { ERROR_CODES, postLog, workerError } from "./errors";
 import { isRecoverablePageError } from "../wasmFatal";
 import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
-import {
-    buildCompoundVocabulary,
-    detectPageParagraphs,
-    mapPageSentences,
-    runSentenceExtractionFromDoc,
-    type PageParagraphs,
-    type PageSentenceArgs,
-} from "./sentenceExtraction";
+import { runSentenceExtractionFromDoc } from "./sentenceExtraction";
 import { resolveSplitter } from "./splitterResolver";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
-import { buildRefPage, type RefPage } from "../references/pageInput";
-import { applyReferencePlan, planReferences, type ReferencePagePlan } from "../references/classify";
+import type { RefPage } from "../references/pageInput";
+import type { ReferencePagePlan } from "../references/classify";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
@@ -134,12 +117,23 @@ import {
     searchPageInDoc,
 } from "./docHelpers";
 import type { DocumentLike, FontApi } from "./mupdfApi";
-import type { GraphicsSummary } from "./graphicsSummary";
-import { detectRegions } from "../regions/RegionDetector";
-import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
-import { regionItemsForPage, type PageRegionItems, type RegionItemDraft } from "../regions/regionItems";
-import { REGION_MODEL } from "../regions/weights";
-import { DEFAULT_REGION_CONTEXT_PAGES } from "./regionOps";
+import {
+    buildAnalysisFromDoc,
+    PageWalkCache,
+    type ResolvedExtractionSettings,
+} from "../pipeline/documentAnalysis";
+import { pageLabelsToStringKeys, projectColumnRect, replaceControlCharsInResult } from "../pipeline/output";
+import {
+    analyzeDocument,
+    mapSentences,
+    project,
+    runItemPasses,
+    segmentPages,
+    type ReferenceStage,
+    type StructuredRunContext,
+} from "../pipeline/structured";
+
+export type { ReferenceStage };
 
 export interface OpReply<T = unknown> {
     result: T;
@@ -270,92 +264,6 @@ export async function opRenderPages(
 }
 
 /**
- * Per-`opExtract` page-walk cache.
- *
- * The OCR gate (`DocumentAnalyzer`) samples a spread of pages across the
- * document, and the extraction pipeline then walks every target/analysis
- * page. For a whole-document extract every sampled page is also a
- * pipeline page, so without sharing each such page's `toStructuredText`
- * walk runs twice — once for the gate, once for extraction. The doubling
- * is invisible on cheap pages but doubles the wall time of a page that is
- * expensive to walk (heavy vector content, redraw-stamped text layers).
- *
- * This cache memoizes the walk so each page is walked at most once per
- * `opExtract` call: the gate populates it, the pipeline reuses it.
- *
- * `includeImages` only takes effect on a cache MISS. It is the OCR gate,
- * not the extraction pipeline, that needs image blocks (to measure
- * scanned-page coverage). The gate always runs first, so the pages it
- * samples are walked WITH images and the pipeline reuses them as-is —
- * image blocks are inert for every downstream text consumer (line /
- * column / paragraph / margin / sentence detection all filter to
- * `type === "text"`). Pages the gate did not sample — and every page
- * when `checkTextLayer` is off and the gate never runs — are walked by
- * the pipeline WITHOUT images, exactly as before this cache existed.
- *
- *  - `getPlain`    — JSON-walk pages for the markdown engines and the
- *                    markdown-mode gate.
- *  - `getDetailed` — per-char detailed-walk pages for structured
- *                    extraction and the structured-mode gate. With `regions`,
- *                    the walk also records font runs and the page's graphics
- *                    summary (`graphicsFor`) for region detection.
- */
-class PageWalkCache {
-    private readonly plain = new Map<number, RawPageData>();
-    private readonly detailed = new Map<number, RawPageDataDetailed>();
-    private readonly graphics = new Map<number, GraphicsSummary>();
-
-    constructor(
-        private readonly doc: DocumentLike,
-        private readonly fontApi: FontApi | undefined,
-        /** Text repair of the op's schema preset; applies to every walk. */
-        private readonly textRepair: boolean,
-        /** Whether detailed walks record per-glyph style runs. */
-        private readonly styleRuns: boolean,
-        /** Region detection of the op's schema preset (structured mode). */
-        readonly regions = false,
-    ) {}
-
-    getPlain(pageIndex: number, includeImages: boolean): RawPageData {
-        let page = this.plain.get(pageIndex);
-        if (!page) {
-            page = extractRawPageFromDoc(this.doc, pageIndex, {
-                includeImages,
-                textRepair: this.textRepair,
-            });
-            this.plain.set(pageIndex, page);
-        }
-        return page;
-    }
-
-    getDetailed(pageIndex: number, includeImages: boolean): RawPageDataDetailed {
-        let page = this.detailed.get(pageIndex);
-        if (!page) {
-            page = extractRawPageDetailedFromDoc(
-                this.doc,
-                pageIndex,
-                includeImages,
-                this.fontApi,
-                this.textRepair,
-                {
-                    styleRuns: this.styleRuns,
-                    ...(this.regions
-                        ? { onGraphics: (g: GraphicsSummary) => this.graphics.set(pageIndex, g), fontSpans: true }
-                        : {}),
-                },
-            );
-            this.detailed.set(pageIndex, page);
-        }
-        return page;
-    }
-
-    /** Graphics summary of a page walked by `getDetailed` (with `regions`). */
-    graphicsFor(pageIndex: number): GraphicsSummary | undefined {
-        return this.graphics.get(pageIndex);
-    }
-}
-
-/**
  * OCR-gate page provider over an op's shared page walks.
  *
  * Structured extraction decides whether a document is queued for OCR from
@@ -373,115 +281,6 @@ function ocrGateProvider(
             detailed
                 ? (pageCache.getDetailed(i, true) as unknown as RawPageData)
                 : pageCache.getPlain(i, true),
-    };
-}
-
-/**
- * Shared analysis-context prefix for `runExtractFromIndices` and
- * `opAnalyzeLayout`. Walks the analysis-window pages once and runs the
- * cross-page `buildPageAnalysisContext` (StyleAnalyzer + MarginFilter)
- * over them.
- *
- * Both extract and analyzeLayout call this so they see the SAME
- * `marginRemoval` / `marginAnalysis` / `styleProfile` for the same input
- * `analysisIndices`. This is what guarantees the margins overlay (built
- * on `analyzeLayout`'s output) and structured extract agree on a given
- * page's filter decisions.
- *
- * Caller resolves `analysisIndices` (typically via `resolveAnalysisPages`)
- * and supplies the document's total `pageCount` (so
- * `getEffectiveRepeatThreshold` can apply the short-doc relaxation).
- *
- * `preWalked` lets the structured branch reuse target-page detailed
- * walks (which carry every field a JSON walk produces — line bbox,
- * font, page dims — with the WASM font helpers wired up). Indices in
- * the map are NOT re-walked; everything else gets a JSON walk as
- * before. This is what eliminates the redundant per-target JSON walk
- * for structured mode when `analysisWindow=0`.
- */
-function buildAnalysisFromDoc(
-    doc: DocumentLike,
-    opts: ExtractionSettings,
-    requestedRepeatThreshold: number | undefined,
-    analysisIndices: number[],
-    pageCount: number,
-    preWalked?: Map<number, RawPageData>,
-    pageCache?: PageWalkCache,
-    pageNumberRuns = true,
-): {
-    analysisPages: RawPageData[];
-    analysisPageByIndex: Map<number, RawPageData>;
-    styleProfile: StyleProfile;
-    marginAnalysis: MarginAnalysis;
-    marginRemoval: MarginRemovalResult;
-    /**
-     * Genuine hyphenated compounds (lowercased) seen mid-line across the
-     * analysis window. Used by the structured sentence mapper to keep a
-     * line-break hyphen when the compound is attested (e.g. "broken-windows")
-     * and join it otherwise. Coverage scales with the analysis window — for
-     * full-document structured extraction it spans the whole document.
-     */
-    compoundVocabulary: ReadonlySet<string>;
-    walkMs: number;
-    analysisMs: number;
-} {
-    const tWalkStart = performance.now();
-    const analysisPages: RawPageData[] = [];
-    for (const i of analysisIndices) {
-        const pre = preWalked?.get(i);
-        if (pre) {
-            analysisPages.push(pre);
-            continue;
-        }
-        try {
-            analysisPages.push(
-                pageCache
-                    ? pageCache.getPlain(i, false)
-                    : extractRawPageFromDoc(doc, i),
-            );
-        } catch (err) {
-            // A malformed page tree can fail to resolve individual leaves.
-            // Skip the bad page and keep going so one unresolvable page
-            // does not abort the whole extraction (mirrors `mutool`).
-            if (!isRecoverablePageError(err)) throw err;
-            postLog(
-                "warn",
-                `[mupdf-worker] buildAnalysisFromDoc: skipping unresolvable page ${i}: ${String(err)}`,
-            );
-        }
-    }
-    const analysisPageByIndex = new Map<number, RawPageData>(
-        analysisPages.map((p) => [p.pageIndex, p]),
-    );
-    // Genuine mid-line hyphenated compounds across the analysis window. Built
-    // from the already-walked line text (no extra walk) and consumed by the
-    // structured sentence mapper's line-break de-hyphenation.
-    const compoundVocabulary = buildCompoundVocabulary(analysisPages);
-    const walkMs = performance.now() - tWalkStart;
-
-    const tAnalysisStart = performance.now();
-    const { styleProfile, marginAnalysis, marginRemoval } = buildPageAnalysisContext({
-        pages: analysisPages,
-        totalPageCount: pageCount,
-        marginZone: opts.marginZone,
-        repeatThreshold: requestedRepeatThreshold,
-        detectPageSequences: opts.detectPageSequences,
-        marginTextRows: opts.marginTextRows,
-        pageNumberRuns,
-    });
-    const analysisMs = performance.now() - tAnalysisStart;
-    StyleAnalyzer.logStyleProfile(styleProfile);
-    MarginFilter.logRemovalCandidates(marginRemoval);
-
-    return {
-        analysisPages,
-        analysisPageByIndex,
-        styleProfile,
-        marginAnalysis,
-        marginRemoval,
-        compoundVocabulary,
-        walkMs,
-        analysisMs,
     };
 }
 
@@ -570,34 +369,17 @@ function docItemsFromParagraphResult(
 }
 
 /**
- * Inverse-rotate a column rect (`{x, y, w, h}` in upright frame) back
- * to MuPDF coords and project into the `{l, t, r, b}` shape stored on
- * `InternalProcessedPage.columns`.
- */
-function projectColumnRect(
-    col: { x: number; y: number; w: number; h: number },
-    pageRotation: RotationAngle,
-    sourceWidth: number,
-    sourceHeight: number,
-): BoundingBox {
-    const box = bboxFromXYWH(col.x, col.y, col.w, col.h, "top-left");
-    return pageRotation === 0
-        ? box
-        : inverseRotateBBox(box, pageRotation, sourceWidth, sourceHeight);
-}
-
-/**
  * Shared body for `opExtract`. The per-page loop has three branches keyed
  * off `engine`:
  *   - `"paragraph"` → `detectFilteredParagraphs` produces
  *     `paragraphResult.pageContent` (`## ` headers, `\n\n` separators).
  *   - `"block"` → column detection + PageExtractor (block-based).
- *   - `"structured"` → `extractSentencesForPage` (per-page detailed walk
- *     + sentence mapping). Populates `items`, `sentences`, `columns`,
- *     plus paragraph-engine `content`.
- *     Requires `splitter` (resolved by the caller). Per-page detailed
- *     walk is the dominant cost — multi-page structured extracts pay
- *     N× this per the `targetIndices` length.
+ *   - `"structured"` → the structured pipeline (`../pipeline/structured`):
+ *     per-page detailed walk, segmentation, item passes and sentence
+ *     mapping. Populates `items`, `sentences`, `columns`, plus
+ *     paragraph-engine `content`. Requires `splitter` (resolved by the
+ *     caller). Per-page detailed walk is the dominant cost — multi-page
+ *     structured extracts pay N× this per the `targetIndices` length.
  *
  * The combination `engine === "structured"` && `markdown.engine` is
  * rejected upstream by `opExtract`. All other steps (raw extraction,
@@ -622,7 +404,7 @@ function projectColumnRect(
  */
 export function runExtractFromIndices(
     doc: DocumentLike,
-    opts: Required<Omit<ExtractionSettings, 'pages' | 'minTextPerPage'>> & ExtractionSettings,
+    opts: ResolvedExtractionSettings,
     requestedRepeatThreshold: number | undefined,
     targetIndices: number[],
     analysisIndices: number[],
@@ -640,100 +422,35 @@ export function runExtractFromIndices(
     try {
     const tStart = performance.now();
 
-    // Structured mode pre-walks every target in detailed mode FIRST so
-    // the analysis-window step can reuse those walks instead of
-    // duplicating them with a JSON walk. Markdown engines don't need
-    // per-char data so they skip this and go straight to the JSON walk
-    // inside `buildAnalysisFromDoc`.
-    //
-    // The detailed walk carries every field a JSON walk produces (line
-    // bbox, font family/weight/style/size — the WASM `_wasm_font_*`
-    // helpers populate the line font directly, so no separate
-    // `RawFontBridge` pass is needed for the target page). Once both
-    // walks become substitutable, target pages incur exactly one walk
-    // even when they also live in the analysis window (the
-    // `analysisWindow=0` default).
-    let preWalkedTargets: Map<number, RawPageData> | undefined;
-    let preWalkedDetailedTargets: Map<number, RawPageDataDetailed> | undefined;
-    let preWalkedDetailedMsByTarget: Map<number, number> | undefined;
-    let preWalkMs = 0;
-    if (engine === "structured") {
-        if (!fontApi) {
-            throw new Error(
-                "runExtractFromIndices: engine='structured' requires a `fontApi` argument so the detailed walker can populate line fonts",
-            );
-        }
-        const tPreWalk = performance.now();
-        preWalkedDetailedTargets = new Map<number, RawPageDataDetailed>();
-        preWalkedDetailedMsByTarget = new Map<number, number>();
-        preWalkedTargets = new Map<number, RawPageData>();
-        for (const i of targetIndices) {
-            const tTargetPreWalk = performance.now();
-            let detailed: RawPageDataDetailed;
-            try {
-                // Reuse the OCR gate's walk of this page when the shared
-                // cache is present; otherwise walk it fresh. The pipeline
-                // never needs image blocks, so a page the gate did not
-                // already sample is walked without them.
-                detailed = pageCache
-                    ? pageCache.getDetailed(i, false)
-                    : extractRawPageDetailedFromDoc(doc, i, false, fontApi);
-            } catch (err) {
-                if (engine === "structured" || !isRecoverablePageError(err)) {
-                    throw err;
-                }
-                // Markdown extraction can still skip an unresolvable leaf in
-                // a malformed page tree. Structured extraction is
-                // full-document canonical output and must fail instead.
-                postLog(
-                    "warn",
-                    `[mupdf-worker] runExtractFromIndices: skipping unresolvable page ${i}: ${String(err)}`,
-                );
-                continue;
-            }
-            preWalkedDetailedMsByTarget.set(
-                i,
-                performance.now() - tTargetPreWalk,
-            );
-            preWalkedDetailedTargets.set(i, detailed);
-            // `RawPageDataDetailed` is structurally a `RawPageData`
-            // (readonly arrays make blocks/lines covariant). Reusing
-            // the same object keeps `pagesForFilterWithBridgedFonts`
-            // a no-op for the target page later on.
-            preWalkedTargets.set(i, detailed as unknown as RawPageData);
-        }
-        preWalkMs = performance.now() - tPreWalk;
-    }
-
-    // Walk the analysis union once; targets are guaranteed to be in it
-    // (resolveAnalysisPages always includes them), so the output loop
-    // looks them up in the pre-walked map without re-extracting. Same
-    // helper `opAnalyzeLayout` calls — keeps the prefix byte-identical
-    // between extract and analyze.
-    const {
-        analysisPages,
-        analysisPageByIndex,
-        styleProfile,
-        marginAnalysis,
-        marginRemoval,
-        compoundVocabulary,
-        walkMs: jsonWalkMs,
-        analysisMs,
-    } = buildAnalysisFromDoc(
+    // Structured mode walks every target in detailed mode first and reuses
+    // those walks for the analysis window (`analyzeDocument`). Markdown
+    // engines don't need per-char data and go straight to the JSON walk
+    // inside `buildAnalysisFromDoc`. Same helper `opAnalyzeLayout` calls —
+    // keeps the prefix byte-identical between extract and analyze.
+    const structuredStudy = engine === "structured"
+        ? analyzeDocument(
+            doc,
+            opts,
+            requestedRepeatThreshold,
+            targetIndices,
+            analysisIndices,
+            pageCount,
+            fontApi,
+            pageCache,
+            pageNumberRuns,
+        )
+        : undefined;
+    const study = structuredStudy ?? buildAnalysisFromDoc(
         doc,
         opts,
         requestedRepeatThreshold,
         analysisIndices,
         pageCount,
-        preWalkedTargets,
+        undefined,
         pageCache,
         pageNumberRuns,
     );
-    // Fold the structured prewalk into the same `walkMs` counter the
-    // markdown engines use. Profilers and the `timings` envelope see a
-    // single "walk" total, regardless of whether the work was done as
-    // a detailed pre-walk or a JSON walk inside `buildAnalysisFromDoc`.
-    const walkMs = jsonWalkMs + preWalkMs;
+    const { analysisPages, analysisPageByIndex, styleProfile, marginAnalysis, marginRemoval, walkMs, analysisMs } = study;
 
     // Drop any target page that failed to walk (unresolvable leaf in a
     // malformed page tree). `buildAnalysisFromDoc` skips such pages, so they
@@ -832,178 +549,28 @@ export function runExtractFromIndices(
             perPageMs.push(performance.now() - tPage);
         }
     } else if (engine === "structured") {
-        // Structured engine: per-page detailed walk + paragraph-scoped
-        // sentence mapping. Reuses the shared analysis context so margin
-        // removal and the style profile run only once across the multi-page
-        // extract. `content` is populated from the same paragraph result
-        // the sentence mapper consumes, so structured-mode `fullText`
-        // matches paragraph-engine markdown for the same pages.
+        // Structured engine: reuses the shared analysis context so margin
+        // removal and the style profile run only once across the document.
         if (!splitter) {
             throw new Error(
                 "runExtractFromIndices: engine='structured' requires a resolved `splitter` argument",
             );
         }
-        const regionImages = pageCache?.regions ? new Map<number, Set<number>>() : undefined;
-        // Region detection keeps the document's running headers and footers out of regions.
-        const bodyExtents = regionImages
-            ? documentBodyExtents(analysisPages, { marginRemoval, styleProfile, margins: opts.margins, marginZone: opts.marginZone, marginTextRows: opts.marginTextRows })
-            : new Map<string, { top: number; bottom: number }>();
-        const runningRepeat = getEffectiveRepeatThreshold({
-            requested: requestedRepeatThreshold,
-            totalPageCount: pageCount,
-            analysisPageCount: analysisPages.length,
-        }).topBottom;
-        if (regionImages) {
-            for (const i of effectiveTargetIndices) {
-                const graphics = pageCache!.graphicsFor(i);
-                if (graphics) regionImages.set(i, pageImageHashes(graphics));
-            }
-        }
-        // Paragraphs for every page first: reference classification is a
-        // document-level decision that edits paragraphs before sentence
-        // mapping.
-        const sentenceArgs = { paragraphSettings, splitter, compoundVocabulary };
-        const prepared: Array<{
-            rawPage: RawPageData;
-            paragraphs: PageParagraphs;
-            regions?: Pick<PageSentenceArgs, "regionItems" | "regionMargin" | "regionsMs">;
-            ms: number;
-        }> = [];
-        for (const i of effectiveTargetIndices) {
-            const tPage = performance.now();
-            const rawPage = analysisPageByIndex.get(i)!;
-            const preWalkedDetailedMs = preWalkedDetailedMsByTarget!.get(i) ?? 0;
-            let detailed = preWalkedDetailedTargets!.get(i);
-            let regionItems: RegionItemDraft[] | undefined;
-            let regionMargin: RawLine[] | undefined;
-            let regionsMs: number | undefined;
-            let pageRotation: RotationAngle | undefined;
-            let pagesForTarget = analysisPages;
-            if (regionImages && detailed) {
-                const tRegions = performance.now();
-                // Orientation is read from the full page: removing region text can
-                // leave too little text to detect it.
-                const rotation = detectDominantTextOrientation(detailed, opts.marginZone);
-                // Running headers, footers and page numbers stay page furniture.
-                const margin = regionFurnitureLines(detailed, {
-                    marginRemoval,
-                    marginAnalysis,
-                    styleProfile,
-                    margins: opts.margins,
-                    marginZone: opts.marginZone,
-                    marginTextRows: opts.marginTextRows,
-                    pageRotation: rotation,
-                    repeat: runningRepeat,
-                    bodyExtents,
-                });
-                const regions = pageRegions(detailed, pageCache!.graphicsFor(i), regionImages, pageCount, compoundVocabulary, margin);
-                if (regions.page !== detailed) {
-                    // The target without absorbed lines replaces the walked page, so
-                    // paragraph detection never sees them (and no font bridge runs).
-                    pageRotation = rotation;
-                    const stripped = regions.page;
-                    pagesForTarget = analysisPages.map((p) =>
-                        p.pageIndex === i ? (stripped as unknown as RawPageData) : p,
-                    );
-                    detailed = stripped;
-                }
-                regionItems = regions.items;
-                regionMargin = regions.margin;
-                regionsMs = performance.now() - tRegions;
-            }
-            const paragraphs = detectPageParagraphs({
-                doc,
-                pageIndex: rawPage.pageIndex,
-                analysisPages: pagesForTarget,
-                splitter,
-                paragraphSettings,
-                marginRemoval,
-                styleProfile,
-                compoundVocabulary,
-                margins: opts.margins,
-                marginZone: opts.marginZone,
-                graphicsLayerMode: opts.graphicsLayerMode,
-                // Reuse the detailed walk done before
-                // `buildAnalysisFromDoc` so we don't pay a second
-                // walk per target page.
-                preWalkedDetailed: detailed,
-                preWalkedDetailedMs,
-                regionItems,
-                regionMargin,
-                regionsMs,
-                pageRotation,
-            });
-            prepared.push({
-                rawPage,
-                paragraphs,
-                regions: regionItems !== undefined ? { regionItems, regionMargin, regionsMs } : undefined,
-                ms: preWalkedDetailedMs + (performance.now() - tPage),
-            });
-        }
-
-        let plans: ReferencePagePlan[] | undefined;
-        let referencesMs = 0;
-        let itemTotal = 0;
-        if (references) {
-            const tReferences = performance.now();
-            const inputs = prepared.map(({ paragraphs }) =>
-                buildRefPage(paragraphs.filteredResult.paragraphResult, styleProfile),
-            );
-            if (references.classify) plans = planReferences(inputs, pageCount);
-            references.collect?.(inputs, plans);
-            referencesMs = performance.now() - tReferences;
-            itemTotal = inputs.reduce((n, page) => n + page.items.length, 0);
-        }
-
-        prepared.forEach(({ rawPage, paragraphs, regions, ms }, k) => {
-            const tPage = performance.now();
-            const { filteredResult } = paragraphs;
-            let referenceItems: Set<number> | undefined;
-            let pageReferencesMs = 0;
-            if (plans) {
-                const applied = applyReferencePlan(
-                    filteredResult.paragraphResult,
-                    plans[k],
-                    paragraphSettings?.removeHyphenation ?? true,
-                );
-                filteredResult.paragraphResult = applied.result;
-                referenceItems = applied.references;
-                pageReferencesMs = itemTotal > 0
-                    ? (referencesMs * plans[k].probs.length) / itemTotal
-                    : referencesMs / prepared.length;
-            }
-            const { sentenceResult, phaseTimings } = mapPageSentences(
-                { ...sentenceArgs, ...regions },
-                paragraphs,
-                referenceItems,
-                pageReferencesMs,
-            );
-            logColumnDetection(rawPage.pageIndex, filteredResult.columnResult);
-            pages.push({
-                index: sentenceResult.pageIndex,
-                label: rawPage.label,
-                // sentenceResult.width/height are already in MuPDF
-                // frame (the mapper reports source dims).
-                width: sentenceResult.width,
-                height: sentenceResult.height,
-                viewBox: rawPage.viewBox,
-                rotation: rawPage.rotation,
-                content: filteredResult.paragraphResult.pageContent,
-                columns: filteredResult.columnResult.columns.map((col) =>
-                    projectColumnRect(
-                        col,
-                        filteredResult.pageRotation,
-                        filteredResult.sourceWidth,
-                        filteredResult.sourceHeight,
-                    ),
-                ),
-                items: sentenceResult.items,
-                sentences: sentenceResult.sentences,
-                degradation: sentenceResult.degradation,
-            } as InternalProcessedPage);
-            perPageMs.push(ms + pageReferencesMs + (performance.now() - tPage));
-            perPagePhases.push(phaseTimings);
-        });
+        const ctx: StructuredRunContext = {
+            doc,
+            opts,
+            requestedRepeatThreshold,
+            pageCount,
+            pageCache,
+            paragraphSettings,
+            splitter,
+        };
+        const segmented = segmentPages(ctx, structuredStudy!, effectiveTargetIndices);
+        const passes = runItemPasses(segmented, styleProfile, pageCount, references, paragraphSettings);
+        const mapped = mapSentences(ctx, segmented, passes, study.compoundVocabulary);
+        pages.push(...mapped.pages);
+        perPageMs.push(...mapped.perPageMs);
+        perPagePhases.push(...mapped.perPagePhases);
     } else {
         const pageExtractor = new PageExtractor({ styleProfile });
 
@@ -1094,71 +661,6 @@ export function runExtractFromIndices(
     }
 }
 
-/**
- * Region items of one page and the page without the lines they absorb. A page
- * the detector fails on keeps its text as prose; the failure is logged.
- */
-function pageRegions(
-    page: RawPageDataDetailed,
-    graphics: GraphicsSummary | undefined,
-    imagesByPage: ReadonlyMap<number, ReadonlySet<number>>,
-    pageCount: number,
-    vocabulary: ReadonlySet<string>,
-    margin: ReadonlySet<RawLine>,
-): PageRegionItems {
-    if (!graphics || !REGION_MODEL) {
-        throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
-    }
-    try {
-        const detection = detectRegions(page, graphics, {
-            pageIndex: page.pageIndex,
-            doc: pageRegionDocContext(page.pageIndex, imagesByPage, pageCount, DEFAULT_REGION_CONTEXT_PAGES),
-            model: REGION_MODEL,
-            route: true,
-            margin,
-        });
-        return regionItemsForPage(page, detection, vocabulary);
-    } catch (err) {
-        postLog("warn", `[mupdf-worker] region detection failed on page ${page.pageIndex}: ${String(err)}`);
-        return { page, items: [], margin: [] };
-    }
-}
-
-function pageLabelsToStringKeys(
-    pageLabels?: Record<number, string>,
-): Record<string, string> | undefined {
-    if (!pageLabels || Object.keys(pageLabels).length === 0) return undefined;
-    return Object.fromEntries(
-        Object.entries(pageLabels).map(([index, label]) => [String(index), label]),
-    );
-}
-
-function degradationSummary(result: InternalExtractionResult):
-    | { totalCount: number; pageCount: number }
-    | undefined {
-    let totalCount = 0;
-    let pageCount = 0;
-    for (const page of result.pages) {
-        const count = page.degradation?.count ?? 0;
-        if (count > 0) {
-            totalCount += count;
-            pageCount += 1;
-        }
-    }
-    return totalCount > 0 ? { totalCount, pageCount } : undefined;
-}
-
-function degradationByPage(
-    result: InternalExtractionResult,
-): Record<string, DegradationSummary> | undefined {
-    const byPage: Record<string, DegradationSummary> = {};
-    for (const page of result.pages) {
-        if (!page.degradation || page.degradation.count <= 0) continue;
-        byPage[String(page.index)] = page.degradation;
-    }
-    return Object.keys(byPage).length > 0 ? byPage : undefined;
-}
-
 function translateDegradationItemIds(
     degradation: DegradationSummary | undefined,
     itemIdByInternalId: Map<string, string>,
@@ -1171,60 +673,6 @@ function translateDegradationItemIds(
             itemId: itemIdByInternalId.get(note.itemId) ?? note.itemId,
         })),
     };
-}
-
-// C0/C1 control characters never belong in extracted text; Type 3 fonts in
-// some Word exports emit U+0007 for list tabs ("23. \x07Heer"). Each is
-// replaced by one character so text offsets stay aligned: C1 codes 0x91-0x97,
-// which some PDFs use as their Windows-1252 punctuation, become that
-// punctuation; every other control becomes a space. Other C1 codes (0x80,
-// 0x85, ...) mean different things in different fonts and are not mapped.
-// This runs on the final result, not on raw pages: page analysis (the OCR
-// gate, unmapped-glyph recovery) relies on control characters counting as
-// non-letters. It is part of text repair, so it is off in the schema-4 preset.
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
-const CONTROL_CHAR_TEST = new RegExp(CONTROL_CHARS.source);
-const CP1252_PUNCTUATION: Record<string, string> = {
-    "\u0091": "‘", // ‘
-    "\u0092": "’", // ’
-    "\u0093": "“", // “
-    "\u0094": "”", // ”
-    "\u0095": "•", // •
-    "\u0096": "–", // –
-    "\u0097": "—", // —
-};
-function replaceControlChars(text: string): string {
-    return CONTROL_CHAR_TEST.test(text)
-        ? text.replace(CONTROL_CHARS, (c) => CP1252_PUNCTUATION[c] ?? " ")
-        : text;
-}
-
-/**
- * Replace control characters in every text field of the result, in place,
- * when the PDF schema preset enables text repair.
- */
-function replaceControlCharsInResult(
-    result: InternalExtractionResult,
-    preset: PdfExtractionPreset,
-): void {
-    if (!preset.textRepair) return;
-    result.fullText = replaceControlChars(result.fullText);
-    for (const page of result.pages) {
-        page.content = replaceControlChars(page.content);
-        for (const item of page.items) {
-            if (!("text" in item)) continue;
-            item.text = replaceControlChars(item.text);
-            for (const line of item.lines) line.text = replaceControlChars(line.text);
-            if (!("sentences" in item) || !item.sentences) continue;
-            for (const sentence of item.sentences) {
-                sentence.text = replaceControlChars(sentence.text);
-                for (const fragment of sentence.fragments ?? []) {
-                    fragment.text = replaceControlChars(fragment.text);
-                }
-            }
-        }
-    }
 }
 
 function toMarkdownExtractResult(
@@ -1260,62 +708,6 @@ function toMarkdownExtractResult(
                 markdown: page.content,
             })),
         },
-    };
-}
-
-function toStructuredExtractResult(
-    result: InternalExtractionResult,
-    preset: PdfExtractionPreset,
-    bboxPrecision: number,
-    includeDiagnostics = false,
-    debug?: ExtractionDebug,
-): StructuredExtractResult {
-    replaceControlCharsInResult(result, preset);
-    // Margin items stay internal: no consumer reads them, and watermarks drawn
-    // glyph by glyph can make them a large share of a document. They are
-    // appended after all other items, so dropping them leaves the other items'
-    // order and ids unchanged. Debug output keeps them as `marginDecisions`.
-    const pages = result.pages.map((page) =>
-        projectStructuredPage(
-            { ...page, items: page.items.filter((item) => item.kind !== "margin") },
-            bboxPrecision,
-        ),
-    );
-    assignDocumentIds(pages, preset.idScheme);
-    const degradation = degradationSummary(result);
-    const pageDegradation = degradationByPage(result);
-    const mergedDebug: ExtractionDebug | undefined = pageDegradation
-        ? {
-            ...(debug ?? {}),
-            degradation: {
-                ...pageDegradation,
-                ...(debug?.degradation ?? {}),
-            },
-        }
-        : debug;
-    return {
-        mode: "structured",
-        schemaVersion: preset.schemaVersion,
-        createdAt: result.metadata.extractedAt,
-        // Profiling/diagnostics payload is opt-in.
-        ...(includeDiagnostics
-            ? {
-                diagnostics: {
-                    settings: result.metadata.settings,
-                    engine: "structured",
-                    timings: result.metadata.timings,
-                    ...(degradation ? { degradation } : {}),
-                },
-            }
-            : {}),
-        document: {
-            pageCount: result.analysis.pageCount,
-            pageLabels: pageLabelsToStringKeys(result.pageLabels),
-            bboxOrigin: "top-left",
-            bboxPrecision,
-            pages,
-        },
-        ...(mergedDebug ? { debug: mergedDebug } : {}),
     };
 }
 
@@ -1505,17 +897,6 @@ function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtra
     const preset = pdfExtractionPreset(schemaVersion);
     if (!preset) throw new Error(`No extraction preset for PDF schema ${schemaVersion}`);
     return preset;
-}
-
-/** Reference classification in structured extraction. */
-export interface ReferenceStage {
-    /** Emit classified reference-list entries as `reference` items. */
-    classify: boolean;
-    /**
-     * Receives every page's classifier input, in page order, and the plans
-     * when `classify` is set (export and debugging).
-     */
-    collect?: (inputs: RefPage[], plans: ReferencePagePlan[] | undefined) => void;
 }
 
 /**
@@ -1724,7 +1105,7 @@ export async function opExtract(
             internal.metadata.timings.totalMs = performance.now() - tOpStart;
         }
         const result = isStructured
-            ? toStructuredExtractResult(
+            ? project(
                 internal,
                 preset,
                 args.structured?.bboxPrecision ?? 1,
@@ -1866,7 +1247,7 @@ export async function opStructuredExtractWithDebug(
 ): Promise<OpReply<StructuredExtractWithDebugResult>> {
     return withStructuredRun(args, undefined, (internal, preset) => {
         const bboxPrecision = args.structured?.bboxPrecision ?? 1;
-        const result = toStructuredExtractResult(internal, preset, bboxPrecision);
+        const result = project(internal, preset, bboxPrecision);
         const debug = buildDebugProjection(
             internal,
             result,
@@ -1885,7 +1266,7 @@ export interface ReferenceInputPage {
     width: number;
     height: number;
     /**
-     * The page's non-margin items in public-frame coordinates. Without
+     * The page's published (citable) items in public-frame coordinates. Without
      * classification they are aligned with `input.items` by index; with it
      * they are the emitted items, after reference splits and merges.
      */
@@ -1914,7 +1295,7 @@ export async function opReferenceInputs(
     return withStructuredRun(args, () => stage, (internal) => {
         const pages = internal.pages.map((page, i): ReferenceInputPage => {
             const input = inputs[i];
-            const items = page.items.filter((item) => item.kind !== "margin");
+            const items = page.items.filter((item) => ITEM_KINDS[item.kind].citable);
             return {
                 input,
                 width: page.width,

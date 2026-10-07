@@ -1,19 +1,16 @@
 /**
  * Worker-side sentence extraction helpers.
  *
- * Two entry points:
+ * Entry points:
  *
- *   - `extractSentencesForPage` (the per-page core): given a doc, target
- *     page index, pre-walked analysis pages, a pre-computed analysis
- *     context (`marginRemoval` + `styleProfile`) and the caller's
- *     extraction margins, walks the detailed target page, runs
- *     `detectFilteredParagraphs`, and maps paragraphs to sentence
- *     bboxes. Returns both the sentence result AND the
- *     `FilteredParagraphResult` so callers (the structured-mode
- *     `runExtractFromIndices` branch) can read columns / lines /
- *     content from the same single call. Used by the structured
- *     multi-page `extract` path AND by the single-page debug
- *     `runSentenceExtractionFromDoc` below.
+ *   - `detectPageParagraphs` + `mapPageSentences` (the per-page core):
+ *     given a doc, target page index, pre-walked analysis pages, a
+ *     pre-computed analysis context (`marginRemoval` + `styleProfile`)
+ *     and the caller's extraction margins, walk the detailed target page,
+ *     run `detectFilteredParagraphs`, and map paragraphs to sentence
+ *     bboxes. The structured pipeline (`../pipeline/structured.ts`) runs
+ *     the first half for every page before any document-level item pass
+ *     and the second half after. `extractSentencesForPage` runs both.
  *
  *   - `runSentenceExtractionFromDoc` (debug-only single-page): owns
  *     splitter resolution, JSON walk over the analysis window, and
@@ -23,7 +20,7 @@
  *     fixture capture, extract-trace endpoint).
  *
  * **Quality bar, not parity.** The structured multi-page caller
- * (`runExtractFromIndices` in `worker/ops.ts`) computes
+ * (`../pipeline/structured.ts`) computes
  * `marginRemoval` / `styleProfile` ONCE over JSON-walked analysis
  * pages — no per-target detailed substitution. The debug single-page
  * path (`runSentenceExtractionFromDoc` in trace mode) computes them
@@ -85,6 +82,7 @@ import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
 import { CURRENT_PDF_EXTRACTION_PRESET } from "../schema";
 import { placeRegionItems, splitRegionItems, type RegionItemDraft } from "../regions/regionItems";
+import { draftItemsFromParagraphs, draftPageFromParagraphs, type DraftPage } from "../pipeline/draftItems";
 
 /** Arguments of the per-page structured work (`extractSentencesForPage`). */
 export interface PageSentenceArgs {
@@ -131,7 +129,7 @@ export interface PageSentenceArgs {
     /**
      * Optional pre-walked detailed page for `pageIndex`. Lets the
      * multi-page structured caller walk the target once (in
-     * `runExtractFromIndices`) and reuse it both as the analysis-window
+     * `analyzeDocument`) and reuse it both as the analysis-window
      * entry AND the input to the sentence mapper, eliminating the
      * redundant per-target JSON walk.
      */
@@ -171,16 +169,22 @@ export interface PageSentenceArgs {
 export interface PageParagraphs {
     detailed: RawPageDataDetailed;
     filteredResult: FilteredParagraphResult;
+    /**
+     * The page's draft items, created from `filteredResult.paragraphResult`.
+     * Item passes edit them; `mapPageSentences` maps them. The paragraph
+     * result itself stays the detector's output (and markdown).
+     */
+    draft: DraftPage;
     detailedWalkMs: number;
     fontBridgeMs: number;
     filteredParagraphsMs: number;
 }
 
 /**
- * Walk (or reuse) the detailed target page and detect its paragraphs. The
- * multi-page caller runs this for every page before `mapPageSentences`, so
- * document-level decisions (reference classification) can edit the
- * paragraphs in between.
+ * Walk (or reuse) the detailed target page, detect its paragraphs and create
+ * its draft items. The multi-page caller runs this for every page before
+ * `mapPageSentences`, so document-level item passes (reference
+ * classification) can edit the draft items in between.
  */
 export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
     const tDetailed = performance.now();
@@ -238,13 +242,15 @@ export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
         pageRotation: args.pageRotation,
     });
     const filteredParagraphsMs = performance.now() - tFiltered;
-    return { detailed, filteredResult, detailedWalkMs, fontBridgeMs, filteredParagraphsMs };
+    const draft = draftPageFromParagraphs(filteredResult.paragraphResult);
+    return { detailed, filteredResult, draft, detailedWalkMs, fontBridgeMs, filteredParagraphsMs };
 }
 
 /**
- * Second half of the per-page work: map paragraphs to sentence bboxes.
- * `referenceItems` (indices into the paragraph result's items) are emitted
- * as `reference` items without sentences.
+ * Second half of the per-page work: map the draft items to sentence bboxes,
+ * then place region and margin items. `referencesMs` is the page's share of
+ * reference classification, reported in the phase timings when references
+ * were classified.
  */
 export function mapPageSentences(
     args: Pick<
@@ -252,8 +258,7 @@ export function mapPageSentences(
         "paragraphSettings" | "splitter" | "compoundVocabulary" | "regionItems" | "regionMargin" | "regionsMs"
     >,
     paragraphs: PageParagraphs,
-    referenceItems?: ReadonlySet<number>,
-    referenceMs = 0,
+    referencesMs?: number,
 ): {
     sentenceResult: PageSentenceResult;
     filteredResult: FilteredParagraphResult;
@@ -265,9 +270,8 @@ export function mapPageSentences(
         paragraphSettings: args.paragraphSettings,
         splitter: args.splitter,
         compoundVocabulary: args.compoundVocabulary,
-        referenceItems,
         precomputed: {
-            paragraphResult: filteredResult.paragraphResult,
+            items: paragraphs.draft.items,
             pageRotation: filteredResult.pageRotation,
             sourceWidth: filteredResult.sourceWidth,
             sourceHeight: filteredResult.sourceHeight,
@@ -314,7 +318,7 @@ export function mapPageSentences(
         paragraphDetectMs: filteredResult.timings.paragraphDetectMs,
         sentenceMapMs,
         ...(args.regionItems !== undefined ? { regionsMs } : {}),
-        ...(referenceItems !== undefined ? { referencesMs: referenceMs } : {}),
+        ...(referencesMs !== undefined ? { referencesMs } : {}),
         charCount,
         lineCount,
         itemCount: sentenceResult.items.length,
@@ -515,7 +519,7 @@ export async function runSentenceExtractionFromDoc(
             splitter,
             compoundVocabulary,
             precomputed: {
-                paragraphResult: filtered.paragraphResult,
+                items: draftItemsFromParagraphs(filtered.paragraphResult),
                 pageRotation: filtered.pageRotation,
                 sourceWidth: filtered.sourceWidth,
                 sourceHeight: filtered.sourceHeight,
@@ -561,7 +565,7 @@ export async function runSentenceExtractionFromDoc(
         splitter,
         compoundVocabulary,
         precomputed: {
-            paragraphResult: filteredResult.paragraphResult,
+            items: draftItemsFromParagraphs(filteredResult.paragraphResult),
             pageRotation: filteredResult.pageRotation,
             sourceWidth: filteredResult.sourceWidth,
             sourceHeight: filteredResult.sourceHeight,

@@ -84,9 +84,13 @@ src/beaver-extract/
 │   ├── wasmHelpers.ts             # WASM utility helpers
 │   ├── workerScope.ts             # Worker globalThis typing
 │   ├── errors.ts                  # Worker-side error envelopes
-│   ├── sentenceExtraction.ts      # Worker-side sentence-bbox pipeline
+│   ├── sentenceExtraction.ts      # Per-page structured phases (paragraphs, sentence mapping)
 │   ├── sentencexInit.ts           # sentencex bootstrap (lazy, with fallback)
 │   └── splitterResolver.ts        # Resolves SentenceSplitterConfig → splitter fn
+├── pipeline/                      # Extraction pipeline (runs in the worker)
+│   ├── documentAnalysis.ts        # Page-walk cache + cross-page analysis context
+│   ├── structured.ts              # Structured extraction phases (analyze → segment → item passes → sentences → project)
+│   └── output.ts                  # Helpers shared by the markdown and structured results
 ├── DocumentAnalyzer.ts            # Text layer & OCR detection
 ├── StyleAnalyzer.ts               # Font/style analysis
 ├── MarginFilter.ts                # Header/footer removal
@@ -403,8 +407,9 @@ export interface InternalProcessedPage {
 3. **Integrate in the worker pipeline**:
 
 The fused `extract` op runs inside the worker. Wire new analyzers into
-`worker/ops.ts` (or `PageExtractor.ts`) so they execute alongside the
-existing column/line/paragraph passes:
+`worker/ops.ts` (markdown engines), `pipeline/structured.ts` (structured
+extraction) or `PageExtractor.ts` so they execute alongside the existing
+column/line/paragraph passes:
 
 ```typescript
 import { detectSections } from "../SectionDetector";

@@ -21,6 +21,10 @@ import {
     decideLineBreakHyphen,
     extractPageSentences,
 } from '../../../src/beaver-extract/ParagraphSentenceMapper';
+import { detectColumns } from '../../../src/beaver-extract/ColumnDetector';
+import { detectLinesOnPage } from '../../../src/beaver-extract/LineDetector';
+import { detectParagraphs } from '../../../src/beaver-extract/ParagraphDetector';
+import { draftItemsFromParagraphs } from '../../../src/beaver-extract/pipeline/draftItems';
 import {
     bboxFromXYWH,
     type RawChar,
@@ -372,7 +376,14 @@ describe('extractPageSentences line-break de-hyphenation', () => {
 
 describe('extractPageSentences reference items', () => {
     function referenceText(page: RawPageDataDetailed, vocab?: ReadonlySet<string>): string {
-        const result = extractPageSentences(page, { compoundVocabulary: vocab, referenceItems: new Set([0]) });
+        const lines = detectLinesOnPage(page, detectColumns(page).columns);
+        const items = draftItemsFromParagraphs(
+            detectParagraphs(lines, null, {}, { paragraph: 0, header: 0 }, { trackItemLines: true }),
+        );
+        const result = extractPageSentences(page, {
+            compoundVocabulary: vocab,
+            precomputed: { items: items.map((item, i) => (i === 0 ? { ...item, kind: 'reference' as const } : item)) },
+        });
         expect(result.items).toHaveLength(1);
         expect(result.items[0].kind).toBe('reference');
         expect(result.sentences).toHaveLength(0);

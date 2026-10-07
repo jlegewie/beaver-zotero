@@ -145,9 +145,8 @@ export interface FilteredParagraphTimings {
 
 export interface FilteredParagraphResult {
     /**
-     * Paragraph detection result with `itemLines` populated, ready to
-     * pass to `extractPageSentences` as
-     * `precomputed: { paragraphResult }`.
+     * Paragraph detection result with `itemLines` populated, ready for
+     * `draftItemsFromParagraphs` (the sentence mapper's input).
      */
     paragraphResult: PageParagraphResult;
     /** Target page after simple + smart margin filtering. */
@@ -201,8 +200,8 @@ export interface FilteredParagraphResult {
  *
  * Throws when `ctx.pageIndex` is not present in `ctx.pages`. Empty/no-
  * column pages return a well-formed `paragraphResult` with empty
- * `items` and `itemLines` arrays — callers can pass it as `precomputed`
- * to the sentence mapper without special-casing.
+ * `items` and `itemLines` arrays — callers can make draft items of it
+ * for the sentence mapper without special-casing.
  *
  * Rotation handling: when the target page's dominant text orientation
  * is non-zero, the target is rotated into an upright working frame

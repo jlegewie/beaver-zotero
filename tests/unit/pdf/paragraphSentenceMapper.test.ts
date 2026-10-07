@@ -28,6 +28,7 @@ import { extractPageWideSentences } from '../../../src/beaver-extract/SentenceMa
 import { detectColumns } from '../../../src/beaver-extract/ColumnDetector';
 import { detectLinesOnPage } from '../../../src/beaver-extract/LineDetector';
 import { detectParagraphs } from '../../../src/beaver-extract/ParagraphDetector';
+import { draftItemsFromParagraphs } from '../../../src/beaver-extract/pipeline/draftItems';
 import {
     bboxFromXYWH,
     bboxHeight,
@@ -236,7 +237,7 @@ describe('extractPageSentences', () => {
         expect(secondPara.sentences[0].text).not.toContain('First paragraph');
     });
 
-    it('supports precomputed paragraph results', () => {
+    it('supports precomputed draft items', () => {
         // We don't want to re-run detection; the caller may have already
         // done it. Call detectParagraphs directly with trackItemLines.
         // This mirrors the production flow where the structured engine
@@ -254,22 +255,18 @@ describe('extractPageSentences', () => {
             { trackItemLines: true },
         );
         const result = extractPageSentences(page, {
-            precomputed: { paragraphResult: paraResult },
+            precomputed: { items: draftItemsFromParagraphs(paraResult) },
         });
         expect(result.degradation).toBeUndefined();
         expect(result.sentences.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('rejects precomputed paragraph results missing itemLines', () => {
+    it('rejects draft items from paragraph results missing itemLines', () => {
         const page = makeMultiBlockPage([[makeLine('Hello world.', 100)]]);
         const cols = detectColumns(page);
         const lines = detectLinesOnPage(page, cols.columns);
         const paraResult = detectParagraphs(lines, null, {}); // no trackItemLines
-        expect(() =>
-            extractPageSentences(page, {
-                precomputed: { paragraphResult: paraResult },
-            }),
-        ).toThrow(/trackItemLines/);
+        expect(() => draftItemsFromParagraphs(paraResult)).toThrow(/trackItemLines/);
     });
 
     it('splits a paragraph with inline non-BMP math symbols into sentences', () => {
@@ -350,7 +347,7 @@ describe('extractPageSentences', () => {
         );
 
         const result = extractPageSentences(page, {
-            precomputed: { paragraphResult: paraResult },
+            precomputed: { items: draftItemsFromParagraphs(paraResult) },
         });
 
         // At least one unmapped paragraph with a fallback sentence.

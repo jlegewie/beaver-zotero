@@ -3,14 +3,15 @@
  *
  * `planReferences` scores every item of a document (see `model.ts`) and
  * decides which items are reference-list entries. `applyReferencePlan` turns
- * one page's plan into edited paragraphs: reference items to emit as
- * `reference` items, split where one item holds several entries, and merged
- * where an entry was broken off its continuation in the same column.
+ * one page's plan into edited draft items: `reference` items, split where one
+ * item holds several entries, and merged where an entry was broken off its
+ * continuation in the same column.
  */
 
 import { mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { PageLine } from "../LineDetector";
-import { joinLines, type ContentItem, type HangingRole, type PageParagraphResult } from "../ParagraphDetector";
+import { joinLines, type HangingRole } from "../ParagraphDetector";
+import type { DraftItem } from "../pipeline/draftItems";
 import { lineStartProbability, scoreReferences, type ReferenceModel } from "./model";
 import { LINE_FEATURES, pageLineFeatures } from "./lines";
 import { isReferenceHeading } from "./features";
@@ -58,68 +59,43 @@ export function planReferences(
 const LINE_HAS_PREV = LINE_FEATURES.indexOf("hasPrev");
 
 /**
- * Apply a page plan to its paragraph result. Returns the edited result and
- * the indices of its reference items. The result is unchanged when the plan
- * edits nothing; otherwise items, lines and roles are rebuilt (item ids
- * follow the new positions; `pageContent` keeps the detector's text).
+ * Apply a page plan to its draft items. Returns the edited items: reference
+ * entries become `reference` items, an item holding several entries is split
+ * at their first lines, and an item that continues the previous entry in the
+ * same column is merged into it. Items are rebuilt from their lines (text via
+ * `joinLines`) when the plan splits or merges anything on the page; otherwise
+ * only reference items are relabeled.
  */
 export function applyReferencePlan(
-    result: PageParagraphResult,
+    items: readonly DraftItem[],
     plan: ReferencePagePlan,
     removeHyphenation = true,
-): { result: PageParagraphResult; references: Set<number> } {
-    const references = new Set<number>();
+): DraftItem[] {
     const edits = plan.splits.some((s) => s.length > 0) || plan.mergeWithPrevious.some(Boolean);
     if (!edits) {
-        plan.reference.forEach((isRef, i) => {
-            if (isRef) references.add(i);
-        });
-        return { result, references };
+        return items.map((item, i) => (plan.reference[i] ? { ...item, kind: "reference" } : item));
     }
 
-    const itemLines = result.itemLines ?? [];
-    const roles = result.itemLineRoles ?? [];
-    const items: ContentItem[] = [];
-    const lines: PageLine[][] = [];
-    const lineRoles: HangingRole[][] = [];
-    const push = (
-        base: ContentItem,
-        group: PageLine[],
-        groupRoles: HangingRole[],
-        isRef: boolean,
-        piece = false,
-    ) => {
-        const text = joinLines(group.map((l) => l.text), removeHyphenation);
+    const out: DraftItem[] = [];
+    const push = (base: DraftItem, lines: PageLine[], roles: HangingRole[], isRef: boolean, piece = false) => {
+        const text = joinLines(lines.map((l) => l.text), removeHyphenation);
+        const bbox = mergeBoxes(lines.map((l) => l.bbox));
         // A list heading the detector merged into the first entry ("FURTHER
         // READING Heyman, K. …") is split off as a piece of its own; it is the
         // list's heading, not an entry.
         if (isRef && piece && isReferenceHeading({ header: false, column: 0, text, lines: [] })) {
-            items.push({ ...base, type: "header", text: `## ${text}`, bbox: mergeBoxes(group.map((l) => l.bbox)) });
-            lines.push(group);
-            lineRoles.push(groupRoles);
+            out.push({ ...base, kind: "section_header", text, bbox, lines, roles });
             return;
         }
-        items.push({
-            ...base,
-            type: isRef ? "paragraph" : base.type,
-            text: isRef || base.type !== "header" ? text : `## ${text}`,
-            bbox: mergeBoxes(group.map((l) => l.bbox)),
-        });
-        lines.push(group);
-        lineRoles.push(groupRoles);
-        if (isRef) references.add(items.length - 1);
+        out.push({ ...base, kind: isRef ? "reference" : base.kind, text, bbox, lines, roles });
     };
 
-    result.items.forEach((item, i) => {
-        const group = itemLines[i] ?? [];
-        const groupRoles = roles[i] ?? group.map(() => null);
+    items.forEach((item, i) => {
+        const group = item.lines;
         const isRef = plan.reference[i];
         if (group.length === 0) {
             // No lines to rebuild from (not produced by the detector); keep as is.
-            items.push(item);
-            lines.push(group);
-            lineRoles.push(groupRoles);
-            if (isRef) references.add(items.length - 1);
+            out.push(isRef ? { ...item, kind: "reference" } : item);
             return;
         }
         const cuts = isRef
@@ -128,34 +104,27 @@ export function applyReferencePlan(
         let start = 0;
         for (const cut of [...cuts, group.length]) {
             if (cut <= start) continue;
-            const last = items.length - 1;
+            const previous = out[out.length - 1];
             if (
                 start === 0 &&
                 isRef &&
                 plan.mergeWithPrevious[i] &&
-                references.has(last) &&
-                items[last].columnIndex === item.columnIndex
+                previous?.kind === "reference" &&
+                previous.columnIndex === item.columnIndex
             ) {
                 // The item's opening lines finish the previous entry.
-                const previous = items.pop()!;
-                references.delete(last);
+                out.pop();
                 push(
                     previous,
-                    [...lines.pop()!, ...group.slice(0, cut)],
-                    [...lineRoles.pop()!, ...groupRoles.slice(0, cut)],
+                    [...previous.lines, ...group.slice(0, cut)],
+                    [...previous.roles, ...item.roles.slice(0, cut)],
                     true,
                 );
             } else {
-                push(item, group.slice(start, cut), groupRoles.slice(start, cut), isRef, cuts.length > 0);
+                push(item, group.slice(start, cut), item.roles.slice(start, cut), isRef, cuts.length > 0);
             }
             start = cut;
         }
     });
-    items.forEach((item, index) => {
-        item.id = `p${result.pageIndex}:i${index}`;
-    });
-    return {
-        result: { ...result, items, itemLines: lines, itemLineRoles: lineRoles },
-        references,
-    };
+    return out;
 }
