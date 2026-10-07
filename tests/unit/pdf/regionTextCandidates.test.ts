@@ -479,6 +479,18 @@ describe("page text", () => {
         expect(runningTexts(specs)).toContain("time.");
     });
 
+    it("keeps a row label out of running text when its row's values are small integers", () => {
+        // Counts set as bare integers, like a manuscript line number, but several of
+        // them on one row: the label's table row, not a paragraph line.
+        const specs: Spec[] = [
+            { box: [72, 100, 540, 111], text: PROSE },
+            { box: [72, 113, 540, 124], text: PROSE },
+            { box: [72, 140, 160, 150], text: "Number of Agencies" },
+            ...[300, 360, 420].map((x, i): Spec => ({ box: [x, 140, x + 15, 150], text: i < 2 ? "737" : "136" })),
+        ];
+        expect(runningTexts(specs)).toEqual([PROSE, PROSE]);
+    });
+
     it("keeps the last line of a wrapped cell in its table when its label sits beside it", () => {
         const LONG = "Electrification of transport and power grids requires massive volumes of copper";
         const specs: Spec[] = [

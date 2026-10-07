@@ -83,6 +83,7 @@ import {
 import type { DocumentLike, FontApi } from "./mupdfApi";
 import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "../schema";
 import { placeRegionItems, splitRegionItems, type RegionItemDraft } from "../regions/regionItems";
 
 /** Arguments of the per-page structured work (`extractSentencesForPage`). */
@@ -442,6 +443,7 @@ export async function runSentenceExtractionFromDoc(
     // Resolve the splitter once per request (not per paragraph).
     const splitter: SentenceSplitter = await resolveSplitter(
         splitterConfig ?? { type: "sentencex" },
+        { captionLabels: CURRENT_PDF_EXTRACTION_PRESET.captionLabels },
     );
 
     const { Font: fontApi } = await ensureApi();

@@ -38,6 +38,8 @@ const UNIT = String.raw`(?:[%‰]|°\s*[CFK]?|[gmsKLVAWJNT]|[A-Za-zµμΩ][A-Za-
 const MEASURE_RE = new RegExp(String.raw`^\s*(?:[<>≤≥]\s*)?${VALUE}(?:\s*(?:±|∓|\+\s*/\s*[−–-])\s*${VALUE})?\s*${UNIT}?\s*$`, "u");
 /** A numeric table cell such as "0.45", "−1.2***" or "12,345". */
 const NUMBER_CELL_RE = /^[−–-]?(?:\d[\d.,]*|\.\d+)[*†‡]*$/;
+/** A bare integer of up to four digits: a manuscript line number, or a table value. */
+const BARE_INTEGER_RE = /^\d{1,4}$/;
 /** Rules this close (in body sizes) above or below a group join it (table rules). */
 const RULE_REACH = 0.8;
 
@@ -292,7 +294,9 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
     const upright = lines.filter((l) => !l.rot).sort((a, b) => a.bbox[1] - b.bbox[1]);
     // Row-mates: other pieces on a line's row. A line sharing its row with pieces
     // that are not running text is a table cell, not a paragraph line (equation
-    // numbers and manuscript line numbers do not count).
+    // numbers and manuscript line numbers do not count). A manuscript line number
+    // stands alone in the margin: two or more bare integers past the line on its
+    // row are a table row's values (counts, years), and do count.
     const rowMates = new Map<RegionLine, RegionLine[]>();
     // Every piece on a line's row, numbers included: values of a table row.
     const rowCells = new Map<RegionLine, RegionLine[]>();
@@ -310,9 +314,13 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
             for (const [x, y] of [[a, b], [b, a]] as const) {
                 if (y.eqNumber) continue;
                 add(rowCells, x, y);
-                if (!/^\d{1,4}$/.test(y.text)) add(rowMates, x, y);
+                if (!BARE_INTEGER_RE.test(y.text)) add(rowMates, x, y);
             }
         }
+    }
+    for (const [x, cells] of rowCells) {
+        const values = cells.filter((o) => BARE_INTEGER_RE.test(o.text) && o.bbox[0] >= x.bbox[2]);
+        if (values.length >= 2) for (const o of values) add(rowMates, x, o);
     }
     // Alone on its row up to the right edge `x1` of its text column, when a
     // paragraph establishes one: lines past that edge (the next column, a table
@@ -359,7 +367,7 @@ function extendParagraphs(lines: readonly RegionLine[], running: Set<RegionLine>
         const past = (rowCells.get(r) ?? []).filter(
             (o) => !running.has(o) && o.bbox[0] >= r.bbox[2] && !(runOf.has(r) && runOf.get(o) === runOf.get(r)),
         );
-        if (past.length === 1 && /^\d{1,4}$/.test(past[0].text)) return true;
+        if (past.length === 1 && BARE_INTEGER_RE.test(past[0].text)) return true;
         return past.every((o) => !aligned(r, o) || !sameSize(r, o));
     };
     // Alone up to the right edge `x1` of the paragraph it continues, and not a row

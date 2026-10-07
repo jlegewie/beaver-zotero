@@ -1477,7 +1477,8 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
 
 /**
  * Paragraph settings with the schema preset's switches applied. The caller may
- * override `hangingIndentBlocks`; `headingLabelFilters` always follows the preset.
+ * override `hangingIndentBlocks`; `headingLabelFilters` and `isolatedHeadings`
+ * always follow the preset.
  */
 function presetParagraphSettings(
     preset: PdfExtractionPreset,
@@ -1487,6 +1488,7 @@ function presetParagraphSettings(
         hangingIndentBlocks: preset.hangingIndentBlocks,
         ...settings,
         headingLabelFilters: preset.headingLabelFilters,
+        isolatedHeadings: preset.isolatedHeadings,
     };
 }
 
@@ -1685,6 +1687,7 @@ export async function opExtract(
         const splitter = isStructured
             ? await resolveSplitter(
                   args.structured?.splitterConfig ?? { type: "sentencex" },
+                  { captionLabels: preset.captionLabels },
               )
             : undefined;
 
@@ -1810,6 +1813,7 @@ async function withStructuredRun<T>(
         });
         const splitter = await resolveSplitter(
             args.structured?.splitterConfig ?? { type: "sentencex" },
+            { captionLabels: preset.captionLabels },
         );
         const internal = runExtractFromIndices(
             doc,

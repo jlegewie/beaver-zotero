@@ -19,7 +19,7 @@ import {
     type SentenceRange,
     type SentenceSplitter,
 } from "../SentenceMapper";
-import { applyPostProcessing } from "../sentencePostprocess";
+import { applyPostProcessing, type PostProcessContext } from "../sentencePostprocess";
 import {
     normalizeLanguageCode,
     sentencexBoundariesToCharRanges,
@@ -28,13 +28,21 @@ import type { SentenceSplitterConfig } from "../sentenceTypes";
 import { ensureSentencex } from "./sentencexInit";
 import { postLog } from "./errors";
 
+/** Post-processing switches the PDF schema preset selects (see `PostProcessContext`). */
+export interface SplitterOptions {
+    captionLabels?: boolean;
+}
+
 export async function resolveSplitter(
     config: SentenceSplitterConfig,
+    options: SplitterOptions = {},
 ): Promise<SentenceSplitter> {
+    const post = (ranges: SentenceRange[], text: string, ctx: PostProcessContext | undefined) =>
+        applyPostProcessing(ranges, text, options.captionLabels ? { ...ctx, captionLabels: true } : ctx);
     if (config.type === "simple") {
         return (text, ctx): SentenceRange[] => {
             const ranges = simpleRegexSentenceSplit(text);
-            return applyPostProcessing(ranges, text, ctx);
+            return post(ranges, text, ctx);
         };
     }
 
@@ -48,7 +56,7 @@ export async function resolveSplitter(
             const boundaries = mod.get_sentence_boundaries(lang, text);
             if (!boundaries || boundaries.length === 0) return [];
             const ranges = sentencexBoundariesToCharRanges(text, boundaries);
-            return applyPostProcessing(ranges, text, ctx);
+            return post(ranges, text, ctx);
         };
     } catch (err) {
         postLog(
@@ -59,7 +67,7 @@ export async function resolveSplitter(
         );
         return (text, ctx): SentenceRange[] => {
             const ranges = simpleRegexSentenceSplit(text);
-            return applyPostProcessing(ranges, text, ctx);
+            return post(ranges, text, ctx);
         };
     }
 }
