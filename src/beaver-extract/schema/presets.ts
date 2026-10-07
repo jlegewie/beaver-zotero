@@ -34,6 +34,18 @@ export interface PdfExtractionPreset {
      */
     headingLabelFilters: boolean;
     /**
+     * Isolated headings: two same-style headings stacked a paragraph gap apart
+     * are separate headings, and heading gaps are left out of a short column's
+     * leading (`ParagraphDetectionSettings.isolatedHeadings`).
+     */
+    isolatedHeadings: boolean;
+    /**
+     * Sentence splitting keeps appendix / supplement-prefixed, panel-suffixed
+     * and roman-numeral caption labels ("Table A1.", "Fig. S2", "Table IV.")
+     * with their caption (`PostProcessContext.captionLabels`).
+     */
+    captionLabels: boolean;
+    /**
      * Smart margin removal matches text rows rather than single MuPDF lines
      * (`ExtractionSettings.marginTextRows`).
      */
@@ -61,8 +73,8 @@ export interface PdfExtractionPreset {
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, marginTextRows: false, referenceItems: false, idScheme: "document", regions: false, pageNumberRuns: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, marginTextRows: true, referenceItems: true, idScheme: "page", regions: true, pageNumberRuns: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, captionLabels: false, marginTextRows: false, referenceItems: false, idScheme: "document", regions: false, pageNumberRuns: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, captionLabels: true, marginTextRows: true, referenceItems: true, idScheme: "page", regions: true, pageNumberRuns: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

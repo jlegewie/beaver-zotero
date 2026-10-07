@@ -62,6 +62,14 @@ export interface ParagraphDetectionSettings {
      * PDF schema 4 turns it off so its document-wide ids keep resolving.
      */
     headingLabelFilters?: boolean;
+    /**
+     * Treat a run of at most `ISOLATED_HEADING_LINES` heading-styled lines as
+     * an isolated heading: its gaps are section spacing, left out of a short
+     * column's leading, and two same-style headings stacked a paragraph gap
+     * apart are separate headings (default: false). Enabled by the PDF schema
+     * preset.
+     */
+    isolatedHeadings?: boolean;
 }
 
 const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
@@ -76,6 +84,7 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     removeHyphenation: true,
     hangingIndentBlocks: false,
     headingLabelFilters: true,
+    isolatedHeadings: false,
 };
 
 /**
@@ -122,6 +131,8 @@ interface ColumnThresholds {
      * column has too few gaps to estimate locally.
      */
     medianGap: number;
+    /** Per column line: part of an isolated heading (see `isolatedHeadingLines`). */
+    isolatedHeading: boolean[];
 }
 
 /**
@@ -1104,12 +1115,56 @@ function calculatePageThresholds(
 // ============================================================================
 
 /**
+ * A run of heading-styled lines up to this long is an isolated heading: one
+ * heading, or two stacked (a section over a subsection that may wrap).
+ */
+const ISOLATED_HEADING_LINES = 3;
+
+/**
+ * Per line: it belongs to a run of at most `ISOLATED_HEADING_LINES`
+ * heading-styled lines. Each line is judged as a heading item of its own
+ * text, so the item-level guards apply: a line opening in lowercase (a body
+ * line that starts with an inline italic or math term) or a run-in label is
+ * not heading-styled.
+ */
+function isolatedHeadingLines(
+    lines: PageLine[],
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    bodyAllCaps: boolean
+): boolean[] {
+    const styled = lines.map(line => isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps, line.text.trim()));
+    const isolated = new Array<boolean>(lines.length).fill(false);
+    for (let i = 0; i < lines.length; ) {
+        if (!styled[i]) {
+            i++;
+            continue;
+        }
+        let j = i;
+        while (j < lines.length && styled[j]) j++;
+        if (j - i <= ISOLATED_HEADING_LINES) isolated.fill(true, i, j);
+        i = j;
+    }
+    return isolated;
+}
+
+/** Whether the middle gap(s) of a column's sorted gaps all border an isolated heading. */
+function medianIsSectionGap(gaps: { gap: number; section: boolean }[]): boolean {
+    const sorted = [...gaps].sort((a, b) => a.gap - b.gap);
+    const mid = Math.floor(sorted.length / 2);
+    const middle = sorted.length % 2 === 1 ? [sorted[mid]] : [sorted[mid - 1], sorted[mid]];
+    return middle.every(g => g.section);
+}
+
+/**
  * Calculate column-specific thresholds
  */
 function calculateColumnThresholds(
     lines: PageLine[],
     pageThresholds: PageThresholds,
-    settings: Required<ParagraphDetectionSettings>
+    settings: Required<ParagraphDetectionSettings>,
+    bodyStyles: TextStyle[] | null,
+    bodyAllCaps: boolean
 ): ColumnThresholds {
     const bboxes = lines.map(line => line.bbox);
 
@@ -1143,14 +1198,31 @@ function calculateColumnThresholds(
     // continuation spacing) doesn't drag the cutoff below this column's
     // own normal leading. Fall back to the page-wide value when the
     // column has fewer than 3 gaps to keep the estimate stable.
-    const colGaps: number[] = [];
+    //
+    // Gaps above or below an isolated heading (a run of at most
+    // `ISOLATED_HEADING_LINES` heading-styled lines) are section spacing, not
+    // leading. When the column's median gap is such a gap, the median does not
+    // measure leading and the column takes the page-wide value where that is
+    // lower (section gaps only ever inflate the median): the column
+    // detector can cut a page into short stacked pieces at its headings, and
+    // in a piece holding a paragraph's last lines and two stacked headings the
+    // heading gaps are the median and lift the threshold over the gaps that set
+    // the headings off. Anywhere else the column keeps its own median: a few
+    // section gaps leave it alone, and the gaps left in a short piece once
+    // they are set aside are too few and too mixed (a caption's tight leading
+    // with the body's) to replace it.
+    const sectionLine = settings.isolatedHeadings
+        ? isolatedHeadingLines(lines, bodyStyles, settings, bodyAllCaps)
+        : new Array<boolean>(lines.length).fill(false);
+    const colGaps: { gap: number; section: boolean }[] = [];
     for (let i = 0; i < lines.length - 1; i++) {
         const gap = lines[i + 1].bbox.t - lines[i].bbox.b;
-        if (gap < 50 && gap > -5) colGaps.push(gap);
+        if (gap < 50 && gap > -5) colGaps.push({ gap, section: sectionLine[i] || sectionLine[i + 1] });
     }
     let gapExcessThreshold = pageThresholds.gapExcessThreshold;
-    const medianGap = colGaps.length >= 3 ? median(colGaps) : pageThresholds.medianGap;
+    let medianGap = pageThresholds.medianGap;
     if (colGaps.length >= 3) {
+        medianGap = median(colGaps.map(g => g.gap));
         const minMeaningfulIncrease = Math.max(1.0, 0.08 * pageThresholds.medianHeight);
         gapExcessThreshold = Math.max(
             settings.minGapPx,
@@ -1158,6 +1230,11 @@ function calculateColumnThresholds(
             medianGap * 1.25,
             0.4 * pageThresholds.medianHeight
         );
+        // Section gaps can only inflate the median: never raise it to the page's.
+        if (medianIsSectionGap(colGaps)) {
+            medianGap = Math.min(medianGap, pageThresholds.medianGap);
+            gapExcessThreshold = Math.min(gapExcessThreshold, pageThresholds.gapExcessThreshold);
+        }
     }
 
     return {
@@ -1170,6 +1247,7 @@ function calculateColumnThresholds(
         earlyEndExcessThreshold,
         gapExcessThreshold,
         medianGap,
+        isolatedHeading: sectionLine,
     };
 }
 
@@ -2362,6 +2440,43 @@ function headingEndsBeforeBodyLine(
     return !isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps, joinedText);
 }
 
+/** Stacked headings are at least this many line heights apart. */
+const STACKED_HEADING_GAP = 0.75;
+
+/** A line that wraps on: it ends on joining punctuation (a word that continues on the next line). */
+const JOINING_END_RE = /[,;:&/\-–—]$/u;
+
+/**
+ * Whether two heading-styled lines are separate stacked headings rather than
+ * one heading wrapped over two lines: they are more than the column's
+ * paragraph-break threshold and `STACKED_HEADING_GAP` of the smaller line
+ * height apart (display titles can be loosely leaded in points, but not
+ * relative to their own height), and the pair does not read as one wrapped
+ * line. Loosely leaded titles reach that gap too, so any sign of a wrap keeps
+ * them together: the second line opens in lowercase, the first ends on a
+ * function word or joining punctuation, or the first runs to the column's
+ * right edge. A closing single capital is a label ("APPENDIX A"), not the
+ * article "a".
+ */
+function stackedHeadingGap(
+    line: PageLine,
+    prevLine: PageLine,
+    columnThresholds: ColumnThresholds,
+    pageThresholds: PageThresholds
+): boolean {
+    const gap = line.bbox.t - prevLine.bbox.b;
+    const height = Math.min(bboxHeight(line.bbox), bboxHeight(prevLine.bbox));
+    if (gap <= columnThresholds.gapExcessThreshold || gap <= STACKED_HEADING_GAP * height) return false;
+
+    const prevText = prevLine.text.trim();
+    if (/^["'“‘«([]?\p{Ll}/u.test(line.text.trim())) return false;
+    if (JOINING_END_RE.test(prevText)) return false;
+    if (FUNCTION_WORD_END_RE.test(prevText) && !/(?:^|\s)\p{Lu}$/u.test(prevText)) return false;
+    const measure = columnThresholds.maxRightEdge - columnThresholds.leftEdgeMode;
+    const shortfall = columnThresholds.maxRightEdge - prevLine.bbox.r;
+    return shortfall > Math.max(pageThresholds.medianHeight, 0.03 * measure);
+}
+
 /**
  * Determine if current line should start a new item
  */
@@ -2559,6 +2674,19 @@ function startNewItem(
         // Different header style. A hanging continuation stays with the
         // heading-styled line it wraps (a bold list label, an italic title).
         if (!sameOpeningStyle(line, prevLine) && hangingRole !== "continuation") {
+            return true;
+        }
+        // Same style, but a paragraph-sized gap apart: two stacked headings
+        // ("RESULTS" over "Summary Statistics" in one face), not one heading
+        // wrapped over two lines. Only within an isolated heading: a longer
+        // run of lines in a heading face is a block (a bold list, cover-page
+        // notes) whose lines stay together as before.
+        if (
+            hangingRole !== "continuation" &&
+            columnThresholds.isolatedHeading[i] &&
+            columnThresholds.isolatedHeading[i - 1] &&
+            stackedHeadingGap(line, prevLine, columnThresholds, pageThresholds)
+        ) {
             return true;
         }
         return false; // Same header style continues
@@ -3207,7 +3335,9 @@ export function detectParagraphs(
         const columnThresholds = calculateColumnThresholds(
             colResult.lines,
             pageThresholds,
-            opts
+            opts,
+            bodyStyles,
+            bodyAllCaps
         );
 
         // Steps 3-6: Process lines into items

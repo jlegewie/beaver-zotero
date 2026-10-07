@@ -2487,6 +2487,275 @@ describe('header detection', () => {
     // equation lead-ins, table headers, and author bylines (all set in a
     // distinct face at body size), so it is left as body text. Missing such a
     // heading is preferred to mislabelling body/figure/table text.
+    // A section heading set directly over a subsection heading in the same
+    // face ("RESULTS" / "Summary Statistics"): the paragraph-sized gap
+    // between them makes two headings, while a heading wrapped over two
+    // lines keeps its own (small) leading and stays one.
+    describe('stacked headings in one style', () => {
+        const SECTION_FACE = { size: 10, font: 'SerifGothic-Bold', bold: true };
+        const BODY_AFTER: LeaderLineSpec[] = FILLERS.slice(0, 3);
+        const ISOLATED: ParagraphDetectionSettings = { isolatedHeadings: true };
+
+        it('keeps stacked same-style headings as one heading without isolatedHeadings (PDF schema 4)', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'RESULTS', l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    { text: 'Summary Statistics', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual(['## RESULTS Summary Statistics']);
+        });
+
+        it('splits two same-style headings separated by a paragraph gap', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'RESULTS', l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    { text: 'Summary Statistics', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual(['## RESULTS', '## Summary Statistics']);
+        });
+
+        it('keeps a heading wrapped at normal leading as one heading', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'School Resource Officers and', l: 0, ...SECTION_FACE },
+                    { text: 'School Discipline in Texas', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual(['## School Resource Officers and School Discipline in Texas']);
+        });
+
+        it('keeps a loosely leaded display title as one heading', () => {
+            // 16pt title lines 6pt apart: more than the body's paragraph-gap
+            // threshold, but well under the title's own line height.
+            const title = { size: 16, font: 'SerifGothic-Bold', bold: true };
+            const all = items(
+                [
+                    { text: 'Patrolling Public Schools: The', l: 0, ...title, gapAfter: 6 },
+                    { text: 'Impact of Funding for School', l: 0, ...title, gapAfter: 6 },
+                    { text: 'Police on Student Discipline', l: 0, ...title, gapAfter: 14 },
+                    ...FILLERS,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual([
+                '## Patrolling Public Schools: The Impact of Funding for School Police on Student Discipline',
+            ]);
+        });
+
+        it.each([
+            ['the next line opens in lowercase', 'Academic and Wellness Outcomes Associated', 'with Use of Anki in Medical School'],
+            ['the first line ends on a function word', 'A Systematic Review of Social Media Use to', 'Discuss and View Self-Harm Acts'],
+            ['the first line ends on joining punctuation', 'Massage and Cancer:', 'Practice Guidelines'],
+            ['the first line runs to the column edge', 'Filler body line number 9 that anchors the column left edge.', 'Practice Guidelines'],
+        ])('keeps a loosely leaded heading together when %s', (_, first, second) => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: first, l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    { text: second, l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual([`## ${first} ${second}`]);
+        });
+
+        it('splits stacked headings when the first ends in a label letter', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'APPENDIX A', l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    { text: 'Data Timeline', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual(['## APPENDIX A', '## Data Timeline']);
+        });
+
+        it('does not split a run of lines in the heading face into one heading per line', () => {
+            // Bold list items spaced like headings: a run longer than an
+            // isolated heading stays one item, as it was.
+            const list = ['Convenient online submission', 'Thorough peer review', 'No space constraints',
+                'Immediate publication on acceptance'].map(
+                (text, i, all): LeaderLineSpec => ({ text, l: 0, ...SECTION_FACE, gapAfter: i === all.length - 1 ? 8 : 14 }),
+            );
+            const all = items([...FILLERS_BEFORE_HEADING, ...list, ...BODY_AFTER], [BODY], ISOLATED);
+            expect(all.filter(it => it.type === 'header').length).toBeLessThanOrEqual(1);
+        });
+
+        it('does not split a loosely leaded block set in a heading face into lines', () => {
+            // A block of short lines in the heading face, in a column piece of
+            // its own beside tightly leaded body text: a run of heading-styled
+            // lines, whose gaps are its own leading, not section spacing.
+            const block = makeColumnPageResult(
+                ['Convenient online submission', 'Thorough peer review', 'No space constraints',
+                    'Immediate publication on acceptance', 'Inclusion in indexing services'].map(
+                    (text): LeaderLineSpec => ({ text, l: 0, ...SECTION_FACE, bboxHeight: 9, gapAfter: 7 }),
+                ),
+            ).columnResults[0];
+            const body = makeColumnPageResult(FILLERS).columnResults[0];
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [body, { ...block, columnIndex: 1 }],
+                allLines: [...body.lines, ...block.lines],
+            };
+            const headers = detectParagraphs(page, [BODY], ISOLATED).items.filter(it => it.type === 'header');
+            expect(headers.length).toBeLessThanOrEqual(1);
+        });
+
+        it('keeps a title apart from the author line below it in a short front-matter piece', () => {
+            // Title, authors and affiliations in a column piece of their own,
+            // spaced as on a real cover page. The gap under the title is
+            // section spacing, but the piece's median gap is leading, so the
+            // piece keeps its own threshold and the title stays a heading.
+            // (Taking the page's lower threshold here lets the uniform-leading
+            // protection read the title gap as leading, and the two lines'
+            // equally tall boxes give no size break.)
+            const piece = makeColumnPageResult([
+                { text: 'Natural course of posterior subcapsular cataract over a short time', l: 0, r: 470, size: 14, font: 'Title-Sans', bboxHeight: 10, gapAfter: 11.3 },
+                { text: 'Thomas Neumayer, Nino Hirnschall, Michael Georgopoulos and Oliver Findl', l: 0, r: 400, size: 10, font: 'Author-Serif', bboxHeight: 10, gapAfter: 8.8 },
+                { text: 'Vienna Institute for Research in Ocular Surgery, A Karl Landsteiner Institute, Hanusch', l: 0, r: 500, size: 10, font: 'Times-Roman', gapAfter: 1.5 },
+                { text: 'Ophthalmology, Medical University of Vienna, Vienna, Austria', l: 0, r: 300, size: 10, font: 'Times-Roman' },
+            ]).columnResults[0];
+            const body = makeColumnPageResult(FILLERS).columnResults[0];
+            const offset = piece.column.y + piece.column.h + 20;
+            const bodyLines = body.lines.map(line => ({
+                ...line,
+                bbox: { ...line.bbox, t: line.bbox.t + offset, b: line.bbox.b + offset },
+            }));
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [piece, { ...body, columnIndex: 1, lines: bodyLines }],
+                allLines: [...piece.lines, ...bodyLines],
+            };
+            const headers = detectParagraphs(page, [BODY], ISOLATED).items
+                .filter(it => it.type === 'header')
+                .map(it => it.text.trim());
+            expect(headers).toEqual(['## Natural course of posterior subcapsular cataract over a short time']);
+        });
+
+        it('keeps body lines together in a short piece holding a caption, a heading and a paragraph', () => {
+            // The gaps left once the heading's are set aside mix the caption's
+            // tight leading with the body's; the piece takes the page's
+            // threshold instead of their median.
+            const piece = makeColumnPageResult([
+                { text: 'Figure 11. Mean number of cloud-free observations per tile in the', l: 0, r: 480, size: 9, font: 'Times-Bold', bold: true, gapAfter: -1 },
+                { text: 'corresponding mosaics, computed over the Planet NICFI tiles. Only', l: 0, r: 480, size: 9, font: 'Times-Roman', gapAfter: 1 },
+                { text: 'pixels greater than zero were considered in the computation.', l: 0, r: 300, size: 9, font: 'Times-Roman', gapAfter: 27 },
+                { text: '3.9. Amazon forest canopy height', l: 0, r: 200, ...SECTION_FACE, gapAfter: 13 },
+                { text: 'We found that the mean canopy height of the Amazon forest was 22.09 m, with', l: 0, r: 480, size: 10, font: 'Times-Roman', gapAfter: 5.3 },
+                { text: 'a median of 22.25 m and a 97.5th percentile of 32.10 m (Table 1).', l: 0, r: 330, size: 10, font: 'Times-Roman' },
+            ]).columnResults[0];
+            const body = makeColumnPageResult(
+                FILLERS.map((f): LeaderLineSpec => ({ ...f, gapAfter: 5.3 })),
+            ).columnResults[0];
+            const offset = piece.column.y + piece.column.h + 20;
+            const bodyLines = body.lines.map(line => ({
+                ...line,
+                bbox: { ...line.bbox, t: line.bbox.t + offset, b: line.bbox.b + offset },
+            }));
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [piece, { ...body, columnIndex: 1, lines: bodyLines }],
+                allLines: [...piece.lines, ...bodyLines],
+            };
+            const texts = detectParagraphs(page, [BODY], ISOLATED).items.map(it => it.text.trim());
+            expect(texts).toContain(
+                'We found that the mean canopy height of the Amazon forest was 22.09 m, with a median of 22.25 m and a 97.5th percentile of 32.10 m (Table 1).',
+            );
+        });
+
+        it('never raises a short piece threshold to a looser page leading', () => {
+            // The piece's median gap borders the heading, but the page's
+            // double-spaced body sets a higher threshold than the piece's own:
+            // section gaps only inflate a median, so the lower value stands.
+            const piece = makeColumnPageResult([
+                { text: 'In conclusion, our results suggest that the interventions have a lasting', l: 0, r: 480, size: 10, font: 'Times-Roman', gapAfter: 2 },
+                { text: 'effect on the outcomes we measured.', l: 0, r: 200, size: 10, font: 'Times-Roman', gapAfter: 11 },
+                { text: 'Conclusions', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                { text: 'Taken together, these findings extend earlier work on the topic.', l: 0, r: 400, size: 10, font: 'Times-Roman' },
+            ]).columnResults[0];
+            const body = makeColumnPageResult(
+                FILLERS.map((f): LeaderLineSpec => ({ ...f, gapAfter: 12 })),
+            ).columnResults[0];
+            const offset = piece.column.y + piece.column.h + 20;
+            const bodyLines = body.lines.map(line => ({
+                ...line,
+                bbox: { ...line.bbox, t: line.bbox.t + offset, b: line.bbox.b + offset },
+            }));
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [piece, { ...body, columnIndex: 1, lines: bodyLines }],
+                allLines: [...piece.lines, ...bodyLines],
+            };
+            const headers = detectParagraphs(page, [BODY], ISOLATED).items
+                .filter(it => it.type === 'header')
+                .map(it => it.text.trim());
+            expect(headers).toEqual(['## Conclusions']);
+        });
+
+        it('finds stacked headings in a short column piece cut off above the body', () => {
+            // The column detector can cut a single-column page at its
+            // headings, leaving a piece with a paragraph's last lines and two
+            // stacked headings. Their gaps are section spacing; they must not
+            // set the piece's own paragraph-gap threshold.
+            const piece = makeColumnPageResult([
+                { text: 'types partially account for interest in alternate security aims, such as', l: 0, size: 10, font: 'Times-Roman' },
+                { text: 'security equipment and technology.', l: 0, r: 180, size: 10, font: 'Times-Roman', gapAfter: 16 },
+                { text: 'RESULTS', l: 0, ...SECTION_FACE, gapAfter: 14 },
+                { text: 'Summary Statistics', l: 0, ...SECTION_FACE },
+            ]).columnResults[0];
+            const body = makeColumnPageResult(FILLERS).columnResults[0];
+            const offset = piece.column.y + piece.column.h + 8;
+            const bodyLines = body.lines.map(line => ({
+                ...line,
+                bbox: { ...line.bbox, t: line.bbox.t + offset, b: line.bbox.b + offset },
+            }));
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [piece, { ...body, columnIndex: 1, lines: bodyLines }],
+                allLines: [...piece.lines, ...bodyLines],
+            };
+            const headers = detectParagraphs(page, [BODY], ISOLATED).items
+                .filter(it => it.type === 'header')
+                .map(it => it.text.trim());
+            expect(headers).toEqual(['## RESULTS', '## Summary Statistics']);
+        });
+    });
+
     describe('bare font-difference is not a heading signal', () => {
         it('does NOT promote a Regular-weight, different-family line with no other cue', () => {
             const all = items(

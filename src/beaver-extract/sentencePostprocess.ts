@@ -41,6 +41,14 @@ export interface PostProcessContext {
      * line; synthetic fillers inserted between PDF lines carry `null`.
      */
     source?: ReadonlyArray<{ lineIndex: number; charIndex: number } | null>;
+    /**
+     * Also read appendix / supplement-prefixed, panel-suffixed and
+     * roman-numeral caption labels ("Table A1.", "Fig. S2", "Fig. 3a",
+     * "Table IV.") as labels (`mergeLabelSentences`). Set by the PDF schema
+     * preset; off, only plain and dotted numbers count, so earlier schemas'
+     * sentence ids keep resolving.
+     */
+    captionLabels?: boolean;
 }
 
 /**
@@ -148,11 +156,41 @@ function getLabelPattern(): RegExp {
     return labelPatternCache;
 }
 
-function isLabel(text: string): boolean {
+/**
+ * Caption labels in the other numbering schemes captions use (with
+ * `PostProcessContext.captionLabels`): appendix / supplement prefixes
+ * (`Table A1.`, `Fig. S2`, `Table B.3`, `Figure A-1`), panel suffixes
+ * (`Fig. 3a`) and roman numerals (`Table IV.`), besides plain numbers.
+ *
+ * Keywords match in either case; a number's letter prefix and a roman
+ * numeral must be uppercase, so that a word ("Table of 3.", "Box mix.")
+ * never reads as one. The pattern has no `i` flag for that reason: each
+ * keyword letter is expanded to both cases instead.
+ */
+let captionLabelPatternCache: RegExp | null = null;
+function getCaptionLabelPattern(): RegExp {
+    if (captionLabelPatternCache) return captionLabelPatternCache;
+    const keywords = LABEL_KEYWORDS.map((k) => Array.from(k, caseFoldedChar).join("")).join("|");
+    captionLabelPatternCache = new RegExp(
+        `^(?:${keywords})\\.?\\s*(?:(?:\\p{Lu}{1,2}[.\\-–]?\\s?)?\\d+(?:[.\\-–]\\d+)*\\p{Ll}?|[IVXLC]{1,7})[.:]?$`,
+        "u",
+    );
+    return captionLabelPatternCache;
+}
+
+/** One keyword character as a pattern matching it in either case. */
+function caseFoldedChar(ch: string): string {
+    const lower = ch.toLowerCase();
+    const upper = ch.toUpperCase();
+    if (lower === upper) return ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return `[${lower}${upper}]`;
+}
+
+function isLabel(text: string, captionLabels: boolean): boolean {
     const trimmed = text.trim();
     if (!trimmed || trimmed.length > LABEL_MAX_LEN) return false;
     if (NUMERIC_LABEL_RE.test(trimmed)) return true;
-    return getLabelPattern().test(trimmed);
+    return (captionLabels ? getCaptionLabelPattern() : getLabelPattern()).test(trimmed);
 }
 
 /**
@@ -168,7 +206,8 @@ function isLabel(text: string): boolean {
  * collapse left-to-right: each label binds to whatever non-label range
  * eventually appears after it.
  */
-export const mergeLabelSentences: PostProcessStep = (ranges, text) => {
+export const mergeLabelSentences: PostProcessStep = (ranges, text, context) => {
+    const captionLabels = context?.captionLabels === true;
     const out: SentenceRange[] = [];
     let pendingStart: number | null = null;
 
@@ -177,7 +216,7 @@ export const mergeLabelSentences: PostProcessStep = (ranges, text) => {
         const segText = text.slice(r.start, r.end);
         const isLast = i === ranges.length - 1;
 
-        if (!isLast && isLabel(segText)) {
+        if (!isLast && isLabel(segText, captionLabels)) {
             // Open a merge: remember the earliest start, keep walking.
             if (pendingStart === null) pendingStart = r.start;
             continue;
