@@ -117,6 +117,10 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Organize items tool
     organize_items: TaskDoneIcon,
 
+    // Tag and collection management (matches getAgentActionToolIcon)
+    manage_tags: TagIcon,
+    manage_collections: FolderDetailIcon,
+
     // Duplicate tools
     find_duplicates: BookCopyIcon,
     merge_items: BookCopyIcon,
