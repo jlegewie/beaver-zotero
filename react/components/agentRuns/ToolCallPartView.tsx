@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
+import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isNotFoundWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import { isTableToolName, isTableWriteToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
@@ -347,6 +347,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         view,
         enrich: labelEnrich,
         noChange: isNoChangeReturn,
+        notFound: isNoChangeReturn && isNotFoundWriteReturn(result),
     });
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)

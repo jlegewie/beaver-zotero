@@ -42,6 +42,19 @@ describe('getToolCallLabel', () => {
         expect(getToolCallLabel(part, 'completed', { noChange: true }))
             .toBe('Import items: no change needed');
     });
+
+    it('names the tag a manage_tags call operates on', () => {
+        const part = toolCall({ tool_name: 'manage_tags', args: { action: 'rename', name: 'methods', new_name: 'methodology' } });
+        expect(getToolCallLabel(part, 'completed')).toBe('Manage tags: "methods"');
+    });
+
+    it('does not call a write on a missing target unnecessary', () => {
+        const part = toolCall({ tool_name: 'manage_tags', args: { action: 'delete', name: 'gone' } });
+        expect(getToolCallLabel(part, 'completed', { noChange: true }))
+            .toBe('Manage tags: no change needed');
+        expect(getToolCallLabel(part, 'completed', { noChange: true, notFound: true }))
+            .toBe('Manage tags: nothing found to change');
+    });
 });
 
 describe('getToolCallLabel for create_items', () => {

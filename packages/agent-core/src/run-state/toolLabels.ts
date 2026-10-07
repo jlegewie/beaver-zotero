@@ -33,6 +33,8 @@ export interface ToolCallLabelOptions {
      * label reports that instead of naming an edit that never happened.
      */
     noChange?: boolean;
+    /** With `noChange`: the target did not exist (see isNotFoundWriteReturn). */
+    notFound?: boolean;
 }
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -420,7 +422,9 @@ function computeMainLabel(
     // A write that changed nothing: the return holds guidance written for the
     // model, so the label is the whole story the row can tell.
     if (opts?.noChange) {
-        return `${baseLabel}: no change needed`;
+        return opts.notFound
+            ? `${baseLabel}: nothing found to change`
+            : `${baseLabel}: no change needed`;
     }
 
     const args = parseArgs(part);
@@ -852,7 +856,7 @@ function computeMainLabel(
         }
 
         case 'manage_tags': {
-            const tag = args.tag as string | undefined;
+            const tag = args.name as string | undefined;
             if (tag) {
                 return `${baseLabel}: "${truncate(tag, 20)}"`;
             }
