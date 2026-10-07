@@ -435,6 +435,7 @@ function buildAnalysisFromDoc(
         marginZone: opts.marginZone,
         repeatThreshold: requestedRepeatThreshold,
         detectPageSequences: opts.detectPageSequences,
+        marginTextRows: opts.marginTextRows,
     });
     const analysisMs = performance.now() - tAnalysisStart;
     StyleAnalyzer.logStyleProfile(styleProfile);
@@ -753,6 +754,7 @@ export function runExtractFromIndices(
                 styleProfile,
                 margins: opts.margins,
                 marginZone: opts.marginZone,
+                marginTextRows: opts.marginTextRows,
                 paragraphSettings,
                 fillBoundaries,
                 dividerLines,
@@ -822,6 +824,7 @@ export function runExtractFromIndices(
                     compoundVocabulary,
                     margins: opts.margins,
                     marginZone: opts.marginZone,
+                    marginTextRows: opts.marginTextRows,
                     graphicsLayerMode: opts.graphicsLayerMode,
                     // Reuse the detailed walk done before
                     // `buildAnalysisFromDoc` so we don't pay a second
@@ -868,6 +871,7 @@ export function runExtractFromIndices(
                 marginRemoval,
                 styleProfile.bodyStyles,
                 styleProfile.primaryBodyStyle,
+                opts.marginTextRows,
             );
             const marginItems = collectMarginItemsFromFilteredPage(
                 rawPage,
@@ -1416,7 +1420,7 @@ export async function opExtract(
         // short-doc relaxation only kicks in when no explicit value was
         // provided.
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}), marginTextRows: preset.marginTextRows };
         // `resolveTruePageCount` (not `doc.countPages()`): a corrupt or
         // truncated PDF can advertise more pages in `/Root/Pages/Count`
         // than its page tree can resolve. Using the advertised count
@@ -1559,7 +1563,7 @@ export async function opStructuredExtractWithDebug(
     let docFailed = false;
     try {
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}), marginTextRows: preset.marginTextRows };
         assertDocumentHasPages(doc.countPages());
         const pageCount = resolveTruePageCount(doc);
         assertDocumentHasPages(pageCount);

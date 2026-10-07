@@ -122,6 +122,8 @@ export function extractSentencesForPage(args: {
     /** Caller-supplied extraction margins. Match the markdown branch. */
     margins: MarginSettings;
     marginZone: MarginSettings;
+    /** Match margin text rows rather than single lines (default true). */
+    marginTextRows?: boolean;
     /**
      * Whether to probe the PDF graphics layer for tinted display
      * containers (`fill_path` events) on this page. See
@@ -198,6 +200,7 @@ export function extractSentencesForPage(args: {
         styleProfile: args.styleProfile,
         margins: args.margins,
         marginZone: args.marginZone,
+        marginTextRows: args.marginTextRows,
         paragraphSettings: args.paragraphSettings,
         fillBoundaries,
         dividerLines,

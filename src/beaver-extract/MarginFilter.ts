@@ -234,6 +234,21 @@ function isStructuredPageNumber(text: string): boolean {
  * "Page 2", …) collapse to a single template key. Operates on
  * digit-normalized text so "page １" and "page 1" share a template.
  */
+/**
+ * Key for matching joined rows with their digits aside: rows that carry
+ * text, and a single number with its ornaments ("-119 -", "— 5 —"). Rows of
+ * several bare numbers (table values, figure ticks) would all share one
+ * template, so they keep exact matching and are left to page-number
+ * detection.
+ */
+function rowTemplateKey(text: string): string {
+    const letters = text.match(/\p{L}/gu)?.length ?? 0;
+    const numbers = normalizeDigits(text).match(/\d+/gu)?.length ?? 0;
+    return letters >= 3 || numbers <= 1
+        ? `tpl:${templateKey(text)}`
+        : `txt:${normalizeText(text)}`;
+}
+
 function templateKey(text: string): string {
     return normalizeDigits(text).trim().toLowerCase().replace(/\d+/gu, "§N");
 }
@@ -356,6 +371,134 @@ function isSubstantialSideMarginText(text: string): boolean {
         .filter((t) => /[\p{L}\p{N}]/u.test(t));
     return tokens.length >= 2;
 }
+
+// ============================================================================
+// Text rows
+// ============================================================================
+
+/** Lines MuPDF emitted separately on one baseline, read as one line. */
+interface TextRow {
+    /** Row text: the line's own trimmed text, or the lines' joined text. */
+    text: string;
+    bbox: BoundingBox;
+    lines: RawLine[];
+}
+
+function unionBBox(lines: RawLine[]): BoundingBox {
+    return {
+        l: Math.min(...lines.map(line => line.bbox.l)),
+        t: Math.min(...lines.map(line => line.bbox.t)),
+        r: Math.max(...lines.map(line => line.bbox.r)),
+        b: Math.max(...lines.map(line => line.bbox.b)),
+        origin: lines[0].bbox.origin,
+    };
+}
+
+function joinRowText(lines: RawLine[]): string {
+    return lines.map(line => line.text).join(" ").replace(/\s+/gu, " ").trim();
+}
+
+/**
+ * Group a page's text lines into rows, the unit of smart margin removal.
+ *
+ * Some PDFs draw text word by word or out of reading order, and MuPDF then
+ * emits each word, or a line's opening word, as a line of its own. Judged
+ * word by word, common words of body rows that reach into a margin zone
+ * repeat across pages like a running head does, and a body word that also
+ * appears in a running head is removed with it. Joining such lines back
+ * into the row they belong to restores the unit MuPDF produces for
+ * ordinary PDFs: a running head still repeats as a whole, a body row does
+ * not, and a body row that leaves the margin zone is not margin text.
+ *
+ * Upright lines join when they overlap vertically by at least half the
+ * shorter line, neither is more than twice as tall as the other, and the
+ * gap between them is at most 0.3 em of the smaller font. Word-split lines
+ * carry their word space, so they nearly touch. MuPDF itself splits a line
+ * only at a wider gap, so lines it split for that reason (a running head
+ * and its page number or separator dots, columns) stay apart. Lines that
+ * overlap horizontally by more than a quarter em are text printed over
+ * other text (a download stamp across a footer), not one row. The em comes
+ * from the reported font size rather than the line box, whose height
+ * differs between extraction passes. Rows keep the order of their first
+ * line.
+ */
+function collectTextRows(page: RawPageData, joinLines: boolean): TextRow[] {
+    const lines: RawLine[] = [];
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) {
+            if ((line.text || "").trim()) lines.push(line);
+        }
+    }
+
+    const n = lines.length;
+    const parent = Array.from({ length: n }, (_, i) => i);
+    const find = (i: number): number => {
+        while (parent[i] !== i) {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        return i;
+    };
+    const upright = lines.map(line => joinLines && line.wmode !== 1 && (line.rotation ?? 0) === 0);
+    const em = lines.map(line =>
+        line.font?.size > 0 ? line.font.size : 0.7 * (line.bbox.b - line.bbox.t),
+    );
+    const order = lines.map((_, i) => i)
+        .filter(i => upright[i])
+        .sort((a, b) => lines[a].bbox.t - lines[b].bbox.t);
+    for (let x = 0; x < order.length; x++) {
+        const a = lines[order[x]].bbox;
+        const ha = a.b - a.t;
+        if (!(ha > 0)) continue;
+        for (let y = x + 1; y < order.length; y++) {
+            const b = lines[order[y]].bbox;
+            if (b.t >= a.b) break;
+            const hb = b.b - b.t;
+            if (!(hb > 0)) continue;
+            const minH = Math.min(ha, hb);
+            if (Math.max(ha, hb) > 2 * minH) continue;
+            if (Math.min(a.b, b.b) - b.t < 0.5 * minH) continue;
+            const minEm = Math.min(em[order[x]], em[order[y]]);
+            const gap = Math.max(b.l - a.r, a.l - b.r);
+            if (gap > 0.3 * minEm || gap < -0.25 * minEm) continue;
+            const ra = find(order[x]);
+            const rb = find(order[y]);
+            if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
+        }
+    }
+
+    const groups = new Map<number, RawLine[]>();
+    for (let i = 0; i < n; i++) {
+        const root = find(i);
+        let group = groups.get(root);
+        if (!group) {
+            group = [];
+            groups.set(root, group);
+        }
+        group.push(lines[i]);
+    }
+    return Array.from(groups.values(), (group): TextRow => {
+        if (group.length === 1) {
+            return { text: group[0].text.trim(), bbox: group[0].bbox, lines: group };
+        }
+        group.sort((a, b) => a.bbox.l - b.bbox.l);
+        return {
+            text: joinRowText(group),
+            bbox: unionBBox(group),
+            lines: group,
+        };
+    });
+}
+
+/**
+ * Most page-number-like lines a page may have in one margin zone for a
+ * standalone one to support a page-number run found beside running heads.
+ */
+const MAX_PAGE_NUMBER_CANDIDATES = 3;
+
+/** Smallest reported font size of a page number in such a run. */
+const MIN_PAGE_NUMBER_FONT_SIZE = 5;
 
 // ============================================================================
 // Effective repeat-threshold helper
@@ -510,10 +653,12 @@ export class MarginFilter {
 
     /**
      * Smart filter: Collect all elements in margin zones for analysis.
+     * With `textRows` off, every line is its own row (PDF schema 4).
      */
     static collectMarginElements(
         pages: RawPageData[],
-        marginZone: MarginSettings
+        marginZone: MarginSettings,
+        textRows: boolean = true
     ): MarginAnalysis {
         const elements = new Map<MarginPosition, MarginElement[]>([
             ["top", []],
@@ -522,30 +667,53 @@ export class MarginFilter {
             ["right", []],
         ]);
 
+        // One element per text row (see `collectTextRows`); `line` is the
+        // row's first line. A row that spans two zones without reaching the
+        // content area, such as a running head with its page number in the
+        // corner, contributes its lines one by one.
         for (const page of pages) {
-            for (const block of page.blocks) {
-                if (block.type !== "text" || !block.lines) continue;
-
-                for (const line of block.lines) {
-                    const trimmedText = (line.text || "").trim();
-                    if (!trimmedText) continue;
-
-                    const position = getMarginPosition(
-                        line.bbox,
-                        page.width,
-                        page.height,
-                        marginZone
-                    );
-
-                    if (position) {
-                        elements.get(position)!.push({
-                            text: trimmedText,
-                            position,
-                            bbox: line.bbox,
-                            pageIndex: page.pageIndex,
-                            line,
-                        });
+            const positionOf = (bbox: BoundingBox) =>
+                getMarginPosition(bbox, page.width, page.height, marginZone);
+            const push = (
+                text: string,
+                position: MarginPosition,
+                bbox: BoundingBox,
+                lines: RawLine[],
+                rowEndNumber = false,
+            ) => {
+                elements.get(position)!.push({
+                    text,
+                    position,
+                    bbox,
+                    pageIndex: page.pageIndex,
+                    line: lines[0],
+                    ...(lines.length > 1 ? { lineCount: lines.length } : {}),
+                    ...(rowEndNumber ? { rowEndNumber } : {}),
+                });
+            };
+            for (const row of collectTextRows(page, textRows)) {
+                const position = positionOf(row.bbox);
+                if (position) {
+                    push(row.text, position, row.bbox, row.lines);
+                    // A page number set beside a running head that changes
+                    // from page to page ("1 Introduction", "2 Methods") is
+                    // only found by the page-number sequence, so a leading
+                    // or trailing page number is also collected on its own
+                    // (see `rowEndNumber`).
+                    const ends = row.lines.length > 1
+                        ? [row.lines[0], row.lines[row.lines.length - 1]]
+                        : [];
+                    for (const line of ends) {
+                        const linePosition = positionOf(line.bbox);
+                        if (linePosition && isPageNumberPattern(line.text.trim())) {
+                            push(line.text.trim(), linePosition, line.bbox, [line], true);
+                        }
                     }
+                    continue;
+                }
+                if (row.lines.length < 2 || !row.lines.every(line => positionOf(line.bbox))) continue;
+                for (const line of row.lines) {
+                    push(line.text.trim(), positionOf(line.bbox)!, line.bbox, [line]);
                 }
             }
         }
@@ -583,7 +751,9 @@ export class MarginFilter {
         const removalsByPage = new Map<number, Set<string>>();
 
         // Process each margin position
-        for (const [position, elements] of analysis.elements) {
+        for (const [position, positionElements] of analysis.elements) {
+            const elements = positionElements.filter(el => !el.rowEndNumber);
+            const rowEndNumbers = positionElements.filter(el => el.rowEndNumber);
             const requiredForPosition =
                 typeof requiredCount === "number"
                     ? requiredCount
@@ -603,11 +773,29 @@ export class MarginFilter {
             };
             const buckets = new Map<string, Bucket>();
 
+            // A joined row often carries the page number next to the running
+            // head ("166 | Elegies of Diaspora"), so its digits don't count
+            // (see `rowTemplateKey`); a single line keeps exact text matching. MuPDF can emit the same
+            // running head as one line on some pages and as several on
+            // others, so a single line whose text a joined row also has counts
+            // with that row.
+            const rowKey = (el: MarginElement, normalized: string) =>
+                isStructuredPageNumber(el.text) ? null : `row:${rowTemplateKey(normalized)}`;
+            const rowKeyByText = new Map<string, string>();
+            for (const el of elements) {
+                if (!el.lineCount) continue;
+                const normalized = normalizeText(el.text);
+                const key = rowKey(el, normalized);
+                if (key) rowKeyByText.set(normalized, key);
+            }
+
             for (const el of elements) {
                 const normalized = normalizeText(el.text);
                 const key = isStructuredPageNumber(el.text)
                     ? `tpl:${templateKey(el.text)}`
-                    : `txt:${normalized}`;
+                    : el.lineCount
+                        ? rowKey(el, normalized)!
+                        : rowKeyByText.get(normalized) ?? `txt:${normalized}`;
                 let bucket = buckets.get(key);
                 if (!bucket) {
                     bucket = {
@@ -627,7 +815,7 @@ export class MarginFilter {
                 bucket.pageIndices.add(el.pageIndex);
             }
 
-            for (const bucket of buckets.values()) {
+            for (const [key, bucket] of buckets) {
                 if (bucket.pageIndices.size < requiredForPosition) continue;
 
                 // Left/right repeats must clear a substance bar so common
@@ -647,14 +835,28 @@ export class MarginFilter {
                 // candidate.text stays as exact normalized text — external
                 // consumers (testPdfHandlers, extractionOverlay) match
                 // candidate.text against line text. Internal Map/Set keys
-                // (tpl:/txt:) are scoped to this function only.
-                candidates.push({
-                    text: bucket.firstNormalized,
-                    originalText: bucket.firstOriginal,
-                    pageIndices: pages,
-                    reason: "repeat",
-                    position,
-                });
+                // (tpl:/row:/txt:) are scoped to this function only. A
+                // joined-row bucket lists every variant, so the smart filter
+                // finds each one's reason (and spares heading-sized ones).
+                if (key.startsWith("row:")) {
+                    for (const [variant, variantPages] of bucket.variantPages) {
+                        candidates.push({
+                            text: variant,
+                            originalText: variant === bucket.firstNormalized ? bucket.firstOriginal : variant,
+                            pageIndices: Array.from(variantPages).sort((a, b) => a - b),
+                            reason: "repeat",
+                            position,
+                        });
+                    }
+                } else {
+                    candidates.push({
+                        text: bucket.firstNormalized,
+                        originalText: bucket.firstOriginal,
+                        pageIndices: pages,
+                        reason: "repeat",
+                        position,
+                    });
+                }
 
                 for (const [variant, variantPages] of bucket.variantPages) {
                     textsToRemove.add(variant);
@@ -827,6 +1029,70 @@ export class MarginFilter {
                         pdfLog(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`, 3);
                     }
                 }
+
+                // Page numbers at the end of joined rows (see
+                // `rowEndNumber`). Joined rows also hold running text, whose
+                // numbers (subscripts, years, table values) can increase by
+                // chance, so these count only when value minus page index
+                // stays the same on enough pages: they step with the pages.
+                // Page numbers that stand apart on other pages (where the
+                // running head sat further away) count toward the same run,
+                // so changing header spacing does not split the evidence; a
+                // run needs joined-row numbers on two pages. A standalone
+                // number counts only on a page with few numbers in this zone:
+                // pages of formulas or tables offer so many that one steps
+                // with the pages by chance.
+                // Numbers this zone already removes (the sequence above found
+                // them) are evidence too, whatever the page around them.
+                const isRemoved = (el: MarginElement) =>
+                    removalsByPage.get(el.pageIndex)?.has(normalizeText(el.text)) ?? false;
+                const byOffset = new Map<number, MarginElement[]>();
+                if (rowEndNumbers.length > 0) {
+                    const numberLike = [...rowEndNumbers, ...elements.filter(
+                        el => !el.lineCount && isPageNumberPattern(el.text),
+                    )];
+                    const numbersOnPage = new Map<number, number>();
+                    for (const el of numberLike) {
+                        numbersOnPage.set(el.pageIndex, (numbersOnPage.get(el.pageIndex) ?? 0) + 1);
+                    }
+                    const standaloneNumbers = numberLike.filter(
+                        el => !el.rowEndNumber
+                            && (isRemoved(el) || numbersOnPage.get(el.pageIndex)! <= MAX_PAGE_NUMBER_CANDIDATES),
+                    );
+                    for (const el of [...rowEndNumbers, ...standaloneNumbers]) {
+                        // Figure tick labels and exponents are set tiny.
+                        if (!isRemoved(el) && !(el.line.font?.size >= MIN_PAGE_NUMBER_FONT_SIZE)) continue;
+                        const value = parsePageNumber(el.text);
+                        if (value === null) continue;
+                        const offset = value - el.pageIndex;
+                        let group = byOffset.get(offset);
+                        if (!group) {
+                            group = [];
+                            byOffset.set(offset, group);
+                        }
+                        group.push(el);
+                    }
+                }
+                for (const group of byOffset.values()) {
+                    if (new Set(group.filter(el => el.rowEndNumber).map(el => el.pageIndex)).size < 2) continue;
+                    if (new Set(group.map(el => el.pageIndex)).size < Math.max(2, requiredForPosition)) continue;
+                    for (const el of group) {
+                        if (isRemoved(el)) continue;
+                        const normalized = normalizeText(el.text);
+                        candidates.push({
+                            text: normalized,
+                            originalText: el.text,
+                            pageIndices: [el.pageIndex],
+                            reason: "page_number",
+                            position,
+                        });
+                        textsToRemove.add(normalized);
+                        if (!removalsByPage.has(el.pageIndex)) {
+                            removalsByPage.set(el.pageIndex, new Set());
+                        }
+                        removalsByPage.get(el.pageIndex)!.add(normalized);
+                    }
+                }
             }
         }
 
@@ -847,6 +1113,9 @@ export class MarginFilter {
      * match on a heading-sized line is almost always the document's actual
      * title or section heading sharing text with a small-font running
      * header elsewhere — keep it.
+     *
+     * `textRows` must match the setting the removal result was computed
+     * with (see `collectMarginElements`).
      */
     static filterPageWithSmartRemoval(
         page: RawPageData,
@@ -854,7 +1123,8 @@ export class MarginFilter {
         marginZone: MarginSettings,
         removalResult: MarginRemovalResult,
         bodyStyles?: TextStyle[],
-        primaryBodyStyle?: TextStyle
+        primaryBodyStyle?: TextStyle,
+        textRows: boolean = true
     ): RawPageData {
         const pageRemovals = removalResult.removalsByPage.get(page.pageIndex);
         // Per-text reason lookup so the heading-spare can apply only to
@@ -864,6 +1134,90 @@ export class MarginFilter {
         const reasonByText = new Map<string, RemovalCandidate["reason"]>();
         for (const c of removalResult.candidates) {
             if (!reasonByText.has(c.text)) reasonByText.set(c.text, c.reason);
+        }
+
+        // Smart removal matches text rows, as the analysis collected them
+        // (see `collectTextRows`), and removes or keeps a row's lines
+        // together. A heading-sized row whose text matches a `repeat`
+        // candidate is spared: a line whose font already meets the heading-
+        // size threshold cannot be a running header/footer on this page
+        // regardless of textual identity with a small-font running header
+        // elsewhere. This protects article titles and section headings whose
+        // text happens to recur as a running header on subsequent pages. The
+        // spare is gated to `repeat` reasons so page-number sequences and
+        // identifier matches (URLs, DOIs in margins) remain force-removed.
+        //
+        // The analysis pass reports slightly different line boxes, so it may
+        // have read a row's lines as rows of their own; such lines still
+        // match on their own text. A running head can also share its row with
+        // other text set right beside it, such as a figure label or a photo
+        // credit: a row's leading or trailing run of lines matching a repeat
+        // or identifier candidate in the same zone is removed, by exact text
+        // for one line and digits aside for a substantial run of several
+        // that carries text (see `rowTemplateKey`).
+        const removedLines = new Set<RawLine>();
+        const inZone = (bbox: BoundingBox) =>
+            getMarginPosition(bbox, page.width, page.height, marginZone) !== null;
+        // A joined row is judged as a heading by its whole text, set in
+        // heading-sized type throughout.
+        const remove = (lines: RawLine[], reason: RemovalCandidate["reason"] | undefined) => {
+            const text = lines.length > 1 ? joinRowText(lines) : null;
+            if (
+                reason === "repeat"
+                && lines.every(line =>
+                    StyleAnalyzer.isHeadingLine(text === null ? line : { ...line, text }, primaryBodyStyle),
+                )
+            ) {
+                return;
+            }
+            for (const line of lines) removedLines.add(line);
+        };
+        const endTexts = new Set<string>();
+        const endKeys = new Set<string>();
+        for (const c of removalResult.candidates) {
+            if (c.reason === "page_number") continue;
+            endTexts.add(`${c.position}|${c.text}`);
+            if (isSubstantialSideMarginText(c.text)) endKeys.add(`${c.position}|${rowTemplateKey(c.text)}`);
+        }
+        const removeEndRun = (lines: RawLine[]): boolean => {
+            const position = getMarginPosition(unionBBox(lines), page.width, page.height, marginZone);
+            if (!position) return false;
+            const matches = lines.length === 1
+                ? endTexts.has(`${position}|${normalizeText(lines[0].text)}`)
+                : endKeys.has(`${position}|${rowTemplateKey(joinRowText(lines))}`);
+            if (!matches) return false;
+            remove(lines, "repeat");
+            return true;
+        };
+        if ((pageRemovals && pageRemovals.size > 0) || endTexts.size > 0) {
+            for (const row of collectTextRows(page, textRows)) {
+                const normalized = normalizeText(row.text);
+                if (pageRemovals?.has(normalized) && inZone(row.bbox)) {
+                    remove(row.lines, reasonByText.get(normalized));
+                    continue;
+                }
+                const n = row.lines.length;
+                if (n === 1) continue;
+                for (const [k, line] of row.lines.entries()) {
+                    const text = normalizeText(line.text);
+                    if (!pageRemovals?.has(text) || !inZone(line.bbox)) continue;
+                    // A page number only ever opens or closes a row; the
+                    // same digits inside running text stay.
+                    const reason = reasonByText.get(text);
+                    if (reason === "page_number" && k !== 0 && k !== n - 1) continue;
+                    remove([line], reason);
+                }
+                let headEnd = 0;
+                for (let k = n - 1; k >= 1; k--) {
+                    if (removeEndRun(row.lines.slice(0, k))) {
+                        headEnd = k;
+                        break;
+                    }
+                }
+                for (let k = Math.max(1, headEnd); k < n; k++) {
+                    if (removeEndRun(row.lines.slice(k))) break;
+                }
+            }
         }
 
         const filteredBlocks = page.blocks.map(block => {
@@ -883,44 +1237,7 @@ export class MarginFilter {
                     }
                 }
 
-                // Check if line is in margin zone and matches removal candidate.
-                // Smart-removal still applies to body-styled lines, but a
-                // heading-sized line whose text matches a `repeat` candidate
-                // is spared: a line whose font already meets the heading-
-                // size threshold cannot be a running header/footer on this
-                // page regardless of textual identity with a small-font
-                // running header elsewhere. This protects article titles
-                // and section headings whose text happens to recur as a
-                // running header on subsequent pages. The spare is gated to
-                // `repeat` reasons so page-number sequences and identifier
-                // matches (URLs, DOIs in margins) remain force-removed.
-                if (pageRemovals && pageRemovals.size > 0) {
-                    const position = getMarginPosition(
-                        line.bbox,
-                        page.width,
-                        page.height,
-                        marginZone
-                    );
-
-                    if (position) {
-                        const normalized = normalizeText(line.text || "");
-                        if (pageRemovals.has(normalized)) {
-                            const reason = reasonByText.get(normalized);
-                            if (
-                                reason === "repeat"
-                                && StyleAnalyzer.isHeadingLine(
-                                    line,
-                                    primaryBodyStyle,
-                                )
-                            ) {
-                                return true;
-                            }
-                            return false;
-                        }
-                    }
-                }
-
-                return true;
+                return !removedLines.has(line);
             });
 
             return {

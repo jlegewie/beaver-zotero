@@ -33,13 +33,18 @@ export interface PdfExtractionPreset {
      * captions (`ParagraphDetectionSettings.headingLabelFilters`).
      */
     headingLabelFilters: boolean;
+    /**
+     * Smart margin removal matches text rows rather than single MuPDF lines
+     * (`ExtractionSettings.marginTextRows`).
+     */
+    marginTextRows: boolean;
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */
     idScheme: ExtractIdScheme;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, idScheme: "document" },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, idScheme: "page" },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, marginTextRows: false, idScheme: "document" },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, marginTextRows: true, idScheme: "page" },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

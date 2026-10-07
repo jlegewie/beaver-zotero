@@ -80,6 +80,8 @@ export interface FilteredParagraphContext {
     totalPageCount?: number;
     /** Whether to detect ascending page-number sequences in margins. */
     detectPageSequences?: boolean;
+    /** Match margin text rows rather than single lines (`ExtractionSettings.marginTextRows`). */
+    marginTextRows?: boolean;
     /** Forwarded to `detectParagraphs`. */
     paragraphSettings?: ParagraphDetectionSettings;
     /**
@@ -228,6 +230,7 @@ export function detectFilteredParagraphs(
             marginZone,
             repeatThreshold: ctx.repeatThreshold,
             detectPageSequences: ctx.detectPageSequences,
+            marginTextRows: ctx.marginTextRows,
         });
         analysisContextMs = performance.now() - tAnalysis;
         styleProfile = styleProfile ?? computed.styleProfile;
@@ -252,6 +255,7 @@ export function detectFilteredParagraphs(
         marginRemoval,
         styleProfile.bodyStyles,
         styleProfile.primaryBodyStyle,
+        ctx.marginTextRows ?? true,
     );
     const marginFilterMs = performance.now() - tMarginFilter;
     const uprightMarginItems = collectMarginItemsFromFilteredPage(

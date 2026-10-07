@@ -1500,3 +1500,317 @@ describe("filterPageByMargins — body-style spare", () => {
         expect(withBody.blocks).toHaveLength(1);
     });
 });
+
+describe("smart removal on word-split rows", () => {
+    // Some PDFs draw text word by word, so MuPDF emits every word as its own
+    // line. Smart removal joins them back into rows: a running head repeats
+    // as a whole, while common words of body rows that reach into a margin
+    // zone do not count on their own.
+    const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    /** One line per word, glued left to right starting at `x`. */
+    function row(words: string[], x: number, y: number): RawLine[] {
+        let cursor = x;
+        return words.map((word) => {
+            const w = word.trim().length * 5 + (word.startsWith(" ") ? 2 : 0);
+            const line = makeStyledLine(word, cursor, y, w, "Times-Roman", 9);
+            cursor += w;
+            return line;
+        });
+    }
+
+    function buildPages(): RawPageData[] {
+        const animals = ["lion", "tiger", "zebra", "otter"];
+        return animals.map((animal, pageIndex) => ({
+            ...makePageWithLines([
+                // Running head, alone on its row.
+                ...row(["Journal", " and", " Things"], 200, 48),
+                // A body row inside the top zone; most of its words recur on
+                // every page, one does not.
+                ...row(["the", " quick", ` ${animal}`, " and", " the"], 100, 64),
+                // A body row whose opening word sits in the left zone.
+                ...row(["and", " in", " subjects", " under", " stress"], 45, 300),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+    }
+
+    function analyze(pages: RawPageData[]): MarginRemovalResult {
+        return MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements(pages, zone),
+            3,
+        );
+    }
+
+    function keptText(page: RawPageData, removal: MarginRemovalResult): string[] {
+        const filtered = MarginFilter.filterPageWithSmartRemoval(page, margins, zone, removal);
+        return filtered.blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text.trim()));
+    }
+
+    it("removes a running head split into one line per word", () => {
+        const pages = buildPages();
+        const removal = analyze(pages);
+        expect(removal.candidates.map((c) => c.text)).toEqual(["journal and things"]);
+        const kept = keptText(pages[1], removal);
+        expect(kept).not.toContain("Journal");
+        expect(kept).not.toContain("Things");
+    });
+
+    it("keeps body words that recur in the margin zone or match running-head words", () => {
+        const pages = buildPages();
+        const removal = analyze(pages);
+        const kept = keptText(pages[2], removal);
+        expect(kept.filter((t) => t === "and")).toHaveLength(2);
+        expect(kept.filter((t) => t === "the")).toHaveLength(2);
+        expect(kept).toEqual(expect.arrayContaining(["quick", "zebra", "in", "subjects"]));
+    });
+
+    it("matches a running head joined to its page number, digits aside", () => {
+        const pages = buildPages();
+        pages.forEach((page, pageIndex) => {
+            page.blocks.push({
+                type: "text",
+                bbox: bboxFromXYWH(300, 735, 120, 9, "top-left"),
+                lines: [
+                    makeStyledLine(`${166 + pageIndex}`, 300, 735, 15, "Times-Roman", 9),
+                    makeStyledLine("| Elegies of Diaspora", 317, 735, 100, "Times-Roman", 9),
+                ],
+            });
+        });
+        const removal = analyze(pages);
+        const kept = keptText(pages[2], removal);
+        expect(kept).not.toContain("168");
+        expect(kept).not.toContain("| Elegies of Diaspora");
+    });
+
+    it("matches the parts of a corner row that spans two zones one by one", () => {
+        // The running head sits in the top zone; its page number, set a word
+        // space away, reaches below the top zone into the right zone.
+        const pages = buildPages();
+        pages.forEach((page, pageIndex) => {
+            page.blocks.push({
+                type: "text",
+                bbox: bboxFromXYWH(400, 68, 190, 16, "top-left"),
+                lines: [
+                    makeStyledLine("Med Ultrason 2020; 22(2): 203-210", 400, 70, 150, "Times-Roman", 9),
+                    { ...makeStyledLine(`${205 + 2 * pageIndex}`, 552, 68, 18, "Times-Roman", 9),
+                        bbox: bboxFromXYWH(552, 68, 18, 16, "top-left") },
+                ],
+            });
+        });
+        const removal = analyze(pages);
+        const kept = keptText(pages[1], removal);
+        expect(kept).not.toContain("Med Ultrason 2020; 22(2): 203-210");
+        expect(kept).not.toContain("207");
+    });
+
+    it("removes a running head that shares its row with other text", () => {
+        const pages = buildPages();
+        // On the last page a photo credit is set right before the running head.
+        const credit = makeStyledLine("[Courtesy F. Vitart]", 140, 48, 58, "Times-Roman", 9);
+        pages[3].blocks[0].lines!.push(credit);
+        const removal = analyze(pages);
+        const kept = keptText(pages[3], removal);
+        expect(kept).toContain("[Courtesy F. Vitart]");
+        expect(kept).not.toContain("Journal");
+        expect(kept).not.toContain("Things");
+    });
+
+    it("matches the end of a row only against running heads of the same zone", () => {
+        const pages = buildPages();
+        // A footer opens with the running head's words.
+        pages[2].blocks.push({
+            type: "text",
+            bbox: bboxFromXYWH(100, 735, 300, 9, "top-left"),
+            lines: row(["Journal", " and", " Things", " Division,", " an", " American", " Company"], 100, 735),
+        });
+        const removal = analyze(pages);
+        const kept = keptText(pages[2], removal);
+        expect(kept).toEqual(expect.arrayContaining(["Journal", "Things", "Division,"]));
+    });
+
+    it("matches line by line with text rows off (PDF schema 4)", () => {
+        const pages = buildPages();
+        const removal = MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements(pages, zone, false),
+            3,
+        );
+        expect(removal.candidates.map((c) => c.text)).toEqual(
+            expect.arrayContaining(["journal", "things"]),
+        );
+        const kept = MarginFilter.filterPageWithSmartRemoval(
+            pages[1], margins, zone, removal, undefined, undefined, false,
+        ).blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text.trim()));
+        expect(kept).not.toContain("Journal");
+    });
+
+    it("spares a heading-sized joined row whose running head differs only by digits", () => {
+        const pages = [0, 1, 2, 3].map((pageIndex) => {
+            const size = pageIndex === 2 ? 17 : 9;
+            let x = 200;
+            const lines = ["Chapter", ` ${pageIndex + 1}`, " Results"].map((word) => {
+                const w = word.trim().length * (size / 2) + 2;
+                const line = makeStyledLine(word, x, 48, w, "Times-Roman", size);
+                x += w;
+                return line;
+            });
+            return { ...makePageWithLines(lines), pageIndex, pageNumber: pageIndex + 1 };
+        });
+        const removal = analyze(pages);
+        const primaryBody: TextStyle = { size: 9, font: "Times-Roman", bold: false, italic: false };
+        const keep = (page: RawPageData) =>
+            MarginFilter.filterPageWithSmartRemoval(page, margins, zone, removal, undefined, primaryBody)
+                .blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text.trim()));
+        expect(keep(pages[1])).not.toContain("Results");
+        expect(keep(pages[2])).toEqual(["Chapter", "3", "Results"]);
+    });
+
+    it("counts a running head emitted as one line on some pages and as several on others together", () => {
+        const pages = [0, 1, 2, 3].map((pageIndex) => ({
+            ...makePageWithLines(
+                pageIndex < 2
+                    ? [makeStyledLine("Journal of Things", 200, 48, 85, "Times-Roman", 9)]
+                    : row(["Journal", " of", " Things"], 200, 48),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(removal.candidates.map((c) => c.text)).toEqual(["journal of things"]);
+        expect(removal.candidates[0].pageIndices).toEqual([0, 1, 2, 3]);
+        for (const page of pages) expect(keptText(page, removal)).toEqual([]);
+    });
+
+    it("finds a page-number sequence set beside a running head that changes per page", () => {
+        const titles = ["Introduction", "Methods", "Results", "Discussion"];
+        const pages = titles.map((title, pageIndex) => ({
+            ...makePageWithLines(row([`${pageIndex + 1}`, ` ${title}`], 60, 48)),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(
+            removal.candidates.filter((c) => c.reason === "page_number").map((c) => c.text),
+        ).toEqual(["1", "2", "3", "4"]);
+        expect(keptText(pages[1], removal)).toEqual(["Methods"]);
+    });
+
+    it("counts standalone page numbers toward a run that also sits beside running heads", () => {
+        // Pages 0 and 1 set the number apart from the head; pages 2 and 3
+        // set it a word space away from section titles that change.
+        const titles = ["Introduction", "Methods", "Results", "Discussion"];
+        const pages = titles.map((title, pageIndex) => ({
+            ...makePageWithLines(
+                pageIndex < 2
+                    ? [
+                        makeStyledLine(`${pageIndex + 1}`, 60, 48, 6, "Times-Roman", 9),
+                        makeStyledLine(title, 120, 48, 60, "Times-Roman", 9),
+                    ]
+                    : row([`${pageIndex + 1}`, ` ${title}`], 60, 48),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(
+            removal.candidates.filter((c) => c.reason === "page_number").map((c) => c.text).sort(),
+        ).toEqual(["1", "2", "3", "4"]);
+        for (const [i, page] of pages.entries()) {
+            expect(keptText(page, removal)).toEqual([titles[i]]);
+        }
+    });
+
+    it("keeps rows of bare numbers whose values differ from page to page", () => {
+        const values = [["12", "80", "37"], ["99", "4", "63"], ["8", "26", "51"]];
+        const pages = values.map((cells, pageIndex) => ({
+            ...makePageWithLines(row([cells[0], ` ${cells[1]}`, ` ${cells[2]}`], 200, 735)),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(removal.candidates).toEqual([]);
+        expect(keptText(pages[1], removal)).toEqual(["99", "4", "63"]);
+    });
+
+    it("still removes a page number split from its ornament", () => {
+        // "-119-" emitted as "-119" and "-", one word space apart.
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines(row([`-${119 + pageIndex}`, "-"], 500, 735)),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(keptText(pages[1], removal)).toEqual([]);
+    });
+
+    it("counts page numbers the sequence already removes toward a run beside running heads", () => {
+        // Three pages set the number apart, which the page-number sequence
+        // removes; the last two set it a word space from changing titles.
+        const titles = ["Introduction", "Data", "Methods", "Results", "Discussion"];
+        const pages = titles.map((title, pageIndex) => ({
+            ...makePageWithLines(
+                pageIndex < 3
+                    ? [
+                        makeStyledLine(`${pageIndex + 1}`, 60, 48, 6, "Times-Roman", 9),
+                        makeStyledLine(title, 120, 48, 60, "Times-Roman", 9),
+                    ]
+                    : row([`${pageIndex + 1}`, ` ${title}`], 60, 48),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        for (const [i, page] of pages.entries()) {
+            expect(keptText(page, removal)).toEqual([titles[i]]);
+        }
+        const numbers = removal.candidates.filter((c) => c.reason === "page_number").map((c) => c.text);
+        expect([...numbers].sort()).toEqual(["1", "2", "3", "4", "5"]);
+    });
+
+    it("ignores standalone numbers on pages crowded with them, such as figure ticks", () => {
+        // Joined-row numbers step with the pages on two pages only; the other
+        // pages' stepping numbers sit among many tick labels.
+        const titles = ["Introduction", "Methods", "Results", "Discussion"];
+        const pages = titles.map((title, pageIndex) => ({
+            ...makePageWithLines(
+                pageIndex < 2
+                    ? row([`${pageIndex + 1}`, ` ${title}`], 60, 48)
+                    : [0, 1, 2, 3, 4].map((k) =>
+                        makeStyledLine(`${pageIndex + 1 - 2 + k}`, 300 + 30 * k, 30 + 20 * (k % 2) + 18, 6, "Times-Roman", 9),
+                    ),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(removal.candidates.filter((c) => c.reason === "page_number")).toEqual([]);
+    });
+
+    it("leaves numbers that end running text unless they step with the pages", () => {
+        const values = [3, 7, 8, 15];
+        const nouns = ["lions", "tigers", "zebras", "otters"];
+        const pages = values.map((value, pageIndex) => ({
+            ...makePageWithLines(row(["the", ` ${nouns[pageIndex]}`, " grow", " with", ` ${value}`], 100, 735)),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(removal.candidates.filter((c) => c.reason === "page_number")).toEqual([]);
+        expect(keptText(pages[2], removal)).toContain("8");
+    });
+
+    it("still matches lines that stand alone on their row", () => {
+        const pages = buildPages();
+        for (const page of pages) {
+            page.blocks.push({
+                type: "text",
+                bbox: bboxFromXYWH(300, 735, 40, 9, "top-left"),
+                lines: [makeStyledLine("Working Paper", 300, 735, 40, "Times-Roman", 9)],
+            });
+        }
+        const removal = analyze(pages);
+        expect(keptText(pages[3], removal)).not.toContain("Working Paper");
+    });
+});

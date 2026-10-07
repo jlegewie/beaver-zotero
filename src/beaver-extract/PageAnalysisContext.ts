@@ -47,6 +47,8 @@ export interface PageAnalysisContextInput {
     repeatThreshold?: number;
     /** Whether to detect ascending page-number sequences in margins. */
     detectPageSequences?: boolean;
+    /** Match text rows rather than single lines (`ExtractionSettings.marginTextRows`). */
+    marginTextRows?: boolean;
 }
 
 export interface PageAnalysisContext {
@@ -81,6 +83,7 @@ export function buildPageAnalysisContext(
         marginZone = DEFAULT_MARGIN_ZONE,
         repeatThreshold,
         detectPageSequences = true,
+        marginTextRows = true,
     } = input;
 
     const styleProfile = new StyleAnalyzer().analyze(pages, 4, 0.15, 0);
@@ -88,6 +91,7 @@ export function buildPageAnalysisContext(
     const marginAnalysis = MarginFilter.collectMarginElements(
         pages,
         marginZone,
+        marginTextRows,
     );
     const marginRemoval = MarginFilter.identifyElementsToRemove(
         marginAnalysis,

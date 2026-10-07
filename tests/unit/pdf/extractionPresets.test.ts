@@ -9,24 +9,26 @@ import {
 import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
 describe("PDF extraction presets", () => {
-    it("keeps text repair, style runs, hanging-indent blocks and heading label filters off and ids document-wide for schema 4", () => {
+    it("keeps text repair, style runs, hanging-indent blocks, heading label filters and margin text rows off and ids document-wide for schema 4", () => {
         expect(pdfExtractionPreset("4")).toEqual({
             schemaVersion: "4",
             textRepair: false,
             styleRuns: false,
             hangingIndentBlocks: false,
             headingLabelFilters: false,
+            marginTextRows: false,
             idScheme: "document",
         });
     });
 
-    it("turns text repair, style runs, hanging-indent blocks and heading label filters on and ids page-scoped for schema 5", () => {
+    it("turns text repair, style runs, hanging-indent blocks, heading label filters and margin text rows on and ids page-scoped for schema 5", () => {
         expect(pdfExtractionPreset("5")).toEqual({
             schemaVersion: "5",
             textRepair: true,
             styleRuns: true,
             hangingIndentBlocks: true,
             headingLabelFilters: true,
+            marginTextRows: true,
             idScheme: "page",
         });
     });

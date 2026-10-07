@@ -350,6 +350,30 @@ describe('hanging-indent blocks', () => {
         ]);
     });
 
+    it('starts an author-year entry right after a one-line entry that fills its line', () => {
+        expect(
+            paragraphTexts([
+                ...REFERENCES.slice(0, 4),
+                { text: 'Sejpal, K. (2013). Modular method of teaching. Journal of Education 2(2), 169 171', l: 0, r: RIGHT_MARGIN },
+                { text: 'Stone-Romero, E. F., Alvarez, K., & Thompson, L. F. (2009). The construct', l: 0, r: RIGHT_MARGIN },
+                { text: 'validity of conceptual and operational definitions. Journal 3: 4-5.', l: INDENT, r: 300 },
+            ]).slice(2),
+        ).toEqual([
+            'Sejpal, K. (2013). Modular method of teaching. Journal of Education 2(2), 169 171',
+            'Stone-Romero, E. F., Alvarez, K., & Thompson, L. F. (2009). The construct validity of conceptual and operational definitions. Journal 3: 4-5.',
+        ]);
+    });
+
+    it('does not split flush-left prose after the list at a sentence that names an author', () => {
+        const texts = paragraphTexts([
+            ...REFERENCES.slice(0, 4),
+            { text: 'Brown, L. 2012. A single-line reference that fills the line and the', l: 0, r: RIGHT_MARGIN },
+            { text: 'However, Smith (2009) found that the effect holds widely across all', l: 0, r: RIGHT_MARGIN },
+        ]);
+        expect(texts[texts.length - 1]).toContain('However, Smith (2009)');
+        expect(texts[texts.length - 1]).toContain('Brown, L. 2012.');
+    });
+
     // A two-line indented paragraph whose second line opens with a capital
     // has the same layout as an entry whose last line runs into the next
     // entry (the abbreviation case above), so it still merges into the last
