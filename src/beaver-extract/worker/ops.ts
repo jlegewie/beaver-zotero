@@ -407,6 +407,7 @@ function buildAnalysisFromDoc(
     pageCount: number,
     preWalked?: Map<number, RawPageData>,
     pageCache?: PageWalkCache,
+    pageNumberRuns = true,
 ): {
     analysisPages: RawPageData[];
     analysisPageByIndex: Map<number, RawPageData>;
@@ -465,6 +466,7 @@ function buildAnalysisFromDoc(
         marginZone: opts.marginZone,
         repeatThreshold: requestedRepeatThreshold,
         detectPageSequences: opts.detectPageSequences,
+        pageNumberRuns,
     });
     const analysisMs = performance.now() - tAnalysisStart;
     StyleAnalyzer.logStyleProfile(styleProfile);
@@ -631,6 +633,7 @@ export function runExtractFromIndices(
     fontApi?: FontApi,
     pageCache?: PageWalkCache,
     references?: ReferenceStage,
+    pageNumberRuns = true,
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
     try {
@@ -723,6 +726,7 @@ export function runExtractFromIndices(
         pageCount,
         preWalkedTargets,
         pageCache,
+        pageNumberRuns,
     );
     // Fold the structured prewalk into the same `walkMs` counter the
     // markdown engines use. Profilers and the `timings` envelope see a
@@ -1705,6 +1709,7 @@ export async function opExtract(
             fontApi,
             pageCache,
             isStructured && preset.referenceItems ? { classify: true } : undefined,
+            preset.pageNumberRuns,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are
@@ -1829,6 +1834,7 @@ async function withStructuredRun<T>(
             fontApi,
             pageCache,
             references,
+            preset.pageNumberRuns,
         );
         if (internal.metadata.timings) {
             internal.metadata.timings.docOpenMs = docOpenMs;
