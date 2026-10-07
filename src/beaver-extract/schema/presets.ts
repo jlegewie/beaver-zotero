@@ -29,8 +29,9 @@ export interface PdfExtractionPreset {
     hangingIndentBlocks: boolean;
     /**
      * Heading detection demotes run-in label lines ("Keywords: …",
-     * "Received: …") and supplementary / extended-data figure and table
-     * captions (`ParagraphDetectionSettings.headingLabelFilters`).
+     * "Received: …"), display equations, bare web addresses and
+     * supplementary / extended-data figure and table captions
+     * (`ParagraphDetectionSettings.headingLabelFilters`).
      */
     headingLabelFilters: boolean;
     /**
