@@ -466,6 +466,7 @@ function buildAnalysisFromDoc(
         marginZone: opts.marginZone,
         repeatThreshold: requestedRepeatThreshold,
         detectPageSequences: opts.detectPageSequences,
+        marginTextRows: opts.marginTextRows,
         pageNumberRuns,
     });
     const analysisMs = performance.now() - tAnalysisStart;
@@ -788,6 +789,7 @@ export function runExtractFromIndices(
                 styleProfile,
                 margins: opts.margins,
                 marginZone: opts.marginZone,
+                marginTextRows: opts.marginTextRows,
                 paragraphSettings,
                 fillBoundaries,
                 dividerLines,
@@ -844,7 +846,7 @@ export function runExtractFromIndices(
         const regionImages = pageCache?.regions ? new Map<number, Set<number>>() : undefined;
         // Region detection keeps the document's running headers and footers out of regions.
         const bodyExtents = regionImages
-            ? documentBodyExtents(analysisPages, { marginRemoval, styleProfile, margins: opts.margins, marginZone: opts.marginZone })
+            ? documentBodyExtents(analysisPages, { marginRemoval, styleProfile, margins: opts.margins, marginZone: opts.marginZone, marginTextRows: opts.marginTextRows })
             : new Map<string, { top: number; bottom: number }>();
         const runningRepeat = getEffectiveRepeatThreshold({
             requested: requestedRepeatThreshold,
@@ -889,6 +891,7 @@ export function runExtractFromIndices(
                     styleProfile,
                     margins: opts.margins,
                     marginZone: opts.marginZone,
+                    marginTextRows: opts.marginTextRows,
                     pageRotation: rotation,
                     repeat: runningRepeat,
                     bodyExtents,
@@ -1014,6 +1017,7 @@ export function runExtractFromIndices(
                 marginRemoval,
                 styleProfile.bodyStyles,
                 styleProfile.primaryBodyStyle,
+                opts.marginTextRows,
             );
             const marginItems = collectMarginItemsFromFilteredPage(
                 rawPage,
@@ -1620,7 +1624,7 @@ export async function opExtract(
         // short-doc relaxation only kicks in when no explicit value was
         // provided.
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}), marginTextRows: preset.marginTextRows };
         // `resolveTruePageCount` (not `doc.countPages()`): a corrupt or
         // truncated PDF can advertise more pages in `/Root/Pages/Count`
         // than its page tree can resolve. Using the advertised count
@@ -1782,7 +1786,7 @@ async function withStructuredRun<T>(
     let docFailed = false;
     try {
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}), marginTextRows: preset.marginTextRows };
         assertDocumentHasPages(doc.countPages());
         const pageCount = resolveTruePageCount(doc);
         assertDocumentHasPages(pageCount);

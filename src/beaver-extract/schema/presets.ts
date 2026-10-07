@@ -46,6 +46,11 @@ export interface PdfExtractionPreset {
      */
     captionLabels: boolean;
     /**
+     * Smart margin removal matches text rows rather than single MuPDF lines
+     * (`ExtractionSettings.marginTextRows`).
+     */
+    marginTextRows: boolean;
+    /**
      * Classify reference-list entries in structured extraction and emit them
      * as `reference` items (see `references/classify.ts`).
      */
@@ -68,8 +73,8 @@ export interface PdfExtractionPreset {
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, captionLabels: false, referenceItems: false, idScheme: "document", regions: false, pageNumberRuns: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, captionLabels: true, referenceItems: true, idScheme: "page", regions: true, pageNumberRuns: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, captionLabels: false, marginTextRows: false, referenceItems: false, idScheme: "document", regions: false, pageNumberRuns: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, captionLabels: true, marginTextRows: true, referenceItems: true, idScheme: "page", regions: true, pageNumberRuns: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

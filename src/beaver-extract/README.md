@@ -275,9 +275,14 @@ DEFAULT_MARGINS = { left: 25, top: 40, right: 25, bottom: 40 };
 ```typescript
 DEFAULT_MARGIN_ZONE = { left: 60, top: 80, right: 60, bottom: 80 }
 
-1. Collect elements in margin zones
-2. Group by normalized text (case-insensitive, trimmed)
-3. Remove if appears on ≥3 pages (repeatThreshold)
+1. Join lines MuPDF split on one baseline back into text rows (word-split
+   PDFs emit every word as a line), and collect the rows that sit in a
+   margin zone
+2. Group by normalized text (case-insensitive, trimmed; digits ignored for
+   joined rows)
+3. Remove if appears on ≥3 pages (repeatThreshold); a row that does not
+   match as a whole still loses a leading/trailing run matching a running
+   head of the same zone
 4. Detect page numbers:
    - Regex patterns: /^\d+$/, /^page \d+$/, /^[ivxlcm]+$/
    - Verify strictly increasing sequence

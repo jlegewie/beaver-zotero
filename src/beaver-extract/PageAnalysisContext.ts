@@ -47,6 +47,8 @@ export interface PageAnalysisContextInput {
     repeatThreshold?: number;
     /** Whether to detect ascending page-number sequences in margins. */
     detectPageSequences?: boolean;
+    /** Match text rows rather than single lines (`ExtractionSettings.marginTextRows`). */
+    marginTextRows?: boolean;
     /**
      * Also detect runs of page numbers that advance with the page index
      * (`PdfExtractionPreset.pageNumberRuns`). Default true.
@@ -86,6 +88,7 @@ export function buildPageAnalysisContext(
         marginZone = DEFAULT_MARGIN_ZONE,
         repeatThreshold,
         detectPageSequences = true,
+        marginTextRows = true,
         pageNumberRuns = true,
     } = input;
 
@@ -94,6 +97,7 @@ export function buildPageAnalysisContext(
     const marginAnalysis = MarginFilter.collectMarginElements(
         pages,
         marginZone,
+        marginTextRows,
     );
     const marginRemoval = MarginFilter.identifyElementsToRemove(
         marginAnalysis,

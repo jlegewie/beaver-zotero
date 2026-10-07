@@ -3112,3 +3112,169 @@ describe('short CJK section headings', () => {
         expect(candidate!.type).toBe('paragraph');
     });
 });
+
+// ---------------------------------------------------------------------------
+// Font-expansion size jitter
+//
+// LaTeX `microtype` scales each line's glyphs by up to about 2%, so 10pt
+// body lines report truncated sizes of 9 (9.96pt) or 10 (10.04pt) at random.
+// The exact sizes in the style runs show they are one size.
+// ---------------------------------------------------------------------------
+describe('font-expansion size jitter', () => {
+    const BODY9 = bodyStyle(9, 'Times-Roman');
+
+    function run(
+        font: string,
+        chars: number,
+        exactSize: number,
+        opts: { size?: number; italic?: boolean } = {},
+    ): RawStyleRun {
+        return {
+            font: {
+                name: font,
+                family: font,
+                weight: 'normal',
+                style: opts.italic ? 'italic' : 'normal',
+                size: opts.size ?? Math.trunc(exactSize),
+            },
+            exactSize,
+            chars,
+            letters: chars,
+        };
+    }
+
+    // A paragraph whose lines alternate between the two truncated sizes.
+    const JITTERED_BODY: LeaderLineSpec[] = Array.from({ length: 6 }, (_, i) => {
+        const exact = i % 2 === 0 ? 9.96 : 10.04;
+        return {
+            text: `Body line number ${i + 1} of a paragraph that runs on across the`,
+            l: 0,
+            r: 305,
+            size: Math.trunc(exact),
+            bboxHeight: 12,
+            font: 'Times-Roman',
+            styleRuns: [run('Times-Roman', 55, exact)],
+        };
+    });
+
+    function items(specs: LeaderLineSpec[]) {
+        return detectParagraphs(makeColumnPageResult(specs), [BODY9]).items;
+    }
+
+    it('does not read an italic line expanded past the next point as a larger heading', () => {
+        const all = items([
+            ...JITTERED_BODY,
+            {
+                text: 'Proficient in English, More Educated Than a Decade Ago. Report.',
+                l: 0,
+                r: 305,
+                size: 10,
+                bboxHeight: 12,
+                italic: true,
+                font: 'Times-Italic',
+                styleRuns: [
+                    run('Times-Italic', 46, 10.04, { italic: true }),
+                    run('Times-Roman', 8, 10.04),
+                ],
+            },
+            {
+                text: 'Washington, DC: Pew Research Center.',
+                l: 0,
+                size: 9,
+                bboxHeight: 12,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', 31, 9.96)],
+            },
+        ]);
+        expect(all).toHaveLength(1);
+        expect(all[0].type).toBe('paragraph');
+    });
+
+    it('keeps a wrapped italic statement together when its lines land on either side of a point', () => {
+        const all = items([
+            ...JITTERED_BODY,
+            {
+                text: 'if the Laplacian maximum eigenvalues of the non-regular',
+                l: 0,
+                r: 305,
+                size: 10,
+                bboxHeight: 12,
+                italic: true,
+                font: 'Times-Italic',
+                styleRuns: [run('Times-Italic', 48, 10.06, { italic: true })],
+            },
+            {
+                text: 'graphs to be compared are not the same. Otherwise it is not.',
+                l: 0,
+                size: 9,
+                bboxHeight: 12,
+                italic: true,
+                font: 'Times-Italic',
+                styleRuns: [run('Times-Italic', 48, 9.86, { italic: true })],
+            },
+        ]);
+        const statement = all.find(it => it.text.includes('if the Laplacian'));
+        expect(statement?.text).toContain('graphs to be compared');
+    });
+
+    it('still reads a line set a full point larger as a heading', () => {
+        const all = items([
+            ...JITTERED_BODY,
+            {
+                text: 'Results',
+                l: 0,
+                size: 11,
+                bboxHeight: 13,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', 7, 11.0)],
+            },
+            {
+                text: 'Washington, DC: Pew Research Center.',
+                l: 0,
+                size: 9,
+                bboxHeight: 12,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', 31, 9.96)],
+            },
+        ]);
+        expect(all.find(it => it.text.includes('Results'))?.type).toBe('header');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Numbered entries
+// ---------------------------------------------------------------------------
+describe('consecutive numbered entries', () => {
+    // Part of the hanging-block reading, so enabled with it.
+    const texts = (result: PageLineResult, hangingIndentBlocks = true) =>
+        detectParagraphs(result, [BODY], { hangingIndentBlocks }).items
+            .filter(it => it.type === 'paragraph')
+            .map(it => it.text.trim());
+
+    it('starts a new entry at the next number even when the previous entry fills its line', () => {
+        const result = makeColumnPageResult([
+            ...FILLERS,
+            { text: '46. Goadsby, P. J. & Edvinsson, L. Human in vivo evidence for the', l: 0, r: 305 },
+            { text: 'trigeminovascular system. Brain 117, 427–434 (1994).', l: 12, r: 250 },
+            { text: '47. Lang, J. Clinical Anatomy of the Head Neurocranium and Orbit.', l: 0, r: 305 },
+            { text: '48. Holton, P. Antidromic vasodilatation in the isolated perfused ear.', l: 0, r: 305 },
+            { text: '49. Jancso, G. Neurogenic Inflammation in Health and Disease (2008).', l: 0, r: 300 },
+        ]);
+        const paragraphs = texts(result);
+        for (const n of ['46.', '47.', '48.', '49.']) {
+            expect(paragraphs.filter(p => p.includes(`${n} `))).toHaveLength(1);
+        }
+        expect(paragraphs.find(p => p.startsWith('47.'))).not.toContain('48.');
+        expect(paragraphs.find(p => p.startsWith('48.'))).not.toContain('49.');
+        expect(texts(result, false).find(p => p.includes('47.'))).toContain('48.');
+    });
+
+    it('does not split a line that opens with any other number', () => {
+        const result = makeColumnPageResult([
+            ...FILLERS,
+            { text: '47. Lang, J. Clinical Anatomy of the Head Neurocranium and Orbit,', l: 0, r: 305 },
+            { text: '12. Auflage. Springer, Berlin and Heidelberg and New York (1983).', l: 0, r: 305 },
+        ]);
+        expect(texts(result).find(p => p.includes('47.'))).toContain('12. Auflage');
+    });
+});

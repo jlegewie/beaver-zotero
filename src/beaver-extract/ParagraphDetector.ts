@@ -50,7 +50,9 @@ export interface ParagraphDetectionSettings {
     /**
      * Read hanging-indent blocks (reference lists, footnotes, lists whose
      * wrapped lines sit at an inner edge) as entries with continuations; see
-     * `detectHangingRoles` (default: false). Enabled by the PDF schema preset.
+     * `detectHangingRoles` (default: false). Also starts a new item at the
+     * next number of a numbered list (`isNextNumberedEntry`). Enabled by the
+     * PDF schema preset.
      */
     hangingIndentBlocks?: boolean;
     /**
@@ -621,6 +623,25 @@ function isTextHangingIndentLeader(line: PageLine): boolean {
     );
 }
 
+/** Numbered entry leader: "12.", "12)", "[12]" or "(12)", then a word. */
+const NUMBERED_ENTRY_RE = /^\s*([([]?)(\d{1,3})([.)\]])\s+[^\s\d]/u;
+
+/**
+ * Whether `line` opens the entry numbered right after the one `opener`
+ * opens: "48." after an item opened by "47.", with the same marker
+ * punctuation. Numbered references and list entries that fill their last
+ * line give no layout cue for the break; the count does.
+ */
+function isNextNumberedEntry(opener: PageLine, line: PageLine): boolean {
+    const a = NUMBERED_ENTRY_RE.exec(opener.text);
+    if (!a) return false;
+    const b = NUMBERED_ENTRY_RE.exec(line.text);
+    if (!b || a[1] !== b[1] || a[3] !== b[3]) return false;
+    // "[12]" and "(12)" close their bracket; a bare number ends in "." or ")".
+    if (a[1] === "[" ? a[3] !== "]" : a[1] === "(" ? a[3] !== ")" : a[3] === "]") return false;
+    return Number(b[2]) === Number(a[2]) + 1;
+}
+
 /**
  * Inline footnote / endnote / affiliation marker glued to the body text — the
  * shape MuPDF commonly emits with NO separating space, which the
@@ -835,6 +856,135 @@ function openingExactSize(line: PageLine): number | null {
         }
     }
     return null;
+}
+
+/**
+ * Exact size of the line's glyphs set in `style` (its font at its size),
+ * when style runs are recorded. The largest such run wins, matching how
+ * `majorityLineStyle` sizes a font.
+ */
+function styleExactSize(line: PageLine, style: TextStyle): number | null {
+    let size: number | null = null;
+    for (const span of line.spans) {
+        for (const run of span.styleRuns ?? []) {
+            if (run.chars === 0 || run.exactSize === undefined) continue;
+            if (run.font.name !== style.font || Math.round(run.font.size) !== style.size) continue;
+            if (size === null || run.exactSize > size) size = run.exactSize;
+        }
+    }
+    return size;
+}
+
+/** Body glyphs a page needs before `pageBodyExactSize` measures it. */
+const MIN_BODY_EXACT_SIZE_CHARS = 100;
+
+/**
+ * Untruncated body text size on the page: the glyph-weighted median exact
+ * size of style runs set in the primary body face at its reported size.
+ * Null without style runs or with too little body text, such as on a page
+ * whose text in the body face is set at another size (a table of contents).
+ *
+ * Reported sizes are truncated, so one face can read as two sizes. Under
+ * LaTeX `microtype` font expansion each line is scaled by up to about 2%,
+ * so 10pt body lines read as 9 (9.96pt) or 10 (10.04pt) at random; only the
+ * exact sizes show that they are the same size.
+ */
+function pageBodyExactSize(
+    columnResults: ColumnLineResult[],
+    bodyStyles: TextStyle[] | null
+): number | null {
+    if (!bodyStyles || bodyStyles.length === 0) return null;
+    const primary = bodyStyles[0];
+    const face = baseFontName(primary.font);
+    if (!face || face === "unknown") return null;
+    const samples: { size: number; chars: number }[] = [];
+    let total = 0;
+    for (const col of columnResults) {
+        for (const line of col.lines) {
+            for (const span of line.spans) {
+                for (const run of span.styleRuns ?? []) {
+                    if (run.chars === 0 || run.exactSize === undefined) continue;
+                    if (baseFontName(run.font.name) !== face) continue;
+                    if (Math.round(run.font.size) !== primary.size) continue;
+                    samples.push({ size: run.exactSize, chars: run.chars });
+                    total += run.chars;
+                }
+            }
+        }
+    }
+    if (total < MIN_BODY_EXACT_SIZE_CHARS) return null;
+    samples.sort((a, b) => a.size - b.size);
+    let seen = 0;
+    for (const sample of samples) {
+        seen += sample.chars;
+        if (seen * 2 >= total) return sample.size;
+    }
+    return samples[samples.length - 1].size;
+}
+
+/**
+ * Largest exact-size difference from the body, as a share of the body size,
+ * that font expansion produces. LaTeX `microtype` scales glyphs by up to 2%
+ * by default.
+ */
+const FONT_EXPANSION_SHARE = 0.025;
+
+/**
+ * Whether two fonts belong to one family: the names before their style
+ * suffix agree ("URWPalladioL-Roma" / "URWPalladioL-Ital",
+ * "TimesNewRomanPSMT" / "TimesNewRomanPS-ItalicMT").
+ */
+function sameFontFamily(a: string, b: string): boolean {
+    const ka = baseFontName(a).split(/[-,]/)[0];
+    const kb = baseFontName(b).split(/[-,]/)[0];
+    return ka.length > 0 && kb.length > 0 && (ka.startsWith(kb) || kb.startsWith(ka));
+}
+
+/**
+ * Compare a line's size in `lineStyle` with the primary body style: 1 when
+ * larger, 0 when the same, -1 when smaller, by the reported (truncated)
+ * sizes. A line in the body's font family that reads larger is the same
+ * size when both exact sizes are known (see `pageBodyExactSize`) and differ
+ * by no more than font expansion does: truncation only split one size in
+ * two. Exact sizes only take a size cue away, never add one: sizes the
+ * reported ones call equal stay equal, the page's body measure can come from
+ * little text, and a heading set a little larger in another face (9pt over
+ * an 8.8pt body) keeps its cue.
+ */
+function compareToBodySize(
+    line: PageLine,
+    lineStyle: TextStyle,
+    primaryBodyStyle: TextStyle
+): -1 | 0 | 1 {
+    const delta = lineStyle.size - primaryBodyStyle.size;
+    if (Math.abs(delta) < 0.5) return 0;
+    if (delta < 0) return -1;
+    const bodyExact = primaryBodyStyle.exactSize;
+    if (bodyExact !== undefined && sameFontFamily(lineStyle.font, primaryBodyStyle.font)) {
+        const exact = styleExactSize(line, lineStyle);
+        if (exact !== null && exact - bodyExact <= FONT_EXPANSION_SHARE * bodyExact) return 0;
+    }
+    return 1;
+}
+
+/**
+ * Whether two heading lines open in the same style: equal reported opening
+ * styles, or the same face at exact opening sizes no further apart than font
+ * expansion puts them, so size-truncation jitter is not a style change. Two
+ * heading levels set half a point apart (10.5pt over 10pt) stay distinct.
+ */
+function sameOpeningStyle(a: PageLine, b: PageLine): boolean {
+    const sa = openingLineStyle(a);
+    const sb = openingLineStyle(b);
+    if (stylesEqual(sa, sb)) return true;
+    if (!sa || !sb || sa.font !== sb.font || sa.bold !== sb.bold || sa.italic !== sb.italic) return false;
+    const exactA = openingExactSize(a);
+    const exactB = openingExactSize(b);
+    return (
+        exactA !== null &&
+        exactB !== null &&
+        Math.abs(exactA - exactB) <= FONT_EXPANSION_SHARE * Math.max(exactA, exactB)
+    );
 }
 
 /**
@@ -1582,6 +1732,7 @@ function matchesHeaderRules(
     }
 
     const primaryBodyStyle = bodyStyles[0];
+    const sizeVsBody = compareToBodySize(line, lineStyle, primaryBodyStyle);
     const gapCheckPasses = precededByGap === null || precededByGap;
     const text = line.text.trim();
     // `phraseTextOverride` lets the multi-line item evaluator pass the joined
@@ -1613,7 +1764,7 @@ function matchesHeaderRules(
         !bodyAllCaps &&
         fontIndistinctFromBody &&
         !lineStyle.italic &&
-        lineStyle.size <= primaryBodyStyle.size + 0.5 &&
+        sizeVsBody <= 0 &&
         isAllCapsHeaderPhrase(phraseText) &&
         // All-caps reference-list entries (uppercased author names + year)
         // share the body face and would otherwise be promoted; the byline /
@@ -1648,10 +1799,10 @@ function matchesHeaderRules(
     // Used to exempt size-cued headings from the heading-capitalization
     // guard below — a larger line is a heading regardless of its leading
     // character.
-    const sizeIncreaseHeader = lineStyle.size > primaryBodyStyle.size;
+    const sizeIncreaseHeader = sizeVsBody === 1;
 
     // Rule 1: Larger font size
-    if (lineStyle.size > primaryBodyStyle.size) {
+    if (sizeIncreaseHeader) {
         isPotentialHeader = true;
     }
 
@@ -1659,7 +1810,7 @@ function matchesHeaderRules(
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
-        Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
+        sizeVsBody === 0 &&
         lineStyle.bold &&
         !primaryBodyStyle.bold &&
         lineStyle.font !== primaryBodyStyle.font
@@ -1678,7 +1829,7 @@ function matchesHeaderRules(
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
-        Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
+        sizeVsBody === 0 &&
         hasHeavyWeightToken(lineStyle.font) &&
         !hasHeavyWeightToken(primaryBodyStyle.font) &&
         lineStyle.font !== primaryBodyStyle.font
@@ -1690,7 +1841,7 @@ function matchesHeaderRules(
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
-        Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
+        sizeVsBody === 0 &&
         lineStyle.italic &&
         !primaryBodyStyle.italic &&
         lineStyle.font !== primaryBodyStyle.font
@@ -1702,7 +1853,7 @@ function matchesHeaderRules(
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
-        lineStyle.size < primaryBodyStyle.size &&
+        sizeVsBody === -1 &&
         lineStyle.bold &&
         !primaryBodyStyle.bold &&
         lineStyle.font !== primaryBodyStyle.font
@@ -1727,7 +1878,7 @@ function matchesHeaderRules(
         !isPotentialHeader &&
         gapCheckPasses &&
         !bodyAllCaps &&
-        lineStyle.size <= primaryBodyStyle.size + 0.5 &&
+        sizeVsBody <= 0 &&
         lineStyle.font !== primaryBodyStyle.font &&
         isAllCapsHeaderPhrase(phraseText)
     ) {
@@ -1752,7 +1903,7 @@ function matchesHeaderRules(
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
-        Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
+        sizeVsBody === 0 &&
         lineStyle.font !== primaryBodyStyle.font &&
         SECTION_PREFIX_RE.test(phraseText)
     ) {
@@ -1965,6 +2116,17 @@ function groupRows(lines: PageLine[], mh: number): TextRow[] {
     return rows;
 }
 
+/**
+ * An author-year reference opening: a surname, a comma and initials or a
+ * given name with a middle initial, then a year within the next 100
+ * characters, in parentheses ("Stone-Romero, E. F., Alvarez, K., & Thompson,
+ * L. F. (2009).") or set off by punctuation ("Harris, Douglas N., and Tim R.
+ * Sass. 2007.", "Kao, G. 2000."). Prose such as "However, Smith (2009)
+ * found" lacks the initials.
+ */
+const AUTHOR_YEAR_ENTRY_RE =
+    /^\s*(?:\p{L}[\p{L}'’.-]*\s+){0,2}\p{Lu}[\p{L}'’-]+,\s+(?:\p{Lu}\.(?:\s?-?\p{Lu}\.)*|\p{Lu}\p{Ll}+(?:\s\p{Lu}\.)+)[^]{0,100}?(?:\(\s*(?:1[89]|20)\d{2}[a-z]?\s*[),;]|(?:[,.]\s*|\s)(?:1[89]|20)\d{2}[a-z]?[.,;:])/u;
+
 /** The end of a reference entry without terminal punctuation: a URL, DOI or page range. */
 const ENTRY_TAIL_RE = /(?:https?:\/\/|www\.|doi:)\S*$|\d+\s*[–-]\s*\d+$/iu;
 
@@ -2156,6 +2318,11 @@ function labelHangingRun(
             }
         } else if (isInner(prev)) {
             if (!/^\s*(?:\p{Ll}|https?:|www\.)/u.test(row.text)) roles[row.first] = "entry";
+        } else if (AUTHOR_YEAR_ENTRY_RE.test(row.text)) {
+            // An outer row after an outer row follows a one-line entry that
+            // filled its line, so no layout cue marks the break. An
+            // author-year opening does.
+            roles[row.first] = "entry";
         }
     }
 }
@@ -2329,6 +2496,15 @@ function startNewItem(
     if (i === 0) return true;
     if (!prevLine) return true;
 
+    // The next number in a numbered list starts a new entry.
+    if (
+        settings.hangingIndentBlocks &&
+        currentLines.length > 0 &&
+        isNextNumberedEntry(currentLines[0], line)
+    ) {
+        return true;
+    }
+
     // (a) Vertical gap signal. Use the column-local threshold so a dense
     // neighbour column (e.g. references list) can't drag the cutoff below
     // this column's own normal leading and split every line into its own
@@ -2497,9 +2673,7 @@ function startNewItem(
     if (isLocalHeader && prevIsLocalHeader) {
         // Different header style. A hanging continuation stays with the
         // heading-styled line it wraps (a bold list label, an italic title).
-        const lineStyle = openingLineStyle(line);
-        const prevStyle = openingLineStyle(prevLine);
-        if (!stylesEqual(lineStyle, prevStyle) && hangingRole !== "continuation") {
+        if (!sameOpeningStyle(line, prevLine) && hangingRole !== "continuation") {
             return true;
         }
         // Same style, but a paragraph-sized gap apart: two stacked headings
@@ -3135,6 +3309,13 @@ export function detectParagraphs(
     // all-caps. Used to gate the all-caps header rule so all-caps
     // documents don't promote every line to a header.
     const bodyAllCaps = computeBodyAllCaps(lineResult.columnResults, bodyStyles);
+
+    // The heading rules compare sizes exactly when the page's body size can
+    // be measured (see `pageBodyExactSize`).
+    const bodyExactSize = pageBodyExactSize(lineResult.columnResults, bodyStyles);
+    if (bodyStyles && bodyExactSize !== null) {
+        bodyStyles = [{ ...bodyStyles[0], exactSize: bodyExactSize }, ...bodyStyles.slice(1)];
+    }
 
     let pageContent = "";
     const allItems: ContentItem[] = [];

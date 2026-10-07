@@ -72,6 +72,12 @@ export interface ExtractionSettings {
     /** Whether to detect and remove page number sequences */
     detectPageSequences?: boolean;
     /**
+     * Whether smart margin removal joins lines MuPDF split on one baseline
+     * back into text rows before matching (see `MarginFilter`). Set by the
+     * PDF schema preset; schema 4 keeps line-by-line matching.
+     */
+    marginTextRows?: boolean;
+    /**
      * Graphics-layer probe mode for column detection (see
      * `GraphicsLayerMode`). Default `"off"`. Set `"on"` or `"auto"` to opt in
      * of fill-rect detection entirely — useful when the per-page
@@ -95,6 +101,7 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
+    marginTextRows: true,
     graphicsLayerMode: "off",
     analyzerLogging: false,
 };
@@ -617,6 +624,12 @@ export interface TextStyle {
     bold: boolean;
     /** Is italic (from font style or name) */
     italic: boolean;
+    /**
+     * Untruncated size, when measured from per-glyph style runs. Set only on
+     * page-local copies of a body style (see `pageBodyExactSize` in the
+     * paragraph detector).
+     */
+    exactSize?: number;
 }
 
 /** Create a unique key string for a TextStyle */
@@ -657,8 +670,19 @@ export interface MarginElement {
     bbox: BoundingBox;
     /** Page index where this appears */
     pageIndex: number;
-    /** Full line data for context */
+    /** Full line data for context (a joined row's first line) */
     line: RawLine;
+    /**
+     * Number of lines joined into the element when MuPDF split its text row
+     * into several lines; absent for a single line.
+     */
+    lineCount?: number;
+    /**
+     * A page-number-like line at either end of a joined row, collected on
+     * its own as well. Only a page-number sequence that steps with the page
+     * index removes it.
+     */
+    rowEndNumber?: boolean;
 }
 
 /**

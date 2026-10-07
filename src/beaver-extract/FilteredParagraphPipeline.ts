@@ -83,6 +83,8 @@ export interface FilteredParagraphContext {
     totalPageCount?: number;
     /** Whether to detect ascending page-number sequences in margins. */
     detectPageSequences?: boolean;
+    /** Match margin text rows rather than single lines (`ExtractionSettings.marginTextRows`). */
+    marginTextRows?: boolean;
     /** Forwarded to `detectParagraphs`. */
     paragraphSettings?: ParagraphDetectionSettings;
     /**
@@ -246,6 +248,7 @@ export function detectFilteredParagraphs(
             marginZone,
             repeatThreshold: ctx.repeatThreshold,
             detectPageSequences: ctx.detectPageSequences,
+            marginTextRows: ctx.marginTextRows,
         });
         analysisContextMs = performance.now() - tAnalysis;
         styleProfile = styleProfile ?? computed.styleProfile;
@@ -271,6 +274,7 @@ export function detectFilteredParagraphs(
         marginRemoval,
         styleProfile.bodyStyles,
         styleProfile.primaryBodyStyle,
+        ctx.marginTextRows ?? true,
     );
     const marginFilterMs = performance.now() - tMarginFilter;
     const uprightMarginItems = collectMarginItemsFromFilteredPage(
@@ -464,6 +468,8 @@ export function marginFilteredLines(
         styleProfile: StyleProfile;
         margins?: MarginSettings;
         marginZone?: MarginSettings;
+        /** Must match the setting `marginRemoval` was computed with. */
+        marginTextRows?: boolean;
         pageRotation: RotationAngle;
     },
 ): Set<RawLine> {
@@ -475,6 +481,7 @@ export function marginFilteredLines(
         ctx.marginRemoval,
         ctx.styleProfile.bodyStyles,
         ctx.styleProfile.primaryBodyStyle,
+        ctx.marginTextRows ?? true,
     );
     const marginZone = ctx.marginZone ?? DEFAULT_MARGIN_ZONE;
     const kept = new Set<RawLine>();
@@ -559,7 +566,7 @@ export function pageSizeKey(page: { width: number; height: number }): string {
  */
 export function documentBodyExtents(
     pages: readonly RawPageData[],
-    ctx: { marginRemoval: MarginRemovalResult; styleProfile: StyleProfile; margins?: MarginSettings; marginZone?: MarginSettings },
+    ctx: { marginRemoval: MarginRemovalResult; styleProfile: StyleProfile; margins?: MarginSettings; marginZone?: MarginSettings; marginTextRows?: boolean },
 ): Map<string, { top: number; bottom: number }> {
     const extents = new Map<string, { top: number; bottom: number }>();
     for (const page of pages) {
@@ -570,6 +577,7 @@ export function documentBodyExtents(
             ctx.marginRemoval,
             ctx.styleProfile.bodyStyles,
             ctx.styleProfile.primaryBodyStyle,
+            ctx.marginTextRows ?? true,
         );
         let top = Infinity;
         let bottom = -Infinity;
@@ -605,6 +613,8 @@ export function regionFurnitureLines(
         styleProfile: StyleProfile;
         margins?: MarginSettings;
         marginZone?: MarginSettings;
+        /** Must match the setting `marginRemoval` was computed with. */
+        marginTextRows?: boolean;
         pageRotation: RotationAngle;
         /** Pages a running header repeats on (`getEffectiveRepeatThreshold`). */
         repeat: number;
