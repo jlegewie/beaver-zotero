@@ -57,8 +57,9 @@ export interface ParagraphDetectionSettings {
     hangingIndentBlocks?: boolean;
     /**
      * Whether heading detection demotes run-in label items ("Keywords: …",
-     * "Received: …", a structured-abstract label followed by prose) and
-     * supplementary / extended-data figure and table captions (default: true).
+     * "Received: …", a structured-abstract label followed by prose), display
+     * equations, bare web addresses and supplementary / extended-data figure
+     * and table captions (default: true).
      * PDF schema 4 turns it off so its document-wide ids keep resolving.
      */
     headingLabelFilters?: boolean;
@@ -1315,6 +1316,45 @@ const MATH_FONT_RE =
     /^(?:CMMI|CMSY|CMEX|CMBSY|MSAM|MSBM|EUFM|EUSM|RSFS|MTMI|MTSY|MTEX|RMTMI|RBLMI|rtxmi|rtxsy|txmi|txsy|txex|Symbol|MT-Extra|Euclid|ESint|wasy|stmary|TeX_CM_Maths|[^,]*Math)/i;
 
 /**
+ * A line's per-glyph style runs (see `RawLine.styleRuns`) in reading order
+ * across its spans, each with its text. Runs count non-whitespace glyphs in
+ * order; empty runs are dropped.
+ */
+function lineStyleRuns(line: PageLine): { run: RawStyleRun; text: string }[] {
+    const runs: { run: RawStyleRun; text: string }[] = [];
+    for (const span of line.spans) {
+        const glyphs = Array.from(span.text).filter(c => /\S/u.test(c));
+        let offset = 0;
+        for (const run of span.styleRuns ?? []) {
+            if (run.chars === 0) continue;
+            runs.push({ run, text: glyphs.slice(offset, offset + run.chars).join("") });
+            offset += run.chars;
+        }
+    }
+    return runs;
+}
+
+/**
+ * Size a style run counts at in `majorityLineStyle`: the largest size its font
+ * reaches on the line (`fontMax`) when the run is smaller only as fake small
+ * caps or superscripts are, or by size-truncation jitter; its own size
+ * otherwise.
+ *
+ * Fake small caps hold no lowercase letters, and superscripts and subscripts
+ * are a few glyphs long. A longer smaller run of lowercase text is text in
+ * its own right: the body text after a run-in label that the producer set
+ * larger in the same font ("Speed: Translation by…") rather than in a bold
+ * face, or the prose around a larger operator ("if x = ab"). Lifting it
+ * would make the whole line read larger than the body.
+ */
+function liftedRunSize(run: RawStyleRun, text: string, fontMax: RawStyleRun): number {
+    const max = fontMax.font.size;
+    if (run.font.size === max || run.chars <= 3 || !/\p{Ll}/u.test(text)) return max;
+    if (run.exactSize === undefined || fontMax.exactSize === undefined) return max;
+    return fontMax.exactSize - run.exactSize <= FONT_EXPANSION_SHARE * fontMax.exactSize ? max : run.font.size;
+}
+
+/**
  * Majority styling of a line, from its per-glyph style runs.
  *
  * MuPDF reports a line's font from its first glyph, so a body line that
@@ -1329,34 +1369,30 @@ const MATH_FONT_RE =
  *     markers, trailing punctuation) and a leading section number
  *     (`numberedTitleStyle`);
  *   - math-font glyphs (`MATH_FONT_RE`);
- *   - size differences within one font: each run counts at its font's
- *     largest size on the line, so fake small caps ("I. I" + "NTRODUCTION"
- *     set smaller) and superscripts don't shrink the line.
+ *   - some size differences within one font (`liftedRunSize`), so fake small
+ *     caps ("I. I" + "NTRODUCTION" set smaller) and superscripts don't
+ *     shrink the line.
  *
  * Returns `lineStyle` itself when the line has no style runs or its majority
  * styling agrees with it.
  */
 function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
-    const runs: RawStyleRun[] = [];
-    for (const span of line.spans) {
-        for (const run of span.styleRuns ?? []) {
-            if (run.chars > 0) runs.push(run);
-        }
-    }
+    const runs = lineStyleRuns(line);
     if (runs.length === 0) return lineStyle;
 
     let start = numberedTitleStyle(line)?.numberRuns ?? 0;
     let end = runs.length;
-    while (end - start > 1 && runs[start].letters === 0 && runs[start].chars <= 3) start++;
-    while (end - start > 1 && runs[end - 1].letters === 0 && runs[end - 1].chars <= 3) end--;
+    while (end - start > 1 && runs[start].run.letters === 0 && runs[start].run.chars <= 3) start++;
+    while (end - start > 1 && runs[end - 1].run.letters === 0 && runs[end - 1].run.chars <= 3) end--;
     const voters = runs
         .slice(start, end)
-        .filter(run => !MATH_FONT_RE.test(baseFontName(run.font.name)));
+        .filter(({ run }) => !MATH_FONT_RE.test(baseFontName(run.font.name)));
     if (voters.length === 0) return lineStyle;
 
-    const fontMaxSize = new Map<string, number>();
-    for (const run of voters) {
-        fontMaxSize.set(run.font.name, Math.max(fontMaxSize.get(run.font.name) ?? 0, run.font.size));
+    const fontMax = new Map<string, RawStyleRun>();
+    for (const { run } of voters) {
+        const max = fontMax.get(run.font.name);
+        if (!max || run.font.size > max.font.size) fontMax.set(run.font.name, run);
     }
 
     let total = 0;
@@ -1365,12 +1401,13 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
     let heavyChars = 0;
     const charsBySize = new Map<number, number>();
     const charsByFont = new Map<string, number>();
-    for (const run of voters) {
+    const fontFaces = new Map<string, TextStyle>();
+    for (const { run, text } of voters) {
         const style = extractSpanStyle(
             run.font.name || "unknown",
             run.font.weight,
             run.font.style,
-            fontMaxSize.get(run.font.name)
+            liftedRunSize(run, text, fontMax.get(run.font.name)!)
         );
         total += run.chars;
         if (style.bold) boldChars += run.chars;
@@ -1378,6 +1415,7 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
         if (hasHeavyWeightToken(style.font)) heavyChars += run.chars;
         charsBySize.set(style.size, (charsBySize.get(style.size) ?? 0) + run.chars);
         charsByFont.set(style.font, (charsByFont.get(style.font) ?? 0) + run.chars);
+        fontFaces.set(style.font, style);
     }
 
     // Largest size that at least MAJORITY_STYLE_SHARE of the glyphs reach.
@@ -1391,29 +1429,28 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
             break;
         }
     }
-    // The font with the most glyphs. A Medium / Semibold face carries a
-    // heading cue in its name (Rule 2b), so like bold it must cover
-    // MAJORITY_STYLE_SHARE of the glyphs to describe the line: a semibold
-    // run-in label ahead of plain text ("Peer review information Nature
-    // Medicine thanks…") can outnumber each of the plain faces it is
-    // followed by without making the line a heading.
+    // The font with the most glyphs, among the faces whose styling the line
+    // carries. A bold, italic, Medium or Semibold face must cover
+    // MAJORITY_STYLE_SHARE of the glyphs to describe the line, like the bold
+    // and italic flags: a semibold run-in label ahead of plain text ("Peer
+    // review information Nature Medicine thanks…") or an italic question
+    // ahead of its roman gloss can outnumber each plain face without making
+    // the line a heading face.
+    const bold = boldChars / total >= MAJORITY_STYLE_SHARE;
+    const italic = italicChars / total >= MAJORITY_STYLE_SHARE;
     const heavyMajority = heavyChars / total >= MAJORITY_STYLE_SHARE;
     let font = lineStyle.font;
     let fontChars = -1;
     for (const [name, chars] of charsByFont) {
-        if (!heavyMajority && hasHeavyWeightToken(name)) continue;
+        const face = fontFaces.get(name)!;
+        if ((!bold && face.bold) || (!italic && face.italic) || (!heavyMajority && hasHeavyWeightToken(name))) continue;
         if (chars > fontChars) {
             fontChars = chars;
             font = name;
         }
     }
 
-    const majority: TextStyle = {
-        size,
-        font,
-        bold: boldChars / total >= MAJORITY_STYLE_SHARE,
-        italic: italicChars / total >= MAJORITY_STYLE_SHARE,
-    };
+    const majority: TextStyle = { size, font, bold, italic };
     return stylesEqual(majority, lineStyle) ? lineStyle : majority;
 }
 
@@ -1427,48 +1464,60 @@ const SECTION_NUMBER_RE = /^\d{1,2}(?:(?:\.\d{1,3}){1,3}\.?|\.)$/;
 
 /**
  * Style of a numbered heading's title when its section number is set in
- * another face: "2.4 *Freeing Up Women's Time*", the number in the body face
- * and the title in italic. MuPDF reports the line's style from the number's
- * first glyph, so the line reads as body text. The title's opening style
- * describes the line instead, the way an unnumbered heading is described by
- * its first glyph.
+ * another style: "2.4 *Freeing Up Women's Time*", the number in the body face
+ * and the title in italic, or "2.1.1 **Levels of…**" with the number in the
+ * title's face at a slightly different size, which truncation reports as
+ * 11 against the title's 12. MuPDF reports the line's style from the number's
+ * first glyph, so the line reads as body text or as two styles. The title's
+ * opening style describes the line instead, the way an unnumbered heading is
+ * described by its first glyph.
  *
  * Needs per-glyph style runs: the line must open with runs that hold exactly
- * a plain (not bold or italic) section number (`SECTION_NUMBER_RE`), followed
- * by a run in a different style at the number's size (a smaller number is an affiliation or footnote
- * marker). Contents entries with dot leaders are excluded. Returns null
+ * a section number (`SECTION_NUMBER_RE`), set plain (not bold or italic) or
+ * in the title's own face, followed by a run in a different style at the
+ * number's size (a smaller number is an affiliation or footnote marker). The
+ * number may be a span of its own, as when a wide space separates it from
+ * the title. Contents entries with dot leaders are excluded. Returns null
  * otherwise.
  */
 function numberedTitleStyle(line: PageLine): { style: TextStyle; numberRuns: number } | null {
-    const span = line.spans[0];
-    const runs = (span?.styleRuns ?? []).filter(run => run.chars > 0);
-    if (runs.length < 2 || !SECTION_PREFIX_RE.test(line.text) || /(?:\.\s?){4}/.test(line.text)) return null;
+    if (!SECTION_PREFIX_RE.test(line.text) || /(?:\.\s?){4}/.test(line.text)) return null;
+    const runs = lineStyleRuns(line);
+    if (runs.length < 2) return null;
 
-    // Text of each run: runs count non-whitespace glyphs in order.
-    const glyphs = Array.from(span.text).filter(c => /\S/u.test(c));
-    let offset = 0;
     let number = "";
     let numberRuns = 0;
-    while (numberRuns < runs.length - 1) {
-        const text = glyphs.slice(offset, offset + runs[numberRuns].chars).join("");
-        if (!/^[\d.]+$/.test(text)) break;
-        number += text;
-        offset += runs[numberRuns].chars;
+    while (numberRuns < runs.length - 1 && /^[\d.]+$/.test(runs[numberRuns].text)) {
+        number += runs[numberRuns].text;
         numberRuns++;
     }
     if (numberRuns === 0 || !SECTION_NUMBER_RE.test(number)) return null;
 
-    // A bold or italic number carries the heading cue itself (see
-    // `isCJKNumberedHeading`); only a plain number defers to its title.
-    for (const run of runs.slice(0, numberRuns)) {
-        const numberStyle = extractSpanStyle(run.font.name || "unknown", run.font.weight, run.font.style, run.font.size);
-        if (numberStyle.bold || numberStyle.italic || hasHeavyWeightToken(numberStyle.font)) return null;
-    }
-    const title = runs[numberRuns];
-    const sizeOf = (run: RawStyleRun) => run.exactSize ?? run.font.size;
-    if (runs.slice(0, numberRuns).some(run => Math.abs(sizeOf(run) - sizeOf(title)) > 1)) return null;
+    const title = runs[numberRuns].run;
     const style = extractSpanStyle(title.font.name || "unknown", title.font.weight, title.font.style, title.font.size);
-    return stylesEqual(style, extractLineStyle(line)) ? null : { style, numberRuns };
+    // A bold or italic number in a face of its own carries the heading cue
+    // itself (see `isCJKNumberedHeading`); a plain number, or one in the
+    // title's face, defers to its title.
+    for (const { run } of runs.slice(0, numberRuns)) {
+        const numberStyle = extractSpanStyle(run.font.name || "unknown", run.font.weight, run.font.style, run.font.size);
+        const titleFace =
+            baseFontName(numberStyle.font) === baseFontName(style.font) &&
+            numberStyle.bold === style.bold &&
+            numberStyle.italic === style.italic;
+        if (!titleFace && (numberStyle.bold || numberStyle.italic || hasHeavyWeightToken(numberStyle.font))) {
+            return null;
+        }
+    }
+    const sizeOf = (run: RawStyleRun) => run.exactSize ?? run.font.size;
+    if (runs.slice(0, numberRuns).some(({ run }) => Math.abs(sizeOf(run) - sizeOf(title)) > 1)) return null;
+    // Another subset of the line's own font (`WHFMUD+Calibri` after
+    // `FSAPEC+Calibri`) is not another style.
+    const lineStyle = extractLineStyle(line);
+    const sameStyle = !!lineStyle && stylesEqual(
+        { ...style, font: baseFontName(style.font) },
+        { ...lineStyle, font: baseFontName(lineStyle.font) }
+    );
+    return sameStyle ? null : { style, numberRuns };
 }
 
 /** The line's opening style: a numbered title's style, else its first glyph's. */
@@ -1518,11 +1567,14 @@ function isHeaderStyle(
     const lineStyle = numbered?.style ?? extractLineStyle(line);
     if (!lineStyle) return false;
     // Item-level only (the joined item text): boundaries are decided per line
-    // and stay as they are; a run-in label item just isn't labelled a heading.
+    // and stay as they are; a run-in label, equation or link item just isn't
+    // labelled a heading.
     if (
         settings.headingLabelFilters &&
         phraseTextOverride !== null &&
-        looksLikeRunInLabel(phraseTextOverride)
+        (looksLikeRunInLabel(phraseTextOverride) ||
+            looksLikeEquation(phraseTextOverride) ||
+            looksLikeWebAddresses(phraseTextOverride))
     ) {
         return false;
     }
@@ -1639,6 +1691,65 @@ function looksLikeRunInLabel(text: string): boolean {
     if (RUN_IN_LABEL_RE.test(t) || KEYWORDS_LABEL_RE.test(t)) return true;
     const m = STRUCTURED_ABSTRACT_LABEL_RE.exec(t);
     return !!m && isProseTail(m[1]);
+}
+
+/**
+ * Share of an equation's visible characters, at most, that words of three or
+ * more letters make up (see `looksLikeEquation`).
+ */
+const EQUATION_WORD_SHARE = 0.4;
+
+/** A complete bracketed group: a function's arguments, a set, an index. */
+const BRACKETED_GROUP_RE = /\([^()]*\)|\[[^[\]]*\]|\{[^{}]*\}/gu;
+
+/**
+ * A display equation: text that states a relation ("=") and is mostly
+ * symbols, with less than `EQUATION_WORD_SHARE` of its visible characters in
+ * words of three or more letters ("Σ* = {0, a, b, aa, ab, …}", "P(A, B) =
+ * P(A)P(B)"). An equation set in a larger or italic face, or centered with
+ * space around it, passes the style rules.
+ *
+ * An equation's left-hand side is a symbol expression, whose words, if any,
+ * sit inside function arguments ("P(can | N) = 0.9"). A heading that states a
+ * relation names its subject in words before it, however short the heading
+ * is ("2.1.1 Case n = 1", "3. Case 1: x = y", "3. Proof: a² + b² = c²").
+ */
+function looksLikeEquation(text: string): boolean {
+    const relation = text.indexOf("=");
+    if (relation < 0) return false;
+    let lhs = text.slice(0, relation);
+    for (let prev = ""; prev !== lhs; ) {
+        prev = lhs;
+        lhs = lhs.replace(BRACKETED_GROUP_RE, "");
+    }
+    if (/\p{L}{3,}/u.test(lhs)) return false;
+    const visible = text.replace(/\s/gu, "").length;
+    const wordChars = (text.match(/\p{L}{3,}/gu) ?? []).join("").length;
+    return wordChars < EQUATION_WORD_SHARE * visible;
+}
+
+/**
+ * One web address or DOI: a URL with a scheme, a "www." host, a host with a
+ * path ("babel.uoregon.edu/guides.html"), or a DOI. A bare host without
+ * "www." ("Booking.com") can be a name, so it doesn't count.
+ */
+const WEB_ADDRESS_RE =
+    /^(?:[a-z][a-z+.-]*:\/\/\S+|www\d?\.\S+|[\w-]+(?:\.[\w-]+)*\.\p{L}{2,}\/\S*|10\.\d{4,9}\/\S+)$/iu;
+
+/**
+ * Text that is only web addresses: a link line on a cover page or in a list
+ * of resources, set in a larger or distinct face. A heading names its
+ * section in words. A path wrapped after a slash ("…/ doc/cjk.inf") counts
+ * as part of its address.
+ */
+function looksLikeWebAddresses(text: string): boolean {
+    const tokens = text.trim().split(/\s+/u);
+    let address = false;
+    for (const token of tokens) {
+        if (WEB_ADDRESS_RE.test(token)) address = true;
+        else if (!(address && /^[\w.~%-]*\/\S*$|^[\w~%-]+\.\p{L}{2,4}$/u.test(token))) return false;
+    }
+    return address;
 }
 
 /**
