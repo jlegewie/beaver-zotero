@@ -795,3 +795,138 @@ describe('detectColumns recursion-depth guard', () => {
         expect(result!.columns).toHaveLength(N);
     });
 });
+
+describe('detectColumns regionBarriers', () => {
+    // Two columns, left 100–300 and right 320–520, with a region whose text
+    // was removed from the page.
+    const box = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h });
+    const spans = (cols: Rect[]) => cols.map((c) => `${Math.round(c.x)}:${Math.round(c.y)}-${Math.round(c.y + c.h)}`);
+    const members = (result: ReturnType<typeof detectColumns>) => result.regionPieces?.map((pieces) => pieces?.map((p) => p.members));
+
+    it('keeps the text around a region in one column apart but reads that column through it', () => {
+        // Right column: a paragraph, then a figure, then its caption. A full-width
+        // footer rules out a clean vertical cut, so the right column's two parts
+        // would otherwise be cut apart across the page.
+        const left = box(100, 300, 200, 300);
+        const rightTop = box(320, 100, 200, 100);
+        const caption = box(320, 520, 200, 80);
+        const footer = box(100, 640, 420, 10);
+        // The figure's box reaches a little past its column (loose boxes do).
+        const figure = { box: box(290, 220, 230, 280) };
+        expect(spans(detectColumns(makeColumnPage([left, rightTop, caption, footer])).columns)).toEqual([
+            '100:300-600', '320:100-600', '100:640-650',
+        ]);
+        const result = detectColumns(makeColumnPage([left, rightTop, caption, footer]), { regionBarriers: [figure] });
+        expect(spans(result.columns)).toEqual(['100:300-600', '320:100-200', '320:520-600', '100:640-650']);
+        // The figure's frame rule stays within the column.
+        const frame = { orientation: 'horizontal' as const, position: 505, start: 320, end: 520, thickness: 1 };
+        const framed = detectColumns(makeColumnPage([left, rightTop, caption, footer]), { regionBarriers: [figure], dividerLines: [frame] });
+        expect(spans(framed.columns)).toEqual(spans(result.columns));
+
+        // Side-by-side blocks further down the column (a two-part list) are
+        // behind the caption: they do not border the figure.
+        const list = [box(320, 610, 90, 20), box(430, 610, 90, 20)];
+        const lower = box(100, 700, 420, 10);
+        const withList = detectColumns(makeColumnPage([left, rightTop, caption, ...list, lower]), { regionBarriers: [figure] });
+        expect(spans(withList.columns).slice(0, 3)).toEqual(['100:300-600', '320:100-200', '320:520-600']);
+    });
+
+    it('joins only one column, set a gutter apart from its neighbours', () => {
+        // A short block over a full-width one is no column (a running head over a
+        // caption), and a column closer to its neighbour than a gutter cannot be
+        // cut apart: both keep the plain order.
+        const figure = { box: box(320, 220, 200, 280) };
+        const head = [box(100, 300, 200, 300), box(320, 100, 80, 100), box(320, 520, 200, 80), box(100, 640, 420, 10)];
+        expect(spans(detectColumns(makeColumnPage(head), { regionBarriers: [figure] }).columns)).toEqual([
+            '320:100-200', '100:300-600', '320:520-600', '100:640-650',
+        ]);
+        const tightFigure = { box: box(304, 220, 200, 280) };
+        const tight = [box(100, 300, 200, 300), box(304, 100, 200, 100), box(304, 520, 200, 80), box(100, 640, 404, 10)];
+        expect(spans(detectColumns(makeColumnPage(tight), { regionBarriers: [tightFigure] }).columns)).toEqual([
+            '304:100-200', '100:300-600', '304:520-600', '100:640-650',
+        ]);
+    });
+
+    it('does not read a column through a region spanning the columns', () => {
+        // A figure in the left column and, below it, a table across both columns:
+        // both upper blocks come before the table, as with the table alone.
+        const blocks = [box(100, 100, 200, 150), box(320, 100, 200, 220), box(100, 400, 200, 150), box(320, 400, 200, 150)];
+        const figure = { box: box(100, 260, 200, 50) };
+        const table = { box: box(100, 330, 420, 50) };
+        const expected = ['100:100-250', '320:100-320', '100:400-550', '320:400-550'];
+        expect(spans(detectColumns(makeColumnPage(blocks), { regionBarriers: [figure, table] }).columns)).toEqual(expected);
+        // A rule across the page in its place does the same.
+        const rule = { orientation: 'horizontal' as const, position: 355, start: 100, end: 520, thickness: 1 };
+        expect(spans(detectColumns(makeColumnPage(blocks), { regionBarriers: [figure], dividerLines: [rule] }).columns)).toEqual(expected);
+    });
+
+    it('reads both columns above a region spanning them before the text below it', () => {
+        const blocks = [box(100, 100, 200, 150), box(320, 100, 200, 150), box(100, 400, 200, 150), box(320, 400, 200, 150)];
+        const table = { box: box(100, 270, 420, 110) };
+        const result = detectColumns(makeColumnPage(blocks), { regionBarriers: [table] });
+        expect(spans(result.columns)).toEqual(['100:100-250', '320:100-250', '100:400-550', '320:400-550']);
+        // A table without a text layer fills its box too.
+        const empty = detectColumns(makeColumnPage(blocks), { regionBarriers: [{ ...table, content: [] }] });
+        expect(spans(empty.columns)).toEqual(spans(result.columns));
+    });
+
+    it('splits equations set in each column and merged into one box into column-local pieces', () => {
+        // The left column's last line above the box is short; its column below
+        // still reaches the gutter.
+        const blocks = [
+            box(100, 100, 200, 80), box(100, 240, 120, 10), box(100, 400, 200, 150),
+            box(320, 100, 200, 150), box(320, 400, 200, 150),
+        ];
+        const merged = {
+            box: box(100, 270, 420, 110),
+            content: [box(130, 300, 140, 20), box(280, 300, 20, 20), box(350, 330, 170, 20)],
+        };
+        const result = detectColumns(makeColumnPage(blocks), { regionBarriers: [merged] });
+        expect(spans(result.columns)).toEqual(['100:100-180', '100:240-250', '100:400-550', '320:100-250', '320:400-550']);
+
+        // Mirrored: the right column's nearest line is indented.
+        const indented = [
+            box(100, 100, 200, 150), box(100, 400, 200, 150),
+            box(320, 100, 200, 80), box(360, 240, 160, 10), box(320, 400, 200, 150),
+        ];
+        const mirrored = { box: merged.box, content: [box(120, 300, 160, 20), box(322, 330, 30, 20), box(360, 330, 160, 20)] };
+        const right = detectColumns(makeColumnPage(indented), { regionBarriers: [mirrored] });
+        expect(spans(right.columns)).toEqual(['100:100-250', '100:400-550', '320:100-180', '360:240-250', '320:400-550']);
+
+        // An equation number at the far margin only tags the equation's line: one
+        // equation, not one in each column, and it lies in its body's column.
+        const numbered = { ...merged, content: [box(130, 300, 140, 20), box(500, 300, 15, 20), box(130, 330, 140, 20)] };
+        const tagged = detectColumns(makeColumnPage(blocks), { regionBarriers: [numbered] });
+        expect(tagged.regionPieces).toEqual([[{ members: [0, 1, 2], body: [0, 2] }]]);
+        expect(spans(tagged.columns)).toEqual(['100:100-180', '100:240-250', '100:400-550', '320:100-550']);
+        expect(members(result)).toEqual([[[0, 1], [2]]]);
+        // A short equation centred in its column beside a long one in the other
+        // is an equation of its own, not a label.
+        const short = { ...merged, content: [box(180, 300, 40, 20), box(330, 300, 170, 20)] };
+        expect(members(detectColumns(makeColumnPage(blocks), { regionBarriers: [short] }))).toEqual([[[0], [1]]]);
+        // Nor is a few characters set mid-column, away from the outer edge.
+        const midColumn = { ...merged, content: [box(110, 300, 180, 20), box(400, 300, 15, 20)] };
+        expect(members(detectColumns(makeColumnPage(blocks), { regionBarriers: [midColumn] }))).toEqual([[[0], [1]]]);
+        // Nor is a flush-right piece wider than a few characters.
+        const wideTag = { ...merged, content: [box(110, 300, 180, 10), box(460, 300, 60, 10)] };
+        expect(members(detectColumns(makeColumnPage(blocks), { regionBarriers: [wideTag] }))).toEqual([[[0], [1]]]);
+        // A label tags an equation several times its width, not one about as narrow.
+        const narrowHost = { ...merged, content: [box(180, 300, 40, 20), box(505, 300, 15, 20)] };
+        expect(members(detectColumns(makeColumnPage(blocks), { regionBarriers: [narrowHost] }))).toEqual([[[0], [1]]]);
+        // On a single-column page, a lead-in line split into pieces at inline math
+        // (twice the font size tall) is no pair of columns: a numbered equation
+        // under it stays whole.
+        const body = { size: 10, font: 'Body', bold: false, italic: false };
+        const single = [box(100, 100, 420, 150), box(100, 255, 150, 20), box(300, 255, 220, 20), box(100, 330, 420, 100)];
+        const display = { box: box(100, 280, 420, 30), content: [box(120, 285, 120, 20), box(505, 285, 15, 20)] };
+        expect(detectColumns(makeColumnPage(single), { regionBarriers: [display], bodyStyles: [body] }).regionPieces).toEqual([undefined]);
+        // A narrow strip running lines of its own (line numbers) is a piece.
+        const strip = { ...merged, content: [box(100, 280, 15, 10), box(100, 300, 15, 10), box(100, 340, 15, 10), box(350, 300, 170, 20)] };
+        expect(members(detectColumns(makeColumnPage(blocks), { regionBarriers: [strip] }))).toEqual([[[0, 1, 2], [3]]]);
+
+        // One line running across the gutter makes it a display spanning both columns.
+        const wide = { ...merged, content: [...merged.content, box(150, 350, 300, 20)] };
+        const spanning = detectColumns(makeColumnPage(blocks), { regionBarriers: [wide] });
+        expect(spans(spanning.columns)).toEqual(['100:100-180', '100:240-250', '320:100-250', '100:400-550', '320:400-550']);
+    });
+});

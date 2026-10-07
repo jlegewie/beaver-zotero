@@ -120,6 +120,7 @@ export type DocumentItemKind =
     | "formula"
     | "table"
     | "picture"
+    | "reference"
     | "margin";
 
 export const ID_PREFIXES = {
@@ -133,6 +134,7 @@ export const ID_PREFIXES = {
     formula: "eq",
     table: "table",
     picture: "fig",
+    reference: "ref",
     margin: "margin",
 } as const satisfies Record<DocumentItemKind | "sentence" | "line", string>;
 
@@ -183,6 +185,11 @@ export interface FootnoteItem extends TextBearingItem {
     sentences?: Sentence[];
 }
 
+/**
+ * A display equation. `text` is the equation's extracted text, one row per
+ * line; an equation number stays at the end of its row. Cited as the item,
+ * never split into sentences. Empty when the equation has no text layer.
+ */
 export interface FormulaItem extends TextBearingItem {
     kind: "formula";
 }
@@ -191,12 +198,32 @@ export interface MarginItem extends TextBearingItem {
     kind: "margin";
 }
 
-export interface TableItem extends DocumentItemBase {
+/**
+ * One entry of a bibliographic reference list (or a piece of one that a
+ * column or page break split off). Cited as a whole; never split into
+ * sentences.
+ */
+export interface ReferenceItem extends TextBearingItem {
+    kind: "reference";
+}
+
+/**
+ * A table. `text` holds its rows, one per line, cells joined by " | "; each
+ * row is one sentence, so rows are citable on their own.
+ */
+export interface TableItem extends TextBearingItem {
     kind: "table";
+    sentences?: Sentence[];
 }
 
 export interface PictureItem extends DocumentItemBase {
     kind: "picture";
+    /**
+     * Text labels inside the figure (axis titles, legends, diagram boxes), one
+     * row per line. Fragments, not sentences; rows of bare numbers are left
+     * out. Absent when the figure has no labels.
+     */
+    text?: string;
 }
 
 export type DocumentItem =
@@ -208,6 +235,7 @@ export type DocumentItem =
     | FormulaItem
     | TableItem
     | PictureItem
+    | ReferenceItem
     | MarginItem;
 
 export interface Sentence {

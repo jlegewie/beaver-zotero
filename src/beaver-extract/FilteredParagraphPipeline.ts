@@ -8,6 +8,7 @@
  */
 
 import { MarginFilter } from "./MarginFilter";
+import { StyleAnalyzer } from "./StyleAnalyzer";
 import { detectColumns, logColumnDetection, type ColumnDetectionResult } from "./ColumnDetector";
 import { detectLinesOnPage, logLineDetection, type PageLineResult } from "./LineDetector";
 import {
@@ -23,6 +24,8 @@ import {
     bboxFromXYWH,
     bboxHeight,
     bboxWidth,
+    type BoundingBox,
+    type MarginAnalysis,
     type MarginItem,
     type MarginRemovalResult,
     type MarginSettings,
@@ -101,6 +104,21 @@ export interface FilteredParagraphContext {
         end: number;
         thickness: number;
     }>;
+    /**
+     * Regions (tables, figures, equations) whose lines were removed from the
+     * target page, in raw MuPDF frame: the box and, for an equation, the boxes
+     * of its lines. Each keeps the text above it apart from the text below it
+     * in the reading frame; one spanning columns is read after the text above
+     * it in every column, one within a column is read through
+     * (`ColumnDetectionOptions.regionBarriers`).
+     */
+    regionBarriers?: ReadonlyArray<{ bbox: BoundingBox; content?: ReadonlyArray<BoundingBox> }>;
+    /**
+     * Dominant text orientation of the target page, when the caller detected
+     * it before removing lines from the page (e.g. region text). Without it,
+     * orientation is detected on the supplied page.
+     */
+    pageRotation?: RotationAngle;
 }
 
 /**
@@ -242,7 +260,8 @@ export function detectFilteredParagraphs(
     // against the raw bboxes so the marginZone exclusion uses the
     // original page geometry.
     const tRotation = performance.now();
-    const pageRotation = detectDominantTextOrientation(rawTargetPage, marginZone);
+    const pageRotation =
+        ctx.pageRotation ?? detectDominantTextOrientation(rawTargetPage, marginZone);
     const rotated = rotateRawPage(rawTargetPage, pageRotation);
     const targetPage = rotated.page;
     const rotationMs = performance.now() - tRotation;
@@ -355,6 +374,14 @@ export function detectFilteredParagraphs(
                   };
               })
             : ctx.dividerLines;
+    const uprightRect = (box: BoundingBox) => {
+        const upright = rotateBBox(box, pageRotation, rotated.sourceWidth, rotated.sourceHeight);
+        return { x: upright.l, y: upright.t, w: bboxWidth(upright), h: bboxHeight(upright) };
+    };
+    const regionBarriers = (ctx.regionBarriers ?? []).map((region) => ({
+        box: uprightRect(region.bbox),
+        ...(region.content ? { content: region.content.map(uprightRect) } : {}),
+    }));
 
     const tColumnDetect = performance.now();
     const columnResult = detectColumns(filteredPage, {
@@ -363,6 +390,7 @@ export function detectFilteredParagraphs(
         bodyStyles: styleProfile.bodyStyles,
         fillBoundaries,
         dividerLines,
+        regionBarriers,
         debug: isAnalyzerLoggingEnabled(),
     });
     const columnDetectMs = performance.now() - tColumnDetect;
@@ -425,6 +453,192 @@ export function detectFilteredParagraphs(
     };
 }
 
+/**
+ * Lines of a page that margin filtering removes from the prose in the page's top and
+ * bottom margin bands (running headers and footers, page numbers, margin
+ * identifiers), as `detectFilteredParagraphs` filters them: in the page's upright
+ * working frame, with the document's smart-removal result. Side margins are left
+ * out: a full-width figure's panel letters repeat there from page to page. The
+ * lines returned are the page's own.
+ */
+export function marginFilteredLines(
+    page: RawPageData,
+    ctx: {
+        marginRemoval: MarginRemovalResult;
+        styleProfile: StyleProfile;
+        margins?: MarginSettings;
+        marginZone?: MarginSettings;
+        /** Must match the setting `marginRemoval` was computed with. */
+        marginTextRows?: boolean;
+        pageRotation: RotationAngle;
+    },
+): Set<RawLine> {
+    const rotated = rotateRawPage(page, ctx.pageRotation).page;
+    const filtered = MarginFilter.filterPageWithSmartRemoval(
+        rotated,
+        ctx.margins ?? DEFAULT_MARGINS,
+        ctx.marginZone ?? DEFAULT_MARGIN_ZONE,
+        ctx.marginRemoval,
+        ctx.styleProfile.bodyStyles,
+        ctx.styleProfile.primaryBodyStyle,
+        ctx.marginTextRows ?? true,
+    );
+    const marginZone = ctx.marginZone ?? DEFAULT_MARGIN_ZONE;
+    const kept = new Set<RawLine>();
+    for (const block of filtered.blocks) {
+        if (block.type === "text") for (const line of block.lines ?? []) kept.add(line);
+    }
+    for (const block of rotated.blocks) {
+        if (block.type !== "text") continue;
+        for (const line of block.lines ?? []) {
+            const position = MarginFilter.getMarginPosition(line.bbox, rotated.width, rotated.height, marginZone);
+            if (position !== "top" && position !== "bottom") kept.add(line);
+        }
+    }
+    // Rotation copies lines in order, block by block.
+    const removed = new Set<RawLine>();
+    page.blocks.forEach((block, b) => {
+        if (block.type !== "text") return;
+        const turned = rotated.blocks[b].lines ?? [];
+        (block.lines ?? []).forEach((line, k) => {
+            if (!kept.has(turned[k])) removed.add(line);
+        });
+    });
+    return removed;
+}
+
+/**
+ * Running headers and footers that carry the page number (`Journal 2024 № 7 41`,
+ * `Smith et al. — page 12`): lines in the top or bottom margin zone whose text,
+ * spaces dropped, repeats on at least `repeat` pages of `analysis` with only its
+ * numbers changing, one of them stepping with the page index. Exact repeats and
+ * bare page numbers are the margin filter's; a header numbered page by page is
+ * not one text for it. The lines returned are `page`'s.
+ */
+export function numberedRunningLines(page: RawPageData, analysis: MarginAnalysis, repeat: number, marginZone: MarginSettings = DEFAULT_MARGIN_ZONE): Set<RawLine> {
+    const shape = (text: string) => {
+        const compact = text.toLowerCase().replace(/\s+/gu, "");
+        return { key: compact.replace(/\d+/gu, "#"), numbers: (compact.match(/\d+/gu) ?? []).map(Number) };
+    };
+    const found = new Set<RawLine>();
+    for (const position of ["top", "bottom"] as const) {
+        const byKey = new Map<string, { page: number; numbers: number[] }[]>();
+        for (const el of analysis.elements.get(position) ?? []) {
+            const { key, numbers } = shape(el.text);
+            if (!numbers.length) continue;
+            byKey.set(key, [...(byKey.get(key) ?? []), { page: el.pageIndex, numbers }]);
+        }
+        const numbered = new Set<string>();
+        for (const [key, seen] of byKey) {
+            const pages = new Map(seen.map((s) => [s.page, s.numbers]));
+            if (pages.size < repeat) continue;
+            const counts = [...pages.values()];
+            if (counts.some((n) => n.length !== counts[0].length)) continue;
+            const stepsWithPage = counts[0].some((_, k) => new Set([...pages].map(([p, n]) => n[k] - p)).size === 1);
+            if (stepsWithPage) numbered.add(key);
+        }
+        if (!numbered.size) continue;
+        for (const block of page.blocks) {
+            if (block.type !== "text") continue;
+            for (const line of block.lines ?? []) {
+                if (!line.text.trim() || MarginFilter.getMarginPosition(line.bbox, page.width, page.height, marginZone) !== position) continue;
+                if (numbered.has(shape(line.text).key)) found.add(line);
+            }
+        }
+    }
+    return found;
+}
+
+/** A line of body text holds at least this many words. */
+const BODY_LINE_WORDS = 4;
+
+/** Pages of one size share a body extent (`documentBodyExtents`). */
+export function pageSizeKey(page: { width: number; height: number }): string {
+    return `${Math.round(page.width)}x${Math.round(page.height)}`;
+}
+
+/**
+ * Where a document's body text starts and ends down its pages, per page size
+ * (`pageSizeKey`): the highest top and the lowest bottom of its lines of body text (in a
+ * body style, a line of words, not margin text) on any page of that size. Running
+ * headers and footers stand outside it on every page; a figure or table set at the top
+ * or foot of a page stands inside it.
+ */
+export function documentBodyExtents(
+    pages: readonly RawPageData[],
+    ctx: { marginRemoval: MarginRemovalResult; styleProfile: StyleProfile; margins?: MarginSettings; marginZone?: MarginSettings; marginTextRows?: boolean },
+): Map<string, { top: number; bottom: number }> {
+    const extents = new Map<string, { top: number; bottom: number }>();
+    for (const page of pages) {
+        const kept = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            ctx.margins ?? DEFAULT_MARGINS,
+            ctx.marginZone ?? DEFAULT_MARGIN_ZONE,
+            ctx.marginRemoval,
+            ctx.styleProfile.bodyStyles,
+            ctx.styleProfile.primaryBodyStyle,
+            ctx.marginTextRows ?? true,
+        );
+        let top = Infinity;
+        let bottom = -Infinity;
+        for (const block of kept.blocks) {
+            if (block.type !== "text") continue;
+            for (const line of block.lines ?? []) {
+                if ((line.rotation ?? 0) !== 0 || line.wmode === 1) continue;
+                if (line.text.trim().split(/\s+/u).length < BODY_LINE_WORDS || !StyleAnalyzer.isLineBodyStyled(line, ctx.styleProfile.bodyStyles)) continue;
+                top = Math.min(top, line.bbox.t);
+                bottom = Math.max(bottom, line.bbox.b);
+            }
+        }
+        if (top >= bottom) continue;
+        const key = pageSizeKey(page);
+        const extent = extents.get(key);
+        extents.set(key, extent ? { top: Math.min(extent.top, top), bottom: Math.max(extent.bottom, bottom) } : { top, bottom });
+    }
+    return extents;
+}
+
+/**
+ * Page furniture no region may take: running headers and footers and page numbers
+ * (`marginFilteredLines`, `numberedRunningLines`) set apart above the document's body
+ * text or below it on pages of this page's size (`documentBodyExtents`). Text in the margin band inside the body's extent
+ * (a figure's labels at the top of a page, a continued table's header) is not
+ * furniture, however often it repeats. Pages read in another orientation have none.
+ */
+export function regionFurnitureLines(
+    page: RawPageData,
+    ctx: {
+        marginRemoval: MarginRemovalResult;
+        marginAnalysis: MarginAnalysis;
+        styleProfile: StyleProfile;
+        margins?: MarginSettings;
+        marginZone?: MarginSettings;
+        /** Must match the setting `marginRemoval` was computed with. */
+        marginTextRows?: boolean;
+        pageRotation: RotationAngle;
+        /** Pages a running header repeats on (`getEffectiveRepeatThreshold`). */
+        repeat: number;
+        bodyExtents: ReadonlyMap<string, { top: number; bottom: number }>;
+    },
+): Set<RawLine> {
+    const furniture = new Set<RawLine>();
+    const body = ctx.bodyExtents.get(pageSizeKey(page));
+    if (!body || ctx.pageRotation !== 0) return furniture;
+    const candidates = [...marginFilteredLines(page, ctx), ...numberedRunningLines(page, ctx.marginAnalysis, ctx.repeat, ctx.marginZone)];
+    for (const line of candidates) {
+        // Set apart from the body by at least its own line height.
+        const clearance = line.bbox.b - line.bbox.t;
+        if (line.bbox.b <= body.top - clearance || line.bbox.t >= body.bottom + clearance) furniture.add(line);
+    }
+    // A page has one page number in a band: several bare numbers there are a figure's or a
+    // table's, not furniture.
+    for (const above of [true, false]) {
+        const numbers = [...furniture].filter((l) => /^\d+$/u.test(l.text.trim()) && (l.bbox.b <= body.top) === above);
+        if (numbers.length > 1) for (const l of numbers) furniture.delete(l);
+    }
+    return furniture;
+}
+
 export function collectMarginItemsFromFilteredPage(
     originalPage: RawPageData,
     filteredPage: RawPageData,
@@ -435,30 +649,39 @@ export function collectMarginItemsFromFilteredPage(
         for (const line of block.lines) keptLines.add(line);
     }
 
-    const items: MarginItem[] = [];
+    const removed: RawLine[] = [];
     for (const block of originalPage.blocks) {
         if (block.type !== "text" || !block.lines) continue;
         for (const line of block.lines) {
-            const text = (line.text ?? "").trim();
-            if (!text || keptLines.has(line)) continue;
-            const index = items.length;
-            items.push({
-                kind: "margin",
-                id: `p${originalPage.pageIndex}:i${index}`,
-                pageIndex: originalPage.pageIndex,
-                index,
-                bbox: line.bbox,
-                columnIndex: 0,
-                text: line.text,
-                lines: [
-                    {
-                        text: line.text,
-                        bbox: line.bbox,
-                        fontSize: line.font?.size,
-                    },
-                ],
-            });
+            if (!keptLines.has(line)) removed.push(line);
         }
+    }
+    return marginItemsForLines(originalPage.pageIndex, removed);
+}
+
+/** One margin item per non-blank line, in the given order and frame. */
+export function marginItemsForLines(pageIndex: number, lines: readonly RawLine[]): MarginItem[] {
+    const items: MarginItem[] = [];
+    for (const line of lines) {
+        const text = (line.text ?? "").trim();
+        if (!text) continue;
+        const index = items.length;
+        items.push({
+            kind: "margin",
+            id: `p${pageIndex}:i${index}`,
+            pageIndex,
+            index,
+            bbox: line.bbox,
+            columnIndex: 0,
+            text: line.text,
+            lines: [
+                {
+                    text: line.text,
+                    bbox: line.bbox,
+                    fontSize: line.font?.size,
+                },
+            ],
+        });
     }
     return items;
 }

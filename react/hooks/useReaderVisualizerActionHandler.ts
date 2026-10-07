@@ -9,9 +9,7 @@
 
 import { useEventSubscription } from './useEventSubscription';
 import {
-    visualizeCurrentPageColumns,
     visualizeCurrentPageItems,
-    visualizeCurrentPageLines,
     visualizeCurrentPageSentences,
     clearVisualizationAnnotations,
     resolveActiveReaderContext,
@@ -35,39 +33,14 @@ export function useReaderVisualizerActionHandler() {
 
         try {
             switch (detail.action) {
-                case 'columns': {
-                    const r = await visualizeCurrentPageColumns({ reader });
-                    logger(`[ReaderVisualizer] columns: ${r.message}`);
-                    return;
-                }
-                case 'columns-graphics': {
-                    const r = await visualizeCurrentPageColumns({ reader, graphicsLayerMode: 'on' });
-                    logger(`[ReaderVisualizer] columns-graphics: ${r.message}`);
-                    return;
-                }
-                case 'lines': {
-                    const r = await visualizeCurrentPageLines({ reader });
-                    logger(`[ReaderVisualizer] lines: ${r.message}`);
-                    return;
-                }
                 case 'items': {
                     const r = await visualizeItemsForActiveReader(reader);
                     logger(`[ReaderVisualizer] items: ${r.message}`);
                     return;
                 }
-                case 'items-graphics': {
-                    const r = await visualizeCurrentPageItems({ reader, graphicsLayerMode: 'on' });
-                    logger(`[ReaderVisualizer] items-graphics: ${r.message}`);
-                    return;
-                }
                 case 'sentences': {
                     const r = await visualizeSentencesForActiveReader(reader);
                     logger(`[ReaderVisualizer] sentences: ${r.message}`);
-                    return;
-                }
-                case 'sentences-graphics': {
-                    const r = await visualizeCurrentPageSentences({ reader, graphicsLayerMode: 'on' });
-                    logger(`[ReaderVisualizer] sentences-graphics: ${r.message}`);
                     return;
                 }
                 case 'clear': {

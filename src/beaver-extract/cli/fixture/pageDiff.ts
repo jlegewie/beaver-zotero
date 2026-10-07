@@ -139,8 +139,8 @@ function diffItem(
     if ("text" in e || "text" in a) {
         diffScalar(
             `${base}.text`,
-            "text" in e ? normalizeWhitespace(e.text) : undefined,
-            "text" in a ? normalizeWhitespace(a.text) : undefined,
+            "text" in e && e.text !== undefined ? normalizeWhitespace(e.text) : undefined,
+            "text" in a && a.text !== undefined ? normalizeWhitespace(a.text) : undefined,
             diffs,
         );
     }

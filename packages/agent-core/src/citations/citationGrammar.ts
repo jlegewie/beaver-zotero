@@ -39,6 +39,7 @@ export type LocatorKind =
     | 'equation'
     | 'table'
     | 'margin'
+    | 'reference'
     | 'unknown';
 
 export interface Locator {
@@ -107,6 +108,7 @@ const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boo
     { prefix: 'margin', kind: 'margin', numericOnly: true },
     { prefix: 'table', kind: 'table', numericOnly: true },
     { prefix: 'page', kind: 'page' },
+    { prefix: 'ref', kind: 'reference', numericOnly: true },
     { prefix: 'list', kind: 'list', numericOnly: true },
     { prefix: 'l', kind: 'line', numericOnly: true },
     { prefix: 'fig', kind: 'figure', numericOnly: true },
@@ -128,6 +130,7 @@ const CITATION_INDEX_PREFIXES: Partial<Record<LocatorKind, string>> = {
     equation: ID_PREFIXES.formula,
     table: ID_PREFIXES.table,
     margin: ID_PREFIXES.margin,
+    reference: ID_PREFIXES.reference,
 };
 
 function stripClobberPrefix(value: string): string {

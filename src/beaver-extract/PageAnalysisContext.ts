@@ -49,6 +49,11 @@ export interface PageAnalysisContextInput {
     detectPageSequences?: boolean;
     /** Match text rows rather than single lines (`ExtractionSettings.marginTextRows`). */
     marginTextRows?: boolean;
+    /**
+     * Also detect runs of page numbers that advance with the page index
+     * (`PdfExtractionPreset.pageNumberRuns`). Default true.
+     */
+    pageNumberRuns?: boolean;
 }
 
 export interface PageAnalysisContext {
@@ -84,6 +89,7 @@ export function buildPageAnalysisContext(
         repeatThreshold,
         detectPageSequences = true,
         marginTextRows = true,
+        pageNumberRuns = true,
     } = input;
 
     const styleProfile = new StyleAnalyzer().analyze(pages, 4, 0.15, 0);
@@ -101,6 +107,7 @@ export function buildPageAnalysisContext(
             analysisPageCount: pages.length,
         }),
         detectPageSequences,
+        pageNumberRuns,
     );
 
     return { styleProfile, marginAnalysis, marginRemoval };

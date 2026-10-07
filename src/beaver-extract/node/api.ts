@@ -16,7 +16,7 @@
  * `Promise.all` (the `info` command does exactly that). The worker
  * dispatcher uses the same queue, so this matches the worker contract.
  */
-import { ensureExtractionRuntime } from "./bootstrap";
+import { ensureExtractionRuntime, resetMuPDFNode } from "./bootstrap";
 import {
     opAnalyzeLayout,
     opAnalyzeOCRNeeds,
@@ -24,10 +24,12 @@ import {
     opExtractRawPageDetailed,
     opGetMetadata,
     opGetPageCount,
+    opReferenceInputs,
     opRenderPages,
     opStructuredExtractWithDebug,
 } from "../worker/ops";
 import { enqueue } from "../worker/opQueue";
+import { opDetectRegions, type RegionDetectionResult } from "../worker/regionOps";
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -135,6 +137,30 @@ export async function structuredExtractWithDebug(
     return reply.result;
 }
 
+/**
+ * Full-document structured extraction returning the reference classifier's
+ * per-page inputs (training export and debugging).
+ */
+export async function referenceInputs(
+    input: Pick<ExtractInput, "pdfData" | "settings" | "paragraphSettings" | "analysisWindow" | "schemaVersion"> & {
+        /** Classify too: return plans and the emitted items. */
+        classify?: boolean;
+    },
+): Promise<Awaited<ReturnType<typeof opReferenceInputs>>["result"]> {
+    await ensureExtractionRuntime();
+    const reply = await enqueue(() => opReferenceInputs(input));
+    return reply.result;
+}
+
+/**
+ * Replace the MuPDF runtime after a fatal WASM error (trap or heap
+ * exhaustion) so the next operation starts on a fresh instance. Batch
+ * callers use it between documents; the next op re-initializes lazily.
+ */
+export function resetExtractionRuntime(): void {
+    resetMuPDFNode();
+}
+
 export async function analyzeLayout(
     input: AnalyzeLayoutInput,
 ): Promise<LayoutAnalysisResult> {
@@ -171,3 +197,30 @@ export async function analyzeOCRNeeds(
     const reply = await enqueue(() => opAnalyzeOCRNeeds({ pdfData, options }));
     return reply.result;
 }
+
+export interface DetectRegionsInput {
+    pdfData: PdfBytes;
+    pageIndices: number[];
+    /** Extra pages (graphics summary only) used for document context. */
+    contextPages?: number;
+    /** false: return unclassified candidates (training-data export). */
+    classify?: boolean;
+    /** Also return each page's text lines with routing flags. */
+    includeLines?: boolean;
+}
+
+/** Region candidates per page with features and classes (debugging and training export). */
+export async function detectRegions(input: DetectRegionsInput): Promise<RegionDetectionResult> {
+    await ensureExtractionRuntime();
+    const reply = await enqueue(() =>
+        opDetectRegions({
+            pdfData: input.pdfData instanceof Uint8Array ? input.pdfData : new Uint8Array(input.pdfData),
+            pageIndices: input.pageIndices,
+            contextPages: input.contextPages,
+            classify: input.classify,
+            includeLines: input.includeLines,
+        }),
+    );
+    return reply.result;
+}
+

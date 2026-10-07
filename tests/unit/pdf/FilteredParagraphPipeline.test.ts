@@ -5,7 +5,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { detectFilteredParagraphs } from "../../../src/beaver-extract/FilteredParagraphPipeline";
+import {
+    detectFilteredParagraphs,
+    documentBodyExtents,
+    marginFilteredLines,
+    numberedRunningLines,
+    regionFurnitureLines,
+} from "../../../src/beaver-extract/FilteredParagraphPipeline";
+import { buildPageAnalysisContext } from "../../../src/beaver-extract/PageAnalysisContext";
 import { MarginFilter } from "../../../src/beaver-extract/MarginFilter";
 import { StyleAnalyzer } from "../../../src/beaver-extract/StyleAnalyzer";
 import {
@@ -582,4 +589,53 @@ describe("detectFilteredParagraphs", () => {
         });
     });
 
+});
+
+describe("region furniture", () => {
+    /** Six pages with a running header, a footer line and a numbered running footer, panel letters at the side and a body line. */
+    const pages = Array.from({ length: 6 }, (_, k) =>
+        makePage(k, [
+            makeLine("Journal of Testing Studies", 20, 80, 9),
+            makeLine("a b", 300, 20, 9),
+            bodyLine(`Body text of page ${k} goes on here with words.`, 300),
+            makeLine("Copyright Testing Press", 745, 80, 9),
+            makeLine(`ASIA AND AFRICA TODAY 2024 No 7 ${41 + k}`, 760, 160, 9),
+        ]),
+    );
+    const { marginAnalysis, marginRemoval, styleProfile } = buildPageAnalysisContext({ pages, totalPageCount: pages.length });
+    const texts = (lines: Set<RawLine>) => [...lines].map((l) => l.text);
+
+    it("takes the margin filter's lines in the top and bottom bands, not the side margins", () => {
+        const removed = marginFilteredLines(pages[2], { marginRemoval, styleProfile, pageRotation: 0 });
+        expect(texts(removed)).toContain("Journal of Testing Studies");
+        // The panel letter repeats in the side margin; a figure there keeps it.
+        expect(texts(removed)).not.toContain("a b");
+        expect(texts(removed).some((t) => t.startsWith("Body text"))).toBe(false);
+    });
+
+    it("finds running lines whose numbers step with the page", () => {
+        expect(texts(numberedRunningLines(pages[2], marginAnalysis, 3))).toEqual(["ASIA AND AFRICA TODAY 2024 No 7 43"]);
+        // A line repeating with numbers that do not follow the page is no running footer.
+        const stray = Array.from({ length: 6 }, (_, k) => makePage(k, [makeLine(`Figure axis 10 20 ${k % 2 ? 30 : 40}`, 760, 160, 9)]));
+        const analysis = buildPageAnalysisContext({ pages: stray, totalPageCount: stray.length }).marginAnalysis;
+        expect(numberedRunningLines(stray[2], analysis, 3).size).toBe(0);
+    });
+
+    it("keeps text inside the body's extent out of furniture, however often it repeats", () => {
+        // Figure pages: a label set at the top of each figure repeats in the margin band,
+        // below where body text starts on the text pages.
+        const docPages = Array.from({ length: 6 }, (_, k) =>
+            makePage(k, [
+                makeLine("Journal of Testing Studies", 20, 80, 9),
+                ...(k % 2 ? [makeLine("Posterior Distribution", 66, 150, 9)] : []),
+                bodyLine(`Body text of page ${k} goes on here with more words.`, k % 2 ? 300 : 60),
+                bodyLine("A second line of body text with enough words in it.", k % 2 ? 314 : 74),
+            ]),
+        );
+        const ctx = buildPageAnalysisContext({ pages: docPages, totalPageCount: docPages.length });
+        const bodyExtents = documentBodyExtents(docPages, ctx);
+        expect([...bodyExtents.values()].map((b) => b.top)).toEqual([60]);
+        const furniture = regionFurnitureLines(docPages[3], { ...ctx, pageRotation: 0, repeat: 3, bodyExtents });
+        expect(texts(furniture)).toEqual(["Journal of Testing Studies"]);
+    });
 });

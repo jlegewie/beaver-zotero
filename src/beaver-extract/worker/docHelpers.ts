@@ -31,7 +31,9 @@ import type {
     PageLike,
     QuadTuple,
     RectTuple,
+    StructuredTextLike,
 } from "./mupdfApi";
+import type { GraphicsSummary } from "./graphicsSummary";
 import { ERROR_CODES, postLog, workerError } from "./errors";
 import { isRecoverablePageError } from "../wasmFatal";
 import { isUnmappedTextLayer, recoveredTextIsAcceptable } from "../unmappedGlyphRecovery";
@@ -716,8 +718,9 @@ function extractRawPageDetailedOnce(
     fontApi?: FontApi,
     recoverUnmappedGlyphs?: boolean,
     textRepair = CURRENT_PDF_EXTRACTION_PRESET.textRepair,
-    styleRuns = CURRENT_PDF_EXTRACTION_PRESET.styleRuns,
+    extras: DetailedWalkExtras = {},
 ): RawPageDataDetailed {
+    const { onGraphics, fontSpans, styleRuns = CURRENT_PDF_EXTRACTION_PRESET.styleRuns } = extras;
     const page = doc.loadPage(pageIndex);
     try {
         const pb = page.getBounds("CropBox");
@@ -735,7 +738,16 @@ function extractRawPageDetailedOnce(
 
         let stextOptions = detailedStructuredTextOptions(includeImages, textRepair);
         if (recoverUnmappedGlyphs) stextOptions = withRecoveryFlags(stextOptions);
-        const stext = page.toStructuredText(stextOptions);
+        // With `onGraphics`, the graphics summary comes from the same pass over the
+        // page contents; the structured text is identical either way.
+        let stext: StructuredTextLike;
+        if (onGraphics) {
+            const both = page.toStructuredTextWithGraphics(stextOptions);
+            stext = both.stext;
+            onGraphics(both.graphics);
+        } else {
+            stext = page.toStructuredText(stextOptions);
+        }
 
         const blocks: RawBlock[] = [];
         let currentBlock: (RawBlock & { type: "text"; lines: RawLineDetailed[] }) | null = null;
@@ -778,7 +790,7 @@ function extractRawPageDetailedOnce(
         let glyphExactSize = 0;
         let runFontPtr = 0;
         let runs: { fontPtr: number; size: number; exactSize: number; chars: number; letters: number }[] = [];
-        const onCharFont = (fontPtr: number, size: number) => {
+        const noteGlyphStyle = (fontPtr: number, size: number) => {
             glyphFontPtr = typeof fontPtr === "number" ? fontPtr : 0;
             glyphExactSize = typeof size === "number" ? size : 0;
             glyphSize = Math.trunc(glyphExactSize);
@@ -808,9 +820,35 @@ function extractRawPageDetailedOnce(
             runs = [];
         };
 
+        // Per-line font runs (`RawLineDetailed.spans`, region walks only).
+        // `spanFontPtr` is the font pointer of the current line's last span.
+        let spanFontPtr = 0;
+        const recordFontSpan = (fontPtr: number, size: number) => {
+            if (!currentLine) return;
+            const spans = (currentLine.spans ??= []);
+            const last = spans[spans.length - 1];
+            if (last && spanFontPtr === fontPtr && last.font.size === size) return;
+            const f = lookupFont(fontPtr);
+            spanFontPtr = fontPtr;
+            spans.push({
+                start: currentLine.chars.length,
+                font: { name: f.name, family: f.family, weight: f.weight, style: f.style, size },
+            });
+        };
+
+        // Style runs and font spans share the walker's single per-glyph font
+        // callback, which is left undefined when neither is wanted (it costs
+        // two WASM calls per glyph).
+        const onCharFont =
+            captureRuns || fontSpans
+                ? (fontPtr: number, size: number) => {
+                      if (captureRuns) noteGlyphStyle(fontPtr, size);
+                      if (fontSpans) recordFontSpan(fontPtr, size);
+                  }
+                : undefined;
+
         try {
             stext.walk({
-                ...(captureRuns ? { onCharFont } : {}),
                 beginTextBlock: (bbox) => {
                     currentBlock = {
                         type: "text",
@@ -855,6 +893,7 @@ function extractRawPageDetailedOnce(
                     }
                     currentLine = null;
                 },
+                onCharFont,
                 onLineFont: (fontPtr, size) => {
                     if (!currentLine) return;
                     const f = lookupFont(typeof fontPtr === "number" ? fontPtr : 0);
@@ -1395,18 +1434,41 @@ export function extractRawPageFromDoc(
     return recovered;
 }
 
-/** Extract a page's detailed-walk data, recovering an unmapped text layer when present. */
+/** Optional extras recorded by the detailed walk. */
+export interface DetailedWalkExtras {
+    /**
+     * Receives the page's graphics summary, collected in the same pass as the
+     * text (requires `MuPDFApi.supportsGraphicsSummary`).
+     */
+    onGraphics?: (graphics: GraphicsSummary) => void;
+    /** Record per-line font runs (`RawLineDetailed.spans`, region detection). */
+    fontSpans?: boolean;
+    /**
+     * Record per-glyph style runs (`RawLine.styleRuns`, heading detection).
+     * Defaults to the current schema preset's `styleRuns`.
+     */
+    styleRuns?: boolean;
+}
+
+/**
+ * Extract a page's detailed-walk data, recovering an unmapped text layer when
+ * present. The graphics summary does not depend on text options, so the
+ * unmapped-glyph retry does not re-collect it.
+ */
 export function extractRawPageDetailedFromDoc(
     doc: DocumentLike,
     pageIndex: number,
     includeImages: boolean,
     fontApi?: FontApi,
     textRepair?: boolean,
-    styleRuns?: boolean,
+    extras: DetailedWalkExtras = {},
 ): RawPageDataDetailed {
-    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair, styleRuns);
+    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair, extras);
     if (!isUnmappedTextLayer(page)) return page;
-    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair, styleRuns);
+    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair, {
+        fontSpans: extras.fontSpans,
+        styleRuns: extras.styleRuns,
+    });
     if (!recoveredTextIsAcceptable(recovered)) return page;
     postLog("info", `Recovered unmapped text layer on page ${pageIndex}`);
     return recovered;

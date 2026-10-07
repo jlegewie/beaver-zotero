@@ -385,7 +385,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
                 return (
                     <div key={`markdown-${index}`} className={className}>
                         <ReactMarkdown
-                            remarkPlugins={[remarkMath, remarkGfm]}
+                            // Strikethrough needs `~~`: models write subscripts as `P~lac~`
+                            // and approximations as `~5`, which single tildes would strike.
+                            remarkPlugins={[remarkMath, [remarkGfm, { singleTilde: false }]]}
                             rehypePlugins={rehypePlugins}
                             urlTransform={exportRendering ? exportUrlTransform : urlTransform}
                             components={{

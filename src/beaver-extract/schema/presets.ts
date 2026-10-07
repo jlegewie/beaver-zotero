@@ -38,13 +38,31 @@ export interface PdfExtractionPreset {
      * (`ExtractionSettings.marginTextRows`).
      */
     marginTextRows: boolean;
+    /**
+     * Classify reference-list entries in structured extraction and emit them
+     * as `reference` items (see `references/classify.ts`).
+     */
+    referenceItems: boolean;
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */
     idScheme: ExtractIdScheme;
+    /**
+     * Region detection in structured extraction: tables, figures and display
+     * equations become `table` / `picture` / `formula` items, and the text
+     * lines they absorb leave the prose (see `regions/regionItems.ts`).
+     */
+    regions: boolean;
+    /**
+     * Margin page-number detection also accepts runs of page numbers that
+     * advance with the page index, so stray numerals in the zone, numbering
+     * restarts, or another zone's matching page numbers don't hide them. See
+     * `MarginFilter.identifyElementsToRemove`.
+     */
+    pageNumberRuns: boolean;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, marginTextRows: false, idScheme: "document" },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, marginTextRows: true, idScheme: "page" },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, marginTextRows: false, referenceItems: false, idScheme: "document", regions: false, pageNumberRuns: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, marginTextRows: true, referenceItems: true, idScheme: "page", regions: true, pageNumberRuns: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

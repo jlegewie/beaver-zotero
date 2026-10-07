@@ -8,7 +8,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import { extractRawPageDetailedFromDoc } from "../../../src/beaver-extract/worker/docHelpers";
+import type { RawLineDetailed } from "@beaver/agent-core/extract/types";
+
+import { type DetailedWalkExtras, extractRawPageDetailedFromDoc } from "../../../src/beaver-extract/worker/docHelpers";
 import type {
     DocumentLike,
     FontApi,
@@ -81,9 +83,14 @@ const RUN_IN_LABEL: Segment[] = [
     { text: "policing; education 2022", fontPtr: REGULAR_PTR, size: 9.96 },
 ];
 
-function firstLine(doc: DocumentLike, styleRuns: boolean, fontApi: FontApi | undefined) {
-    const page = extractRawPageDetailedFromDoc(doc, 0, false, fontApi, true, styleRuns);
-    return page.blocks[0].lines![0];
+function firstLine(
+    doc: DocumentLike,
+    styleRuns: boolean,
+    fontApi: FontApi | undefined,
+    extras: DetailedWalkExtras = {},
+) {
+    const page = extractRawPageDetailedFromDoc(doc, 0, false, fontApi, true, { ...extras, styleRuns });
+    return page.blocks[0].lines![0] as RawLineDetailed;
 }
 
 describe("detailed-walk style runs", () => {
@@ -140,5 +147,23 @@ describe("detailed-walk style runs", () => {
 
     it("records no runs without the font API", () => {
         expect(firstLine(fakeDoc(RUN_IN_LABEL), true, undefined).styleRuns).toBeUndefined();
+    });
+
+    it("records style runs and region font spans together in one walk", () => {
+        const line = firstLine(fakeDoc(RUN_IN_LABEL), true, FONT_API, { fontSpans: true });
+        expect(line.styleRuns!.map((r) => [r.font.weight, r.chars])).toEqual([
+            ["bold", 9],
+            ["normal", 22],
+        ]);
+        expect(line.spans!.map((s) => [s.start, s.font.weight, s.font.size])).toEqual([
+            [0, "bold", 9.96],
+            [10, "normal", 9.96],
+        ]);
+    });
+
+    it("records font spans without style runs when only regions ask for them", () => {
+        const line = firstLine(fakeDoc(RUN_IN_LABEL), false, FONT_API, { fontSpans: true });
+        expect(line.styleRuns).toBeUndefined();
+        expect(line.spans).toHaveLength(2);
     });
 });

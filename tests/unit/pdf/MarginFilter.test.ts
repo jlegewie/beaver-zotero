@@ -762,6 +762,187 @@ describe("page-number-sequence distinct-page guard", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Page-number runs: a page number advances with the page index, so stray
+// numerals in the same zone or a numbering restart must not hide it.
+// ---------------------------------------------------------------------------
+
+/** Build a MarginAnalysis from explicit `[pageIndex, text, position]` entries. */
+function textsOnPages(
+    entries: [number, string, MarginPosition?][],
+): MarginAnalysis {
+    const elements = new Map<MarginPosition, MarginElement[]>([
+        ["top", []],
+        ["bottom", []],
+        ["left", []],
+        ["right", []],
+    ]);
+    for (const [pageIndex, text, position = "bottom"] of entries) {
+        const line = makeLine(text, 100, position === "bottom" ? PAGE_H - 30 : 30);
+        elements.get(position)!.push({ text, position, bbox: line.bbox, pageIndex, line });
+    }
+    const counts = {
+        top: elements.get("top")!.length,
+        bottom: elements.get("bottom")!.length,
+        left: elements.get("left")!.length,
+        right: elements.get("right")!.length,
+    };
+    return { elements, counts };
+}
+
+/** Footer page numbers `first..first+count-1` on pages `startPage..`. */
+function footerNumbers(startPage: number, first: number, count: number): [number, string][] {
+    return Array.from({ length: count }, (_, k) => [startPage + k, String(first + k)]);
+}
+
+function pageNumberRemovals(out: MarginRemovalResult, pageIndex: number): string[] {
+    return Array.from(out.removalsByPage.get(pageIndex) ?? []).sort();
+}
+
+describe("page-number runs that advance with the page index", () => {
+    it("removes footer page numbers when stray numerals elsewhere in the zone break the sequence", () => {
+        // Footer numbers 1..20 on pages 2..21; a reference list reaching the
+        // footer zone on later pages leaves a wrapped DOI tail and a
+        // "1177/1098611116658875" fragment that parses as an "X/Y" page
+        // range. Their values are not increasing in page order.
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([
+                ...footerNumbers(2, 1, 20),
+                [30, "1078087418774641"],
+                [31, "1177/1098611116658875"],
+            ]),
+            3,
+            true,
+        );
+        expect(pageNumberRemovals(out, 2)).toEqual(["1"]);
+        expect(pageNumberRemovals(out, 21)).toEqual(["20"]);
+        expect(out.removalsByPage.has(30)).toBe(false);
+        expect(out.removalsByPage.has(31)).toBe(false);
+    });
+
+    it("removes both runs when page numbering restarts", () => {
+        // A compiled thesis: the frame numbered 1..6, then a reprinted part
+        // with its own pagination 1..6.
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([...footerNumbers(0, 1, 6), ...footerNumbers(8, 1, 6)]),
+            3,
+            true,
+        );
+        for (const pageIndex of [0, 5, 8, 13]) {
+            expect(out.removalsByPage.get(pageIndex)?.size).toBe(1);
+        }
+    });
+
+    it("keeps a stray numeral that shares a page with a run's page number", () => {
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([...footerNumbers(0, 1, 8), [3, "1999"], [9, "2"]]),
+            3,
+            true,
+        );
+        expect(pageNumberRemovals(out, 3)).toEqual(["4"]);
+    });
+
+    it("does not treat numerals that do not track the page index as page numbers", () => {
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([[0, "17"], [1, "3"], [2, "42"], [3, "8"], [4, "25"], [5, "11"]]),
+            3,
+            true,
+        );
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("needs three pages for a run even under the short-document threshold", () => {
+        // [5, 6] tracks the page index on two pages; the leading "9" breaks
+        // the whole-zone sequence, so only a run could match.
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([[0, "9"], [1, "5"], [2, "6"]]),
+            { topBottom: 2, leftRight: 3 },
+            true,
+        );
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("finds footer page numbers whose texts a header sequence elsewhere already removed", () => {
+        // Footer numbers 1..8 on pages 0..7; a reprinted article later in the
+        // document carries its own header numbers 2..5 on pages 20..23.
+        const analysis = textsOnPages([
+            ...footerNumbers(0, 1, 8),
+            ...([[20, "2"], [21, "3"], [22, "4"], [23, "5"]] as [number, string][]).map(
+                ([pageIndex, text]): [number, string, MarginPosition] => [pageIndex, text, "top"],
+            ),
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(pageNumberRemovals(out, 1)).toEqual(["2"]);
+        expect(pageNumberRemovals(out, 4)).toEqual(["5"]);
+        expect(pageNumberRemovals(out, 20)).toEqual(["2"]);
+    });
+
+    it("keeps chapter numbers that do not advance with the page index", () => {
+        // Header page numbers 1..30 on pages 0..29; chapter-opening pages
+        // carry a large chapter number in the right zone. The header
+        // sequence already accounts for the texts "1", "2", "3", which
+        // keeps them out of the right zone's increasing-sequence check,
+        // and they form no run.
+        const analysis = textsOnPages([
+            ...Array.from({ length: 30 }, (_, k): [number, string, MarginPosition] => [k, String(k + 1), "top"]),
+            [0, "1", "right"],
+            [9, "2", "right"],
+            [21, "3", "right"],
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(pageNumberRemovals(out, 9)).toEqual(["10"]);
+        expect(pageNumberRemovals(out, 21)).toEqual(["22"]);
+    });
+
+    it("does not read side-zone numerals that advance one per page as page numbers", () => {
+        // Footnote markers at the left text edge, one footnote per page,
+        // numbered 2, 3, 4, … at varying heights; a stray "17" keeps the
+        // whole-zone sequence check from matching.
+        const elements = new Map<MarginPosition, MarginElement[]>([
+            ["top", []],
+            ["bottom", []],
+            ["left", []],
+            ["right", []],
+        ]);
+        const markers: [number, string, number][] = [[0, "17", 300], [4, "2", 450], [5, "3", 210], [6, "4", 380]];
+        for (const [pageIndex, text, y] of markers) {
+            const line = makeLine(text, 20, y);
+            elements.get("left")!.push({ text, position: "left", bbox: line.bbox, pageIndex, line });
+        }
+        const out = MarginFilter.identifyElementsToRemove(
+            { elements, counts: { top: 0, bottom: 0, left: markers.length, right: 0 } },
+            3,
+            true,
+        );
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    describe("schema 4 (pageNumberRuns off)", () => {
+        it("keeps the whole-zone sequence check all-or-nothing", () => {
+            const out = MarginFilter.identifyElementsToRemove(
+                textsOnPages([...footerNumbers(2, 1, 20), [30, "1078087418774641"], [31, "1177/1098611116658875"]]),
+                3,
+                true,
+                false,
+            );
+            expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+        });
+
+        it("skips texts any zone already removed", () => {
+            const analysis = textsOnPages([
+                ...footerNumbers(0, 1, 8),
+                ...([[20, "2"], [21, "3"], [22, "4"], [23, "5"]] as [number, string][]).map(
+                    ([pageIndex, text]): [number, string, MarginPosition] => [pageIndex, text, "top"],
+                ),
+            ]);
+            const out = MarginFilter.identifyElementsToRemove(analysis, 3, true, false);
+            expect(pageNumberRemovals(out, 0)).toEqual(["1"]);
+            expect(out.removalsByPage.has(1)).toBe(false);
+            expect(pageNumberRemovals(out, 5)).toEqual(["6"]);
+        });
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Fix 4: end-to-end split-line alternating recto/verso headers
 // ---------------------------------------------------------------------------
 
