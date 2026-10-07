@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isEmptyWriteReturn } from '@beaver/agent-core/agents/types';
+import { isEmptyWriteReturn, isNotFoundWriteReturn } from '@beaver/agent-core/agents/types';
 import type { ToolReturnPart } from '@beaver/agent-core/agents/types';
 
 function toolReturn(overrides: Partial<ToolReturnPart> = {}): ToolReturnPart {
@@ -93,5 +93,34 @@ describe('isEmptyWriteReturn', () => {
                 content: { status: 'applied', items: [{ input: 'doi:10.1/a', outcome: 'created' }] },
             }))).toBe(false);
         });
+    });
+});
+
+describe('manage_tags no-op results', () => {
+    const manageTags = (status: string) => toolReturn({
+        tool_name: 'manage_tags',
+        content: { status, action: 'rename', name: 'old', new_name: 'new', items_affected: 0 },
+    });
+
+    it('treats unchanged and not_found as no change', () => {
+        expect(isEmptyWriteReturn(manageTags('unchanged'))).toBe(true);
+        expect(isEmptyWriteReturn(manageTags('not_found'))).toBe(true);
+    });
+
+    it('keeps results that changed or may change the library', () => {
+        for (const status of ['applied', 'pending', 'rejected']) {
+            expect(isEmptyWriteReturn(manageTags(status))).toBe(false);
+        }
+    });
+
+    it('flags only not_found as a missing target', () => {
+        expect(isNotFoundWriteReturn(manageTags('not_found'))).toBe(true);
+        expect(isNotFoundWriteReturn(manageTags('unchanged'))).toBe(false);
+        expect(isNotFoundWriteReturn(toolReturn({
+            tool_name: 'manage_tags',
+            outcome: 'failed',
+            content: { status: 'not_found' },
+        }))).toBe(false);
+        expect(isNotFoundWriteReturn(null)).toBe(false);
     });
 });
