@@ -1,6 +1,7 @@
 import type { DocumentItem, StructuredPage } from "@beaver/agent-core/extract/schema";
 import { ID_PREFIXES } from "@beaver/agent-core/extract/schema";
 import { formatExtractId, type ExtractIdScheme } from "@beaver/agent-core/extract/ids";
+import { ITEM_KINDS } from "./itemKinds";
 
 function sortedItems(page: StructuredPage): DocumentItem[] {
     return [...page.items].sort((a, b) => a.order - b.order);
@@ -27,7 +28,7 @@ export function assignDocumentIds(pages: StructuredPage[], scheme: ExtractIdSche
     const sortedPages = [...pages].sort((a, b) => a.index - b.index);
     for (const page of sortedPages) {
         for (const item of sortedItems(page)) {
-            item.id = nextId(ID_PREFIXES[item.kind], page);
+            item.id = nextId(ITEM_KINDS[item.kind].idPrefix, page);
         }
     }
 

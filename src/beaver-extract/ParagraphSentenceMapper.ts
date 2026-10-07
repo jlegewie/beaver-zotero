@@ -43,12 +43,13 @@ import type {
 } from "@beaver/agent-core/extract/types";
 import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { PageLine } from "./LineDetector";
-import type {
-    ContentItem,
-    PageParagraphResult,
-    ParagraphDetectionSettings,
-} from "./ParagraphDetector";
+import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 import { detectParagraphs } from "./ParagraphDetector";
+import {
+    draftItemsFromParagraphs,
+    publicItemText,
+    type DraftItem,
+} from "./pipeline/draftItems";
 import { detectColumns } from "./ColumnDetector";
 import { detectLinesOnPage } from "./LineDetector";
 import {
@@ -66,6 +67,7 @@ import {
     rotateRawPageDetailed,
     type RotationAngle,
 } from "./PageRotationNormalizer";
+import { carriesSentences, type SentenceBearingItem } from "./schema/itemKinds";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -505,14 +507,7 @@ export function tryBuildParagraphText(
     }
 }
 
-function itemLinesFromDetailed(
-    lines: RawLineDetailed[],
-    fallbackText: string,
-    fallbackBBox: BoundingBox,
-): ItemLine[] {
-    if (lines.length === 0) {
-        return [{ text: fallbackText, bbox: fallbackBBox }];
-    }
+function itemLinesFromDetailed(lines: RawLineDetailed[]): ItemLine[] {
     return lines.map((line) => ({
         text: line.text,
         bbox: line.bbox,
@@ -520,34 +515,33 @@ function itemLinesFromDetailed(
     }));
 }
 
-function itemFromContentItem(
-    item: ContentItem,
+function itemFromDraft(
+    item: DraftItem,
     pageIndex: number,
     index: number,
     lines: ItemLine[],
-    reference = false,
 ): TextItem | SectionHeaderItem | ReferenceItem {
+    const text = publicItemText(item);
     const base: Omit<TextBearingItem, "kind"> = {
         id: `p${pageIndex}:i${index}`,
         pageIndex,
         index,
         bbox: item.bbox,
         columnIndex: item.columnIndex,
-        text: item.text,
-        lines: lines.length > 0 ? lines : [{ text: item.text, bbox: item.bbox }],
+        text,
+        lines: lines.length > 0 ? lines : [{ text, bbox: item.bbox }],
     };
-    if (reference) {
-        // The detector marks headings with "## "; a reference entry it read
-        // as a heading keeps its plain text.
-        return { ...base, text: item.text.replace(/^## /, ""), kind: "reference" };
+    switch (item.kind) {
+        case "reference":
+            return { ...base, kind: "reference" };
+        case "section_header":
+            return { ...base, kind: "section_header", level: 1 };
+        case "text":
+            return { ...base, kind: "text" };
     }
-    if (item.type === "header") {
-        return { ...base, kind: "section_header", level: 1 };
-    }
-    return { ...base, kind: "text" };
 }
 
-function fallbackSentenceFromItem(item: TextItem): SentenceItem {
+function fallbackSentenceFromItem(item: SentenceBearingItem): SentenceItem {
     return {
         parentId: item.id,
         index: 0,
@@ -606,10 +600,6 @@ function resolveSentencesInParagraph(
     return out;
 }
 
-function itemSupportsSentences(item: DocItem): item is TextItem {
-    return item.kind === "text";
-}
-
 function inverseRotateItem(
     item: DocItem,
     pageRotation: RotationAngle,
@@ -622,7 +612,7 @@ function inverseRotateItem(
             line.bbox = inverseRotateBBox(line.bbox, pageRotation, sourceWidth, sourceHeight);
         }
     }
-    if (itemSupportsSentences(item) && item.sentences) {
+    if (carriesSentences(item) && item.sentences) {
         for (const sentence of item.sentences) {
             for (let i = 0; i < sentence.bboxes.length; i++) {
                 sentence.bboxes[i] = inverseRotateBBox(
@@ -672,13 +662,13 @@ export interface PageSentenceOptions {
     /** Forwarded to `detectParagraphs`. */
     paragraphSettings?: ParagraphDetectionSettings;
     /**
-     * If provided, skip running columns + lines + paragraphs and reuse this
-     * pre-computed result. Useful when the caller already ran the line /
-     * paragraph pipeline for other reasons and wants to add sentence bboxes
-     * without re-doing detection.
+     * If provided, skip running columns + lines + paragraphs and map these
+     * draft items (`draftItemsFromParagraphs`, edited by any item passes).
+     * Useful when the caller already ran the line / paragraph pipeline and
+     * wants to add sentence bboxes without re-doing detection.
      *
      * Rotation handshake: when `pageRotation !== 0`, the supplied
-     * `paragraphResult` is in the **upright working frame** (the
+     * `items` are in the **upright working frame** (the
      * upstream `FilteredParagraphPipeline` rotated the raw page before
      * column/paragraph detection). The mapper normalizes the
      * `detailedPage` argument with the same rotation before
@@ -688,7 +678,7 @@ export interface PageSentenceOptions {
      * `pageRotation = 0`) preserves the existing un-rotated path.
      */
     precomputed?: {
-        paragraphResult: PageParagraphResult;
+        items: readonly DraftItem[];
         pageRotation?: RotationAngle;
         sourceWidth?: number;
         sourceHeight?: number;
@@ -714,11 +704,6 @@ export interface PageSentenceOptions {
      * `collectHyphenatedCompounds` / `decideLineBreakHyphen`.
      */
     compoundVocabulary?: ReadonlySet<string>;
-    /**
-     * Indices into the paragraph result's items to emit as `reference`
-     * items: one bibliographic entry each, with lines but no sentences.
-     */
-    referenceItems?: ReadonlySet<number>;
 }
 
 /**
@@ -755,29 +740,21 @@ export function extractPageSentences(
     //    `RawPageDataDetailed` is structurally a `RawPageData`, so the
     //    existing detectors accept it unchanged — they just ignore the
     //    extra `chars` field on each line.
-    let paragraphResult: PageParagraphResult;
-    if (options.precomputed?.paragraphResult) {
-        paragraphResult = options.precomputed.paragraphResult;
-        if (!paragraphResult.itemLines) {
-            throw new Error(
-                "[ParagraphSentenceMapper] precomputed.paragraphResult must " +
-                "have itemLines set (call detectParagraphs with " +
-                "{ trackItemLines: true })",
-            );
-        }
+    let draftItems: readonly DraftItem[];
+    if (options.precomputed) {
+        draftItems = options.precomputed.items;
     } else {
         const columnResult = detectColumns(detailedPage);
         const lineResult = detectLinesOnPage(detailedPage, columnResult.columns);
-        paragraphResult = detectParagraphs(
+        draftItems = draftItemsFromParagraphs(detectParagraphs(
             lineResult,
             null,
             options.paragraphSettings ?? {},
             { paragraph: 0, header: 0 },
             { trackItemLines: true },
-        );
+        ));
     }
 
-    const itemLines = paragraphResult.itemLines!;
     const detailedLookup = buildDetailedLineLookup(detailedPage);
 
     const items: DocItem[] = [];
@@ -794,30 +771,22 @@ export function extractPageSentences(
         }
     };
 
-    for (let i = 0; i < paragraphResult.items.length; i++) {
-        const item = paragraphResult.items[i];
-        const group = itemLines[i] ?? [];
+    for (let i = 0; i < draftItems.length; i++) {
+        const item = draftItems[i];
         const detailedLines = collectDetailedLinesForParagraph(
-            group,
+            item.lines,
             detailedLookup,
         );
-        const isReference = options.referenceItems?.has(i) ?? false;
 
         // Degradation path 1: paragraph could not be mapped back to any
         // detailed line. We still want a usable SentenceItem for the
         // caller, so we emit a fallback covering the whole paragraph.
         if (detailedLines.length === 0) {
-            const docItem = itemFromContentItem(
-                item,
-                detailedPage.pageIndex,
-                i,
-                [{ text: item.text, bbox: item.bbox }],
-                isReference,
-            );
+            const docItem = itemFromDraft(item, detailedPage.pageIndex, i, []);
             degradedCount++;
             degradedItems.add(docItem.id);
             addNote({ itemId: docItem.id, itemKind: docItem.kind, reason: "unmapped" });
-            if (docItem.kind === "text") {
+            if (carriesSentences(docItem)) {
                 const fallback = fallbackSentenceFromItem(docItem);
                 docItem.sentences = [fallback];
                 flatSentences.push(fallback);
@@ -833,13 +802,7 @@ export function extractPageSentences(
             options.compoundVocabulary,
         );
         if (!built.ok) {
-            const docItem = itemFromContentItem(
-                item,
-                detailedPage.pageIndex,
-                i,
-                [{ text: item.text, bbox: item.bbox }],
-                isReference,
-            );
+            const docItem = itemFromDraft(item, detailedPage.pageIndex, i, []);
             degradedCount++;
             degradedItems.add(docItem.id);
             addNote({
@@ -848,7 +811,7 @@ export function extractPageSentences(
                 reason: "invariant_violation",
                 message: built.error,
             });
-            if (docItem.kind === "text") {
+            if (carriesSentences(docItem)) {
                 const fallback = fallbackSentenceFromItem(docItem);
                 docItem.sentences = [fallback];
                 flatSentences.push(fallback);
@@ -858,17 +821,16 @@ export function extractPageSentences(
         }
 
         const paragraphText = built.paragraphText;
-        const docItem = itemFromContentItem(
+        const docItem = itemFromDraft(
             item,
             detailedPage.pageIndex,
             i,
-            itemLinesFromDetailed(detailedLines, item.text, item.bbox),
-            isReference,
+            itemLinesFromDetailed(detailedLines),
         );
 
-        // Heading and reference paths: never split into sentences, and
-        // exclude them from the flattened sentence view.
-        if (docItem.kind === "section_header" || docItem.kind === "reference") {
+        // Headings and references: never split into sentences, and
+        // excluded from the flattened sentence view.
+        if (!carriesSentences(docItem)) {
             if (docItem.kind === "reference") {
                 // A reference has no sentences to carry the repaired text, so
                 // its own text takes it: line-break hyphens are resolved per
@@ -1087,8 +1049,8 @@ export function annotateColumnContinuations(
     for (let i = 0; i < items.length - 1; i++) {
         const cur = items[i];
         const next = items[i + 1];
-        const curSentences = itemSupportsSentences(cur) ? cur.sentences ?? [] : [];
-        const nextSentences = itemSupportsSentences(next) ? next.sentences ?? [] : [];
+        const curSentences = cur.kind === "text" ? cur.sentences ?? [] : [];
+        const nextSentences = next.kind === "text" ? next.sentences ?? [] : [];
         const lastSentence = curSentences[curSentences.length - 1];
 
         // Always clear any stale flag before re-evaluating; only set on
@@ -1198,7 +1160,7 @@ export function buildPageSentenceFeasibilityReport(
     }
 
     const previews = result.items.slice(0, maxParagraphs).map((item, idx) => {
-        const sentences = itemSupportsSentences(item) ? item.sentences ?? [] : [];
+        const sentences = carriesSentences(item) ? item.sentences ?? [] : [];
         return {
             index: idx,
             itemKind: item.kind,

@@ -9,6 +9,7 @@ import {
 } from "../../../src/beaver-extract";
 import { bboxFromXYWH } from "@beaver/agent-core/extract/types";
 import type { PageLine } from "../../../src/beaver-extract/LineDetector";
+import { draftItemsFromParagraphs } from "../../../src/beaver-extract/pipeline/draftItems";
 import type {
     ContentItem,
     PageParagraphResult,
@@ -138,7 +139,7 @@ describe("processed page sentence view", () => {
         const { detailedPage, paragraphResult } = buildPage();
         const result = extractPageSentences(detailedPage, {
             splitter: simpleRegexSentenceSplit,
-            precomputed: { paragraphResult },
+            precomputed: { items: draftItemsFromParagraphs(paragraphResult) },
         });
         const page: InternalProcessedPage = {
             index: result.pageIndex,

@@ -324,6 +324,9 @@ export default tseslint.config(
     // `../StyleAnalyzer`, and the extract types via
     // `@beaver/agent-core/extract/*`.
     //
+    // The structured pipeline (`src/beaver-extract/pipeline/`) runs in the
+    // worker too, at the same depth, so the same rules apply.
+    //
     // Path math reminder — relative specifiers from a file at
     // `src/beaver-extract/worker/<file>.ts`:
     //   ../X            → src/beaver-extract/X    (package internals — OK)
@@ -333,7 +336,7 @@ export default tseslint.config(
     // Bare `@beaver/agent-core/...` specifiers also leave the directory; only
     // its extract/* subpaths are worker-safe (enforced below).
     {
-        files: ["src/beaver-extract/worker/**/*.ts"],
+        files: ["src/beaver-extract/worker/**/*.ts", "src/beaver-extract/pipeline/**/*.ts"],
         rules: {
             "no-restricted-imports": [
                 "error",

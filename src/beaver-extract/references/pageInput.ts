@@ -1,15 +1,14 @@
 /**
  * Compact per-page input for the reference classifier.
  *
- * Built once per page from the paragraph detector's output, in the upright
- * working frame. It holds everything the classifier's features read, so the
+ * Built once per page from its draft items, in the upright working frame. It holds everything the classifier's features read, so the
  * same features can be computed in the worker and, from an exported copy, in
  * the training pipeline.
  */
 
 import type { RawStyleRun, StyleProfile } from "@beaver/agent-core/extract/types";
-import type { PageParagraphResult } from "../ParagraphDetector";
 import type { DetectedSpan, PageLine } from "../LineDetector";
+import type { DraftPage } from "../pipeline/draftItems";
 
 /** One text line of an item. Coordinates are in the upright page frame. */
 export interface RefLine {
@@ -33,7 +32,7 @@ export interface RefItem {
     /** The paragraph detector read the item as a heading. */
     header: boolean;
     column: number;
-    /** Item text without the detector's heading marker. */
+    /** Item text (without the detector's heading marker). */
     text: string;
     lines: RefLine[];
 }
@@ -113,18 +112,12 @@ function lineSize(line: PageLine): number {
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
-/** Build the classifier input for one page from its paragraph result. */
-export function buildRefPage(
-    paragraphResult: PageParagraphResult,
-    styleProfile: StyleProfile,
-): RefPage {
-    const itemLines = paragraphResult.itemLines ?? [];
-    const roles = paragraphResult.itemLineRoles ?? [];
-    const items: RefItem[] = paragraphResult.items.map((item, i) => {
-        const header = item.type === "header";
-        const lines = (itemLines[i] ?? []).map((line, k): RefLine => {
+/** Build the classifier input for one page from its draft items. */
+export function buildRefPage(page: DraftPage, styleProfile: StyleProfile): RefPage {
+    const items: RefItem[] = page.items.map((item) => {
+        const lines = item.lines.map((line, k): RefLine => {
             const size = lineSize(line);
-            const role = roles[i]?.[k] ?? null;
+            const role = item.roles[k] ?? null;
             const marker = leadMarkerSize(line);
             return {
                 text: line.text,
@@ -138,16 +131,16 @@ export function buildRefPage(
             };
         });
         return {
-            header,
+            header: item.kind === "section_header",
             column: item.columnIndex,
-            text: header ? item.text.replace(/^## /, "") : item.text,
+            text: item.text,
             lines,
         };
     });
     return {
-        pageIndex: paragraphResult.pageIndex,
-        width: round2(paragraphResult.width),
-        height: round2(paragraphResult.height),
+        pageIndex: page.pageIndex,
+        width: round2(page.width),
+        height: round2(page.height),
         bodySize: styleProfile.primaryBodyStyle?.size ?? 0,
         items,
     };
