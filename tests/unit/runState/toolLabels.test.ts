@@ -30,6 +30,13 @@ describe('getToolCallLabel', () => {
             .toBe('Edit metadata: Applying edits');
     });
 
+    it('humanizes the name of a tool this client has no label for', () => {
+        const part = toolCall({ tool_name: 'find_book_chapters', args: {} });
+        expect(getToolCallLabel(part, 'completed')).toBe('Find book chapters');
+        expect(getToolCallLabel({ ...part, progress: 'Querying Crossref' }, 'in_progress'))
+            .toBe('Find book chapters: Querying Crossref');
+    });
+
     // create_items normally renders as an agent-action card, so its label is only
     // reached when the call created nothing. Without a base label the row read
     // "Calling function".
