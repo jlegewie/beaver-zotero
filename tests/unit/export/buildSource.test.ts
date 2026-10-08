@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
-import { buildResponseBlocks, buildThreadBlocks, splitNoteTags } from '@beaver/agent-export/source/buildSource';
+import { buildResponseBlocks, buildThreadBlocks, unwrapNoteTags } from '@beaver/agent-export/source/buildSource';
 import { parseExportSource } from '@beaver/agent-export/parse/parseExportDoc';
 import { activityLabelParts } from '@beaver/agent-export/activity';
 
@@ -51,32 +51,31 @@ describe('buildResponseBlocks', () => {
     });
 });
 
-describe('splitNoteTags', () => {
-    it('turns <note> tags into note sections', () => {
-        expect(splitNoteTags('Before <note title="T">Inside</note> after', true)).toEqual([
-            { type: 'markdown', markdown: 'Before ' },
-            { type: 'note', title: 'T', markdown: 'Inside' },
-            { type: 'markdown', markdown: ' after' },
+describe('unwrapNoteTags', () => {
+    it('inlines the body of a legacy <note> tag', () => {
+        expect(unwrapNoteTags('Before <note title="T">Inside</note> after')).toEqual([
+            { type: 'markdown', markdown: 'Before \n\nInside\n\n after' },
         ]);
     });
 
     it('leaves note tags written inside code alone', () => {
         const text = 'Example:\n\n```xml\n<note title="T">Body</note>\n```\n\nAnd `<note>` inline.';
-        expect(splitNoteTags(text, true)).toEqual([{ type: 'markdown', markdown: text }]);
+        expect(unwrapNoteTags(text)).toEqual([{ type: 'markdown', markdown: text }]);
     });
 
     it('does not let an unclosed tag in code consume a later real note', () => {
         const text = 'Write `<note>` like this.\n\n<note title="Real">Line one\n\nLine two</note>\n\nAfter.';
-        expect(splitNoteTags(text, true)).toEqual([
-            { type: 'markdown', markdown: 'Write `<note>` like this.\n\n' },
-            { type: 'note', title: 'Real', markdown: 'Line one\n\nLine two' },
-            { type: 'markdown', markdown: '\n\nAfter.' },
+        expect(unwrapNoteTags(text)).toEqual([
+            {
+                type: 'markdown',
+                markdown: 'Write `<note>` like this.\n\n\n\nLine one\n\nLine two\n\n\n\nAfter.',
+            },
         ]);
     });
 
     it('keeps an unterminated note to the end of the text', () => {
-        expect(splitNoteTags('<note title="T">Still writing', true)).toEqual([
-            { type: 'note', title: 'T', markdown: 'Still writing' },
+        expect(unwrapNoteTags('<note title="T">Still writing')).toEqual([
+            { type: 'markdown', markdown: 'Still writing' },
         ]);
     });
 });
@@ -185,13 +184,11 @@ describe('buildResponseBlocks content', () => {
         const canceled = run('r1', 'Q', [
             { part_kind: 'text', content: 'Searching.' },
             { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'a', args: {} },
-            { part_kind: 'text', content: 'Answer <note title="Details">Details</note> Done.' },
+            { part_kind: 'text', content: 'Answer. Done.' },
             { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'b', args: {} },
         ]);
         expect(buildResponseBlocks([canceled], { content: 'final' })).toEqual([
-            { type: 'markdown', markdown: 'Answer ' },
-            { type: 'note', title: 'Details', markdown: 'Details' },
-            { type: 'markdown', markdown: ' Done.' },
+            { type: 'markdown', markdown: 'Answer. Done.' },
         ]);
         const noteOnly = run('r2', 'Q', [
             { part_kind: 'tool-call', tool_name: 'item_search_by_topic', tool_call_id: 'a', args: {} },

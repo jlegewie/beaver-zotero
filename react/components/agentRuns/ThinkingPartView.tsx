@@ -87,7 +87,6 @@ export const ThinkingPartView: React.FC<ThinkingPartViewProps> = ({
                     <MarkdownRenderer 
                         className="markdown chat-prose"
                         content={content.trim().replace(/^undefined/, '')}
-                        enableNoteBlocks={false}
                     />
                 </div>
             )}

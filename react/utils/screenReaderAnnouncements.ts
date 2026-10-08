@@ -19,6 +19,7 @@ function decodeBasicHtmlEntities(text: string): string {
  */
 export function toScreenReaderText(text: string): string {
     return decodeBasicHtmlEntities(text)
+        // Legacy `<note>` sections in older threads: announce the title, keep the body.
         .replace(/<note\s+[^>]*title=["']([^"']+)["'][^>]*>/gi, '\n$1\n')
         .replace(/<\/note>/gi, '\n')
         .replace(/<citation\b[^>]*\/?>/gi, '')

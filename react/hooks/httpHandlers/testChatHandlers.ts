@@ -470,7 +470,6 @@ export async function handleTestUndoActionHttpRequest(request: any) {
             case 'manage_collections':
                 await undoManageCollectionsAction(action);
                 break;
-            case 'zotero_note':
             case 'create_note':
                 await undoCreateNoteAction(action);
                 break;

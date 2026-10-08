@@ -114,7 +114,6 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
                             <TextPartView
                                 key={`text-${index}`}
                                 part={part}
-                                runId={runId}
                             />
                         )
                     ))}

@@ -60,10 +60,7 @@ export const CreateNotePreview: React.FC<CreateNotePreviewProps> = ({
                     ref={contentRef}
                     className={`markdown note-body ${compact ? 'create-note-preview-compact' : ''} ${isTruncated ? 'is-truncated' : ''}`}
                 >
-                    <MarkdownRenderer
-                        content={trimmedContent}
-                        enableNoteBlocks={false}
-                    />
+                    <MarkdownRenderer content={trimmedContent} />
                 </div>
             </div>
         </div>
