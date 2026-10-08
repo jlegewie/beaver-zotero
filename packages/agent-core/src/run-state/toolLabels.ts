@@ -1,6 +1,6 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from '../agents/types';
-import { parseArgs, TOOL_BASE_LABELS } from './toolCallRequest';
+import { getToolBaseLabel, parseArgs } from './toolCallRequest';
 import { isExternalReferenceListView, isItemRow, type ToolResultView } from './toolResultViews';
 import { extractAuthorLastName, type ExternalReference } from '../types/externalReferences';
 
@@ -412,7 +412,7 @@ function computeMainLabel(
     opts?: ToolCallLabelOptions,
 ): string {
     const toolName = part.tool_name;
-    const baseLabel = TOOL_BASE_LABELS[toolName] ?? 'Calling function';
+    const baseLabel = getToolBaseLabel(toolName);
 
     // Progress messages take precedence when present
     if (status === 'in_progress' && part.progress) {

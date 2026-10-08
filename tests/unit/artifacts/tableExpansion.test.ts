@@ -18,7 +18,8 @@ vi.mock("../../../react/utils/toolCallLabelEnrich", () => ({
 vi.mock("../../../react/components/agentRuns/GenericAgentActionView", () => ({
     GenericAgentActionView: () => null,
 }));
-vi.mock("../../../react/components/agentRuns/ToolResultView", () => ({
+vi.mock("../../../react/components/agentRuns/ToolResultView", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../../react/components/agentRuns/ToolResultView")>()),
     ToolResultView: () => React.createElement("div", null, "Result body"),
 }));
 
@@ -38,7 +39,7 @@ afterEach(() => {
 it.each([
     { kind: "table card", tool: "create_table", expanded: true },
     { kind: "table status", tool: "fill_table", expanded: true },
-    { kind: "ordinary result", tool: "get_metadata", expanded: false },
+    { kind: "ordinary result", tool: "list_tags", expanded: false },
 ])(
     "toggles $kind from its displayed default on the first click",
     async ({ kind, tool, expanded }) => {
@@ -68,7 +69,18 @@ it.each([
                           },
                       },
                   }
-                : {}),
+                : kind === "ordinary result"
+                  ? {
+                        metadata: {
+                            view: {
+                                view_type: "tag_list",
+                                tool_name: "list_tags",
+                                tags: [],
+                                total_count: 1,
+                            },
+                        },
+                    }
+                  : {}),
         });
         container = document.createElement("div");
         document.body.append(container);
@@ -108,3 +120,42 @@ it.each([
         expect(!!container.querySelector("#tool-result-call")).toBe(expanded);
     },
 );
+
+it("keeps a tool without a supported view collapsed", async () => {
+    const store = createStore();
+    store.set(resultAtom, {
+        part_kind: "tool-return",
+        tool_name: "find_book_chapters",
+        tool_call_id: "call",
+        content: { chapters: [] },
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () =>
+        root!.render(
+            React.createElement(
+                Provider,
+                { store },
+                React.createElement(ToolCallPartView, {
+                    part: {
+                        part_kind: "tool-call",
+                        tool_name: "find_book_chapters",
+                        tool_call_id: "call",
+                        args: {},
+                    },
+                    runId: "run",
+                    responseIndex: 0,
+                    runStatus: "completed",
+                }),
+            ),
+        ),
+    );
+    const button = container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    expect(button.textContent).toContain("Find book chapters");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+
+    act(() => button.click());
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector("#tool-result-call")).toBeNull();
+});
