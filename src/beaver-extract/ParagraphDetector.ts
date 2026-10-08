@@ -71,6 +71,13 @@ export interface ParagraphDetectionSettings {
      * preset.
      */
     isolatedHeadings?: boolean;
+    /**
+     * A page whose text is mostly set in a style other than the document's
+     * body styles (an appended or cover page in another face) adds that style
+     * to the page's body styles (`pageBodyStyle`), so its lines are not
+     * headings (default: false). Enabled by the PDF schema preset.
+     */
+    pageBodyStyles?: boolean;
 }
 
 const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
@@ -86,6 +93,7 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     hangingIndentBlocks: false,
     headingLabelFilters: true,
     isolatedHeadings: false,
+    pageBodyStyles: false,
 };
 
 /**
@@ -923,6 +931,54 @@ function pageBodyExactSize(
     return samples[samples.length - 1].size;
 }
 
+/** Visible glyphs a page needs before `pageBodyStyle` reads its body style. */
+const PAGE_BODY_MIN_CHARS = 600;
+/** Share of a page's visible glyphs its own body style must cover. */
+const PAGE_BODY_MIN_SHARE = 0.6;
+/** Largest share of a page's glyphs in the document's body styles for the page to have its own. */
+const PAGE_BODY_MAX_DOC_SHARE = 0.15;
+
+/**
+ * The page's own body style, when it differs from the document's: the style
+ * (font, size, weight, slant, by majority per line) that covers most of the
+ * page's text. A page appended in another face ("This article has been cited
+ * by: 1. …" in Times under a New Caledonia article) is all "different font"
+ * to the document-wide heading rules; on its own page that face is the body.
+ * A heading has to stand out on its page too. Only a page that is nearly
+ * all in another face has its own body style: where the document's body
+ * text sets more than `PAGE_BODY_MAX_DOC_SHARE` of the page, the page's
+ * headings are judged against it as everywhere else, however much of the
+ * page a block quote or a list in a heading face takes up. Null also when
+ * the page has little text or no style covers `PAGE_BODY_MIN_SHARE` of it.
+ */
+function pageBodyStyle(columnResults: ColumnLineResult[], bodyStyles: TextStyle[]): TextStyle | null {
+    if (bodyStyles.length === 0) return null;
+    const styles: { style: TextStyle; chars: number }[] = [];
+    let total = 0;
+    let docBody = 0;
+    for (const col of columnResults) {
+        for (const line of col.lines) {
+            const reported = extractLineStyle(line);
+            if (!reported) continue;
+            const style = majorityLineStyle(line, reported);
+            const chars = line.text.replace(/\s/gu, "").length;
+            if (chars === 0) continue;
+            total += chars;
+            if (matchesBodyStyle(style, bodyStyles)) {
+                docBody += chars;
+                continue;
+            }
+            const known = styles.find(entry => matchesBodyStyle(style, [entry.style]));
+            if (known) known.chars += chars;
+            else styles.push({ style, chars });
+        }
+    }
+    if (total < PAGE_BODY_MIN_CHARS || docBody > PAGE_BODY_MAX_DOC_SHARE * total) return null;
+    let best: { style: TextStyle; chars: number } | null = null;
+    for (const entry of styles) if (!best || entry.chars > best.chars) best = entry;
+    return best && best.chars >= PAGE_BODY_MIN_SHARE * total ? { ...best.style, pageLocal: true } : null;
+}
+
 /**
  * Largest exact-size difference from the body, as a share of the body size,
  * that font expansion produces. LaTeX `microtype` scales glyphs by up to 2%
@@ -1291,7 +1347,10 @@ export function looksLikeFragmentedCJKBody(
     if (!hasCJKContent(text)) return false;
     if (NUMERIC_OUTLINE_PREFIX_CJK_RE.test(text)) return false;
 
+    // A page's own body style (`pageBodyStyle`) is another face, not a subset
+    // of the document's: it is no evidence of fragmentation.
     const sameDims = bodyStyles.filter(bs =>
+        !bs.pageLocal &&
         Math.abs(bs.size - lineStyle.size) < 0.5 &&
         bs.bold === lineStyle.bold &&
         bs.italic === lineStyle.italic
@@ -1574,7 +1633,8 @@ function isHeaderStyle(
         phraseTextOverride !== null &&
         (looksLikeRunInLabel(phraseTextOverride) ||
             looksLikeEquation(phraseTextOverride) ||
-            looksLikeWebAddresses(phraseTextOverride))
+            looksLikeWebAddresses(phraseTextOverride) ||
+            looksLikeIdentifier(phraseTextOverride))
     ) {
         return false;
     }
@@ -1753,6 +1813,29 @@ function looksLikeWebAddresses(text: string): boolean {
 }
 
 /**
+ * A lone identifier rather than words: an e-mail address, or a long token
+ * without spaces in an identifier's shape — code punctuation ("_", "%",
+ * "#", "=", "@"), a file name ending, or a hash (a lowercase run of eight or
+ * more hex digits, or a UUID) — such as a link wrapped onto its own line
+ * ("071d4a94-28a8-11e4-8593-da634b334390_story.html") or a rule of
+ * underscores. Hyphenated scientific names with digits
+ * ("Phosphatidylinositol-3-Kinase", "ABCC10-Mediated-Chemoresistance"),
+ * words joined by slashes and CJK headings are not identifiers.
+ */
+function looksLikeIdentifier(text: string): boolean {
+    const token = text.trim();
+    if (/[\s\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(token)) return false;
+    if (/^[^@\s]+@[^@\s]+\.\p{L}{2,}$/u.test(token)) return true;
+    if (token.length < 20) return false;
+    return (
+        /[_%#=@\\]/u.test(token) ||
+        /\.(?:html?|pdf|php|aspx?|jsp|xml|txt|docx?|xlsx?|csv|zip)\b/iu.test(token) ||
+        /(?:^|[^0-9a-z])(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}(?![0-9a-z])/u.test(token) ||
+        /(?:^|[^0-9a-z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}(?![0-9a-z])/iu.test(token)
+    );
+}
+
+/**
  * Numbered CJK / Korean section headings whose number alone carries the
  * heading styling: a bold or larger "２．２" / "5" / "(6)" before heading text
  * set in a face MuPDF doesn't flag as bold ("２．２ 明确对党忠诚的…"). The
@@ -1865,17 +1948,28 @@ function matchesHeaderRules(
     // same-or-smaller size, non-italic, and preceded by a gap. Resolved,
     // distinct-font docs keep using Rule 5 (this bypass requires an indistinct
     // font, so it never changes their behavior).
+    //
+    // A page set in its own body face (`pageBodyStyle`) is the same case on
+    // that page: an all-caps heading in the page's face ("APPENDIX METHODS"
+    // on an appendix page in another font) matches the page's body style. It
+    // qualifies by the page's body as well as by the document's: not larger
+    // than either body in that body's face.
     const fontIndistinctFromBody =
         !lineStyle.font ||
         lineStyle.font === "unknown" ||
         lineStyle.font === primaryBodyStyle.font ||
         baseFontName(lineStyle.font) === baseFontName(primaryBodyStyle.font);
+    const indistinctFromPageBody = bodyStyles.some(
+        style =>
+            style.pageLocal &&
+            baseFontName(style.font) === baseFontName(lineStyle.font) &&
+            lineStyle.size - style.size < 0.5
+    );
     const capsWithoutFontCue =
         gapCheckPasses &&
         !bodyAllCaps &&
-        fontIndistinctFromBody &&
+        ((fontIndistinctFromBody && sizeVsBody <= 0) || indistinctFromPageBody) &&
         !lineStyle.italic &&
-        sizeVsBody <= 0 &&
         isAllCapsHeaderPhrase(phraseText) &&
         // All-caps reference-list entries (uppercased author names + year)
         // share the body face and would otherwise be promoted; the byline /
@@ -3426,6 +3520,11 @@ export function detectParagraphs(
     const bodyExactSize = pageBodyExactSize(lineResult.columnResults, bodyStyles);
     if (bodyStyles && bodyExactSize !== null) {
         bodyStyles = [{ ...bodyStyles[0], exactSize: bodyExactSize }, ...bodyStyles.slice(1)];
+    }
+
+    if (opts.pageBodyStyles && bodyStyles) {
+        const pageStyle = pageBodyStyle(lineResult.columnResults, bodyStyles);
+        if (pageStyle) bodyStyles = [...bodyStyles, pageStyle];
     }
 
     let pageContent = "";

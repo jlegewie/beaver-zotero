@@ -2607,6 +2607,145 @@ describe('header detection', () => {
             expect(kindOf('P(A, B) = P(A)P(B)', off)).toBe('header');
             expect(kindOf('www.aclweb.org', off)).toBe('header');
         });
+
+        it('demotes a lone identifier: a wrapped link tail, an e-mail address, a rule', () => {
+            expect(kindOf('071d4a94-28a8-11e4-8593-da634b334390_story.html')).toBe('paragraph');
+            expect(kindOf('/content/333/6042/627.full.html')).toBe('paragraph');
+            expect(kindOf('3f2a9c1e7b4d5a6c8e9f0a1b2c3d4e5f6a7b8c9d')).toBe('paragraph');
+            expect(kindOf('9B2E4F1A-7C3D-4E5F-8A9B-0C1D2E3F4A5B')).toBe('paragraph');
+            expect(kindOf('ophir.klein@ucsf.edu')).toBe('paragraph');
+            expect(kindOf('______________________________')).toBe('paragraph');
+        });
+
+        it('keeps one-word headings, slash pairs and CJK headings', () => {
+            expect(kindOf('ABCC10-Mediated-Chemoresistance')).toBe('header');
+            expect(kindOf('Phosphatidylinositol-3-Kinase')).toBe('header');
+            expect(kindOf('17β-Hydroxysteroid-Dehydrogenase')).toBe('header');
+            expect(kindOf('Acknowledgements')).toBe('header');
+            expect(kindOf('Literaturverzeichnis')).toBe('header');
+            expect(kindOf('Metabolism/Elimination')).toBe('header');
+            expect(kindOf('一、中国共产党纪律体系的历史演进2021')).toBe('header');
+        });
+    });
+
+    describe('page body styles', () => {
+        // A page appended in another face ("This article has been cited by:"
+        // in Times under a New Caledonia article): its numbered entries fit
+        // Rule 6 (same size, different font, section-number prefix) against
+        // the document body, but on their own page that face is the body.
+        const DOC_BODY = bodyStyle(10, 'NewCaledonia');
+        const ENTRIES: LeaderLineSpec[] = Array.from({ length: 8 }, (_, i): LeaderLineSpec[] => [
+            {
+                text: `${i + 1}. A. Author, B. Author. 2011. A study of something that matters a great deal to`,
+                l: 0,
+                size: 10,
+                font: 'Times-Roman',
+            },
+            { text: 'Economic Perspectives and Policy 3: 1-9.', l: 10, size: 10, font: 'Times-Roman', gapAfter: 14 },
+        ]).flat();
+
+        function types(specs: LeaderLineSpec[], settings: ParagraphDetectionSettings) {
+            return items(specs, [DOC_BODY], settings).map(it => it.type);
+        }
+
+        it('reads the page style as body on a page set in another face', () => {
+            expect(types(ENTRIES, { pageBodyStyles: true })).not.toContain('header');
+        });
+
+        it('keeps the document-wide reading without page body styles (PDF schema 4)', () => {
+            expect(types(ENTRIES, { pageBodyStyles: false })).toContain('header');
+        });
+
+        it('keeps a heading that stands out on its page', () => {
+            const heading: LeaderLineSpec = {
+                text: 'This article has been cited by:',
+                l: 0,
+                size: 10,
+                font: 'Times-Bold',
+                bold: true,
+                gapAfter: 10,
+            };
+            const all = items([heading, ...ENTRIES], [DOC_BODY], { pageBodyStyles: true });
+            expect(all.filter(it => it.type === 'header').map(it => it.text)).toEqual([
+                '## This article has been cited by:',
+            ]);
+        });
+
+        it('keeps an all-caps heading set in the page body face', () => {
+            // An appendix page set in Times under a New Caledonia document.
+            const prose = (n: number): LeaderLineSpec[] =>
+                Array.from({ length: n }, (_, i) => ({
+                    text: `Appendix prose in the page face, line ${i + 1} of a paragraph that runs across the page.`,
+                    l: 0,
+                    size: 10,
+                    font: 'Times-Roman',
+                }));
+            const before = prose(6);
+            before[5] = { ...before[5], gapAfter: 14 };
+            const heading: LeaderLineSpec = { text: 'APPENDIX METHODS', l: 0, size: 10, font: 'Times-Roman' };
+            for (const pageBodyStyles of [false, true]) {
+                const all = items([...before, heading, ...prose(6)], [DOC_BODY], { pageBodyStyles });
+                expect(all.find(it => it.text.includes('APPENDIX METHODS'))?.type, String(pageBodyStyles)).toBe('header');
+            }
+        });
+
+        it('keeps an all-caps heading that qualifies by the document body on a page with its own', () => {
+            // Document body 11pt, the page's own body 9pt, the heading 10pt,
+            // all in one face: not larger than the document body, it is a
+            // heading as it would be without the page's body style.
+            const docBody = bodyStyle(11, 'Times-Bold', true);
+            const prose = (n: number): LeaderLineSpec[] =>
+                Array.from({ length: n }, (_, i) => ({
+                    text: `Reference list text set smaller, line ${i + 1} of an entry that runs across the page.`,
+                    l: 0,
+                    size: 9,
+                    font: 'Times-Bold',
+                    bold: true,
+                }));
+            const before = prose(6);
+            before[5] = { ...before[5], gapAfter: 14 };
+            const heading: LeaderLineSpec = { text: 'REFERENCES', l: 0, size: 10, font: 'Times-Bold', bold: true };
+            for (const pageBodyStyles of [false, true]) {
+                const all = items([...before, heading, ...prose(6)], [docBody], { pageBodyStyles });
+                expect(all.find(it => it.text.includes('REFERENCES'))?.type, String(pageBodyStyles)).toBe('header');
+            }
+        });
+
+        it('keeps a CJK heading on a page set in another body face at the body size', () => {
+            // A 10pt SimSun document with an appendix page in NotoSansCJK: the
+            // page's body face is no evidence that the document's body font is
+            // split across subsets.
+            const prose = (n: number): LeaderLineSpec[] =>
+                Array.from({ length: n }, () => ({
+                    text: '本附录说明研究所使用的数据来源样本构成以及变量的测量方式和处理过程',
+                    l: 0,
+                    size: 10,
+                    font: 'NotoSansCJK-Regular',
+                }));
+            const before = prose(12);
+            before[11] = { ...before[11], gapAfter: 14 };
+            const heading: LeaderLineSpec = { text: '研究方法', l: 0, size: 10, font: 'NotoSansCJK-Medium' };
+            for (const pageBodyStyles of [false, true]) {
+                const all = items([...before, heading, ...prose(12)], [bodyStyle(10, 'SimSun')], { pageBodyStyles });
+                expect(all.find(it => it.text.includes('研究方法'))?.type, String(pageBodyStyles)).toBe('header');
+            }
+        });
+
+        it('leaves a page with document body text to the document-wide rules', () => {
+            const body: LeaderLineSpec[] = Array.from({ length: 12 }, (_, i) => ({
+                text: `Ordinary body text in the document face, line ${i + 1} of the section that continues.`,
+                l: 0,
+                size: 10,
+                font: 'NewCaledonia',
+            }));
+            const heading: LeaderLineSpec = { text: '2.1 Methods and Data', l: 0, size: 10, font: 'Helvetica' };
+            const all = items(
+                [...body.slice(0, 6), { ...body[5], gapAfter: 14 }, heading, ...body.slice(6)],
+                [DOC_BODY],
+                { pageBodyStyles: true },
+            );
+            expect(all.find(it => it.text.includes('Methods'))?.type).toBe('header');
+        });
     });
 
     describe('numbered CJK headings styled only by their number', () => {

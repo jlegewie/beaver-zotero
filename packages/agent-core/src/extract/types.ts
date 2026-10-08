@@ -630,6 +630,11 @@ export interface TextStyle {
      * paragraph detector).
      */
     exactSize?: number;
+    /**
+     * The style is a page's own body style rather than one of the document's
+     * (see `pageBodyStyle` in the paragraph detector).
+     */
+    pageLocal?: boolean;
 }
 
 /** Create a unique key string for a TextStyle */
