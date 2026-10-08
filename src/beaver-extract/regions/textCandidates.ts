@@ -12,7 +12,7 @@
  */
 import { UnionFind } from "./cluster";
 import { hgap, overlapFrac, unionRect, vgap, type Rect } from "./geometry";
-import { NUMERIC_RE, isProse, type Primitive, type RegionLine } from "./pageSignals";
+import { NUMERIC_RE, inkSizeOf, isProse, type Primitive, type RegionLine } from "./pageSignals";
 
 /** Stacked lines join across at most this many body sizes of vertical space. */
 const STACK_GAP = 1.0;
@@ -26,7 +26,8 @@ const ALIGNED_GAP = 3;
 const EDGE_TOLERANCE = 3;
 /** Relation signs that start a separate equation on a new row. */
 const RELATION_RE = /[=≤≥<>≈≡∝≠≃≅∼]/;
-const LEADING_RELATION_RE = /^[=≤≥<>≈≡∝≠≃≅∼]/;
+/** A row opening with a relation (":=" included) continues the row above. */
+const LEADING_RELATION_RE = /^(?::=|[=≤≥<>≈≡∝≠≃≅∼])/;
 /** A number, maybe signed, in scientific notation, or a percentage: "1.25", "−3", "1.2e−3", "1.2 × 10⁻³", "12%". */
 const VALUE = String.raw`[−–-]?(?:\d[\d.,]*|\.\d+)(?:\s*[eE][−–+-]?\d+|\s*[×x·]\s*10[⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+|\s*[×x·]\s*10\^?[−–+-]?\d+)?\s*%?`;
 /** A unit; one letter only as an SI symbol, so that "2 x" stays a term of an equation. */
@@ -828,10 +829,21 @@ function mergeAligned(
     return groups;
 }
 
+/** A relation sign set below this share of the type size around it is in a script. */
+const SCRIPT_RELATION = 0.85;
+/** Limits sit at most this many of their line heights above or below what they attach to (a tall ∏'s box is its text line's). */
+const LIMIT_REACH = 2;
+/** A limit's centre lies within this many points of the span of what it attaches to... */
+const LIMIT_CENTRE_TOLERANCE = 1;
+/** ...and it is at most this many times as wide ("i=m+1" under a ∑). */
+const LIMIT_WIDTH = 3;
+
 /**
  * In a group of math, each row holding its own relation sign
  * is a separate equation (b₂ = …, −θ = …); a row starting with a relation
- * ("= …", "≤ …") or without one continues the previous row.
+ * ("= …", "≤ …") or without one continues the previous row. A relation set in
+ * script size (a sum's limits, "i=1" under a ∑) belongs to the term it sits
+ * under and splits nothing.
  */
 function splitAtRelations(group: RegionLine[], eqNumbers: ReadonlySet<RegionLine>): RegionLine[][] {
     const ink = group.reduce((n, l) => n + l.inkChars, 0);
@@ -851,9 +863,51 @@ function splitAtRelations(group: RegionLine[], eqNumbers: ReadonlySet<RegionLine
             .map((l) => l.text)
             .join(" ")
             .trim();
+    // A relation is a script's when set small for the text of its row (a limit beside the
+    // operator), or small for the group's text on a row of limits: a row set in script size
+    // under or over an operator (∑, ∫, lim, sup, ...) or under or over another such row
+    // (limits stacked under "lim sup"). A whole equation set smaller than its neighbour hangs
+    // on no operator.
+    const mainSize = inkSizeOf(group);
+    const smallRow = (row: readonly RegionLine[]) => inkSizeOf(row) < SCRIPT_RELATION * mainSize;
+    // What limits attach to: the spans of the operators on the group's lines, then the
+    // limit rows found under or over them (limits stacked on limits).
+    const anchors: { line: RegionLine; spans: [number, number][] }[] = group
+        .filter((l) => l.limitSpans?.length)
+        .map((l) => ({ line: l, spans: l.limitSpans! }));
+    // A limit is centred under or over its operator, close to its line, and narrow beside it.
+    const attached = (l: RegionLine) =>
+        anchors.some(({ line, spans }) => {
+            if (line === l) return false;
+            const h = Math.max(l.bbox[3] - l.bbox[1], line.bbox[3] - line.bbox[1]);
+            if (Math.max(l.bbox[1] - line.bbox[3], line.bbox[1] - l.bbox[3]) > LIMIT_REACH * h) return false;
+            const cx = (l.bbox[0] + l.bbox[2]) / 2;
+            return spans.some(
+                ([x0, x1]) =>
+                    cx >= x0 - LIMIT_CENTRE_TOLERANCE &&
+                    cx <= x1 + LIMIT_CENTRE_TOLERANCE &&
+                    l.bbox[2] - l.bbox[0] <= LIMIT_WIDTH * (x1 - x0) + LIMIT_CENTRE_TOLERANCE,
+            );
+        });
+    const limitRows = new Set<RegionLine[]>();
+    for (let grown = true; grown; ) {
+        grown = false;
+        for (const row of rows) {
+            if (limitRows.has(row) || !smallRow(row) || !row.some(attached)) continue;
+            limitRows.add(row);
+            for (const l of row) anchors.push({ line: l, spans: [[l.bbox[0], l.bbox[2]]] });
+            grown = true;
+        }
+    }
+    const fullSize = (l: RegionLine, row: RegionLine[]) => {
+        const size = l.relationSize ?? 0;
+        if (!size || size < SCRIPT_RELATION * inkSizeOf(row)) return false;
+        return size >= SCRIPT_RELATION * mainSize || !limitRows.has(row);
+    };
+    const relation = (row: RegionLine[]) => row.some((l) => fullSize(l, row));
     const ownRelation = (row: RegionLine[]) => {
         const t = text(row);
-        return RELATION_RE.test(t.slice(1)) && !LEADING_RELATION_RE.test(t);
+        return relation(row) && RELATION_RE.test(t.slice(1)) && !LEADING_RELATION_RE.test(t);
     };
     const parts: RegionLine[][] = [];
     let current: RegionLine[] = [];
@@ -866,7 +920,7 @@ function splitAtRelations(group: RegionLine[], eqNumbers: ReadonlySet<RegionLine
             currentHasRelation = false;
         }
         current.push(...row);
-        currentHasRelation ||= own || RELATION_RE.test(text(row));
+        currentHasRelation ||= own || relation(row);
     }
     parts.push(current);
     return parts;

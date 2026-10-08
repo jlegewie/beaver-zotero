@@ -192,6 +192,30 @@ describe("pagePrimitives", () => {
         expect(prims.map((p) => p.kind)).toEqual(["vrule", "image"]);
     });
 
+    it("reads hairline images as rules: a pixel stretched along a table's rules and cell borders", () => {
+        const prims = pagePrimitives(
+            summary([
+                { kind: GS_KIND.imageMask, bbox: [72, 109.2, 584.3, 109.7] }, // a rule across the table
+                { kind: GS_KIND.imageMask, bbox: [174.3, 109.6, 174.8, 175.5] }, // one cell's border
+                { kind: GS_KIND.imageMask, bbox: [72, 300, 80, 300.5] }, // a dash, too short for a rule
+                { kind: GS_KIND.imageMask, bbox: [72, 320, 584, 320.5], rgb: 0xffffff }, // painted white: nothing
+            ]),
+            W,
+            H,
+            BS,
+        );
+        expect(prims.map((p) => p.kind)).toEqual(["hrule", "vrule"]);
+        // A raster stored as touching strips, one per row of pixels, is one image, no set of rules.
+        const strips = pagePrimitives(
+            summary(Array.from({ length: 20 }, (_, k): Rec => ({ kind: GS_KIND.image, bbox: [48, 337 + 0.35 * k, 273, 337.35 + 0.35 * k] }))),
+            W,
+            H,
+            BS,
+        );
+        expect(strips.map((p) => p.kind)).toEqual(["image"]);
+        expect(strips[0].bbox.map((v) => Math.round(v))).toEqual([48, 337, 273, 344]);
+    });
+
     it("turns runs of overflow-grid cells into coarse marks", () => {
         const size = 32;
         const prims = pagePrimitives(summary([], { size, cells: [3 * size + 4, 3 * size + 5, 3 * size + 9] }), W, H, BS);
