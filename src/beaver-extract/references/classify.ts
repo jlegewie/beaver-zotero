@@ -15,8 +15,8 @@ import { joinLines, type HangingRole } from "../ParagraphDetector";
 import type { DraftItem } from "../pipeline/draftItems";
 import { lineStartProbability, scoreReferences, type ReferenceModel } from "./model";
 import { HANGING_MAX_INDENT_EM, LINE_FEATURES, canOpenEntry, hangingLevels, pageLineFeatures } from "./lines";
-import { hasBibliographicDetail, isNotesHeading, isReferenceHeading, proseWordCount } from "./features";
-import type { RefItem, RefLine, RefPage } from "./pageInput";
+import type { InputItem, InputLine, InputPage } from "../features/itemInput";
+import { hasBibliographicDetail, isNotesHeading, isReferenceHeading, proseWordCount } from "../features/text";
 import { REFERENCE_MODEL } from "./weights";
 
 export interface ReferencePagePlan {
@@ -40,7 +40,7 @@ export interface ReferencePagePlan {
  * (`acceptCandidates`).
  */
 export function planReferences(
-    pages: readonly RefPage[],
+    pages: readonly InputPage[],
     pageCount: number,
     model: ReferenceModel = REFERENCE_MODEL,
 ): ReferencePagePlan[] {
@@ -133,7 +133,7 @@ interface LinePlan {
  */
 function planLines(
     model: ReferenceModel,
-    page: RefPage,
+    page: InputPage,
     wanted: readonly boolean[],
     votes: readonly boolean[] = wanted,
     layout: readonly boolean[] = wanted,
@@ -196,7 +196,7 @@ interface Candidates {
  * between, or the item right after a reference entry, which may continue it.
  * A heading or label is never one.
  */
-function referenceCandidates(pages: readonly RefPage[], reference: readonly boolean[][]): Candidates {
+function referenceCandidates(pages: readonly InputPage[], reference: readonly boolean[][]): Candidates {
     // A boundary ends a list: a heading, or a label read from the text — a
     // list heading, a caption or an appendix label set like body text.
     type Slot = { p: number; i: number; boundary: boolean; ref: boolean };
@@ -260,14 +260,14 @@ const NON_ENTRY_LABEL_RE =
  * without one ("… Cambridge Univ. Press"), and the text that follows the
  * list can be anything.
  */
-function continuesLastEntry(previous: RefLine, text: string): boolean {
+function continuesLastEntry(previous: InputLine, text: string): boolean {
     if (proseWordCount(text) >= 2 || NON_ENTRY_LABEL_RE.test(text)) return false;
     return OPEN_LINE_END_RE.test(previous.text.trim()) || hasBibliographicDetail(text);
 }
 
 /** One item of the re-segmented document and the original lines it holds. */
 interface Piece {
-    item: RefItem;
+    item: InputItem;
     /** Original item index on the page for each of its lines. */
     origins: number[];
 }
@@ -288,7 +288,7 @@ const ACCEPT_ROUNDS = 3;
  */
 function acceptCandidates(
     model: ReferenceModel,
-    pages: readonly RefPage[],
+    pages: readonly InputPage[],
     pageCount: number,
     reference: boolean[][],
     { candidate, inside }: Candidates,
@@ -343,7 +343,7 @@ function acceptCandidates(
  * continuation at the top of a page is a candidate too).
  */
 function resegmentPage(
-    page: RefPage,
+    page: InputPage,
     reference: readonly boolean[],
     eligible: readonly boolean[],
     plan: LinePlan,
@@ -409,7 +409,7 @@ export function applyReferencePlan(
         // A list heading the detector merged into the first entry ("FURTHER
         // READING Heyman, K. …") is split off as a piece of its own; it is the
         // list's heading, not an entry.
-        if (isRef && piece && isReferenceHeading({ header: false, column: 0, text, lines: [] })) {
+        if (isRef && piece && isReferenceHeading({ header: false, text })) {
             out.push({ ...base, kind: "section_header", text, bbox, lines, roles });
             return;
         }

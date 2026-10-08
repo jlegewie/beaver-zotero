@@ -82,6 +82,8 @@ npm run beaver-extract -- overlay --help
 | `render`         | Render one or more pages to PNG.                       |
 | `fixture`        | Manage extraction-regression fixtures (see below).     |
 | `ocr-fixture`    | Manage OCR-detection regression fixtures (see below).  |
+| `items`          | Training export for item models (`items export --task`, see below). |
+| `references`     | Reference-classifier export, features, plans and debugging. |
 
 Overlay levels: `columns | lines | items | sentences | margins`.
 
@@ -227,6 +229,36 @@ ms fields so you can chart timing vs. page complexity offline.
   is WASM/MuPDF cost, the second is JS cost on the target page.
   `fontBridge` is typically <1% and should not be optimized
   speculatively.
+
+## Training export for item models
+
+```bash
+npm run beaver-extract -- items export --task item-type \
+    --pdf-list docs.jsonl --out /tmp/items-export [--shard 0/4] [--limit N] [--schema 5]
+```
+
+One row per document (`<out>/docs/<doc_id>.json.gz`; list rows are JSONL with
+`doc_id` and `pdf_path`). Every row records its `commit` (and `dirty` when
+tracked files differ from it), `feature_set` and `feature_version`. Per page:
+
+- `units`: the draft items where the task's model runs (start of step 3), one
+  training row each: `unit` (index on the page), draft `kind`, box, text, lines
+  and the task's `features` (null for a missing value).
+- `items`: the structured result's items with their ids, boxes
+  (`--bbox-precision`, default 2, as in the training repo's structured export),
+  columns, text, lines (box, text, font, size, hanging role) and the `units`
+  their lines came from. A reference entry split from a unit lists that unit;
+  an item merged from several lists them all; region items list none.
+- `filtered_lines`: the lines the margin filter removed (`filtered: true`).
+
+Labels made on the structured export of the same commit match items by id and
+map onto units through `units`. `<out>/manifest.json` records the task,
+feature names and version, schema, box precision and commit; a directory is
+only resumed with the same settings and commit (use a new `--out` otherwise).
+An unsupported `--schema` fails before any document is attempted. Extraction
+uses the plugin's settings, so features see the same analysis window as at
+runtime: every page of the document. Resumable and shardable like
+`references export`; each shard keeps its own `ledger-<i>of<n>.jsonl`.
 
 ## Configuration
 
@@ -415,7 +447,10 @@ src/beaver-extract/
 │   │   ├── rawDetailed.ts           # `raw-detailed`
 │   │   ├── render.ts                # `render`
 │   │   ├── fixture.ts               # `fixture {capture,evaluate,update,migrate,list}`
-│   │   └── ocrFixture.ts            # `ocr-fixture {capture,evaluate,update,list}`
+│   │   ├── ocrFixture.ts            # `ocr-fixture {capture,evaluate,update,list}`
+│   │   ├── items.ts                 # `items export` (training export for item models)
+│   │   └── references.ts            # `references {export,featurize,plan,classify,render}`
+│   ├── batch.ts                 # document lists, shards, resume ledger (export commands)
 │   └── fixture/                 # extract + OCR fixture file format (Node-only)
 │       ├── fixtureFile.ts           # atomic read/write, _shared/ dedup
 │       ├── fixtureSchema.ts         # validators with targeted errors

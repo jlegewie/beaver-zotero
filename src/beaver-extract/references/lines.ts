@@ -8,8 +8,9 @@
  * whether the item starts an entry or continues the previous one.
  */
 
-import { leadingNumber } from "./features";
-import type { RefLine, RefPage } from "./pageInput";
+import { clamp } from "../features/geometry";
+import type { InputLine, InputPage } from "../features/itemInput";
+import { AUTHOR_LEADER, NUMBERED_RE, SURNAME, leadingNumber } from "../features/text";
 
 export const LINE_FEATURE_VERSION = 3;
 
@@ -42,11 +43,6 @@ export const LINE_FEATURES = [
 
 type LineFeatureName = (typeof LINE_FEATURES)[number];
 
-const LEADER = String.raw`(?:\[\d{1,4}\]|\(\d{1,4}\)|\d{1,4}[.)](?!\d))\s*`;
-/** A list leader, or a bare list number before the author ("16 Schwamm LH, …"). */
-const AUTHOR_LEADER = String.raw`(?:${LEADER}|\d{1,4}\s+(?=\p{Lu}))`;
-const SURNAME = String.raw`(?:(?:van|von|de|da|del|della|der|den|di|du|le|la|dos|das|ten|ter|mc|mac|o')\s?)*\p{Lu}[\p{L}'’\-]+(?:[\s\-]\p{Lu}[\p{L}'’\-]+)?`;
-const NUMBERED_RE = new RegExp(`^\\s*${LEADER}\\S`, "u");
 const AUTHOR_RE = new RegExp(
     `^\\s*(?:${AUTHOR_LEADER})?${SURNAME},?\\s+(?:\\p{Lu}\\.|\\p{Lu}[\\p{Ll}]+[-,;.\\s(]|\\p{Lu}{1,3}[,;.\\s])`,
     "u",
@@ -57,8 +53,6 @@ const INITIALS_RE = new RegExp(
 );
 const DASH_RE = /^\s*(?:[—–-]\s?){2,}/u;
 const YEAR_RE = /(?<![\d/.])(?:1[5-9]\d\d|20[0-3]\d)[a-z]?(?!\d)/u;
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /**
  * An author opening with initials: "Smith, J.", "Smith JA,", "Huber E,", "van der Berg, A.".
@@ -121,13 +115,13 @@ const LEVEL_WINDOW = 20;
  * hang, are absent.
  */
 export function hangingLevels(
-    page: RefPage,
+    page: InputPage,
     wanted: (itemIndex: number) => boolean,
     votes: (itemIndex: number) => boolean = wanted,
 ): Map<number, HangingLevel[]> {
     const em = page.bodySize > 0 ? page.bodySize : 10;
     const out = new Map<number, HangingLevel[]>();
-    const columns = new Map<number, { i: number; k: number; line: RefLine }[]>();
+    const columns = new Map<number, { i: number; k: number; line: InputLine }[]>();
     page.items.forEach((item, i) => {
         if (!wanted(i)) return;
         const seq = columns.get(item.column) ?? [];
@@ -182,7 +176,7 @@ export function hangingLevels(
  * that item is in the same column.
  */
 export function pageLineFeatures(
-    page: RefPage,
+    page: InputPage,
     wanted: (itemIndex: number) => boolean,
 ): Map<number, number[][]> {
     const out = new Map<number, number[][]>();
@@ -198,7 +192,7 @@ export function pageLineFeatures(
     return out;
 }
 
-function lineFeatures(page: RefPage, itemIndex: number, numberBefore: number | null): number[][] {
+function lineFeatures(page: InputPage, itemIndex: number, numberBefore: number | null): number[][] {
     const item = page.items[itemIndex];
     const lines = item.lines;
     if (lines.length === 0) return [];
@@ -219,7 +213,7 @@ function lineFeatures(page: RefPage, itemIndex: number, numberBefore: number | n
     let lastNumber = numberBefore;
     const rows: number[][] = [];
     lines.forEach((line, k) => {
-        const prev: RefLine | null = k > 0 ? lines[k - 1] : prevItemLine;
+        const prev: InputLine | null = k > 0 ? lines[k - 1] : prevItemLine;
         const text = line.text.trim();
         const prevText = prev ? prev.text.trim() : "";
         const n = leadingNumber(text);

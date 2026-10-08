@@ -29,18 +29,22 @@ import { createInterface } from "node:readline";
 import { Command } from "commander";
 
 import type { CliDeps } from "../runCliTypes";
-import { isFatalWasmError, isHeapExhaustionError } from "../../wasmFatal";
+import {
+    checkSchemaOption,
+    dropTornLine,
+    parseShard,
+    pendingDocuments,
+    readJsonl,
+    recoverRuntime,
+    requireFiles,
+    type ListRow,
+} from "../batch";
 import type { ReferenceInputPage } from "../../worker/ops";
 import { CONTEXT_FEATURES, FEATURE_VERSION, ITEM_FEATURES } from "../../references/features";
 import { stage1Features } from "../../references/model";
 import { planReferences } from "../../references/classify";
 import { LINE_FEATURES, LINE_FEATURE_VERSION, pageLineFeatures } from "../../references/lines";
 
-interface ListRow {
-    doc_id: string;
-    pdf_path: string;
-    page_index?: number;
-}
 
 /**
  * An output file whose stream errors (unopenable path, failed write) reject
@@ -120,89 +124,20 @@ async function* exportDocuments(paths: readonly string[]): AsyncGenerator<Export
     }
 }
 
-/** Fail before any output is written when an explicitly supplied input is missing. */
-function requireFiles(paths: readonly string[]): void {
-    for (const path of paths) {
-        if (!existsSync(path)) throw new Error(`input file not found: ${path}`);
-    }
-}
-
-/**
- * Read a JSONL file. A missing file is an error unless `optional` (the
- * resume ledger, which does not exist before the first run).
- */
-async function readJsonl<T>(path: string, { optional = false } = {}): Promise<T[]> {
-    const rows: T[] = [];
-    if (!existsSync(path)) {
-        if (optional) return rows;
-        throw new Error(`input file not found: ${path}`);
-    }
-    const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
-    for await (const line of rl) {
-        if (line.trim()) rows.push(JSON.parse(line) as T);
-    }
-    return rows;
-}
-
-function parseShard(value: string | undefined): { index: number; count: number } {
-    if (!value) return { index: 0, count: 1 };
-    const m = /^(\d+)\/(\d+)$/.exec(value);
-    if (!m || Number(m[1]) >= Number(m[2])) throw new Error(`invalid --shard ${value}`);
-    return { index: Number(m[1]), count: Number(m[2]) };
-}
-
-/**
- * After a fatal MuPDF error the cached WASM runtime is unusable; replace it
- * so the next document runs on a fresh one. Returns how the error relates to
- * the runtime: a trap is the document's own failure, heap exhaustion may not
- * be (the document can succeed on a fresh runtime), anything else left the
- * runtime intact.
- */
-function recoverRuntime(deps: CliDeps, err: unknown): "trap" | "heap" | null {
-    const kind = isHeapExhaustionError(err) ? "heap" : isFatalWasmError(err) ? "trap" : null;
-    if (kind) deps.api.resetExtractionRuntime();
-    return kind;
-}
-
-function shardOf(id: string, count: number): number {
-    let h = 2166136261;
-    for (let i = 0; i < id.length; i++) {
-        h ^= id.charCodeAt(i);
-        h = Math.imul(h, 16777619);
-    }
-    return (h >>> 0) % count;
-}
-
 async function runExport(
     deps: CliDeps,
     opts: { pdfList: string; out: string; limit?: string; shard?: string; schema?: string },
 ): Promise<void> {
     const shard = parseShard(opts.shard);
     const ledgerPath = `${opts.out}.ledger.jsonl`;
+    checkSchemaOption(opts.schema);
     requireFiles([opts.pdfList]);
     // An interrupted append can leave a partial last row in either file. In
     // the ledger, dropping it loses at most one start (one attempt fewer
     // counted) or one outcome (the document is exported again).
     await dropTornLine(ledgerPath);
     await dropTornLine(opts.out);
-    const ledger = await readJsonl<{ doc_id: string; status: string }>(ledgerPath, { optional: true });
-    // A document is done once it succeeded or its extraction failed. It is
-    // given up after two starts without an outcome: the process died on it,
-    // or it exhausted the WASM heap and was left for a retry on a fresh
-    // runtime. A start that ended in an output error is not held against it.
-    const starts = new Map<string, number>();
-    const finished = new Set<string>();
-    for (const row of ledger) {
-        const delta = row.status === "start" ? 1 : row.status === "output_error" ? -1 : 0;
-        if (delta !== 0) starts.set(row.doc_id, (starts.get(row.doc_id) ?? 0) + delta);
-        else if (row.status !== "retry") finished.add(row.doc_id);
-    }
-    const todo = (await readJsonl<ListRow>(opts.pdfList)).filter(
-        (row) =>
-            shardOf(row.doc_id, shard.count) === shard.index &&
-            !finished.has(row.doc_id) &&
-            (starts.get(row.doc_id) ?? 0) < 2,
-    );
+    const todo = await pendingDocuments(opts.pdfList, ledgerPath, shard);
     const appendLedger = (row: object) => appendFile(ledgerPath, JSON.stringify(row) + "\n");
     const limit = opts.limit ? Number(opts.limit) : Infinity;
     let done = 0;
@@ -261,40 +196,6 @@ async function isCompletePng(path: string): Promise<boolean> {
         const tail = Buffer.alloc(PNG_IEND.length);
         await handle.read(tail, 0, tail.length, size - tail.length);
         return tail.equals(PNG_IEND);
-    } finally {
-        await handle.close();
-    }
-}
-
-/**
- * Cut an interrupted append (a last line without its newline) off the end of
- * an output file, so resumed rows start on a fresh line. A row written in full
- * whose ledger entry was lost is exported again; readers keep the last row
- * per document.
- */
-async function dropTornLine(path: string): Promise<void> {
-    if (!existsSync(path)) return;
-    const handle = await open(path, "r+");
-    try {
-        const { size } = await handle.stat();
-        if (size === 0) return;
-        const tail = Buffer.alloc(Math.min(size, 1 << 20));
-        let end = size;
-        for (;;) {
-            const start = Math.max(0, end - tail.length);
-            await handle.read(tail, 0, end - start, start);
-            if (end === size && tail[end - start - 1] === 0x0a) return;
-            const nl = tail.subarray(0, end - start).lastIndexOf(0x0a);
-            if (nl >= 0) {
-                await handle.truncate(start + nl + 1);
-                return;
-            }
-            if (start === 0) {
-                await handle.truncate(0);
-                return;
-            }
-            end = start;
-        }
     } finally {
         await handle.close();
     }

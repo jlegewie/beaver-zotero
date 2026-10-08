@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { CONTEXT_FEATURES, FEATURE_VERSION, ITEM_FEATURES } from "../../../src/beaver-extract/references/features";
 import { LINE_FEATURES, LINE_FEATURE_VERSION } from "../../../src/beaver-extract/references/lines";
 import {
+    STAGE2_FEATURES,
     lineStartProbability,
     stage1Logit,
     stage2Features,
@@ -28,10 +29,11 @@ const fixture = JSON.parse(
 
 describe("reference model parity with the training pipeline", () => {
     it("ships weights for the current feature layout", () => {
-        expect(REFERENCE_MODEL.featureVersion).toBe(FEATURE_VERSION);
-        expect(REFERENCE_MODEL.features).toEqual([...ITEM_FEATURES, ...CONTEXT_FEATURES]);
-        expect(REFERENCE_MODEL.lines.featureVersion).toBe(LINE_FEATURE_VERSION);
-        expect(REFERENCE_MODEL.lines.features).toEqual([...LINE_FEATURES]);
+        expect(REFERENCE_MODEL.stage1.featureVersion).toBe(FEATURE_VERSION);
+        expect(REFERENCE_MODEL.stage1.features).toEqual([...ITEM_FEATURES, ...CONTEXT_FEATURES]);
+        expect(REFERENCE_MODEL.stage2.features).toEqual([...STAGE2_FEATURES, ...ITEM_FEATURES, ...CONTEXT_FEATURES]);
+        expect(REFERENCE_MODEL.lines.model.featureVersion).toBe(LINE_FEATURE_VERSION);
+        expect(REFERENCE_MODEL.lines.model.features).toEqual([...LINE_FEATURES]);
     });
 
     it("reproduces item probabilities, including the stage-2 neighbour features", () => {

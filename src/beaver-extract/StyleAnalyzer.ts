@@ -40,33 +40,33 @@ export function extractStyle(line: RawLine): TextStyle {
         };
     }
 
-    // Determine bold/italic from font properties or name
     const fontName = font.name || "unknown";
-    const fontNameLower = fontName.toLowerCase();
-
-    // Subset font names often encode weight/style as a suffix that substring
-    // checks miss — e.g. `AJHJCE+AdvTT56ea2c23.B` (bold),
-    // `BPEJCI+AdvTTa15c7c65.I` (italic), `XXX.BI`/`.IB` (bold-italic).
-    const boldSuffix = /\.(B|Bd|Bld|Bold|Black|Heavy|BI|IB)$/i;
-    const italicSuffix = /\.(I|It|Italic|Obl|Oblique|BI|IB)$/i;
-
-    const isBold = font.weight === "bold" ||
-        fontNameLower.includes("bold") ||
-        fontNameLower.includes("black") ||
-        fontNameLower.includes("heavy") ||
-        boldSuffix.test(fontName);
-
-    const isItalic = font.style === "italic" ||
-        fontNameLower.includes("italic") ||
-        fontNameLower.includes("oblique") ||
-        italicSuffix.test(fontName);
-
     return {
         size: Math.round(font.size || 12),
         font: fontName,
-        bold: isBold,
-        italic: isItalic,
+        bold: isBoldFont(fontName, font.weight),
+        italic: isItalicFont(fontName, font.style),
     };
+}
+
+// Subset font names often encode weight/style as a suffix that substring
+// checks miss — e.g. `AJHJCE+AdvTT56ea2c23.B` (bold),
+// `BPEJCI+AdvTTa15c7c65.I` (italic), `XXX.BI`/`.IB` (bold-italic).
+const BOLD_SUFFIX_RE = /\.(B|Bd|Bld|Bold|Black|Heavy|BI|IB)$/i;
+const ITALIC_SUFFIX_RE = /\.(I|It|Italic|Obl|Oblique|BI|IB)$/i;
+
+/** Whether a font is bold, from its weight or its name. */
+export function isBoldFont(fontName: string, weight: string | undefined): boolean {
+    if (weight === "bold") return true;
+    const lower = fontName.toLowerCase();
+    return lower.includes("bold") || lower.includes("black") || lower.includes("heavy") || BOLD_SUFFIX_RE.test(fontName);
+}
+
+/** Whether a font is italic, from its style or its name. */
+export function isItalicFont(fontName: string, style: string | undefined): boolean {
+    if (style === "italic") return true;
+    const lower = fontName.toLowerCase();
+    return lower.includes("italic") || lower.includes("oblique") || ITALIC_SUFFIX_RE.test(fontName);
 }
 
 /**

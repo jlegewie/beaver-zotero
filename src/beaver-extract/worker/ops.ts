@@ -94,8 +94,11 @@ import { runSentenceExtractionFromDoc } from "./sentenceExtraction";
 import { resolveSplitter } from "./splitterResolver";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
-import type { RefPage } from "../references/pageInput";
+import type { InputPage } from "../features/itemInput";
 import type { ReferencePagePlan } from "../references/classify";
+import { referencePass } from "../references/pass";
+import type { ItemPass } from "../pipeline/itemPasses";
+import { ITEMS_EXPORT_TASKS, ItemsExportCollector, type ItemsExportRow } from "../pipeline/itemsExport";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
@@ -128,12 +131,11 @@ import {
     mapSentences,
     project,
     runItemPasses,
+    createItemPasses,
     segmentPages,
-    type ReferenceStage,
     type StructuredRunContext,
 } from "../pipeline/structured";
 
-export type { ReferenceStage };
 
 export interface OpReply<T = unknown> {
     result: T;
@@ -415,7 +417,7 @@ export function runExtractFromIndices(
     splitter?: SentenceSplitter,
     fontApi?: FontApi,
     pageCache?: PageWalkCache,
-    references?: ReferenceStage,
+    itemPasses: readonly ItemPass[] = [],
     pageNumberRuns = true,
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
@@ -566,7 +568,7 @@ export function runExtractFromIndices(
             splitter,
         };
         const segmented = segmentPages(ctx, structuredStudy!, effectiveTargetIndices);
-        const passes = runItemPasses(segmented, styleProfile, pageCount, references, paragraphSettings);
+        const passes = runItemPasses(segmented, structuredStudy!, pageCount, itemPasses, paragraphSettings);
         const mapped = mapSentences(ctx, segmented, passes, study.compoundVocabulary);
         pages.push(...mapped.pages);
         perPageMs.push(...mapped.perPageMs);
@@ -1094,7 +1096,7 @@ export async function opExtract(
             splitter,
             fontApi,
             pageCache,
-            isStructured && preset.referenceItems ? { classify: true } : undefined,
+            isStructured ? createItemPasses(preset) : [],
             preset.pageNumberRuns,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
@@ -1153,14 +1155,12 @@ type StructuredRunArgs = {
  */
 async function withStructuredRun<T>(
     args: StructuredRunArgs,
-    /** Reference stage; defaults to the preset's classification. */
-    referenceStage: ((preset: PdfExtractionPreset) => ReferenceStage | undefined) | undefined,
+    /** Item passes to run; defaults to the preset's. */
+    itemPassesFor: ((preset: PdfExtractionPreset) => ItemPass[]) | undefined,
     finish: (internal: InternalExtractionResult, preset: PdfExtractionPreset) => T,
 ): Promise<T> {
     const preset = resolvePdfExtractionPreset(args.schemaVersion);
-    const references = referenceStage
-        ? referenceStage(preset)
-        : preset.referenceItems ? { classify: true } : undefined;
+    const itemPasses = (itemPassesFor ?? createItemPasses)(preset);
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
     const doc = await acquireDoc(args.pdfData);
@@ -1219,7 +1219,7 @@ async function withStructuredRun<T>(
             splitter,
             fontApi,
             pageCache,
-            references,
+            itemPasses,
             preset.pageNumberRuns,
         );
         if (internal.metadata.timings) {
@@ -1262,7 +1262,7 @@ export async function opStructuredExtractWithDebug(
 
 /** A page of `opReferenceInputs`: the classifier input and the page's items. */
 export interface ReferenceInputPage {
-    input: RefPage;
+    input: InputPage;
     /** Page size in the public (MuPDF) frame; `input` uses the upright frame. */
     width: number;
     height: number;
@@ -1284,16 +1284,16 @@ export interface ReferenceInputPage {
 export async function opReferenceInputs(
     args: StructuredRunArgs & { classify?: boolean },
 ): Promise<OpReply<{ pageCount: number; pages: ReferenceInputPage[] }>> {
-    let inputs: RefPage[] = [];
+    let inputs: InputPage[] = [];
     let plans: ReferencePagePlan[] | undefined;
-    const stage: ReferenceStage = {
+    const pass = referencePass({
         classify: args.classify === true,
         collect: (collected, collectedPlans) => {
             inputs = collected;
             plans = collectedPlans;
         },
-    };
-    return withStructuredRun(args, () => stage, (internal) => {
+    });
+    return withStructuredRun(args, () => [pass], (internal) => {
         const pages = internal.pages.map((page, i): ReferenceInputPage => {
             const input = inputs[i];
             const items = page.items.filter((item) => ITEM_KINDS[item.kind].citable);
@@ -1310,6 +1310,26 @@ export async function opReferenceInputs(
             };
         });
         return { result: { pageCount: internal.pages.length, pages } };
+    });
+}
+
+/**
+ * Full-document structured extraction that returns the `items export` row of
+ * a model task: the structured items with their lines, the lines the margin
+ * filter removed and the task's feature rows (see `pipeline/itemsExport.ts`).
+ */
+export async function opItemsExport(
+    args: StructuredRunArgs & { task: string },
+): Promise<OpReply<ItemsExportRow>> {
+    const task = ITEMS_EXPORT_TASKS[args.task];
+    if (!task) {
+        throw new Error(`Unknown items export task "${args.task}" (known: ${Object.keys(ITEMS_EXPORT_TASKS).join(", ")})`);
+    }
+    const collector = new ItemsExportCollector(task);
+    const bboxPrecision = args.structured?.bboxPrecision ?? 1;
+    return withStructuredRun(args, (preset) => collector.passes(createItemPasses(preset)), (internal, preset) => {
+        const projected = project(internal, preset, bboxPrecision);
+        return { result: collector.row(internal, projected, args.task, bboxPrecision) };
     });
 }
 

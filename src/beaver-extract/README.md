@@ -90,7 +90,20 @@ src/beaver-extract/
 ├── pipeline/                      # Extraction pipeline (runs in the worker)
 │   ├── documentAnalysis.ts        # Page-walk cache + cross-page analysis context
 │   ├── structured.ts              # Structured extraction phases (analyze → segment → item passes → sentences → project)
+│   ├── draftItems.ts              # Draft items between segmentation and sentence mapping
+│   ├── itemPasses.ts              # Step 3: `ItemPass` interface; presets list their passes
+│   ├── itemsExport.ts             # `items export` rows (items, lines, filtered lines, task features)
 │   └── output.ts                  # Helpers shared by the markdown and structured results
+├── models/runtime.ts              # One evaluator for every learned model (bxm-trees-v1, bxm-logistic-v1)
+├── features/                      # Feature parts shared by the item models
+│   ├── itemInput.ts               # Per-page model input built from draft items
+│   ├── text.ts                    # Text patterns (word counts, leaders, bibliographic details, list headings)
+│   ├── style.ts                   # Line typography (size, font, bold/italic, lead marker)
+│   ├── geometry.ts                # Line-block geometry in em
+│   └── context.ts                 # Document context (page position, list headings so far)
+├── itemTypes/                     # Item-type model: input + feature set (model and pass come later)
+├── references/                    # Reference entries: classifier, line model, item pass, generated weights
+├── regions/                       # Region detection (pictures, tables, formulas): step 2
 ├── DocumentAnalyzer.ts            # Text layer & OCR detection
 ├── StyleAnalyzer.ts               # Font/style analysis
 ├── MarginFilter.ts                # Header/footer removal
