@@ -125,7 +125,7 @@ it("keeps a tool without a supported view collapsed", async () => {
     const store = createStore();
     store.set(resultAtom, {
         part_kind: "tool-return",
-        tool_name: "find_book_chapters",
+        tool_name: "find_patent_families",
         tool_call_id: "call",
         content: { chapters: [] },
     });
@@ -140,7 +140,7 @@ it("keeps a tool without a supported view collapsed", async () => {
                 React.createElement(ToolCallPartView, {
                     part: {
                         part_kind: "tool-call",
-                        tool_name: "find_book_chapters",
+                        tool_name: "find_patent_families",
                         tool_call_id: "call",
                         args: {},
                     },
@@ -152,7 +152,7 @@ it("keeps a tool without a supported view collapsed", async () => {
         ),
     );
     const button = container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
-    expect(button.textContent).toContain("Find book chapters");
+    expect(button.textContent).toContain("Find patent families");
     expect(button.getAttribute("aria-expanded")).toBe("false");
 
     act(() => button.click());

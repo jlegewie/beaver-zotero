@@ -31,10 +31,15 @@ describe('getToolCallLabel', () => {
     });
 
     it('humanizes the name of a tool this client has no label for', () => {
-        const part = toolCall({ tool_name: 'find_book_chapters', args: {} });
-        expect(getToolCallLabel(part, 'completed')).toBe('Find book chapters');
-        expect(getToolCallLabel({ ...part, progress: 'Querying Crossref' }, 'in_progress'))
-            .toBe('Find book chapters: Querying Crossref');
+        const part = toolCall({ tool_name: 'find_patent_families', args: {} });
+        expect(getToolCallLabel(part, 'completed')).toBe('Find patent families');
+        expect(getToolCallLabel({ ...part, progress: 'Querying the registry' }, 'in_progress'))
+            .toBe('Find patent families: Querying the registry');
+    });
+
+    it('names find_book_chapters', () => {
+        const part = toolCall({ tool_name: 'find_book_chapters', args: { book: ['10.1002/9783527677429'] } });
+        expect(getToolCallLabel(part, 'completed')).toBe('Book chapters');
     });
 
     // create_items normally renders as an agent-action card, so its label is only

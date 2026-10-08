@@ -210,6 +210,15 @@ describe('getToolResultLabelSuffix', () => {
         };
         expect(getToolResultLabelSuffix(view, 'lookup_work')).toBe(' (2 found)');
     });
+
+    it('counts the chapters find_book_chapters found', () => {
+        const view = (found_count: number): ExternalReferenceListView => ({
+            view_type: 'external_reference_list', tool_name: 'find_book_chapters', references: [], found_count,
+        });
+        expect(getToolResultLabelSuffix(view(13), 'find_book_chapters')).toBe(' (13 chapters)');
+        expect(getToolResultLabelSuffix(view(1), 'find_book_chapters')).toBe(' (1 chapter)');
+        expect(getToolResultLabelSuffix(view(0), 'find_book_chapters')).toBeNull();
+    });
 });
 
 describe('getToolResultRenderableCount (expansion gating)', () => {
