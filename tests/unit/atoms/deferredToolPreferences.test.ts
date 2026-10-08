@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
     getPref: vi.fn(() => JSON.stringify({
         toolToGroup: {
             edit_note: 'custom_note_edits',
-            zotero_note: 'note_creation',
             highlight_annotation: 'annotations',
             note_annotation: 'annotations',
             delete_annotations: 'annotations',
@@ -32,7 +31,6 @@ describe('deferredToolPreferences', () => {
 
         expect(preferences.toolToGroup.edit_note).toBe('custom_note_edits');
         expect(preferences.groupPreferences.custom_note_edits).toBe('always_apply');
-        expect(preferences.toolToGroup).not.toHaveProperty('zotero_note');
         expect(preferences.toolToGroup).not.toHaveProperty('highlight_annotation');
         expect(preferences.toolToGroup).not.toHaveProperty('note_annotation');
         expect(preferences.toolToGroup.delete_annotations).toBe('annotation_deletion');

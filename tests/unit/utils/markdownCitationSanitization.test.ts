@@ -13,10 +13,6 @@ vi.mock('@beaver/agent-ui/chat/Citation', () => ({
     },
 }));
 
-vi.mock('../../../react/components/messages/NoteDisplay', () => ({
-    default: () => null,
-}));
-
 import MarkdownRenderer from '../../../react/components/messages/MarkdownRenderer';
 
 describe('MarkdownRenderer citation sanitization', () => {

@@ -376,38 +376,14 @@ export interface ConfirmExternalSearchProposedData {
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /**
  * Union type for all proposed data types
  */
-export interface NoteProposedData {
-    title: string;
-    content?: string | null;
-    library_id?: number | null;
-    zotero_key?: string | null;
-    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
-    library_ref?: string;
-    /** Library name or ID string (resolved by frontend via getLibraryByIdOrName) */
-    library?: string | null;
-    /** Collection name or key (resolved by frontend via getCollectionByIdOrName) */
-    collection?: string | null;
-    /** Raw tag from LLM output - used for matching during streaming */
-    raw_tag?: string;
-}
-
-export interface NoteResultData {
-    library_id: number;
-    zotero_key: string;
-    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
-    library_ref?: string;
-    parent_key?: string;
-}
-
 export type ProposedData =
     MergeItemsProposedData |
     AnnotationProposedData |
-    NoteProposedData |
     CreateItemProposedData |
     ImportItemProposedData |
     EditMetadataProposedData |
@@ -427,7 +403,6 @@ export type ProposedData =
 export type ActionResultDataType =
     MergeItemsResultData |
     AnnotationResultData |
-    NoteResultData |
     CreateItemResultData |
     ImportItemResultData |
     CreateCollectionResultData |

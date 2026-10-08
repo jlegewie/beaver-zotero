@@ -16,10 +16,6 @@ vi.mock('@beaver/agent-ui/chat/Citation', () => ({
     default: () => null,
 }));
 
-vi.mock('../../../react/components/messages/NoteDisplay', () => ({
-    default: () => null,
-}));
-
 import { FIND_HIT_ATTR, FIND_HIT_CLASS, FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
 import MarkdownRenderer from '../../../react/components/messages/MarkdownRenderer';
 import { renderContentWithSlashPills } from '../../../react/components/agentRuns/slashCommandRendering';

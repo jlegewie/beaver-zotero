@@ -4,8 +4,6 @@ import MarkdownRenderer from '../messages/MarkdownRenderer';
 
 interface TextPartViewProps {
     part: TextPart;
-    /** Agent run ID for linking citations and saving notes */
-    runId?: string;
 }
 
 /**
@@ -13,7 +11,7 @@ interface TextPartViewProps {
  * Since WSPartEvent sends accumulated content (not deltas),
  * we simply render the current content state.
  */
-export const TextPartView: React.FC<TextPartViewProps> = React.memo(function TextPartView({ part, runId }) {
+export const TextPartView: React.FC<TextPartViewProps> = React.memo(function TextPartView({ part }) {
     if (!part.content || part.content.trim() === '' || part.content == '_') {
         return null;
     }
@@ -22,7 +20,6 @@ export const TextPartView: React.FC<TextPartViewProps> = React.memo(function Tex
         <MarkdownRenderer
             className="markdown chat-prose"
             content={part.content.trim()}
-            runId={runId}
         />
     );
 });

@@ -131,7 +131,6 @@ import {
     isAnnotationAgentAction,
     isEditAnnotationsAgentAction,
     isEditMetadataAgentAction,
-    isZoteroNoteAgentAction,
     isCreateItemAgentAction,
     isImportItemAgentAction,
     isItemCreatingAgentAction,
@@ -193,7 +192,7 @@ import { selectLiveBatchProgress } from '@beaver/agent-core/run-state/batchProgr
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom, threadNavigationSeqAtom } from './threads';
-import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
+import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
     clearRunApprovalPolicyAtom,
@@ -999,7 +998,7 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
             if (isCreateAnnotationsAgentAction(action)) {
                 return hasAppliedBulkAnnotations(action);
             }
-            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+            if (isAnnotationAgentAction(action)) {
                 return hasAppliedZoteroItem(action);
             }
             return action.status === 'applied';
@@ -1022,7 +1021,7 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 // Preserve fields the user manually modified after apply, as
                 // the other edit-action retry paths do.
                 await undoEditAnnotationsAction(action, false);
-            } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+            } else if (isAnnotationAgentAction(action)) {
                 const ref = action.result_data as ZoteroItemReference | undefined;
                 if (!ref) continue;
                 const resolved = await resolveItemReference(ref);
@@ -1063,7 +1062,6 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
 interface ActionsToUndo {
     annotations: AgentAction[];
     annotationEdits: AgentAction[];
-    zoteroNotes: AgentAction[];
     metadataEdits: AgentAction[];
     noteEdits: AgentAction[];
     createItems: AgentAction[];
@@ -1084,8 +1082,8 @@ type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
  * or 'cancel' to abort regeneration entirely.
  */
 function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoConfirmResult {
-    const { annotations, annotationEdits, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes, mergeItems } = actions;
-    const totalActions = annotations.length + annotationEdits.length + zoteroNotes.length + metadataEdits.length +
+    const { annotations, annotationEdits, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes, mergeItems } = actions;
+    const totalActions = annotations.length + annotationEdits.length + metadataEdits.length +
                          noteEdits.length + createItems.length + createCollections.length + organizeItems.length +
                          manageTags.length + manageCollections.length + createNotes.length + mergeItems.length;
 
@@ -1112,9 +1110,6 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
             return sum + count;
         }, 0);
         changeLines.push(`• ${annotationCount} PDF annotation change${annotationCount === 1 ? '' : 's'}`);
-    }
-    if (zoteroNotes.length > 0) {
-        changeLines.push(`• ${zoteroNotes.length} Zotero note${zoteroNotes.length === 1 ? '' : 's'}`);
     }
     if (metadataEdits.length > 0) {
         changeLines.push(`• ${metadataEdits.length} metadata edit${metadataEdits.length === 1 ? '' : 's'}`);
@@ -1771,10 +1766,6 @@ export function createWSCallbacks(
                 );
                 // Auto-apply annotations if enabled
                 autoApplyAnnotationAgentActions(event.run_id, actions);
-                // Auto-create notes if enabled
-                await autoCreateNoteAgentActions(event.run_id, actions, set).catch(err =>
-                    logger(`WS onRunComplete: Failed to auto-create notes: ${err}`, 1)
-                );
             }
 
             // Surface an OS-native notification if the user can't currently see
@@ -3045,9 +3036,6 @@ async function startRegenerateRunOwned(
         const annotationEditsToUndo = actionsInRemovedRuns
             .filter(isEditAnnotationsAgentAction)
             .filter(a => a.status === 'applied');
-        const zoteroNotesToDelete = actionsInRemovedRuns
-            .filter(isZoteroNoteAgentAction)
-            .filter(hasAppliedZoteroItem);
         const metadataEditsToUndo = actionsInRemovedRuns
             .filter(isEditMetadataAgentAction)
             .filter(a => a.status === 'applied');
@@ -3081,7 +3069,6 @@ async function startRegenerateRunOwned(
         // backend confirms, so a failed POST changes nothing.
         let confirmResult: UndoConfirmResult = 'skip';
         const hasActionsToUndo = annotationsToDelete.length > 0 || annotationEditsToUndo.length > 0 ||
-                                 zoteroNotesToDelete.length > 0 ||
                                  metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                  createItemsToUndo.length > 0 ||
                                  createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
@@ -3091,7 +3078,6 @@ async function startRegenerateRunOwned(
             confirmResult = confirmUndoAppliedActions({
                 annotations: annotationsToDelete,
                 annotationEdits: annotationEditsToUndo,
-                zoteroNotes: zoteroNotesToDelete,
                 metadataEdits: metadataEditsToUndo,
                 noteEdits: noteEditsToUndo,
                 createItems: createItemsToUndo,

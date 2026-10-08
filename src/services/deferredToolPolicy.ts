@@ -40,7 +40,6 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
  * names from silently acquiring persistent preference defaults.
  */
 export const RUN_APPROVAL_ACTION_TYPE_ALIASES: Record<string, string> = {
-    zotero_note: 'note_creation',
     highlight_annotation: 'annotations',
     note_annotation: 'annotations',
 };
