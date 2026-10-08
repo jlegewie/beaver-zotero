@@ -93,6 +93,9 @@ export async function findExistingItems(
         const batch = await batchFindExistingReferences(
             bibliographic.map(({ key, json }) => ({
                 id: key,
+                // Book sections and conference papers carry the ISBN of the
+                // volume they appear in, so only a book is identified by it.
+                matchByISBN: json.itemType === 'book',
                 data: {
                     title: field(json, 'title'),
                     date: field(json, 'date'),

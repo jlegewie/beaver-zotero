@@ -96,3 +96,30 @@ describe('findExistingItems URL matching', () => {
         expect(existing.has('NEW')).toBe(false);
     });
 });
+
+describe('findExistingItems identifier matching', () => {
+    const ISBN = '9780134685991';
+
+    beforeEach(() => {
+        vi.mocked(batchFindExistingReferences).mockReset();
+        vi.mocked(batchFindExistingReferences).mockResolvedValue({ results: [] } as any);
+    });
+
+    async function sent(json: Record<string, unknown>) {
+        await findExistingItems([{ key: 'NEW', json: json as any }], 1);
+        return vi.mocked(batchFindExistingReferences).mock.calls[0][0][0];
+    }
+
+    it('matches a book by its ISBN', async () => {
+        const item = await sent({ itemType: 'book', title: 'A Book', ISBN: ISBN });
+        expect(item.data.ISBN).toBe(ISBN);
+        expect(item.matchByISBN).toBe(true);
+    });
+
+    it('keeps the ISBN of a book section for conflicts but does not match on it', async () => {
+        const item = await sent({ itemType: 'bookSection', title: 'Chapter 2', DOI: '10.1/ch2', ISBN: ISBN });
+        expect(item.data.ISBN).toBe(ISBN);
+        expect(item.data.DOI).toBe('10.1/ch2');
+        expect(item.matchByISBN).toBe(false);
+    });
+});

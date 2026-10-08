@@ -169,6 +169,7 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     external_search: 'Web search',
     lookup_work: 'Lookup work',
     find_related_works: 'Related works',
+    find_book_chapters: 'Book chapters',
 
     // Batch jobs
     batch_start: 'Batch job',

@@ -166,6 +166,10 @@ export function getToolResultLabelSuffix(
                 const n = view.found_count ?? view.references.length;
                 return n != null ? ` (${n} found)` : null;
             }
+            if (toolName === 'find_book_chapters') {
+                const n = view.found_count ?? view.references.length;
+                return n ? ` (${plural(n, 'chapter')})` : null;
+            }
             // find_related_works: the page is a window into a larger set.
             if (view.tool_info) {
                 const shown = view.references.length;

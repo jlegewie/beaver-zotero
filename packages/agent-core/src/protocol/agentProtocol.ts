@@ -2836,6 +2836,13 @@ export const CLIENT_FEATURES = {
      */
     ITEM_IMPORT_V2: 'item_import_v2',
     /**
+     * `book_chapters` capability (`find_book_chapters`), offered together with
+     * ITEM_IMPORT_V2. Declare it only while the import duplicate check matches
+     * ISBNs book-to-book: a chapter resolved from its DOI carries its book's
+     * ISBN.
+     */
+    BOOK_CHAPTERS: 'book_chapters',
+    /**
      * Chat markdown follows `[label](u-KEY)` (and `zotero://select/...`) as a
      * link that reveals the named library object. Without it those hrefs render
      * as ordinary relative links, so the backend must not instruct the model to
