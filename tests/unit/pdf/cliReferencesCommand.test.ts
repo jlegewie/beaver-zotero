@@ -111,6 +111,18 @@ describe("references export", () => {
     });
 });
 
+describe("references export options", () => {
+    it("rejects an unsupported schema before the ledger records any document", async () => {
+        const referenceInputs = vi.fn(async () => ({ pageCount: 1, pages: [] }));
+        const deps = makeDeps({ referenceInputs });
+        const out = join(dir, "out.jsonl");
+
+        expect(await runCli(["references", "export", "--pdf-list", await writeList(docs), "--out", out, "--schema", "99"], deps)).toBe(1);
+        expect(referenceInputs).not.toHaveBeenCalled();
+        expect(existsSync(`${out}.ledger.jsonl`)).toBe(false);
+    });
+});
+
 describe("references export output errors", () => {
     it("fails before extracting anything when --out can't be written", async () => {
         const referenceInputs = vi.fn(async () => ({ pageCount: 1, pages: [] }));

@@ -18,12 +18,7 @@ import {
 import { GRID_CLUSTER_MIN, clusterRects, gridCluster } from "../../../src/beaver-extract/regions/cluster";
 import { EMPTY_DOC_CONTEXT, REGION_FEATURES, REGION_FEATURE_VERSION, candidateFeatures } from "../../../src/beaver-extract/regions/features";
 import type { Rect } from "../../../src/beaver-extract/regions/geometry";
-import {
-    assertCompatible,
-    predictRegionClass,
-    type LogisticRegionModel,
-    type TreeRegionModel,
-} from "../../../src/beaver-extract/regions/model";
+import { assertCompatible, predictRegionClass, type RegionModelWeights } from "../../../src/beaver-extract/regions/model";
 import {
     NOTE_CAPTION_RE,
     isFigureCaption,
@@ -841,9 +836,11 @@ describe("resolveOverlaps", () => {
     });
 });
 
+type LogisticRegionModel = Extract<RegionModelWeights, { format: "bxm-logistic-v1" }>;
+
 describe("region model", () => {
     const model = (overrides: Partial<LogisticRegionModel> = {}): LogisticRegionModel => ({
-        kind: "logistic",
+        format: "bxm-logistic-v1",
         featureVersion: REGION_FEATURE_VERSION,
         features: [...REGION_FEATURES],
         classes: ["other", "picture", "decoration"],
@@ -864,14 +861,21 @@ describe("region model", () => {
 
     it("sums tree leaves per class on top of the baseline", () => {
         // One stump per class on feature 1: left leaf when x[1] <= 0.5.
-        const stump = (left: number, right: number) => [1, 0.5, 1, 2, 0, -1, 0, 0, 0, left, -1, 0, 0, 0, right];
-        const trees: TreeRegionModel = {
-            kind: "trees",
+        const stump = (score: number, left: number, right: number) => ({
+            score,
+            feature: [1, -1, -1],
+            threshold: [0.5, 0, 0],
+            left: [1, 0, 0],
+            right: [2, 0, 0],
+            value: [0, left, right],
+        });
+        const trees: RegionModelWeights = {
+            format: "bxm-trees-v1",
             featureVersion: REGION_FEATURE_VERSION,
             features: [...REGION_FEATURES],
             classes: ["other", "picture", "decoration"],
             baseline: [0, 0.5, 0],
-            trees: [[stump(0, 0)], [stump(-0.5, 1.5), stump(0, 0.5)], [stump(0, 0)]],
+            trees: [stump(0, 0, 0), stump(1, -0.5, 1.5), stump(2, 0, 0), stump(1, 0, 0.5)],
             trainedOn: "test",
         };
         const x = REGION_FEATURES.map(() => 0);

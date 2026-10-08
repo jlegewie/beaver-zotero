@@ -24,6 +24,7 @@ import {
     opExtractRawPageDetailed,
     opGetMetadata,
     opGetPageCount,
+    opItemsExport,
     opReferenceInputs,
     opRenderPages,
     opStructuredExtractWithDebug,
@@ -149,6 +150,24 @@ export async function referenceInputs(
 ): Promise<Awaited<ReturnType<typeof opReferenceInputs>>["result"]> {
     await ensureExtractionRuntime();
     const reply = await enqueue(() => opReferenceInputs(input));
+    return reply.result;
+}
+
+/**
+ * Full-document structured extraction returning the `items export` row of a
+ * model task (training export; see `pipeline/itemsExport.ts`). It runs with
+ * the plugin's extraction settings: the defaults, which the plugin uses too,
+ * so features see what they will see at runtime.
+ */
+export async function itemsExport(
+    input: Pick<ExtractInput, "pdfData" | "schemaVersion"> & {
+        task: string;
+        bboxPrecision?: number;
+    },
+): Promise<Awaited<ReturnType<typeof opItemsExport>>["result"]> {
+    await ensureExtractionRuntime();
+    const { bboxPrecision, ...args } = input;
+    const reply = await enqueue(() => opItemsExport({ ...args, structured: { bboxPrecision } }));
     return reply.result;
 }
 

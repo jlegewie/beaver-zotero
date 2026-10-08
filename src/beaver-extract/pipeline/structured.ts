@@ -6,8 +6,9 @@
  *     text).
  *  2. `segmentPages` — per page: region detection, rotation, margin filter,
  *     columns, lines and items.
- *  3. `runItemPasses` — document-level passes over the items of every page
- *     (reference classification).
+ *  3. `runItemPasses` — ordered document-level passes over the draft items
+ *     of every page (`itemPasses.ts`); each preset lists its passes
+ *     (`createItemPasses`).
  *  4. `mapSentences` — per page: sentence mapping, region item placement and
  *     margin items.
  *  5. `project` — the public structured result: projection and ids.
@@ -22,7 +23,7 @@
 import { getEffectiveRepeatThreshold } from "../MarginFilter";
 import { logColumnDetection } from "../ColumnDetector";
 import { documentBodyExtents, regionFurnitureLines } from "../FilteredParagraphPipeline";
-import { detectDominantTextOrientation, type RotationAngle } from "../PageRotationNormalizer";
+import { detectDominantTextOrientation, rotateBBox, type RotationAngle } from "../PageRotationNormalizer";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type {
@@ -35,6 +36,7 @@ import type {
     StructuredPagePhaseTimings,
     StyleProfile,
 } from "@beaver/agent-core/extract/types";
+import { bboxFromXYWH } from "@beaver/agent-core/extract/types";
 import {
     ITEM_KINDS,
     assignDocumentIds,
@@ -43,8 +45,7 @@ import {
     type PdfExtractionPreset,
     type StructuredExtractResult,
 } from "../schema";
-import { buildRefPage, type RefPage } from "../references/pageInput";
-import { applyReferencePlan, planReferences, type ReferencePagePlan } from "../references/classify";
+import { REFERENCE_PASS, referencePass } from "../references/pass";
 import { detectRegions } from "../regions/RegionDetector";
 import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
 import { regionItemsForPage, type PageRegionItems, type RegionItemDraft } from "../regions/regionItems";
@@ -66,17 +67,19 @@ import {
     type PageWalkCache,
     type ResolvedExtractionSettings,
 } from "./documentAnalysis";
+import { runPasses, type ItemPass, type PagePassTimings } from "./itemPasses";
 import { pageLabelsToStringKeys, projectColumnRect, replaceControlCharsInResult } from "./output";
 
-/** Reference classification in structured extraction. */
-export interface ReferenceStage {
-    /** Emit classified reference-list entries as `reference` items. */
-    classify: boolean;
-    /**
-     * Receives every page's classifier input, in page order, and the plans
-     * when `classify` is set (export and debugging).
-     */
-    collect?: (inputs: RefPage[], plans: ReferencePagePlan[] | undefined) => void;
+/** Item pass factories, by the name presets list them under. */
+const ITEM_PASSES: Record<ItemPassName, () => ItemPass> = {
+    references: () => referencePass({ classify: true }),
+};
+
+export type ItemPassName = PdfExtractionPreset["itemPasses"][number];
+
+/** The item passes of a preset, in order. */
+export function createItemPasses(preset: PdfExtractionPreset): ItemPass[] {
+    return preset.itemPasses.map((name) => ITEM_PASSES[name]());
 }
 
 /** Inputs shared by the per-page phases of one structured run. */
@@ -105,12 +108,6 @@ export interface SegmentedPage {
     regions?: Pick<PageSentenceArgs, "regionItems" | "regionMargin" | "regionsMs">;
     /** Page time so far: its detailed walk and segmentation. */
     ms: number;
-}
-
-/** Step 3 result for one page. */
-export interface PageItemPasses {
-    /** The page's share of reference classification time, when references were classified. */
-    referencesMs?: number;
 }
 
 /** Step 4 result. */
@@ -282,6 +279,15 @@ export function segmentPages(
             regionsMs,
             pageRotation,
         });
+        const { pageRotation: rotation, sourceWidth, sourceHeight, columnResult } = paragraphs.filteredResult;
+        paragraphs.draft.columns = columnResult.columns.map((col) => bboxFromXYWH(col.x, col.y, col.w, col.h, "top-left"));
+        paragraphs.draft.frame = { rotation, sourceWidth, sourceHeight };
+        if (regionItems) {
+            paragraphs.draft.regions = regionItems.map((region) => ({
+                kind: region.kind,
+                bbox: rotation !== 0 ? rotateBBox(region.bbox, rotation, sourceWidth, sourceHeight) : region.bbox,
+            }));
+        }
         segmented.push({
             rawPage,
             paragraphs,
@@ -293,37 +299,24 @@ export function segmentPages(
 }
 
 /**
- * Step 3. Document-level passes that relabel, split or merge the draft items
- * of every page, in place. Reference classification scores the items of
- * every page, then relabels each page's reference entries and splits and
- * merges them. Without a reference stage this is a no-op.
+ * Step 3. Runs the item passes in order over the draft items of every page;
+ * they edit them in place. Returns each page's pass timings.
  */
 export function runItemPasses(
     pages: SegmentedPage[],
-    styleProfile: StyleProfile,
+    study: Pick<StructuredDocumentStudy, "styleProfile" | "marginAnalysis" | "analysisPages">,
     pageCount: number,
-    references: ReferenceStage | undefined,
+    passes: readonly ItemPass[],
     paragraphSettings: ParagraphDetectionSettings | undefined,
-): PageItemPasses[] {
-    if (!references) return pages.map(() => ({}));
-    const tReferences = performance.now();
-    const inputs = pages.map(({ paragraphs }) => buildRefPage(paragraphs.draft, styleProfile));
-    const plans = references.classify ? planReferences(inputs, pageCount) : undefined;
-    references.collect?.(inputs, plans);
-    const referencesMs = performance.now() - tReferences;
-    if (!plans) return pages.map(() => ({}));
-    const itemTotal = inputs.reduce((n, page) => n + page.items.length, 0);
-    return pages.map(({ paragraphs }, k) => {
-        const tApply = performance.now();
-        const { draft } = paragraphs;
-        draft.items = applyReferencePlan(draft.items, plans[k], paragraphSettings?.removeHyphenation ?? true);
-        // Classification time is shared by item count; applying the plan is
-        // the page's own.
-        const share = itemTotal > 0
-            ? (referencesMs * plans[k].probs.length) / itemTotal
-            : referencesMs / pages.length;
-        return { referencesMs: share + (performance.now() - tApply) };
-    });
+): PagePassTimings[] {
+    const doc = {
+        pages: pages.map(({ paragraphs }) => paragraphs.draft),
+        pageCount,
+        styleProfile: study.styleProfile,
+        marginAnalysis: study.marginAnalysis,
+        analysisPageIndices: study.analysisPages.map((page) => page.pageIndex),
+    };
+    return runPasses(passes, doc, paragraphSettings);
 }
 
 /**
@@ -334,7 +327,7 @@ export function runItemPasses(
 export function mapSentences(
     ctx: StructuredRunContext,
     pages: SegmentedPage[],
-    passes: PageItemPasses[],
+    passes: PagePassTimings[],
     compoundVocabulary: ReadonlySet<string>,
 ): MappedPages {
     const sentenceArgs = { paragraphSettings: ctx.paragraphSettings, splitter: ctx.splitter, compoundVocabulary };
@@ -342,7 +335,9 @@ export function mapSentences(
     pages.forEach(({ rawPage, paragraphs, regions, ms }, k) => {
         const tPage = performance.now();
         const { filteredResult } = paragraphs;
-        const { referencesMs } = passes[k];
+        const referencesMs: number | undefined = passes[k][REFERENCE_PASS];
+        let passMs = 0;
+        for (const ms of Object.values(passes[k])) passMs += ms;
         const { sentenceResult, phaseTimings } = mapPageSentences(
             { ...sentenceArgs, ...regions },
             paragraphs,
@@ -371,7 +366,7 @@ export function mapSentences(
             sentences: sentenceResult.sentences,
             degradation: sentenceResult.degradation,
         } as InternalProcessedPage);
-        out.perPageMs.push(ms + (referencesMs ?? 0) + (performance.now() - tPage));
+        out.perPageMs.push(ms + passMs + (performance.now() - tPage));
         out.perPagePhases.push(phaseTimings);
     });
     return out;

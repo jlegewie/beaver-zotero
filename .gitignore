@@ -26,6 +26,8 @@ archive
 !/scripts/pack-xpi.mjs
 !/scripts/worktree/
 !/scripts/worktree/**
+!/scripts/models/
+!/scripts/models/convert-legacy-weights.ts
 !/scripts/copy-agent-ui-css.mjs
 !/scripts/check-esbuild-graph.mjs
 

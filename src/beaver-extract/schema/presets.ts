@@ -58,10 +58,11 @@ export interface PdfExtractionPreset {
      */
     marginTextRows: boolean;
     /**
-     * Classify reference-list entries in structured extraction and emit them
-     * as `reference` items (see `references/classify.ts`).
+     * Item passes of structured extraction, in order (step 3, see
+     * `pipeline/itemPasses.ts`). `references` classifies reference-list
+     * entries and emits them as `reference` items (`references/classify.ts`).
      */
-    referenceItems: boolean;
+    itemPasses: readonly "references"[];
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */
     idScheme: ExtractIdScheme;
     /**
@@ -80,8 +81,8 @@ export interface PdfExtractionPreset {
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, referenceItems: false, idScheme: "document", regions: false, pageNumberRuns: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, referenceItems: true, idScheme: "page", regions: true, pageNumberRuns: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["references"], idScheme: "page", regions: true, pageNumberRuns: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

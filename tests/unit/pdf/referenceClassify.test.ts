@@ -11,7 +11,7 @@ import {
     planReferences,
     type ReferencePagePlan,
 } from "../../../src/beaver-extract/references/classify";
-import type { RefItem, RefLine, RefPage } from "../../../src/beaver-extract/references/pageInput";
+import type { InputItem, InputLine, InputPage } from "../../../src/beaver-extract/features/itemInput";
 
 function bbox(l: number, t: number, r: number, b: number): BoundingBox {
     return { l, t, r, b, origin: "top-left" };
@@ -165,14 +165,14 @@ describe("planReferences", () => {
     // an outer edge (120) to an inner one (136). The paragraph detector cut
     // it badly: one-line entries run together, continuation lines broke off
     // their entries, and the item scores alone miss such fragments.
-    function document(): RefPage[] {
+    function document(): InputPage[] {
         let t = 60;
-        const line = (text: string, l = 120, r = 484): RefLine => {
-            const out: RefLine = { text, l, t, r, b: t + 8, size: 8, role: 0, lead: 1 };
+        const line = (text: string, l = 120, r = 484): InputLine => {
+            const out: InputLine = { text, l, t, r, b: t + 8, size: 8, role: 0, lead: 1 };
             t += 11;
             return out;
         };
-        const item = (lines: RefLine[], header = false): RefItem => ({
+        const item = (lines: InputLine[], header = false): InputItem => ({
             header,
             column: 0,
             text: lines.map((l) => l.text).join(" "),
@@ -232,12 +232,12 @@ describe("planReferences", () => {
         // The paragraph's indented lines would make the list read as hanging,
         // and "Harvard University Press." would open an entry at its outer edge.
         let t = 60;
-        const line = (text: string, l = 72, r = 540): RefLine => {
-            const out: RefLine = { text, l, t, r, b: t + 10, size: 10, role: 0, lead: 1 };
+        const line = (text: string, l = 72, r = 540): InputLine => {
+            const out: InputLine = { text, l, t, r, b: t + 10, size: 10, role: 0, lead: 1 };
             t += 12;
             return out;
         };
-        const item = (lines: RefLine[], header = false): RefItem => ({
+        const item = (lines: InputLine[], header = false): InputItem => ({
             header,
             column: 0,
             text: lines.map((l) => l.text).join(" "),
@@ -266,12 +266,12 @@ describe("planReferences", () => {
         // hang at an inner edge (136) that the text after the list shares.
         function tail(last: string[], after: string[], rest: string[][] = []): ReferencePagePlan {
             let t = 60;
-            const line = (text: string, l = 120, r = 484): RefLine => {
-                const out: RefLine = { text, l, t, r, b: t + 8, size: 8, role: 0, lead: 1 };
+            const line = (text: string, l = 120, r = 484): InputLine => {
+                const out: InputLine = { text, l, t, r, b: t + 8, size: 8, role: 0, lead: 1 };
                 t += 11;
                 return out;
             };
-            const item = (lines: RefLine[], header = false): RefItem => ({
+            const item = (lines: InputLine[], header = false): InputItem => ({
                 header,
                 column: 0,
                 text: lines.map((l) => l.text).join(" "),

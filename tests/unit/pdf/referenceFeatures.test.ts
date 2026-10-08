@@ -1,26 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import {
-    CONTEXT_FEATURES,
-    ITEM_FEATURES,
-    contextFeatures,
-    isNotesHeading,
-    isReferenceHeading,
-    itemFeatures,
-    leadingNumber,
-} from "../../../src/beaver-extract/references/features";
+import { CONTEXT_FEATURES, ITEM_FEATURES, contextFeatures, itemFeatures } from "../../../src/beaver-extract/references/features";
+import { isNotesHeading, isReferenceHeading, leadingNumber } from "../../../src/beaver-extract/features/text";
 import { LINE_FEATURES, hangingLevels, opensLikeEntry, pageLineFeatures } from "../../../src/beaver-extract/references/lines";
-import type { RefItem, RefLine, RefPage } from "../../../src/beaver-extract/references/pageInput";
+import type { InputItem, InputLine, InputPage } from "../../../src/beaver-extract/features/itemInput";
 
-function line(text: string, l: number, t: number, role: 0 | 1 | 2 = 0, r = 500): RefLine {
+function line(text: string, l: number, t: number, role: 0 | 1 | 2 = 0, r = 500): InputLine {
     return { text, l, t, r, b: t + 10, size: 10, role, lead: 1 };
 }
 
-function item(text: string, lines: RefLine[] = [line(text, 50, 100)], header = false): RefItem {
+function item(text: string, lines: InputLine[] = [line(text, 50, 100)], header = false): InputItem {
     return { header, column: 0, text, lines };
 }
 
-function page(items: RefItem[], pageIndex = 0): RefPage {
+function page(items: InputItem[], pageIndex = 0): InputPage {
     return { pageIndex, width: 600, height: 800, bodySize: 10, items };
 }
 

@@ -3,8 +3,8 @@
  *
  * Segmentation creates them from the paragraph detector's result
  * (`draftItemsFromParagraphs`), item passes relabel, split and merge them
- * (reference classification), and sentence mapping turns them into the
- * page's `DocItem`s. Coordinates are in the upright working frame.
+ * (`itemPasses.ts`), and sentence mapping turns them into the page's
+ * `DocItem`s. Coordinates are in the upright working frame.
  *
  * The kind is a field. The paragraph detector marks a heading with a "## "
  * prefix in its text, which its markdown output (`pageContent`) keeps; draft
@@ -15,6 +15,8 @@
 import type { BoundingBox } from "@beaver/agent-core/extract/types";
 import type { PageLine } from "../LineDetector";
 import type { HangingRole, PageParagraphResult } from "../ParagraphDetector";
+import type { RotationAngle } from "../PageRotationNormalizer";
+import type { RegionItemKind } from "../regions/regionItems";
 
 /** Kinds a draft item can have; region items are placed after sentence mapping. */
 export type DraftItemKind = "text" | "section_header" | "reference";
@@ -31,6 +33,17 @@ export interface DraftItem {
     text: string;
 }
 
+/**
+ * A region item of the page (picture, table, formula). Regions are context
+ * for item passes, not draft items: they are placed among the page's items
+ * after sentence mapping.
+ */
+export interface DraftRegion {
+    kind: RegionItemKind;
+    /** Upright working frame. */
+    bbox: BoundingBox;
+}
+
 /** The draft items of one page. */
 export interface DraftPage {
     pageIndex: number;
@@ -38,6 +51,15 @@ export interface DraftPage {
     width: number;
     height: number;
     items: DraftItem[];
+    /** Column rectangles of the page (upright working frame). */
+    columns?: BoundingBox[];
+    /**
+     * How the upright working frame relates to the page (MuPDF) frame: the
+     * text's rotation and the page size before it was turned upright.
+     */
+    frame?: { rotation: RotationAngle; sourceWidth: number; sourceHeight: number };
+    /** The page's region items, when region detection ran. */
+    regions?: DraftRegion[];
 }
 
 /** The paragraph detector's heading marker (markdown heading syntax). */

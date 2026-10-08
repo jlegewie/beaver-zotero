@@ -836,9 +836,9 @@ export interface StructuredPagePhaseTimings {
     /** Region detection and region items (schema presets with `regions`). */
     regionsMs?: number;
     /**
-     * This page's share of reference classification (presets with
-     * `referenceItems`); the document-level pass is split across pages by
-     * item count.
+     * This page's share of reference classification (presets with the
+     * `references` item pass); the document-level pass is split across pages
+     * by item count.
      */
     referencesMs?: number;
     /** Total character count on the target page (post-detailed-walk). */
