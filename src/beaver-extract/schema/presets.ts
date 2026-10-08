@@ -41,6 +41,12 @@ export interface PdfExtractionPreset {
      */
     isolatedHeadings: boolean;
     /**
+     * A page whose text is mostly set in a style other than the document's
+     * body adds that style to its body styles, so lines in it are not
+     * headings (`ParagraphDetectionSettings.pageBodyStyles`).
+     */
+    pageBodyStyles: boolean;
+    /**
      * Sentence splitting keeps appendix / supplement-prefixed, panel-suffixed
      * and roman-numeral caption labels ("Table A1.", "Fig. S2", "Table IV.")
      * with their caption (`PostProcessContext.captionLabels`).
@@ -74,8 +80,8 @@ export interface PdfExtractionPreset {
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, captionLabels: false, marginTextRows: false, referenceItems: false, idScheme: "document", regions: false, pageNumberRuns: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, captionLabels: true, marginTextRows: true, referenceItems: true, idScheme: "page", regions: true, pageNumberRuns: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, referenceItems: false, idScheme: "document", regions: false, pageNumberRuns: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, referenceItems: true, idScheme: "page", regions: true, pageNumberRuns: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

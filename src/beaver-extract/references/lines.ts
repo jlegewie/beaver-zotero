@@ -61,6 +61,122 @@ const YEAR_RE = /(?<![\d/.])(?:1[5-9]\d\d|20[0-3]\d)[a-z]?(?!\d)/u;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /**
+ * An author opening with initials: "Smith, J.", "Smith JA,", "Huber E,", "van der Berg, A.".
+ * Unlike `AUTHOR_RE`, a capitalized word after the surname doesn't count:
+ * title and publisher lines open that way ("Memorial Lecture, Proceedings").
+ */
+const INITIALED_AUTHOR_RE = new RegExp(
+    `^\\s*(?:${AUTHOR_LEADER})?${SURNAME},?\\s+\\p{Lu}{1,3}(?:[,.;]|\\s|$)`,
+    "u",
+);
+
+/**
+ * A line that opens like a reference entry: a list number (not a year), an
+ * author with initials, or a repeated-author rule, which scanned text often
+ * reduces to one dash ("- ed. Studies in …").
+ */
+export function opensLikeEntry(text: string): boolean {
+    const n = leadingNumber(text);
+    if (n !== null) return n < 1500 || n > 2039;
+    return INITIALED_AUTHOR_RE.test(text) || INITIALS_RE.test(text) || /^\s*[—–-]/u.test(text);
+}
+
+/**
+ * Whether a line at the outer edge of a hanging list can open an entry: it
+ * starts with a capital, a repeated-author dash or a list number. A line
+ * that starts in lowercase, with a year or a page number, or with a marker
+ * such as "*" runs on from the line before.
+ */
+export function canOpenEntry(text: string): boolean {
+    const n = leadingNumber(text);
+    if (n !== null) return n < 1500 || n > 2039;
+    return /^\s*(?:\p{Lu}|[—–-])/u.test(text);
+}
+
+/** Widest hanging indent, in em: the inner edge sits 0.5–4.5 em in from the outer one. */
+export const HANGING_MAX_INDENT_EM = 4.5;
+
+/** Where a line starts in a hanging-indent list: at the outer edge, the inner edge, or neither. */
+export type HangingLevel = "outer" | "inner" | null;
+
+/**
+ * Lines on each side whose left edges set a line's local outer edge: scanned
+ * pages drift, but the window has to reach past the longest entry's
+ * continuation lines.
+ */
+const LEVEL_WINDOW = 20;
+
+/**
+ * Levels of the lines of the wanted items of a page when they form hanging
+ * lists: per column, entries open at an outer edge and wrap to an inner edge
+ * 0.5–4.5 em further in. A column reads as such a list when at least three
+ * lines open at the outer edge and two of the voting items' lines at the
+ * inner one, and when most outer lines open like an entry and few inner
+ * ones do. Evidence for the layout (inner lines, outer lines that open like
+ * an entry) comes from the voting items, the reference entries, only; the
+ * other wanted items count against it. An indented paragraph after a
+ * flush-left list then cannot make the list read as hanging, though text
+ * that runs on at the outer edge can still keep a list from reading so.
+ * Keyed by item index; items in other columns, or in columns that don't
+ * hang, are absent.
+ */
+export function hangingLevels(
+    page: RefPage,
+    wanted: (itemIndex: number) => boolean,
+    votes: (itemIndex: number) => boolean = wanted,
+): Map<number, HangingLevel[]> {
+    const em = page.bodySize > 0 ? page.bodySize : 10;
+    const out = new Map<number, HangingLevel[]>();
+    const columns = new Map<number, { i: number; k: number; line: RefLine }[]>();
+    page.items.forEach((item, i) => {
+        if (!wanted(i)) return;
+        const seq = columns.get(item.column) ?? [];
+        item.lines.forEach((line, k) => seq.push({ i, k, line }));
+        columns.set(item.column, seq);
+    });
+    for (const seq of columns.values()) {
+        const offsets = seq.map((_, j) => {
+            let edge = Infinity;
+            for (let n = Math.max(0, j - LEVEL_WINDOW); n <= Math.min(seq.length - 1, j + LEVEL_WINDOW); n++) {
+                edge = Math.min(edge, seq[n].line.l);
+            }
+            return (seq[j].line.l - edge) / em;
+        });
+        const inner = offsets
+            .filter((d, j) => votes(seq[j].i) && d >= 0.5 && d <= HANGING_MAX_INDENT_EM)
+            .sort((a, b) => a - b);
+        if (inner.length < 2) continue;
+        const step = inner[inner.length >> 1];
+        const levels: HangingLevel[] = offsets.map((d) =>
+            d <= 0.3 ? "outer" : Math.abs(d - step) <= 0.3 ? "inner" : null,
+        );
+        let outerN = 0;
+        let outerEntries = 0;
+        let innerN = 0;
+        let innerVotes = 0;
+        let innerEntries = 0;
+        seq.forEach(({ i, line }, j) => {
+            const entry = opensLikeEntry(line.text.trim());
+            if (levels[j] === "outer") {
+                outerN++;
+                if (entry && votes(i)) outerEntries++;
+            } else if (levels[j] === "inner") {
+                innerN++;
+                if (votes(i)) innerVotes++;
+                if (entry) innerEntries++;
+            }
+        });
+        if (outerN < 3 || innerVotes < 2 || outerEntries < 0.6 * outerN || innerEntries > 0.2 * innerN) continue;
+        seq.forEach(({ i, k }, j) => {
+            const row = out.get(i) ?? page.items[i].lines.map((): HangingLevel => null);
+            row[k] = levels[j];
+            out.set(i, row);
+        });
+    }
+    return out;
+}
+
+/**
  * Line feature rows of the wanted items of a page, keyed by item index. The
  * line before an item's first line is the previous item's last line when
  * that item is in the same column.

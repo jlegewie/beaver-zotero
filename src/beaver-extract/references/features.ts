@@ -220,15 +220,53 @@ function scanText(text: string) {
     return out;
 }
 
+/**
+ * What may open a heading before its words: a bullet or ornament ("■ References"),
+ * a section number ("6.", "IV") or a letter enumerator ("G. Bibliography").
+ */
+const HEADING_LEAD = String.raw`(?:[^\p{L}\p{N}\s]{1,3}\s*)?(?:[\dIVX]+\.?\s*|\p{Lu}[.)]\s*)?`;
+/** A place and its publisher: "Upper Saddle River, NJ: Prentice Hall", "London, UK: Sage". */
+const PLACE_PUBLISHER_RE = /\p{Lu}[\p{L}.]+,\s?\p{Lu}{2}\s?:/u;
+
+/**
+ * Whether text carries a bibliographic detail: a year, a page range, a
+ * volume or issue, a DOI or link, a venue or publisher word, an editor
+ * statement or a place and publisher.
+ */
+export function hasBibliographicDetail(text: string): boolean {
+    YEAR_RE.lastIndex = 0;
+    return (
+        YEAR_RE.test(text) ||
+        PAGE_RANGE_RE.test(text) ||
+        VOL_ISSUE_RE.test(text) ||
+        DOI_RE.test(text) ||
+        URL_RE.test(text) ||
+        VENUE_RE.test(text) ||
+        IN_EDS_RE.test(text) ||
+        PLACE_PUBLISHER_RE.test(text)
+    );
+}
+
+/** Words of running prose in a text ("is", "this", "we", …; see `PROSE_WORDS`). */
+export function proseWordCount(text: string): number {
+    return scanText(text).prose;
+}
+
 /** Unambiguous reference-list headings (also accepted on short non-heading items). */
-const REF_HEADING_RE =
-    /^\s*(?:[\dIVX]+\.?\s*)?(?:references?(?: and notes| cited| list)?|bibliograph(?:y|ie|ies|ía|ia)|works cited|literature cited|cited literature|literaturverzeichnis|quellenverzeichnis|références(?: bibliographiques)?|referencias(?: bibliográficas)?|referências(?: bibliográficas)?|riferimenti bibliografici|bibliografía|bibliografia|literatuur|litteratur|referenser|kaynakça|список литературы|литература|参考文献|參考文獻|further reading|selected bibliography|sources cited|reference list|(?:主要)?参考文献|參考文獻|引用文献|文献|참고문헌)\s*[:.]?\s*$/iu;
+const REF_HEADING_RE = new RegExp(
+    String.raw`^\s*${HEADING_LEAD}(?:references?(?: (?:and|&) (?:notes|links|bibliography|(?:recommended|suggested) readings?)| cited| list)?|additional references|bibliograph(?:y|ie|ies|ía|ia)(?: and references)?|works (?:cited|consulted)|literature cited|cited literature|literaturverzeichnis|quellenverzeichnis|références(?: bibliographiques)?|referencias(?: bibliográficas)?|referências(?: bibliográficas)?|riferimenti bibliografici|bibliografía|bibliografia|literatuur|litteratur|referenser|kaynakça|список литературы|литература|参考文献|參考文獻|(?:further|suggested|recommended) readings?|select(?:ed)? bibliograph(?:y|ies)|sources cited|reference list|(?:主要)?参考文献|參考文獻|引用文献|文献|참고문헌)\s*[:.]?\s*$`,
+    "iu",
+);
 /** Note-section headings: the list that follows is notes, not references. */
-const NOTES_HEADING_RE =
-    /^\s*(?:[\dIVX]+\.?\s*)?(?:notes|endnotes|footnotes|anmerkungen|endnoten|fußnoten|fussnoten|notas|note|noten)\s*[:.]?\s*$/iu;
+const NOTES_HEADING_RE = new RegExp(
+    String.raw`^\s*${HEADING_LEAD}(?:notes|endnotes|footnotes|anmerkungen|endnoten|fußnoten|fussnoten|notas|note|noten)\s*[:.]?\s*$`,
+    "iu",
+);
 /** Ambiguous headings: count only when the detector read the item as a heading. */
-const AMBIGUOUS_HEADING_RE =
-    /^\s*(?:[\dIVX]+\.?\s*)?(?:literature|literatur|sources|quellen|notes and references|references and further reading|data sources)\s*[:.]?\s*$/iu;
+const AMBIGUOUS_HEADING_RE = new RegExp(
+    String.raw`^\s*${HEADING_LEAD}(?:literature|literatur|sources|quellen|notes and references|references and further reading|data sources)\s*[:.]?\s*$`,
+    "iu",
+);
 
 function count(re: RegExp, text: string): number {
     re.lastIndex = 0;
