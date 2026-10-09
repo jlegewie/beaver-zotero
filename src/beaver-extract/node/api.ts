@@ -25,6 +25,7 @@ import {
     opGetMetadata,
     opGetPageCount,
     opItemsExport,
+    opRegionsExport,
     opReferenceInputs,
     opRenderPages,
     opStructuredExtractWithDebug,
@@ -165,6 +166,23 @@ export async function itemsExport(
     await ensureExtractionRuntime();
     const { bboxPrecision, ...args } = input;
     const reply = await enqueue(() => opItemsExport({ ...args, structured: { bboxPrecision } }));
+    return reply.result;
+}
+
+/**
+ * Full-document structured extraction returning the `regions-v2` export row
+ * (training export of the region model; see `pipeline/regionsExport.ts`),
+ * with the plugin's extraction settings. `pages` limits the pages written.
+ */
+export async function regionsExport(
+    input: Pick<ExtractInput, "pdfData" | "schemaVersion"> & {
+        bboxPrecision?: number;
+        pages?: number[];
+    },
+): Promise<Awaited<ReturnType<typeof opRegionsExport>>["result"]> {
+    await ensureExtractionRuntime();
+    const { bboxPrecision, ...args } = input;
+    const reply = await enqueue(() => opRegionsExport({ ...args, structured: { bboxPrecision } }));
     return reply.result;
 }
 

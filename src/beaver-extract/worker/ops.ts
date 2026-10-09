@@ -97,6 +97,7 @@ import type { ParagraphDetectionSettings } from "../ParagraphDetector";
 import { buildInputPage, type InputPage } from "../features/itemInput";
 import type { ItemPass } from "../pipeline/itemPasses";
 import { ITEMS_EXPORT_TASKS, ItemsExportCollector, type ItemsExportRow } from "../pipeline/itemsExport";
+import { RegionsExportCollector, type RegionsExportRow } from "../pipeline/regionsExport";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
@@ -131,6 +132,7 @@ import {
     runItemPasses,
     createItemPasses,
     segmentPages,
+    type RegionPassObserver,
     type StructuredRunContext,
 } from "../pipeline/structured";
 
@@ -417,6 +419,7 @@ export function runExtractFromIndices(
     pageCache?: PageWalkCache,
     itemPasses: readonly ItemPass[] = [],
     pageNumberRuns = true,
+    regionObserver?: RegionPassObserver,
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
     try {
@@ -564,6 +567,7 @@ export function runExtractFromIndices(
             pageCache,
             paragraphSettings,
             splitter,
+            ...(regionObserver ? { regionObserver } : {}),
         };
         const segmented = segmentPages(ctx, structuredStudy!, effectiveTargetIndices);
         const passes = runItemPasses(segmented, structuredStudy!, pageCount, itemPasses, paragraphSettings);
@@ -1155,6 +1159,8 @@ async function withStructuredRun<T>(
     /** Item passes to run; defaults to the preset's. */
     itemPassesFor: ((preset: PdfExtractionPreset) => ItemPass[]) | undefined,
     finish: (internal: InternalExtractionResult, preset: PdfExtractionPreset) => T,
+    /** Observes the region pass of every page (training export). */
+    regionObserver?: RegionPassObserver,
 ): Promise<T> {
     const preset = resolvePdfExtractionPreset(args.schemaVersion);
     const itemPasses = (itemPassesFor ?? createItemPasses)(preset);
@@ -1218,6 +1224,7 @@ async function withStructuredRun<T>(
             pageCache,
             itemPasses,
             preset.pageNumberRuns,
+            regionObserver,
         );
         if (internal.metadata.timings) {
             internal.metadata.timings.docOpenMs = docOpenMs;
@@ -1321,6 +1328,27 @@ export async function opItemsExport(
         const projected = project(internal, preset, bboxPrecision);
         return { result: collector.row(internal, projected, args.task, bboxPrecision) };
     });
+}
+
+/**
+ * Full-document structured extraction that returns the `regions-v2` export
+ * row: per page, the region pass's text pieces and primitives and what the
+ * detector did with them (see `pipeline/regionsExport.ts`). `pages` limits
+ * the pages written; every page is extracted, as in production.
+ */
+export async function opRegionsExport(
+    args: StructuredRunArgs & { pages?: number[] },
+): Promise<OpReply<RegionsExportRow>> {
+    const preset = resolvePdfExtractionPreset(args.schemaVersion);
+    if (!preset.regions) throw new Error(`PDF schema ${preset.schemaVersion} has no region detection`);
+    const bboxPrecision = args.structured?.bboxPrecision ?? 1;
+    const collector = new RegionsExportCollector(bboxPrecision, args.pages ? new Set(args.pages) : undefined);
+    return withStructuredRun(
+        args,
+        undefined,
+        (internal) => ({ result: collector.row(preset.schemaVersion, internal.analysis.pageCount) }),
+        collector,
+    );
 }
 
 /**
