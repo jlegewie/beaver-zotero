@@ -10,6 +10,7 @@
  */
 
 import { clamp, lineBlockGeometry, median } from "../features/geometry";
+import { featureRow } from "../features/row";
 import type { InputItem, InputLine, InputPage } from "../features/itemInput";
 import {
     AUTHOR_LEADER,
@@ -109,6 +110,9 @@ const PAREN_YEAR_RE = /\((?:1[5-9]\d\d|20[0-3]\d)[a-z]?(?:[,;][^)]{0,20})?\)/;
 const ET_AL_RE = /\b[Ee]t\s?al\b/;
 const QUOTED_RE = /[“"«„][^”"»“]{8,}[”"»“]/;
 const REF_MARKER_RE = /\[(?:Cross[Rr]ef|PubMed|Google Scholar|Ref list|DOI|PMC free article|Internet|[Cc]ited [^\]]{3,30}|[Ss]erial[^\]]{0,30})\]|\b(?:[Rr]etrieved|[Aa]ccessed|[Aa]vailable (?:at|from|online)|ISBN|ISSN|arXiv|PMID|PMCID|Google Scholar)\b/;
+const ENDS_PERIOD_RE = /[.]["'”’)\]]?$/u;
+const ENDS_NUMBER_RE = /[\d)\]]$/u;
+const STARTS_LOWER_RE = /^\p{Ll}/u;
 /** Footnote and endnote idioms. */
 const NOTE_CUES_RE =
     /(?:^|[\s(])(?:[Ii]bid\b|[Ii]dem\b|[Ii]d\.|op\.\s?cit|loc\.\s?cit|[Cc]f\.|[Ss]ee(?:,? e\.g\.,| also)?\s+[A-ZÀ-Þ]|[Qq]uoted (?:in|from)\b|[Ee]mphasis (?:added|in original)|[Vv]gl\.|a\.a\.O\.|[Ee]benda\b)/;
@@ -167,9 +171,9 @@ export function itemFeatures(item: InputItem, page: InputPage): number[] {
         commas: Math.min(counts.commas / nWords, 1),
         periods: Math.min(counts.periods / nWords, 1),
         semicolons: Math.min(counts.semicolons / nWords, 0.5) * 2,
-        endsPeriod: /[.]["'”’)\]]?$/u.test(text) ? 1 : 0,
-        endsNumber: /[\d)\]]$/u.test(text) ? 1 : 0,
-        startsLower: /^\p{Ll}/u.test(text) ? 1 : 0,
+        endsPeriod: ENDS_PERIOD_RE.test(text) ? 1 : 0,
+        endsNumber: ENDS_NUMBER_RE.test(text) ? 1 : 0,
+        startsLower: STARTS_LOWER_RE.test(text) ? 1 : 0,
         hangEntry: lines.length > 0 && lines[0].role === 1 ? 1 : 0,
         hangCont,
         hangIndent,
@@ -179,5 +183,5 @@ export function itemFeatures(item: InputItem, page: InputPage): number[] {
         top: page.height > 0 ? clamp(top / page.height, 0, 1) : 0,
         lineGap,
     };
-    return ITEM_FEATURES.map((name) => f[name]);
+    return featureRow(f, ITEM_FEATURES);
 }

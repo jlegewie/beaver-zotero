@@ -60,9 +60,17 @@ const box = (b: { l: number; t: number; r: number; b: number }): Box => [round2(
 /** Longest text compared with margin text. */
 const MARGIN_TEXT_MAX_CHARS = 200;
 
+const DIGIT_RE = /\d/;
+/** Whitespace other than single spaces: what collapsing whitespace changes. */
+const UNEVEN_SPACE_RE = /[^\S ]| {2}/;
+
 /** Text as repeated margin text is compared: case, digits and spacing ignored. */
 export function repeatKey(text: string): string {
-    return text.normalize("NFKC").toLowerCase().replace(/\d+/gu, "#").replace(/\s+/gu, " ").trim();
+    // Each replacement runs only when it changes the text (most texts have single spaces).
+    let key = text.normalize("NFKC").toLowerCase();
+    if (DIGIT_RE.test(key)) key = key.replace(/\d+/gu, "#");
+    if (UNEVEN_SPACE_RE.test(key)) key = key.replace(/\s+/gu, " ");
+    return key.trim();
 }
 
 /** Pages on which each margin text occurs (`repeatKey`). */
@@ -97,10 +105,12 @@ export function buildTypedDocument(doc: DraftDocument): TypedDocument {
             });
             const first = lines.length > 0 ? lines[0].text : item.text;
             // Margin text is a line or a row; longer items can't match it whole.
-            const marginPages = Math.max(
-                item.text.length <= MARGIN_TEXT_MAX_CHARS ? otherPages(repeatKey(item.text), draft.pageIndex) : 0,
-                first.length <= MARGIN_TEXT_MAX_CHARS ? otherPages(repeatKey(first), draft.pageIndex) : 0,
-            );
+            const itemPages = item.text.length <= MARGIN_TEXT_MAX_CHARS ? otherPages(repeatKey(item.text), draft.pageIndex) : 0;
+            // A one-line item's first line is usually its whole text.
+            const firstPages = first === item.text
+                ? itemPages
+                : first.length <= MARGIN_TEXT_MAX_CHARS ? otherPages(repeatKey(first), draft.pageIndex) : 0;
+            const marginPages = Math.max(itemPages, firstPages);
             return { ...item, lines, marginPages };
         });
         return {
