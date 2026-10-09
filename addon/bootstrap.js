@@ -9,10 +9,48 @@
 
 var chromeHandle;
 
+// Upper bound on how long a starting instance waits for its predecessor's
+// teardown before starting anyway.
+const PREVIOUS_SHUTDOWN_TIMEOUT_MS = 60000;
+
 function install(data, reason) {}
 
+/**
+ * Advance the plugin lifecycle generation. Kept on `Zotero` because a reload
+ * reuses this scope while an update loads a new one.
+ */
+function nextLifecycleGeneration() {
+  Zotero.__beaverBootstrapGeneration =
+    (Zotero.__beaverBootstrapGeneration || 0) + 1;
+  return Zotero.__beaverBootstrapGeneration;
+}
+
+/**
+ * Wait for a previous instance's `shutdown` to finish. On reload or update,
+ * Zotero calls the new instance's `startup` without awaiting the old async
+ * `shutdown`, whose cleanup would otherwise run over the new instance.
+ */
+async function waitForPreviousShutdown() {
+  const pending = Zotero.__beaverBootstrapShutdown;
+  if (!pending) return;
+  const timedOut = await Promise.race([
+    pending.then(() => false),
+    Zotero.Promise.delay(PREVIOUS_SHUTDOWN_TIMEOUT_MS).then(() => true),
+  ]);
+  if (timedOut) {
+    Zotero.logError(
+      new Error("Beaver: previous instance did not finish shutting down; starting anyway"),
+    );
+  }
+}
+
 async function startup({ id, version, resourceURI, rootURI }, reason) {
+  const generation = nextLifecycleGeneration();
   await Zotero.initializationPromise;
+  await waitForPreviousShutdown();
+  // A shutdown while this startup waited (e.g. disabled again during the
+  // previous teardown) supersedes it.
+  if (Zotero.__beaverBootstrapGeneration !== generation) return;
 
   // String 'rootURI' introduced in Zotero 7
   if (!rootURI) {
@@ -59,6 +97,7 @@ async function onMainWindowUnload({ window }, reason) {
 
 async function shutdown({ id, version, resourceURI, rootURI }, reason) {
   if (reason === APP_SHUTDOWN) {
+    nextLifecycleGeneration();
     // Last-window close can leave instance services running. Dispose them
     // even when there are no windows left to deliver an unload hook.
     try {
@@ -84,8 +123,20 @@ async function shutdown({ id, version, resourceURI, rootURI }, reason) {
       Components.interfaces.nsISupports,
     ).wrappedJSObject;
   }
+  nextLifecycleGeneration();
+  // Published before the first await so a concurrently starting instance
+  // waits for this teardown. The instance and chrome handle are captured so
+  // that cleanup only ever touches what this shutdown owns.
+  let finishShutdown;
+  const shutdownDone = new Promise((resolve) => {
+    finishShutdown = resolve;
+  });
+  Zotero.__beaverBootstrapShutdown = shutdownDone;
+  const instance = Zotero.__addonInstance__;
+  const handle = chromeHandle;
+  chromeHandle = null;
   try {
-    await Zotero.__addonInstance__?.hooks.onShutdown();
+    await instance?.hooks.onShutdown();
   } finally {
     // Always drop the singleton off Zotero so the next startup's
     // `loadSubScript` sees it gone and assigns a fresh Addon. onShutdown's
@@ -94,15 +145,23 @@ async function shutdown({ id, version, resourceURI, rootURI }, reason) {
     // teardown leaves `Zotero.__addonInstance__` pointing at a stale
     // instance, breaking the next reload.
     try {
-      delete Zotero.__addonInstance__;
+      if (Zotero.__addonInstance__ === instance) {
+        delete Zotero.__addonInstance__;
+      }
     } catch (_) {
       // best-effort — property may already be gone
     }
 
-    if (chromeHandle) {
-      chromeHandle.destruct();
-      chromeHandle = null;
+    try {
+      handle?.destruct();
+    } catch (error) {
+      Zotero.logError(error);
     }
+
+    if (Zotero.__beaverBootstrapShutdown === shutdownDone) {
+      Zotero.__beaverBootstrapShutdown = undefined;
+    }
+    finishShutdown();
   }
 }
 
