@@ -11,23 +11,39 @@
  * beaver-extract-models (`bxm item-type export`) into `weights.ts`;
  * `contextFeatures` mirrors `tasks/item_type/context.py` there.
  *
- * Stage 2 corrects stage 1 from context. When the export gives
+ * Stage 2 corrects stage 1 from context. With `stage2.initFromStage1`, its
+ * trees were trained on top of stage 1 (LightGBM `init_score`): an item's
+ * stage-2 scores are its stage-2 tree scores plus its stage-1 raw scores, and
+ * its stage-2 probabilities the softmax of that sum. When the export gives
  * `stage2.skipAbove`, an item whose largest stage-1 probability reaches it
  * keeps its stage-1 probabilities and stage 2 is not evaluated for it. Context
  * features come from stage-1 probabilities only, so skipping one item changes
  * no other item's result.
  */
 
-import { assertModelFeatures, modelProbabilities, type ModelInfo, type TreeModel } from "../models/runtime";
+import {
+    assertModelFeatures,
+    modelScores,
+    PACKED_TREES_FORMAT,
+    scoreProbabilities,
+    type ModelInfo,
+    type ModelInput,
+    type PackedTreeModel,
+} from "../models/runtime";
 import type { DraftItemKind } from "../pipeline/draftItems";
 import { FEATURES, FEATURE_SET, FEATURE_VERSION, itemTypeFeatures } from "./features";
 import type { TypedDocument } from "./input";
 
 export type ItemTypeClass = "caption" | "footnote" | "furniture" | "heading" | "reference" | "text";
 
-type StageModel = TreeModel<ItemTypeClass> & Pick<ModelInfo, "featureVersion">;
+type StageModel = PackedTreeModel<ItemTypeClass> & Pick<ModelInfo, "featureVersion">;
 
 interface Stage2Model extends StageModel {
+    /**
+     * Scores start from the item's stage-1 raw scores (stage-1 baseline plus
+     * trees, before the softmax) instead of from stage 2's own baseline alone.
+     */
+    initFromStage1?: boolean;
     /**
      * Largest stage-1 probability at or above which an item keeps its stage-1
      * probabilities. Omitted: stage 2 runs for every item.
@@ -194,15 +210,32 @@ export function assertItemTypeModel(model: ItemTypeModel): void {
     assertModelFeatures(model.stage1, FEATURE_VERSION, FEATURES, "Item-type stage-1");
     assertModelFeatures(model.stage2, FEATURE_VERSION, [...FEATURES, ...contextFeatureNames(model.classes)], "Item-type stage-2");
     for (const stage of [model.stage1, model.stage2]) {
+        if (stage.format !== PACKED_TREES_FORMAT) {
+            throw new Error(`Item-type model stages must be in ${PACKED_TREES_FORMAT}, got ${String(stage.format)}`);
+        }
         if (stage.classes.length !== model.classes.length || stage.classes.some((c, k) => c !== model.classes[k])) {
             throw new Error("Item-type model stages disagree on the class order");
         }
     }
-    const { skipAbove } = model.stage2;
+    const { skipAbove, initFromStage1 } = model.stage2;
     if (skipAbove !== undefined && !(skipAbove > 0 && skipAbove <= 1)) {
         throw new Error(`Item-type stage-2 skipAbove must be in (0, 1], got ${skipAbove}`);
     }
+    if (initFromStage1 !== undefined && typeof initFromStage1 !== "boolean") {
+        throw new Error(`Item-type stage-2 initFromStage1 must be a boolean, got ${String(initFromStage1)}`);
+    }
     checked.add(model);
+}
+
+/**
+ * Stage-2 probabilities of one item's stage-2 row, given its stage-1 raw
+ * scores: the softmax of the stage-2 scores, to which `initFromStage1` adds
+ * the stage-1 scores after the stage-2 trees, as the training code does.
+ */
+export function stage2Probabilities(model: ItemTypeModel, x: ModelInput, stage1Scores: readonly number[]): number[] {
+    const scores = modelScores(model.stage2, x);
+    if (model.stage2.initFromStage1) for (let k = 0; k < scores.length; k++) scores[k] += stage1Scores[k];
+    return scoreProbabilities(scores);
 }
 
 /** Time each part of `classifyItemTypes` took, in ms. */
@@ -249,14 +282,16 @@ export function classifyItemTypes(doc: TypedDocument, model: ItemTypeModel): Ite
             return row;
         });
     const t1 = performance.now();
-    const p1 = rows.map((x) => modelProbabilities(model.stage1, x));
+    // Raw scores are kept: stage 2 may start from them (`initFromStage1`).
+    const s1 = rows.map((x) => modelScores(model.stage1, x));
+    const p1 = s1.map(scoreProbabilities);
     const t2 = performance.now();
     const context = contextFeatures(contextUnits(doc), p1);
     rows.forEach((row, i) => row.set(context[i], FEATURES.length));
     const t3 = performance.now();
     const { skipAbove } = model.stage2;
     const p2 = rows.map((x, i) =>
-        skipAbove !== undefined && Math.max(...p1[i]) >= skipAbove ? p1[i] : modelProbabilities(model.stage2, x),
+        skipAbove !== undefined && Math.max(...p1[i]) >= skipAbove ? p1[i] : stage2Probabilities(model, x, s1[i]),
     );
     const t4 = performance.now();
     const probs: number[][][] = [];
