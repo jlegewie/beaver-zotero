@@ -105,7 +105,7 @@ export class MockDBConnection {
     }
 
     /** Close the database. */
-    async closeDatabase(): Promise<void> {
+    async closeDatabase(_permanent?: boolean): Promise<void> {
         this.db.close();
     }
 
