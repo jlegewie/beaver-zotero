@@ -33,9 +33,10 @@ const NON_ASCII_WORD_CHAR_RE = /[\p{L}\p{N}]/u;
 const NON_ASCII_LETTER_RE = /\p{L}/u;
 
 export function isWhitespace(code: number): boolean {
-    return code === 32 || (code >= 9 && code <= 13) || code === 0xa0 || code === 0x1680 ||
-        (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029 ||
-        code === 0x202f || code === 0x205f || code === 0x3000 || code === 0xfeff;
+    // Most characters are below U+00A0, where only tab–CR and space are whitespace.
+    if (code < 0xa0) return code === 32 || (code >= 9 && code <= 13);
+    return code === 0xa0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200a) || code === 0x2028 ||
+        code === 0x2029 || code === 0x202f || code === 0x205f || code === 0x3000 || code === 0xfeff;
 }
 
 function isAsciiLetter(code: number): boolean {

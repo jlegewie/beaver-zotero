@@ -40,6 +40,7 @@
 
 import { listContext, pagePosition } from "../features/context";
 import { clamp, median } from "../features/geometry";
+import { featureRow } from "../features/row";
 import { ITEM_FEATURES as REFERENCE_ITEM_FEATURES, itemFeatures as referenceItemFeatures } from "./referenceFeatures";
 import { NOTE_CAPTION_RE, isFigureCaption, isTableCaption } from "../regions/pageSignals";
 import { isWhitespace, scanWindow, visibleChars } from "../features/text";
@@ -132,6 +133,7 @@ export const FEATURES: readonly string[] = Object.values(FEATURE_GROUPS).flat();
 
 const OWN_GROUPS = ["text", "typography", "geometry", "pipeline", "context"] as const;
 type OwnFeature = (typeof FEATURE_GROUPS)[(typeof OWN_GROUPS)[number]][number];
+const OWN_FEATURES: readonly OwnFeature[] = OWN_GROUPS.flatMap((group) => FEATURE_GROUPS[group]);
 
 // ---------------------------------------------------------------------------
 // Text patterns
@@ -147,29 +149,25 @@ const EMAIL_RE = /\S@\S+\.\p{L}/u;
 const FRONT_MATTER_RE =
     /^\s*(?:©|\(c\)|copyright\b|(?:manuscript\s+)?(?:received|accepted|revised|published|submitted)\b|available\s+online\b|correspond(?:ence|ing)\b|e-?mail\b|keywords?\b|key\s+words\b|jel\b|doi\b|https?:\/\/doi|issn\b|isbn\b|licen[cs]ed?\b|this\s+(?:article|work)\s+is\b|to\s+cite\b|citation\s*:|article\s+history\b|funding\b|acknowledg)/iu;
 const PAGE_NUMBER_RE = /^\s*(?:page\s+|p\.\s*)?(?:\d{1,4}|[ivxlc]{1,7})\s*$/iu;
+const ENDS_COLON_RE = /:\s*$/u;
 const LETTER_RE = /\p{L}/u;
 const UPPER_RE = /\p{Lu}/u;
 
-/** Whitespace-separated words of a text. */
-function wordCount(text: string): number {
-    let n = 0;
-    let inWord = false;
-    for (let i = 0; i < text.length; i++) {
-        const space = isWhitespace(text.charCodeAt(i));
-        if (!space && !inWord) n++;
-        inWord = !space;
-    }
-    return n;
-}
-
-/** Visible characters, letters and uppercase letters of a text. */
-function letterCounts(text: string): { visible: number; letters: number; upper: number } {
+/** Whitespace-separated words, visible characters, letters and uppercase letters of a text. */
+function letterCounts(text: string): { words: number; visible: number; letters: number; upper: number } {
+    let words = 0;
     let visible = 0;
     let letters = 0;
     let upper = 0;
+    let inWord = false;
     for (let i = 0; i < text.length; i++) {
         const code = text.charCodeAt(i);
-        if (isWhitespace(code)) continue;
+        if (isWhitespace(code)) {
+            inWord = false;
+            continue;
+        }
+        if (!inWord) words++;
+        inWord = true;
         visible++;
         if (code < 128) {
             if (code >= 65 && code <= 90) {
@@ -183,7 +181,7 @@ function letterCounts(text: string): { visible: number; letters: number; upper: 
             if (UPPER_RE.test(text[i])) upper++;
         }
     }
-    return { visible, letters, upper };
+    return { words, visible, letters, upper };
 }
 
 // ---------------------------------------------------------------------------
@@ -194,32 +192,45 @@ function styleKey(font: string, size: number, bold: boolean, italic: boolean): s
     return `${font}|${Math.round(size * 2) / 2}|${bold ? 1 : 0}|${italic ? 1 : 0}`;
 }
 
-/** Visible characters of each line, computed once per document. */
-type LineChars = Map<TypedLine, number>;
-
-function lineCharCounts(doc: TypedDocument): LineChars {
-    const chars: LineChars = new Map();
-    for (const page of doc.pages) for (const item of page.items) for (const line of item.lines) chars.set(line, visibleChars(line.text));
-    return chars;
-}
-
 function lineStyle(line: TypedLine): string {
     return styleKey(line.font, line.size, line.bold >= 0.5, line.italic >= 0.5);
 }
 
-/** The style most of the item's glyphs are set in, or null without lines. */
-function itemStyle(item: TypedItem, lineChars: LineChars): string | null {
-    const chars = new Map<string, number>();
-    for (const line of item.lines) {
-        const key = lineStyle(line);
-        chars.set(key, (chars.get(key) ?? 0) + lineChars.get(line)!);
+/** Visible characters and style key of each of an item's lines. */
+interface LineStats {
+    chars: number[];
+    styles: string[];
+}
+
+/** Line statistics of every item, per page; computed once per document. */
+function lineStats(doc: TypedDocument): LineStats[][] {
+    return doc.pages.map((page) =>
+        page.items.map((item) => ({
+            chars: item.lines.map((line) => visibleChars(line.text)),
+            styles: item.lines.map(lineStyle),
+        })),
+    );
+}
+
+/** The key with the largest total weight, the first seen on ties, or null without keys. */
+function majority(keys: readonly string[], weights: readonly number[]): string | null {
+    const seen: string[] = [];
+    const sums: number[] = [];
+    for (let k = 0; k < keys.length; k++) {
+        const at = seen.indexOf(keys[k]);
+        if (at < 0) {
+            seen.push(keys[k]);
+            sums.push(weights[k]);
+        } else {
+            sums[at] += weights[k];
+        }
     }
     let best: string | null = null;
     let most = -1;
-    for (const [key, n] of chars) {
-        if (n > most) {
-            most = n;
-            best = key;
+    for (let j = 0; j < seen.length; j++) {
+        if (sums[j] > most) {
+            most = sums[j];
+            best = seen[j];
         }
     }
     return best;
@@ -234,21 +245,22 @@ interface DocStyles {
     small: string | null;
 }
 
-function docStyles(doc: TypedDocument, lineChars: LineChars): DocStyles {
+function docStyles(doc: TypedDocument, stats: LineStats[][]): DocStyles {
     const chars = new Map<string, number>();
     const sizeOf = new Map<string, number>();
     let total = 0;
-    for (const page of doc.pages) {
-        for (const item of page.items) {
-            for (const line of item.lines) {
-                const key = lineStyle(line);
-                const n = lineChars.get(line)!;
+    doc.pages.forEach((page, p) => {
+        page.items.forEach((item, i) => {
+            const { chars: lineChars, styles } = stats[p][i];
+            item.lines.forEach((line, k) => {
+                const key = styles[k];
+                const n = lineChars[k];
                 chars.set(key, (chars.get(key) ?? 0) + n);
                 sizeOf.set(key, line.size);
                 total += n;
-            }
-        }
-    }
+            });
+        });
+    });
     let small: string | null = null;
     let most = 0;
     if (doc.body.size > 0) {
@@ -373,24 +385,27 @@ const round = (v: number) => (Number.isNaN(v) ? NaN : Math.round(v * 1e4) / 1e4)
  * (`FEATURES` columns).
  */
 export function itemTypeFeatures(doc: TypedDocument): number[][][] {
-    const lineChars = lineCharCounts(doc);
-    const styles = docStyles(doc, lineChars);
+    const stats = lineStats(doc);
+    const styles = docStyles(doc, stats);
     const lists = listContext(doc.pages);
     const marginWindow = new Set(doc.marginWindow);
     const bodyKey = doc.body.size > 0 ? styleKey(doc.body.font, doc.body.size, doc.body.bold, doc.body.italic) : null;
 
-    // Pages each short item text occurs on, for repetition across pages.
+    // Pages each short item text occurs on, for repetition across pages, and
+    // each item's key (null for a longer text).
     const textPages = new Map<string, Set<number>>();
-    for (const page of doc.pages) {
-        for (const item of page.items) {
-            if (item.text.length > REPEAT_MAX_CHARS) continue;
+    const textKeys = doc.pages.map((page) =>
+        page.items.map((item) => {
+            if (item.text.length > REPEAT_MAX_CHARS) return null;
             const key = repeatKey(item.text);
-            if (!key) continue;
-            const set = textPages.get(key) ?? new Set<number>();
-            set.add(page.pageIndex);
-            textPages.set(key, set);
-        }
-    }
+            if (key) {
+                const set = textPages.get(key) ?? new Set<number>();
+                set.add(page.pageIndex);
+                textPages.set(key, set);
+            }
+            return key;
+        }),
+    );
 
     return doc.pages.map((page, p) => {
         const em = page.bodySize > 0 ? page.bodySize : 10;
@@ -405,33 +420,27 @@ export function itemTypeFeatures(doc: TypedDocument): number[][][] {
             const self = boxes[i];
             const text = item.text.trim();
             const window = scanWindow(text);
-            const words = wordCount(window);
             const letters = letterCounts(window);
+            const words = letters.words;
             const sizes = item.lines.map((line) => line.size).filter((s) => s > 0);
             const size = median(sizes);
-            const chars = item.lines.map((line) => lineChars.get(line)!);
+            const { chars, styles: lineStyles } = stats[p][i];
             const totalChars = chars.reduce((a, b) => a + b, 0);
             const share = (pick: (line: TypedLine) => number) =>
                 totalChars > 0 ? item.lines.reduce((sum, line, k) => sum + pick(line) * chars[k], 0) / totalChars : NaN;
             const boldShare = share((line) => line.bold);
             const italicShare = share((line) => line.italic);
-            const style = itemStyle(item, lineChars);
-            const fontChars = new Map<string, number>();
-            item.lines.forEach((line, k) => fontChars.set(line.font, (fontChars.get(line.font) ?? 0) + chars[k]));
-            let font: string | null = null;
-            let fontMost = -1;
-            for (const [name, n] of fontChars) {
-                if (n > fontMost) {
-                    fontMost = n;
-                    font = name;
-                }
-            }
+            // Style and font most of the item's glyphs are set in (null without lines).
+            const style = majority(lineStyles, chars);
+            const font = majority(item.lines.map((line) => line.font), chars);
             const column = page.columns[item.column] ?? null;
             const colWidth = column ? column[2] - column[0] : 0;
             const regions = self ? regionGaps(self, page, em) : { above: NaN, below: NaN, overlap: NaN };
             const first = item.lines.length > 0 ? item.lines[0].text : text;
             const list = lists[p][i];
-            const repeat = text.length <= REPEAT_MAX_CHARS ? textPages.get(repeatKey(text)) : undefined;
+            // Item texts are mostly trimmed already; their key is then the one computed above.
+            const textKey = text.length <= REPEAT_MAX_CHARS ? (text === item.text ? textKeys[p][i]! : repeatKey(text)) : null;
+            const repeat = textKey === null ? undefined : textPages.get(textKey);
             const bodyKnown = doc.body.size > 0;
 
             const f: Record<OwnFeature, number> = {
@@ -443,7 +452,7 @@ export function itemTypeFeatures(doc: TypedDocument): number[][][] {
                 bullet: BULLET_RE.test(text) ? 1 : 0,
                 symbolLead: SYMBOL_LEAD_RE.test(text) ? 1 : 0,
                 sectionNumber: SECTION_NUMBER_RE.test(text) ? 1 : 0,
-                endsColon: /:\s*$/u.test(text) ? 1 : 0,
+                endsColon: ENDS_COLON_RE.test(text) ? 1 : 0,
                 noFinalPunct: text && !FINAL_PUNCT_RE.test(text) ? 1 : 0,
                 email: EMAIL_RE.test(window) ? 1 : 0,
                 frontMatterCue: FRONT_MATTER_RE.test(text) ? 1 : 0,
@@ -502,12 +511,10 @@ export function itemTypeFeatures(doc: TypedDocument): number[][][] {
                 textRepeat: doc.pages.length > 1 ? (repeat ? repeat.size - 1 : 0) / (doc.pages.length - 1) : NaN,
                 textRepeatCount: repeat ? Math.min(repeat.size - 1, 10) / 10 : 0,
             };
-            const row: number[] = [];
-            for (const group of OWN_GROUPS) {
-                for (const name of FEATURE_GROUPS[group]) row.push(f[name]);
-            }
+            const row = featureRow(f, OWN_FEATURES);
             for (const v of referenceItemFeatures(item, page)) row.push(v);
-            return row.map(round);
+            for (let k = 0; k < row.length; k++) row[k] = round(row[k]);
+            return row;
         });
     });
 }

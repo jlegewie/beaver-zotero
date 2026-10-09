@@ -10,6 +10,7 @@ export const clamp = (v: number, lo: number, hi: number): number => Math.min(hi,
 
 export function median(values: readonly number[]): number {
     if (values.length === 0) return 0;
+    if (values.length === 1) return values[0];
     const s = [...values].sort((a, b) => a - b);
     const m = s.length >> 1;
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
