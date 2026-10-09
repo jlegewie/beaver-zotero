@@ -1,19 +1,14 @@
 /**
- * Features of the reference classifier.
+ * Reference item features: the item-type model's `reference` feature group
+ * (`features.ts` names them `refXxx`).
  *
- * Item features describe one item on its own: the shape of its text
- * (author list, year, venue, page range, DOI), its typography and its
- * geometry (hanging indent, line fill). Context features place the item in
- * the document: whether a reference-list heading precedes it and where the
- * page sits. The classifier's second stage adds the first-stage scores of
- * neighbouring items (see `model.ts`).
- *
- * Everything here is a pure function of `InputPage` inputs, so the training
- * export and the worker compute identical values. The parts other models
- * read too live in `../features/`.
+ * They describe one item on its own: the shape of its text (author list,
+ * year, venue, page range, DOI), its typography and its geometry (hanging
+ * indent, line fill). Everything here is a pure function of `InputPage`
+ * inputs, so the training export and the worker compute identical values.
+ * A change to any value bumps the item-type `FEATURE_VERSION`.
  */
 
-import { listContext, pagePosition } from "../features/context";
 import { clamp, lineBlockGeometry, median } from "../features/geometry";
 import type { InputItem, InputLine, InputPage } from "../features/itemInput";
 import {
@@ -31,8 +26,6 @@ import {
     scanText,
     scanWindow,
 } from "../features/text";
-
-export const FEATURE_VERSION = 8;
 
 export const ITEM_FEATURES = [
     "len",
@@ -82,20 +75,7 @@ export const ITEM_FEATURES = [
     "lineGap",
 ] as const;
 
-export const CONTEXT_FEATURES = [
-    "docPos",
-    "fromEnd",
-    "refHeading",
-    "refHeadingPage",
-    "sinceHeading",
-    "headingsAfter",
-    "listHeading",
-    "notesHeading",
-    "numberSeq",
-] as const;
-
 export type ItemFeatureName = (typeof ITEM_FEATURES)[number];
-export type ContextFeatureName = (typeof CONTEXT_FEATURES)[number];
 
 // ---------------------------------------------------------------------------
 // Reference text patterns
@@ -200,29 +180,4 @@ export function itemFeatures(item: InputItem, page: InputPage): number[] {
         lineGap,
     };
     return ITEM_FEATURES.map((name) => f[name]);
-}
-
-/**
- * Context features for every item of a document, in page and reading order.
- * `pages` must be the document's pages in order; `pageCount` its page count.
- */
-export function contextFeatures(pages: readonly InputPage[], pageCount: number): number[][][] {
-    const lists = listContext(pages);
-    return pages.map((page, p) => {
-        const { docPos, fromEnd } = pagePosition(page.pageIndex, pageCount);
-        return lists[p].map((c) => {
-            const f: Record<ContextFeatureName, number> = {
-                docPos,
-                fromEnd,
-                refHeading: c.refHeadingBefore ? 1 : 0,
-                refHeadingPage: c.refHeadingOnPage ? 1 : 0,
-                sinceHeading: c.refHeadingBefore ? Math.min(Math.log1p(c.sinceRefHeading) / 5, 1) : 0,
-                headingsAfter: Math.min(c.headingsAfterRef, 3) / 3,
-                listHeading: c.listHeading ? 1 : 0,
-                notesHeading: c.notesBefore ? 1 : 0,
-                numberSeq: c.numberSeq ? 1 : 0,
-            };
-            return CONTEXT_FEATURES.map((name) => f[name]);
-        });
-    });
 }

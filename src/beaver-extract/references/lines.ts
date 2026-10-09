@@ -11,6 +11,22 @@
 import { clamp } from "../features/geometry";
 import type { InputLine, InputPage } from "../features/itemInput";
 import { AUTHOR_LEADER, NUMBERED_RE, SURNAME, leadingNumber } from "../features/text";
+import { binaryProbability, type ModelInfo, type TreeModel } from "../models/runtime";
+
+/** The line model with its decision thresholds (weights in `weights.ts`). */
+export interface ReferenceLineModel {
+    /** Entry-start model over `LINE_FEATURES` (`LINE_FEATURE_VERSION`). */
+    model: TreeModel & Pick<ModelInfo, "featureVersion">;
+    /** A later line at or above this start probability opens a new entry. */
+    splitThreshold: number;
+    /** A first line below this start probability continues the previous item. */
+    mergeThreshold: number;
+}
+
+/** Entry-start probability of one line-feature row. */
+export function lineStartProbability(model: ReferenceLineModel, x: readonly number[]): number {
+    return binaryProbability(model.model, x);
+}
 
 export const LINE_FEATURE_VERSION = 3;
 
@@ -104,20 +120,13 @@ const LEVEL_WINDOW = 20;
  * Levels of the lines of the wanted items of a page when they form hanging
  * lists: per column, entries open at an outer edge and wrap to an inner edge
  * 0.5–4.5 em further in. A column reads as such a list when at least three
- * lines open at the outer edge and two of the voting items' lines at the
- * inner one, and when most outer lines open like an entry and few inner
- * ones do. Evidence for the layout (inner lines, outer lines that open like
- * an entry) comes from the voting items, the reference entries, only; the
- * other wanted items count against it. An indented paragraph after a
- * flush-left list then cannot make the list read as hanging, though text
- * that runs on at the outer edge can still keep a list from reading so.
- * Keyed by item index; items in other columns, or in columns that don't
- * hang, are absent.
+ * lines open at the outer edge and two at the inner one, and when most outer
+ * lines open like an entry and few inner ones do. Keyed by item index; items
+ * in other columns, or in columns that don't hang, are absent.
  */
 export function hangingLevels(
     page: InputPage,
     wanted: (itemIndex: number) => boolean,
-    votes: (itemIndex: number) => boolean = wanted,
 ): Map<number, HangingLevel[]> {
     const em = page.bodySize > 0 ? page.bodySize : 10;
     const out = new Map<number, HangingLevel[]>();
@@ -137,7 +146,7 @@ export function hangingLevels(
             return (seq[j].line.l - edge) / em;
         });
         const inner = offsets
-            .filter((d, j) => votes(seq[j].i) && d >= 0.5 && d <= HANGING_MAX_INDENT_EM)
+            .filter((d) => d >= 0.5 && d <= HANGING_MAX_INDENT_EM)
             .sort((a, b) => a - b);
         if (inner.length < 2) continue;
         const step = inner[inner.length >> 1];
@@ -147,20 +156,18 @@ export function hangingLevels(
         let outerN = 0;
         let outerEntries = 0;
         let innerN = 0;
-        let innerVotes = 0;
         let innerEntries = 0;
-        seq.forEach(({ i, line }, j) => {
+        seq.forEach(({ line }, j) => {
             const entry = opensLikeEntry(line.text.trim());
             if (levels[j] === "outer") {
                 outerN++;
-                if (entry && votes(i)) outerEntries++;
+                if (entry) outerEntries++;
             } else if (levels[j] === "inner") {
                 innerN++;
-                if (votes(i)) innerVotes++;
                 if (entry) innerEntries++;
             }
         });
-        if (outerN < 3 || innerVotes < 2 || outerEntries < 0.6 * outerN || innerEntries > 0.2 * innerN) continue;
+        if (outerN < 3 || innerN < 2 || outerEntries < 0.6 * outerN || innerEntries > 0.2 * innerN) continue;
         seq.forEach(({ i, k }, j) => {
             const row = out.get(i) ?? page.items[i].lines.map((): HangingLevel => null);
             row[k] = levels[j];

@@ -6,7 +6,7 @@ import { extractPdf, itemsExport } from "../../../src/beaver-extract/node/api";
 import { FEATURES, FEATURE_GROUPS, FEATURE_SET, FEATURE_VERSION, itemTypeFeatures } from "../../../src/beaver-extract/itemTypes/features";
 import { buildTypedDocument, type TypedDocument, type TypedItem, type TypedPage } from "../../../src/beaver-extract/itemTypes/input";
 import { ITEMS_EXPORT_TASKS } from "../../../src/beaver-extract/pipeline/itemsExport";
-import { ITEM_FEATURES as REFERENCE_ITEM_FEATURES } from "../../../src/beaver-extract/references/features";
+import { ITEM_FEATURES as REFERENCE_ITEM_FEATURES } from "../../../src/beaver-extract/itemTypes/referenceFeatures";
 
 const PDF = join(__dirname, "../../fixtures/pdfs/extract-public/_shared/d86a26bf17a0e19194abe41f10b32b4cf86e8caddf3c854773802e5a76b607cf.pdf");
 const FIXTURE = join(__dirname, "fixtures/itemTypeFeatureParity.json");
@@ -126,9 +126,15 @@ describe("items export", () => {
                 for (const v of unit.features) expect(v === null || Number.isFinite(v)).toBe(true);
                 expect(unit.lines.length).toBeGreaterThan(0);
             }
-            // Every unit belongs to an item; text items list their units, region items none.
+            // Every unit belongs to an item, or the item-type model read it as
+            // page furniture and it is listed with the filtered lines. Text
+            // items list their units, region items none.
             const listed = new Set(page.items.flatMap((item) => item.units));
-            expect([...listed].sort((a, b) => a - b)).toEqual(page.units.map((unit) => unit.unit));
+            const filtered = new Set(page.filtered_lines.map((line) => line.text));
+            for (const unit of page.units) {
+                if (!listed.has(unit.unit)) expect(filtered.has(unit.text), unit.text).toBe(true);
+            }
+            expect([...listed].every((u) => u >= 0 && u < page.units.length)).toBe(true);
             for (const item of page.items) {
                 const region = item.kind === "picture" || item.kind === "table" || item.kind === "formula";
                 expect(item.units.length > 0).toBe(!region);

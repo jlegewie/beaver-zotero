@@ -31,7 +31,7 @@
  *   most 1.
  * - `textRepeat`: share of the document's other pages with an item of the
  *   same text (items up to 120 characters); `textRepeatCount` likewise.
- * - `reference`: the reference classifier's item features (`refXxx`).
+ * - `reference`: the reference item features (`referenceFeatures.ts`, `refXxx`).
  *
  * Missing values (no lines, no column, no region above) are NaN. Values are
  * rounded to 4 decimals. A change to any value bumps `FEATURE_VERSION`; the
@@ -40,7 +40,7 @@
 
 import { listContext, pagePosition } from "../features/context";
 import { clamp, median } from "../features/geometry";
-import { ITEM_FEATURES as REFERENCE_ITEM_FEATURES, itemFeatures as referenceItemFeatures } from "../references/features";
+import { ITEM_FEATURES as REFERENCE_ITEM_FEATURES, itemFeatures as referenceItemFeatures } from "./referenceFeatures";
 import { NOTE_CAPTION_RE, isFigureCaption, isTableCaption } from "../regions/pageSignals";
 import { isWhitespace, scanWindow, visibleChars } from "../features/text";
 import type { TypedDocument, TypedItem, TypedLine, TypedPage } from "./input";

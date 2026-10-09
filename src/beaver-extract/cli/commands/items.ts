@@ -2,7 +2,7 @@
  * `beaver-extract items` — task-generic training export for item models.
  *
  *   items export --task item-type --pdf-list docs.jsonl --out dir/ [--limit N] [--shard i/n]
- *       [--schema v] [--preset itemTypeModel]
+ *       [--schema v]
  *     Full-document structured extraction per PDF; one row per document
  *     (`pipeline/itemsExport.ts`): per page the model's units with their
  *     feature rows, the structured items with their ids, boxes, columns, text,
@@ -30,7 +30,6 @@ import {
     requireFiles,
     sourceCommit,
 } from "../batch";
-import { PRESET_OPTION_HELP, parsePresetOverrides } from "../options";
 import { ITEMS_EXPORT_FORMAT, ITEMS_EXPORT_TASKS } from "../../pipeline/itemsExport";
 import { CURRENT_PDF_EXTRACTION_PRESET } from "../../schema";
 
@@ -41,7 +40,6 @@ interface ExportOptions {
     limit?: string;
     shard?: string;
     schema?: string;
-    preset?: string;
     bboxPrecision: string;
 }
 
@@ -69,8 +67,8 @@ async function claimManifest(path: string, manifest: Manifest): Promise<void> {
         await unlink(tmp).catch(() => undefined);
     }
     const existing = JSON.parse(await readFile(path, "utf8")) as Manifest;
-    // Keys of either side: an optional setting (`preset_overrides`) recorded
-    // by one run and omitted by the other is a difference too.
+    // Keys of either side: an optional setting recorded by one run and
+    // omitted by the other is a difference too.
     for (const key of new Set([...Object.keys(existing), ...Object.keys(manifest)])) {
         const was = JSON.stringify(existing[key]);
         const now = JSON.stringify(manifest[key]);
@@ -92,7 +90,6 @@ async function runExport(deps: CliDeps, opts: ExportOptions): Promise<void> {
     requireFiles([opts.pdfList]);
     const { commit, dirty } = sourceCommit();
     const schemaVersion = opts.schema ?? CURRENT_PDF_EXTRACTION_PRESET.schemaVersion;
-    const presetOverrides = opts.preset ? parsePresetOverrides(opts.preset) : undefined;
     await mkdir(join(opts.out, "docs"), { recursive: true });
     await claimManifest(join(opts.out, "manifest.json"), {
         format: ITEMS_EXPORT_FORMAT,
@@ -101,7 +98,6 @@ async function runExport(deps: CliDeps, opts: ExportOptions): Promise<void> {
         feature_version: task.featureVersion,
         names: task.features,
         schema_version: schemaVersion,
-        ...(presetOverrides ? { preset_overrides: presetOverrides } : {}),
         bbox_precision: bboxPrecision,
         commit,
         dirty,
@@ -128,7 +124,6 @@ async function runExport(deps: CliDeps, opts: ExportOptions): Promise<void> {
                 task: opts.task,
                 bboxPrecision,
                 schemaVersion,
-                ...(presetOverrides ? { presetOverrides } : {}),
             });
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
@@ -166,7 +161,6 @@ export function buildItemsCommand(deps: CliDeps): Command {
         .option("--limit <n>", "process at most n documents, then exit")
         .option("--shard <i/n>", "process only documents hashed to shard i of n")
         .option("--schema <version>", "PDF schema version (extraction preset)")
-        .option("--preset <switches>", PRESET_OPTION_HELP)
         .option("--bbox-precision <n>", "decimal places of boxes, as in the structured export", "2")
         .action((opts: ExportOptions) => runExport(deps, opts));
     return cmd;

@@ -836,15 +836,13 @@ export interface StructuredPagePhaseTimings {
     /** Region detection and region items (schema presets with `regions`). */
     regionsMs?: number;
     /**
-     * This page's share of reference classification (presets with the
-     * `references` item pass); the document-level pass is split across pages
-     * by item count. With the item-type model on, the time spent splitting and
-     * joining the page's reference entries.
+     * Time spent splitting and joining this page's reference entries
+     * (presets with the `references` item pass).
      */
     referencesMs?: number;
     /**
-     * This page's share of the item-type pass (presets with `itemTypeModel`),
-     * split across pages by item count like `referencesMs`. The parts below
+     * This page's share of the item-type pass (presets with the `itemTypes`
+     * item pass), split across pages by item count. The parts below
      * break it down; the rest is building the model input and relabeling.
      */
     itemTypesMs?: number;

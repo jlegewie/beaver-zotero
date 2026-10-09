@@ -9,9 +9,8 @@ import {
     isCaptionLabel,
     isNonEntryLabel,
     planEntries,
-    planReferences,
-    type ReferencePagePlan,
-} from "../../../src/beaver-extract/references/classify";
+    type EntryPagePlan,
+} from "../../../src/beaver-extract/references/entries";
 import type { InputItem, InputLine, InputPage } from "../../../src/beaver-extract/features/itemInput";
 
 function bbox(l: number, t: number, r: number, b: number): BoundingBox {
@@ -38,9 +37,8 @@ function draft(groups: PageLine[][], kinds?: DraftItem["kind"][], columns?: numb
     return groups.map((g, i) => draftItem(g.map((l) => l.text).join(" "), g, columns?.[i] ?? 0, kinds?.[i]));
 }
 
-function plan(n: number, edits: Partial<ReferencePagePlan>): ReferencePagePlan {
+function plan(n: number, edits: Partial<EntryPagePlan>): EntryPagePlan {
     return {
-        probs: new Array(n).fill(0.9),
         reference: new Array(n).fill(true),
         splits: Array.from({ length: n }, () => []),
         mergeWithPrevious: new Array(n).fill(false),
@@ -161,11 +159,11 @@ describe("reference items in the structured projection", () => {
     });
 });
 
-describe("planReferences", () => {
+describe("planEntries", () => {
     // An author-year list without terminal periods, its entries hanging from
     // an outer edge (120) to an inner one (136). The paragraph detector cut
-    // it badly: one-line entries run together, continuation lines broke off
-    // their entries, and the item scores alone miss such fragments.
+    // it badly: one-line entries run together and continuation lines broke
+    // off their entries.
     function document(): InputPage[] {
         let t = 60;
         const line = (text: string, l = 120, r = 484): InputLine => {
@@ -213,14 +211,7 @@ describe("planReferences", () => {
         ];
     }
 
-    it("splits run-together entries of a hanging list where a line opens at the outer edge", () => {
-        const [, plan] = planReferences(document(), 10);
-        expect(plan.reference[0]).toBe(true);
-        expect(plan.splits[0]).toEqual([1, 2, 3]);
-        expect(plan.mergeWithPrevious[1]).toBe(true);
-    });
-
-    it("plans the entries of items another model labeled as references, without classifying", () => {
+    it("splits run-together entries and joins broken-off continuations of the items labeled references", () => {
         const pages = document();
         const reference = [
             [false, true, true],
@@ -240,174 +231,6 @@ describe("planReferences", () => {
         expect(none[1].mergeWithPrevious.some(Boolean)).toBe(false);
     });
 
-    it("joins a continuation the item scores miss to the entry it continues", () => {
-        const [, plan] = planReferences(document(), 10);
-        // "408" finishes the Hutchings entry split off the item before it.
-        expect(plan.probs[3]).toBeLessThan(0.6);
-        expect(plan.reference[3]).toBe(true);
-        expect(plan.mergeWithPrevious[3]).toBe(true);
-        expect(plan.splits[2]).toEqual([1]);
-    });
-
-    it("leaves a flush-left list alone when an indented paragraph after it is rejected", () => {
-        // The paragraph's indented lines would make the list read as hanging,
-        // and "Harvard University Press." would open an entry at its outer edge.
-        let t = 60;
-        const line = (text: string, l = 72, r = 540): InputLine => {
-            const out: InputLine = { text, l, t, r, b: t + 10, size: 10, role: 0, lead: 1 };
-            t += 12;
-            return out;
-        };
-        const item = (lines: InputLine[], header = false): InputItem => ({
-            header,
-            column: 0,
-            text: lines.map((l) => l.text).join(" "),
-            lines,
-        });
-        const items = [
-            item([line("References", 72, 150)], true),
-            item([
-                line("Smith, J. (2001). A study of social structure and its consequences for urban neighborhoods. Cambridge, MA:"),
-                line("Harvard University Press.", 72, 200),
-            ]),
-            item([line("Jones, K. (2002). Networks and neighborhoods. American Journal of Sociology, 108(2), 1–45.", 72, 500)]),
-            item([line("Brown, A. (2003). Collective efficacy revisited. Annual Review of Sociology, 29, 101–130.", 72, 480)]),
-            item([
-                line("Supplementary material for this article is available online, including the data and code used in the", 90),
-                line("analyses and additional robustness checks referred to in the text.", 90, 400),
-            ]),
-        ];
-        const [plan] = planReferences([{ pageIndex: 9, width: 612, height: 792, bodySize: 10, items }], 10);
-        expect(plan.reference).toEqual([false, true, true, true, false]);
-        expect(plan.splits).toEqual([[], [], [], [], []]);
-    });
-
-    describe("text after an unpunctuated list", () => {
-        // Entries end without a final period ("… Cambridge Univ. Press") and
-        // hang at an inner edge (136) that the text after the list shares.
-        function tail(last: string[], after: string[], rest: string[][] = []): ReferencePagePlan {
-            let t = 60;
-            const line = (text: string, l = 120, r = 484): InputLine => {
-                const out: InputLine = { text, l, t, r, b: t + 8, size: 8, role: 0, lead: 1 };
-                t += 11;
-                return out;
-            };
-            const item = (lines: InputLine[], header = false): InputItem => ({
-                header,
-                column: 0,
-                text: lines.map((l) => l.text).join(" "),
-                lines,
-            });
-            const items = [
-                item([line("References", 120, 180)], true),
-                item([
-                    line("Fortner MJ. 2015. Black Silent Majority: Urban Politics and the Rockefeller Drug Laws. Cambridge, MA:"),
-                    line("Harvard Univ. Press", 136, 220),
-                ]),
-                item([
-                    line("Garland D. 2001. The Culture of Control: Crime and Social Order in Contemporary Society. Chicago:"),
-                    line("Univ. Chicago Press", 136, 220),
-                ]),
-                item(last.map((text, k) => line(text, k === 0 ? 120 : 136))),
-                item(after.map((text) => line(text, 136, 440))),
-                ...rest.map((texts) => item(texts.map((text, k) => line(text, k === 0 ? 120 : 136)))),
-            ];
-            return planReferences([{ pageIndex: 9, width: 531, height: 657, bodySize: 8, items }], 10)[0];
-        }
-
-        it("keeps a prose paragraph out of the last entry", () => {
-            const plan = tail(
-                ["Gest T. 2003. Crime and Politics: Big Government's Erratic Campaign for Law and Order. New York:", "Cambridge Univ. Press"],
-                [
-                    "Supplementary material for this article is available online, including the data and code used",
-                    "in the analyses and additional robustness checks referred to in the text",
-                ],
-            );
-            expect(plan.reference[4]).toBe(false);
-            expect(plan.mergeWithPrevious[4]).toBe(false);
-        });
-
-        it("keeps text out of an entry that a lowercase word finishes", () => {
-            const last = ["Gest T. 2023. Crime and Politics: Big Government's Erratic Campaign for Law and Order.", "Cambridge University Press, in press"];
-            for (const after of [
-                [
-                    "Supplementary material for this article is available online, including the data and code used",
-                    "in the analyses and additional robustness checks referred to in the text",
-                ],
-                ["Online Appendix"],
-            ]) {
-                const plan = tail(last, after);
-                expect(plan.reference[4], after[0]).toBe(false);
-                expect(plan.mergeWithPrevious[4], after[0]).toBe(false);
-            }
-        });
-
-        it("keeps prose out of an entry whose last line looks open", () => {
-            const plan = tail(
-                ["Gest T. 2003. Crime and Politics: Big Government's Erratic Campaign for Law and Order. New York:", "Cambridge Univ. Press,"],
-                [
-                    "The authors thank the editors and three anonymous reviewers. This work was presented at the 2019",
-                    "annual meeting, and we are grateful to its participants for their comments",
-                ],
-            );
-            expect(plan.reference[4]).toBe(false);
-            expect(plan.mergeWithPrevious[4]).toBe(false);
-        });
-
-        it("keeps publication history out of the last entry", () => {
-            const plan = tail(
-                ["Gest T. 2003. Crime and Politics: Big Government's Erratic Campaign for Law and Order. New York:", "Cambridge Univ. Press"],
-                ["Received for publication September 2019"],
-            );
-            expect(plan.reference[4]).toBe(false);
-            expect(plan.mergeWithPrevious[4]).toBe(false);
-        });
-
-        it("keeps an appendix label out of the last entry", () => {
-            const last = ["Gest T. 2003. Crime and Politics: Big Government's Erratic Campaign for Law and Order. New York:", "Cambridge Univ. Press"];
-            for (const label of ["Appendix A: Journal Coverage", "Online Appendix B. Journal Sample", "Supplementary Appendix: Review Articles"]) {
-                const plan = tail(last, [label]);
-                expect(plan.reference[4], label).toBe(false);
-                expect(plan.mergeWithPrevious[4], label).toBe(false);
-            }
-        });
-
-        it("does not reach across an appendix label for a list that resumes after it", () => {
-            const plan = tail(
-                ["Gest T. 2003. Crime and Politics: Big Government's Erratic Campaign for Law and Order. New York:", "Cambridge Univ. Press"],
-                ["Supplementary material for this article is available online."],
-                [
-                    ["Appendix A: Journal Coverage"],
-                    ["Gordon DR. 1990. The Justice Juggernaut: Fighting Street Crime, Controlling Citizens. New Brunswick, NJ:", "Rutgers Univ. Press"],
-                ],
-            );
-            expect(plan.reference[4]).toBe(false);
-            expect(plan.mergeWithPrevious[4]).toBe(false);
-        });
-
-        it("joins the rest of an entry its last line leaves open", () => {
-            const plan = tail(["Zuboff S. 2019. The Age of Surveillance Capitalism: The Fight for a Human Future. Public Affairs,"], ["New York"]);
-            expect(plan.probs[4]).toBeLessThan(0.6);
-            expect(plan.reference[4]).toBe(true);
-            expect(plan.mergeWithPrevious[4]).toBe(true);
-        });
-
-        it("joins a bibliographic tail to an entry that looks finished", () => {
-            const plan = tail(
-                ["Overholtzer M, Brugge JS. 2008. The cell biology of the entosis pathway and its consequences. Nat. Rev. Mol. Cell"],
-                ["Biol. 9:796–809"],
-            );
-            expect(plan.probs[4]).toBeLessThan(0.6);
-            expect(plan.reference[4]).toBe(true);
-            expect(plan.mergeWithPrevious[4]).toBe(true);
-        });
-    });
-
-    it("keeps what follows a finished last entry out of the list", () => {
-        const [, plan] = planReferences(document(), 10);
-        expect(plan.reference[5]).toBe(false);
-        expect(plan.mergeWithPrevious[5]).toBe(false);
-    });
 });
 
 describe("isCaptionLabel", () => {

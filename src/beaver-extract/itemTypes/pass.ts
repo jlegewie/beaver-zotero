@@ -7,12 +7,12 @@
  * items), and captions and everything else `text`.
  *
  * It runs first in step 3. The model decides which items are references;
- * the reference entries pass that follows in presets with references only
- * splits and joins them into entries.
+ * the reference pass that follows (`references/pass.ts`) only splits and
+ * joins them into one item per entry.
  */
 
 import type { ItemPass } from "../pipeline/itemPasses";
-import { isNonEntryLabel } from "../references/classify";
+import { isNonEntryLabel } from "../references/entries";
 import { buildTypedDocument } from "./input";
 import { argmax, classifyItemTypes, type ItemTypeClass, type ItemTypeModel } from "./model";
 import { ITEM_TYPE_MODEL } from "./weights";

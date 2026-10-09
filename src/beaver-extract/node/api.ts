@@ -48,7 +48,6 @@ import type {
     StructuredExtractWithDebugResult,
 } from "../schema";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
-import type { PresetOverrides } from "../schema/presets";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 
 export type PdfBytes = Uint8Array | ArrayBuffer;
@@ -73,8 +72,6 @@ export interface ExtractInput {
     includeDiagnostics?: boolean;
     /** PDF schema version to produce (its extraction preset); default current. */
     schemaVersion?: string;
-    /** Development only (CLI): switches of the schema's preset to override. */
-    presetOverrides?: PresetOverrides;
 }
 
 export interface AnalyzeLayoutInput {
@@ -142,14 +139,11 @@ export async function structuredExtractWithDebug(
 }
 
 /**
- * Full-document structured extraction returning the reference classifier's
- * per-page inputs (training export and debugging).
+ * Full-document structured extraction returning the reference line model's
+ * per-page inputs, before any item pass (training export).
  */
 export async function referenceInputs(
-    input: Pick<ExtractInput, "pdfData" | "settings" | "paragraphSettings" | "analysisWindow" | "schemaVersion"> & {
-        /** Classify too: return plans and the emitted items. */
-        classify?: boolean;
-    },
+    input: Pick<ExtractInput, "pdfData" | "settings" | "paragraphSettings" | "analysisWindow" | "schemaVersion">,
 ): Promise<Awaited<ReturnType<typeof opReferenceInputs>>["result"]> {
     await ensureExtractionRuntime();
     const reply = await enqueue(() => opReferenceInputs(input));
@@ -163,7 +157,7 @@ export async function referenceInputs(
  * so features see what they will see at runtime.
  */
 export async function itemsExport(
-    input: Pick<ExtractInput, "pdfData" | "schemaVersion" | "presetOverrides"> & {
+    input: Pick<ExtractInput, "pdfData" | "schemaVersion"> & {
         task: string;
         bboxPrecision?: number;
     },

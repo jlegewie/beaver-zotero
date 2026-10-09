@@ -83,7 +83,7 @@ npm run beaver-extract -- overlay --help
 | `fixture`        | Manage extraction-regression fixtures (see below).     |
 | `ocr-fixture`    | Manage OCR-detection regression fixtures (see below).  |
 | `items`          | Training export for item models (`items export --task`, see below). |
-| `references`     | Reference-classifier export, features, plans and debugging. |
+| `references`     | Reference line-model export and line features.         |
 
 Overlay levels: `columns | lines | items | sentences | margins`.
 
@@ -250,7 +250,7 @@ tracked files differ from it), `feature_set` and `feature_version`. Per page:
   their lines came from. A reference entry split from a unit lists that unit;
   an item merged from several lists them all; region items list none.
 - `filtered_lines`: the lines the margin filter removed (`filtered: true`) and,
-  with the item-type model on, the items it read as page furniture.
+  in presets with the item-type pass, the items it read as page furniture.
 
 Labels made on the structured export of the same commit match items by id and
 map onto units through `units`. `<out>/manifest.json` records the task,
@@ -261,16 +261,9 @@ uses the plugin's settings, so features see the same analysis window as at
 runtime: every page of the document. Resumable and shardable like
 `references export`; each shard keeps its own `ledger-<i>of<n>.jsonl`.
 
-### Preset overrides
-
-`extract`, `profile`, `fixture evaluate` and `items export` accept
-`--preset <switches>` to try a preset switch before a schema version turns it
-on, e.g. `--preset itemTypeModel` (or `itemTypeModel=false`). Only listed
-switches can be overridden (`OVERRIDABLE_PRESET_SWITCHES`); the result still
-names the preset's schema version, so never cache or ship such output. `items
-export` records the overrides in its manifest (`preset_overrides`).
-`profile` also takes `--schema-version`; with the item-type model on it adds
-an `itemTypes` phase and its parts (features, stage 1, context, stage 2).
+`profile` also takes `--schema-version`; in presets with the item-type pass
+it adds an `itemTypes` phase and its parts (features, stage 1, context,
+stage 2).
 
 ## Configuration
 
@@ -461,7 +454,7 @@ src/beaver-extract/
 │   │   ├── fixture.ts               # `fixture {capture,evaluate,update,migrate,list}`
 │   │   ├── ocrFixture.ts            # `ocr-fixture {capture,evaluate,update,list}`
 │   │   ├── items.ts                 # `items export` (training export for item models)
-│   │   └── references.ts            # `references {export,featurize,plan,classify,render}`
+│   │   └── references.ts            # `references {export,featurize,render}`
 │   ├── batch.ts                 # document lists, shards, resume ledger (export commands)
 │   └── fixture/                 # extract + OCR fixture file format (Node-only)
 │       ├── fixtureFile.ts           # atomic read/write, _shared/ dedup

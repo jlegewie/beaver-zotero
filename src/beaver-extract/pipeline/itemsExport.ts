@@ -97,8 +97,8 @@ export interface ItemsExportPage {
     items: ItemsExportItem[];
     /**
      * Lines the margin filter (or region detection) set aside as page
-     * furniture, and with the item-type model on, the items it read as
-     * furniture.
+     * furniture, and in presets with the item-type pass, the items it read
+     * as furniture.
      */
     filtered_lines: ItemsExportFilteredLine[];
 }

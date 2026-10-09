@@ -21,8 +21,6 @@ export const PAGE_RANGE_RE = /\bpp?\.\s*\d|\b\d{1,5}\s*[–—~～-]\s*\d{1,5}\b
 export const VOL_ISSUE_RE = /\b\d{1,4}\s?\(\s?\d{1,4}(?:\s?[–-]\s?\d{1,4})?\s?\)|\b(?:[Vv]ol|VOL|[Nn]o|NO|[Nn]r|[Bb]d|[Jj]g|[Hh]eft)\.\s?\d/;
 export const IN_EDS_RE = /(?:^|[\s.,])In:?\s+[A-ZÀ-Þ]|\(eds?\.?\)|\beds?\.\s|\bed\. by\b|\(Hrsg\.?\)|\bHrsg\.|\(Hg\.?\)|\(dir\.\)|\(coord\.\)/;
 export const VENUE_RE = /\b(?:Press|Publishers?|Publishing|Verlag|Journal|Review|Proceedings|Conference|Symposium|Quarterly|Annals|Bulletin|Letters|Transactions|Editions|Éditions|Books|Zeitschrift|Revista|Revue|Rivista|Thesis|Dissertation|Working Paper|Report|Univ\.|University)\b/;
-/** A place and its publisher: "Upper Saddle River, NJ: Prentice Hall", "London, UK: Sage". */
-const PLACE_PUBLISHER_RE = /\p{Lu}[\p{L}.]+,\s?\p{Lu}{2}\s?:/u;
 
 const PROSE_WORDS = new Set([
     "we", "our", "us", "is", "are", "was", "were", "that", "this", "these", "those", "which",
@@ -152,36 +150,12 @@ export function visibleChars(text: string): number {
     return n;
 }
 
-/** Words of running prose in a text ("is", "this", "we", …; see `scanText`). */
-export function proseWordCount(text: string): number {
-    return scanText(text).prose;
-}
-
 /** Matches of a global regular expression in a text. */
 export function countMatches(re: RegExp, text: string): number {
     re.lastIndex = 0;
     let n = 0;
     while (re.exec(text) !== null) n++;
     return n;
-}
-
-/**
- * Whether text carries a bibliographic detail: a year, a page range, a
- * volume or issue, a DOI or link, a venue or publisher word, an editor
- * statement or a place and publisher.
- */
-export function hasBibliographicDetail(text: string): boolean {
-    YEAR_RE.lastIndex = 0;
-    return (
-        YEAR_RE.test(text) ||
-        PAGE_RANGE_RE.test(text) ||
-        VOL_ISSUE_RE.test(text) ||
-        DOI_RE.test(text) ||
-        URL_RE.test(text) ||
-        VENUE_RE.test(text) ||
-        IN_EDS_RE.test(text) ||
-        PLACE_PUBLISHER_RE.test(text)
-    );
 }
 
 /** Leading list number of a text ("[12]", "12.", "(12)", "12 Smith"), or null. */

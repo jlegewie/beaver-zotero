@@ -18,9 +18,7 @@ import {
     parseAnalysisWindow,
     parsePageRange,
     parsePagesList,
-    parsePresetOverrides,
     parseSchemaVersion,
-    PRESET_OPTION_HELP,
 } from "../options";
 import type { ExtractInput } from "../../node/api";
 import {
@@ -42,7 +40,6 @@ export function buildExtractCommand(deps: CliDeps): Command {
         .option("--graphics-layer-mode <mode>", "graphics layer probe mode: off | auto | on")
         .option("--paragraph-settings <path>", "path to JSON file with ParagraphDetectionSettings")
         .option("--schema-version <v>", "PDF schema version to extract (its preset); default current")
-        .option("--preset <switches>", PRESET_OPTION_HELP)
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
         .action(async (pdfPath: string, opts: Record<string, string | undefined>) => {
@@ -102,10 +99,6 @@ export function buildExtractCommand(deps: CliDeps): Command {
                 if (opts.schemaVersion) {
                     input.schemaVersion = parseSchemaVersion(opts.schemaVersion);
                     effective.schemaVersion = input.schemaVersion;
-                }
-                if (opts.preset) {
-                    input.presetOverrides = parsePresetOverrides(opts.preset);
-                    effective.presetOverrides = input.presetOverrides;
                 }
 
                 const result = await deps.api.extractPdf(input);
