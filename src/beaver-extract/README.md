@@ -93,6 +93,7 @@ src/beaver-extract/
 │   ├── draftItems.ts              # Draft items between segmentation and sentence mapping
 │   ├── itemPasses.ts              # Step 3: `ItemPass` interface; presets list their passes
 │   ├── itemsExport.ts             # `items export` rows (items, lines, filtered lines, task features)
+│   ├── regionsExport.ts           # `items export --task regions-v2` rows (region pass observed in `segmentPages`)
 │   └── output.ts                  # Helpers shared by the markdown and structured results
 ├── models/runtime.ts              # One evaluator for every learned model (bxm-trees-v1, bxm-logistic-v1)
 ├── features/                      # Feature parts shared by the item models

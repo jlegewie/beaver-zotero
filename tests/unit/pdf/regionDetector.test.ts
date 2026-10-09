@@ -69,6 +69,7 @@ function summary(recs: Rec[], grid?: { size: number; cells: number[] }): Graphic
         count: recs.length,
         records,
         overflow: grid !== undefined,
+        incomplete: false,
         grid: gridArray,
         gridSize: grid?.size ?? 0,
     };
