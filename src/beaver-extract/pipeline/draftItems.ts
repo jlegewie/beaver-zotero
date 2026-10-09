@@ -18,8 +18,12 @@ import type { HangingRole, PageParagraphResult } from "../ParagraphDetector";
 import type { RotationAngle } from "../PageRotationNormalizer";
 import type { RegionItemKind } from "../regions/regionItems";
 
-/** Kinds a draft item can have; region items are placed after sentence mapping. */
-export type DraftItemKind = "text" | "section_header" | "reference";
+/**
+ * Kinds a draft item can have; region items are placed after sentence mapping.
+ * `margin` items (page furniture an item pass found) leave the reading order:
+ * they become internal margin items, like the margin filter's.
+ */
+export type DraftItemKind = "text" | "section_header" | "reference" | "footnote" | "margin";
 
 export interface DraftItem {
     kind: DraftItemKind;

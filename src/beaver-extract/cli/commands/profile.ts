@@ -42,6 +42,7 @@ import {
     parseAnalysisWindow,
     parsePageRange,
     parsePagesList,
+    parseSchemaVersion,
 } from "../options";
 
 interface ProfileRun {
@@ -84,7 +85,7 @@ interface ProfileEnvelopeResult {
  * Numeric fields on `StructuredPagePhaseTimings` that we want to
  * aggregate. Kept as a tuple of `[label, key]` so the printed phase
  * order matches the pipeline order: detailed walk → font bridge →
- * filter sub-phases → reference classification → sentence map. Order matters — the printed
+ * filter sub-phases → item passes → sentence map. Order matters — the printed
  * table is read top-to-bottom by the perf-tracker.
  */
 const PHASE_KEYS: ReadonlyArray<[string, keyof StructuredPagePhaseTimings]> = [
@@ -95,8 +96,13 @@ const PHASE_KEYS: ReadonlyArray<[string, keyof StructuredPagePhaseTimings]> = [
     ["  columnDetect", "columnDetectMs"],
     ["  lineDetect", "lineDetectMs"],
     ["  paragraphDetect", "paragraphDetectMs"],
-    // Each page's share of the document-level reference pass; 0 for
-    // schema presets without reference items.
+    // Each page's share of the document-level item passes; 0 for schema
+    // presets without them. The item-type pass's parts are nested.
+    ["itemTypes", "itemTypesMs"],
+    ["  itemTypeFeatures", "itemTypeFeaturesMs"],
+    ["  itemTypeStage1", "itemTypeStage1Ms"],
+    ["  itemTypeContext", "itemTypeContextMs"],
+    ["  itemTypeStage2", "itemTypeStage2Ms"],
     ["references", "referencesMs"],
     ["sentenceMap", "sentenceMapMs"],
 ];
@@ -174,6 +180,7 @@ function aggregate(
         "detailedWalkMs",
         "fontBridgeMs",
         "filteredParagraphsMs",
+        "itemTypesMs",
         "referencesMs",
         "sentenceMapMs",
     ];
@@ -295,6 +302,7 @@ export function buildProfileCommand(deps: CliDeps): Command {
             "--paragraph-settings <path>",
             "path to JSON file with ParagraphDetectionSettings",
         )
+        .option("--schema-version <v>", "PDF schema version to extract (its preset); default current")
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
         .action(async (pdfPath: string, opts: Record<string, string | undefined>) => {
@@ -359,6 +367,11 @@ export function buildProfileCommand(deps: CliDeps): Command {
                         opts.paragraphSettings,
                     );
                     effective.paragraphSettings = input.paragraphSettings;
+                }
+
+                if (opts.schemaVersion) {
+                    input.schemaVersion = parseSchemaVersion(opts.schemaVersion);
+                    effective.schemaVersion = input.schemaVersion;
                 }
 
                 const repeatRaw = opts.repeat ?? "1";

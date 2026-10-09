@@ -22,7 +22,7 @@ import { FEATURES as ITEM_TYPE_FEATURES, FEATURE_SET as ITEM_TYPE_FEATURE_SET, F
 import { bboxToRect } from "../schema/bbox";
 import { ITEM_KINDS } from "../schema/itemKinds";
 import type { Rect, StructuredExtractResult } from "../schema";
-import type { DraftItem, DraftPage } from "./draftItems";
+import type { DraftItem, DraftItemKind, DraftPage } from "./draftItems";
 import type { DraftDocument, ItemPass } from "./itemPasses";
 
 export const ITEMS_EXPORT_FORMAT = "beaver-items-v1";
@@ -95,7 +95,11 @@ export interface ItemsExportPage {
     rotation: number;
     units: ItemsExportUnit[];
     items: ItemsExportItem[];
-    /** Lines the margin filter (or region detection) set aside as page furniture. */
+    /**
+     * Lines the margin filter (or region detection) set aside as page
+     * furniture, and in presets with the item-type pass, the items it read
+     * as furniture.
+     */
     filtered_lines: ItemsExportFilteredLine[];
 }
 
@@ -108,6 +112,9 @@ export interface ItemsExportRow {
     page_count: number;
     pages: ItemsExportPage[];
 }
+
+/** Published kinds made from draft items (`DraftItemKind` without `margin`). */
+const DRAFT_KINDS: ReadonlySet<DocItem["kind"]> = new Set(["text", "section_header", "reference", "footnote"] satisfies DraftItemKind[]);
 
 /** Units of each step-2 line and item of a page. */
 interface PageUnits {
@@ -176,7 +183,9 @@ export class ItemsExportCollector {
         const pages = projected.document.pages.map((publicPage, k): ItemsExportPage => {
             const internalPage = internal.pages[k];
             const draft = this.final[k];
-            const finalItems = this.finalItems[k] ?? [];
+            // Margin drafts (the item-type pass's furniture) become internal
+            // margin items, listed with the filtered lines.
+            const finalItems = (this.finalItems[k] ?? []).filter((item) => item.kind !== "margin");
             const units = this.units[k];
             if (!draft || !units || internalPage.index !== publicPage.index || draft.pageIndex !== publicPage.index) {
                 throw new Error(`items export: page ${publicPage.index} is out of step with the run`);
@@ -187,7 +196,7 @@ export class ItemsExportCollector {
             }
             // Items made from draft items keep their order through sentence
             // mapping and region placement.
-            const fromDrafts = published.filter((item) => item.kind === "text" || item.kind === "section_header" || item.kind === "reference");
+            const fromDrafts = published.filter((item) => DRAFT_KINDS.has(item.kind));
             if (fromDrafts.length !== finalItems.length) {
                 throw new Error(`items export: page ${publicPage.index} has ${fromDrafts.length} text items for ${finalItems.length} draft items`);
             }

@@ -4,8 +4,8 @@
  *
  * Built once per page from its draft items, in the upright working frame.
  * Features are pure functions of it, so the worker and, from an exported
- * copy, the training pipeline compute the same values (the reference
- * classifier's export, `references export`, writes it as is).
+ * copy, the training pipeline compute the same values (the reference line
+ * model's export, `references export`, writes it as is).
  */
 
 import type { StyleProfile } from "@beaver/agent-core/extract/types";

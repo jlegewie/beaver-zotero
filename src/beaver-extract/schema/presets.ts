@@ -59,10 +59,14 @@ export interface PdfExtractionPreset {
     marginTextRows: boolean;
     /**
      * Item passes of structured extraction, in order (step 3, see
-     * `pipeline/itemPasses.ts`). `references` classifies reference-list
-     * entries and emits them as `reference` items (`references/classify.ts`).
+     * `pipeline/itemPasses.ts`). `itemTypes` runs the item-type model
+     * (`itemTypes/pass.ts`): headings, footnotes, references and page
+     * furniture come from the model instead of the paragraph detector's
+     * heading heuristic. `references` splits and joins the reference items
+     * into one item per entry (`references/pass.ts`); it reads the kinds
+     * `itemTypes` gave.
      */
-    itemPasses: readonly "references"[];
+    itemPasses: readonly ("itemTypes" | "references")[];
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */
     idScheme: ExtractIdScheme;
     /**
@@ -82,7 +86,7 @@ export interface PdfExtractionPreset {
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
     "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["references"], idScheme: "page", regions: true, pageNumberRuns: true },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

@@ -836,11 +836,24 @@ export interface StructuredPagePhaseTimings {
     /** Region detection and region items (schema presets with `regions`). */
     regionsMs?: number;
     /**
-     * This page's share of reference classification (presets with the
-     * `references` item pass); the document-level pass is split across pages
-     * by item count.
+     * Time spent splitting and joining this page's reference entries
+     * (presets with the `references` item pass).
      */
     referencesMs?: number;
+    /**
+     * This page's share of the item-type pass (presets with the `itemTypes`
+     * item pass), split across pages by item count. The parts below
+     * break it down; the rest is building the model input and relabeling.
+     */
+    itemTypesMs?: number;
+    /** Item-type features (part of `itemTypesMs`). */
+    itemTypeFeaturesMs?: number;
+    /** Item-type stage 1 (part of `itemTypesMs`). */
+    itemTypeStage1Ms?: number;
+    /** Item-type stage-2 context features (part of `itemTypesMs`). */
+    itemTypeContextMs?: number;
+    /** Item-type stage 2 (part of `itemTypesMs`). */
+    itemTypeStage2Ms?: number;
     /** Total character count on the target page (post-detailed-walk). */
     charCount: number;
     /** Total line count on the target page (post-detailed-walk). */

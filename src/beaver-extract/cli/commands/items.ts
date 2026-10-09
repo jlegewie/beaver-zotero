@@ -2,6 +2,7 @@
  * `beaver-extract items` — task-generic training export for item models.
  *
  *   items export --task item-type --pdf-list docs.jsonl --out dir/ [--limit N] [--shard i/n]
+ *       [--schema v]
  *     Full-document structured extraction per PDF; one row per document
  *     (`pipeline/itemsExport.ts`): per page the model's units with their
  *     feature rows, the structured items with their ids, boxes, columns, text,
@@ -66,7 +67,9 @@ async function claimManifest(path: string, manifest: Manifest): Promise<void> {
         await unlink(tmp).catch(() => undefined);
     }
     const existing = JSON.parse(await readFile(path, "utf8")) as Manifest;
-    for (const key of Object.keys(manifest)) {
+    // Keys of either side: an optional setting recorded by one run and
+    // omitted by the other is a difference too.
+    for (const key of new Set([...Object.keys(existing), ...Object.keys(manifest)])) {
         const was = JSON.stringify(existing[key]);
         const now = JSON.stringify(manifest[key]);
         if (was !== now) {

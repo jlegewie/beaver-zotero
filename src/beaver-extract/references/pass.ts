@@ -1,46 +1,28 @@
 /**
- * Reference classification as an item pass: scores the items of every page
- * (`planReferences`), then relabels each page's reference-list entries and
- * splits and merges them (`applyReferencePlan`).
+ * Reference-list entries as an item pass. It follows the item-type pass,
+ * which decides which items are references, and only splits and joins those
+ * items into one item per entry (`planEntries`, `applyReferencePlan`), on
+ * the pages that have any.
  */
 
 import type { ItemPass } from "../pipeline/itemPasses";
-import { applyReferencePlan, planReferences, type ReferencePagePlan } from "./classify";
-import { buildInputPage, type InputPage } from "../features/itemInput";
-
-export interface ReferencePassOptions {
-    /** Emit classified reference-list entries as `reference` items. */
-    classify: boolean;
-    /**
-     * Receives every page's classifier input, in page order, and the plans
-     * when `classify` is set (export and debugging).
-     */
-    collect?: (inputs: InputPage[], plans: ReferencePagePlan[] | undefined) => void;
-}
+import { applyReferencePlan, planEntries } from "./entries";
+import { buildInputPage } from "../features/itemInput";
 
 export const REFERENCE_PASS = "references";
 
-export function referencePass(options: ReferencePassOptions): ItemPass {
+export function referencePass(): ItemPass {
     return {
         name: REFERENCE_PASS,
         run(doc, ctx) {
-            const tReferences = performance.now();
-            const inputs = doc.pages.map((page) => buildInputPage(page, doc.styleProfile));
-            const plans = options.classify ? planReferences(inputs, doc.pageCount) : undefined;
-            options.collect?.(inputs, plans);
-            const referencesMs = performance.now() - tReferences;
-            if (!plans) return;
             const removeHyphenation = ctx.paragraphSettings?.removeHyphenation ?? true;
-            const itemTotal = inputs.reduce((n, page) => n + page.items.length, 0);
             doc.pages.forEach((page, k) => {
-                const tApply = performance.now();
-                page.items = applyReferencePlan(page.items, plans[k], removeHyphenation);
-                // Classification time is shared by item count; applying the
-                // plan is the page's own.
-                const share = itemTotal > 0
-                    ? (referencesMs * plans[k].probs.length) / itemTotal
-                    : referencesMs / doc.pages.length;
-                ctx.addPageMs(k, share + (performance.now() - tApply));
+                const reference = page.items.map((item) => item.kind === "reference");
+                if (!reference.some(Boolean)) return;
+                const t0 = performance.now();
+                const [plan] = planEntries([buildInputPage(page, doc.styleProfile)], [reference]);
+                page.items = applyReferencePlan(page.items, plan, removeHyphenation);
+                ctx.addPageMs(k, performance.now() - t0);
             });
         },
     };

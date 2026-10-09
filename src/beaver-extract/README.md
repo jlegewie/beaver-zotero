@@ -101,8 +101,8 @@ src/beaver-extract/
 │   ├── style.ts                   # Line typography (size, font, bold/italic, lead marker)
 │   ├── geometry.ts                # Line-block geometry in em
 │   └── context.ts                 # Document context (page position, list headings so far)
-├── itemTypes/                     # Item-type model: input + feature set (model and pass come later)
-├── references/                    # Reference entries: classifier, line model, item pass, generated weights
+├── itemTypes/                     # Item-type model: input, features (incl. reference item features), model, item pass, generated weights
+├── references/                    # Reference entries: line model, entry planning, item pass (splits and joins the item-type model's references), generated weights
 ├── regions/                       # Region detection (pictures, tables, formulas): step 2
 ├── DocumentAnalyzer.ts            # Text layer & OCR detection
 ├── StyleAnalyzer.ts               # Font/style analysis

@@ -1,8 +1,8 @@
 /**
  * Trained region-classifier weights (`../models/runtime.ts` format); do not edit by hand.
- * Trained by beaver-extract-research `scripts/regions/train_detector.py` and converted by
- * `scripts/models/convert-legacy-weights.ts`. That generator writes a retired format:
- * retrain in beaver-extract-models, which exports this format directly.
+ * Trained by beaver-extract-research `scripts/regions/train_detector.py` and converted from
+ * its retired format in d2c617160; retrain in beaver-extract-models, which exports this
+ * format directly.
  */
 // Values are shortest round-trip literals of float64 values, which the lint rule
 // misreports when it re-rounds them to 17 digits.

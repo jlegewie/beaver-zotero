@@ -32,7 +32,9 @@ import type {
     DegradationNote,
     DegradationSummary,
     DocItem,
+    FootnoteItem,
     ItemLine,
+    MarginItem,
     RawLineDetailed,
     RawPageDataDetailed,
     ReferenceItem,
@@ -520,7 +522,7 @@ function itemFromDraft(
     pageIndex: number,
     index: number,
     lines: ItemLine[],
-): TextItem | SectionHeaderItem | ReferenceItem {
+): TextItem | SectionHeaderItem | ReferenceItem | FootnoteItem | MarginItem {
     const text = publicItemText(item);
     const base: Omit<TextBearingItem, "kind"> = {
         id: `p${pageIndex}:i${index}`,
@@ -538,6 +540,10 @@ function itemFromDraft(
             return { ...base, kind: "section_header", level: 1 };
         case "text":
             return { ...base, kind: "text" };
+        case "footnote":
+            return { ...base, kind: "footnote" };
+        case "margin":
+            return { ...base, kind: "margin" };
     }
 }
 
@@ -828,8 +834,8 @@ export function extractPageSentences(
             itemLinesFromDetailed(detailedLines),
         );
 
-        // Headings and references: never split into sentences, and
-        // excluded from the flattened sentence view.
+        // Headings, references and margin items: never split into
+        // sentences, and excluded from the flattened sentence view.
         if (!carriesSentences(docItem)) {
             if (docItem.kind === "reference") {
                 // A reference has no sentences to carry the repaired text, so

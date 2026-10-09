@@ -112,6 +112,7 @@ export function parseSchemaVersion(value: string): string {
     return value;
 }
 
+
 export function parseGraphicsLayerMode(value: string): GraphicsLayerMode {
     if (value === "off" || value === "auto" || value === "on") return value;
     throw new Error(

@@ -45,6 +45,7 @@ import {
     type PdfExtractionPreset,
     type StructuredExtractResult,
 } from "../schema";
+import { ITEM_TYPE_PASS, itemTypePass } from "../itemTypes/pass";
 import { REFERENCE_PASS, referencePass } from "../references/pass";
 import { detectRegions } from "../regions/RegionDetector";
 import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
@@ -72,7 +73,8 @@ import { pageLabelsToStringKeys, projectColumnRect, replaceControlCharsInResult 
 
 /** Item pass factories, by the name presets list them under. */
 const ITEM_PASSES: Record<ItemPassName, () => ItemPass> = {
-    references: () => referencePass({ classify: true }),
+    itemTypes: () => itemTypePass(),
+    references: () => referencePass(),
 };
 
 export type ItemPassName = PdfExtractionPreset["itemPasses"][number];
@@ -335,13 +337,17 @@ export function mapSentences(
     pages.forEach(({ rawPage, paragraphs, regions, ms }, k) => {
         const tPage = performance.now();
         const { filteredResult } = paragraphs;
-        const referencesMs: number | undefined = passes[k][REFERENCE_PASS];
+        const { passes: byPass, parts } = passes[k];
         let passMs = 0;
-        for (const ms of Object.values(passes[k])) passMs += ms;
+        for (const ms of Object.values(byPass)) passMs += ms;
+        const passTimings: Partial<StructuredPagePhaseTimings> = {
+            ...(byPass[REFERENCE_PASS] !== undefined ? { referencesMs: byPass[REFERENCE_PASS] } : {}),
+            ...(byPass[ITEM_TYPE_PASS] !== undefined ? { itemTypesMs: byPass[ITEM_TYPE_PASS], ...parts } : {}),
+        };
         const { sentenceResult, phaseTimings } = mapPageSentences(
             { ...sentenceArgs, ...regions },
             paragraphs,
-            referencesMs,
+            passTimings,
         );
         logColumnDetection(rawPage.pageIndex, filteredResult.columnResult);
         out.pages.push({

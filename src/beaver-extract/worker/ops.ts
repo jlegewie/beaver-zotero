@@ -94,9 +94,7 @@ import { runSentenceExtractionFromDoc } from "./sentenceExtraction";
 import { resolveSplitter } from "./splitterResolver";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
-import type { InputPage } from "../features/itemInput";
-import type { ReferencePagePlan } from "../references/classify";
-import { referencePass } from "../references/pass";
+import { buildInputPage, type InputPage } from "../features/itemInput";
 import type { ItemPass } from "../pipeline/itemPasses";
 import { ITEMS_EXPORT_TASKS, ItemsExportCollector, type ItemsExportRow } from "../pipeline/itemsExport";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
@@ -896,8 +894,7 @@ function presetParagraphSettings(
 }
 
 function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtractionPreset {
-    if (schemaVersion == null) return CURRENT_PDF_EXTRACTION_PRESET;
-    const preset = pdfExtractionPreset(schemaVersion);
+    const preset = schemaVersion == null ? CURRENT_PDF_EXTRACTION_PRESET : pdfExtractionPreset(schemaVersion);
     if (!preset) throw new Error(`No extraction preset for PDF schema ${schemaVersion}`);
     return preset;
 }
@@ -1260,40 +1257,35 @@ export async function opStructuredExtractWithDebug(
     });
 }
 
-/** A page of `opReferenceInputs`: the classifier input and the page's items. */
+/** A page of `opReferenceInputs`: the line model's input and the page's items. */
 export interface ReferenceInputPage {
     input: InputPage;
     /** Page size in the public (MuPDF) frame; `input` uses the upright frame. */
     width: number;
     height: number;
     /**
-     * The page's published (citable) items in public-frame coordinates. Without
-     * classification they are aligned with `input.items` by index; with it
-     * they are the emitted items, after reference splits and merges.
+     * The page's published (citable) items in public-frame coordinates,
+     * aligned with `input.items` by index.
      */
-    items: Array<{ kind: DocItem["kind"]; bbox: [number, number, number, number]; text?: string }>;
-    /** The classification plan for `input.items` (with `classify`). */
-    plan?: ReferencePagePlan;
+    items: Array<{ kind: DocItem["kind"]; bbox: [number, number, number, number] }>;
 }
 
 /**
- * Full-document structured extraction that returns the reference
- * classifier's per-page inputs (training export) and, with `classify`, its
- * plans and the resulting items (debugging and evaluation).
+ * Full-document structured extraction that returns every page's step-2
+ * items as the reference line model reads them (`InputPage`), before any
+ * item pass: the training export of the line model.
  */
 export async function opReferenceInputs(
-    args: StructuredRunArgs & { classify?: boolean },
+    args: StructuredRunArgs,
 ): Promise<OpReply<{ pageCount: number; pages: ReferenceInputPage[] }>> {
     let inputs: InputPage[] = [];
-    let plans: ReferencePagePlan[] | undefined;
-    const pass = referencePass({
-        classify: args.classify === true,
-        collect: (collected, collectedPlans) => {
-            inputs = collected;
-            plans = collectedPlans;
+    const collect: ItemPass = {
+        name: "referenceInputs",
+        run(doc) {
+            inputs = doc.pages.map((page) => buildInputPage(page, doc.styleProfile));
         },
-    });
-    return withStructuredRun(args, () => [pass], (internal) => {
+    };
+    return withStructuredRun(args, () => [collect], (internal) => {
         const pages = internal.pages.map((page, i): ReferenceInputPage => {
             const input = inputs[i];
             const items = page.items.filter((item) => ITEM_KINDS[item.kind].citable);
@@ -1301,12 +1293,10 @@ export async function opReferenceInputs(
                 input,
                 width: page.width,
                 height: page.height,
-                items: (plans ? items : items.slice(0, input.items.length)).map((item) => ({
+                items: items.slice(0, input.items.length).map((item) => ({
                     kind: item.kind,
                     bbox: bboxToRect(item.bbox, 1),
-                    ...(plans && "text" in item ? { text: item.text } : {}),
                 })),
-                ...(plans ? { plan: plans[i] } : {}),
             };
         });
         return { result: { pageCount: internal.pages.length, pages } };

@@ -139,14 +139,11 @@ export async function structuredExtractWithDebug(
 }
 
 /**
- * Full-document structured extraction returning the reference classifier's
- * per-page inputs (training export and debugging).
+ * Full-document structured extraction returning the reference line model's
+ * per-page inputs, before any item pass (training export).
  */
 export async function referenceInputs(
-    input: Pick<ExtractInput, "pdfData" | "settings" | "paragraphSettings" | "analysisWindow" | "schemaVersion"> & {
-        /** Classify too: return plans and the emitted items. */
-        classify?: boolean;
-    },
+    input: Pick<ExtractInput, "pdfData" | "settings" | "paragraphSettings" | "analysisWindow" | "schemaVersion">,
 ): Promise<Awaited<ReturnType<typeof opReferenceInputs>>["result"]> {
     await ensureExtractionRuntime();
     const reply = await enqueue(() => opReferenceInputs(input));

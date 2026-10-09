@@ -237,9 +237,8 @@ describe("missing inputs", () => {
     it.each([
         ["export", ["references", "export", "--pdf-list", "MISSING", "--out", "OUT"]],
         ["render", ["references", "render", "--page-list", "MISSING", "--out-dir", "OUT"]],
-        ["featurize", ["references", "featurize", "--in", "MISSING", "--out", "OUT"]],
+        ["featurize", ["references", "featurize", "--in", "MISSING", "--out", "OUT", "--line-items", "INPUTS"]],
         ["featurize line items", ["references", "featurize", "--in", "INPUTS", "--out", "OUT", "--line-items", "MISSING"]],
-        ["plan", ["references", "plan", "--in", "MISSING", "--out", "OUT"]],
     ])("%s fails on a missing input file and writes no output", async (_name, args) => {
         const inputs = join(dir, "inputs.jsonl");
         await writeFile(inputs, "");
@@ -285,34 +284,29 @@ describe("output files", () => {
         return path;
     }
 
-    it("writes plans and features, including line features", async () => {
+    it("writes the line features of the listed items and their names", async () => {
         const deps = makeDeps({});
-        const plans = join(dir, "plans.jsonl");
-        const features = join(dir, "features.jsonl");
+        const features = join(dir, "lines.jsonl");
         const lineItems = join(dir, "line-items.jsonl");
         await writeFile(lineItems, JSON.stringify(["d1", 0, 0]) + "\n");
-
-        expect(await runCli(["references", "plan", "--in", await inputs(), "--out", plans], deps)).toBe(0);
-        expect(JSON.parse(await readFile(plans, "utf8")).pages[0].probs).toHaveLength(1);
 
         expect(await runCli(
             ["references", "featurize", "--in", await inputs(), "--out", features, "--line-items", lineItems],
             deps,
         )).toBe(0);
-        expect((await readFile(features, "utf8")).trim().split("\n")).toHaveLength(1);
-        expect((await readFile(`${features}.lines.jsonl`, "utf8")).trim().split("\n")).toHaveLength(1);
+        const rows = (await readFile(features, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+        const meta = JSON.parse(await readFile(`${features}.meta.json`, "utf8"));
+        expect(rows).toHaveLength(1);
+        expect(rows[0].slice(0, 4)).toEqual(["d1", 0, 0, 0]);
+        expect(rows[0]).toHaveLength(meta.lineColumns.length);
     });
 
-    it.each([
-        ["plan", (input: string, out: string) => ["references", "plan", "--in", input, "--out", out]],
-        ["featurize", (input: string, out: string) => ["references", "featurize", "--in", input, "--out", out]],
-        ["featurize with line items", (input: string, out: string) =>
-            ["references", "featurize", "--in", input, "--out", out, "--line-items", input]],
-    ])("%s rejects an unopenable --out instead of crashing", async (_name, argv) => {
+    it("rejects an unopenable --out instead of crashing", async () => {
         const deps = makeDeps({});
         const out = join(dir, "no-such-dir", "out.jsonl");
+        const input = await inputs();
 
-        expect(await runCli(argv(await inputs(), out), deps)).toBe(1);
+        expect(await runCli(["references", "featurize", "--in", input, "--out", out, "--line-items", input], deps)).toBe(1);
         expect((deps.stderr as Sink).text).toContain("ENOENT");
     });
 });
@@ -346,15 +340,8 @@ describe("resumed exports with repeated document rows", () => {
         return [first, second];
     }
 
-    it("plans each document once, from its last row", async () => {
-        const out = join(dir, "plans.jsonl");
-        expect(await runCli(["references", "plan", "--in", ...(await exports()), "--out", out], makeDeps({}))).toBe(0);
-        const rows = (await readFile(out, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-        expect(rows.map((r) => r.doc_id)).toEqual(["b", "a"]);
-    });
-
-    it("featurizes each document once, including its line features", async () => {
-        const out = join(dir, "features.jsonl");
+    it("featurizes each document once, from its last row", async () => {
+        const out = join(dir, "lines.jsonl");
         const lineItems = join(dir, "line-items.jsonl");
         await writeFile(lineItems, [["a", 0, 0], ["b", 0, 0]].map((r) => JSON.stringify(r)).join("\n") + "\n");
         expect(await runCli(
@@ -363,6 +350,5 @@ describe("resumed exports with repeated document rows", () => {
         )).toBe(0);
         const keys = (file: string) => readFile(file, "utf8").then((t) => t.trim().split("\n").map((l) => JSON.parse(l).slice(0, 3).join(":")));
         expect(await keys(out)).toEqual(["b:0:0", "a:0:0"]);
-        expect(await keys(`${out}.lines.jsonl`)).toEqual(["b:0:0", "a:0:0"]);
     });
 });
