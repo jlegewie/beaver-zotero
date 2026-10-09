@@ -78,9 +78,11 @@ export interface HtmlTheme {
 export const HTML_THEME: HtmlTheme = {
     fonts: {
         // A PDF embeds the fonts of the computer that prints it: Charter on
-        // macOS, Sitka or Cambria on Windows, then common fallbacks.
-        body: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, "Liberation Serif", serif',
-        headings: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, "Liberation Serif", serif',
+        // macOS, Cambria on Windows, then common fallbacks. Keep variable
+        // fonts (Sitka, Segoe UI Variable, Bahnschrift) out of these lists:
+        // Gecko prints their glyphs as outlines, so the PDF loses its text.
+        body: 'Charter, "Bitstream Charter", Cambria, Georgia, "Liberation Serif", serif',
+        headings: 'Charter, "Bitstream Charter", Cambria, Georgia, "Liberation Serif", serif',
         mono: 'Consolas, Menlo, "DejaVu Sans Mono", monospace',
         ui: 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, "Liberation Sans", sans-serif',
     },
