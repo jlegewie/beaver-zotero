@@ -3,9 +3,9 @@
  * gradient-boosted trees and one for logistic regression, binary and
  * multiclass.
  *
- * Trees use the portable export format `bxm-trees-v1` of the training repo
+ * Trees use the portable export formats of the training repo
  * (`beaver_models/models/trees.py`), evaluated exactly as its `decision()`
- * does:
+ * does. In `bxm-trees-v1`:
  *
  * - Node k is a leaf when `feature[k] < 0`. Otherwise a sample goes left when
  *   `x[feature] <= threshold`, or, when x is NaN, when `missing_left[k]` is 1.
@@ -18,6 +18,18 @@
  * (`flatTrees`, cached per model object); evaluation walks those, with the
  * same arithmetic in the same order as the per-tree arrays of the export.
  *
+ * `bxm-trees-packed-v1` (`pack()` there) holds the same kind of trees as
+ * complete binary trees of one `depth`, as base64 little-endian typed arrays
+ * over all trees. A tree's `2^depth - 1` split nodes are in implicit layout
+ * (node k's children are 2k+1 and 2k+2), followed by its `2^depth` leaves.
+ * Evaluation is a fixed `depth`-step descent with the routing rule above,
+ * then adds the leaf's value to the tree's score. A leaf of the original tree
+ * above full depth is padded into splits (feature 0) whose leaves all hold its
+ * value, so routing through the padding cannot change the result: scores are
+ * bit-identical to the `bxm-trees-v1` form of the same trees. The arrays are
+ * decoded once per model object (`packedTrees`), as views of the decoded
+ * bytes.
+ *
  * Logistic models (`bxm-logistic-v1`) standardize the input
  * (`(x - mean) / scale`) and give one score per row of `coef`, with the same
  * class convention. NaN inputs propagate.
@@ -28,6 +40,7 @@
  */
 
 export const TREES_FORMAT = "bxm-trees-v1";
+export const PACKED_TREES_FORMAT = "bxm-trees-packed-v1";
 export const LOGISTIC_FORMAT = "bxm-logistic-v1";
 
 /** One tree as flat node arrays. */
@@ -56,6 +69,30 @@ export interface TreeModel<C extends ClassLabel = ClassLabel> {
     trees: readonly Tree[];
 }
 
+/** Trees in `bxm-trees-packed-v1`: base64 little-endian typed arrays over all trees. */
+export interface PackedTreeModel<C extends ClassLabel = ClassLabel> {
+    format: typeof PACKED_TREES_FORMAT;
+    /** Input column names, in order. */
+    features: readonly string[];
+    classes: readonly C[];
+    /** One per score. */
+    baseline: readonly number[];
+    /** Depth of every (complete) tree. */
+    depth: number;
+    /** Number of trees. */
+    trees: number;
+    /** Uint8 per tree: the score (class) it adds to. */
+    score: string;
+    /** Int16 per split node: the feature it reads. */
+    feature: string;
+    /** Float64 per split node. */
+    threshold: string;
+    /** Uint8 per split node: 1 where NaN goes left. */
+    missingLeft: string;
+    /** Float64 per leaf. */
+    value: string;
+}
+
 export interface LogisticModel<C extends ClassLabel = ClassLabel> {
     format: typeof LOGISTIC_FORMAT;
     features: readonly string[];
@@ -68,7 +105,7 @@ export interface LogisticModel<C extends ClassLabel = ClassLabel> {
     intercept: readonly number[];
 }
 
-export type Model<C extends ClassLabel = ClassLabel> = TreeModel<C> | LogisticModel<C>;
+export type Model<C extends ClassLabel = ClassLabel> = TreeModel<C> | PackedTreeModel<C> | LogisticModel<C>;
 
 /** What a weights module adds to a model export. */
 export interface ModelInfo {
@@ -147,8 +184,110 @@ function flatTrees(model: TreeModel): FlatTrees {
     return flat;
 }
 
+/** A packed model's arrays, decoded. */
+interface PackedTrees {
+    depth: number;
+    score: Uint8Array;
+    feature: Int16Array;
+    threshold: Float64Array;
+    missingLeft: Uint8Array;
+    value: Float64Array;
+}
+
+const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_CODES = new Int8Array(128).fill(-1);
+for (let i = 0; i < BASE64.length; i++) BASE64_CODES[BASE64.charCodeAt(i)] = i;
+
+/**
+ * Bytes of a standard base64 string (padding optional), in a fresh buffer.
+ * Plain JS, so it runs alike in the worker, the plugin and Node.
+ */
+export function decodeBase64(text: string): Uint8Array {
+    let end = text.length;
+    while (end > 0 && text.charCodeAt(end - 1) === 61 /* = */) end--;
+    if (end % 4 === 1) throw new Error("Invalid base64: bad length");
+    const bytes = new Uint8Array(Math.floor((end * 3) / 4));
+    let bits = 0;
+    let nbits = 0;
+    let j = 0;
+    for (let i = 0; i < end; i++) {
+        const c = text.charCodeAt(i);
+        const v = c < 128 ? BASE64_CODES[c] : -1;
+        if (v < 0) throw new Error(`Invalid base64 character at ${i}`);
+        bits = ((bits << 6) | v) & 0xffffff;
+        nbits += 6;
+        if (nbits >= 8) {
+            nbits -= 8;
+            bytes[j++] = (bits >> nbits) & 0xff;
+        }
+    }
+    return bytes;
+}
+
+/** Typed arrays read the platform's byte order; the export's is little-endian. */
+const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
+const packedCache = new WeakMap<PackedTreeModel, PackedTrees>();
+
+function packedTrees(model: PackedTreeModel): PackedTrees {
+    let packed = packedCache.get(model);
+    if (packed) return packed;
+    if (!LITTLE_ENDIAN) throw new Error(`${PACKED_TREES_FORMAT} needs a little-endian platform`);
+    const { depth, trees: n } = model;
+    if (!(Number.isInteger(depth) && depth >= 0 && depth <= 16 && Number.isInteger(n) && n >= 0)) {
+        throw new Error(`${PACKED_TREES_FORMAT}: bad depth ${depth} or tree count ${n}`);
+    }
+    const splits = n * (2 ** depth - 1);
+    const leaves = n * 2 ** depth;
+    // Each array decodes into its own buffer, so every view starts at offset 0 (aligned).
+    const view = <T>(name: string, data: string, length: number, size: number, make: (buffer: ArrayBuffer) => T): T => {
+        const bytes = decodeBase64(data);
+        if (bytes.length !== length * size) {
+            throw new Error(`${PACKED_TREES_FORMAT}: ${name} has ${bytes.length} bytes, expected ${length * size}`);
+        }
+        return make(bytes.buffer as ArrayBuffer);
+    };
+    packed = {
+        depth,
+        score: view("score", model.score, n, 1, (b) => new Uint8Array(b)),
+        feature: view("feature", model.feature, splits, 2, (b) => new Int16Array(b)),
+        threshold: view("threshold", model.threshold, splits, 8, (b) => new Float64Array(b)),
+        missingLeft: view("missingLeft", model.missingLeft, splits, 1, (b) => new Uint8Array(b)),
+        value: view("value", model.value, leaves, 8, (b) => new Float64Array(b)),
+    };
+    for (let t = 0; t < n; t++) {
+        if (packed.score[t] >= model.baseline.length) throw new Error(`${PACKED_TREES_FORMAT}: score ${packed.score[t]} out of range`);
+    }
+    for (let i = 0; i < splits; i++) {
+        const f = packed.feature[i];
+        if (f < 0 || f >= model.features.length) throw new Error(`${PACKED_TREES_FORMAT}: feature ${f} out of range`);
+    }
+    packedCache.set(model, packed);
+    return packed;
+}
+
+/** `addTreeValues` for a packed model: a fixed `depth`-step descent per tree. */
+function addPackedTreeValues(model: PackedTreeModel, x: ModelInput, scores: number[] | Float64Array): void {
+    const { depth, score, feature, threshold, missingLeft, value } = packedTrees(model);
+    const splits = 2 ** depth - 1;
+    for (let t = 0, node = 0, leaf = 0; t < score.length; t++, node += splits, leaf += splits + 1) {
+        let k = 0;
+        for (let d = 0; d < depth; d++) {
+            const i = node + k;
+            const v = x[feature[i]];
+            // NaN fails every comparison; route it explicitly.
+            k = 2 * k + ((v !== v ? missingLeft[i] === 1 : v <= threshold[i]) ? 1 : 2);
+        }
+        scores[score[t]] += value[leaf + k - splits];
+    }
+}
+
 /** Adds each tree's leaf value for `x` to `scores[tree.score]`, in tree order. */
-function addTreeValues(model: TreeModel, x: ModelInput, scores: number[] | Float64Array): void {
+function addTreeValues(model: TreeModel | PackedTreeModel, x: ModelInput, scores: number[] | Float64Array): void {
+    if (model.format === PACKED_TREES_FORMAT) {
+        addPackedTreeValues(model, x, scores);
+        return;
+    }
     const { feature, threshold, left, right, value, missingLeft, root, score } = flatTrees(model);
     for (let t = 0; t < root.length; t++) {
         let k = root[t];
@@ -166,7 +305,7 @@ function addTreeValues(model: TreeModel, x: ModelInput, scores: number[] | Float
 /** The score of a binary tree model, accumulated in a reused slot (doubles are stored exactly). */
 const binaryTreeScore = new Float64Array(1);
 
-function treeScores(model: TreeModel, x: ModelInput): number[] {
+function treeScores(model: TreeModel | PackedTreeModel, x: ModelInput): number[] {
     const scores = model.baseline.slice();
     addTreeValues(model, x, scores);
     return scores;
@@ -185,7 +324,7 @@ function logisticScores(model: LogisticModel, x: ModelInput): number[] {
  * per-row allocations of `modelScores`; the same arithmetic in the same order.
  */
 export function binaryScore(model: Model, x: ModelInput): number {
-    if (model.format === TREES_FORMAT) {
+    if (model.format !== LOGISTIC_FORMAT) {
         binaryTreeScore[0] = model.baseline[0];
         addTreeValues(model, x, binaryTreeScore);
         return binaryTreeScore[0];
@@ -198,7 +337,7 @@ export function binaryScore(model: Model, x: ModelInput): number {
 
 /** Raw scores (logits) of one input row: one for binary models, one per class otherwise. */
 export function modelScores(model: Model, x: ModelInput): number[] {
-    return model.format === TREES_FORMAT ? treeScores(model, x) : logisticScores(model, x);
+    return model.format === LOGISTIC_FORMAT ? logisticScores(model, x) : treeScores(model, x);
 }
 
 /** Probability of `classes[1]` under a binary model. */
@@ -208,7 +347,11 @@ export function binaryProbability(model: Model, x: ModelInput): number {
 
 /** Class probabilities of one input row, in `model.classes` order. */
 export function modelProbabilities(model: Model, x: ModelInput): number[] {
-    const scores = modelScores(model, x);
+    return scoreProbabilities(modelScores(model, x));
+}
+
+/** Class probabilities from raw scores: the sigmoid of one score, the softmax of several. */
+export function scoreProbabilities(scores: readonly number[]): number[] {
     if (scores.length === 1) {
         const p = sigmoid(scores[0]);
         return [1 - p, p];
