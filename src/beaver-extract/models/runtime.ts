@@ -14,6 +14,10 @@
  * - Two classes give one score, the logit of `classes[1]` (sigmoid); more
  *   classes give one score per class (softmax).
  *
+ * At first use a tree model's trees are concatenated into flat typed arrays
+ * (`flatTrees`, cached per model object); evaluation walks those, with the
+ * same arithmetic in the same order as the per-tree arrays of the export.
+ *
  * Logistic models (`bxm-logistic-v1`) standardize the input
  * (`(x - mean) / scale`) and give one score per row of `coef`, with the same
  * class convention. NaN inputs propagate.
@@ -76,8 +80,11 @@ export interface ModelInfo {
 
 export const sigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
 
+/** A model's input row: an array, or a typed array that can be longer than the model's features. */
+export type ModelInput = ArrayLike<number>;
+
 /** Leaf value of `tree` for the input `x`. */
-export function treeValue(tree: Tree, x: readonly number[]): number {
+export function treeValue(tree: Tree, x: ModelInput): number {
     const { feature, threshold, left, right, value, missing_left: missingLeft } = tree;
     let k = 0;
     for (;;) {
@@ -90,13 +97,82 @@ export function treeValue(tree: Tree, x: readonly number[]): number {
     }
 }
 
-function treeScores(model: TreeModel, x: readonly number[]): number[] {
+/**
+ * Every tree of a model in one set of node arrays: tree t starts at node
+ * `root[t]`, children are indices into the same arrays, and `missingLeft` is
+ * 0 where the export omits it.
+ */
+interface FlatTrees {
+    feature: Int32Array;
+    threshold: Float64Array;
+    left: Int32Array;
+    right: Int32Array;
+    value: Float64Array;
+    missingLeft: Uint8Array;
+    root: Int32Array;
+    score: Int32Array;
+}
+
+const flatCache = new WeakMap<TreeModel, FlatTrees>();
+
+function flatTrees(model: TreeModel): FlatTrees {
+    let flat = flatCache.get(model);
+    if (flat) return flat;
+    const n = model.trees.reduce((total, tree) => total + tree.feature.length, 0);
+    flat = {
+        feature: new Int32Array(n),
+        threshold: new Float64Array(n),
+        left: new Int32Array(n),
+        right: new Int32Array(n),
+        value: new Float64Array(n),
+        missingLeft: new Uint8Array(n),
+        root: new Int32Array(model.trees.length),
+        score: new Int32Array(model.trees.length),
+    };
+    let offset = 0;
+    model.trees.forEach((tree, t) => {
+        flat!.root[t] = offset;
+        flat!.score[t] = tree.score;
+        for (let k = 0; k < tree.feature.length; k++) {
+            flat!.feature[offset + k] = tree.feature[k];
+            flat!.threshold[offset + k] = tree.threshold[k];
+            flat!.left[offset + k] = tree.left[k] + offset;
+            flat!.right[offset + k] = tree.right[k] + offset;
+            flat!.value[offset + k] = tree.value[k];
+            flat!.missingLeft[offset + k] = tree.missing_left?.[k] === 1 ? 1 : 0;
+        }
+        offset += tree.feature.length;
+    });
+    flatCache.set(model, flat);
+    return flat;
+}
+
+/** Adds each tree's leaf value for `x` to `scores[tree.score]`, in tree order. */
+function addTreeValues(model: TreeModel, x: ModelInput, scores: number[] | Float64Array): void {
+    const { feature, threshold, left, right, value, missingLeft, root, score } = flatTrees(model);
+    for (let t = 0; t < root.length; t++) {
+        let k = root[t];
+        for (;;) {
+            const f = feature[k];
+            if (f < 0) break;
+            const v = x[f];
+            // NaN fails every comparison; route it explicitly.
+            k = (v !== v ? missingLeft[k] === 1 : v <= threshold[k]) ? left[k] : right[k];
+        }
+        scores[score[t]] += value[k];
+    }
+}
+
+/** The score of a binary tree model, accumulated in a reused slot (doubles are stored exactly). */
+const binaryTreeScore = new Float64Array(1);
+
+function treeScores(model: TreeModel, x: ModelInput): number[] {
     const scores = model.baseline.slice();
-    for (const tree of model.trees) scores[tree.score] += treeValue(tree, x);
+    addTreeValues(model, x, scores);
     return scores;
 }
 
-function logisticScores(model: LogisticModel, x: readonly number[]): number[] {
+function logisticScores(model: LogisticModel, x: ModelInput): number[] {
     return model.coef.map((row, k) => {
         let z = model.intercept[k];
         for (let j = 0; j < row.length; j++) z += row[j] * ((x[j] - model.mean[j]) / model.scale[j]);
@@ -108,11 +184,11 @@ function logisticScores(model: LogisticModel, x: readonly number[]): number[] {
  * The single score (logit of `classes[1]`) of a binary model, without the
  * per-row allocations of `modelScores`; the same arithmetic in the same order.
  */
-export function binaryScore(model: Model, x: readonly number[]): number {
+export function binaryScore(model: Model, x: ModelInput): number {
     if (model.format === TREES_FORMAT) {
-        let z = model.baseline[0];
-        for (const tree of model.trees) z += treeValue(tree, x);
-        return z;
+        binaryTreeScore[0] = model.baseline[0];
+        addTreeValues(model, x, binaryTreeScore);
+        return binaryTreeScore[0];
     }
     const row = model.coef[0];
     let z = model.intercept[0];
@@ -121,17 +197,17 @@ export function binaryScore(model: Model, x: readonly number[]): number {
 }
 
 /** Raw scores (logits) of one input row: one for binary models, one per class otherwise. */
-export function modelScores(model: Model, x: readonly number[]): number[] {
+export function modelScores(model: Model, x: ModelInput): number[] {
     return model.format === TREES_FORMAT ? treeScores(model, x) : logisticScores(model, x);
 }
 
 /** Probability of `classes[1]` under a binary model. */
-export function binaryProbability(model: Model, x: readonly number[]): number {
+export function binaryProbability(model: Model, x: ModelInput): number {
     return sigmoid(binaryScore(model, x));
 }
 
 /** Class probabilities of one input row, in `model.classes` order. */
-export function modelProbabilities(model: Model, x: readonly number[]): number[] {
+export function modelProbabilities(model: Model, x: ModelInput): number[] {
     const scores = modelScores(model, x);
     if (scores.length === 1) {
         const p = sigmoid(scores[0]);

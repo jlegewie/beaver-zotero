@@ -3,10 +3,11 @@
  *
  * `planReferences` scores every item of a document (see `model.ts`) and
  * decides which items are reference-list entries, re-scoring items next to
- * entries once the list's own layout has repaired their segmentation. `applyReferencePlan` turns
- * one page's plan into edited draft items: `reference` items, split where one
- * item holds several entries, and merged where an entry was broken off its
- * continuation in the same column.
+ * entries once the list's own layout has repaired their segmentation.
+ * `planEntries` plans the entries of items another model already labeled as
+ * references. `applyReferencePlan` turns one page's plan into edited draft
+ * items: `reference` items, split where one item holds several entries, and
+ * merged where an entry was broken off its continuation in the same column.
  */
 
 import { mergeBoxes } from "@beaver/agent-core/extract/types";
@@ -19,15 +20,19 @@ import type { InputItem, InputLine, InputPage } from "../features/itemInput";
 import { hasBibliographicDetail, isNotesHeading, isReferenceHeading, proseWordCount } from "../features/text";
 import { REFERENCE_MODEL } from "./weights";
 
-export interface ReferencePagePlan {
-    /** Reference probability of each input item. */
-    probs: number[];
+/** The reference entries of one page: which items are entries, and where they split and join. */
+export interface EntryPagePlan {
     /** Whether each input item is a reference entry (or part of one). */
     reference: boolean[];
     /** Per input item: line indices (≥ 1) at which a new entry starts. */
     splits: number[][];
     /** Per input item: it continues the previous item's entry in the same column. */
     mergeWithPrevious: boolean[];
+}
+
+export interface ReferencePagePlan extends EntryPagePlan {
+    /** Reference probability of each input item. */
+    probs: number[];
 }
 
 /**
@@ -66,15 +71,31 @@ export function planReferences(
                 : lines[p],
         );
     }
-    return pages.map((page, p) => ({
-        probs: probs[p],
-        reference: reference[p],
-        splits: page.items.map((_, i) => (reference[p][i] ? lines[p].splits[i] : [])),
+    return pages.map((page, p) => ({ probs: probs[p], ...entryPlan(reference[p], lines[p]) }));
+}
+
+/**
+ * Entry plans of pages whose reference items are already decided
+ * (`reference`, per page and item): each page's line plan (`planLines`) over
+ * its reference items, without classifying anything. `pages` holds the input
+ * of the pages to plan, `reference` their items' labels, in the same order.
+ */
+export function planEntries(
+    pages: readonly InputPage[],
+    reference: readonly (readonly boolean[])[],
+    model: ReferenceModel = REFERENCE_MODEL,
+): EntryPagePlan[] {
+    return pages.map((page, p) => entryPlan(reference[p], planLines(model, page, reference[p])));
+}
+
+/** The page plan of a page's reference items under its line plan. */
+function entryPlan(reference: readonly boolean[], lines: LinePlan): EntryPagePlan {
+    return {
+        reference: reference.slice(),
+        splits: reference.map((ref, i) => (ref ? lines.splits[i] : [])),
         // Only a reference entry can be continued.
-        mergeWithPrevious: page.items.map(
-            (_, i) => reference[p][i] && lines[p].mergeWithPrevious[i] && reference[p][i - 1] === true,
-        ),
-    }));
+        mergeWithPrevious: reference.map((ref, i) => ref && lines.mergeWithPrevious[i] && reference[i - 1] === true),
+    };
 }
 
 /**
@@ -394,7 +415,7 @@ const LINE_HAS_PREV = LINE_FEATURES.indexOf("hasPrev");
  */
 export function applyReferencePlan(
     items: readonly DraftItem[],
-    plan: ReferencePagePlan,
+    plan: EntryPagePlan,
     removeHyphenation = true,
 ): DraftItem[] {
     const edits = plan.splits.some((s) => s.length > 0) || plan.mergeWithPrevious.some(Boolean);

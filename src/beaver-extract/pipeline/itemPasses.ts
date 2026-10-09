@@ -4,7 +4,7 @@
  * After every page is segmented, ordered passes see the draft items of the
  * whole document at once and may relabel, split or merge them (the
  * item-type model when the preset turns it on, then reference
- * classification). Each schema preset lists its passes by name
+ * classification, or with the model only reference entry segmentation). Each schema preset lists its passes by name
  * (`PdfExtractionPreset.itemPasses`, plus `itemTypeModel`);
  * `createItemPasses` builds them.
  *

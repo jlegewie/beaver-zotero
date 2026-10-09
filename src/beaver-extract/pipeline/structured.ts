@@ -46,7 +46,7 @@ import {
     type StructuredExtractResult,
 } from "../schema";
 import { ITEM_TYPE_PASS, itemTypePass } from "../itemTypes/pass";
-import { REFERENCE_PASS, referencePass } from "../references/pass";
+import { REFERENCE_ENTRIES_PASS, REFERENCE_PASS, referenceEntriesPass, referencePass } from "../references/pass";
 import { detectRegions } from "../regions/RegionDetector";
 import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
 import { regionItemsForPage, type PageRegionItems, type RegionItemDraft } from "../regions/regionItems";
@@ -71,9 +71,13 @@ import {
 import { runPasses, type ItemPass, type PagePassTimings } from "./itemPasses";
 import { pageLabelsToStringKeys, projectColumnRect, replaceControlCharsInResult } from "./output";
 
-/** Item pass factories, by the name presets list them under. */
-const ITEM_PASSES: Record<ItemPassName, () => ItemPass> = {
-    references: () => referencePass({ classify: true }),
+/**
+ * Item pass factories, by the name presets list them under, given whether the
+ * item-type model runs first. The model decides which items are references,
+ * so with it the reference pass only splits and joins the entries.
+ */
+const ITEM_PASSES: Record<ItemPassName, (itemTypeModel: boolean) => ItemPass> = {
+    references: (itemTypeModel) => (itemTypeModel ? referenceEntriesPass() : referencePass({ classify: true })),
 };
 
 export type ItemPassName = PdfExtractionPreset["itemPasses"][number];
@@ -84,8 +88,8 @@ export type ItemPassName = PdfExtractionPreset["itemPasses"][number];
  */
 export function createItemPasses(preset: PdfExtractionPreset): ItemPass[] {
     return [
-        ...(preset.itemTypeModel ? [itemTypePass({ referencePass: preset.itemPasses.includes("references") })] : []),
-        ...preset.itemPasses.map((name) => ITEM_PASSES[name]()),
+        ...(preset.itemTypeModel ? [itemTypePass()] : []),
+        ...preset.itemPasses.map((name) => ITEM_PASSES[name](preset.itemTypeModel)),
     ];
 }
 
@@ -347,6 +351,7 @@ export function mapSentences(
         for (const ms of Object.values(byPass)) passMs += ms;
         const passTimings: Partial<StructuredPagePhaseTimings> = {
             ...(byPass[REFERENCE_PASS] !== undefined ? { referencesMs: byPass[REFERENCE_PASS] } : {}),
+            ...(byPass[REFERENCE_ENTRIES_PASS] !== undefined ? { referencesMs: byPass[REFERENCE_ENTRIES_PASS] } : {}),
             ...(byPass[ITEM_TYPE_PASS] !== undefined ? { itemTypesMs: byPass[ITEM_TYPE_PASS], ...parts } : {}),
         };
         const { sentenceResult, phaseTimings } = mapPageSentences(

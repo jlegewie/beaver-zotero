@@ -1,11 +1,16 @@
 /**
- * Reference classification as an item pass: scores the items of every page
- * (`planReferences`), then relabels each page's reference-list entries and
- * splits and merges them (`applyReferencePlan`).
+ * Reference-list entries as item passes.
+ *
+ * - `referencePass` classifies: it scores the items of every page
+ *   (`planReferences`), then relabels each page's reference-list entries and
+ *   splits and merges them (`applyReferencePlan`).
+ * - `referenceEntriesPass` follows a pass that already labeled the
+ *   reference items (the item-type pass): it only splits and merges them
+ *   into entries (`planEntries`), on the pages that have any.
  */
 
 import type { ItemPass } from "../pipeline/itemPasses";
-import { applyReferencePlan, planReferences, type ReferencePagePlan } from "./classify";
+import { applyReferencePlan, planEntries, planReferences, type ReferencePagePlan } from "./classify";
 import { buildInputPage, type InputPage } from "../features/itemInput";
 
 export interface ReferencePassOptions {
@@ -41,6 +46,25 @@ export function referencePass(options: ReferencePassOptions): ItemPass {
                     ? (referencesMs * plans[k].probs.length) / itemTotal
                     : referencesMs / doc.pages.length;
                 ctx.addPageMs(k, share + (performance.now() - tApply));
+            });
+        },
+    };
+}
+
+export const REFERENCE_ENTRIES_PASS = "referenceEntries";
+
+export function referenceEntriesPass(): ItemPass {
+    return {
+        name: REFERENCE_ENTRIES_PASS,
+        run(doc, ctx) {
+            const removeHyphenation = ctx.paragraphSettings?.removeHyphenation ?? true;
+            doc.pages.forEach((page, k) => {
+                const reference = page.items.map((item) => item.kind === "reference");
+                if (!reference.some(Boolean)) return;
+                const t0 = performance.now();
+                const [plan] = planEntries([buildInputPage(page, doc.styleProfile)], [reference]);
+                page.items = applyReferencePlan(page.items, plan, removeHyphenation);
+                ctx.addPageMs(k, performance.now() - t0);
             });
         },
     };

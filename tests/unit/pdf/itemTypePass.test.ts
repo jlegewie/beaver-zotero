@@ -34,7 +34,8 @@ describe("item-type preset switch", () => {
         expect(pdfExtractionPreset("4")!.itemTypeModel).toBe(false);
         expect(pdfExtractionPreset("5")!.itemTypeModel).toBe(false);
         const on = applyPresetOverrides(pdfExtractionPreset("5")!, { itemTypeModel: true });
-        expect(createItemPasses(on).map((pass) => pass.name)).toEqual(["itemTypes", "references"]);
+        // The model decides references; the reference pass only splits and joins entries.
+        expect(createItemPasses(on).map((pass) => pass.name)).toEqual(["itemTypes", "referenceEntries"]);
         expect(createItemPasses(pdfExtractionPreset("5")!).map((pass) => pass.name)).toEqual(["references"]);
         const v4 = applyPresetOverrides(pdfExtractionPreset("4")!, { itemTypeModel: true });
         expect(createItemPasses(v4).map((pass) => pass.name)).toEqual(["itemTypes"]);
@@ -53,9 +54,11 @@ describe("item-type pass", () => {
         expect(await structured({ itemTypeModel: false })).toEqual(await structured());
     }, 60_000);
 
-    it("relabels items while the reference pass keeps deciding references", async () => {
+    it("relabels items, references included", async () => {
         const off = await structured();
         const on = await structured({ itemTypeModel: true });
+        // The document has no reference list: neither the model nor the
+        // reference classifier finds entries.
         expect(references(on)).toEqual(references(off));
         const kinds = new Set(on.document.pages.flatMap((page) => page.items.map((item) => item.kind)));
         // Margin items stay internal; captions are emitted as text.

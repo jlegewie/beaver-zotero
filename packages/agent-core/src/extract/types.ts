@@ -838,7 +838,8 @@ export interface StructuredPagePhaseTimings {
     /**
      * This page's share of reference classification (presets with the
      * `references` item pass); the document-level pass is split across pages
-     * by item count.
+     * by item count. With the item-type model on, the time spent splitting and
+     * joining the page's reference entries.
      */
     referencesMs?: number;
     /**

@@ -60,14 +60,16 @@ export interface PdfExtractionPreset {
     /**
      * Item passes of structured extraction, in order (step 3, see
      * `pipeline/itemPasses.ts`). `references` classifies reference-list
-     * entries and emits them as `reference` items (`references/classify.ts`).
+     * entries and emits them as `reference` items (`references/classify.ts`);
+     * with `itemTypeModel` it only splits and joins the entries the model
+     * found.
      */
     itemPasses: readonly "references"[];
     /**
      * Run the item-type model (`itemTypes/pass.ts`) as the first item pass:
      * headings, footnotes and page furniture come from the model instead of
-     * the paragraph detector's heading heuristic. References stay with the
-     * `references` pass.
+     * the paragraph detector's heading heuristic, and references from the
+     * model instead of the reference classifier.
      */
     itemTypeModel: boolean;
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */

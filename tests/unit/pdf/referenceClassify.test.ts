@@ -8,6 +8,7 @@ import {
     applyReferencePlan,
     isCaptionLabel,
     isNonEntryLabel,
+    planEntries,
     planReferences,
     type ReferencePagePlan,
 } from "../../../src/beaver-extract/references/classify";
@@ -217,6 +218,26 @@ describe("planReferences", () => {
         expect(plan.reference[0]).toBe(true);
         expect(plan.splits[0]).toEqual([1, 2, 3]);
         expect(plan.mergeWithPrevious[1]).toBe(true);
+    });
+
+    it("plans the entries of items another model labeled as references, without classifying", () => {
+        const pages = document();
+        const reference = [
+            [false, true, true],
+            [true, true, true, true, true, false],
+        ];
+        const [first, second] = planEntries(pages, reference);
+        expect(first.reference).toEqual(reference[0]);
+        expect(first.splits).toEqual([[], [], []]);
+        expect(second.reference).toEqual(reference[1]);
+        // Run-together entries split at the outer edge, and broken-off
+        // continuations ("1890–1935 …", "408") join the entry before them.
+        expect(second.splits).toEqual([[1, 2, 3], [], [1], [], [], []]);
+        expect(second.mergeWithPrevious).toEqual([false, true, false, true, false, false]);
+        // Items not labeled references are left alone.
+        const none = planEntries(pages, [[false, false, false], [false, false, false, false, false, false]]);
+        expect(none[1].splits.every((s) => s.length === 0)).toBe(true);
+        expect(none[1].mergeWithPrevious.some(Boolean)).toBe(false);
     });
 
     it("joins a continuation the item scores miss to the entry it continues", () => {

@@ -2,14 +2,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { FEATURES, FEATURE_SET, FEATURE_VERSION } from "../../../src/beaver-extract/itemTypes/features";
+import { FEATURES, FEATURE_SET, FEATURE_VERSION, itemTypeFeatures } from "../../../src/beaver-extract/itemTypes/features";
+import type { TypedDocument } from "../../../src/beaver-extract/itemTypes/input";
 import {
     assertItemTypeModel,
+    classifyItemTypes,
     contextFeatureNames,
     contextFeatures,
     type ContextUnit,
     type ItemTypeModel,
 } from "../../../src/beaver-extract/itemTypes/model";
+import { modelProbabilities } from "../../../src/beaver-extract/models/runtime";
 import { passClass } from "../../../src/beaver-extract/itemTypes/pass";
 import { ITEM_TYPE_MODEL } from "../../../src/beaver-extract/itemTypes/weights";
 import { expectModelParity, type ModelParityFixture } from "../../helpers/modelParity";
@@ -86,6 +89,47 @@ describe("item-type model parity with the training pipeline", () => {
     });
 });
 
+describe("item-type stage-2 skip", () => {
+    // The feature parity fixture's input: a real document's step-2 items.
+    const doc = (JSON.parse(readFileSync(join(fixtures, "itemTypeFeatureParity.json"), "utf8")) as { input: TypedDocument }).input;
+    const stage1 = itemTypeFeatures(doc)
+        .flat()
+        .map((row) => modelProbabilities(ITEM_TYPE_MODEL.stage1, row.map((v) => (Number.isFinite(v) ? v : NaN))));
+    const withSkip = (skipAbove: number | undefined): ItemTypeModel => ({
+        ...ITEM_TYPE_MODEL,
+        stage2: { ...ITEM_TYPE_MODEL.stage2, skipAbove },
+    });
+
+    it("keeps stage 1's probabilities and class for confident items and runs stage 2 for the rest", () => {
+        const confidence = stage1.map((p) => Math.max(...p)).sort((a, b) => a - b);
+        // Between two items' confidences, so both paths are taken.
+        const skipAbove = (confidence[0] + confidence[confidence.length - 1]) / 2;
+        expect(confidence[0]).toBeLessThan(skipAbove);
+        const full = classifyItemTypes(doc, withSkip(undefined));
+        const skipped = classifyItemTypes(doc, withSkip(skipAbove));
+        const fullProbs = full.probs.flat();
+        const skippedClasses = skipped.classes.flat();
+        let skips = 0;
+        skipped.probs.flat().forEach((p, i) => {
+            if (Math.max(...stage1[i]) >= skipAbove) {
+                skips++;
+                expect(p).toEqual(stage1[i]);
+                expect(skippedClasses[i]).toBe(ITEM_TYPE_MODEL.classes[stage1[i].indexOf(Math.max(...stage1[i]))]);
+            } else {
+                expect(p).toEqual(fullProbs[i]);
+            }
+        });
+        expect(skips).toBeGreaterThan(0);
+        expect(skips).toBeLessThan(stage1.length);
+    });
+
+    it("rejects a threshold outside (0, 1]", () => {
+        expect(() => assertItemTypeModel(withSkip(0))).toThrow(/skipAbove/);
+        expect(() => assertItemTypeModel(withSkip(1.5))).toThrow(/skipAbove/);
+        expect(() => assertItemTypeModel(withSkip(Number.NaN))).toThrow(/skipAbove/);
+    });
+});
+
 describe("item-type context features", () => {
     const line = (font: string, size: number, chars: number) => ({ font, size, chars });
 
@@ -118,21 +162,22 @@ describe("item-type context features", () => {
 });
 
 describe("item-type pass classes", () => {
-    it("never emits reference: the next most probable class takes its place", () => {
-        const p = (values: Record<string, number>) => ITEM_TYPE_MODEL.classes.map((c) => values[c] ?? 0);
-        expect(passClass(ITEM_TYPE_MODEL, p({ reference: 0.6, text: 0.3, footnote: 0.1 }))).toBe("text");
-        expect(passClass(ITEM_TYPE_MODEL, p({ reference: 0.5, footnote: 0.4, text: 0.1 }))).toBe("footnote");
-        expect(passClass(ITEM_TYPE_MODEL, p({ heading: 0.7, reference: 0.2, text: 0.1 }))).toBe("heading");
+    const p = (values: Record<string, number>) => ITEM_TYPE_MODEL.classes.map((c) => values[c] ?? 0);
+    const entry = "Smith, J. (2004). A study of things. Journal of Studies, 12(3), 45–67.";
+
+    it("emits the most probable class, references included", () => {
+        expect(passClass(ITEM_TYPE_MODEL, p({ reference: 0.6, text: 0.3, footnote: 0.1 }), entry)).toBe("reference");
+        expect(passClass(ITEM_TYPE_MODEL, p({ heading: 0.7, reference: 0.2, text: 0.1 }), "Results")).toBe("heading");
     });
 
-    it("never drops an item the model reads as a reference: its fallback is not furniture", () => {
-        const p = (values: Record<string, number>) => ITEM_TYPE_MODEL.classes.map((c) => values[c] ?? 0);
-        expect(passClass(ITEM_TYPE_MODEL, p({ reference: 0.64, furniture: 0.31, footnote: 0.03, text: 0.02 }))).toBe("footnote");
-        expect(passClass(ITEM_TYPE_MODEL, p({ furniture: 0.6, reference: 0.3, text: 0.1 }))).toBe("furniture");
+    it("never emits a caption, table note or appendix label as a reference", () => {
+        expect(passClass(ITEM_TYPE_MODEL, p({ reference: 0.6, text: 0.3, footnote: 0.1 }), "Table 2. Descriptive statistics")).toBe("text");
+        expect(passClass(ITEM_TYPE_MODEL, p({ reference: 0.5, footnote: 0.4, text: 0.1 }), "Note: Standard errors in parentheses.")).toBe("footnote");
+        expect(passClass(ITEM_TYPE_MODEL, p({ reference: 0.6, text: 0.4 }), "Appendix A: Journal Coverage")).toBe("text");
     });
 
-    it("emits references itself when no reference pass follows", () => {
-        const p = ITEM_TYPE_MODEL.classes.map((c) => (c === "reference" ? 0.6 : c === "text" ? 0.4 : 0));
-        expect(passClass(ITEM_TYPE_MODEL, p, false)).toBe("reference");
+    it("never drops a label the model reads as a reference: its fallback is not furniture", () => {
+        expect(passClass(ITEM_TYPE_MODEL, p({ reference: 0.64, furniture: 0.31, footnote: 0.03, text: 0.02 }), "Figure 3. Trends")).toBe("footnote");
+        expect(passClass(ITEM_TYPE_MODEL, p({ furniture: 0.6, reference: 0.3, text: 0.1 }), "Figure 3. Trends")).toBe("furniture");
     });
 });

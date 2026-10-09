@@ -35,12 +35,6 @@ export interface DraftItem {
     bbox: BoundingBox;
     /** Item text, without the detector's heading marker. */
     text: string;
-    /**
-     * Whether the paragraph detector read the item as a heading. Set by a pass
-     * that relabels kinds (the item-type pass), so models trained on the
-     * detector's verdict keep reading it; absent, `kind` still holds it.
-     */
-    detectorHeading?: boolean;
 }
 
 /**

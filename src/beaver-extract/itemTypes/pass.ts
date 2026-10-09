@@ -2,25 +2,17 @@
  * The item-type model as an item pass: classifies every draft item of the
  * document (`classifyItemTypes`) and relabels it with its class's draft kind
  * (`ItemTypeModel.publicKind`): headings become `section_header`, page-bottom
- * notes `footnote`, page furniture the margin filter let through `margin`
- * (internal, like the margin filter's items), and captions and everything
- * else `text`.
+ * notes `footnote`, reference-list entries `reference`, page furniture the
+ * margin filter let through `margin` (internal, like the margin filter's
+ * items), and captions and everything else `text`.
  *
- * It runs first in step 3, before the reference pass, which still decides
- * which items are references. The reference classifier matches the model on
- * references and its line model splits merged entries, so with a reference
- * pass to follow, this pass never emits `reference`: an item the model calls
- * a reference gets the most probable of the other classes except furniture
- * (the model read it as content, which a margin item would drop: a split-off
- * last line of an entry), and the reference pass relabels the entries it
- * claims, overriding the kind given here. The
- * reference pass reads the paragraph detector's heading verdict
- * (`DraftItem.detectorHeading`), not the kinds given here, so it decides
- * exactly as without this pass. Without a reference pass (a preset that lists
- * none), the model's references are emitted as they are.
+ * It runs first in step 3. The model decides which items are references;
+ * the reference entries pass that follows in presets with references only
+ * splits and joins them into entries.
  */
 
 import type { ItemPass } from "../pipeline/itemPasses";
+import { isNonEntryLabel } from "../references/classify";
 import { buildTypedDocument } from "./input";
 import { argmax, classifyItemTypes, type ItemTypeClass, type ItemTypeModel } from "./model";
 import { ITEM_TYPE_MODEL } from "./weights";
@@ -28,23 +20,23 @@ import { ITEM_TYPE_MODEL } from "./weights";
 export const ITEM_TYPE_PASS = "itemTypes";
 
 /**
- * Class the pass emits for stage-2 probabilities `p`: the most probable, but
- * not `reference` when the reference pass decides references, and then not
- * `furniture` for an item whose most probable class is `reference`.
+ * Class the pass emits for an item with the text `text` and probabilities
+ * `p`: the most probable, except that a caption, table note or appendix
+ * label (`isNonEntryLabel`) is never a reference. Such an item gets the most
+ * probable of the other classes except furniture: the model read it as
+ * content, which a margin item would drop.
  */
-export function passClass(model: ItemTypeModel, p: readonly number[], referencePass = true): ItemTypeClass {
+export function passClass(model: ItemTypeModel, p: readonly number[], text: string): ItemTypeClass {
     const top = model.classes[argmax(p)];
-    if (!referencePass || top !== "reference") return top;
+    if (top !== "reference" || !isNonEntryLabel(text)) return top;
     return model.classes[argmax(p.map((v, k) => (model.classes[k] === "reference" || model.classes[k] === "furniture" ? -Infinity : v)))];
 }
 
 export interface ItemTypePassOptions {
     model?: ItemTypeModel;
-    /** A reference pass follows and decides which items are references. */
-    referencePass: boolean;
 }
 
-export function itemTypePass({ model = ITEM_TYPE_MODEL, referencePass }: ItemTypePassOptions): ItemPass {
+export function itemTypePass({ model = ITEM_TYPE_MODEL }: ItemTypePassOptions = {}): ItemPass {
     return {
         name: ITEM_TYPE_PASS,
         run(doc, ctx) {
@@ -56,8 +48,7 @@ export function itemTypePass({ model = ITEM_TYPE_MODEL, referencePass }: ItemTyp
             doc.pages.forEach((page, k) => {
                 page.items = page.items.map((item, i) => ({
                     ...item,
-                    kind: model.publicKind[passClass(model, probs[k][i], referencePass)],
-                    detectorHeading: item.kind === "section_header",
+                    kind: model.publicKind[passClass(model, probs[k][i], item.text)],
                 }));
             });
             const passMs = performance.now() - t0;
