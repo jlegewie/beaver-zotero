@@ -69,7 +69,7 @@ export function buildInputPage(page: DraftPage, styleProfile: StyleProfile): Inp
             };
         });
         return {
-            header: item.kind === "section_header",
+            header: item.detectorHeading ?? item.kind === "section_header",
             column: item.columnIndex,
             text: item.text,
             lines,

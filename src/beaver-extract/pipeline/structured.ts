@@ -45,6 +45,7 @@ import {
     type PdfExtractionPreset,
     type StructuredExtractResult,
 } from "../schema";
+import { ITEM_TYPE_PASS, itemTypePass } from "../itemTypes/pass";
 import { REFERENCE_PASS, referencePass } from "../references/pass";
 import { detectRegions } from "../regions/RegionDetector";
 import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
@@ -77,9 +78,15 @@ const ITEM_PASSES: Record<ItemPassName, () => ItemPass> = {
 
 export type ItemPassName = PdfExtractionPreset["itemPasses"][number];
 
-/** The item passes of a preset, in order. */
+/**
+ * The item passes of a preset, in order: the item-type pass first when the
+ * preset turns the model on, then the preset's listed passes.
+ */
 export function createItemPasses(preset: PdfExtractionPreset): ItemPass[] {
-    return preset.itemPasses.map((name) => ITEM_PASSES[name]());
+    return [
+        ...(preset.itemTypeModel ? [itemTypePass({ referencePass: preset.itemPasses.includes("references") })] : []),
+        ...preset.itemPasses.map((name) => ITEM_PASSES[name]()),
+    ];
 }
 
 /** Inputs shared by the per-page phases of one structured run. */
@@ -335,13 +342,17 @@ export function mapSentences(
     pages.forEach(({ rawPage, paragraphs, regions, ms }, k) => {
         const tPage = performance.now();
         const { filteredResult } = paragraphs;
-        const referencesMs: number | undefined = passes[k][REFERENCE_PASS];
+        const { passes: byPass, parts } = passes[k];
         let passMs = 0;
-        for (const ms of Object.values(passes[k])) passMs += ms;
+        for (const ms of Object.values(byPass)) passMs += ms;
+        const passTimings: Partial<StructuredPagePhaseTimings> = {
+            ...(byPass[REFERENCE_PASS] !== undefined ? { referencesMs: byPass[REFERENCE_PASS] } : {}),
+            ...(byPass[ITEM_TYPE_PASS] !== undefined ? { itemTypesMs: byPass[ITEM_TYPE_PASS], ...parts } : {}),
+        };
         const { sentenceResult, phaseTimings } = mapPageSentences(
             { ...sentenceArgs, ...regions },
             paragraphs,
-            referencesMs,
+            passTimings,
         );
         logColumnDetection(rawPage.pageIndex, filteredResult.columnResult);
         out.pages.push({

@@ -249,7 +249,8 @@ tracked files differ from it), `feature_set` and `feature_version`. Per page:
   columns, text, lines (box, text, font, size, hanging role) and the `units`
   their lines came from. A reference entry split from a unit lists that unit;
   an item merged from several lists them all; region items list none.
-- `filtered_lines`: the lines the margin filter removed (`filtered: true`).
+- `filtered_lines`: the lines the margin filter removed (`filtered: true`) and,
+  with the item-type model on, the items it read as page furniture.
 
 Labels made on the structured export of the same commit match items by id and
 map onto units through `units`. `<out>/manifest.json` records the task,
@@ -259,6 +260,17 @@ An unsupported `--schema` fails before any document is attempted. Extraction
 uses the plugin's settings, so features see the same analysis window as at
 runtime: every page of the document. Resumable and shardable like
 `references export`; each shard keeps its own `ledger-<i>of<n>.jsonl`.
+
+### Preset overrides
+
+`extract`, `profile`, `fixture evaluate` and `items export` accept
+`--preset <switches>` to try a preset switch before a schema version turns it
+on, e.g. `--preset itemTypeModel` (or `itemTypeModel=false`). Only listed
+switches can be overridden (`OVERRIDABLE_PRESET_SWITCHES`); the result still
+names the preset's schema version, so never cache or ship such output. `items
+export` records the overrides in its manifest (`preset_overrides`).
+`profile` also takes `--schema-version`; with the item-type model on it adds
+an `itemTypes` phase and its parts (features, stage 1, context, stage 2).
 
 ## Configuration
 

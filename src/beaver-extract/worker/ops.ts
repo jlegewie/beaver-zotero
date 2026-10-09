@@ -71,8 +71,10 @@ import {
     CURRENT_PDF_EXTRACTION_PRESET,
     ITEM_KINDS,
     SCHEMA_VERSION,
+    applyPresetOverrides,
     pdfExtractionPreset,
     type PdfExtractionPreset,
+    type PresetOverrides,
     type BeaverExtractResult,
     type ExtractionDebug,
     type DebugSentence,
@@ -895,11 +897,10 @@ function presetParagraphSettings(
     };
 }
 
-function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtractionPreset {
-    if (schemaVersion == null) return CURRENT_PDF_EXTRACTION_PRESET;
-    const preset = pdfExtractionPreset(schemaVersion);
+function resolvePdfExtractionPreset(schemaVersion: string | undefined, overrides?: PresetOverrides): PdfExtractionPreset {
+    const preset = schemaVersion == null ? CURRENT_PDF_EXTRACTION_PRESET : pdfExtractionPreset(schemaVersion);
     if (!preset) throw new Error(`No extraction preset for PDF schema ${schemaVersion}`);
-    return preset;
+    return applyPresetOverrides(preset, overrides);
 }
 
 /**
@@ -968,6 +969,8 @@ export async function opExtract(
         includeDiagnostics?: boolean;
         /** PDF schema version to produce; defaults to the current version. */
         schemaVersion?: string;
+        /** Development only (CLI): switches of the schema's preset to override. */
+        presetOverrides?: PresetOverrides;
     },
 ): Promise<OpReply<BeaverExtractResult>> {
     // Defense in depth: the facade enforces this too, but the worker is
@@ -994,7 +997,7 @@ export async function opExtract(
     const engine: "block" | "paragraph" | "structured" = isStructured
         ? "structured"
         : (explicitEngine ?? "paragraph");
-    const preset = resolvePdfExtractionPreset(args.schemaVersion);
+    const preset = resolvePdfExtractionPreset(args.schemaVersion, args.presetOverrides);
 
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
@@ -1146,6 +1149,8 @@ type StructuredRunArgs = {
     analysisWindow?: number;
     /** PDF schema version to produce; defaults to the current version. */
     schemaVersion?: string;
+    /** Development only (CLI): switches of the schema's preset to override. */
+    presetOverrides?: PresetOverrides;
 };
 
 /**
@@ -1159,7 +1164,7 @@ async function withStructuredRun<T>(
     itemPassesFor: ((preset: PdfExtractionPreset) => ItemPass[]) | undefined,
     finish: (internal: InternalExtractionResult, preset: PdfExtractionPreset) => T,
 ): Promise<T> {
-    const preset = resolvePdfExtractionPreset(args.schemaVersion);
+    const preset = resolvePdfExtractionPreset(args.schemaVersion, args.presetOverrides);
     const itemPasses = (itemPassesFor ?? createItemPasses)(preset);
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();

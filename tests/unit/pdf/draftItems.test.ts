@@ -140,4 +140,17 @@ describe("draft items", () => {
         expect(asReference.items[0]).toMatchObject({ kind: "reference", text: "Section Title" });
         expect(asReference.sentences.map((s) => s.parentId)).toEqual(["p2:i1", "p2:i1"]);
     });
+
+    it("map footnotes to sentence-bearing items and margin drafts to margin items without sentences", () => {
+        const { detailedPage, paragraphResult } = page();
+        const items = draftItemsFromParagraphs(paragraphResult);
+        const result = extractPageSentences(detailedPage, {
+            splitter: simpleRegexSentenceSplit,
+            precomputed: { items: [{ ...items[0], kind: "margin" }, { ...items[1], kind: "footnote" }] },
+        });
+        expect(result.items[0]).toMatchObject({ kind: "margin", text: "Section Title" });
+        expect(result.items[0]).not.toHaveProperty("sentences");
+        expect(result.items[1]).toMatchObject({ kind: "footnote", text: "First sentence. Second sentence." });
+        expect(result.sentences.map((s) => s.parentId)).toEqual(["p2:i1", "p2:i1"]);
+    });
 });

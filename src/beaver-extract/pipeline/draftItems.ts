@@ -18,8 +18,12 @@ import type { HangingRole, PageParagraphResult } from "../ParagraphDetector";
 import type { RotationAngle } from "../PageRotationNormalizer";
 import type { RegionItemKind } from "../regions/regionItems";
 
-/** Kinds a draft item can have; region items are placed after sentence mapping. */
-export type DraftItemKind = "text" | "section_header" | "reference";
+/**
+ * Kinds a draft item can have; region items are placed after sentence mapping.
+ * `margin` items (page furniture an item pass found) leave the reading order:
+ * they become internal margin items, like the margin filter's.
+ */
+export type DraftItemKind = "text" | "section_header" | "reference" | "footnote" | "margin";
 
 export interface DraftItem {
     kind: DraftItemKind;
@@ -31,6 +35,12 @@ export interface DraftItem {
     bbox: BoundingBox;
     /** Item text, without the detector's heading marker. */
     text: string;
+    /**
+     * Whether the paragraph detector read the item as a heading. Set by a pass
+     * that relabels kinds (the item-type pass), so models trained on the
+     * detector's verdict keep reading it; absent, `kind` still holds it.
+     */
+    detectorHeading?: boolean;
 }
 
 /**

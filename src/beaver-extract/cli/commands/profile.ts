@@ -42,6 +42,9 @@ import {
     parseAnalysisWindow,
     parsePageRange,
     parsePagesList,
+    parsePresetOverrides,
+    parseSchemaVersion,
+    PRESET_OPTION_HELP,
 } from "../options";
 
 interface ProfileRun {
@@ -95,8 +98,13 @@ const PHASE_KEYS: ReadonlyArray<[string, keyof StructuredPagePhaseTimings]> = [
     ["  columnDetect", "columnDetectMs"],
     ["  lineDetect", "lineDetectMs"],
     ["  paragraphDetect", "paragraphDetectMs"],
-    // Each page's share of the document-level reference pass; 0 for
-    // schema presets without reference items.
+    // Each page's share of the document-level item passes; 0 for schema
+    // presets without them. The item-type pass's parts are nested.
+    ["itemTypes", "itemTypesMs"],
+    ["  itemTypeFeatures", "itemTypeFeaturesMs"],
+    ["  itemTypeStage1", "itemTypeStage1Ms"],
+    ["  itemTypeContext", "itemTypeContextMs"],
+    ["  itemTypeStage2", "itemTypeStage2Ms"],
     ["references", "referencesMs"],
     ["sentenceMap", "sentenceMapMs"],
 ];
@@ -174,6 +182,7 @@ function aggregate(
         "detailedWalkMs",
         "fontBridgeMs",
         "filteredParagraphsMs",
+        "itemTypesMs",
         "referencesMs",
         "sentenceMapMs",
     ];
@@ -295,6 +304,8 @@ export function buildProfileCommand(deps: CliDeps): Command {
             "--paragraph-settings <path>",
             "path to JSON file with ParagraphDetectionSettings",
         )
+        .option("--schema-version <v>", "PDF schema version to extract (its preset); default current")
+        .option("--preset <switches>", PRESET_OPTION_HELP)
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
         .action(async (pdfPath: string, opts: Record<string, string | undefined>) => {
@@ -359,6 +370,15 @@ export function buildProfileCommand(deps: CliDeps): Command {
                         opts.paragraphSettings,
                     );
                     effective.paragraphSettings = input.paragraphSettings;
+                }
+
+                if (opts.schemaVersion) {
+                    input.schemaVersion = parseSchemaVersion(opts.schemaVersion);
+                    effective.schemaVersion = input.schemaVersion;
+                }
+                if (opts.preset) {
+                    input.presetOverrides = parsePresetOverrides(opts.preset);
+                    effective.presetOverrides = input.presetOverrides;
                 }
 
                 const repeatRaw = opts.repeat ?? "1";

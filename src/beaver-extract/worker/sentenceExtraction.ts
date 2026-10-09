@@ -61,6 +61,7 @@ import type {
 } from "../sentenceTypes";
 import type {
     GraphicsLayerMode,
+    MarginItem,
     MarginRemovalResult,
     MarginSettings,
     RawLine,
@@ -248,9 +249,9 @@ export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
 
 /**
  * Second half of the per-page work: map the draft items to sentence bboxes,
- * then place region and margin items. `referencesMs` is the page's share of
- * reference classification, reported in the phase timings when references
- * were classified.
+ * then place region and margin items. `passTimings` holds the page's share
+ * of the item passes (`referencesMs`, `itemTypesMs`, …), reported in the
+ * phase timings.
  */
 export function mapPageSentences(
     args: Pick<
@@ -258,7 +259,7 @@ export function mapPageSentences(
         "paragraphSettings" | "splitter" | "compoundVocabulary" | "regionItems" | "regionMargin" | "regionsMs"
     >,
     paragraphs: PageParagraphs,
-    referencesMs?: number,
+    passTimings: Partial<StructuredPagePhaseTimings> = {},
 ): {
     sentenceResult: PageSentenceResult;
     filteredResult: FilteredParagraphResult;
@@ -266,17 +267,30 @@ export function mapPageSentences(
 } {
     const { detailed, filteredResult } = paragraphs;
     const tSentence = performance.now();
+    // Margin draft items (furniture an item pass found) leave the reading
+    // order: they are mapped last, so they don't break sentence continuations
+    // or region placement, and join the margin filter's items at the end.
+    const drafts = paragraphs.draft.items;
+    const marginDrafts = drafts.filter((item) => item.kind === "margin");
     const sentenceResult = extractPageSentences(detailed, {
         paragraphSettings: args.paragraphSettings,
         splitter: args.splitter,
         compoundVocabulary: args.compoundVocabulary,
         precomputed: {
-            items: paragraphs.draft.items,
+            items: marginDrafts.length > 0 ? [...drafts.filter((item) => item.kind !== "margin"), ...marginDrafts] : drafts,
             pageRotation: filteredResult.pageRotation,
             sourceWidth: filteredResult.sourceWidth,
             sourceHeight: filteredResult.sourceHeight,
         },
     });
+    const draftMargins = sentenceResult.items.splice(sentenceResult.items.length - marginDrafts.length) as MarginItem[];
+    // Their degradation notes, taken before region placement renames the other items.
+    const marginNotes = draftMargins.length > 0
+        ? (sentenceResult.degradation?.notes ?? []).flatMap((note) => {
+            const k = draftMargins.findIndex((item) => item.id === note.itemId);
+            return k >= 0 ? [{ note, k }] : [];
+        })
+        : [];
     let regionsMs = args.regionsMs ?? 0;
     if (args.regionItems?.length) {
         const tRegions = performance.now();
@@ -297,13 +311,12 @@ export function mapPageSentences(
         }
         regionsMs += performance.now() - tRegions;
     }
-    sentenceResult.items = [
-        ...sentenceResult.items,
-        ...reindexMarginItems(
-            [...filteredResult.marginItems, ...marginItemsForLines(detailed.pageIndex, args.regionMargin ?? [])],
-            sentenceResult.items.length,
-        ),
-    ];
+    const margins = reindexMarginItems(
+        [...draftMargins, ...filteredResult.marginItems, ...marginItemsForLines(detailed.pageIndex, args.regionMargin ?? [])],
+        sentenceResult.items.length,
+    );
+    for (const { note, k } of marginNotes) note.itemId = margins[k].id;
+    sentenceResult.items = [...sentenceResult.items, ...margins];
     const sentenceMapMs = performance.now() - tSentence;
 
     const { charCount, lineCount } = countDetailedPageSizes(detailed);
@@ -318,7 +331,7 @@ export function mapPageSentences(
         paragraphDetectMs: filteredResult.timings.paragraphDetectMs,
         sentenceMapMs,
         ...(args.regionItems !== undefined ? { regionsMs } : {}),
-        ...(referencesMs !== undefined ? { referencesMs } : {}),
+        ...passTimings,
         charCount,
         lineCount,
         itemCount: sentenceResult.items.length,

@@ -48,6 +48,7 @@ import type {
     StructuredExtractWithDebugResult,
 } from "../schema";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
+import type { PresetOverrides } from "../schema/presets";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 
 export type PdfBytes = Uint8Array | ArrayBuffer;
@@ -72,6 +73,8 @@ export interface ExtractInput {
     includeDiagnostics?: boolean;
     /** PDF schema version to produce (its extraction preset); default current. */
     schemaVersion?: string;
+    /** Development only (CLI): switches of the schema's preset to override. */
+    presetOverrides?: PresetOverrides;
 }
 
 export interface AnalyzeLayoutInput {
@@ -160,7 +163,7 @@ export async function referenceInputs(
  * so features see what they will see at runtime.
  */
 export async function itemsExport(
-    input: Pick<ExtractInput, "pdfData" | "schemaVersion"> & {
+    input: Pick<ExtractInput, "pdfData" | "schemaVersion" | "presetOverrides"> & {
         task: string;
         bboxPrecision?: number;
     },
