@@ -1159,10 +1159,17 @@ export class BeaverDB {
     }
 
     /**
-     * Close the database connection.
+     * Close the database connection permanently.
+     *
+     * Every caller is a teardown path, and each plugin instance opens its own
+     * connection. A non-permanent close lets `Zotero.DBConnection` reopen on
+     * the next query, and it keeps the connection's idle observer (backup +
+     * vacuum) registered with the app. After a plugin reload or a quit, a late
+     * query or an idle callback would then reopen a connection nothing closes,
+     * and Sqlite.sys.mjs blocks app shutdown waiting for it.
      */
     public async closeDatabase(): Promise<void> {
-        await this.conn.closeDatabase();
+        await this.conn.closeDatabase(true);
     }
 
     /**
