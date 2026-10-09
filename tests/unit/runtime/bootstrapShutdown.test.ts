@@ -36,10 +36,11 @@ describe('application shutdown without main windows', () => {
 describe('plugin reload while the previous instance is still shutting down', () => {
     const ADDON_DISABLE = 4;
 
-    function makeHost() {
+    function makeHost({ slowStartup = false } = {}) {
         const handles: { destruct: ReturnType<typeof vi.fn> }[] = [];
         const instances: any[] = [];
         const pendingShutdowns: (() => void)[] = [];
+        const pendingStartups: (() => void)[] = [];
         const zotero: any = {
             initializationPromise: Promise.resolve(),
             Promise: { delay: () => new Promise(() => {}) },
@@ -51,7 +52,9 @@ describe('plugin reload while the previous instance is still shutting down', () 
             let disposal: Promise<void> | undefined;
             const instance = {
                 hooks: {
-                    onStartup: vi.fn(async () => {}),
+                    onStartup: vi.fn(() => slowStartup
+                        ? new Promise<void>(resolve => { pendingStartups.push(resolve); })
+                        : Promise.resolve()),
                     onShutdown: vi.fn(() => disposal ??= new Promise<void>(resolve => { pendingShutdowns.push(resolve); })),
                 },
             };
@@ -80,7 +83,8 @@ describe('plugin reload while the previous instance is still shutting down', () 
                 scriptloader: { loadSubScript: () => { zotero.__addonInstance__ = makeInstance(); } },
             },
         });
-        return { zotero, handles, instances, context, finish: () => pendingShutdowns.splice(0).forEach(resolve => resolve()) };
+        return { zotero, handles, instances, context, finish: () => pendingShutdowns.splice(0).forEach(resolve => resolve()),
+            finishStartup: () => pendingStartups.splice(0).forEach(resolve => resolve()) };
     }
 
     // Disabling and re-enabling reuses the plugin's bootstrap scope, while an
@@ -146,5 +150,48 @@ describe('plugin reload while the previous instance is still shutting down', () 
         expect(host.handles).toHaveLength(1);
         expect(host.zotero.__addonInstance__).toBeUndefined();
         expect(host.zotero.__beaverBootstrapShutdown).toBeUndefined();
+    });
+
+    it('lets an in-flight startup finish before tearing the instance down', async () => {
+        const host = makeHost({ slowStartup: true });
+        const scope = host.context();
+        runInNewContext(source, scope);
+        const startup = (scope as any).startup({ rootURI: 'jar:beaver/' }, 1);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const instance = host.instances[0];
+        expect(instance.hooks.onStartup).toHaveBeenCalledOnce();
+
+        const shutdown = (scope as any).shutdown({}, ADDON_DISABLE);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(instance.hooks.onShutdown).not.toHaveBeenCalled();
+
+        host.finishStartup();
+        await startup;
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(instance.hooks.onShutdown).toHaveBeenCalledOnce();
+        host.finish();
+        await shutdown;
+
+        expect(host.zotero.__addonInstance__).toBeUndefined();
+        expect(host.handles[0].destruct).toHaveBeenCalledOnce();
+        expect(host.zotero.__beaverBootstrapStartup).toBeUndefined();
+    });
+
+    it('shuts down anyway when an in-flight startup never settles', async () => {
+        const host = makeHost({ slowStartup: true });
+        const scope = host.context();
+        runInNewContext(source, scope);
+        void (scope as any).startup({ rootURI: 'jar:beaver/' }, 1);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        host.zotero.Promise.delay = () => Promise.resolve();
+
+        const shutdown = (scope as any).shutdown({}, ADDON_DISABLE);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        host.finish();
+        await shutdown;
+
+        expect(host.instances[0].hooks.onShutdown).toHaveBeenCalledOnce();
+        expect(host.zotero.logError).toHaveBeenCalled();
+        expect(host.zotero.__addonInstance__).toBeUndefined();
     });
 });

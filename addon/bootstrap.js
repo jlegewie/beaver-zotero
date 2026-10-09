@@ -9,9 +9,9 @@
 
 var chromeHandle;
 
-// Upper bound on how long a starting instance waits for its predecessor's
-// teardown before starting anyway.
-const PREVIOUS_SHUTDOWN_TIMEOUT_MS = 60000;
+// Upper bound on how long a startup or shutdown waits for the other to
+// settle before proceeding anyway.
+const LIFECYCLE_WAIT_TIMEOUT_MS = 60000;
 
 function install(data, reason) {}
 
@@ -26,28 +26,48 @@ function nextLifecycleGeneration() {
 }
 
 /**
- * Wait for a previous instance's `shutdown` to finish. On reload or update,
- * Zotero calls the new instance's `startup` without awaiting the old async
- * `shutdown`, whose cleanup would otherwise run over the new instance.
+ * Wait, bounded, for an in-flight lifecycle step to settle. Zotero does not
+ * await async bootstrap methods: on reload or update the new instance's
+ * `startup` overlaps the old async `shutdown`, and a quick disable overlaps a
+ * still-running `startup`. Without this, one would run over the other.
  */
-async function waitForPreviousShutdown() {
-  const pending = Zotero.__beaverBootstrapShutdown;
+async function waitForLifecycleStep(pending, timeoutMessage) {
   if (!pending) return;
   const timedOut = await Promise.race([
-    pending.then(() => false),
-    Zotero.Promise.delay(PREVIOUS_SHUTDOWN_TIMEOUT_MS).then(() => true),
+    pending.then(
+      () => false,
+      () => false,
+    ),
+    Zotero.Promise.delay(LIFECYCLE_WAIT_TIMEOUT_MS).then(() => true),
   ]);
   if (timedOut) {
-    Zotero.logError(
-      new Error("Beaver: previous instance did not finish shutting down; starting anyway"),
-    );
+    Zotero.logError(new Error(`Beaver: ${timeoutMessage}`));
   }
 }
 
-async function startup({ id, version, resourceURI, rootURI }, reason) {
+async function startup(data, reason) {
+  // Published so a shutdown arriving mid-startup waits for it to settle.
+  const run = runStartup(data);
+  Zotero.__beaverBootstrapStartup = run;
+  try {
+    await run;
+  } finally {
+    if (Zotero.__beaverBootstrapStartup === run) {
+      Zotero.__beaverBootstrapStartup = undefined;
+    }
+  }
+}
+
+async function runStartup({ id, version, resourceURI, rootURI }) {
   const generation = nextLifecycleGeneration();
+  // Captured before any await: a shutdown that arrives later waits for this
+  // startup, so waiting on it here would deadlock.
+  const previousShutdown = Zotero.__beaverBootstrapShutdown;
   await Zotero.initializationPromise;
-  await waitForPreviousShutdown();
+  await waitForLifecycleStep(
+    previousShutdown,
+    "previous instance did not finish shutting down; starting anyway",
+  );
   // A shutdown while this startup waited (e.g. disabled again during the
   // previous teardown) supersedes it.
   if (Zotero.__beaverBootstrapGeneration !== generation) return;
@@ -123,7 +143,11 @@ async function shutdown({ id, version, resourceURI, rootURI }, reason) {
       Components.interfaces.nsISupports,
     ).wrappedJSObject;
   }
+  // Cancels a startup still waiting on a previous teardown; one already
+  // running is allowed to settle first, so this tears down a finished
+  // instance rather than one that is half initialized.
   nextLifecycleGeneration();
+  const startingUp = Zotero.__beaverBootstrapStartup;
   // Published before the first await so a concurrently starting instance
   // waits for this teardown. The instance and chrome handle are captured so
   // that cleanup only ever touches what this shutdown owns.
@@ -132,10 +156,18 @@ async function shutdown({ id, version, resourceURI, rootURI }, reason) {
     finishShutdown = resolve;
   });
   Zotero.__beaverBootstrapShutdown = shutdownDone;
-  const instance = Zotero.__addonInstance__;
-  const handle = chromeHandle;
-  chromeHandle = null;
+  let instance;
+  let handle;
   try {
+    if (startingUp) {
+      await waitForLifecycleStep(
+        startingUp,
+        "startup did not finish before shutdown; shutting down anyway",
+      );
+    }
+    instance = Zotero.__addonInstance__;
+    handle = chromeHandle;
+    chromeHandle = null;
     await instance?.hooks.onShutdown();
   } finally {
     // Always drop the singleton off Zotero so the next startup's
@@ -145,7 +177,7 @@ async function shutdown({ id, version, resourceURI, rootURI }, reason) {
     // teardown leaves `Zotero.__addonInstance__` pointing at a stale
     // instance, breaking the next reload.
     try {
-      if (Zotero.__addonInstance__ === instance) {
+      if (instance && Zotero.__addonInstance__ === instance) {
         delete Zotero.__addonInstance__;
       }
     } catch (_) {
