@@ -13,6 +13,10 @@ if (Zotero.isMac) {
 }
 
 async function onLoad() {
+    if (Zotero.isWin) {
+        // The Windows window exposes these actions in the chat UI and shortcuts.
+        document.querySelector("menubar").hidden = true;
+    }
     await Zotero.initializationPromise;
     if (window.closed || !Zotero.Beaver?.data.alive) return;
     Zotero.UIProperties.registerRoot(
