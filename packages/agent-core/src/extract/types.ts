@@ -712,6 +712,15 @@ export interface MarginElement {
      * index removes it.
      */
     rowEndNumber?: boolean;
+    /**
+     * For a numeral in the left zone: body text rows between it and the
+     * numeral above it (or the top of the body, for a page's first numeral)
+     * that carry no numeral of their own. Manuscript line numbers number
+     * every row. Collected only with text rows on.
+     */
+    unnumberedRowsAbove?: number;
+    /** For a page's last numeral in the left zone: body text rows below it. */
+    unnumberedRowsBelow?: number;
 }
 
 /**
@@ -722,6 +731,8 @@ export interface MarginAnalysis {
     elements: Map<MarginPosition, MarginElement[]>;
     /** Total elements found per zone */
     counts: Record<MarginPosition, number>;
+    /** Number of pages analysed, including pages with no margin elements. */
+    pageCount?: number;
 }
 
 /**

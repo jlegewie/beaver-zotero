@@ -28,6 +28,12 @@ describe("addBlockToVocabulary", () => {
         expect(vocabulary.words.has("design")).toBe(true);
     });
 
+    it("reads compound parts with a Unicode hyphen, but not letters glued to digits", () => {
+        const vocabulary = vocabularyOf("a diagnosticity\u2010adoption link", "the HNF1β-Gen and anti-COVID-19 work");
+        expect(vocabulary.compoundLefts).toEqual(new Set(["diagnosticity", "anti"]));
+        expect(vocabulary.compoundRights).toEqual(new Set(["adoption", "covid"]));
+    });
+
     it("leaves both halves of a word split at a line end out of the words", () => {
         const vocabulary = vocabularyOf("the effects of con-", "sequences matter", "consequences differ");
         expect(vocabulary.words.has("con")).toBe(false);
@@ -109,6 +115,15 @@ describe("decideSplitWord", () => {
         expect(split("sub", "cultured", vocabularyOf("a sub group was cultured"))).toBe("join");
         expect(split("out", "come", vocabularyOf("we went out to come back"))).toBe("join");
         expect(split("off", "set", vocabularyOf("turned off the set"))).toBe("join");
+        // Nor does a compound elsewhere vouch for a prefix's closed word,
+        // though it does after a short element ("Li-doped").
+        expect(split("under", "standing", vocabularyOf("a long-standing view"))).toBe("join");
+        expect(split("bi", "cultural", vocabularyOf("cross-cultural work"))).toBe("join");
+        expect(split("Li", "doped", vocabularyOf("the Zn-doped films"))).toBe("keep");
+        // A bound prefix keeps its hyphen before the vowel it ends with.
+        expect(split("meta", "analysis")).toBe("keep");
+        expect(split("anti", "inflammatory")).toBe("keep");
+        expect(split("co", "operation")).toBe("join");
     });
 
     it("keeps only attested compounds with a plain set", () => {

@@ -30,15 +30,22 @@ export class LineJoinVocabulary extends Set<string> {
 }
 
 const WORD_RE = /\p{L}+/gu;
+/** A hyphenated compound of letters (ASCII hyphen-minus), as `collectHyphenatedCompounds` reads them. */
 const COMPOUND_RE = /\p{L}+(?:-\p{L}+)+/gu;
+/**
+ * A compound whose parts count as compound parts: hyphen-minus or Unicode
+ * hyphen, not glued to digits or letters ("β-Gen" in the gene name
+ * "HNF1β-Gen" is no compound).
+ */
+const COMPOUND_PARTS_RE = /(?<![\p{L}\p{N}])\p{L}+(?:[-\u2010]\p{L}+)+(?![\p{L}\p{N}])/gu;
 /** A line-end hyphen: ASCII hyphen-minus, Unicode hyphen, or soft hyphen. */
 const LINE_END_HYPHEN_RE = /[-\u2010\u00AD]$/u;
 
 /**
  * Add a block's lines (in reading order) to `vocabulary`. Compounds come from
- * every line, so the set matches `collectHyphenatedCompounds`; words and
- * compound parts skip the last word of a line ending in a hyphen and the
- * first word of the line after it.
+ * every line, so the set matches `collectHyphenatedCompounds` (PDF schema 4
+ * reads it); words and compound parts skip the last word of a line ending in
+ * a hyphen and the first word of the line after it.
  */
 export function addBlockToVocabulary(lines: readonly string[], vocabulary: LineJoinVocabulary): void {
     let afterHyphen = false;
@@ -47,17 +54,22 @@ export function addBlockToVocabulary(lines: readonly string[], vocabulary: LineJ
         const endsWithHyphen = LINE_END_HYPHEN_RE.test(line.trimEnd());
         for (let t = 0; t < tokens.length; t++) {
             const whole = !(afterHyphen && t === 0) && !(endsWithHyphen && t === tokens.length - 1);
-            for (const match of tokens[t].includes("-") ? tokens[t].matchAll(COMPOUND_RE) : []) {
+            if (!/[-\u2010]/u.test(tokens[t])) {
+                if (whole) for (const word of tokens[t].matchAll(WORD_RE)) vocabulary.words.add(word[0].toLowerCase());
+                continue;
+            }
+            for (const match of tokens[t].matchAll(COMPOUND_RE)) {
                 const parts = match[0].toLowerCase().split("-");
-                for (let i = 0; i + 1 < parts.length; i++) {
-                    vocabulary.add(`${parts[i]}-${parts[i + 1]}`);
-                    if (whole) {
-                        vocabulary.compoundLefts.add(parts[i]);
-                        vocabulary.compoundRights.add(parts[i + 1]);
-                    }
-                }
+                for (let i = 0; i + 1 < parts.length; i++) vocabulary.add(`${parts[i]}-${parts[i + 1]}`);
             }
             if (!whole) continue;
+            for (const match of tokens[t].matchAll(COMPOUND_PARTS_RE)) {
+                const parts = match[0].toLowerCase().split(/[-\u2010]/u);
+                for (let i = 0; i + 1 < parts.length; i++) {
+                    vocabulary.compoundLefts.add(parts[i]);
+                    vocabulary.compoundRights.add(parts[i + 1]);
+                }
+            }
             for (const word of tokens[t].matchAll(WORD_RE)) vocabulary.words.add(word[0].toLowerCase());
         }
         if (tokens.length > 0) afterHyphen = endsWithHyphen;
@@ -138,7 +150,7 @@ const BOUND_PREFIXES = new Set([
     "inter", "intra", "pre", "post", "multi", "co", "anti", "semi", "sub", "super", "over", "under",
     "re", "de", "un", "non", "dis", "mis", "trans", "micro", "macro", "meta", "neuro", "bio", "geo",
     "auto", "hyper", "hypo", "poly", "mono", "pro", "counter", "extra", "ultra", "infra", "tele",
-    "pseudo", "quasi", "socio", "psycho", "per", "out", "off",
+    "pseudo", "quasi", "socio", "psycho", "per", "out", "off", "bi",
 ]);
 
 /** Endings that make a word of a hyphen prefix ("four-th", "short-en", "real-istic"). */
@@ -218,9 +230,14 @@ export function decideSplitWord(
         }
         return "keep";
     }
+    // A bound prefix keeps its hyphen before the vowel it ends with
+    // ("meta-analysis", "anti-inflammatory", "re-enter").
+    if (BOUND_PREFIXES.has(l) && /[aei]$/u.test(l) && r.startsWith(l[l.length - 1])) return "keep";
     if (vocab) {
+        // A bound prefix starts closed words ("under-" + "standing"),
+        // whatever compounds the document builds elsewhere.
         const bound = BOUND_PREFIXES.has(l);
-        if ((vocab.compoundLefts.has(l) && !bound && l.length >= 3) || vocab.compoundRights.has(r)) return "keep";
+        if ((vocab.compoundLefts.has(l) && !bound && l.length >= 3) || (vocab.compoundRights.has(r) && !bound)) return "keep";
         if (!bound && l.length >= 3 && r.length >= 3 && vocab.words.has(l) && vocab.words.has(r)) return "keep";
     }
     return "join";

@@ -2104,6 +2104,149 @@ describe("Roman page numbers in a paragraph block (PDF schema 5)", () => {
     });
 });
 
+describe("manuscript line numbers in the left margin (PDF schema 5)", () => {
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    it("removes line numbers that run on from page to page", () => {
+        let next = 1;
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines(
+                Array.from({ length: 20 }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 100 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`body text row ${k} on page ${pageIndex}`, 100, 100 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(removal.removalsByPage.get(1)?.size).toBe(20);
+        expect(removal.removalsByPage.get(1)?.has("21")).toBe(true);
+    });
+
+    it("removes line numbers that start below a title page's front matter", () => {
+        let next = 1;
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines([
+                ...(pageIndex === 0
+                    ? ["A Title", "An Author", "A University", "Key words: lines"].map((text, k) =>
+                        makeStyledLine(text, 100, 100 + 28 * k, 200, "Times-Roman", 9))
+                    : []),
+                ...Array.from({ length: pageIndex === 0 ? 12 : 20 }, (_, k) => {
+                    const y = (pageIndex === 0 ? 224 : 100) + 28 * k;
+                    return [
+                        makeStyledLine(`${next++}`, 40, y, 10, "Times-Roman", 9),
+                        makeStyledLine(`body text row ${k} on page ${pageIndex}`, 100, y, 400, "Times-Roman", 9),
+                    ];
+                }).flat(),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(removal.removalsByPage.get(0)?.size).toBe(12);
+        expect(removal.removalsByPage.get(2)?.size).toBe(20);
+    });
+
+    /** Pages of left-margin numbers 1, 2, … running on across pages, one per body row. */
+    function numberedPages(pageCount: number, perPage: number, extra: (pageIndex: number) => RawLine[] = () => []): RawPageData[] {
+        let next = 1;
+        return Array.from({ length: pageCount }, (_, pageIndex) => ({
+            ...makePageWithLines([
+                ...Array.from({ length: perPage }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 100 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`row ${k} on page ${pageIndex}`, 100, 100 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+                ...extra(pageIndex),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+    }
+    const removedTexts = (removal: MarginRemovalResult) => [...removal.removalsByPage.values()].flatMap((texts) => [...texts]);
+
+    it("counts pages without margin text toward the pages a numbering must cover", () => {
+        const prosePages = Array.from({ length: 7 }, (_, k) => ({
+            ...makePageWithLines([makeStyledLine(`a page of prose ${k}`, 100, 300, 400, "Times-Roman", 9)]),
+            pageIndex: 3 + k,
+            pageNumber: 4 + k,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements([...numberedPages(3, 10), ...prosePages], zone),
+            3,
+            true,
+            true,
+        );
+        expect(removedTexts(removal)).toEqual([]);
+    });
+
+    it("reads no line numbers without text rows", () => {
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(numberedPages(3, 20), zone, false), 3, true, true);
+        expect(removedTexts(removal)).toEqual([]);
+    });
+
+    it("removes line numbers that another zone's page numbers repeat", () => {
+        const pages = numberedPages(3, 20, (pageIndex) => [makeStyledLine(`${pageIndex + 1}`, 300, PAGE_H - 40, 10, "Times-Roman", 9)]);
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(removal.removalsByPage.get(0)?.size).toBe(20);
+        expect(removal.removalsByPage.get(2)?.has("3")).toBe(true);
+    });
+
+    it("keeps the numbers of a list set between paragraphs", () => {
+        let next = 1;
+        const prose = (pageIndex: number, y: number) =>
+            Array.from({ length: 3 }, (_, k) => makeStyledLine(`prose row ${k} at ${y} on page ${pageIndex}`, 100, y + 28 * k, 400, "Times-Roman", 9));
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines([
+                ...prose(pageIndex, 100),
+                ...Array.from({ length: 10 }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 184 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`item ${k} on page ${pageIndex}`, 100, 184 + 28 * k, 300, "Times-Roman", 9),
+                ]).flat(),
+                ...prose(pageIndex, 464),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect([...removal.removalsByPage.values()].flatMap((texts) => [...texts])).toEqual([]);
+    });
+
+    it("keeps the numbers of a list whose items wrap", () => {
+        let next = 1;
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines(
+                Array.from({ length: 10 }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 100 + 56 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`item ${k} on page ${pageIndex} starts here and`, 100, 100 + 56 * k, 400, "Times-Roman", 9),
+                    makeStyledLine(`wraps onto a second row`, 100, 128 + 56 * k, 200, "Times-Roman", 9),
+                ]).flat(),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect([...removal.removalsByPage.values()].flatMap((texts) => [...texts])).toEqual([]);
+    });
+
+    it("keeps contents references to consecutive pages", () => {
+        for (const perPage of [5, 10]) {
+            const contents = [0, 1, 2].map((pageIndex) => ({
+                ...makePageWithLines(
+                    Array.from({ length: perPage }, (_, k) => [
+                        makeStyledLine(`Section ${pageIndex}.${k} title`, 100, 100 + 28 * k, 300, "Times-Roman", 9),
+                        makeStyledLine(`${100 + perPage * pageIndex + k}`, PAGE_W - 40, 100 + 28 * k, 15, "Times-Roman", 9),
+                    ]).flat(),
+                ),
+                pageIndex,
+                pageNumber: pageIndex + 1,
+            }));
+            const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(contents, zone), 3, true, true);
+            expect([...removal.removalsByPage.values()].flatMap((texts) => [...texts])).toEqual([]);
+        }
+    });
+});
+
 describe("page numbers that advance with the pages (PDF schema 5)", () => {
     // A contents page lists page references in its margin; they increase
     // from page to page too, but by far more than one per page.

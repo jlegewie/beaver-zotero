@@ -18,6 +18,7 @@ import type {
     MarginRemovalResult,
     TextStyle,
 } from "@beaver/agent-core/extract/types";
+import { bboxHeight } from "@beaver/agent-core/extract/types";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 
@@ -282,6 +283,85 @@ function advancesWithPages(onePerPage: PageNumberEntry[]): boolean {
         if (values <= 2 * pages + 1) paced++;
     }
     return steps > 0 && paced >= 0.75 * steps;
+}
+
+/**
+ * Set `unnumberedRowsAbove` on each of a page's left-zone `numerals` (the
+ * body text `rows` between it and the numeral above it, or above it for the
+ * first, that share a row with neither) and `unnumberedRowsBelow` on the
+ * last.
+ */
+function countUnnumberedRows(numerals: MarginElement[], rows: BoundingBox[]): void {
+    const sameRow = (a: BoundingBox, b: BoundingBox) =>
+        Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.5 * Math.min(bboxHeight(a), bboxHeight(b));
+    const centerY = (box: BoundingBox) => (box.t + box.b) / 2;
+    const unnumberedBetween = (above: BoundingBox | undefined, below: BoundingBox | undefined) =>
+        rows.filter((row) =>
+            (!above || (centerY(row) > centerY(above) && !sameRow(row, above))) &&
+            (!below || (centerY(row) < centerY(below) && !sameRow(row, below))),
+        ).length;
+    const sorted = [...numerals].sort((a, b) => a.bbox.t - b.bbox.t);
+    sorted.forEach((numeral, i) => {
+        numeral.unnumberedRowsAbove = unnumberedBetween(sorted[i - 1]?.bbox, numeral.bbox);
+    });
+    const last = sorted[sorted.length - 1];
+    if (last) last.unnumberedRowsBelow = unnumberedBetween(last.bbox, undefined);
+}
+
+/** Fewest numbers a page of manuscript line numbering holds (a title page has few rows). */
+const MIN_LINE_NUMBERS_PER_PAGE = 5;
+
+/** Fewest numbers the pages of manuscript line numbering hold on average: one per text row. */
+const MIN_LINE_NUMBERS_PER_PAGE_MEAN = 10;
+
+/** Most text rows without a line number, as a share of a page's line numbers. */
+const MAX_UNNUMBERED_ROW_SHARE = 0.25;
+
+/**
+ * Pages whose numbers in the left zone are manuscript line numbers: at least
+ * `MIN_LINE_NUMBERS_PER_PAGE` numbers stepping by one from top to bottom,
+ * the count going on from the last such page. They increase across pages far
+ * faster than page numbers. Read for the left zone only: line numbers stand
+ * before the text rows they number, while a contents page sets its page
+ * references after its entries, at the right. A numbered list can step by
+ * one too, so the numbering must also cover at least half of the
+ * `analysedPages` pages, with `MIN_LINE_NUMBERS_PER_PAGE_MEAN` numbers per
+ * page on average, and few body text rows on the page without one: line
+ * numbers run down every text row of the manuscript, while a numbered list
+ * leaves the wrapped rows of its items and the prose around it unnumbered.
+ * Unnumbered rows above the numbers count except on the page the numbering
+ * starts on (a title page's front matter), and a few are allowed for
+ * (headings, display equations). Empty unless two pages qualify.
+ */
+function lineNumberingPages(entries: PageNumberEntry[], analysedPages: number): Set<number> {
+    const byPage = new Map<number, PageNumberEntry[]>();
+    for (const entry of entries) {
+        const list = byPage.get(entry.el.pageIndex) ?? [];
+        list.push(entry);
+        byPage.set(entry.el.pageIndex, list);
+    }
+    const pages = new Set<number>();
+    let numbers = 0;
+    let last: number | undefined;
+    for (const pageIndex of [...byPage.keys()].sort((a, b) => a - b)) {
+        const values = byPage.get(pageIndex)!.sort((a, b) => a.el.bbox.t - b.el.bbox.t).map((e) => e.value);
+        if (values.length < MIN_LINE_NUMBERS_PER_PAGE || values.some((v, i) => i > 0 && v !== values[i - 1] + 1)) continue;
+        if (last !== undefined && values[0] !== last + 1) continue;
+        const onPage = byPage.get(pageIndex)!;
+        // Without row evidence (text rows off), nothing reads as line numbers.
+        if (onPage[0].el.unnumberedRowsAbove === undefined) return new Set();
+        const unnumbered = onPage.reduce(
+            (sum, e, i) => sum + (i === 0 && last === undefined ? 0 : e.el.unnumberedRowsAbove ?? 0),
+            onPage[onPage.length - 1].el.unnumberedRowsBelow ?? 0,
+        );
+        if (unnumbered > MAX_UNNUMBERED_ROW_SHARE * values.length) continue;
+        pages.add(pageIndex);
+        numbers += values.length;
+        last = values[values.length - 1];
+    }
+    const lineNumbered = pages.size >= 2 && 2 * pages.size >= analysedPages &&
+        numbers >= MIN_LINE_NUMBERS_PER_PAGE_MEAN * pages.size;
+    return lineNumbered ? pages : new Set();
 }
 
 /**
@@ -924,7 +1004,8 @@ export class MarginFilter {
                     ...(rowEndNumber ? { rowEndNumber } : {}),
                 });
             };
-            for (const row of collectTextRows(page, textRows)) {
+            const rows = collectTextRows(page, textRows);
+            for (const row of rows) {
                 if (prose && row.lines.every(line => prose.has(line))) continue;
                 const position = positionOf(row.bbox);
                 if (position) {
@@ -951,6 +1032,12 @@ export class MarginFilter {
                     push(line.text.trim(), positionOf(line.bbox)!, line.bbox, [line]);
                 }
             }
+            if (textRows) {
+                countUnnumberedRows(
+                    elements.get("left")!.filter(el => el.pageIndex === page.pageIndex && isPageNumberPattern(el.text)),
+                    rows.filter(row => !positionOf(row.bbox)).map(row => row.bbox),
+                );
+            }
         }
 
         const counts: Record<MarginPosition, number> = {
@@ -960,7 +1047,7 @@ export class MarginFilter {
             right: elements.get("right")!.length,
         };
 
-        return { elements, counts };
+        return { elements, counts, pageCount: pages.length };
     }
 
     /**
@@ -993,6 +1080,11 @@ export class MarginFilter {
         // sequence check reads this, so runs never change what it sees.
         const textsBeforeRuns = new Set<string>();
         const removalsByPage = new Map<number, Set<string>>();
+        // The pages the analysis read (or, for an analysis without the
+        // count, those with any margin element).
+        const analysedPages = analysis.pageCount ?? new Set(
+            [...analysis.elements.values()].flatMap((els) => els.map((el) => el.pageIndex)),
+        ).size;
 
         // Process each margin position
         for (const [position, positionElements] of analysis.elements) {
@@ -1192,6 +1284,19 @@ export class MarginFilter {
                         removalsByPage.get(el.pageIndex)!.add(normalized);
                     }
                 };
+
+                // Manuscript line numbers in the left zone, read from all
+                // of the zone's numerals (a footer's page numbers removed
+                // on other pages are line numbers here) and removed whole,
+                // on the pages they number. They do not feed
+                // `textsBeforeRuns`: other zones' page numbers are not
+                // line numbers.
+                if (pageNumberRuns && position === "left") {
+                    for (const { entries } of pageNumberBuckets(elements, new Set())) {
+                        const lineNumbered = lineNumberingPages(entries, analysedPages);
+                        markPageNumbers(entries.filter(({ el }) => lineNumbered.has(el.pageIndex)), true);
+                    }
+                }
 
                 // Skip elements already covered by the repeat/templating
                 // pass — otherwise a co-located "Page K" family (already

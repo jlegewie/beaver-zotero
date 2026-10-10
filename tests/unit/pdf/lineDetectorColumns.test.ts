@@ -20,13 +20,14 @@ function line(text: string, x: number, y: number, w: number, h = 9, size = 9): R
     };
 }
 
-function page(lines: RawLine[]): RawPageData {
+/** A page of one MuPDF block per argument. */
+function page(...blocks: RawLine[][]): RawPageData {
     return {
         pageIndex: 0,
         pageNumber: 1,
         width: 612,
         height: 792,
-        blocks: [{ type: "text", bbox: bboxFromXYWH(0, 0, 612, 792, "top-left"), lines }],
+        blocks: blocks.map((lines) => ({ type: "text" as const, bbox: bboxFromXYWH(0, 0, 612, 792, "top-left"), lines })),
     };
 }
 
@@ -99,6 +100,74 @@ describe("detectLinesOnPage with overlapping columns", () => {
             ["noise has a 30-dB decade slope", "and the 40-dB band is flat"],
             [],
         ]);
+    });
+
+    it("gives a table column its own box though one row's cells sit close", () => {
+        // Cells 10pt (1.1 em) apart on the first row, 27pt (3 em) on the others.
+        const raw = page([
+            line("Study", 54, 230, 60),
+            line("Sample", 124, 230, 40),
+            line("Result", 174, 230, 60),
+            line("Smith et al.", 54, 242, 60),
+            line("n = 14", 141, 242, 23),
+            line("improved", 191, 242, 43),
+            line("Jones (2010)", 54, 254, 60),
+            line("n = 20", 141, 254, 23),
+            line("no change", 191, 254, 43),
+        ]);
+        const columns = [rect(54, 230, 234, 263), rect(124, 230, 164, 263)];
+        expect(columnTexts(raw, columns, true)).toEqual([
+            ["Study Result", "Smith et al. improved", "Jones (2010) no change"],
+            ["Sample", "n = 14", "n = 20"],
+        ]);
+    });
+
+    it("gives a one-row figure label far from the text on both sides its own box", () => {
+        const raw = page(
+            [line("for ex-", 54, 230, 40), line("ample the", 240, 230, 60), line("next row of the paragraph", 54, 242, 246)],
+            [line("W1 b1 W2 b2", 140, 230, 50, 6, 6)],
+        );
+        const columns = [rect(54, 230, 300, 251), rect(140, 230, 190, 236)];
+        expect(columnTexts(raw, columns, true)).toEqual([["for ex- ample the", "next row of the paragraph"], ["W1 b1 W2 b2"]]);
+        // A small image elsewhere on the page does not tie the label to the text.
+        raw.blocks.splice(1, 0, { type: "image", bbox: bboxFromXYWH(400, 600, 8, 7, "top-left") });
+        expect(columnTexts(raw, columns, true)).toEqual([["for ex- ample the", "next row of the paragraph"], ["W1 b1 W2 b2"]]);
+    });
+
+    it("keeps a piece of a row cut out by inline math in the row's column", () => {
+        // MuPDF left out a formula on both sides of "to the output"; the
+        // paragraph's next row, in the same block, runs under both gaps.
+        const raw = page([
+            line("the transfer function from", 54, 230, 110),
+            line("to the output", 190, 230, 55),
+            line("should be linear", 280, 230, 70),
+            line("in the range of interest, as the next row of the paragraph shows", 54, 242, 296),
+        ]);
+        const columns = [rect(54, 230, 350, 251), rect(190, 230, 245, 239)];
+        expect(columnTexts(raw, columns, true)).toEqual([
+            ["the transfer function from to the output should be linear", "in the range of interest, as the next row of the paragraph shows"],
+            [],
+        ]);
+    });
+
+    it("reads a paragraph MuPDF split at inline formula images as one block", () => {
+        // MuPDF ends a text block at each inline image; the paragraph's
+        // blocks still bridge the fragment's gaps.
+        const image = (x: number, y: number, w = 8, h = 7) => ({ type: "image" as const, bbox: bboxFromXYWH(x, y, w, h, "top-left") });
+        const [before, fragment, after] = page([line("the transfer function from", 54, 230, 110)], [line("to the output", 190, 230, 55)], [
+            line("should be linear", 280, 230, 70),
+            line("in the range of interest, as the next row of the paragraph shows", 54, 242, 296),
+        ]).blocks;
+        const columns = [rect(54, 230, 350, 251), rect(190, 230, 245, 239)];
+        const fragmentColumn = (first: RawPageData["blocks"][number], second: RawPageData["blocks"][number]) => {
+            const raw = page();
+            raw.blocks = [before, first, fragment, second, after];
+            return columnTexts(raw, columns, true)[1];
+        };
+        expect(fragmentColumn(image(170, 231), image(249, 231))).toEqual([]);
+        // Small images elsewhere on the page, or a figure, separate them.
+        expect(fragmentColumn(image(400, 500), image(400, 520))).toEqual(["to the output"]);
+        expect(fragmentColumn(image(170, 231), image(100, 400, 200, 120))).toEqual(["to the output"]);
     });
 
     it("gives a one-row heading beside the next column its own box", () => {
