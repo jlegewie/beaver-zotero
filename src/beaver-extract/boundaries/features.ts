@@ -28,7 +28,8 @@
  *   numbers, the next number of a list, note markers, caption labels), dot
  *   leaders and trailing page numbers.
  * - `heuristic`: the detector's decision on j and i, the rule that decided
- *   (`START_RULES` index), the break signals and vetoes, hanging roles,
+ *   (`START_RULES` index), the break signals and vetoes (missing where the
+ *   boundary model decided, which reads none of them), hanging roles,
  *   isolated headings.
  * - `context`: the pairs before and after, the block's size and the line's
  *   place in it and on the page, the pair type, and for a block's first line
@@ -484,8 +485,9 @@ export function boundaryRow(prep: PreparedBoundaryPage, b: number, j: number): n
     const end = prev?.last ?? null;
     const opening = line.first;
     const body = page.body;
-    const signals = line.signals;
-    const vetoes = line.vetoes;
+    const heuristic = line.rule !== null;
+    const signal = (mask: number) => (heuristic ? bit((line.signals & mask) !== 0) : NaN);
+    const veto = (mask: number) => (heuristic ? bit((line.vetoes & mask) !== 0) : NaN);
 
     // A block's first line: how the two blocks sit.
     let stacked = NaN;
@@ -613,24 +615,24 @@ export function boundaryRow(prep: PreparedBoundaryPage, b: number, j: number): n
         pageNumberJ: bit(tj.pageNumber),
         lenI: ti ? ti.len : NaN,
         lenJ: tj.len,
-        // Heuristic
-        start: bit(line.start),
-        rule: START_RULES.indexOf(line.rule),
-        headingRule: bit(HEADING_RULES.has(line.rule)),
-        startI: prev ? bit(prev.start) : NaN,
-        sigGap: bit((signals & START_SIGNALS.gap) !== 0),
-        sigIndent: bit((signals & START_SIGNALS.indent) !== 0),
-        sigEarlyEnd: bit((signals & START_SIGNALS.early_end) !== 0),
-        sigFontSize: bit((signals & START_SIGNALS.font_size) !== 0),
-        sigLeader: bit((signals & START_SIGNALS.leader_after_continuation) !== 0),
-        sigHangingEntry: bit((signals & START_SIGNALS.hanging_entry) !== 0),
-        vetoLeaderContinuation: bit((vetoes & START_VETOES.leader_continuation) !== 0),
-        vetoUniformLeading: bit((vetoes & START_VETOES.uniform_leading) !== 0),
-        vetoIndentSuppression: bit((vetoes & START_VETOES.indent_suppression) !== 0),
-        vetoSuperscriptMarker: bit((vetoes & START_VETOES.superscript_marker) !== 0),
-        vetoDropCap: bit((vetoes & START_VETOES.drop_cap) !== 0),
-        vetoSameIndentHanging: bit((vetoes & START_VETOES.same_indent_hanging) !== 0),
-        vetoHangingContinuation: bit((vetoes & START_VETOES.hanging_continuation) !== 0),
+        // Heuristic (missing where the boundary model decided instead)
+        start: heuristic ? bit(line.start) : NaN,
+        rule: heuristic ? START_RULES.indexOf(line.rule!) : NaN,
+        headingRule: heuristic ? bit(HEADING_RULES.has(line.rule!)) : NaN,
+        startI: prev && prev.rule !== null ? bit(prev.start) : NaN,
+        sigGap: signal(START_SIGNALS.gap),
+        sigIndent: signal(START_SIGNALS.indent),
+        sigEarlyEnd: signal(START_SIGNALS.early_end),
+        sigFontSize: signal(START_SIGNALS.font_size),
+        sigLeader: signal(START_SIGNALS.leader_after_continuation),
+        sigHangingEntry: signal(START_SIGNALS.hanging_entry),
+        vetoLeaderContinuation: veto(START_VETOES.leader_continuation),
+        vetoUniformLeading: veto(START_VETOES.uniform_leading),
+        vetoIndentSuppression: veto(START_VETOES.indent_suppression),
+        vetoSuperscriptMarker: veto(START_VETOES.superscript_marker),
+        vetoDropCap: veto(START_VETOES.drop_cap),
+        vetoSameIndentHanging: veto(START_VETOES.same_indent_hanging),
+        vetoHangingContinuation: veto(START_VETOES.hanging_continuation),
         roleI: prev ? prev.role : NaN,
         roleJ: line.role,
         isolatedI: prev ? bit(prev.isolatedHeading) : NaN,

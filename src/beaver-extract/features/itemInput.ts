@@ -33,7 +33,13 @@ export interface InputLine {
 export interface InputItem {
     /** The paragraph detector read the item as a heading. */
     header: boolean;
+    /** Block (column) of the item's first line. */
     column: number;
+    /**
+     * Block of the item's last line, set only when it differs from `column`
+     * (an item joined across stacked blocks, `DraftItem.endColumnIndex`).
+     */
+    endColumn?: number;
     /** Item text (without the detector's heading marker). */
     text: string;
     lines: InputLine[];
@@ -71,6 +77,7 @@ export function buildInputPage(page: DraftPage, styleProfile: StyleProfile): Inp
         return {
             header: item.kind === "section_header",
             column: item.columnIndex,
+            ...(item.endColumnIndex !== undefined ? { endColumn: item.endColumnIndex } : {}),
             text: item.text,
             lines,
         };

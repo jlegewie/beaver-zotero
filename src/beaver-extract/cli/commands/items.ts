@@ -2,7 +2,7 @@
  * `beaver-extract items` — task-generic training export for item models.
  *
  *   items export --task item-type --pdf-list docs.jsonl --out dir/ [--limit N] [--shard i/n]
- *       [--schema v]
+ *       [--schema v] [--preset learnedBoundaries]
  *     Full-document structured extraction per PDF; one row per document
  *     (`pipeline/itemsExport.ts`): per page the model's units with their
  *     feature rows, the structured items with their ids, boxes, columns, text,
@@ -16,6 +16,8 @@
  *     The item-boundary model's export: the same rows plus, per page, every
  *     flow line with its glyph geometry, the paragraph detector's decision and
  *     reason, its draft unit and its feature row (`ItemsExportFlowLine`).
+ *     With `--preset learnedBoundaries` the units are the boundary model's
+ *     and each flow line also carries its start probability.
  *
  *   items export --task regions-v2 ... [--page-list pages.jsonl]
  *     The region model's export (`pipeline/regionsExport.ts`, format
@@ -47,6 +49,7 @@ import { ITEMS_EXPORT_FORMAT, ITEMS_EXPORT_TASKS } from "../../pipeline/itemsExp
 import { REGIONS_EXPORT_TASK, regionsExportManifest } from "../../pipeline/regionsExport";
 import { CURRENT_PDF_EXTRACTION_PRESET } from "../../schema";
 import { pdfExtractionPreset } from "../../schema/presets";
+import { PRESET_OPTION_HELP, parsePresetOverrides } from "../options";
 
 interface ExportOptions {
     task: string;
@@ -56,6 +59,7 @@ interface ExportOptions {
     limit?: string;
     shard?: string;
     schema?: string;
+    preset?: string;
     bboxPrecision: string;
 }
 
@@ -131,6 +135,8 @@ async function runExport(deps: CliDeps, opts: ExportOptions): Promise<void> {
         throw new Error(`--task ${REGIONS_EXPORT_TASK} needs a schema with region detection (got ${schemaVersion})`);
     }
     const pageList = opts.pageList ? await readPageList(opts.pageList) : undefined;
+    const presetOverrides = opts.preset ? parsePresetOverrides(opts.preset) : undefined;
+    if (presetOverrides && regions) throw new Error(`--preset is not supported for --task ${REGIONS_EXPORT_TASK}`);
     await mkdir(join(opts.out, "docs"), { recursive: true });
     await claimManifest(
         join(opts.out, "manifest.json"),
@@ -142,6 +148,7 @@ async function runExport(deps: CliDeps, opts: ExportOptions): Promise<void> {
                 feature_version: task.featureVersion,
                 names: task.features,
                 schema_version: schemaVersion,
+                ...(presetOverrides ? { preset_overrides: presetOverrides } : {}),
                 bbox_precision: bboxPrecision,
                 commit,
                 dirty,
@@ -176,7 +183,7 @@ async function runExport(deps: CliDeps, opts: ExportOptions): Promise<void> {
             const pdfData = await deps.loadPdf(row.pdf_path);
             result = regions
                 ? await deps.api.regionsExport({ pdfData, bboxPrecision, schemaVersion, ...(pages ? { pages } : {}) })
-                : await deps.api.itemsExport({ pdfData, task: opts.task, bboxPrecision, schemaVersion });
+                : await deps.api.itemsExport({ pdfData, task: opts.task, bboxPrecision, schemaVersion, ...(presetOverrides ? { presetOverrides } : {}) });
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             const fatal = recoverRuntime(deps, e);
@@ -217,6 +224,7 @@ export function buildItemsCommand(deps: CliDeps): Command {
         .option("--limit <n>", "process at most n documents, then exit")
         .option("--shard <i/n>", "process only documents hashed to shard i of n")
         .option("--schema <version>", "PDF schema version (extraction preset)")
+        .option("--preset <switches>", PRESET_OPTION_HELP)
         .option("--bbox-precision <n>", "decimal places of boxes, as in the structured export", "2")
         .action((opts: ExportOptions) => runExport(deps, opts));
     return cmd;

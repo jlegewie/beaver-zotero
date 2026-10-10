@@ -12,7 +12,13 @@ import type {
     ExtractionSettings,
     GraphicsLayerMode,
 } from "@beaver/agent-core/extract/types";
-import { pdfExtractionPreset } from "../schema/presets";
+import {
+    CURRENT_PDF_EXTRACTION_PRESET,
+    OVERRIDABLE_PRESET_SWITCHES,
+    applyPresetOverrides,
+    pdfExtractionPreset,
+    type PresetOverrides,
+} from "../schema/presets";
 
 export function parsePagesList(value: string): number[] {
     const parts = value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -112,6 +118,30 @@ export function parseSchemaVersion(value: string): string {
     return value;
 }
 
+/** Help text of `--preset`. */
+export const PRESET_OPTION_HELP =
+    `development only: override preset switches, comma-separated name[=true|false] (${OVERRIDABLE_PRESET_SWITCHES.join(", ")})`;
+
+/**
+ * `--preset`: preset switches to override, comma-separated `name` or
+ * `name=true|false` (e.g. `learnedBoundaries`).
+ */
+export function parsePresetOverrides(value: string): PresetOverrides {
+    const overrides: Record<string, boolean> = {};
+    for (const part of value.split(",").map((s) => s.trim()).filter(Boolean)) {
+        const [name, raw = "true", ...rest] = part.split("=");
+        if (rest.length > 0 || (raw !== "true" && raw !== "false")) {
+            throw new Error(`--preset: "${part}" is not name or name=true|false`);
+        }
+        overrides[name] = raw === "true";
+    }
+    try {
+        applyPresetOverrides(CURRENT_PDF_EXTRACTION_PRESET, overrides);
+    } catch (e) {
+        throw new Error(`--preset: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return overrides;
+}
 
 export function parseGraphicsLayerMode(value: string): GraphicsLayerMode {
     if (value === "off" || value === "auto" || value === "on") return value;

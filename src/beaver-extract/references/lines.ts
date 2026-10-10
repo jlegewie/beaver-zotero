@@ -180,7 +180,7 @@ export function hangingLevels(
 /**
  * Line feature rows of the wanted items of a page, keyed by item index. The
  * line before an item's first line is the previous item's last line when
- * that item is in the same column.
+ * that item ends in the column the item starts in.
  */
 export function pageLineFeatures(
     page: InputPage,
@@ -206,7 +206,7 @@ function lineFeatures(page: InputPage, itemIndex: number, numberBefore: number |
     const em = page.bodySize > 0 ? page.bodySize : 10;
     const prevItem = itemIndex > 0 ? page.items[itemIndex - 1] : null;
     const prevItemLine =
-        prevItem && prevItem.column === item.column && prevItem.lines.length > 0
+        prevItem && (prevItem.endColumn ?? prevItem.column) === item.column && prevItem.lines.length > 0
             ? prevItem.lines[prevItem.lines.length - 1]
             : null;
     const minL = Math.min(...lines.map((l) => l.l));

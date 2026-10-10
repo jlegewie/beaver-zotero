@@ -15,7 +15,8 @@
  * A line-level task (`--task boundaries`) also lists every flow line of a
  * page (`lines`): the lines the paragraph detector segments, blocks in reading
  * order and lines top to bottom, each with the detector's decision and the
- * task's feature row. The rows are computed where the detector builds the
+ * task's feature row; with `learnedBoundaries`, the boundary model's
+ * decision and probability. The rows are computed where the detector builds the
  * task's input (`BoundaryObserver`), before segmentation; the units' lines in
  * order are the same flow.
  */
@@ -114,8 +115,13 @@ export interface ItemsExportFlowLine extends ItemsExportLine {
     coreBottom: number | null;
     /** The paragraph detector's decision: the line starts a draft unit. */
     start: boolean;
-    /** The rule that decided it (`START_RULES`). */
+    /** The rule that decided it (`START_RULES`), or `model` where the boundary model did. */
     reason: string;
+    /**
+     * The boundary model's start probability, where it decided
+     * (`learnedBoundaries`; not for a page's first line).
+     */
+    probability?: number;
     /** Break signals and vetoes of the decision (`START_SIGNALS`, `START_VETOES` bits). */
     signals: number;
     vetoes: number;
@@ -372,9 +378,10 @@ export class ItemsExportCollector {
                     coreTop: position(line.coreTop),
                     coreBottom: position(line.coreBottom),
                     start: line.start,
-                    reason: line.rule,
+                    reason: line.rule ?? "model",
                     signals: line.signals,
                     vetoes: line.vetoes,
+                    ...(line.probability !== undefined ? { probability: line.probability } : {}),
                     unit: units.byLine.get(source) ?? -1,
                     features: captured.rows[b][j].map((v) => (Number.isFinite(v) ? v : null)),
                 });

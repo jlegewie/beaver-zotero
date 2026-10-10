@@ -208,6 +208,40 @@ describe("items export --task boundaries", () => {
     }, 60_000);
 });
 
+describe("items export --task boundaries with learned boundaries", () => {
+    it("lists the model's decisions and probabilities, with the same features but no heuristic trace", async () => {
+        const pdfData = new Uint8Array(readFileSync(PDF));
+        const off = (await itemsExport({ pdfData: pdfData.slice(), task: "boundaries", bboxPrecision: 2 })) as ItemsExportRow;
+        const on = (await itemsExport({
+            pdfData: pdfData.slice(),
+            task: "boundaries",
+            bboxPrecision: 2,
+            presetOverrides: { learnedBoundaries: true },
+        })) as ItemsExportRow;
+        const heuristic = new Set<number>(
+            FEATURE_GROUPS.heuristic.filter((name) => !/^(role|isolated)/.test(name)).map((name) => col(name)),
+        );
+        for (const [k, p] of on.pages.entries()) {
+            const lines = p.lines!;
+            const before = off.pages[k].lines!;
+            expect(lines.map((l) => [l.bbox, l.text, l.block])).toEqual(before.map((l) => [l.bbox, l.text, l.block]));
+            const fromUnits = p.units.flatMap((unit) => unit.lines.map((l) => [l.bbox, l.text, unit.unit]));
+            expect(lines.map((l) => [l.bbox, l.text, l.unit])).toEqual(fromUnits);
+            lines.forEach((l, n) => {
+                expect(l.reason).toBe("model");
+                expect(l.signals).toBe(0);
+                expect(l.start).toBe(n === 0 || lines[n - 1].unit !== l.unit);
+                if (n === 0) expect(l.probability).toBeUndefined();
+                else expect(l.probability).toBeGreaterThanOrEqual(0);
+                l.features.forEach((v, j) => {
+                    if (heuristic.has(j)) expect(v, FEATURES[j]).toBeNull();
+                    else expect(v, FEATURES[j]).toBe(before[n].features[j]);
+                });
+            });
+        }
+    }, 60_000);
+});
+
 describe("line geometry", () => {
     const box = (t: number, b: number) => ({ l: 72, t, r: 300, b, origin: "top-left" as const });
     function span(text: string, size: number, metrics: RawGlyphMetrics[]): DetectedSpan {
