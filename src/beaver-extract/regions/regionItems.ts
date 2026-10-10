@@ -2185,8 +2185,8 @@ export interface ReadingFrame {
  * every item (`p<page>:i<index>`). A region goes before the first item below
  * its centre that overlaps it horizontally, else after the last such item above
  * it, else at the end. A table or figure never goes between a sentence and its
- * continuation in the next item; a display equation may, as it is part of the
- * sentence around it. Regions sharing a position keep reading order: one placed
+ * continuation in the next body item, nor among the footnotes between them; a
+ * display equation may, as it is part of the sentence around it. Regions sharing a position keep reading order: one placed
  * after an item comes before one placed before the next item, then rows top to
  * bottom, left to right within a row. `sentences` is rebuilt from the items
  * (they share sentence objects); `renamed` maps old item ids to new ones.
@@ -2207,6 +2207,14 @@ export function placeRegionItems(
     const overlapsX = (a: BoundingBox, b: BoundingBox) => Math.min(a.r, b.r) > Math.max(a.l, b.l);
     const continues = (item: DocItem) =>
         "sentences" in item && !!item.sentences?.length && !!item.sentences[item.sentences.length - 1].joinWithNext;
+    // A sentence continues past the footnotes between it and its next body
+    // item (`SentenceItem.joinWithNext`), so a position after such a footnote
+    // is inside the continuation too.
+    const insideContinuation = (position: number) => {
+        let k = position - 1;
+        while (k > 0 && items[k].kind === "footnote") k--;
+        return k >= 0 && continues(items[k]);
+    };
 
     // Position = number of text items before the region.
     const itemBoxes = items.map((item) => upright(item.bbox));
@@ -2223,7 +2231,7 @@ export function placeRegionItems(
             position = last >= 0 ? last + 1 : items.length;
         }
         if (region.kind !== "formula") {
-            while (position > 0 && position < items.length && continues(items[position - 1])) position++;
+            while (position > 0 && position < items.length && insideContinuation(position)) position++;
         }
         return { region, box, position, after, order };
     });

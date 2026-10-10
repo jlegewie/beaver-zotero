@@ -16,6 +16,7 @@ import { simpleRegexSentenceSplit } from "../../../src/beaver-extract/SentenceMa
 import {
     bboxFromXYWH,
     type BoundingBox,
+    type DocItem,
     type SectionHeaderItem,
     type SentenceItem,
     type TextItem,
@@ -538,5 +539,41 @@ describe("annotateColumnContinuations", () => {
                 new Set(),
             ),
         ).not.toThrow();
+    });
+});
+
+describe("annotateColumnContinuations past footnotes (PDF schema 5)", () => {
+    function footnote(text: string, idx: number): DocItem {
+        const bbox = bboxFromXYWH(50, 700, 250, 12, "top-left");
+        return {
+            id: `p0:i${idx}`,
+            pageIndex: 0,
+            index: idx,
+            bbox,
+            columnIndex: 0,
+            text,
+            lines: [{ text, bbox }],
+            kind: "footnote",
+            sentences: [makeSentence(text, { bboxes: [bbox] })],
+        };
+    }
+
+    function page() {
+        const left = makeParagraph(0, [makeSentence("we examine changes in violent and property")], { idx: 0 });
+        const note = footnote("1 Crime data come from the city.", 1);
+        const right = makeParagraph(1, [makeSentence("crime before, during, and after.")], { idx: 2 });
+        return { left, note, right, items: [left, note, right] };
+    }
+
+    it("joins a body sentence to its continuation in the next column after the column's notes", () => {
+        const { left, items } = page();
+        annotateColumnContinuations(items, simpleRegexSentenceSplit, new Set(), true);
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBe(true);
+    });
+
+    it("stops at the notes without the switch", () => {
+        const { left, items } = page();
+        annotateColumnContinuations(items, simpleRegexSentenceSplit, new Set());
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBeUndefined();
     });
 });

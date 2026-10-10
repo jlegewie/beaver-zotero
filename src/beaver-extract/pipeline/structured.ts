@@ -342,6 +342,7 @@ export function segmentPages(
             compoundVocabulary,
             margins: opts.margins,
             marginZone: opts.marginZone,
+            marginProseRows: opts.marginTextRows,
             graphicsLayerMode: opts.graphicsLayerMode,
             // Reuse the detailed walk done in `analyzeDocument` so we don't pay
             // a second walk per target page.

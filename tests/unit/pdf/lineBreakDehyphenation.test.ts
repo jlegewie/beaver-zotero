@@ -411,3 +411,173 @@ describe('extractPageSentences reference items', () => {
         expect(referenceText(page, vocab)).toBe(allSentenceText(page, vocab));
     });
 });
+
+// ---------------------------------------------------------------------------
+// PDF schema 5: line joins (`lineJoins`) and footnote markers (`noteMarkers`)
+// ---------------------------------------------------------------------------
+
+/**
+ * A line whose characters at `small` indices are superscripts: 7pt tall and
+ * raised (their bottom 5pt above the line's).
+ */
+function makeLineWithSuperscripts(text: string, yTop: number, small: ReadonlySet<number>): RawLineDetailed {
+    const line = makeLine(text, yTop);
+    line.chars = line.chars.map((ch, i) => {
+        if (!small.has(i)) return ch;
+        const x = ch.bbox.l;
+        const quad: QuadPoint = [x, yTop, x + 10, yTop, x, yTop + 7, x + 10, yTop + 7];
+        return { ...ch, quad, bbox: bboxFromXYWH(x, yTop, 10, 7, 'top-left') };
+    });
+    return line;
+}
+
+/** Indices of `part` within `text` (first occurrence). */
+function indicesOf(text: string, part: string): Set<number> {
+    const start = text.indexOf(part);
+    return new Set(Array.from({ length: part.length }, (_, k) => start + k));
+}
+
+function schema5SentenceText(page: RawPageDataDetailed, kind?: 'footnote'): string {
+    const settings = { lineJoins: true, noteMarkers: true };
+    const lines = detectLinesOnPage(page, detectColumns(page).columns);
+    const items = draftItemsFromParagraphs(
+        detectParagraphs(lines, null, settings, { paragraph: 0, header: 0 }, { trackItemLines: true }),
+    );
+    const result = extractPageSentences(page, {
+        paragraphSettings: settings,
+        precomputed: { items: kind ? items.map((item) => ({ ...item, kind })) : items },
+    });
+    return result.sentences.map((s) => s.text).join(' ');
+}
+
+describe('buildParagraphText with line joins (PDF schema 5)', () => {
+    it('joins at a soft hyphen and drops soft hyphens inside a line', () => {
+        const pt = buildParagraphText(
+            [makeLine('das Kosten\u00AD', 100), makeLine('verhalten der hypo\u00ADthese.', 115)],
+            undefined,
+            { lineJoins: true },
+        );
+        expect(pt.text).toBe('das Kostenverhalten der hypothese.');
+        expect(pt.source.length).toBe(pt.text.length);
+    });
+
+    it('keeps fragment text in step with the sentence when it drops soft hyphens', () => {
+        const page = makeSingleBlockPage([makeLine('platelet hypo\u00ADmag\u00ADnesemia.', 100)]);
+        const result = extractPageSentences(page, { paragraphSettings: { lineJoins: true } });
+        const sentence = result.sentences[0];
+        expect(sentence.text).toBe('platelet hypomagnesemia.');
+        expect(sentence.fragments?.map((f) => f.text)).toEqual(['platelet hypomagnesemia.']);
+    });
+
+    it('continues a URL and a number range without a space', () => {
+        const url = buildParagraphText(
+            [makeLine('code at https:', 100), makeLine('//github.com/x/y here.', 115)],
+            undefined,
+            { lineJoins: true },
+        );
+        expect(url.text).toBe('code at https://github.com/x/y here.');
+        const range = buildParagraphText(
+            [makeLine('Neurology 19:422–', 100), makeLine('33.', 115)],
+            undefined,
+            { lineJoins: true },
+        );
+        expect(range.text).toBe('Neurology 19:422–33.');
+    });
+
+    it('keeps the word space between raw lines side by side on one row', () => {
+        const row = buildParagraphText(
+            [makeLine('한국어', 100, 50), makeLine('문장입니다.', 100, 90)],
+            undefined,
+            { lineJoins: true },
+        );
+        expect(row.text).toBe('한국어 문장입니다.');
+        // Chinese has no word spaces, gap or not.
+        const chinese = buildParagraphText(
+            [makeLine('疾病负担日益增加', 100, 50), makeLine('［３］。', 100, 150)],
+            undefined,
+            { lineJoins: true },
+        );
+        expect(chinese.text).toBe('疾病负担日益增加［３］。');
+        // A hyphen inside a row is literal: suspended before a gap, joined when touching.
+        const suspended = buildParagraphText(
+            [makeLine('appearance-', 100, 50), makeLine('and sport-related', 100, 170)],
+            undefined,
+            { lineJoins: true },
+        );
+        expect(suspended.text).toBe('appearance- and sport-related');
+        const touching = buildParagraphText(
+            [makeLine('knock-out-', 100, 50), makeLine('receptor mice', 100, 150)],
+            undefined,
+            { lineJoins: true },
+        );
+        expect(touching.text).toBe('knock-out-receptor mice');
+        // A line break without a trailing space continues the word.
+        const wrapped = buildParagraphText(
+            [makeLine('한국어', 100), makeLine('문장입니다.', 115)],
+            undefined,
+            { lineJoins: true },
+        );
+        expect(wrapped.text).toBe('한국어문장입니다.');
+    });
+
+    it('keeps the hyphen of a compound with a common hyphen prefix', () => {
+        const pt = buildParagraphText(
+            [makeLine('their self-', 100), makeLine('identity grew.', 115)],
+            undefined,
+            { lineJoins: true },
+        );
+        expect(pt.text).toBe('their self-identity grew.');
+    });
+
+    it('leaves schema-4 joins unchanged without the switch', () => {
+        const pt = buildParagraphText([makeLine('their self-', 100), makeLine('identity grew.', 115)]);
+        expect(pt.text).toBe('their selfidentity grew.');
+    });
+});
+
+describe('extractPageSentences footnote markers (PDF schema 5)', () => {
+    it('drops a marker glued to a word, keeping what follows it', () => {
+        const text = 'design of their programmes52 (which were new).';
+        const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '52'))]);
+        expect(schema5SentenceText(page)).toBe('design of their programmes (which were new).');
+    });
+
+    it('drops a list of markers glued to a word', () => {
+        const text = 'two alleles105,106, and more.';
+        const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '105,106'))]);
+        expect(schema5SentenceText(page)).toBe('two alleles, and more.');
+    });
+
+    it('keeps the exponent of a mathematical function', () => {
+        const text = 'we take cos2 x as the gain.';
+        const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '2'))]);
+        expect(schema5SentenceText(page)).toBe('we take cos2 x as the gain.');
+    });
+
+    it('keeps exponents of units and variables', () => {
+        const text = 'the volume in mm3 was large.';
+        const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '3'))]);
+        expect(schema5SentenceText(page)).toBe('the volume in mm3 was large.');
+    });
+
+    it('keeps the power of a unit with a longer name', () => {
+        const text = 'The variance is 4 rad2 here.';
+        const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '2'))]);
+        expect(schema5SentenceText(page)).toBe('The variance is 4 rad2 here.');
+    });
+
+    it('keeps the power of a unit without a number before it', () => {
+        for (const text of ['The resistance in ohm2 was recorded.', 'The level in ppm2 was low.', 'It read 3 kohm2 here.']) {
+            const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '2'))]);
+            expect(schema5SentenceText(page)).toBe(text);
+        }
+    });
+
+    it("sets a footnote's glued lead marker off from its text", () => {
+        const text = '1AI is a collection of algorithms.';
+        const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, new Set([0]))]);
+        expect(schema5SentenceText(page, 'footnote')).toBe('1 AI is a collection of algorithms.');
+        // Body text keeps its opening characters as they are.
+        expect(schema5SentenceText(page)).toBe('1AI is a collection of algorithms.');
+    });
+});

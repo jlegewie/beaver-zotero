@@ -296,15 +296,19 @@ DEFAULT_MARGIN_ZONE = { left: 60, top: 80, right: 60, bottom: 80 }
 
 1. Join lines MuPDF split on one baseline back into text rows (word-split
    PDFs emit every word as a line), and collect the rows that sit in a
-   margin zone
+   margin zone. Words of a justified prose row, split too far apart to
+   join, and lone lowercase words ("the", "and") are not margin elements
+   (schema 5)
 2. Group by normalized text (case-insensitive, trimmed; digits ignored for
    joined rows)
 3. Remove if appears on ≥3 pages (repeatThreshold); a row that does not
    match as a whole still loses a leading/trailing run matching a running
-   head of the same zone
+   head of the same zone; words of justified prose rows stay (schema 5)
 4. Detect page numbers:
    - Regex patterns: /^\d+$/, /^page \d+$/, /^[ivxlcm]+$/
-   - Verify strictly increasing sequence
+   - Verify strictly increasing sequence that, in schema 5, advances with
+     the pages; only each page's own number is removed (a contents page
+     keeps its page references)
 5. Log what was removed
 ```
 
