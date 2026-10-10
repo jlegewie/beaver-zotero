@@ -449,7 +449,8 @@ function gluedNoteMarkerChars(line: RawLineDetailed, superscriptThreshold: numbe
     const chars = line.chars;
     const isSmall = (ch: RawChar) => bboxHeight(ch.bbox) > 0 && bboxHeight(ch.bbox) < superscriptThreshold;
     for (let i = 3; i < chars.length; i++) {
-        if (!/[0-9]/u.test(chars[i].c) || !isSmall(chars[i])) continue;
+        const code = chars[i].c.charCodeAt(0);
+        if (code < 48 || code > 57 || chars[i].c.length !== 1 || !isSmall(chars[i])) continue;
         const prev = chars[i - 1];
         if (!/\p{Ll}/u.test(prev.c) || isSmall(prev) || !isRaisedAgainst(chars[i], prev)) continue;
         let w = i - 1;

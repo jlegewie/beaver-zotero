@@ -47,7 +47,7 @@ export function addBlockToVocabulary(lines: readonly string[], vocabulary: LineJ
         const endsWithHyphen = LINE_END_HYPHEN_RE.test(line.trimEnd());
         for (let t = 0; t < tokens.length; t++) {
             const whole = !(afterHyphen && t === 0) && !(endsWithHyphen && t === tokens.length - 1);
-            for (const match of tokens[t].matchAll(COMPOUND_RE)) {
+            for (const match of tokens[t].includes("-") ? tokens[t].matchAll(COMPOUND_RE) : []) {
                 const parts = match[0].toLowerCase().split("-");
                 for (let i = 0; i + 1 < parts.length; i++) {
                     vocabulary.add(`${parts[i]}-${parts[i + 1]}`);
@@ -294,8 +294,9 @@ export function decideLineJoin(
     if (p.endsWith(SOFT_HYPHEN)) return "join";
     const prevToken = /\S+$/u.exec(p)?.[0] ?? "";
     const nextToken = /^\S+/u.exec(n)?.[0] ?? "";
-    const split = /(\p{L}+)[-\u2010]$/u.exec(p);
-    const rightWord = /^(\p{L}+)(\S*)/u.exec(n);
+    const endsWithHyphen = p.endsWith("-") || p.endsWith("\u2010");
+    const split = endsWithHyphen ? /(\p{L}+)[-\u2010]$/u.exec(p) : null;
+    const rightWord = split ? /^(\p{L}+)(\S*)/u.exec(n) : null;
     if (split && rightWord) {
         if (isUrlishToken(prevToken) || isUrlishToken(nextToken)) return "glue";
         const decision = decideSplitWord(

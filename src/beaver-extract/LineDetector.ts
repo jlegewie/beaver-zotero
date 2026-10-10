@@ -565,15 +565,20 @@ export function detectLinesInColumn(
 /**
  * Whether the smaller of two overlapping column boxes, `inner`, is a column
  * of its own: text of `outer` that `inner` lacks sits beside `inner`'s lines
- * on their rows, across a gutter (a real column under a box that spans the
- * page). When such text comes within half an em of one of `inner`'s lines,
- * `inner` is a piece cut out of `outer`'s rows (a superscript, the second
- * half of a wrapped title, the middle of rows MuPDF split into touching
- * pieces); when there is none, `inner` is a run of `outer`'s rows.
+ * across a gap (a real column under a box that spans the page, a heading
+ * beside the next column).
+ *
+ * When such text comes within half an em of one of `inner`'s lines, `inner`
+ * is a piece cut out of `outer`'s rows (a superscript, the second half of a
+ * wrapped title, the middle of rows MuPDF split into pieces). With text
+ * beside it on a single row, `inner` is a column only when that text is on
+ * one side and at least 1.5 em away: text on both sides makes it the middle
+ * of a row, whose justified word spaces can be wider than half an em. With
+ * no text beside it, `inner` is a run of `outer`'s rows.
  */
 function isColumnBeside(innerLines: RawLine[], outerLines: RawLine[]): boolean {
     const inner = new Set(innerLines);
-    let beside = false;
+    const rows: { top: number; height: number; left: boolean; right: boolean; minGapEm: number }[] = [];
     for (const b of outerLines) {
         if (inner.has(b)) continue;
         for (const a of innerLines) {
@@ -583,10 +588,39 @@ function isColumnBeside(innerLines: RawLine[], outerLines: RawLine[]): boolean {
             const em = Math.min(a.font?.size || 0.7 * bboxHeight(a.bbox), b.font?.size || 0.7 * bboxHeight(b.bbox));
             const gap = Math.max(b.bbox.l - a.bbox.r, a.bbox.l - b.bbox.r);
             if (gap <= 0.5 * em) return false;
-            beside = true;
+            let row = rows.find((r) => Math.abs(r.top - a.bbox.t) < 0.5 * r.height);
+            if (!row) {
+                row = { top: a.bbox.t, height: bboxHeight(a.bbox), left: false, right: false, minGapEm: Infinity };
+                rows.push(row);
+            }
+            if (b.bbox.r <= a.bbox.l) row.left = true;
+            else row.right = true;
+            row.minGapEm = Math.min(row.minGapEm, gap / em);
         }
     }
-    return beside;
+    if (rows.length >= 2) return true;
+    if (rows.length === 0) return false;
+    const [row] = rows;
+    return row.left !== row.right && row.minGapEm >= 1.5;
+}
+
+/**
+ * Whether two column boxes overlap or touch. When none do and a line must
+ * have at least half its area in a box to be read there, no line lies in two
+ * of them (a line meeting two separate boxes also covers the gap between
+ * them, so its overlap shares sum below 1), and lines need no owner.
+ */
+function columnsMeet(columns: Rect[]): boolean {
+    for (let i = 0; i < columns.length; i++) {
+        for (let j = i + 1; j < columns.length; j++) {
+            const a = columns[i];
+            const b = columns[j];
+            if (Math.min(a.x + a.w, b.x + b.w) >= Math.max(a.x, b.x) && Math.min(a.y + a.h, b.y + b.h) >= Math.max(a.y, b.y)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 /**
@@ -646,8 +680,9 @@ export function detectLinesOnPage(
 ): PageLineResult {
     const columnResults: ColumnLineResult[] = [];
     const allLines: PageLine[] = [];
-    const columnOf = options.exclusiveColumns
-        ? lineColumnOwners(page, columns, options.minColumnOverlap ?? DEFAULT_OPTIONS.minColumnOverlap)
+    const minOverlap = options.minColumnOverlap ?? DEFAULT_OPTIONS.minColumnOverlap;
+    const columnOf = options.exclusiveColumns && (minOverlap < 0.5 || columnsMeet(columns))
+        ? lineColumnOwners(page, columns, minOverlap)
         : undefined;
 
     for (let i = 0; i < columns.length; i++) {

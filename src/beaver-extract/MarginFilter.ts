@@ -616,6 +616,7 @@ const LOWERCASE_WORD_RE = /^[(“‘"']?\p{Ll}[\p{L}\p{M}'’-]*[.,;:!?)”’"'
  */
 function isLoneLowercaseWord(text: string): boolean {
     const word = text.trim();
+    if (word.length < 2 || word.includes(" ")) return false;
     return /^\p{Ll}[\p{Ll}\p{M}'’-]*\p{Ll}[.,;:]?$/u.test(word)
         && /[aeiouy]/u.test(word.normalize("NFD"));
 }
@@ -663,12 +664,15 @@ function paragraphBlockLines(page: RawPageData): Set<RawLine> {
  * lowercase words. Running heads are set with ordinary word spaces (one row
  * already) or are not lowercase prose, so they never qualify. Only short
  * lines without digits are returned, so a page number set beside the row is
- * still found.
+ * still found. Only blocks that reach a margin zone are read: other lines
+ * are never margin elements.
  */
-function proseRowLines(page: RawPageData): Set<RawLine> {
+function proseRowLines(page: RawPageData, marginZone: MarginSettings): Set<RawLine> {
     const protectedLines = new Set<RawLine>();
     for (const block of page.blocks) {
         if (block.type !== "text" || !block.lines || block.lines.length < 2) continue;
+        // Only lines in a margin zone are ever matched or removed.
+        if (!block.lines.some(line => getMarginPosition(line.bbox, page.width, page.height, marginZone))) continue;
         const lines = block.lines.filter(line =>
             (line.text || "").trim() && line.wmode !== 1 && (line.rotation ?? 0) === 0 && line.bbox.b > line.bbox.t,
         );
@@ -892,7 +896,7 @@ export class MarginFilter {
         // corner, contributes its lines one by one. Words of a justified
         // prose row are body text, not margin elements (see `proseRowLines`).
         for (const page of pages) {
-            const prose = textRows ? proseRowLines(page) : null;
+            const prose = textRows ? proseRowLines(page, marginZone) : null;
             const paragraphLines = textRows ? paragraphBlockLines(page) : null;
             const positionOf = (bbox: BoundingBox) =>
                 getMarginPosition(bbox, page.width, page.height, marginZone);
@@ -1402,7 +1406,7 @@ export class MarginFilter {
         // `proseRowLines`): a common word at the edge of a body row may
         // match a running head's text.
         const removedLines = new Set<RawLine>();
-        const prose = textRows && proseRows ? proseRowLines(page) : null;
+        const prose = textRows && proseRows ? proseRowLines(page, marginZone) : null;
         const inZone = (bbox: BoundingBox) =>
             getMarginPosition(bbox, page.width, page.height, marginZone) !== null;
         // A joined row is judged as a heading by its whole text, set in

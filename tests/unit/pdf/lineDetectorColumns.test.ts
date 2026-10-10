@@ -72,6 +72,32 @@ describe("detectLinesOnPage with overlapping columns", () => {
         ]);
     });
 
+    it("keeps the middle of a justified row in the row's column", () => {
+        // MuPDF split "30-dB" out of its row with justified word spaces wider
+        // than half an em; its own box sits inside the paragraph's.
+        const raw = page([
+            line("noise has a", 54, 230, 60),
+            line("30-dB", 125, 230, 30),
+            line("decade slope", 166, 230, 80),
+            line("next row of the paragraph", 54, 242, 192),
+        ]);
+        const columns = [rect(54, 230, 246, 251), rect(125, 230, 155, 239)];
+        expect(columnTexts(raw, columns, true)).toEqual([["noise has a 30-dB decade slope", "next row of the paragraph"], []]);
+    });
+
+    it("gives a one-row heading beside the next column its own box", () => {
+        const raw = page([
+            line("Introduction", 73, 270, 51),
+            line("right column text row one", 315, 270, 245),
+            line("right column text row two", 315, 282, 245),
+        ]);
+        const columns = [rect(73, 270, 124, 279), rect(73, 270, 560, 291)];
+        expect(columnTexts(raw, columns, true)).toEqual([
+            ["Introduction"],
+            ["right column text row one", "right column text row two"],
+        ]);
+    });
+
     it("gives a real column under a box spanning the page its own lines", () => {
         const raw = page([
             line("left column text row one", 54, 230, 248),
@@ -84,5 +110,13 @@ describe("detectLinesOnPage with overlapping columns", () => {
             ["left column text row one", "left column text row two"],
             ["right column text row one", "right column text row two"],
         ]);
+    });
+
+    it("reads a line inside two separate boxes once under a low overlap threshold", () => {
+        // Each box holds 40% of the line, enough for both at this threshold.
+        const raw = page([line("a line spanning two separate boxes", 0, 100, 100)]);
+        const columns = [rect(0, 100, 40, 109), rect(60, 100, 100, 109)];
+        const result = detectLinesOnPage(raw, columns, { exclusiveColumns: true, minColumnOverlap: 0.4 });
+        expect(result.allLines.map((l) => l.text)).toEqual(["a line spanning two separate boxes"]);
     });
 });
