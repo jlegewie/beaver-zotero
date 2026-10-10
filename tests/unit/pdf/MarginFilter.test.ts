@@ -2080,6 +2080,30 @@ describe("justified prose rows split word by word (PDF schema 5)", () => {
     });
 });
 
+describe("Roman page numbers in a paragraph block (PDF schema 5)", () => {
+    // MuPDF can put the page number in the block of the body rows above it;
+    // the number is collected even though it reads as a lone lowercase word.
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    it("removes the Roman page-number sequence", () => {
+        const numerals = ["iii", "iv", "v", "vi"];
+        const pages = numerals.map((numeral, pageIndex) => ({
+            ...makePageWithLines([
+                ...["the preface goes on with", "an account of sources", "and methods for"].map((text, k) =>
+                    makeStyledLine(`${text} ${["maps", "towns", "rivers", "roads"][pageIndex]}`, 100, PAGE_H - 76 + 12 * k, 300, "Times-Roman", 9),
+                ),
+                makeStyledLine(numeral, 300, PAGE_H - 40, 10, "Times-Roman", 9),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 3,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(numerals.map((_, pageIndex) => [...(removal.removalsByPage.get(pageIndex) ?? [])])).toEqual(
+            numerals.map((numeral) => [numeral]),
+        );
+    });
+});
+
 describe("page numbers that advance with the pages (PDF schema 5)", () => {
     // A contents page lists page references in its margin; they increase
     // from page to page too, but by far more than one per page.

@@ -907,9 +907,12 @@ export class MarginFilter {
                 lines: RawLine[],
                 rowEndNumber = false,
             ) => {
+                // A Roman page number ("iii", "iv") reads as a lone word but
+                // is still collected for the page-number sequence.
                 if (
                     paragraphLines && (position === "top" || position === "bottom") &&
-                    isLoneLowercaseWord(text) && lines.every(line => paragraphLines.has(line))
+                    isLoneLowercaseWord(text) && parseRoman(text.trim()) === null &&
+                    lines.every(line => paragraphLines.has(line))
                 ) return;
                 elements.get(position)!.push({
                     text,

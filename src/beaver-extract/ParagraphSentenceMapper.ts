@@ -406,10 +406,18 @@ const MATH_FUNCTIONS = new Set([
     "sup", "inf", "lim", "deg", "dim", "ker", "erf", "sgn", "var", "cov",
 ]);
 
-/** Units of three or more letters a raised digit after is a power of ("4 rad²", "2 mbar³"), not a note marker. */
+/** Unit names a decimal prefix goes before ("mrad", "µmol", "kohm"). */
+const PREFIXED_UNITS = ["rad", "bar", "mol", "ohm", "sec", "cal", "lux"];
+const UNIT_PREFIXES = ["", "p", "n", "µ", "μ", "m", "c", "k"];
+
+/**
+ * Units of three or more letters a raised digit after is a power of
+ * ("4 rad²", "2 mbar³", "ohm²"), not a note marker.
+ */
 const UNIT_WORDS = new Set([
-    "rad", "mrad", "µrad", "μrad", "bar", "mbar", "kbar", "mol", "mmol", "µmol", "μmol", "nmol", "pmol",
-    "kmol", "cal", "kcal", "lux", "sec", "msec", "arcsec", "arcmin", "mas",
+    ...PREFIXED_UNITS.flatMap((unit) => UNIT_PREFIXES.map((prefix) => prefix + unit)),
+    "ohms", "ppm", "ppb", "ppt", "rpm", "mph", "kph", "atm", "torr", "dyn", "erg", "gal", "lbs",
+    "arcsec", "arcmin", "mas",
 ]);
 
 /** Marker characters a footnote opens with: numbers, note symbols, lettered notes. */

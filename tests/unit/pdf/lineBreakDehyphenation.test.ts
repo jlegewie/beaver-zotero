@@ -566,6 +566,13 @@ describe('extractPageSentences footnote markers (PDF schema 5)', () => {
         expect(schema5SentenceText(page)).toBe('The variance is 4 rad2 here.');
     });
 
+    it('keeps the power of a unit without a number before it', () => {
+        for (const text of ['The resistance in ohm2 was recorded.', 'The level in ppm2 was low.', 'It read 3 kohm2 here.']) {
+            const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '2'))]);
+            expect(schema5SentenceText(page)).toBe(text);
+        }
+    });
+
     it("sets a footnote's glued lead marker off from its text", () => {
         const text = '1AI is a collection of algorithms.';
         const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, new Set([0]))]);
