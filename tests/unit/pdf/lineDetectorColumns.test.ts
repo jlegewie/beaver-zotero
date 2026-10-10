@@ -85,6 +85,22 @@ describe("detectLinesOnPage with overlapping columns", () => {
         expect(columnTexts(raw, columns, true)).toEqual([["noise has a 30-dB decade slope", "next row of the paragraph"], []]);
     });
 
+    it("keeps the middles of several justified rows in their rows' column", () => {
+        const raw = page([
+            line("noise has a", 54, 230, 60),
+            line("30-dB", 125, 230, 30),
+            line("decade slope", 166, 230, 80),
+            line("and the", 54, 242, 60),
+            line("40-dB", 125, 242, 30),
+            line("band is flat", 166, 242, 80),
+        ]);
+        const columns = [rect(54, 230, 246, 251), rect(125, 230, 155, 251)];
+        expect(columnTexts(raw, columns, true)).toEqual([
+            ["noise has a 30-dB decade slope", "and the 40-dB band is flat"],
+            [],
+        ]);
+    });
+
     it("gives a one-row heading beside the next column its own box", () => {
         const raw = page([
             line("Introduction", 73, 270, 51),

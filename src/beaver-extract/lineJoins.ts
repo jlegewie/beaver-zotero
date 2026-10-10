@@ -181,10 +181,16 @@ export function decideSplitWord(
     if (vocab?.words.has(l + r)) return "join";
     // One hyphen of several, next to a whole element ("state-of-" + "the-art",
     // "analog-" + "to-digital", "T-FAP-" + "mediated"). A break inside an
-    // element ("self-determina-" + "tion") is a hyphenation point.
+    // element ("self-determina-" + "tion") is a hyphenation point. In
+    // all-capitals text every part looks like an acronym, so capitals are
+    // no evidence of an element there ("SELF-DETERMINA-" + "TION"), and a
+    // connector is matched in lowercase ("STATE-OF-"). Elsewhere a
+    // capitalized syllable is no connector ("US-An-" + "leihen").
     const leftRest = leftToken.slice(0, leftToken.length - left.length - 1);
     const isElement = (part: string) =>
-        COMPOUND_CONNECTORS.has(part) || /^\p{Lu}+$/u.test(part) || (part.length >= 3 && vocab?.words.has(part.toLowerCase()) === true);
+        COMPOUND_CONNECTORS.has(capitalsText ? part.toLowerCase() : part) ||
+        (!capitalsText && /^\p{Lu}+$/u.test(part)) ||
+        (part.length >= 3 && vocab?.words.has(part.toLowerCase()) === true);
     if ((leftRest.includes("-") && isElement(left)) || (rightRest.startsWith("-") && isElement(right))) return "keep";
     // Before the capitals tests: an acronym can open a suspended compound
     // ("DNA- and RNA-based").

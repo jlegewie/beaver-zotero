@@ -570,11 +570,12 @@ export function detectLinesInColumn(
  *
  * When such text comes within half an em of one of `inner`'s lines, `inner`
  * is a piece cut out of `outer`'s rows (a superscript, the second half of a
- * wrapped title, the middle of rows MuPDF split into pieces). With text
- * beside it on a single row, `inner` is a column only when that text is on
- * one side and at least 1.5 em away: text on both sides makes it the middle
- * of a row, whose justified word spaces can be wider than half an em. With
- * no text beside it, `inner` is a run of `outer`'s rows.
+ * wrapped title, the middle of rows MuPDF split into pieces). Text on both
+ * sides of a line, nearer than 1.5 em, makes it the middle of a row too:
+ * justified word spaces can be wider than half an em. Otherwise `inner` is a
+ * column when text sits beside it on two or more rows, or on a single row
+ * from one side at least 1.5 em away. With no text beside it, `inner` is a
+ * run of `outer`'s rows.
  */
 function isColumnBeside(innerLines: RawLine[], outerLines: RawLine[]): boolean {
     const inner = new Set(innerLines);
@@ -598,8 +599,8 @@ function isColumnBeside(innerLines: RawLine[], outerLines: RawLine[]): boolean {
             row.minGapEm = Math.min(row.minGapEm, gap / em);
         }
     }
+    if (rows.length === 0 || rows.some((r) => r.left && r.right && r.minGapEm < 1.5)) return false;
     if (rows.length >= 2) return true;
-    if (rows.length === 0) return false;
     const [row] = rows;
     return row.left !== row.right && row.minGapEm >= 1.5;
 }

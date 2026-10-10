@@ -174,6 +174,8 @@ describe("decideLineJoin", () => {
 
     it("reads capitals as no evidence in all-capitals text", () => {
         expect(decideLineJoin("INTER-", "NATIONAL LAW")).toBe("join");
+        expect(decideLineJoin("THE SELF-DETERMINA-", "TION PROCESS")).toBe("join");
+        expect(decideLineJoin("THE STATE-OF-", "THE-ART METHOD")).toBe("glue");
         expect(decideLineJoin("funded by an MRC-", "AMED award")).toBe("glue");
     });
 
@@ -195,6 +197,9 @@ describe("joinLineTexts", () => {
         expect(joinLineTexts(["non-", "sense"])).toBe("nonsense");
         expect(joinLineTexts(["the four-", "th wave"])).toBe("the fourth wave");
         expect(joinLineTexts(["INTER-", "NATIONAL LAW"])).toBe("INTERNATIONAL LAW");
+        // A capitalized syllable of a mixed-case compound is no connector.
+        expect(joinLineTexts(["die US-An-", "leihen steigen"])).toBe("die US-Anleihen steigen");
+        expect(joinLineTexts(["der EU-Be-", "richt"])).toBe("der EU-Bericht");
         expect(joinLineTexts(["Visit https://example.org/ ", "for more information."]))
             .toBe("Visit https://example.org/ for more information.");
     });
