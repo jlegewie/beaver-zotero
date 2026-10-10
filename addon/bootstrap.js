@@ -96,9 +96,12 @@ async function runStartup({ id, version, resourceURI, rootURI }) {
   };
   ctx._globalThis = ctx;
 
-  Services.scriptloader.loadSubScript(
-    `${rootURI}/content/scripts/__addonRef__.js`,
-    ctx,
+  // Load through the chrome URL registered above: Firefox 153 refuses
+  // loadSubScript of the XPI's own jar:/file: URIs. `ignoreCache` because the
+  // script cache is keyed by URL, which is the same across updates and reloads.
+  Services.scriptloader.loadSubScriptWithOptions(
+    "chrome://__addonRef__/content/scripts/__addonRef__.js",
+    { target: ctx, ignoreCache: true },
   );
   try {
     await Zotero.__addonInstance__.hooks.onStartup();

@@ -17,6 +17,31 @@ const restrictedGlobals = [
     "Zotero_Tabs",
 ];
 
+/**
+ * Firefox 153 (Zotero 11) regressions that must keep working on Zotero 7-10 too.
+ * Flat config replaces rule options instead of merging them, so every block
+ * that sets its own `no-restricted-syntax` spreads these in as well.
+ */
+const firefox153SyntaxBans = [
+    {
+        // Before Firefox 153, ="false" meant off. Firefox 153 treats these as
+        // presence-based, so ="false" turns them on.
+        selector:
+            "CallExpression[callee.property.name='setAttribute'][arguments.0.value=/^(hidden|collapsed|selected|disabled|checked)$/][arguments.1.value='false']",
+        message: "Boolean XUL attributes are presence-based on Firefox 153: use removeAttribute() or toggleAttribute().",
+    },
+    {
+        selector: "CallExpression[callee.property.name='setAttribute'][arguments.0.value=/^on[a-z]+$/i]",
+        message: "Inline event handlers are blocked by the chrome CSP on Firefox 153: use addEventListener().",
+    },
+];
+const firefox153PropertyBans = [
+    {
+        property: "ownerGlobal",
+        message: "Firefox 153 renamed ownerGlobal (it reads as undefined): use ownerDocument.defaultView.",
+    },
+];
+
 const l1CoreGlobals = [
     ...restrictedGlobals,
     {
@@ -248,6 +273,8 @@ export default tseslint.config(
         },
         rules: {
             "no-restricted-globals": ["error", ...restrictedGlobals],
+            "no-restricted-syntax": ["error", ...firefox153SyntaxBans],
+            "no-restricted-properties": ["error", ...firefox153PropertyBans],
 
             "@typescript-eslint/ban-ts-comment": [
                 "warn",
@@ -612,7 +639,7 @@ export default tseslint.config(
                 "error",
                 { paths: l1CorePackageBans, patterns: l1CoreImportBans },
             ],
-            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
+            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan, ...firefox153SyntaxBans],
         },
     },
     // The export pipeline (source building, parsing, citation data, writers)
@@ -637,7 +664,7 @@ export default tseslint.config(
                     ],
                 },
             ],
-            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
+            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan, ...firefox153SyntaxBans],
         },
     },
     // The shared React layer (theme, icons, primitives, render components) is
@@ -653,7 +680,7 @@ export default tseslint.config(
         rules: {
             "no-restricted-globals": ["error", ...l2UiGlobals],
             "no-restricted-imports": ["error", { patterns: l2UiImportBans }],
-            "no-restricted-syntax": ["error", ...l2UiAmbientTypeBan],
+            "no-restricted-syntax": ["error", ...l2UiAmbientTypeBan, ...firefox153SyntaxBans],
         },
     },
 );

@@ -14,6 +14,24 @@
 #   scripts/worktree/worktree-zotero.sh watch [path]     # optional: npm start hot-reload watcher
 #   scripts/worktree/worktree-zotero.sh fix-db [path]    # quit that instance, checkpoint DBs, offer restart
 #   scripts/worktree/worktree-zotero.sh stop [path]      # quit Zotero (+ watcher if any) for this worktree
+#   scripts/worktree/worktree-zotero.sh hardening on|subscript|csp|off|status [path]
+#                                                        # Zotero 11 hardening prefs (Zotero must be stopped)
+#
+# Zotero binary:
+#   Launches use ZOTERO_PLUGIN_ZOTERO_BIN_PATH from the worktree's .env (written
+#   from setup-worktree.sh's ZOTERO_BIN), else /Applications/Zotero.app. To run a
+#   worktree on a Zotero 11 dev build, set it to e.g.
+#   "/Applications/Zotero 11 Dev.app/Contents/MacOS/zotero" -- only ever with a
+#   cloned data dir, since Zotero 11 upgrades the database schema.
+#   `status` prints the binary's version and, when Zotero is up, the running
+#   Zotero version and Gecko major (`platformMajorVersion`).
+#
+# Zotero 11 hardening:
+#   `hardening on` writes security.allow_unsafe_subscript_loads=false and
+#   security.chrome_baseline_csp.enabled=true to the profile's user.js, undoing
+#   Zotero 11's temporary overrides; `subscript` / `csp` write one of them, and
+#   `off` removes them (from prefs.js too). Both prefs are inert on Zotero 7-10.
+#   See lib/zotero11-hardening.sh, including which Zotero builds survive `csp`.
 #
 # Updating the plugin after edits:
 #   Default:  scripts/worktree/worktree-zotero.sh reload
@@ -41,6 +59,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/zotero-clone.sh
 source "$SCRIPT_DIR/lib/zotero-clone.sh"
+# shellcheck source=lib/zotero11-hardening.sh
+source "$SCRIPT_DIR/lib/zotero11-hardening.sh"
 
 CMD="${1:-status}"
 ARG_PATH="${2:-}"
@@ -350,6 +370,42 @@ PY
   printf '%s\n' "$bin"
 }
 
+# Version of the app bundle containing a Zotero binary (no process launch).
+bundle_version() {
+  local plist
+  plist="$(dirname "$(dirname "$1")")/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist" 2>/dev/null || echo "version unknown"
+}
+
+# Zotero version and Gecko major of the instance serving on <port>. The Beaver
+# ping reports both plus the hardening prefs; without Beaver, Zotero's own
+# X-Zotero-Version header still names the version.
+running_platform() {
+  local port="$1" health="$2" out
+  if [[ "$health" == "beaver-ok" ]]; then
+    out="$(curl -fsS -m 3 -X POST "http://127.0.0.1:$port/beaver/test/ping" \
+             -H 'Content-Type: application/json' -d '{}' 2>/dev/null | python3 -c '
+import json, sys
+p = json.load(sys.stdin).get("platform")
+if p:
+    prefs = p.get("prefs", {})
+    print("Zotero %s, platformMajorVersion %s, allow_unsafe_subscript_loads=%s, chrome_baseline_csp=%s" % (
+        p.get("zoteroVersion"), p.get("platformMajorVersion"),
+        prefs.get("allowUnsafeSubscriptLoads"), prefs.get("chromeBaselineCsp")))
+' 2>/dev/null || true)"
+    if [[ -n "$out" ]]; then echo "$out"; return; fi
+  fi
+  if [[ "$health" == "beaver-ok" || "$health" == "zotero-up" ]]; then
+    out="$(curl -sS -m 3 -o /dev/null -D - "http://127.0.0.1:$port/connector/ping" 2>/dev/null \
+             | awk -F': ' 'tolower($1) == "x-zotero-version" { sub(/\r$/, "", $2); print $2 }')"
+    if [[ -n "$out" ]]; then
+      echo "Zotero $out (platform needs Beaver's /beaver/test/ping)"
+      return
+    fi
+  fi
+  echo "unknown (HTTP server not answering)"
+}
+
 # Normalize dirty DBs before a cold start (unclean WAL stalls the next launch).
 maybe_normalize_before_start() {
   local hint
@@ -588,13 +644,19 @@ EOF
   if [[ -n "$pids" ]]; then state=running; else state=stopped; fi
   hint="$(db_stall_hint "$WT_DATADIR" "$state")"
 
+  local bin
+  bin="$(resolve_zotero_bin "$wt" 2>/dev/null || true)"
+
   echo "Branch   : $WT_BRANCH"
   echo "Profile  : $WT_PROFILE"
   echo "Data dir : $WT_DATADIR"
+  echo "Binary   : ${bin:-"(not executable)"}$( [[ -n "$bin" ]] && echo " ($(bundle_version "$bin"))" )"
+  echo "Hardening: $(z11_hardening_state "$WT_PROFILE") (Zotero 11 prefs in user.js)"
   echo "HTTP     : ${WT_HTTP:-?}   RDP: ${WT_RDP:-?}"
   echo "DB hint  : $hint"
   if [[ -n "$pids" ]]; then
     echo "Zotero   : RUNNING (pid $pids)  health=$health"
+    echo "Platform : $(running_platform "$WT_HTTP" "$health")"
   else
     echo "Zotero   : not running  health=$health"
   fi
@@ -874,6 +936,26 @@ Restore from a backup in the data dir (zotero.sqlite.bak) or re-clone:
   fi
 }
 
+cmd_hardening() {
+  local mode="${ARG_PATH:-status}" wt
+  case "$mode" in
+    on|subscript|csp|off|status) ;;
+    *) die "usage: $0 hardening on|subscript|csp|off|status [path]" ;;
+  esac
+  wt="$(resolve_wt "${ARG_PATH2:-}")"
+  ensure_identity "$wt" || die "this worktree has no Zotero profile configured"
+  if [[ "$mode" == "status" ]]; then
+    echo "Zotero 11 hardening: $(z11_hardening_state "$WT_PROFILE")  ($WT_PROFILE/user.js)"
+    return 0
+  fi
+  if [[ -n "$(zotero_pids_for_profile "$WT_PROFILE")" ]]; then
+    die "Zotero is running on this profile; stop it first ($0 stop $wt) -- it rewrites prefs.js on exit"
+  fi
+  z11_set_hardening "$WT_PROFILE" "$mode"
+  echo "Zotero 11 hardening: $(z11_hardening_state "$WT_PROFILE")  ($WT_PROFILE/user.js)"
+  echo "Takes effect on the next start:  $0 open $wt"
+}
+
 cmd_status() {
   local wt
   wt="$(resolve_wt "$ARG_PATH")"
@@ -881,7 +963,7 @@ cmd_status() {
 }
 
 usage() {
-  sed -n '3,35p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,55p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 case "$CMD" in
@@ -893,13 +975,14 @@ case "$CMD" in
   watch)          cmd_watch ;;
   stop)           cmd_stop ;;
   fix-db|fixdb)  cmd_fix_db ;;
+  hardening)      ARG_PATH2="${3:-}" cmd_hardening ;;
   *)
     # Allow: scripts/worktree/worktree-zotero.sh /path/to/wt
     if [[ -d "$CMD" ]]; then
       ARG_PATH="$CMD"
       cmd_status
     else
-      die "unknown command: $CMD (try: list | status | open | reload | watch | stop | fix-db)"
+      die "unknown command: $CMD (try: list | status | open | reload | watch | stop | fix-db | hardening)"
     fi
     ;;
 esac

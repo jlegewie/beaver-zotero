@@ -820,6 +820,11 @@ function clearIframeAction(iframeWindow: any): void {
     catch { /* ignore */ }
 }
 
+function setIframeAction(iframeWindow: any, action: string): void {
+    try { if (iframeWindow?.wrappedJSObject) iframeWindow.wrappedJSObject[ACTION_PROP] = action; }
+    catch { /* ignore */ }
+}
+
 // =============================================================================
 // Style & Banner
 // =============================================================================
@@ -847,11 +852,15 @@ function injectPreviewBanner(
     isRewrite: boolean,
 ): void {
     try {
-        const doc = iframeWindow?.wrappedJSObject?.document ?? iframeWindow?.document;
+        // Built through the Xray view, not `wrappedJSObject`, so the click
+        // listeners below stay chrome functions the page cannot see or call.
+        const doc = iframeWindow?.document;
         if (!doc) return;
         const container = doc.getElementById('editor-container');
         if (!container) return;
         doc.getElementById(PREVIEW_BANNER_ID)?.remove();
+        const onClick = (button: any, action: string) =>
+            button.addEventListener('click', () => setIframeAction(iframeWindow, action));
 
         const banner = doc.createElement('div');
         banner.id = PREVIEW_BANNER_ID;
@@ -861,7 +870,7 @@ function injectPreviewBanner(
         closeBtn.className = 'btn-close';
         closeBtn.textContent = '\u00D7';
         closeBtn.title = 'Close preview';
-        closeBtn.setAttribute('onclick', `window.${ACTION_PROP} = 'close'`);
+        onClick(closeBtn, 'close');
 
         const title = doc.createElement('span');
         title.className = 'banner-title';
@@ -877,12 +886,12 @@ function injectPreviewBanner(
         const rejectBtn = doc.createElement('button');
         rejectBtn.className = 'btn-reject';
         rejectBtn.textContent = `Reject${suffix}`;
-        rejectBtn.setAttribute('onclick', `window.${ACTION_PROP} = 'rejectAll'`);
+        onClick(rejectBtn, 'rejectAll');
 
         const approveBtn = doc.createElement('button');
         approveBtn.className = 'btn-approve';
         approveBtn.textContent = `Apply${suffix}`;
-        approveBtn.setAttribute('onclick', `window.${ACTION_PROP} = 'approveAll'`);
+        onClick(approveBtn, 'approveAll');
 
         banner.appendChild(title);
         banner.appendChild(rejectBtn);
