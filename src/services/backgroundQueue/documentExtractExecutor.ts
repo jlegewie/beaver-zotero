@@ -18,6 +18,7 @@ import type {
     BackgroundJobRecord,
 } from '../database';
 import { observeAttachmentSource } from '../documentExtraction/sourceObservation';
+import { clearStaleEmbeddingText, storeEmbeddingText } from '../documentExtraction/embeddingTextStore';
 import { getFileSignature, getRemoteFileHash } from '../documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
@@ -27,6 +28,7 @@ import { enqueueOcrJob } from '../ocr/enqueueOcr';
 import { shouldStopCachePreparation } from '../backgroundProcessing/cachePreparationBudget';
 import {
     BACKGROUND_UPSERT_PRIORITY,
+    LOCAL_EXTRACT_PRIORITY_CEILING,
 } from '../backgroundProcessing/constants';
 import { isLibraryInScope, isLibraryScopeKnown } from '../libraryScope';
 import {
@@ -133,6 +135,13 @@ export class DocumentExtractExecutor implements JobExecutor {
             });
             return { kind: 'complete', reason: source.code };
         }
+        // The local band may run with background processing off, where files
+        // are never downloaded. The file can have left this computer since the
+        // job was queued; background processing reconciles it later if enabled.
+        if (source.source.isRemoteOnly && record.priority >= 100
+            && record.priority < LOCAL_EXTRACT_PRIORITY_CEILING && !backgroundProcessingEnabled()) {
+            return { kind: 'complete', reason: 'remote_only' };
+        }
         const beforeSignature = await getFileSignature(source.source.filePath);
 
         let extracted: ExtractSuccess | JobOutcome;
@@ -236,6 +245,30 @@ export class DocumentExtractExecutor implements JobExecutor {
         });
         if (!applied) {
             return { kind: 'complete', reason: 'stale_completion_ignored' };
+        }
+
+        if (isLibraryInScope(item.libraryID)) {
+            // Every successful structured extraction refreshes the attachment's
+            // derived embedding text, whichever producer requested it. A file
+            // without text (a scan awaiting OCR) drops text of an earlier file.
+            try {
+                if (extracted.document) {
+                    await storeEmbeddingText({
+                        db: ctx.db,
+                        item,
+                        kind,
+                        document: extracted.document,
+                        fileSignature: afterSignature,
+                        fileHash,
+                        extractionSource: previous.ocrStatus === 'done' && previous.fileHash === fileHash
+                            ? 'ocr' : 'native',
+                    });
+                } else {
+                    await clearStaleEmbeddingText({ db: ctx.db, item, fileSignature: afterSignature, fileHash });
+                }
+            } catch (error) {
+                logger(`DocumentExtractExecutor: storing embedding text failed for ${item.libraryID}-${item.key}: ${error}`, 2);
+            }
         }
 
         if (extracted.ocrStatus === 'needed') {

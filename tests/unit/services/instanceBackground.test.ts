@@ -43,8 +43,9 @@ describe("InstanceBackground", () => {
     let owner: any;
     beforeEach(() => {
         vi.clearAllMocks();
-        for (const start of [mocks.fulltext, mocks.cleanup, mocks.embedding])
+        for (const start of [mocks.fulltext, mocks.cleanup])
             start.mockReturnValue(mocks.stop);
+        mocks.embedding.mockReturnValue({ stop: mocks.stop, scheduleEvents: vi.fn() });
         snapshot = {
             generation: 1,
             session: { user: { id: "account-a" } },

@@ -16,6 +16,7 @@ import { startBackgroundProcessingScopeCleanup } from "./backgroundProcessing/ba
 import {
     startEmbeddingIndex,
     initialEmbeddingState,
+    type EmbeddingIndexHandle,
     type EmbeddingIndexState,
     type PendingEmbeddingEvents,
 } from "./instanceEmbeddingIndex";
@@ -27,7 +28,7 @@ export class InstanceBackground {
     private cleanups: (() => void | Promise<void>)[] = [];
     private key = "";
     private notificationGeneration: number | undefined;
-    private stopEmbedding?: () => void;
+    private embedding?: EmbeddingIndexHandle;
     private embeddingLibraryIds?: number[];
     private pendingReindex = false;
     private settling = new Set<Promise<void>>();
@@ -315,16 +316,27 @@ export class InstanceBackground {
         this.notifications.set(key, now);
         return true;
     }
+    /**
+     * Recompute the embedding units affected by these items. Without an active
+     * index generation the ids wait for the next one.
+     */
+    markEmbeddingDirty(itemIds: number[]): void {
+        for (const id of itemIds) {
+            this.pendingEmbeddingEvents.deletedItemIds.delete(id);
+            this.pendingEmbeddingEvents.modifiedItemIds.add(id);
+        }
+        this.embedding?.scheduleEvents();
+    }
     reindex(): void {
         this.pendingReindex = true;
         if (this.embeddingLibraryIds)
             this.restartEmbedding(this.embeddingLibraryIds, true);
     }
     private restartEmbedding(ids: number[], force = false): void {
-        this.stopEmbedding?.();
+        this.embedding?.stop();
         this.embeddingLibraryIds = ids;
         this.publish({ ...initialEmbeddingState });
-        this.stopEmbedding = startEmbeddingIndex(
+        this.embedding = startEmbeddingIndex(
             ids,
             force,
             (update) => this.publish(update),
@@ -390,8 +402,8 @@ export class InstanceBackground {
         this.restartEmbedding(ids, this.pendingReindex);
     }
     private clearGeneration(): void {
-        this.stopEmbedding?.();
-        this.stopEmbedding = undefined;
+        this.embedding?.stop();
+        this.embedding = undefined;
         this.embeddingLibraryIds = undefined;
         for (const cleanup of this.cleanups.splice(0)) {
             const result = cleanup();
