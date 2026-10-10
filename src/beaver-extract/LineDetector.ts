@@ -18,7 +18,7 @@
  *   8. Merge overlapping lines (handles drop caps, subscripts, etc.)
  */
 
-import type { BoundingBox, RawPageData, RawBlock, RawLine, RawStyleRun } from "@beaver/agent-core/extract/types";
+import type { BoundingBox, RawGlyphMetrics, RawPageData, RawBlock, RawLine, RawStyleRun } from "@beaver/agent-core/extract/types";
 import { bboxHeight, bboxWidth, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
@@ -53,6 +53,8 @@ export interface DetectedSpan {
      * words (see `decideLineJoin`).
      */
     trailingSpace?: true;
+    /** Glyph metrics of the source line, when recorded (see `RawLine.glyphMetrics`) */
+    glyphMetrics?: RawGlyphMetrics[];
 }
 
 /**
@@ -117,6 +119,12 @@ export interface LineDetectionOptions {
      * twice. Enabled by the PDF schema preset.
      */
     exclusiveColumns?: boolean;
+    /**
+     * Writing direction of the page's upright text (the rotation its working
+     * frame was turned by; default 0). Glyph metrics are kept only for lines
+     * written in it: those of other lines lie on another axis.
+     */
+    textRotation?: 0 | 90 | 180 | 270;
 }
 
 const DEFAULT_OPTIONS: Required<LineDetectionOptions> = {
@@ -125,6 +133,7 @@ const DEFAULT_OPTIONS: Required<LineDetectionOptions> = {
     gapMultiplier: 5.0,
     minColumnOverlap: 0.5,
     exclusiveColumns: false,
+    textRotation: 0,
 };
 
 // ============================================================================
@@ -195,6 +204,7 @@ function extractSpansInColumn(
     page: RawPageData,
     column: Rect,
     minOverlap: number,
+    textRotation: number,
     owner?: { columnOf: Map<RawLine, number>; columnIndex: number },
 ): DetectedSpan[] {
     const spans: DetectedSpan[] = [];
@@ -222,6 +232,9 @@ function extractSpansInColumn(
                 fontStyle: line.font?.style,
                 styleRuns: line.styleRuns,
                 ...(/\s$/u.test(line.text) ? { trailingSpace: true as const } : {}),
+                // Metrics of a line in another direction (a rotated label on
+                // an upright page) are not positions in this frame.
+                glyphMetrics: (line.rotation ?? 0) === textRotation ? line.glyphMetrics : undefined,
             });
         }
     }
@@ -526,6 +539,7 @@ export function detectLinesInColumn(
         page,
         column,
         opts.minColumnOverlap,
+        opts.textRotation,
         columnOf ? { columnOf, columnIndex } : undefined,
     );
 

@@ -21,6 +21,8 @@ import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { joinLineTexts } from "./lineJoins";
+import { START_SIGNALS, START_VETOES, type StartTrace } from "./boundaries/rules";
+import { boundaryLine, type BoundaryBlock, type BoundaryPage, type LineDecision } from "./boundaries/input";
 
 // ============================================================================
 // Types
@@ -2742,8 +2744,14 @@ function startNewItem(
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
     bodyAllCaps: boolean = false,
-    hangingRole: HangingRole = null
+    hangingRole: HangingRole = null,
+    trace: StartTrace | null = null
 ): boolean {
+    if (trace) {
+        trace.rule = "forced";
+        trace.signals = 0;
+        trace.vetoes = 0;
+    }
     if (i === 0) return true;
     if (!prevLine) return true;
 
@@ -2753,6 +2761,7 @@ function startNewItem(
         currentLines.length > 0 &&
         isNextNumberedEntry(currentLines[0], line)
     ) {
+        if (trace) trace.rule = "numbered";
         return true;
     }
 
@@ -2796,6 +2805,7 @@ function startNewItem(
             !prevEndsSentence
         ) {
             gapBreak = false;
+            if (trace) trace.vetoes |= START_VETOES.leader_continuation;
         }
     }
 
@@ -2889,6 +2899,7 @@ function startNewItem(
             const uniformTol = Math.max(1.5, 0.3 * referenceLeading);
             if (spacingTop <= referenceLeading + uniformTol) {
                 gapBreak = false;
+                if (trace) trace.vetoes |= START_VETOES.uniform_leading;
             }
         }
     }
@@ -2918,6 +2929,7 @@ function startNewItem(
         isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
 
     if (isLocalHeader && !prevIsLocalHeader) {
+        if (trace) trace.rule = "heading_after_body";
         return true; // Header after non-header
     }
 
@@ -2925,6 +2937,7 @@ function startNewItem(
         // Different header style. A hanging continuation stays with the
         // heading-styled line it wraps (a bold list label, an italic title).
         if (!sameOpeningStyle(line, prevLine) && hangingRole !== "continuation") {
+            if (trace) trace.rule = "heading_style_change";
             return true;
         }
         // Same style, but a paragraph-sized gap apart: two stacked headings
@@ -2938,8 +2951,10 @@ function startNewItem(
             columnThresholds.isolatedHeading[i - 1] &&
             stackedHeadingGap(line, prevLine, columnThresholds, pageThresholds)
         ) {
+            if (trace) trace.rule = "heading_stacked";
             return true;
         }
+        if (trace) trace.rule = "heading_continues";
         return false; // Same header style continues
     }
 
@@ -2959,6 +2974,7 @@ function startNewItem(
         !sameTypeface(line, prevLine) &&
         opensWithHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps)
     ) {
+        if (trace) trace.rule = "heading_opening_style";
         return true;
     }
 
@@ -2971,6 +2987,7 @@ function startNewItem(
             line, prevLine, currentLines, columnThresholds, pageThresholds, bodyStyles, settings, bodyAllCaps
         )
     ) {
+        if (trace) trace.rule = "heading_ends_before_body";
         return true;
     }
 
@@ -3070,6 +3087,7 @@ function startNewItem(
                     const prevEndsSentence = /[.!?]["'”’)]?$/u.test(prevText);
                     if (!prevEndsSentence) {
                         indentBreak = false;
+                        if (trace) trace.vetoes |= START_VETOES.indent_suppression;
                     }
                 }
             }
@@ -3130,6 +3148,7 @@ function startNewItem(
                 heightExcess <= line.fontSize;
             if (prevReportsSmaller && prevHeightComparable) {
                 fontSizeBreak = false;
+                if (trace) trace.vetoes |= START_VETOES.superscript_marker;
             }
         }
     }
@@ -3142,6 +3161,7 @@ function startNewItem(
     const prevExtendsBelow =
         prevLine.bbox.b > line.bbox.b + bboxHeight(line.bbox);
     if (prevExtendsBelow) {
+        if (trace && (indentBreak || earlyEndBreak || fontSizeBreak)) trace.vetoes |= START_VETOES.drop_cap;
         indentBreak = false;
         earlyEndBreak = false;
         fontSizeBreak = false;
@@ -3179,6 +3199,7 @@ function startNewItem(
             sameStyle &&
             !prevEndsSentence
         ) {
+            if (trace && (gapBreak || earlyEndBreak || fontSizeBreak)) trace.vetoes |= START_VETOES.same_indent_hanging;
             gapBreak = false;
             earlyEndBreak = false;
             fontSizeBreak = false;
@@ -3206,6 +3227,7 @@ function startNewItem(
     // visual break.
     let hangingEntryBreak = false;
     if (hangingRole === "continuation") {
+        if (trace && (indentBreak || earlyEndBreak)) trace.vetoes |= START_VETOES.hanging_continuation;
         indentBreak = false;
         earlyEndBreak = false;
     } else if (hangingRole === "entry") {
@@ -3220,6 +3242,23 @@ function startNewItem(
         fontSizeBreak ||
         leaderAfterContinuationBreak ||
         hangingEntryBreak;
+    if (trace) {
+        const s = START_SIGNALS;
+        trace.signals =
+            (gapBreak ? s.gap : 0) |
+            (indentBreak ? s.indent : 0) |
+            (earlyEndBreak ? s.early_end : 0) |
+            (fontSizeBreak ? s.font_size : 0) |
+            (leaderAfterContinuationBreak ? s.leader_after_continuation : 0) |
+            (hangingEntryBreak ? s.hanging_entry : 0);
+        trace.rule = gapBreak ? "gap"
+            : indentBreak ? "indent"
+            : earlyEndBreak ? "early_end"
+            : fontSizeBreak ? "font_size"
+            : leaderAfterContinuationBreak ? "leader_after_continuation"
+            : hangingEntryBreak ? "hanging_entry"
+            : "none";
+    }
     return visualBreak;
 }
 
@@ -3402,7 +3441,8 @@ function processColumnLines(
     itemCounters: ItemCounters,
     initialPageContent: string,
     bodyAllCaps: boolean = false,
-    prevDocLine: PageLine | null = null
+    prevDocLine: PageLine | null = null,
+    decisions: LineDecision[] | null = null
 ): {
     pageContent: string;
     items: ContentItem[];
@@ -3428,6 +3468,7 @@ function processColumnLines(
         const line = lines[i];
         const prevLine = i > 0 ? lines[i - 1] : null;
         const nextLine = i + 1 < lines.length ? lines[i + 1] : null;
+        const trace: StartTrace | null = decisions ? { rule: "forced", signals: 0, vetoes: 0 } : null;
 
         const shouldStartNew =
             currentLines.length === 0 ||
@@ -3442,8 +3483,18 @@ function processColumnLines(
                 bodyStyles,
                 settings,
                 bodyAllCaps,
-                hangingRoles[i]
+                hangingRoles[i],
+                trace
             );
+        if (decisions && trace) {
+            decisions.push({
+                start: shouldStartNew,
+                trace,
+                role: hangingRoles[i],
+                headerStyle: isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps),
+                isolatedHeading: columnThresholds.isolatedHeading[i],
+            });
+        }
 
         if (shouldStartNew) {
             if (currentLines.length > 0) {
@@ -3538,6 +3589,20 @@ export interface DetectParagraphsOptions {
      * callers pay nothing.
      */
     trackItemLines?: boolean;
+    /**
+     * Receives the page's blocks as the item-boundary features read them
+     * (`boundaries/input.ts`), with the flow lines in the same order. Only
+     * the training export passes it.
+     */
+    boundaries?: BoundaryCapture;
+}
+
+/** Captures the item-boundary input of a page (`DetectParagraphsOptions.boundaries`). */
+export interface BoundaryCapture {
+    /** Region items of the page in the detector's frame, as [l, t, r, b]. */
+    regions: [number, number, number, number][];
+    /** Called once per page: the input, and its lines in flow order (blocks in reading order). */
+    page(input: BoundaryPage, flow: PageLine[]): void;
 }
 
 /**
@@ -3583,6 +3648,8 @@ export function detectParagraphs(
     // line into the next column so single-line first items can detect
     // wrap-continuations of icon-font bullet lists across the column boundary.
     let prevDocLine: PageLine | null = null;
+    const boundaryBlocks: BoundaryBlock[] | null = options.boundaries ? [] : null;
+    const flow: PageLine[] = [];
     for (const colResult of lineResult.columnResults) {
         if (colResult.lines.length === 0) continue;
 
@@ -3596,6 +3663,7 @@ export function detectParagraphs(
         );
 
         // Steps 3-6: Process lines into items
+        const decisions: LineDecision[] | null = boundaryBlocks ? [] : null;
         const result = processColumnLines(
             colResult.lines,
             colResult.columnIndex,
@@ -3607,8 +3675,28 @@ export function detectParagraphs(
             itemCounters,
             pageContent,
             bodyAllCaps,
-            prevDocLine
+            prevDocLine,
+            decisions
         );
+        if (boundaryBlocks && decisions) {
+            const t = columnThresholds;
+            boundaryBlocks.push({
+                index: colResult.columnIndex,
+                lines: colResult.lines.map((line, k) => boundaryLine(line, decisions[k])),
+                thresholds: {
+                    leftEdgeMode: t.leftEdgeMode,
+                    rightEdgeMode: t.rightEdgeMode,
+                    leftEdgeMad: t.leftEdgeMad,
+                    rightEdgeMad: t.rightEdgeMad,
+                    maxRightEdge: t.maxRightEdge,
+                    indentExcessThreshold: t.indentExcessThreshold,
+                    earlyEndExcessThreshold: t.earlyEndExcessThreshold,
+                    gapExcessThreshold: t.gapExcessThreshold,
+                    medianGap: t.medianGap,
+                },
+            });
+            flow.push(...colResult.lines);
+        }
 
         pageContent = result.pageContent;
         allItems.push(...result.items);
@@ -3624,6 +3712,25 @@ export function detectParagraphs(
     allItems.forEach((item, index) => {
         item.id = `p${lineResult.pageIndex}:i${index}`;
     });
+
+    if (options.boundaries && boundaryBlocks) {
+        const body = bodyStyles?.[0];
+        options.boundaries.page(
+            {
+                pageIndex: lineResult.pageIndex,
+                width: lineResult.width,
+                height: lineResult.height,
+                body: body
+                    ? { size: body.exactSize ?? body.size, font: body.font, bold: body.bold, italic: body.italic }
+                    : null,
+                medianHeight: pageThresholds.medianHeight,
+                gapExcessThreshold: pageThresholds.gapExcessThreshold,
+                regions: options.boundaries.regions,
+                blocks: boundaryBlocks,
+            },
+            flow,
+        );
+    }
 
     const baseResult: PageParagraphResult = {
         pageIndex: lineResult.pageIndex,

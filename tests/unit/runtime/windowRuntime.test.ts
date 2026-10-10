@@ -14,11 +14,16 @@ function makeWindow() {
     } as unknown as Window;
 }
 
-/** A frame window the way a reader tab's chrome window appears to the plugin. */
+/**
+ * A frame window the way a reader tab's chrome window appears to the plugin.
+ * The embedder element has no `ownerGlobal`, as on Firefox 153.
+ */
 function makeFrameWindow(embedder: Window | undefined) {
     return {
         closed: false,
-        browsingContext: embedder ? { embedderElement: { ownerGlobal: embedder } } : undefined,
+        browsingContext: embedder
+            ? { embedderElement: { ownerGlobal: undefined, ownerDocument: { defaultView: embedder } } }
+            : undefined,
     } as unknown as Window;
 }
 

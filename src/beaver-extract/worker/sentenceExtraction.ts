@@ -48,6 +48,7 @@ import {
     detectFilteredParagraphs,
     marginItemsForLines,
     reindexMarginItems,
+    type FilteredParagraphContext,
     type FilteredParagraphResult,
 } from "../FilteredParagraphPipeline";
 import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
@@ -166,6 +167,8 @@ export interface PageSentenceArgs {
      * from `preWalkedDetailed` (`detectDominantTextOrientation`).
      */
     pageRotation?: RotationAngle;
+    /** Receives the page's item-boundary input (training export only). */
+    boundaries?: FilteredParagraphContext["boundaries"];
 }
 
 /** First half of the per-page work: paragraphs, before sentence mapping. */
@@ -245,6 +248,7 @@ export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
             ...(region.kind === "formula" ? { content: region.rows.flat().map((cell) => cell.bbox) } : {}),
         })),
         pageRotation: args.pageRotation,
+        ...(args.boundaries ? { boundaries: args.boundaries } : {}),
     });
     const filteredParagraphsMs = performance.now() - tFiltered;
     const draft = draftPageFromParagraphs(filteredResult.paragraphResult);

@@ -4,7 +4,7 @@
  * and the size of a leading marker.
  */
 
-import type { RawStyleRun } from "@beaver/agent-core/extract/types";
+import type { RawGlyphMetrics, RawStyleRun } from "@beaver/agent-core/extract/types";
 import type { DetectedSpan, PageLine } from "../LineDetector";
 import { isBoldFont, isItalicFont } from "../StyleAnalyzer";
 
@@ -119,4 +119,48 @@ export function lineFace(line: PageLine): LineFace {
         }
     }
     return total > 0 ? { font, bold: bold / total, italic: italic / total } : { font, bold: 0, italic: 0 };
+}
+
+/** Vertical metrics of the glyphs set in a line's dominant size (`lineGeometry`). */
+export interface LineGeometry {
+    /** Median glyph origin: the baseline. */
+    baseline: number;
+    /** Median ascent edge of those glyphs. */
+    coreTop: number;
+    /** Median descent edge of those glyphs. */
+    coreBottom: number;
+}
+
+/**
+ * Baseline and core of a line, from the glyphs set in its dominant size
+ * (`lineSize`, or `dominantSize` when the caller has it), in the line's frame. Taller glyphs merged into the line
+ * (inline math, sub- and superscripts) widen its box but not its core. Each
+ * source line records the median per size; spans of the same size combine as
+ * a median weighted by their glyphs. Null without recorded metrics (no
+ * per-glyph walk) or when no glyph has the dominant size.
+ */
+export function lineGeometry(line: PageLine, dominantSize?: number): LineGeometry | null {
+    let parts: RawGlyphMetrics[] | null = null;
+    let size = dominantSize ?? NaN;
+    for (const span of line.spans) {
+        if (!span.glyphMetrics) continue;
+        if (Number.isNaN(size)) size = lineSize(line);
+        for (const m of span.glyphMetrics) {
+            if (m.size === size && m.glyphs > 0) (parts ??= []).push(m);
+        }
+    }
+    if (!parts) return null;
+    if (parts.length === 1) return { baseline: parts[0].baseline, coreTop: parts[0].top, coreBottom: parts[0].bottom };
+    let total = 0;
+    for (const p of parts) total += p.glyphs;
+    const weighted = (pick: (p: RawGlyphMetrics) => number) => {
+        const sorted = parts!.slice().sort((a, b) => pick(a) - pick(b));
+        let seen = 0;
+        for (const p of sorted) {
+            seen += p.glyphs;
+            if (2 * seen >= total) return pick(p);
+        }
+        return pick(sorted[sorted.length - 1]);
+    };
+    return { baseline: weighted((p) => p.baseline), coreTop: weighted((p) => p.top), coreBottom: weighted((p) => p.bottom) };
 }

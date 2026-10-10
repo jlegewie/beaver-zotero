@@ -337,6 +337,24 @@ export interface RawStyleRun {
 }
 
 /**
+ * Vertical metrics of a line's glyphs set in one size (`RawLine.glyphMetrics`).
+ * Positions are medians over the glyphs, on the axis across the line's
+ * writing direction (y for horizontal text), in the line's frame.
+ */
+export interface RawGlyphMetrics {
+    /** Font size to the half point, keyed like the style run sizes. */
+    size: number;
+    /** Visible glyphs set in this size. */
+    glyphs: number;
+    /** Glyph origin: the baseline. */
+    baseline: number;
+    /** Ascent edge of the glyph boxes (the font's ascender). */
+    top: number;
+    /** Descent edge of the glyph boxes (the font's descender). */
+    bottom: number;
+}
+
+/**
  * Raw line data from MuPDF structured text JSON.
  */
 export interface RawLine {
@@ -355,6 +373,11 @@ export interface RawLine {
      * (per-glyph) walk when the schema preset enables it; absent otherwise.
      */
     styleRuns?: RawStyleRun[];
+    /**
+     * Glyph metrics per size of the visible glyphs, recorded with `styleRuns`
+     * by the detailed walk; absent otherwise.
+     */
+    glyphMetrics?: RawGlyphMetrics[];
     /** Baseline X coordinate */
     x: number;
     /** Baseline Y coordinate */

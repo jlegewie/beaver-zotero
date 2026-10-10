@@ -14,10 +14,12 @@ export interface WindowRuntime {
  * The chrome window embedding `win`, or undefined when there is none reachable.
  * Chrome-privileged frames (a reader tab's `reader.html`) expose
  * `browsingContext`; content frames do not, and end the walk.
+ * `ownerDocument.defaultView` rather than `ownerGlobal`: Firefox 153 renamed
+ * the latter, which then reads as undefined.
  */
 function embedderWindow(win: Window): Window | undefined {
     try {
-        return (win as any).browsingContext?.embedderElement?.ownerGlobal ?? undefined;
+        return (win as any).browsingContext?.embedderElement?.ownerDocument?.defaultView ?? undefined;
     } catch {
         return undefined;
     }

@@ -41,6 +41,7 @@ import type {
     MarginSettings,
     RawBlock,
     RawChar,
+    RawGlyphMetrics,
     RawLine,
     RawLineDetailed,
     RawPageData,
@@ -261,6 +262,36 @@ export function rotateBBox(
     return { l: minX, t: minY, r: maxX, b: maxY, origin: bbox.origin };
 }
 
+/**
+ * A line's glyph metrics in the upright working frame. They are positions on
+ * the axis across the line's writing direction, so they carry over only for
+ * lines the rotation turns upright (`line.rotation === rotation`); other lines
+ * lose them.
+ */
+function rotateGlyphMetrics(
+    line: RawLine,
+    rotation: RotationAngle,
+    sourceWidth: number,
+    sourceHeight: number,
+): RawGlyphMetrics[] | undefined {
+    if (!line.glyphMetrics || (line.rotation ?? 0) !== rotation) return undefined;
+    const crossX = rotation === 90 || rotation === 270;
+    // A position across the line as a degenerate box along the line, turned upright.
+    const upright = (v: number) =>
+        rotateBBox(
+            crossX ? { ...line.bbox, l: v, r: v } : { ...line.bbox, t: v, b: v },
+            rotation,
+            sourceWidth,
+            sourceHeight,
+        ).t;
+    return line.glyphMetrics.map((m) => ({
+        ...m,
+        baseline: upright(m.baseline),
+        top: upright(m.top),
+        bottom: upright(m.bottom),
+    }));
+}
+
 function rotateQuad(
     quad: QuadPoint,
     rotation: RotationAngle,
@@ -340,9 +371,11 @@ export function rotateRawPage(
         if (block.type === "text") {
             const newLines: RawLine[] = [];
             for (const line of block.lines ?? []) {
+                const glyphMetrics = rotateGlyphMetrics(line, rotation, sourceWidth, sourceHeight);
                 newLines.push({
                     ...line,
                     bbox: rotateBBox(line.bbox, rotation, sourceWidth, sourceHeight),
+                    ...(line.glyphMetrics ? { glyphMetrics } : {}),
                 });
             }
             newBlocks.push({
@@ -396,10 +429,12 @@ export function rotateRawPageDetailed(
                         bbox: rotateBBox(ch.bbox, rotation, sourceWidth, sourceHeight),
                     };
                 });
+                const glyphMetrics = rotateGlyphMetrics(line, rotation, sourceWidth, sourceHeight);
                 return {
                     ...line,
                     bbox: rotateBBox(line.bbox, rotation, sourceWidth, sourceHeight),
                     chars: newChars,
+                    ...(line.glyphMetrics ? { glyphMetrics } : {}),
                 };
             });
             return {

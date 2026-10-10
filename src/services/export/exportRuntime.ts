@@ -12,7 +12,11 @@ import { getSystemTimers } from '../../utils/systemTimers';
 
 export type ExportRuntime = typeof ExportRuntimeModule;
 
-const RUNTIME_SCRIPT = 'content/scripts/beaver-export.js';
+/**
+ * Loaded through the registered chrome URL: Firefox 153 refuses `loadSubScript`
+ * of the XPI's own `jar:` / `file:` URIs.
+ */
+const RUNTIME_SCRIPT = 'chrome://beaver/content/scripts/beaver-export.js';
 const RUNTIME_GLOBAL = 'BeaverExportRuntime';
 
 /**
@@ -36,7 +40,9 @@ function createScope(): Record<string, unknown> {
 /** Load the runtime into its own scope. */
 export function loadExportRuntime(): ExportRuntime {
     const scope = createScope();
-    Services.scriptloader.loadSubScript(`${rootURI}${RUNTIME_SCRIPT}`, scope);
+    // `ignoreCache`: the script cache is keyed by URL, which stays the same
+    // across plugin updates and reloads.
+    Services.scriptloader.loadSubScriptWithOptions(RUNTIME_SCRIPT, { target: scope, ignoreCache: true });
     const runtime = scope[RUNTIME_GLOBAL] as ExportRuntime | undefined;
     if (!runtime?.parseExportSource || !runtime.writeDocx || !runtime.writeHtml || !runtime.writeMarkdown || !runtime.writeLatex) {
         throw new Error('The export runtime did not load');

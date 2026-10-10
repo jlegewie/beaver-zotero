@@ -182,6 +182,53 @@ describe("items export", () => {
         expect((await readdir(out)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     });
 
+    it("exports the regions-v2 task for the listed pages only, and reports listed pages a document lacks", async () => {
+        const regionsExport = vi.fn(async ({ pages }: { pages?: number[] }) => ({
+            format: "beaver-regions-v1",
+            pages: (pages ?? []).filter((i) => i < 3).map((index) => ({ index })),
+        }));
+        const itemsExport = vi.fn();
+        const deps = makeDeps({ regionsExport, itemsExport });
+        const out = join(dir, "out");
+        const list = await writeList(docs);
+        const pageList = join(dir, "pages.jsonl");
+        await writeFile(pageList, [{ doc_id: "a", page_index: 2 }, { doc_id: "a", page_index: 0 }, { doc_id: "c", page_index: 7 }].map((r) => JSON.stringify(r)).join("\n") + "\n");
+
+        const args = ["items", "export", "--task", "regions-v2", "--pdf-list", list, "--page-list", pageList, "--out", out];
+        expect(await runCli(args, deps)).toBe(0);
+
+        expect(itemsExport).not.toHaveBeenCalled();
+        expect(regionsExport.mock.calls.map(([call]) => call)).toEqual([
+            expect.objectContaining({ pages: [2, 0], bboxPrecision: 2, schemaVersion: "5" }),
+            expect.objectContaining({ pages: [7] }),
+        ]);
+        expect((await readdir(join(out, "docs"))).sort()).toEqual(["a.json.gz", "c.json.gz"]);
+        const manifest = JSON.parse(await readFile(join(out, "manifest.json"), "utf8"));
+        expect(manifest).toMatchObject({ format: "beaver-regions-v1", task: "regions-v2", feature_set: null, feature_version: null, schema_version: "5" });
+        expect(manifest.page_list_sha256).toMatch(/^[0-9a-f]{64}$/);
+        expect((await ledger(join(out, "ledger.jsonl"))).filter((r) => r.status === "done")).toEqual([
+            expect.not.objectContaining({ missing_pages: expect.anything() }),
+            expect.objectContaining({ doc_id: "c", missing_pages: [7] }),
+        ]);
+
+        // Another page selection is another export.
+        await writeFile(pageList, JSON.stringify({ doc_id: "b", page_index: 1 }) + "\n");
+        expect(await runCli(args, deps)).toBe(1);
+        expect((deps.stderr as Sink).text).toContain("page_list_sha256");
+    });
+
+    it("refuses a page list for item tasks and a schema without regions for regions-v2", async () => {
+        const deps = makeDeps({ itemsExport: vi.fn(), regionsExport: vi.fn() });
+        const list = await writeList(docs);
+        const pageList = join(dir, "pages.jsonl");
+        await writeFile(pageList, JSON.stringify({ doc_id: "a", page_index: 0 }) + "\n");
+        expect(await runCli(["items", "export", "--task", "item-type", "--pdf-list", list, "--page-list", pageList, "--out", join(dir, "o1")], deps)).toBe(1);
+        expect(await runCli(["items", "export", "--task", "regions-v2", "--pdf-list", list, "--schema", "4", "--out", join(dir, "o2")], deps)).toBe(1);
+        expect((deps.stderr as Sink).text).toContain("--page-list is only for");
+        expect((deps.stderr as Sink).text).toContain("needs a schema with region detection");
+        expect(deps.api.regionsExport).not.toHaveBeenCalled();
+    });
+
     it("rejects an unknown task before extracting anything", async () => {
         const itemsExport = vi.fn();
         const deps = makeDeps({ itemsExport });
