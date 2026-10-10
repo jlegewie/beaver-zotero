@@ -25,7 +25,7 @@ import { getEffectiveRepeatThreshold } from "../MarginFilter";
 import { logColumnDetection, type ColumnDetectionResult } from "../ColumnDetector";
 import { documentBodyExtents, regionFurnitureLines } from "../FilteredParagraphPipeline";
 import { detectDominantTextOrientation, rotateBBox, type RotationAngle } from "../PageRotationNormalizer";
-import type { ParagraphDetectionSettings } from "../ParagraphDetector";
+import type { BoundaryCapture, ParagraphDetectionSettings } from "../ParagraphDetector";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type {
     DegradationSummary,
@@ -97,6 +97,21 @@ export interface StructuredRunContext {
     splitter: SentenceSplitter;
     /** Receives each page's region pass; absent in production. */
     regionObserver?: RegionPassObserver;
+    /** Receives each page's item-boundary input; absent in production. */
+    boundaryObserver?: BoundaryObserver;
+}
+
+/**
+ * Observes the item-boundary input of every page of a structured run, as the
+ * paragraph detector builds it (`BoundaryCapture.page`), during segmentation.
+ * It must not modify what it is given.
+ */
+export type BoundaryObserver = Pick<BoundaryCapture, "page">;
+
+/** Observers of a structured run (training exports); none in production. */
+export interface StructuredRunObservers {
+    region?: RegionPassObserver;
+    boundaries?: BoundaryObserver;
 }
 
 /** What the region pass saw and did on one page (`RegionPassObserver`). */
@@ -336,6 +351,7 @@ export function segmentPages(
             regionMargin,
             regionsMs,
             pageRotation,
+            ...(ctx.boundaryObserver ? { boundaries: ctx.boundaryObserver } : {}),
         });
         const { pageRotation: rotation, sourceWidth, sourceHeight, columnResult } = paragraphs.filteredResult;
         paragraphs.draft.columns = columnResult.columns.map((col) => bboxFromXYWH(col.x, col.y, col.w, col.h, "top-left"));

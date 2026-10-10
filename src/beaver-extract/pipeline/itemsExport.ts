@@ -11,6 +11,13 @@
  * sibling pieces; a merged item lists several. Item ids are the structured
  * result's, so labels made on a structured export of the same commit match
  * by id and map onto units through `units`.
+ *
+ * A line-level task (`--task boundaries`) also lists every flow line of a
+ * page (`lines`): the lines the paragraph detector segments, blocks in reading
+ * order and lines top to bottom, each with the detector's decision and the
+ * task's feature row. The rows are computed where the detector builds the
+ * task's input (`BoundaryObserver`), before segmentation; the units' lines in
+ * order are the same flow.
  */
 
 import type { DocItem, InternalExtractionResult } from "@beaver/agent-core/extract/types";
@@ -24,16 +31,30 @@ import { ITEM_KINDS } from "../schema/itemKinds";
 import type { Rect, StructuredExtractResult } from "../schema";
 import type { DraftItem, DraftItemKind, DraftPage } from "./draftItems";
 import type { DraftDocument, ItemPass } from "./itemPasses";
+import type { BoundaryObserver } from "./structured";
+import type { BoundaryPage } from "../boundaries/input";
+import {
+    FEATURES as BOUNDARY_FEATURES,
+    FEATURE_SET as BOUNDARY_FEATURE_SET,
+    FEATURE_VERSION as BOUNDARY_FEATURE_VERSION,
+    boundaryFeatures,
+} from "../boundaries/features";
 
 export const ITEMS_EXPORT_FORMAT = "beaver-items-v1";
 
-/** A model task whose features `items export` writes. */
+/**
+ * A model task whose features `items export` writes: a feature row per unit
+ * (`compute`), or per flow line (`lineFeatures`).
+ */
 export interface ItemsExportTask {
     featureSet: string;
     featureVersion: number;
+    /** Names of the task's feature rows (`names` in the manifest). */
     features: readonly string[];
     /** Feature rows of every draft item, per page in reading order. */
-    compute(doc: DraftDocument): number[][][];
+    compute?(doc: DraftDocument): number[][][];
+    /** Feature rows of every line of a page, per block in reading order. */
+    lineFeatures?(page: BoundaryPage): number[][][];
 }
 
 export const ITEMS_EXPORT_TASKS: Record<string, ItemsExportTask> = {
@@ -42,6 +63,12 @@ export const ITEMS_EXPORT_TASKS: Record<string, ItemsExportTask> = {
         featureVersion: ITEM_TYPE_FEATURE_VERSION,
         features: ITEM_TYPE_FEATURES,
         compute: (doc) => itemTypeFeatures(buildTypedDocument(doc)),
+    },
+    boundaries: {
+        featureSet: BOUNDARY_FEATURE_SET,
+        featureVersion: BOUNDARY_FEATURE_VERSION,
+        features: BOUNDARY_FEATURES,
+        lineFeatures: boundaryFeatures,
     },
 };
 
@@ -66,7 +93,35 @@ export interface ItemsExportUnit {
     /** Text without the detector's heading marker. */
     text: string;
     lines: ItemsExportLine[];
-    /** The task's feature row (`names` in the manifest); null where a value is missing (NaN). */
+    /**
+     * The task's feature row (`names` in the manifest); null where a value is
+     * missing (NaN). Empty for a line-level task.
+     */
+    features: (number | null)[];
+}
+
+/** A line of a page's flow (line-level tasks). */
+export interface ItemsExportFlowLine extends ItemsExportLine {
+    /** The line's block (the paragraph detector's column index). */
+    block: number;
+    /**
+     * Baseline and core of the line's dominant-size glyphs (`lineGeometry`),
+     * as y positions in the page's upright reading frame (the frame of `bbox`
+     * on unrotated pages); null without glyph metrics.
+     */
+    baseline: number | null;
+    coreTop: number | null;
+    coreBottom: number | null;
+    /** The paragraph detector's decision: the line starts a draft unit. */
+    start: boolean;
+    /** The rule that decided it (`START_RULES`). */
+    reason: string;
+    /** Break signals and vetoes of the decision (`START_SIGNALS`, `START_VETOES` bits). */
+    signals: number;
+    vetoes: number;
+    /** The draft unit holding the line (index in `units`), -1 when none does. */
+    unit: number;
+    /** The task's feature row (`names`); null where a value is missing (NaN). */
     features: (number | null)[];
 }
 
@@ -95,6 +150,8 @@ export interface ItemsExportPage {
     rotation: number;
     units: ItemsExportUnit[];
     items: ItemsExportItem[];
+    /** Every flow line in reading order (line-level tasks); `l<n>` is the n-th. */
+    lines?: ItemsExportFlowLine[];
     /**
      * Lines the margin filter (or region detection) set aside as page
      * furniture, and in presets with the item-type pass, the items it read
@@ -110,6 +167,8 @@ export interface ItemsExportRow {
     feature_version: number;
     schema_version: string;
     page_count: number;
+    /** Names of the flow lines' feature rows (line-level tasks). */
+    names?: readonly string[];
     pages: ItemsExportPage[];
 }
 
@@ -143,8 +202,21 @@ export class ItemsExportCollector {
     /** Per page: the draft page and its items after every pass. */
     private final: DraftPage[] = [];
     private finalItems: DraftItem[][] = [];
+    /** Line-level tasks: each page's boundary input, flow lines and feature rows. */
+    private flows = new Map<number, { input: BoundaryPage; flow: PageLine[]; rows: number[][][] }>();
 
     constructor(private readonly task: ItemsExportTask) {}
+
+    /** Observer of the run's boundary input, for a line-level task. */
+    boundaryObserver(): BoundaryObserver | undefined {
+        const lineFeatures = this.task.lineFeatures;
+        if (!lineFeatures) return undefined;
+        return {
+            page: (input, flow) => {
+                this.flows.set(input.pageIndex, { input, flow, rows: lineFeatures(input) });
+            },
+        };
+    }
 
     /** The passes to run: a collector before and after the preset's own. */
     passes(presetPasses: readonly ItemPass[]): ItemPass[] {
@@ -152,7 +224,7 @@ export class ItemsExportCollector {
             {
                 name: "itemsExportUnits",
                 run: (doc) => {
-                    this.features = this.task.compute(doc);
+                    this.features = this.task.compute?.(doc) ?? [];
                     this.units = doc.pages.map((page) => {
                         const byLine = new Map<PageLine, number>();
                         const byItem = new Map<DraftItem, number>();
@@ -220,6 +292,11 @@ export class ItemsExportCollector {
                     };
                 });
             const pageFeatures = this.features[k] ?? [];
+            const unitFeatures = (unit: number) =>
+                this.task.compute
+                    ? (pageFeatures[unit] ?? this.task.features.map(() => NaN)).map((v) => (Number.isFinite(v) ? v : null))
+                    : [];
+            const flowLines = this.task.lineFeatures ? this.flowLines(draft.pageIndex, units, toPublic, bboxPrecision) : undefined;
             return {
                 index: publicPage.index,
                 width: publicPage.width,
@@ -231,7 +308,7 @@ export class ItemsExportCollector {
                     bbox: toPublic(item.bbox),
                     text: item.text,
                     lines: linesOf(item),
-                    features: (pageFeatures[unit] ?? this.task.features.map(() => NaN)).map((v) => (Number.isFinite(v) ? v : null)),
+                    features: unitFeatures(unit),
                 })),
                 items: publicPage.items.map((publicItem, j): ItemsExportItem => {
                     const source = draftOf.get(published[j]);
@@ -253,6 +330,7 @@ export class ItemsExportCollector {
                         size: ("lines" in item ? item.lines?.[0]?.fontSize : undefined) ?? null,
                         filtered: true,
                     })),
+                ...(flowLines ? { lines: flowLines } : {}),
             };
         });
         return {
@@ -262,7 +340,46 @@ export class ItemsExportCollector {
             feature_version: this.task.featureVersion,
             schema_version: projected.schemaVersion,
             page_count: projected.document.pageCount,
+            ...(this.task.lineFeatures ? { names: this.task.features } : {}),
             pages,
         };
+    }
+
+    /** The flow lines of a page (line-level tasks), from the captured boundary input. */
+    private flowLines(
+        pageIndex: number,
+        units: PageUnits,
+        toPublic: (bbox: DraftItem["bbox"]) => Rect,
+        bboxPrecision: number,
+    ): ItemsExportFlowLine[] {
+        const captured = this.flows.get(pageIndex);
+        if (!captured) return [];
+        const out: ItemsExportFlowLine[] = [];
+        const scale = 10 ** bboxPrecision;
+        const position = (v: number | null) => (v === null ? null : Math.round(v * scale) / scale);
+        let n = 0;
+        captured.input.blocks.forEach((block, b) => {
+            block.lines.forEach((line, j) => {
+                const source = captured.flow[n++];
+                out.push({
+                    bbox: toPublic(source.bbox),
+                    text: line.text,
+                    font: line.font,
+                    size: Math.round(line.size * 100) / 100,
+                    role: line.role,
+                    block: block.index,
+                    baseline: position(line.baseline),
+                    coreTop: position(line.coreTop),
+                    coreBottom: position(line.coreBottom),
+                    start: line.start,
+                    reason: line.rule,
+                    signals: line.signals,
+                    vetoes: line.vetoes,
+                    unit: units.byLine.get(source) ?? -1,
+                    features: captured.rows[b][j].map((v) => (Number.isFinite(v) ? v : null)),
+                });
+            });
+        });
+        return out;
     }
 }

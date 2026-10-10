@@ -34,11 +34,13 @@ interface Segment {
     text: string;
     fontPtr: number;
     size: number;
+    /** Baseline shift upward (a superscript), in points. */
+    rise?: number;
 }
 
 function fakeDoc(segments: Segment[]): DocumentLike {
     const glyphs = segments.flatMap((s) =>
-        Array.from(s.text).map((rune) => ({ rune, fontPtr: s.fontPtr, size: s.size })),
+        Array.from(s.text).map((rune) => ({ rune, fontPtr: s.fontPtr, size: s.size, rise: s.rise ?? 0 })),
     );
     const stext = (): StructuredTextLike => ({
         pointer: 1,
@@ -50,8 +52,10 @@ function fakeDoc(segments: Segment[]): DocumentLike {
             walker.onLineFont?.(glyphs[0].fontPtr, glyphs[0].size);
             glyphs.forEach((g, i) => {
                 const x = 10 + i * 4;
-                const quad: QuadTuple = [x, 10, x + 4, 10, x, 20, x + 4, 20];
+                // Glyph box 10–20 with its baseline at 18, raised by `rise`.
+                const quad: QuadTuple = [x, 10 - g.rise, x + 4, 10 - g.rise, x, 20 - g.rise, x + 4, 20 - g.rise];
                 walker.onCharFont?.(g.fontPtr, g.size);
+                walker.onCharOrigin?.(x, 18 - g.rise);
                 walker.onChar?.(g.rune, quad);
             });
             walker.endLine?.();
@@ -141,8 +145,26 @@ describe("detailed-walk style runs", () => {
         expect(line.styleRuns!.map((r) => [r.font.name, r.chars])).toEqual([["ABCDEF+Sans", 8]]);
     });
 
+    it("records the baseline, ascent and descent of the visible glyphs per size", () => {
+        const line = firstLine(
+            fakeDoc([
+                { text: "x squared", fontPtr: REGULAR_PTR, size: 9.96 },
+                { text: "2", fontPtr: REGULAR_PTR, size: 6, rise: 4 },
+                { text: " here", fontPtr: REGULAR_PTR, size: 9.96 },
+            ]),
+            true,
+            FONT_API,
+        );
+        expect(line.glyphMetrics).toEqual([
+            { size: 10, glyphs: 12, baseline: 18, top: 10, bottom: 20 },
+            { size: 6, glyphs: 1, baseline: 14, top: 6, bottom: 16 },
+        ]);
+    });
+
     it("records no runs when the preset disables them (schema 4)", () => {
-        expect(firstLine(fakeDoc(RUN_IN_LABEL), false, FONT_API).styleRuns).toBeUndefined();
+        const line = firstLine(fakeDoc(RUN_IN_LABEL), false, FONT_API);
+        expect(line.styleRuns).toBeUndefined();
+        expect(line.glyphMetrics).toBeUndefined();
     });
 
     it("records no runs without the font API", () => {

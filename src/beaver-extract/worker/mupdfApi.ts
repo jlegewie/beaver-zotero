@@ -152,6 +152,11 @@ export interface StructuredTextWalker {
      * reads fonts only once per line (`onLineFont`).
      */
     onCharFont?(fontPtr: number, size: number): void;
+    /**
+     * Per-character origin (the glyph's point on the baseline), fired before
+     * each `onChar`. Opt-in like `onCharFont`: one more WASM call per character.
+     */
+    onCharOrigin?(x: number, y: number): void;
     onChar?(rune: string, quad: QuadTuple): void;
     onImageBlock?(bbox: RectTuple, transform: unknown, image: unknown): void;
 }
@@ -1294,6 +1299,10 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                                             libmupdf._wasm_stext_char_get_font(ch),
                                             libmupdf._wasm_stext_char_get_size(ch),
                                         );
+                                    }
+                                    if (walker.onCharOrigin) {
+                                        const origin = libmupdf._wasm_stext_char_get_origin(ch) >> 2;
+                                        walker.onCharOrigin(libmupdf.HEAPF32[origin], libmupdf.HEAPF32[origin + 1]);
                                     }
                                     walker.onChar(rune, quad);
                                     ch = libmupdf._wasm_stext_char_get_next(ch);

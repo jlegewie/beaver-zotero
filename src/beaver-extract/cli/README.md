@@ -261,6 +261,26 @@ uses the plugin's settings, so features see the same analysis window as at
 runtime: every page of the document. Resumable and shardable like
 `references export`; each shard keeps its own `ledger-<i>of<n>.jsonl`.
 
+### Item-boundary export (`--task boundaries`)
+
+```bash
+npm run beaver-extract -- items export --task boundaries \
+    --pdf-list docs.jsonl --out /tmp/boundaries-export [--shard 0/4] [--schema 5]
+```
+
+The same rows, plus per page `lines`: every flow line (the lines the paragraph
+detector segments: blocks in reading order, lines top to bottom), so the n-th
+is unit `l<n>` of a boundary label. Each has the box, text, font, size and
+hanging role of an item line, its `block`, the `baseline`, `coreTop` and
+`coreBottom` of its dominant-size glyphs (y in the page's upright frame; null
+without the per-glyph walk, schema 4), the detector's `start` decision with
+its `reason` (`START_RULES`) and `signals`/`vetoes` bits, the draft `unit`
+holding it, and its `features` (`names` once per row, and in the manifest).
+The rows are captured where the paragraph detector builds the boundary input
+(`BoundaryObserver`), before segmentation; `units`, `items` and
+`filtered_lines` are those of the item-type export of the same commit, except
+that units carry no features.
+
 ### Region model export (`--task regions-v2`)
 
 ```bash
