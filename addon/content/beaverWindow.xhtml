@@ -30,18 +30,14 @@
 
     <script type="application/javascript" src="chrome://beaver/content/beaverWindow.js"/>
 
+    <!-- Handlers are attached in beaverWindow.js: the chrome CSP blocks inline
+         on* attributes. -->
     <commandset>
-        <command id="cmd_beaverNewChat"
-                 oncommand="window.BeaverReact?.handleWindowMenuCommand('new-chat').catch(error => Zotero.logError(error));"/>
-        <command id="cmd_beaverSettings"
-                 oncommand="window.BeaverReact?.handleWindowMenuCommand('settings').catch(error => Zotero.logError(error));"/>
-        <command id="cmd_close" oncommand="window.close();"/>
-        <command id="minimizeWindow"
-                 data-l10n-id="window-minimize-command"
-                 oncommand="window.minimize();"/>
-        <command id="zoomWindow"
-                 data-l10n-id="window-zoom-command"
-                 oncommand="zoomWindow();"/>
+        <command id="cmd_beaverNewChat"/>
+        <command id="cmd_beaverSettings"/>
+        <command id="cmd_close"/>
+        <command id="minimizeWindow" data-l10n-id="window-minimize-command"/>
+        <command id="zoomWindow" data-l10n-id="window-zoom-command"/>
     </commandset>
     <keyset>
         <key id="key_beaverNewChat" key="N" modifiers="accel" command="cmd_beaverNewChat"/>

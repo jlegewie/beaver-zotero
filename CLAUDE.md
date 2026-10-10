@@ -333,6 +333,23 @@ await Zotero.DB.queryAsync(sql, params, {
 
 This applies to every query, including simple `COUNT`s. See `src/utils/sync.ts`.
 
+### Firefox 153 (Zotero 11) platform rules
+
+Code must run on Zotero 7–10 and Zotero 11. Prefer feature detection; if you must branch,
+use `Zotero.platformMajorVersion` (140 on Zotero 10, 153 on Zotero 11), never `Zotero.version`.
+
+- **Boolean XUL attributes** (`hidden`, `collapsed`, `selected`, `disabled`, `checked`) are
+  presence-based: `setAttribute(x, 'false')` turns them *on*. Use `removeAttribute` /
+  `toggleAttribute`.
+- **No inline handlers** in chrome documents (`on*=` attributes, `setAttribute('on…')`,
+  inline `<script>`); the chrome CSP blocks them. Use `addEventListener`.
+- **Load plugin scripts via `chrome://beaver/…`**, not `rootURI` (`jar:`/`file:`), which
+  `loadSubScript` refuses.
+- **`ownerGlobal` reads as undefined**; use `ownerDocument.defaultView`.
+
+Lint enforces the first, second and fourth. Testing against a Zotero 11 build is described
+in `tests/README.md`.
+
 ## Library exclusions (enforce in every data / write / index path)
 
 Users can exclude Zotero libraries in Beaver Preferences. Exclusion is an access-control

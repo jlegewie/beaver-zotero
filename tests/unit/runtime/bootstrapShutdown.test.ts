@@ -80,7 +80,7 @@ describe('plugin reload while the previous instance is still shutting down', () 
             },
             Services: {
                 io: { newURI: (uri: string) => uri },
-                scriptloader: { loadSubScript: () => { zotero.__addonInstance__ = makeInstance(); } },
+                scriptloader: { loadSubScriptWithOptions: () => { zotero.__addonInstance__ = makeInstance(); } },
             },
         });
         return { zotero, handles, instances, context, finish: () => pendingShutdowns.splice(0).forEach(resolve => resolve()),
