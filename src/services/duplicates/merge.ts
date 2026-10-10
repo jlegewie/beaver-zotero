@@ -32,6 +32,8 @@ import {
     type TimeoutContext,
 } from "../agentDataProvider/timeout";
 
+import { logger } from "@beaver/agent-core/platform/logger";
+import { waitForDeferredCommits } from "../committedTransaction";
 import { nativeMergeTransaction } from "./nativeMergeTransaction";
 import { dismissNotePreviews } from "../notePreviews";
 
@@ -202,6 +204,14 @@ export async function applyMerge(
     const affected = await affectedItems(items, true, ctx);
     await settleNotePreviews(affected);
     const preview = await describeGroup(items);
+    // The native merge stages Zotero's own undo entry. An earlier write that
+    // returned before its commit callbacks finished would otherwise record the
+    // merge's entry half-staged when its UndoHistory callback runs.
+    if (!(await waitForDeferredCommits()))
+        logger(
+            "applyMerge: earlier writes are still delivering Notifier events; Zotero's own undo entry for this merge may be incomplete",
+            1,
+        );
     let mutationStarted = false;
     try {
         return await nativeMergeTransaction(

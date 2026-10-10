@@ -226,13 +226,12 @@ describe('writeImportItem target checks', () => {
 });
 
 describe('writeImportItem saving', () => {
-    it('saves with Zotero\'s ItemSaver, ignoring attachments and forcing manual tags', async () => {
+    it('saves with Zotero\'s ItemSaver, ignoring attachments', async () => {
         mocks.recheckExistingCollections.mockReturnValue([{ collection: { id: 10 }, collectionId: 'u-COLL0001', key: 'COLL0001' }]);
         const result = await writeImportItem(journal({ collection_ids: ['u-COLL0001'] }));
         expect(itemSaverCtor).toHaveBeenCalledWith({
             libraryID: 1,
             collections: [10],
-            forceTagType: 1,
             attachmentMode: 0,
         });
         const [items] = saveItems.mock.calls[0];
@@ -245,6 +244,45 @@ describe('writeImportItem saving', () => {
             collection_ids: ['u-COLL0001'],
             collection_keys: ['COLL0001'],
         });
+    });
+
+    it('returns the created item once the save commits, without waiting for slow observers', async () => {
+        vi.useFakeTimers();
+        try {
+            const parent = makeSavedItem({ id: 501, key: 'NEWITEM1', parentID: null });
+            const childNote = makeSavedItem({ id: 502, key: 'NOTE0001', parentID: 501, isNote: () => true });
+            let observersDone = false;
+            // Zotero shape: the transaction runs the work, commits, runs onCommit, then
+            // delivers Notifier events; ItemSaver opens it synchronously.
+            Z.DB = {
+                executeTransaction: vi.fn(async (work: () => Promise<unknown>, options?: { onCommit?: () => void }) => {
+                    const result = await work();
+                    options?.onCommit?.();
+                    await new Promise((resolve) => setTimeout(resolve, 21_000));
+                    observersDone = true;
+                    return result;
+                }),
+                valueQueryAsync: vi.fn(async () => 500),
+                columnQueryAsync: vi.fn(async () => [501, 502]),
+            };
+            Z.Items.get = vi.fn((id: number) => (id === 501 ? parent : id === 502 ? childNote : false));
+            saveItems.mockImplementation(async () => {
+                await Z.DB.executeTransaction(async () => {});
+                return [parent];
+            });
+            const pending = writeImportItem(journal());
+            await vi.advanceTimersByTimeAsync(3000);
+            await expect(pending).resolves.toMatchObject({ zotero_key: 'NEWITEM1' });
+            expect(observersDone).toBe(false);
+            expect(Z.DB.columnQueryAsync).toHaveBeenCalledWith(
+                'SELECT itemID FROM items WHERE itemID > ? AND libraryID = ?',
+                [500, 1],
+            );
+            await vi.advanceTimersByTimeAsync(18_000);
+            expect(observersDone).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('creates the item without a collection deleted after approval and reports it', async () => {
@@ -331,24 +369,65 @@ describe('writeImportItem saving', () => {
 });
 
 describe('writeImportItem finishing touches', () => {
-    it('adds manual tags and saves once', async () => {
+    it('saves the action\'s tags as manual tags in the first save', async () => {
         await writeImportItem(journal({ tags: ['reading', '  ', 'to-cite '] }));
-        expect(saved.addTag).toHaveBeenCalledTimes(2);
-        expect(saved.addTag).toHaveBeenCalledWith('reading', 0);
-        expect(saved.addTag).toHaveBeenCalledWith('to-cite', 0);
-        expect(saved.saveTx).toHaveBeenCalledTimes(1);
+        expect(saveItems.mock.calls[0][0][0].tags).toEqual([
+            { tag: 'reading', type: 0 },
+            { tag: 'to-cite', type: 0 },
+        ]);
+        expect(saved.addTag).not.toHaveBeenCalled();
+        expect(saved.save).not.toHaveBeenCalled();
+        expect(saved.saveTx).not.toHaveBeenCalled();
+    });
+
+    it('keeps resolved tags as automatic tags when automatic tags are on', async () => {
+        prefs.automaticTags = true;
+        await writeImportItem(journal({
+            item: { itemType: 'journalArticle', title: 'Paper', tags: [{ tag: 'Sociology' }, { tag: 'reading', type: 0 }, { tag: ' ' }] },
+            tags: ['reading'],
+        }));
+        expect(saveItems.mock.calls[0][0][0].tags).toEqual([
+            { tag: 'Sociology', type: 1 },
+            { tag: 'reading', type: 0 },
+        ]);
+    });
+
+    it('lets a manual tag replace an automatic tag that differs only by whitespace or Unicode form', async () => {
+        prefs.automaticTags = true;
+        await writeImportItem(journal({
+            item: {
+                itemType: 'journalArticle',
+                title: 'Paper',
+                // 'Cafe\u0301' is the decomposed form of 'Caf\u00e9'.
+                tags: [{ tag: 'reading ' }, { tag: ' Cafe\u0301' }],
+            },
+            tags: ['reading', 'Caf\u00e9'],
+        }));
+        expect(saveItems.mock.calls[0][0][0].tags).toEqual([
+            { tag: 'reading', type: 0 },
+            { tag: 'Caf\u00e9', type: 0 },
+        ]);
+    });
+
+    it('drops resolved tags when automatic tags are off, as Zotero does', async () => {
+        prefs.automaticTags = false;
+        await writeImportItem(journal({ item: { itemType: 'journalArticle', title: 'Paper', tags: [{ tag: 'Sociology' }] } }));
+        expect(saveItems.mock.calls[0][0][0]).not.toHaveProperty('tags');
     });
 
     it('does not save again when nothing needs stamping', async () => {
         await writeImportItem(journal());
+        expect(saved.save).not.toHaveBeenCalled();
         expect(saved.saveTx).not.toHaveBeenCalled();
     });
 
-    it('stamps Beaver provenance and saves', async () => {
+    it('stamps Beaver provenance and saves it in its own transaction', async () => {
         mocks.stampBeaverProvenanceExtra.mockReturnValue(true);
         await writeImportItem(journal());
         expect(mocks.stampBeaverProvenanceExtra).toHaveBeenCalledWith(saved);
-        expect(saved.saveTx).toHaveBeenCalledTimes(1);
+        expect(Z.DB.executeTransaction).toHaveBeenCalledTimes(1);
+        expect(saved.save).toHaveBeenCalledTimes(1);
+        expect(saved.saveTx).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -357,7 +436,7 @@ describe('writeImportItem finishing touches', () => {
     ])('records %s in Extra', async (method, line) => {
         await writeImportItem(journal({ resolution: { method } }));
         expect(saved.setField).toHaveBeenCalledWith('extra', line);
-        expect(saved.saveTx).toHaveBeenCalled();
+        expect(saved.save).toHaveBeenCalled();
     });
 
     it('appends the metadata line to existing Extra without duplicating it', async () => {
@@ -383,7 +462,13 @@ describe('writeImportItem finishing touches', () => {
         expect(mocks.createProvenanceNote).toHaveBeenCalledWith(
             { library_id: 1, zotero_key: 'ITEM0001', library_ref: 'u' },
             { threadId: 't1', runId: 'r1' },
+            expect.any(Function),
         );
+        // The note is saved inside a Beaver-owned transaction.
+        const note = { save: vi.fn(async () => {}) };
+        await mocks.createProvenanceNote.mock.calls[0][2](note);
+        expect(note.save).toHaveBeenCalledTimes(1);
+        expect(Z.DB.executeTransaction).toHaveBeenCalledTimes(1);
     });
 
     it('creates no provenance note by default', async () => {
@@ -545,15 +630,17 @@ describe('writeImportItem attachments', () => {
     });
 
     it('erases the new item when a step after saving throws', async () => {
-        saved.saveTx.mockRejectedValue(new Error('tag save failed'));
-        await expect(writeImportItem(journal({ tags: ['x'] }))).rejects.toThrow('tag save failed');
+        mocks.stampBeaverProvenanceExtra.mockReturnValue(true);
+        saved.save.mockRejectedValue(new Error('stamp save failed'));
+        await expect(writeImportItem(journal())).rejects.toThrow('stamp save failed');
         expect(saved.eraseTx).toHaveBeenCalledTimes(1);
     });
 
     it('still reports the original error when cleanup itself fails', async () => {
-        saved.saveTx.mockRejectedValue(new Error('tag save failed'));
+        mocks.stampBeaverProvenanceExtra.mockReturnValue(true);
+        saved.save.mockRejectedValue(new Error('stamp save failed'));
         saved.eraseTx.mockRejectedValue(new Error('erase failed'));
-        await expect(writeImportItem(journal({ tags: ['x'] }))).rejects.toThrow('tag save failed');
+        await expect(writeImportItem(journal())).rejects.toThrow('stamp save failed');
     });
 
     it('does not erase anything when saving itself fails', async () => {

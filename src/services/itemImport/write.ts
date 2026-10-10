@@ -30,6 +30,7 @@ import type { TimingAccumulator } from '../../utils/timing';
 import type { AttachmentResolvedPayload } from '../attachmentResolved';
 import { assertLibraryWritable, recheckExistingCollections } from '../collections/collectionMutations';
 import { coordinateLibraryMutation } from '../libraryMutations';
+import { runCommittedTransaction, runInterceptedTransaction } from '../committedTransaction';
 import { isPdfDocument } from '../../utils/attachmentFiles';
 import { WEB_CONTENT_ITEM_TYPES } from './duplicates';
 import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
@@ -117,30 +118,89 @@ async function resolvePending(data: ImportItemProposedData, libraryID: number, t
 const SAVE_UNSUPPORTED_MESSAGE = 'Saving imported items is not supported in this Zotero version.';
 
 /**
- * Save item JSON with Zotero's own saver (creators, notes, automatic tags),
- * attachments ignored. `ItemSaver` is what Zotero uses for every translator
- * result, so there is no hand-written fallback: if it is missing or has
- * changed, the import fails without writing anything.
+ * Tags for the saved JSON. Resolved tags become automatic, as `ItemSaver`'s
+ * `forceTagType: 1` would make them (and are dropped when the user turned
+ * automatic tags off); the action's tags are manual and replace an automatic
+ * tag of the same name, as `item.addTag(name, 0)` would.
+ *
+ * Names are compared as Zotero stores them (trimmed, NFC-normalized): two
+ * entries that differ only before that cleanup would otherwise both reach the
+ * save, where the automatic one would overwrite the manual one.
  */
-async function saveItemJson(json: ZoteroItemJson, libraryID: number, collectionIDs: number[]): Promise<Zotero.Item> {
+function tagsForSave(resolved: ZoteroItemJson['tags'], manual: string[] | undefined): Array<{ tag: string; type: 0 | 1 }> {
+    const tags = new Map<string, 0 | 1>();
+    const add = (name: unknown, type: 0 | 1) => {
+        if (typeof name !== 'string') return;
+        const cleaned = name.trim().normalize();
+        if (cleaned) tags.set(cleaned, type);
+    };
+    if (Zotero.Prefs.get('automaticTags')) {
+        for (const entry of resolved ?? []) add(typeof entry === 'string' ? entry : entry?.tag, 1);
+    }
+    for (const name of manual ?? []) add(name, 0);
+    return [...tags].map(([tag, type]) => ({ tag, type }));
+}
+
+/** The top-level item among the IDs a save created. */
+function savedTopLevelItem(itemIDs: number[]): Zotero.Item | undefined {
+    return itemIDs
+        .map((id) => Zotero.Items.get(id) as Zotero.Item | false)
+        .find((item): item is Zotero.Item => !!item && !item.isNote() && !item.isAttachment() && !item.parentID);
+}
+
+/**
+ * Save item JSON with Zotero's own saver (creators, notes, automatic tags),
+ * attachments ignored, in one transaction that also carries the action's
+ * manual tags. `ItemSaver` is what Zotero uses for every translator result, so
+ * there is no hand-written fallback: if it is missing or has changed, the
+ * import fails without writing anything.
+ *
+ * The save returns once it has committed, without waiting long for other
+ * plugins' Notifier observers (see `runInterceptedTransaction`). The created
+ * item is identified inside the transaction, as the top-level item above the
+ * highest item ID before the save.
+ */
+async function saveItemJson(
+    json: ZoteroItemJson,
+    libraryID: number,
+    collectionIDs: number[],
+    manualTags: string[] | undefined,
+    timing: TimingAccumulator | undefined,
+): Promise<Zotero.Item> {
     if (!isApiAvailable('itemSaver')) throw new ImportItemError('item_import_unsupported', SAVE_UNSUPPORTED_MESSAGE);
     const clone = JSON.parse(JSON.stringify(json));
-    let items: Zotero.Item[];
+    const tags = tagsForSave(clone.tags, manualTags);
+    if (tags.length) clone.tags = tags;
+    else delete clone.tags;
+    let item: Zotero.Item | undefined;
     try {
         const ItemSaver = (Zotero as any).Translate.ItemSaver;
         const saver = new ItemSaver({
             libraryID,
             collections: collectionIDs.length ? collectionIDs : false,
-            forceTagType: 1,
             attachmentMode: ItemSaver.ATTACHMENT_MODE_IGNORE,
         });
-        items = await saver.saveItems([clone], () => {}, () => {});
+        const outcome = await runInterceptedTransaction(
+            () => saver.saveItems([clone], () => {}, () => {}) as Promise<Zotero.Item[]>,
+            async (work) => {
+                const lastID = Number(await Zotero.DB.valueQueryAsync('SELECT COALESCE(MAX(itemID), 0) FROM items'));
+                await work();
+                const created = await Zotero.DB.columnQueryAsync(
+                    'SELECT itemID FROM items WHERE itemID > ? AND libraryID = ?',
+                    [lastID, libraryID],
+                );
+                return savedTopLevelItem((created ?? []).map(Number));
+            },
+            { timing, label: 'import_item save' },
+        );
+        item = outcome.intercepted
+            ? outcome.value
+            : outcome.startValue?.find((candidate) => candidate && !candidate.isNote?.());
     } catch (error) {
         if (!looksLikeApiDrift(error)) throw error;
         markApiUnavailable('itemSaver', error);
         throw new ImportItemError('item_import_unsupported', SAVE_UNSUPPORTED_MESSAGE);
     }
-    const item = items?.find((candidate) => candidate && !candidate.isNote?.());
     if (!item) throw new Error('ItemSaver returned no item');
     return item;
 }
@@ -287,29 +347,28 @@ function withProvenanceLines(extra: string, method: string | undefined): string 
     return lines.join('\n');
 }
 
-/** Apply manual tags, provenance and the metadata-source stamp; one save. */
-async function finishItem(item: Zotero.Item, data: ImportItemProposedData, method: string | undefined, options: WriteImportOptions): Promise<void> {
-    let needsSave = false;
-    for (const tag of data.tags ?? []) {
-        if (typeof tag === 'string' && tag.trim()) {
-            item.addTag(tag.trim(), 0);
-            needsSave = true;
-        }
+/**
+ * Restore Beaver's provenance and metadata-source stamp if the saved item lacks
+ * them, and add the optional provenance note. Both are already in the first
+ * save, so the stamp normally saves nothing.
+ */
+async function finishItem(item: Zotero.Item, method: string | undefined, options: WriteImportOptions): Promise<void> {
+    if (item.isAttachment()) return;
+    let needsSave = stampBeaverProvenanceExtra(item);
+    const sourceLine = method ? BEAVER_METADATA_LINE[method] : undefined;
+    const extra = (item.getField('extra') as string) || '';
+    if (sourceLine && !extra.includes(sourceLine)) {
+        item.setField('extra', extra ? `${extra}\n${sourceLine}` : sourceLine);
+        needsSave = true;
     }
-    if (!item.isAttachment()) {
-        needsSave = stampBeaverProvenanceExtra(item) || needsSave;
-        const sourceLine = method ? BEAVER_METADATA_LINE[method] : undefined;
-        const extra = (item.getField('extra') as string) || '';
-        if (sourceLine && !extra.includes(sourceLine)) {
-            item.setField('extra', extra ? `${extra}\n${sourceLine}` : sourceLine);
-            needsSave = true;
-        }
+    if (needsSave) {
+        await runCommittedTransaction(() => item.save(), { timing: options.timing, label: 'import_item stamp' });
     }
-    if (needsSave) await item.saveTx();
-    if (!item.isAttachment() && getPref('addBeaverProvenanceNote') === true) {
+    if (getPref('addBeaverProvenanceNote') === true) {
         await createProvenanceNote(
             { library_id: item.libraryID, zotero_key: item.key, library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined },
             { threadId: options.threadId ?? undefined, runId: options.runId },
+            (note) => runCommittedTransaction(() => note.save(), { timing: options.timing, label: 'import_item provenance note' }),
         );
     }
 }
@@ -369,9 +428,9 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
     // which would drop a stamp added in a second save.
     toSave.extra = withProvenanceLines(typeof json.extra === 'string' ? json.extra : '', method);
 
-    const item = await track(options.timing, 'save_ms', () => saveItemJson(toSave, libraryID, collectionIDs));
+    const item = await track(options.timing, 'save_ms', () => saveItemJson(toSave, libraryID, collectionIDs, data.tags, options.timing));
     try {
-        await finishItem(item, data, method, options);
+        await finishItem(item, method, options);
 
         let fileAttachment: Zotero.Item | null = null;
         if (file) fileAttachment = await track(options.timing, 'attach_file_ms', () => attachFile(item, file!));
