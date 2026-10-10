@@ -78,6 +78,9 @@ import { ImportItemError, undoImportItem, writeImportItem } from '../../../src/s
 
 const Z = Zotero as any;
 
+/** The JSON the new item was built from. */
+const savedJson = () => saved.fromJSON.mock.calls[0][0];
+
 function makeSavedItem(overrides: Record<string, any> = {}) {
     const fields: Record<string, string> = { extra: '' };
     const item: any = {
@@ -92,6 +95,8 @@ function makeSavedItem(overrides: Record<string, any> = {}) {
         addTag: vi.fn(),
         saveTx: vi.fn(async () => {}),
         save: vi.fn(async () => {}),
+        fromJSON: vi.fn(),
+        setCollections: vi.fn(),
         eraseTx: vi.fn(async () => {}),
         getAttachments: vi.fn(() => []),
         getNotes: vi.fn(() => []),
@@ -103,8 +108,8 @@ function makeSavedItem(overrides: Record<string, any> = {}) {
 }
 
 let saved: any;
-let itemSaverCtor: ReturnType<typeof vi.fn>;
-let saveItems: ReturnType<typeof vi.fn>;
+let itemCtor: ReturnType<typeof vi.fn>;
+let childNotes: any[];
 let libraryInfo: { editable: boolean; filesEditable: boolean };
 let prefs: Record<string, unknown>;
 let apiAvailable: Record<string, boolean>;
@@ -137,11 +142,11 @@ beforeEach(() => {
     mocks.resolveImportItems.mockReset();
     mocks.locateImportFile.mockReset();
     saved = makeSavedItem();
-    saveItems = vi.fn(async () => [saved]);
-    itemSaverCtor = vi.fn();
+    itemCtor = vi.fn();
+    childNotes = [];
     libraryInfo = { editable: true, filesEditable: true };
     prefs = {};
-    apiAvailable = { itemSaver: true, importFromDocument: true, remoteTranslate: true, attachmentRename: false };
+    apiAvailable = { importFromDocument: true, remoteTranslate: true, attachmentRename: false };
 
     mocks.isApiAvailable.mockImplementation((name: string) => apiAvailable[name] ?? false);
     mocks.getPref.mockImplementation((name: string) => prefs[name]);
@@ -163,11 +168,13 @@ beforeEach(() => {
     Z.Date.dateToISO = vi.fn(() => '2026-10-01T00:00:00Z');
     Z.DB = { executeTransaction: vi.fn(async (work: () => Promise<unknown>) => work()) };
     Z.Collections = { get: vi.fn((id: number) => (id === 20 ? { id: 20, libraryID: 1 } : id === 21 ? { id: 21, libraryID: 7 } : undefined)) };
-    Z.Translate = {
-        ItemSaver: Object.assign(function (this: any, options: unknown) {
-            itemSaverCtor(options);
-            this.saveItems = saveItems;
-        }, { ATTACHMENT_MODE_IGNORE: 0 }),
+    // `new Zotero.Item(type)`: the parent is `saved`; child notes are recorded.
+    Z.Item = function (type: string) {
+        itemCtor(type);
+        if (type !== 'note') return saved;
+        const note = { setNote: vi.fn(), setTags: vi.fn(), save: vi.fn(async () => {}) } as any;
+        childNotes.push(note);
+        return note;
     };
     Z.Attachments = {
         importFromFile: vi.fn(async () => makeSavedItem({ id: 600, key: 'FILEKEY1' })),
@@ -191,7 +198,7 @@ describe('writeImportItem target checks', () => {
     it('refuses a library excluded after approval, before any write', async () => {
         Z.Beaver.searchableLibraryIds = [2];
         await expect(writeImportItem(journal())).rejects.toMatchObject({ code: 'library_not_searchable' });
-        expect(saveItems).not.toHaveBeenCalled();
+        expect(itemCtor).not.toHaveBeenCalled();
     });
 
     it('refuses when the library scope is not initialized', async () => {
@@ -202,41 +209,52 @@ describe('writeImportItem target checks', () => {
     it('refuses a read-only library', async () => {
         libraryInfo.editable = false;
         await expect(writeImportItem(journal())).rejects.toMatchObject({ code: 'library_not_editable' });
-        expect(saveItems).not.toHaveBeenCalled();
+        expect(itemCtor).not.toHaveBeenCalled();
     });
 
     it('prefers the explicit target library over the action data', async () => {
         Z.Beaver.searchableLibraryIds = [1, 7];
         await writeImportItem(journal({ library_id: 1 }), { libraryId: 7 });
         expect(mocks.resolveWriteTargetLibrary).not.toHaveBeenCalled();
-        expect(itemSaverCtor).toHaveBeenCalledWith(expect.objectContaining({ libraryID: 7 }));
+        expect(saved.libraryID).toBe(7);
     });
 
     it('lets collection and library write guards run before saving', async () => {
         mocks.assertLibraryWritable.mockImplementation(() => { throw Object.assign(new Error('not accessible'), { code: 'library_not_searchable' }); });
         await expect(writeImportItem(journal())).rejects.toMatchObject({ code: 'library_not_searchable' });
-        expect(saveItems).not.toHaveBeenCalled();
+        expect(itemCtor).not.toHaveBeenCalled();
     });
 
     it('runs the caller checkpoint before saving', async () => {
         const assertCurrent = vi.fn(() => { throw new Error('deadline'); });
         await expect(writeImportItem(journal(), { assertCurrent })).rejects.toThrow('deadline');
-        expect(saveItems).not.toHaveBeenCalled();
+        expect(itemCtor).not.toHaveBeenCalled();
     });
 });
 
 describe('writeImportItem saving', () => {
-    it('saves with Zotero\'s ItemSaver, ignoring attachments', async () => {
+    it('builds the item from its JSON in one transaction, ignoring attachments', async () => {
         mocks.recheckExistingCollections.mockReturnValue([{ collection: { id: 10 }, collectionId: 'u-COLL0001', key: 'COLL0001' }]);
-        const result = await writeImportItem(journal({ collection_ids: ['u-COLL0001'] }));
-        expect(itemSaverCtor).toHaveBeenCalledWith({
-            libraryID: 1,
-            collections: [10],
-            attachmentMode: 0,
-        });
-        const [items] = saveItems.mock.calls[0];
-        expect(items).toHaveLength(1);
-        expect(items[0]).toMatchObject({ itemType: 'journalArticle', title: 'Paper' });
+        const result = await writeImportItem(journal({
+            collection_ids: ['u-COLL0001'],
+            item: {
+                itemType: 'journalArticle',
+                title: 'Paper',
+                creators: [{ lastName: 'Smith' } as any],
+                attachments: [{ url: 'https://x.org/a.pdf' }],
+                dateAdded: '2020-01-01',
+                key: 'TRANSLAT',
+            },
+        }));
+        expect(itemCtor).toHaveBeenCalledWith('journalArticle');
+        expect(saved.libraryID).toBe(1);
+        expect(savedJson()).toMatchObject({ itemType: 'journalArticle', title: 'Paper', creators: [{ creatorType: 'author', lastName: 'Smith' }] });
+        expect(savedJson()).not.toHaveProperty('attachments');
+        expect(savedJson()).not.toHaveProperty('dateAdded');
+        expect(savedJson()).not.toHaveProperty('key');
+        expect(saved.setCollections).toHaveBeenCalledWith([10]);
+        expect(saved.save).toHaveBeenCalledTimes(1);
+        expect(Z.DB.executeTransaction).toHaveBeenCalledTimes(1);
         expect(result).toMatchObject({
             library_id: 1,
             library_ref: 'u',
@@ -246,14 +264,26 @@ describe('writeImportItem saving', () => {
         });
     });
 
+    it('saves translator notes as child notes in the same transaction', async () => {
+        prefs.automaticTags = true;
+        await writeImportItem(journal({
+            item: { itemType: 'journalArticle', title: 'Paper', notes: [{ note: '<p>Abstract</p>', tags: [{ tag: 'n' }] } as any] },
+        }));
+        expect(savedJson()).not.toHaveProperty('notes');
+        expect(childNotes).toHaveLength(1);
+        expect(childNotes[0]).toMatchObject({ libraryID: 1, parentID: 500 });
+        expect(childNotes[0].setNote).toHaveBeenCalledWith('<p>Abstract</p>');
+        expect(childNotes[0].setTags).toHaveBeenCalledWith([{ tag: 'n', type: 1 }]);
+        expect(childNotes[0].save).toHaveBeenCalledTimes(1);
+        expect(Z.DB.executeTransaction).toHaveBeenCalledTimes(1);
+    });
+
     it('returns the created item once the save commits, without waiting for slow observers', async () => {
         vi.useFakeTimers();
         try {
-            const parent = makeSavedItem({ id: 501, key: 'NEWITEM1', parentID: null });
-            const childNote = makeSavedItem({ id: 502, key: 'NOTE0001', parentID: 501, isNote: () => true });
             let observersDone = false;
             // Zotero shape: the transaction runs the work, commits, runs onCommit, then
-            // delivers Notifier events; ItemSaver opens it synchronously.
+            // delivers Notifier events.
             Z.DB = {
                 executeTransaction: vi.fn(async (work: () => Promise<unknown>, options?: { onCommit?: () => void }) => {
                     const result = await work();
@@ -262,22 +292,11 @@ describe('writeImportItem saving', () => {
                     observersDone = true;
                     return result;
                 }),
-                valueQueryAsync: vi.fn(async () => 500),
-                columnQueryAsync: vi.fn(async () => [501, 502]),
             };
-            Z.Items.get = vi.fn((id: number) => (id === 501 ? parent : id === 502 ? childNote : false));
-            saveItems.mockImplementation(async () => {
-                await Z.DB.executeTransaction(async () => {});
-                return [parent];
-            });
             const pending = writeImportItem(journal());
             await vi.advanceTimersByTimeAsync(3000);
-            await expect(pending).resolves.toMatchObject({ zotero_key: 'NEWITEM1' });
+            await expect(pending).resolves.toMatchObject({ zotero_key: 'ITEM0001' });
             expect(observersDone).toBe(false);
-            expect(Z.DB.columnQueryAsync).toHaveBeenCalledWith(
-                'SELECT itemID FROM items WHERE itemID > ? AND libraryID = ?',
-                [500, 1],
-            );
             await vi.advanceTimersByTimeAsync(18_000);
             expect(observersDone).toBe(true);
         } finally {
@@ -288,7 +307,7 @@ describe('writeImportItem saving', () => {
     it('creates the item without a collection deleted after approval and reports it', async () => {
         mocks.recheckExistingCollections.mockReturnValue([{ collection: { id: 10 }, collectionId: 'u-KEPT0001', key: 'KEPT0001' }]);
         const result = await writeImportItem(journal({ collection_ids: ['u-KEPT0001', 'u-GONE0001'] }));
-        expect(itemSaverCtor).toHaveBeenCalledWith(expect.objectContaining({ collections: [10] }));
+        expect(saved.setCollections).toHaveBeenCalledWith([10]);
         expect(result).toMatchObject({ collection_ids: ['u-KEPT0001'], skipped_collections: ['u-GONE0001'] });
     });
 
@@ -298,9 +317,9 @@ describe('writeImportItem saving', () => {
         expect(result).not.toHaveProperty('skipped_collections');
     });
 
-    it('does not pass collections to the saver when there are none', async () => {
+    it('sets no collections when there are none', async () => {
         await writeImportItem(journal());
-        expect(itemSaverCtor).toHaveBeenCalledWith(expect.objectContaining({ collections: false }));
+        expect(saved.setCollections).not.toHaveBeenCalled();
     });
 
     it('does not mutate the approved item JSON', async () => {
@@ -312,71 +331,66 @@ describe('writeImportItem saving', () => {
 
     it('adds the context collection only when it belongs to the target library', async () => {
         await writeImportItem(journal(), { collectionId: 20 });
-        expect(itemSaverCtor).toHaveBeenLastCalledWith(expect.objectContaining({ collections: [20] }));
+        expect(saved.setCollections).toHaveBeenLastCalledWith([20]);
 
+        saved.setCollections.mockClear();
         await writeImportItem(journal(), { collectionId: 21 });
-        expect(itemSaverCtor).toHaveBeenLastCalledWith(expect.objectContaining({ collections: false }));
+        expect(saved.setCollections).not.toHaveBeenCalled();
     });
 
     it('does not duplicate a collection already in the approved memberships', async () => {
         mocks.recheckExistingCollections.mockReturnValue([{ collection: { id: 20 }, collectionId: 'u-C', key: 'C' }]);
         await writeImportItem(journal({ collection_ids: ['u-C'] }), { collectionId: 20 });
-        expect(itemSaverCtor).toHaveBeenCalledWith(expect.objectContaining({ collections: [20] }));
+        expect(saved.setCollections).toHaveBeenCalledWith([20]);
     });
 
-    it('fails without writing when ItemSaver is unavailable', async () => {
-        apiAvailable.itemSaver = false;
-        await expect(writeImportItem(journal())).rejects.toMatchObject({ code: 'item_import_unsupported' });
-        expect(itemSaverCtor).not.toHaveBeenCalled();
-        expect(saveItems).not.toHaveBeenCalled();
+    it('refuses a standalone note or attachment without writing', async () => {
+        await expect(writeImportItem(journal({ item: { itemType: 'note', note: 'x' } })))
+            .rejects.toMatchObject({ code: 'invalid_item_type' });
+        await expect(writeImportItem(journal({ item: { itemType: 'attachment' } })))
+            .rejects.toMatchObject({ code: 'invalid_item_type' });
+        expect(itemCtor).not.toHaveBeenCalled();
+        expect(Z.DB.executeTransaction).not.toHaveBeenCalled();
     });
 
-    it('marks ItemSaver unavailable and fails when it breaks like API drift', async () => {
-        const drift = new TypeError('saver.saveItems is not a function');
-        saveItems.mockRejectedValue(drift);
-        await expect(writeImportItem(journal())).rejects.toMatchObject({ code: 'item_import_unsupported' });
-        expect(mocks.markApiUnavailable).toHaveBeenCalledWith('itemSaver', drift);
-    });
-
-    it('propagates a non-drift ItemSaver failure', async () => {
-        saveItems.mockRejectedValue(new Error('database locked'));
+    it('propagates a save failure', async () => {
+        saved.save.mockRejectedValue(new Error('database locked'));
         await expect(writeImportItem(journal())).rejects.toThrow('database locked');
-        expect(mocks.markApiUnavailable).not.toHaveBeenCalled();
     });
 
-    it('fails when the saver returns no item', async () => {
-        saveItems.mockResolvedValue([]);
-        await expect(writeImportItem(journal())).rejects.toThrow('ItemSaver returned no item');
+    it('fills in a translator CURRENT_TIMESTAMP access date', async () => {
+        await writeImportItem(journal({ item: { itemType: 'journalArticle', title: 'Paper', accessDate: 'CURRENT_TIMESTAMP' } }));
+        expect(savedJson().accessDate).toBe('2026-10-01T00:00:00Z');
     });
 
     it('sets an access date for web content only', async () => {
         await writeImportItem(journal({ item: { itemType: 'webpage', title: 'Page' } }));
-        expect(saveItems.mock.calls[0][0][0].accessDate).toBe('2026-10-01T00:00:00Z');
+        expect(savedJson().accessDate).toBe('2026-10-01T00:00:00Z');
 
-        saveItems.mockClear();
+        saved.fromJSON.mockClear();
         await writeImportItem(journal());
-        expect(saveItems.mock.calls[0][0][0]).not.toHaveProperty('accessDate');
+        expect(savedJson()).not.toHaveProperty('accessDate');
 
-        saveItems.mockClear();
+        saved.fromJSON.mockClear();
         await writeImportItem(journal({ snapshot_url: 'https://x.org/r', item: { itemType: 'report', title: 'R' } }));
-        expect(saveItems.mock.calls[0][0][0].accessDate).toBe('2026-10-01T00:00:00Z');
+        expect(savedJson().accessDate).toBe('2026-10-01T00:00:00Z');
     });
 
     it('keeps an access date the item already has', async () => {
         await writeImportItem(journal({ item: { itemType: 'webpage', title: 'Page', accessDate: '2026-09-29' } }));
-        expect(saveItems.mock.calls[0][0][0].accessDate).toBe('2026-09-29');
+        expect(savedJson().accessDate).toBe('2026-09-29');
     });
 });
 
 describe('writeImportItem finishing touches', () => {
     it('saves the action\'s tags as manual tags in the first save', async () => {
         await writeImportItem(journal({ tags: ['reading', '  ', 'to-cite '] }));
-        expect(saveItems.mock.calls[0][0][0].tags).toEqual([
+        expect(savedJson().tags).toEqual([
             { tag: 'reading', type: 0 },
             { tag: 'to-cite', type: 0 },
         ]);
         expect(saved.addTag).not.toHaveBeenCalled();
-        expect(saved.save).not.toHaveBeenCalled();
+        expect(saved.save).toHaveBeenCalledTimes(1);
         expect(saved.saveTx).not.toHaveBeenCalled();
     });
 
@@ -386,7 +400,7 @@ describe('writeImportItem finishing touches', () => {
             item: { itemType: 'journalArticle', title: 'Paper', tags: [{ tag: 'Sociology' }, { tag: 'reading', type: 0 }, { tag: ' ' }] },
             tags: ['reading'],
         }));
-        expect(saveItems.mock.calls[0][0][0].tags).toEqual([
+        expect(savedJson().tags).toEqual([
             { tag: 'Sociology', type: 1 },
             { tag: 'reading', type: 0 },
         ]);
@@ -403,7 +417,7 @@ describe('writeImportItem finishing touches', () => {
             },
             tags: ['reading', 'Caf\u00e9'],
         }));
-        expect(saveItems.mock.calls[0][0][0].tags).toEqual([
+        expect(savedJson().tags).toEqual([
             { tag: 'reading', type: 0 },
             { tag: 'Caf\u00e9', type: 0 },
         ]);
@@ -412,12 +426,12 @@ describe('writeImportItem finishing touches', () => {
     it('drops resolved tags when automatic tags are off, as Zotero does', async () => {
         prefs.automaticTags = false;
         await writeImportItem(journal({ item: { itemType: 'journalArticle', title: 'Paper', tags: [{ tag: 'Sociology' }] } }));
-        expect(saveItems.mock.calls[0][0][0]).not.toHaveProperty('tags');
+        expect(savedJson()).not.toHaveProperty('tags');
     });
 
     it('does not save again when nothing needs stamping', async () => {
         await writeImportItem(journal());
-        expect(saved.save).not.toHaveBeenCalled();
+        expect(saved.save).toHaveBeenCalledTimes(1);
         expect(saved.saveTx).not.toHaveBeenCalled();
     });
 
@@ -425,8 +439,8 @@ describe('writeImportItem finishing touches', () => {
         mocks.stampBeaverProvenanceExtra.mockReturnValue(true);
         await writeImportItem(journal());
         expect(mocks.stampBeaverProvenanceExtra).toHaveBeenCalledWith(saved);
-        expect(Z.DB.executeTransaction).toHaveBeenCalledTimes(1);
-        expect(saved.save).toHaveBeenCalledTimes(1);
+        expect(Z.DB.executeTransaction).toHaveBeenCalledTimes(2);
+        expect(saved.save).toHaveBeenCalledTimes(2);
         expect(saved.saveTx).not.toHaveBeenCalled();
     });
 
@@ -468,7 +482,7 @@ describe('writeImportItem finishing touches', () => {
         const note = { save: vi.fn(async () => {}) };
         await mocks.createProvenanceNote.mock.calls[0][2](note);
         expect(note.save).toHaveBeenCalledTimes(1);
-        expect(Z.DB.executeTransaction).toHaveBeenCalledTimes(1);
+        expect(Z.DB.executeTransaction).toHaveBeenCalledTimes(2);
     });
 
     it('creates no provenance note by default', async () => {
@@ -618,7 +632,7 @@ describe('writeImportItem attachments', () => {
             mocks.locateImportFile.mockResolvedValue({ ok: false, code: 'file_changed', message: 'changed' });
             await expect(writeImportItem(journal({ file: { path: '/home/u/papers/a.pdf' } })))
                 .rejects.toMatchObject({ code: 'file_changed', message: 'changed' });
-            expect(saveItems).not.toHaveBeenCalled();
+            expect(itemCtor).not.toHaveBeenCalled();
         });
 
         it('erases the new item when attaching the file fails', async () => {
@@ -631,20 +645,20 @@ describe('writeImportItem attachments', () => {
 
     it('erases the new item when a step after saving throws', async () => {
         mocks.stampBeaverProvenanceExtra.mockReturnValue(true);
-        saved.save.mockRejectedValue(new Error('stamp save failed'));
+        saved.save.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('stamp save failed'));
         await expect(writeImportItem(journal())).rejects.toThrow('stamp save failed');
         expect(saved.eraseTx).toHaveBeenCalledTimes(1);
     });
 
     it('still reports the original error when cleanup itself fails', async () => {
         mocks.stampBeaverProvenanceExtra.mockReturnValue(true);
-        saved.save.mockRejectedValue(new Error('stamp save failed'));
+        saved.save.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('stamp save failed'));
         saved.eraseTx.mockRejectedValue(new Error('erase failed'));
         await expect(writeImportItem(journal())).rejects.toThrow('stamp save failed');
     });
 
     it('does not erase anything when saving itself fails', async () => {
-        saveItems.mockRejectedValue(new Error('database locked'));
+        saved.save.mockRejectedValue(new Error('database locked'));
         await expect(writeImportItem(journal())).rejects.toThrow('database locked');
         expect(saved.eraseTx).not.toHaveBeenCalled();
     });
@@ -684,7 +698,7 @@ describe('writeImportItem pending resolution (citation-derived actions)', () => 
             })],
             { libraryID: 1, deadlineMs: 20_000, threadId: 't1' },
         );
-        expect(saveItems.mock.calls[0][0][0]).toMatchObject({ title: 'Resolved' });
+        expect(savedJson()).toMatchObject({ title: 'Resolved' });
         expect(saved.setField).toHaveBeenCalledWith('extra', expect.stringContaining('search-result metadata'));
     });
 
@@ -694,7 +708,7 @@ describe('writeImportItem pending resolution (citation-derived actions)', () => 
         const error = await writeImportItem(pending()).catch((caught) => caught);
         expect(error).toBeInstanceOf(ImportItemError);
         expect(error).toMatchObject({ code: 'already_in_library', details: { existing_item: existing } });
-        expect(saveItems).not.toHaveBeenCalled();
+        expect(itemCtor).not.toHaveBeenCalled();
         expect(saved.eraseTx).not.toHaveBeenCalled();
     });
 

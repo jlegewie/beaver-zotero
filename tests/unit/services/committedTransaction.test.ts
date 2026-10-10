@@ -5,7 +5,6 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 import {
     OBSERVER_GRACE_MS,
     runCommittedTransaction,
-    runInterceptedTransaction,
 } from '../../../src/services/committedTransaction';
 import { TimingAccumulator } from '../../../src/utils/timing';
 
@@ -81,112 +80,6 @@ describe('runCommittedTransaction', () => {
         const pending = runCommittedTransaction(async () => 'saved');
         await vi.advanceTimersByTimeAsync(10);
         await expect(pending).resolves.toBe('saved');
-    });
-});
-
-describe('runInterceptedTransaction', () => {
-    /** A saver that opens its transaction synchronously, then does post-transaction work. */
-    function saverThatOpensTransaction(observers: Observers) {
-        const execute = fakeExecuteTransaction(observers);
-        Z.DB = { executeTransaction: execute };
-        const work = vi.fn(async () => 'inner');
-        const start = vi.fn(async () => {
-            await Z.DB.executeTransaction(work);
-            return ['post-transaction value'];
-        });
-        return { execute, work, start };
-    }
-
-    it('returns the value read inside the transaction after the grace period', async () => {
-        const { execute, work, start } = saverThatOpensTransaction(30_000);
-        const timing = new TimingAccumulator();
-        const pending = runInterceptedTransaction(start, async (inner) => {
-            const result = await inner();
-            return `created after ${result}`;
-        }, { timing });
-        await vi.advanceTimersByTimeAsync(OBSERVER_GRACE_MS);
-        await expect(pending).resolves.toEqual({ intercepted: true, value: 'created after inner' });
-        expect(work).toHaveBeenCalledTimes(1);
-        expect(timing.get('observers_deferred')).toBe(1);
-        // The intercept is one-shot: later transactions use Zotero's own function.
-        expect(Z.DB.executeTransaction).toBe(execute);
-    });
-
-    it('keeps the transaction work\'s own return value for the saver', async () => {
-        const execute = fakeExecuteTransaction(0);
-        Z.DB = { executeTransaction: execute };
-        let seenByCaller: unknown;
-        const start = async () => {
-            seenByCaller = await Z.DB.executeTransaction(async () => 'inner result');
-            return [];
-        };
-        const pending = runInterceptedTransaction(start, async (inner) => { await inner(); return 'outer'; });
-        await vi.advanceTimersByTimeAsync(0);
-        await pending;
-        expect(seenByCaller).toBe('inner result');
-    });
-
-    it('chains an onCommit callback the caller passed to Zotero', async () => {
-        const execute = fakeExecuteTransaction(0);
-        Z.DB = { executeTransaction: execute };
-        const onCommit = vi.fn();
-        const start = async () => {
-            await Z.DB.executeTransaction(async () => {}, { onCommit });
-            return [];
-        };
-        const pending = runInterceptedTransaction(start, async (inner) => inner());
-        await vi.advanceTimersByTimeAsync(0);
-        await pending;
-        expect(onCommit).toHaveBeenCalledWith('tx');
-    });
-
-    it('falls back to awaiting start in full when no transaction opens synchronously', async () => {
-        const execute = fakeExecuteTransaction(0);
-        Z.DB = { executeTransaction: execute };
-        const inside = vi.fn();
-        const start = async () => {
-            await Promise.resolve();
-            await Z.DB.executeTransaction(async () => {});
-            return ['items'];
-        };
-        const pending = runInterceptedTransaction(start, inside);
-        await vi.advanceTimersByTimeAsync(0);
-        await expect(pending).resolves.toEqual({ intercepted: false, startValue: ['items'] });
-        expect(inside).not.toHaveBeenCalled();
-        expect(Z.DB.executeTransaction).toBe(execute);
-    });
-
-    it('leaves Zotero\'s prototype method in place, without an own property, after intercepting', async () => {
-        const execute = fakeExecuteTransaction(0);
-        class FakeDB {}
-        (FakeDB.prototype as any).executeTransaction = execute;
-        Z.DB = new FakeDB();
-        const start = async () => { await Z.DB.executeTransaction(async () => {}); return []; };
-        const pending = runInterceptedTransaction(start, async (inner) => inner());
-        await vi.advanceTimersByTimeAsync(0);
-        await pending;
-        expect(Object.prototype.hasOwnProperty.call(Z.DB, 'executeTransaction')).toBe(false);
-        expect(Z.DB.executeTransaction).toBe(execute);
-
-        const fallback = runInterceptedTransaction(async () => [], async () => null);
-        await vi.advanceTimersByTimeAsync(0);
-        await fallback;
-        expect(Object.prototype.hasOwnProperty.call(Z.DB, 'executeTransaction')).toBe(false);
-    });
-
-    it('restores Zotero\'s function when start throws synchronously', async () => {
-        const execute = fakeExecuteTransaction(0);
-        Z.DB = { executeTransaction: execute };
-        const start = () => { throw new TypeError('saveItems is not a function'); };
-        await expect(runInterceptedTransaction(start as any, async () => null)).rejects.toThrow(TypeError);
-        expect(Z.DB.executeTransaction).toBe(execute);
-    });
-
-    it('propagates a rolled-back transaction', async () => {
-        const execute = fakeExecuteTransaction(0);
-        Z.DB = { executeTransaction: execute };
-        const start = async () => Z.DB.executeTransaction(async () => { throw new Error('database locked'); });
-        await expect(runInterceptedTransaction(start, async (inner) => inner())).rejects.toThrow('database locked');
     });
 });
 

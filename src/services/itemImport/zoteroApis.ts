@@ -22,7 +22,6 @@ import { getSystemTimers } from '../../utils/systemTimers';
 export type ZoteroApiName =
     | 'translateSearch'
     | 'remoteTranslate'
-    | 'itemSaver'
     | 'pdfRecognizerData'
     | 'recognizerService'
     | 'epub'
@@ -38,7 +37,6 @@ export interface ZoteroApiStatus {
 const API_NAMES: ZoteroApiName[] = [
     'translateSearch',
     'remoteTranslate',
-    'itemSaver',
     'pdfRecognizerData',
     'recognizerService',
     'epub',
@@ -92,12 +90,6 @@ function probe(name: ZoteroApiName): ZoteroApiStatus {
             return fn(remote?.RemoteTranslate) && fn(hidden?.HiddenBrowser)
                 ? { available: true }
                 : { available: false, reason: 'RemoteTranslate.mjs / HiddenBrowser.mjs did not import' };
-        }
-        case 'itemSaver': {
-            const saver = Z.Translate?.ItemSaver;
-            return fn(saver) && fn(saver.prototype?.saveItems) && typeof saver.ATTACHMENT_MODE_IGNORE === 'number'
-                ? { available: true }
-                : { available: false, reason: 'Zotero.Translate.ItemSaver is missing saveItems or ATTACHMENT_MODE_IGNORE' };
         }
         case 'pdfRecognizerData':
             return fn(Z.PDFWorker?._enqueue) && fn(Z.PDFWorker?._query)
