@@ -50,14 +50,6 @@ describe('API probes', () => {
         expect(isApiAvailable('translateSearch')).toBe(true);
     });
 
-    it('requires saveItems and a numeric ATTACHMENT_MODE_IGNORE for itemSaver', () => {
-        Z.Translate = { ItemSaver: class { saveItems() {} } };
-        expect(isApiAvailable('itemSaver')).toBe(false);
-        resetZoteroApiProbes();
-        Z.Translate = { ItemSaver: Object.assign(class { saveItems() {} }, { ATTACHMENT_MODE_IGNORE: 0 }) };
-        expect(isApiAvailable('itemSaver')).toBe(true);
-    });
-
     it('reports the PDF worker and attachment helpers unavailable when absent', () => {
         Z.PDFWorker = undefined;
         Z.Attachments = {};
@@ -93,7 +85,7 @@ describe('API probes', () => {
     it('probes every API for the capabilities report', () => {
         const all = probeAllZoteroApis();
         expect(Object.keys(all).sort()).toEqual([
-            'attachmentRename', 'epub', 'importFromDocument', 'itemSaver', 'pdfRecognizerData',
+            'attachmentRename', 'epub', 'importFromDocument', 'pdfRecognizerData',
             'recognizerService', 'rdfImport', 'remoteTranslate', 'translateSearch',
         ].sort());
         for (const status of Object.values(all)) expect(typeof status.available).toBe('boolean');

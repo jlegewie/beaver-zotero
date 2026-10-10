@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
     resolveCollectionMemberships: vi.fn(),
     writeImportItem: vi.fn(),
     resolve: vi.fn(),
-    canSave: vi.fn(),
     describeActiveAddons: vi.fn(),
 }));
 
@@ -71,14 +70,13 @@ beforeEach(() => {
     Z.Beaver = {
         libraryScopeInitialized: true,
         searchableLibraryIds: [1, 7],
-        itemImport: { resolve: mocks.resolve, canSave: mocks.canSave },
+        itemImport: { resolve: mocks.resolve },
     };
     Z.Libraries.get = vi.fn(() => libraryInfo);
     mocks.resolveWriteTargetLibrary.mockReturnValue({ ok: true, libraryID: 1 });
     mocks.resolveCollectionMemberships.mockReturnValue([]);
     mocks.getDeferredToolPreference.mockReturnValue('always_ask');
     mocks.checkLibraryExcluded.mockReturnValue(null);
-    mocks.canSave.mockReturnValue(true);
     mocks.resolve.mockResolvedValue([{ key: 'a', status: 'resolved', item: { itemType: 'book', title: 'T' } }]);
 });
 
@@ -139,13 +137,6 @@ describe('validateImportItemsAction', () => {
         const response = await validateImportItemsAction(validateRequest({ items: [spec('a')] }));
         expect(response).toMatchObject({ valid: false, error_code: 'library_not_searchable' });
         expect(JSON.stringify(response)).not.toContain('SECRET01');
-    });
-
-    it('fails before resolving when this Zotero version cannot save items', async () => {
-        mocks.canSave.mockReturnValue(false);
-        expect(await validateImportItemsAction(validateRequest({ items: [spec('a')] })))
-            .toMatchObject({ valid: false, error_code: 'item_import_unsupported' });
-        expect(mocks.resolve).not.toHaveBeenCalled();
     });
 
     it('fails clearly when the plugin-realm import service is missing', async () => {

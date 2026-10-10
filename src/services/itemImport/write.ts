@@ -30,7 +30,7 @@ import type { TimingAccumulator } from '../../utils/timing';
 import type { AttachmentResolvedPayload } from '../attachmentResolved';
 import { assertLibraryWritable, recheckExistingCollections } from '../collections/collectionMutations';
 import { coordinateLibraryMutation } from '../libraryMutations';
-import { runCommittedTransaction, runInterceptedTransaction } from '../committedTransaction';
+import { runCommittedTransaction } from '../committedTransaction';
 import { isPdfDocument } from '../../utils/attachmentFiles';
 import { WEB_CONTENT_ITEM_TYPES } from './duplicates';
 import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
@@ -115,13 +115,14 @@ async function resolvePending(data: ImportItemProposedData, libraryID: number, t
     return resolved;
 }
 
-const SAVE_UNSUPPORTED_MESSAGE = 'Saving imported items is not supported in this Zotero version.';
+/** Fields an import never sets: Zotero assigns them, or they are saved separately. */
+const IMPORT_IGNORED_FIELDS = ['attachments', 'notes', 'dateAdded', 'dateModified', 'seeAlso', 'version', 'id', 'itemID', 'key', 'path'];
 
 /**
- * Tags for the saved JSON. Resolved tags become automatic, as `ItemSaver`'s
- * `forceTagType: 1` would make them (and are dropped when the user turned
- * automatic tags off); the action's tags are manual and replace an automatic
- * tag of the same name, as `item.addTag(name, 0)` would.
+ * Tags for the saved JSON. Resolved tags become automatic, as Zotero's
+ * translator import makes them (and are dropped when the user turned automatic
+ * tags off); the action's tags are manual and replace an automatic tag of the
+ * same name, as `item.addTag(name, 0)` would.
  *
  * Names are compared as Zotero stores them (trimmed, NFC-normalized): two
  * entries that differ only before that cleanup would otherwise both reach the
@@ -141,24 +142,13 @@ function tagsForSave(resolved: ZoteroItemJson['tags'], manual: string[] | undefi
     return [...tags].map(([tag, type]) => ({ tag, type }));
 }
 
-/** The top-level item among the IDs a save created. */
-function savedTopLevelItem(itemIDs: number[]): Zotero.Item | undefined {
-    return itemIDs
-        .map((id) => Zotero.Items.get(id) as Zotero.Item | false)
-        .find((item): item is Zotero.Item => !!item && !item.isNote() && !item.isAttachment() && !item.parentID);
-}
-
 /**
- * Save item JSON with Zotero's own saver (creators, notes, automatic tags),
- * attachments ignored, in one transaction that also carries the action's
- * manual tags. `ItemSaver` is what Zotero uses for every translator result, so
- * there is no hand-written fallback: if it is missing or has changed, the
- * import fails without writing anything.
+ * Save item JSON the way Zotero saves a translator result (creators, child
+ * notes, automatic tags), attachments ignored, in one transaction that also
+ * carries the action's manual tags.
  *
  * The save returns once it has committed, without waiting long for other
- * plugins' Notifier observers (see `runInterceptedTransaction`). The created
- * item is identified inside the transaction, as the top-level item above the
- * highest item ID before the save.
+ * plugins' Notifier observers (see `runCommittedTransaction`).
  */
 async function saveItemJson(
     json: ZoteroItemJson,
@@ -167,42 +157,39 @@ async function saveItemJson(
     manualTags: string[] | undefined,
     timing: TimingAccumulator | undefined,
 ): Promise<Zotero.Item> {
-    if (!isApiAvailable('itemSaver')) throw new ImportItemError('item_import_unsupported', SAVE_UNSUPPORTED_MESSAGE);
-    const clone = JSON.parse(JSON.stringify(json));
-    const tags = tagsForSave(clone.tags, manualTags);
-    if (tags.length) clone.tags = tags;
-    else delete clone.tags;
-    let item: Zotero.Item | undefined;
-    try {
-        const ItemSaver = (Zotero as any).Translate.ItemSaver;
-        const saver = new ItemSaver({
-            libraryID,
-            collections: collectionIDs.length ? collectionIDs : false,
-            attachmentMode: ItemSaver.ATTACHMENT_MODE_IGNORE,
-        });
-        const outcome = await runInterceptedTransaction(
-            () => saver.saveItems([clone], () => {}, () => {}) as Promise<Zotero.Item[]>,
-            async (work) => {
-                const lastID = Number(await Zotero.DB.valueQueryAsync('SELECT COALESCE(MAX(itemID), 0) FROM items'));
-                await work();
-                const created = await Zotero.DB.columnQueryAsync(
-                    'SELECT itemID FROM items WHERE itemID > ? AND libraryID = ?',
-                    [lastID, libraryID],
-                );
-                return savedTopLevelItem((created ?? []).map(Number));
-            },
-            { timing, label: 'import_item save' },
-        );
-        item = outcome.intercepted
-            ? outcome.value
-            : outcome.startValue?.find((candidate) => candidate && !candidate.isNote?.());
-    } catch (error) {
-        if (!looksLikeApiDrift(error)) throw error;
-        markApiUnavailable('itemSaver', error);
-        throw new ImportItemError('item_import_unsupported', SAVE_UNSUPPORTED_MESSAGE);
+    if (json.itemType === 'note' || json.itemType === 'attachment') {
+        throw new ImportItemError('invalid_item_type', `Cannot import a standalone ${json.itemType}.`);
     }
-    if (!item) throw new Error('ItemSaver returned no item');
-    return item;
+    const fields = JSON.parse(JSON.stringify(json)) as ZoteroItemJson;
+    const notes = Array.isArray(fields.notes) ? fields.notes : [];
+    for (const name of IMPORT_IGNORED_FIELDS) delete fields[name];
+    for (const creator of fields.creators ?? []) {
+        if (!creator.creatorType) creator.creatorType = 'author';
+    }
+    if (fields.accessDate === 'CURRENT_TIMESTAMP') fields.accessDate = (Zotero.Date as any).dateToISO(new Date());
+    const tags = tagsForSave(fields.tags, manualTags);
+    if (tags.length) fields.tags = tags;
+    else delete fields.tags;
+
+    return runCommittedTransaction(async () => {
+        const item = new Zotero.Item(fields.itemType as any);
+        item.libraryID = libraryID;
+        item.fromJSON(fields);
+        if (collectionIDs.length) item.setCollections(collectionIDs);
+        await item.save();
+        for (const note of notes) {
+            const text = typeof note === 'string' ? note : note?.note;
+            if (typeof text !== 'string') continue;
+            const child = new Zotero.Item('note');
+            child.libraryID = libraryID;
+            child.parentID = item.id;
+            child.setNote(text);
+            const noteTags = typeof note === 'object' ? tagsForSave((note as { tags?: ZoteroItemJson['tags'] }).tags, undefined) : [];
+            if (noteTags.length) child.setTags(noteTags);
+            await child.save();
+        }
+        return item;
+    }, { timing, label: 'import_item save' });
 }
 
 /** Attach the input file as a child of `parent`, renamed the way Zotero renames on import. */
