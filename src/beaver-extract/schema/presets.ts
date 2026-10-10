@@ -78,15 +78,39 @@ export interface PdfExtractionPreset {
     /**
      * Margin page-number detection also accepts runs of page numbers that
      * advance with the page index, so stray numerals in the zone, numbering
-     * restarts, or another zone's matching page numbers don't hide them. See
-     * `MarginFilter.identifyElementsToRemove`.
+     * restarts, or another zone's matching page numbers don't hide them; and a
+     * zone's increasing numbers count as page numbers only when they advance
+     * with the pages, removing only each page's own number (a contents page
+     * keeps its page references). See `MarginFilter.identifyElementsToRemove`.
      */
     pageNumberRuns: boolean;
+    /**
+     * Line detection reads each raw line in one column only, so text inside
+     * two overlapping column boxes is not emitted twice
+     * (`ParagraphDetectionSettings.exclusiveColumnLines`).
+     */
+    exclusiveColumnLines: boolean;
+    /**
+     * Line breaks inside an item follow `decideLineJoin` (`lineJoins.ts`) in
+     * both the structured and the markdown text: line-end hyphens decided
+     * from the document's spelling and the word's shape, URLs, DOIs, number
+     * ranges and CJK text joined without a space, soft hyphens removed
+     * (`ParagraphDetectionSettings.lineJoins`).
+     */
+    lineJoins: boolean;
+    /**
+     * Footnote markers glued to text: a footnote's raised lead marker is set
+     * off from its text ("1AI" → "1 AI"), a raised marker glued to a word in
+     * body text is dropped ("context53"), and a body sentence continues past
+     * the footnotes that sit between columns
+     * (`ParagraphDetectionSettings.noteMarkers`).
+     */
+    noteMarkers: boolean;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, exclusiveColumnLines: false, lineJoins: false, noteMarkers: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, exclusiveColumnLines: true, lineJoins: true, noteMarkers: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

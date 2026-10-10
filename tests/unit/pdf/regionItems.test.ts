@@ -1587,6 +1587,17 @@ describe("placeRegionItems", () => {
         expect(stacked.items.map((i) => i.text)).toEqual(["x = 1", "y = 2", "Figure 1."]);
     });
 
+    it("never separates a sentence from its continuation past the column's footnotes", () => {
+        // The left column ends mid-sentence above its footnote; the sentence
+        // goes on at the top of the right column, under a figure.
+        const body = textItem(0, [72, 80, 290, 600], ["Starts here and"], true);
+        const note = { ...textItem(1, [72, 650, 290, 700], ["1 A note."]), kind: "footnote" } as DocItem;
+        const items = [body, note, textItem(2, [320, 450, 540, 520], ["goes on here."])];
+        const fig = draft("picture", [320, 80, 540, 400]);
+        const out = placeRegionItems(0, items, [fig]);
+        expect(out.items.map((i) => i.kind)).toEqual(["text", "footnote", "text", "picture"]);
+    });
+
     it("never separates a sentence from its continuation in the next item", () => {
         const items = [textItem(0, [72, 80, 290, 700], ["Starts here and"], true), right[0], right[1]];
         const fig = draft("picture", [320, 20, 540, 60]);

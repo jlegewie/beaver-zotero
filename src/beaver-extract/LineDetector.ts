@@ -47,6 +47,12 @@ export interface DetectedSpan {
     fontStyle?: string;
     /** Per-glyph style runs of the source line, when recorded (see `RawLine.styleRuns`) */
     styleRuns?: RawStyleRun[];
+    /**
+     * The source line's text ends in whitespace (trimmed from `text`): the
+     * PDF set a space after its last word, so a break after it falls between
+     * words (see `decideLineJoin`).
+     */
+    trailingSpace?: true;
 }
 
 /**
@@ -104,6 +110,13 @@ export interface LineDetectionOptions {
     gapMultiplier?: number;
     /** Minimum overlap ratio for span to belong to column (default: 0.5) */
     minColumnOverlap?: number;
+    /**
+     * Give each raw line to one column only when column boxes overlap (see
+     * `lineColumnOwners`; default: false). Without it a
+     * line inside two column boxes is read in both, and its text appears
+     * twice. Enabled by the PDF schema preset.
+     */
+    exclusiveColumns?: boolean;
 }
 
 const DEFAULT_OPTIONS: Required<LineDetectionOptions> = {
@@ -111,6 +124,7 @@ const DEFAULT_OPTIONS: Required<LineDetectionOptions> = {
     overlapThreshold: 0.5,
     gapMultiplier: 5.0,
     minColumnOverlap: 0.5,
+    exclusiveColumns: false,
 };
 
 // ============================================================================
@@ -180,7 +194,8 @@ function cleanText(text: string): string {
 function extractSpansInColumn(
     page: RawPageData,
     column: Rect,
-    minOverlap: number
+    minOverlap: number,
+    owner?: { columnOf: Map<RawLine, number>; columnIndex: number },
 ): DetectedSpan[] {
     const spans: DetectedSpan[] = [];
 
@@ -192,6 +207,7 @@ function extractSpansInColumn(
             if (calculateColumnOverlap(line.bbox, column) < minOverlap) {
                 continue;
             }
+            if (owner && owner.columnOf.get(line) !== owner.columnIndex) continue;
 
             const text = cleanText(line.text || "");
             if (!text) continue;
@@ -205,6 +221,7 @@ function extractSpansInColumn(
                 fontWeight: line.font?.weight,
                 fontStyle: line.font?.style,
                 styleRuns: line.styleRuns,
+                ...(/\s$/u.test(line.text) ? { trailingSpace: true as const } : {}),
             });
         }
     }
@@ -499,12 +516,18 @@ export function detectLinesInColumn(
     page: RawPageData,
     column: Rect,
     columnIndex: number,
-    options: LineDetectionOptions = {}
+    options: LineDetectionOptions = {},
+    columnOf?: Map<RawLine, number>,
 ): ColumnLineResult {
     const opts = { ...DEFAULT_OPTIONS, ...options };
 
     // Step 1: Extract spans in column
-    let spans = extractSpansInColumn(page, column, opts.minColumnOverlap);
+    let spans = extractSpansInColumn(
+        page,
+        column,
+        opts.minColumnOverlap,
+        columnOf ? { columnOf, columnIndex } : undefined,
+    );
 
     if (spans.length === 0) {
         return {
@@ -540,6 +563,80 @@ export function detectLinesInColumn(
 }
 
 /**
+ * Whether the smaller of two overlapping column boxes, `inner`, is a column
+ * of its own: text of `outer` that `inner` lacks sits beside `inner`'s lines
+ * on their rows, across a gutter (a real column under a box that spans the
+ * page). When such text comes within half an em of one of `inner`'s lines,
+ * `inner` is a piece cut out of `outer`'s rows (a superscript, the second
+ * half of a wrapped title, the middle of rows MuPDF split into touching
+ * pieces); when there is none, `inner` is a run of `outer`'s rows.
+ */
+function isColumnBeside(innerLines: RawLine[], outerLines: RawLine[]): boolean {
+    const inner = new Set(innerLines);
+    let beside = false;
+    for (const b of outerLines) {
+        if (inner.has(b)) continue;
+        for (const a of innerLines) {
+            const minH = Math.min(bboxHeight(a.bbox), bboxHeight(b.bbox));
+            const overlapY = Math.min(a.bbox.b, b.bbox.b) - Math.max(a.bbox.t, b.bbox.t);
+            if (!(minH > 0) || overlapY < 0.5 * minH) continue;
+            const em = Math.min(a.font?.size || 0.7 * bboxHeight(a.bbox), b.font?.size || 0.7 * bboxHeight(b.bbox));
+            const gap = Math.max(b.bbox.l - a.bbox.r, a.bbox.l - b.bbox.r);
+            if (gap <= 0.5 * em) return false;
+            beside = true;
+        }
+    }
+    return beside;
+}
+
+/**
+ * The column each raw line is read in, when column boxes overlap and a line
+ * lies in two of them: the smaller box when it is a column of its own (see
+ * `isColumnBeside`), the larger box otherwise (it holds the paragraph the
+ * smaller one is a piece of).
+ */
+function lineColumnOwners(
+    page: RawPageData,
+    columns: Rect[],
+    minOverlap: number,
+): Map<RawLine, number> {
+    const candidates = new Map<RawLine, number[]>();
+    const members: RawLine[][] = columns.map(() => []);
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) {
+            const inColumns: number[] = [];
+            for (let i = 0; i < columns.length; i++) {
+                if (calculateColumnOverlap(line.bbox, columns[i]) < minOverlap) continue;
+                inColumns.push(i);
+                members[i].push(line);
+            }
+            candidates.set(line, inColumns);
+        }
+    }
+    const area = (i: number) => columns[i].w * columns[i].h;
+    const preferred = new Map<string, number>();
+    const prefer = (i: number, j: number): number => {
+        const key = `${i}|${j}`;
+        let winner = preferred.get(key);
+        if (winner === undefined) {
+            const [small, large] = area(j) < area(i) ? [j, i] : [i, j];
+            winner = isColumnBeside(members[small], members[large]) ? small : large;
+            preferred.set(key, winner);
+        }
+        return winner;
+    };
+    const owners = new Map<RawLine, number>();
+    for (const [line, inColumns] of candidates) {
+        if (inColumns.length === 0) continue;
+        let best = inColumns[0];
+        for (const i of inColumns.slice(1)) best = prefer(best, i);
+        owners.set(line, best);
+    }
+    return owners;
+}
+
+/**
  * Detect lines for all columns on a page
  */
 export function detectLinesOnPage(
@@ -549,9 +646,12 @@ export function detectLinesOnPage(
 ): PageLineResult {
     const columnResults: ColumnLineResult[] = [];
     const allLines: PageLine[] = [];
+    const columnOf = options.exclusiveColumns
+        ? lineColumnOwners(page, columns, options.minColumnOverlap ?? DEFAULT_OPTIONS.minColumnOverlap)
+        : undefined;
 
     for (let i = 0; i < columns.length; i++) {
-        const result = detectLinesInColumn(page, columns[i], i, options);
+        const result = detectLinesInColumn(page, columns[i], i, options, columnOf);
         columnResults.push(result);
         allLines.push(...result.lines);
     }

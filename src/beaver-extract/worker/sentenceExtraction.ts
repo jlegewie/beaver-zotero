@@ -39,11 +39,11 @@
  */
 
 import {
-    collectHyphenatedCompounds,
     extractPageSentences,
 } from "../ParagraphSentenceMapper";
 import type { PageSentenceResult } from "../ParagraphSentenceMapper";
 import { resolveAnalysisPages } from "../AnalysisWindow";
+import { addBlockToVocabulary, LineJoinVocabulary } from "../lineJoins";
 import {
     detectFilteredParagraphs,
     marginItemsForLines,
@@ -118,6 +118,8 @@ export interface PageSentenceArgs {
     marginZone: MarginSettings;
     /** Match margin text rows rather than single lines (default true). */
     marginTextRows?: boolean;
+    /** Keep the words of justified prose rows (`FilteredParagraphContext.marginProseRows`). */
+    marginProseRows?: boolean;
     /**
      * Whether to probe the PDF graphics layer for tinted display
      * containers (`fill_path` events) on this page. See
@@ -231,7 +233,9 @@ export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
         margins: args.margins,
         marginZone: args.marginZone,
         marginTextRows: args.marginTextRows,
+        marginProseRows: args.marginProseRows,
         paragraphSettings: args.paragraphSettings,
+        compoundVocabulary: args.compoundVocabulary,
         fillBoundaries,
         dividerLines,
         regionBarriers: args.regionItems?.map((region) => ({
@@ -369,12 +373,12 @@ export function extractSentencesForPage(args: PageSentenceArgs): {
  */
 export function buildCompoundVocabulary(
     pages: readonly RawPageData[],
-): Set<string> {
-    const vocabulary = new Set<string>();
+): LineJoinVocabulary {
+    const vocabulary = new LineJoinVocabulary();
     for (const page of pages) {
         for (const block of page.blocks) {
             if (block.type !== "text" || !block.lines) continue;
-            collectHyphenatedCompounds(
+            addBlockToVocabulary(
                 block.lines.map((line) => line.text),
                 vocabulary,
             );
@@ -524,6 +528,7 @@ export async function runSentenceExtractionFromDoc(
             margins,
             marginZone,
             paragraphSettings,
+            compoundVocabulary,
             fillBoundaries,
             dividerLines,
         });

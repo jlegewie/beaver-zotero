@@ -513,8 +513,9 @@ export interface SentenceItem {
         bbox: BoundingBox;
     }>;
     /**
-     * Hint that this sentence is continued by the *next* sentence in reading
-     * order. Omitted means false.
+     * Hint that this sentence is continued by the *next* sentence of body text
+     * in reading order. Footnote items between the two (notes under a column
+     * that the sentence continues past) don't count. Omitted means false.
      */
     joinWithNext?: boolean;
 }

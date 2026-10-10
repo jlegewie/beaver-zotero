@@ -1995,3 +1995,126 @@ describe("smart removal on word-split rows", () => {
         expect(keptText(pages[3], removal)).not.toContain("Working Paper");
     });
 });
+
+describe("justified prose rows split word by word (PDF schema 5)", () => {
+    // A justified line stretches its word spaces, and some PDFs come out of
+    // MuPDF with each word as a line of its own, too far apart to join into a
+    // row. Common words of such rows in a margin zone recur like a running
+    // head would.
+    const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    /** Words two em (18pt at 9pt) apart, starting at `x`. */
+    function justified(words: string[], x: number, y: number): RawLine[] {
+        let cursor = x;
+        return words.map((word) => {
+            const w = word.length * 5;
+            const line = makeStyledLine(word, cursor, y, w, "Times-Roman", 9);
+            cursor += w + 18;
+            return line;
+        });
+    }
+
+    function buildPages(): RawPageData[] {
+        const subjects = ["climate", "water", "heat", "health"];
+        return subjects.map((subject, pageIndex) => ({
+            ...makePageWithLines([
+                makeStyledLine("Review", 280, 30, 30, "Times-Roman", 9),
+                ...justified(["how", subject, "is", "impacting", "the"], 100, 60),
+                // A row with a single word, as the last line of a paragraph.
+                makeStyledLine("the", 100, 72, 15, "Times-Roman", 9),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+    }
+
+    function keptText(page: RawPageData, removal: MarginRemovalResult, proseRows: boolean): string[] {
+        return MarginFilter.filterPageWithSmartRemoval(page, margins, zone, removal, undefined, undefined, true, proseRows)
+            .blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text.trim()));
+    }
+
+    it("does not count the words of a justified prose row as margin elements", () => {
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(buildPages(), zone), 3);
+        expect(removal.candidates.map((c) => c.text)).toEqual(["review"]);
+    });
+
+    it("keeps the words of a justified prose row and removes the running head", () => {
+        const pages = buildPages();
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        const kept = keptText(pages[1], removal, true);
+        expect(kept).not.toContain("Review");
+        expect(kept).toEqual(["how", "water", "is", "impacting", "the", "the"]);
+    });
+
+    it("spares a prose word that matches a running head elsewhere", () => {
+        const pages = buildPages();
+        // "is" is a repeat candidate from the other pages' single-word rows.
+        const removal: MarginRemovalResult = {
+            candidates: [{ text: "is", originalText: "is", pageIndices: [0, 2, 3], reason: "repeat", position: "top" }],
+            textsToRemove: new Set(["is"]),
+            removalsByPage: new Map([[1, new Set(["is"])]]),
+        };
+        expect(keptText(pages[1], removal, true)).toContain("is");
+    });
+
+    it("still removes a lowercase running head set in a block of its own", () => {
+        const pages = buildPages().map((page) => ({
+            ...page,
+            blocks: [
+                ...page.blocks,
+                { type: "text" as const, bbox: bboxFromXYWH(500, 30, 30, 9, "top-left"), lines: [makeStyledLine("nature", 500, 30, 30, "Times-Roman", 9)] },
+            ],
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        expect(removal.candidates.map((c) => c.text)).toContain("nature");
+        expect(keptText(pages[1], removal, true)).not.toContain("nature");
+    });
+
+    it("leaves single-line matching as it was with text rows off (PDF schema 4)", () => {
+        const removal = MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements(buildPages(), zone, false),
+            3,
+        );
+        expect(removal.candidates.map((c) => c.text)).toEqual(expect.arrayContaining(["the", "is", "how"]));
+    });
+});
+
+describe("page numbers that advance with the pages (PDF schema 5)", () => {
+    // A contents page lists page references in its margin; they increase
+    // from page to page too, but by far more than one per page.
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    function buildPages(): RawPageData[] {
+        const references = [[15, 19, 22], [95, 102, 137], [255, 260, 264], [351, 352, 358]];
+        return references.map((refs, pageIndex) => ({
+            ...makePageWithLines([
+                makeStyledLine(`${pageIndex + 8}`, 20, 20, 10, "Times-Roman", 9),
+                // A contents entry high on the page, its page reference in the top zone.
+                makeStyledLine(["Introduction", "Methods", "Results", "Discussion"][pageIndex], 100, 50, 60, "Times-Roman", 9),
+                makeStyledLine(`${refs[0] - 2}`, 300, 50, 12, "Times-Roman", 9),
+                ...refs.map((ref, k) => makeStyledLine(`${ref}`, PAGE_W - 40, 200 + 20 * k, 15, "Times-Roman", 9)),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+    }
+
+    function removed(pageNumberRuns: boolean): string[] {
+        const removal = MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements(buildPages(), zone),
+            3,
+            true,
+            pageNumberRuns,
+        );
+        return [...(removal.removalsByPage.get(1) ?? [])].sort();
+    }
+
+    it("removes each page's own number and keeps the contents page references", () => {
+        expect(removed(true)).toEqual(["9"]);
+    });
+
+    it("removes every number of the zone with page-number runs off (PDF schema 4)", () => {
+        expect(removed(false)).toEqual(["102", "137", "9", "93", "95"]);
+    });
+});

@@ -85,8 +85,19 @@ export interface FilteredParagraphContext {
     detectPageSequences?: boolean;
     /** Match margin text rows rather than single lines (`ExtractionSettings.marginTextRows`). */
     marginTextRows?: boolean;
+    /**
+     * Keep the words of justified prose rows when filtering the target page
+     * (`MarginFilter.filterPageWithSmartRemoval`'s `proseRows`). Follows
+     * `marginTextRows` when omitted, and is off when both are.
+     */
+    marginProseRows?: boolean;
     /** Forwarded to `detectParagraphs`. */
     paragraphSettings?: ParagraphDetectionSettings;
+    /**
+     * The document's line-break vocabulary (`buildCompoundVocabulary`), for
+     * joining item lines when `paragraphSettings.lineJoins` is on.
+     */
+    compoundVocabulary?: ReadonlySet<string>;
     /**
      * Bounding boxes of background-shaded display elements on the target
      * page (see `ColumnDetectionOptions.fillBoundaries`). When supplied,
@@ -274,6 +285,7 @@ export function detectFilteredParagraphs(
         styleProfile.bodyStyles,
         styleProfile.primaryBodyStyle,
         ctx.marginTextRows ?? true,
+        ctx.marginProseRows ?? ctx.marginTextRows ?? false,
     );
     const marginFilterMs = performance.now() - tMarginFilter;
     const uprightMarginItems = collectMarginItemsFromFilteredPage(
@@ -402,7 +414,9 @@ export function detectFilteredParagraphs(
 
     if (columnResult.columns.length > 0) {
         const tLineDetect = performance.now();
-        lineResult = detectLinesOnPage(filteredPage, columnResult.columns);
+        lineResult = detectLinesOnPage(filteredPage, columnResult.columns, {
+            exclusiveColumns: ctx.paragraphSettings?.exclusiveColumnLines ?? false,
+        });
         lineDetectMs = performance.now() - tLineDetect;
         logLineDetection(lineResult);
         if (lineResult.allLines.length > 0) {
@@ -410,7 +424,9 @@ export function detectFilteredParagraphs(
             paragraphResult = detectParagraphs(
                 lineResult,
                 styleProfile.bodyStyles,
-                ctx.paragraphSettings ?? {},
+                ctx.compoundVocabulary
+                    ? { ...ctx.paragraphSettings, lineJoinVocabulary: ctx.compoundVocabulary }
+                    : ctx.paragraphSettings ?? {},
                 { paragraph: 0, header: 0 },
                 { trackItemLines: true },
             );
@@ -481,6 +497,7 @@ export function marginFilteredLines(
         ctx.styleProfile.bodyStyles,
         ctx.styleProfile.primaryBodyStyle,
         ctx.marginTextRows ?? true,
+        ctx.marginTextRows ?? false,
     );
     const marginZone = ctx.marginZone ?? DEFAULT_MARGIN_ZONE;
     const kept = new Set<RawLine>();
@@ -577,6 +594,7 @@ export function documentBodyExtents(
             ctx.styleProfile.bodyStyles,
             ctx.styleProfile.primaryBodyStyle,
             ctx.marginTextRows ?? true,
+            ctx.marginTextRows ?? false,
         );
         let top = Infinity;
         let bottom = -Infinity;
