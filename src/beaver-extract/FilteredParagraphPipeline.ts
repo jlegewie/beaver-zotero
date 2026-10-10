@@ -14,6 +14,7 @@ import { detectLinesOnPage, logLineDetection, type PageLineResult } from "./Line
 import {
     detectParagraphs,
     logParagraphDetection,
+    type BoundaryCapture,
     type PageParagraphResult,
     type ParagraphDetectionSettings,
 } from "./ParagraphDetector";
@@ -119,6 +120,11 @@ export interface FilteredParagraphContext {
      * orientation is detected on the supplied page.
      */
     pageRotation?: RotationAngle;
+    /**
+     * Receives the item-boundary input of the target page; the region
+     * barriers are its regions (training export only).
+     */
+    boundaries?: Pick<BoundaryCapture, "page">;
 }
 
 /**
@@ -402,7 +408,7 @@ export function detectFilteredParagraphs(
 
     if (columnResult.columns.length > 0) {
         const tLineDetect = performance.now();
-        lineResult = detectLinesOnPage(filteredPage, columnResult.columns);
+        lineResult = detectLinesOnPage(filteredPage, columnResult.columns, { textRotation: pageRotation });
         lineDetectMs = performance.now() - tLineDetect;
         logLineDetection(lineResult);
         if (lineResult.allLines.length > 0) {
@@ -412,7 +418,22 @@ export function detectFilteredParagraphs(
                 styleProfile.bodyStyles,
                 ctx.paragraphSettings ?? {},
                 { paragraph: 0, header: 0 },
-                { trackItemLines: true },
+                {
+                    trackItemLines: true,
+                    ...(ctx.boundaries
+                        ? {
+                              boundaries: {
+                                  regions: regionBarriers.map(({ box }): [number, number, number, number] => [
+                                      box.x,
+                                      box.y,
+                                      box.x + box.w,
+                                      box.y + box.h,
+                                  ]),
+                                  page: ctx.boundaries.page,
+                              },
+                          }
+                        : {}),
+                },
             );
             paragraphDetectMs = performance.now() - tParagraphDetect;
             logParagraphDetection(paragraphResult);

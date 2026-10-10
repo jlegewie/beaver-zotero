@@ -132,8 +132,8 @@ import {
     runItemPasses,
     createItemPasses,
     segmentPages,
-    type RegionPassObserver,
     type StructuredRunContext,
+    type StructuredRunObservers,
 } from "../pipeline/structured";
 
 
@@ -419,7 +419,7 @@ export function runExtractFromIndices(
     pageCache?: PageWalkCache,
     itemPasses: readonly ItemPass[] = [],
     pageNumberRuns = true,
-    regionObserver?: RegionPassObserver,
+    observers: StructuredRunObservers = {},
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
     try {
@@ -567,7 +567,8 @@ export function runExtractFromIndices(
             pageCache,
             paragraphSettings,
             splitter,
-            ...(regionObserver ? { regionObserver } : {}),
+            ...(observers.region ? { regionObserver: observers.region } : {}),
+            ...(observers.boundaries ? { boundaryObserver: observers.boundaries } : {}),
         };
         const segmented = segmentPages(ctx, structuredStudy!, effectiveTargetIndices);
         const passes = runItemPasses(segmented, structuredStudy!, pageCount, itemPasses, paragraphSettings);
@@ -1159,8 +1160,8 @@ async function withStructuredRun<T>(
     /** Item passes to run; defaults to the preset's. */
     itemPassesFor: ((preset: PdfExtractionPreset) => ItemPass[]) | undefined,
     finish: (internal: InternalExtractionResult, preset: PdfExtractionPreset) => T,
-    /** Observes the region pass of every page (training export). */
-    regionObserver?: RegionPassObserver,
+    /** Observe the region pass or the item-boundary input of every page (training exports). */
+    observers: StructuredRunObservers = {},
 ): Promise<T> {
     const preset = resolvePdfExtractionPreset(args.schemaVersion);
     const itemPasses = (itemPassesFor ?? createItemPasses)(preset);
@@ -1224,7 +1225,7 @@ async function withStructuredRun<T>(
             pageCache,
             itemPasses,
             preset.pageNumberRuns,
-            regionObserver,
+            observers,
         );
         if (internal.metadata.timings) {
             internal.metadata.timings.docOpenMs = docOpenMs;
@@ -1324,10 +1325,16 @@ export async function opItemsExport(
     }
     const collector = new ItemsExportCollector(task);
     const bboxPrecision = args.structured?.bboxPrecision ?? 1;
-    return withStructuredRun(args, (preset) => collector.passes(createItemPasses(preset)), (internal, preset) => {
-        const projected = project(internal, preset, bboxPrecision);
-        return { result: collector.row(internal, projected, args.task, bboxPrecision) };
-    });
+    const boundaries = collector.boundaryObserver();
+    return withStructuredRun(
+        args,
+        (preset) => collector.passes(createItemPasses(preset)),
+        (internal, preset) => {
+            const projected = project(internal, preset, bboxPrecision);
+            return { result: collector.row(internal, projected, args.task, bboxPrecision) };
+        },
+        boundaries ? { boundaries } : {},
+    );
 }
 
 /**
@@ -1347,7 +1354,7 @@ export async function opRegionsExport(
         args,
         undefined,
         (internal) => ({ result: collector.row(preset.schemaVersion, internal.analysis.pageCount) }),
-        collector,
+        { region: collector },
     );
 }
 

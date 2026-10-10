@@ -12,6 +12,11 @@
  *     `<dir>/ledger[-<i>of<n>].jsonl` are skipped. A directory is only resumed
  *     with the settings, feature set and commit its manifest records.
  *
+ *   items export --task boundaries ...
+ *     The item-boundary model's export: the same rows plus, per page, every
+ *     flow line with its glyph geometry, the paragraph detector's decision and
+ *     reason, its draft unit and its feature row (`ItemsExportFlowLine`).
+ *
  *   items export --task regions-v2 ... [--page-list pages.jsonl]
  *     The region model's export (`pipeline/regionsExport.ts`, format
  *     `beaver-regions-v1`): per page the region pass's text pieces and drawing

@@ -14,6 +14,7 @@ import type {
     RawPageDataDetailed,
     RawLineDetailed,
     RawChar,
+    RawGlyphMetrics,
     PageGeometry,
     PDFPageSearchResult,
     PageImageResult,
@@ -698,6 +699,47 @@ function deriveFontFamily(name: string): string {
     );
 }
 
+function medianOf(values: number[]): number {
+    // A typed array sorts numerically without a comparator.
+    const s = Float64Array.from(values).sort();
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/**
+ * Glyph metrics of a line's style runs, one entry per size. Sizes are keyed to
+ * the half point from each run's exact size, as `lineSize` keys them, so the
+ * line's dominant size picks its entry.
+ */
+function glyphMetricsOfRuns(
+    runs: readonly { exactSize: number; chars: number; baselines: number[]; tops: number[]; bottoms: number[] }[],
+): RawGlyphMetrics[] {
+    const bySize = new Map<number, { baselines: number[]; tops: number[]; bottoms: number[] }>();
+    for (const run of runs) {
+        if (run.chars === 0) continue;
+        const size = Math.round(run.exactSize * 2) / 2;
+        const entry = bySize.get(size);
+        if (entry) {
+            entry.baselines.push(...run.baselines);
+            entry.tops.push(...run.tops);
+            entry.bottoms.push(...run.bottoms);
+        } else {
+            bySize.set(size, { baselines: run.baselines, tops: run.tops, bottoms: run.bottoms });
+        }
+    }
+    const out: RawGlyphMetrics[] = [];
+    for (const [size, g] of bySize) {
+        out.push({
+            size,
+            glyphs: g.baselines.length,
+            baseline: medianOf(g.baselines),
+            top: medianOf(g.tops),
+            bottom: medianOf(g.bottoms),
+        });
+    }
+    return out;
+}
+
 /**
  * Extract detailed (character-level) page data, including per-character
  * quad and bbox metadata.
@@ -789,22 +831,46 @@ function extractRawPageDetailedOnce(
         let glyphSize = 0;
         let glyphExactSize = 0;
         let runFontPtr = 0;
-        let runs: { fontPtr: number; size: number; exactSize: number; chars: number; letters: number }[] = [];
+        type Run = {
+            fontPtr: number;
+            size: number;
+            exactSize: number;
+            chars: number;
+            letters: number;
+            /** Per visible glyph, on the line's cross axis: origin, ascent and descent edges. */
+            baselines: number[];
+            tops: number[];
+            bottoms: number[];
+        };
+        let runs: Run[] = [];
+        // Glyph metrics are measured across the writing direction: y for
+        // horizontal lines, x for vertical ones (`beginLine`).
+        let crossX = false;
+        let glyphOriginX = 0;
+        let glyphOriginY = 0;
         const noteGlyphStyle = (fontPtr: number, size: number) => {
             glyphFontPtr = typeof fontPtr === "number" ? fontPtr : 0;
             glyphExactSize = typeof size === "number" ? size : 0;
             glyphSize = Math.trunc(glyphExactSize);
         };
-        const countRunGlyph = (rune: string) => {
+        const countRunGlyph = (rune: string, quad: QuadTuple) => {
             if (!/\S/u.test(rune)) return;
             let run = runs[runs.length - 1];
             if (!run || runFontPtr !== glyphFontPtr || run.size !== glyphSize) {
-                run = { fontPtr: glyphFontPtr, size: glyphSize, exactSize: glyphExactSize, chars: 0, letters: 0 };
+                run = {
+                    fontPtr: glyphFontPtr, size: glyphSize, exactSize: glyphExactSize, chars: 0, letters: 0,
+                    baselines: [], tops: [], bottoms: [],
+                };
                 runs.push(run);
                 runFontPtr = glyphFontPtr;
             }
             run.chars++;
             if (/\p{L}/u.test(rune)) run.letters++;
+            // Quad: upper-left, upper-right, lower-left, lower-right corners in
+            // the glyph's own frame; "upper" is the ascent side.
+            run.baselines.push(crossX ? glyphOriginX : glyphOriginY);
+            run.tops.push(crossX ? quad[0] : quad[1]);
+            run.bottoms.push(crossX ? quad[4] : quad[5]);
         };
         const flushRuns = (line: RawLineDetailed) => {
             if (!captureRuns) return;
@@ -817,6 +883,7 @@ function extractRawPageDetailedOnce(
                     letters: r.letters,
                 };
             });
+            line.glyphMetrics = glyphMetricsOfRuns(runs);
             runs = [];
         };
 
@@ -864,6 +931,8 @@ function extractRawPageDetailedOnce(
                 },
                 beginLine: (bbox, wmode, dir) => {
                     runs = [];
+                    const rotation = dirToRotation(dir[0], dir[1]);
+                    crossX = rotation === 90 || rotation === 270;
                     currentLine = {
                         wmode,
                         bbox: tupleToBBox(bbox),
@@ -881,7 +950,7 @@ function extractRawPageDetailedOnce(
                         // nearest cardinal so downstream rotation
                         // normalization gets a stable, sign-precise
                         // angle. See `PageRotationNormalizer`.
-                        rotation: dirToRotation(dir[0], dir[1]),
+                        rotation,
                         chars: [] as RawChar[],
                     } as RawLineDetailed;
                 },
@@ -894,6 +963,12 @@ function extractRawPageDetailedOnce(
                     currentLine = null;
                 },
                 onCharFont,
+                onCharOrigin: captureRuns
+                    ? (x: number, y: number) => {
+                          glyphOriginX = x;
+                          glyphOriginY = y;
+                      }
+                    : undefined,
                 onLineFont: (fontPtr, size) => {
                     if (!currentLine) return;
                     const f = lookupFont(typeof fontPtr === "number" ? fontPtr : 0);
@@ -914,7 +989,7 @@ function extractRawPageDetailedOnce(
                 },
                 onChar: (rune, quad) => {
                     if (!currentLine) return;
-                    if (captureRuns) countRunGlyph(rune);
+                    if (captureRuns) countRunGlyph(rune, quad);
                     currentLine.text += rune;
                     currentLine.chars.push({
                         c: rune,

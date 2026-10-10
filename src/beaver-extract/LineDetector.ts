@@ -18,7 +18,7 @@
  *   8. Merge overlapping lines (handles drop caps, subscripts, etc.)
  */
 
-import type { BoundingBox, RawPageData, RawBlock, RawLine, RawStyleRun } from "@beaver/agent-core/extract/types";
+import type { BoundingBox, RawGlyphMetrics, RawPageData, RawBlock, RawLine, RawStyleRun } from "@beaver/agent-core/extract/types";
 import { bboxHeight, bboxWidth, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
@@ -47,6 +47,8 @@ export interface DetectedSpan {
     fontStyle?: string;
     /** Per-glyph style runs of the source line, when recorded (see `RawLine.styleRuns`) */
     styleRuns?: RawStyleRun[];
+    /** Glyph metrics of the source line, when recorded (see `RawLine.glyphMetrics`) */
+    glyphMetrics?: RawGlyphMetrics[];
 }
 
 /**
@@ -104,6 +106,12 @@ export interface LineDetectionOptions {
     gapMultiplier?: number;
     /** Minimum overlap ratio for span to belong to column (default: 0.5) */
     minColumnOverlap?: number;
+    /**
+     * Writing direction of the page's upright text (the rotation its working
+     * frame was turned by; default 0). Glyph metrics are kept only for lines
+     * written in it: those of other lines lie on another axis.
+     */
+    textRotation?: 0 | 90 | 180 | 270;
 }
 
 const DEFAULT_OPTIONS: Required<LineDetectionOptions> = {
@@ -111,6 +119,7 @@ const DEFAULT_OPTIONS: Required<LineDetectionOptions> = {
     overlapThreshold: 0.5,
     gapMultiplier: 5.0,
     minColumnOverlap: 0.5,
+    textRotation: 0,
 };
 
 // ============================================================================
@@ -180,7 +189,8 @@ function cleanText(text: string): string {
 function extractSpansInColumn(
     page: RawPageData,
     column: Rect,
-    minOverlap: number
+    minOverlap: number,
+    textRotation: number
 ): DetectedSpan[] {
     const spans: DetectedSpan[] = [];
 
@@ -205,6 +215,9 @@ function extractSpansInColumn(
                 fontWeight: line.font?.weight,
                 fontStyle: line.font?.style,
                 styleRuns: line.styleRuns,
+                // Metrics of a line in another direction (a rotated label on
+                // an upright page) are not positions in this frame.
+                glyphMetrics: (line.rotation ?? 0) === textRotation ? line.glyphMetrics : undefined,
             });
         }
     }
@@ -504,7 +517,7 @@ export function detectLinesInColumn(
     const opts = { ...DEFAULT_OPTIONS, ...options };
 
     // Step 1: Extract spans in column
-    let spans = extractSpansInColumn(page, column, opts.minColumnOverlap);
+    let spans = extractSpansInColumn(page, column, opts.minColumnOverlap, opts.textRotation);
 
     if (spans.length === 0) {
         return {
