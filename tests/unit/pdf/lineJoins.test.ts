@@ -107,6 +107,8 @@ describe("decideSplitWord", () => {
         expect(split("redox", "regulated", vocabulary)).toBe("keep");
         // A bound prefix forms closed words: being a word says nothing.
         expect(split("sub", "cultured", vocabularyOf("a sub group was cultured"))).toBe("join");
+        expect(split("out", "come", vocabularyOf("we went out to come back"))).toBe("join");
+        expect(split("off", "set", vocabularyOf("turned off the set"))).toBe("join");
     });
 
     it("keeps only attested compounds with a plain set", () => {

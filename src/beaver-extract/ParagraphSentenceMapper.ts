@@ -406,6 +406,12 @@ const MATH_FUNCTIONS = new Set([
     "sup", "inf", "lim", "deg", "dim", "ker", "erf", "sgn", "var", "cov",
 ]);
 
+/** Units of three or more letters a raised digit after is a power of ("4 rad²", "2 mbar³"), not a note marker. */
+const UNIT_WORDS = new Set([
+    "rad", "mrad", "µrad", "μrad", "bar", "mbar", "kbar", "mol", "mmol", "µmol", "μmol", "nmol", "pmol",
+    "kmol", "cal", "kcal", "lux", "sec", "msec", "arcsec", "arcmin", "mas",
+]);
+
 /** Marker characters a footnote opens with: numbers, note symbols, lettered notes. */
 const LEAD_MARKER_RE = /^[0-9*†‡§¶#a-z]$/u;
 
@@ -441,8 +447,9 @@ function gluedLeadMarkerEnd(line: RawLineDetailed, superscriptThreshold: number)
  * (numbers of up to three digits, with commas and dashes between) right
  * after a lowercase word of three or more letters, followed by a space,
  * punctuation or the end of the line. The word length and case keep
- * exponents of units and variables ("mm3", "cm2", "R2") out, and a list of
- * function names those of mathematics ("cos² x", "log² n").
+ * exponents of units and variables ("mm3", "cm2", "R2") out, and lists of
+ * longer unit names and function names those of units and mathematics
+ * ("rad²", "cos² x", "log² n").
  */
 function gluedNoteMarkerChars(line: RawLineDetailed, superscriptThreshold: number): Set<number> {
     const out = new Set<number>();
@@ -456,7 +463,7 @@ function gluedNoteMarkerChars(line: RawLineDetailed, superscriptThreshold: numbe
         let w = i - 1;
         while (w >= 0 && /\p{L}/u.test(chars[w].c)) w--;
         const word = chars.slice(w + 1, i).map((ch) => ch.c).join("");
-        if (word.length < 3 || !/^\p{Ll}+$/u.test(word) || MATH_FUNCTIONS.has(word)) continue;
+        if (word.length < 3 || !/^\p{Ll}+$/u.test(word) || MATH_FUNCTIONS.has(word) || UNIT_WORDS.has(word)) continue;
         // The marker, or a list or range of them ("105,106", "14–16"), set
         // small and raised; it ends on a digit.
         let end = i;

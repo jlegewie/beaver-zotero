@@ -138,7 +138,7 @@ const BOUND_PREFIXES = new Set([
     "inter", "intra", "pre", "post", "multi", "co", "anti", "semi", "sub", "super", "over", "under",
     "re", "de", "un", "non", "dis", "mis", "trans", "micro", "macro", "meta", "neuro", "bio", "geo",
     "auto", "hyper", "hypo", "poly", "mono", "pro", "counter", "extra", "ultra", "infra", "tele",
-    "pseudo", "quasi", "socio", "psycho", "per",
+    "pseudo", "quasi", "socio", "psycho", "per", "out", "off",
 ]);
 
 /** Endings that make a word of a hyphen prefix ("four-th", "short-en", "real-istic"). */
