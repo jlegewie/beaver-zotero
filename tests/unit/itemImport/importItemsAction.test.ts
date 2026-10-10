@@ -10,6 +10,12 @@ const mocks = vi.hoisted(() => ({
     writeImportItem: vi.fn(),
     resolve: vi.fn(),
     canSave: vi.fn(),
+    describeActiveAddons: vi.fn(),
+}));
+
+vi.mock('../../../src/services/committedTransaction', () => ({
+    SLOW_OBSERVERS_MS: 1000,
+    describeActiveAddons: mocks.describeActiveAddons,
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
@@ -257,6 +263,25 @@ describe('executeImportItemAction', () => {
             source: { kind: 'file', input: 'a.pdf' }, file: { path: '/x/a.pdf' },
         }), ctx());
         expect(fileOnly.success).toBe(true);
+    });
+
+    it('names the active add-ons only when Notifier observers held the write', async () => {
+        mocks.describeActiveAddons.mockResolvedValue('linter@northword.cn@3.3.2');
+        mocks.writeImportItem.mockImplementation(async (_data: unknown, options: any) => {
+            options.timing.record('post_commit_ms', 3000);
+            options.timing.record('observers_deferred', 1);
+            return { library_id: 1, zotero_key: 'K', attachment_status: 'none' };
+        });
+        const slow: any = await executeImportItemAction(executeRequest(data()), ctx());
+        expect(slow.timing).toMatchObject({ observers_deferred: 1, active_addons: 'linter@northword.cn@3.3.2' });
+
+        mocks.writeImportItem.mockImplementation(async (_data: unknown, options: any) => {
+            options.timing.record('post_commit_ms', 40);
+            options.timing.record('observers_deferred', 0);
+            return { library_id: 1, zotero_key: 'K', attachment_status: 'none' };
+        });
+        const fast: any = await executeImportItemAction(executeRequest(data()), ctx());
+        expect(fast.timing).not.toHaveProperty('active_addons');
     });
 
     it('fails with the library error when the target cannot be resolved', async () => {

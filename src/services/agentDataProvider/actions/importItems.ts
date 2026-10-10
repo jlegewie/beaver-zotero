@@ -20,6 +20,7 @@ import type {
 import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimingAccumulator } from '../../../utils/timing';
 import { resolveCollectionMemberships } from '../../collections/collectionMutations';
+import { describeActiveAddons, SLOW_OBSERVERS_MS } from '../../committedTransaction';
 import { ImportItemError, writeImportItem } from '../../itemImport/write';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
@@ -136,13 +137,23 @@ export async function executeImportItemAction(
 ): Promise<WSAgentActionExecuteResponse> {
     const started = Date.now();
     const timing = new TimingAccumulator();
-    const respond = (body: Partial<WSAgentActionExecuteResponse>): WSAgentActionExecuteResponse => ({
-        type: 'agent_action_execute_response',
-        request_id: request.request_id,
-        success: false,
-        timing: { total_ms: Date.now() - started, ...timing.getAll() },
-        ...body,
-    } as WSAgentActionExecuteResponse);
+    const respond = async (body: Partial<WSAgentActionExecuteResponse>): Promise<WSAgentActionExecuteResponse> => {
+        // Slow Notifier observers usually belong to another plugin; name the
+        // active add-ons so the stall can be attributed.
+        const slowObservers = timing.get('observers_deferred') > 0 || timing.get('post_commit_ms') >= SLOW_OBSERVERS_MS;
+        const activeAddons = slowObservers ? await describeActiveAddons() : null;
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            timing: {
+                total_ms: Date.now() - started,
+                ...timing.getAll(),
+                ...(activeAddons !== null ? { active_addons: activeAddons } : {}),
+            },
+            ...body,
+        } as WSAgentActionExecuteResponse;
+    };
 
     const data = request.action_data as ImportItemProposedData;
     if (!data?.source || (!data.item && !data.pending_resolution && !data.file)) {

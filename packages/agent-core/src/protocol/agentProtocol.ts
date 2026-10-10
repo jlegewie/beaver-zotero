@@ -522,8 +522,8 @@ export interface ItemSearchFrontendResultItem {
  * Used for backend diagnostics to understand where time is spent during search operations.
  */
 export interface FrontendTimingMetadata {
-    /** Allow additional timing keys from TimingAccumulator */
-    [key: string]: number | undefined;
+    /** Allow additional timing keys from TimingAccumulator, plus string diagnostics such as `active_addons` */
+    [key: string]: number | string | undefined;
     /** Total operation time in milliseconds */
     total_ms?: number;
     /** Time spent in search/query phase */
@@ -585,6 +585,16 @@ export interface FrontendTimingMetadata {
     pdf_check_ms?: number;
     /** Total time inside applyCreateItemData (createZoteroItem + post-processing) */
     apply_ms?: number;
+
+    // Committed-transaction timings (summed over an action's writes)
+    /** Time from starting a write transaction to its commit */
+    tx_commit_ms?: number;
+    /** Time from the commit until the write returned (Notifier observers, capped by the grace period) */
+    post_commit_ms?: number;
+    /** Writes that returned while their Notifier observers were still running */
+    observers_deferred?: number;
+    /** Active non-system add-ons (`id@version`, comma separated), sent only when observers were slow */
+    active_addons?: string;
 
     // Reference check specific timings
     /** Time spent in phase 1: identifier (DOI/ISBN) lookup */
