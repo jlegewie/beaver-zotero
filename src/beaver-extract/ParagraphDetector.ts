@@ -93,8 +93,9 @@ export interface ParagraphDetectionSettings {
      * Decide where items start with the learned boundary model
      * (`boundaries/model.ts`) instead of `startNewItem`, and continue an
      * item across a cut between stacked blocks of one printed column
-     * (`detectLearnedItems`; default: false). Enabled by the PDF schema
-     * preset.
+     * (`detectLearnedItems`; default: false). Applies only to pages whose
+     * lines carry glyph metrics (`hasGlyphMetrics`); others keep
+     * `startNewItem`. Enabled by the PDF schema preset.
      */
     learnedBoundaries?: boolean;
 }
@@ -3636,8 +3637,14 @@ function boundaryPage(
     };
 }
 
-const STACKED = BOUNDARY_FEATURES.indexOf("stacked");
 const SIDE_BY_SIDE = BOUNDARY_FEATURES.indexOf("sideBySide");
+const BLOCK_OVERLAP = BOUNDARY_FEATURES.indexOf("blockOverlap");
+/**
+ * Least horizontal overlap of two blocks (share of the narrower one's width)
+ * for an item to continue from one into the other: blocks of one printed
+ * column overlap; a block beside another doesn't.
+ */
+const MIN_JOIN_OVERLAP = 0.3;
 const TEXT_BETWEEN = BOUNDARY_FEATURES.indexOf("textBetween");
 const REGION_BETWEEN = BOUNDARY_FEATURES.indexOf("regionBetween");
 
@@ -3662,6 +3669,26 @@ function layoutBarrierBetween(above: PageLine, below: PageLine, barriers: Detect
     return dividers.length > 0 && crossesDivider(a, b, dividers);
 }
 
+const lastOf = <T>(values: readonly T[]): T => values[values.length - 1];
+
+/**
+ * The previous line extends below this one by more than this line's height:
+ * the line wraps around a drop cap or another tall element beside it (the
+ * drop-cap check of `startNewItem`).
+ */
+function wrapsAroundTallLine(prevLine: PageLine, line: PageLine): boolean {
+    return prevLine.bbox.b > line.bbox.b + bboxHeight(line.bbox);
+}
+
+/**
+ * Whether the walk recorded glyph metrics for the page's lines (schema
+ * presets with `styleRuns`): the boundary model's gap features are measured
+ * from baselines, so it runs only on such input.
+ */
+function hasGlyphMetrics(lineResult: PageLineResult): boolean {
+    return lineResult.columnResults.some((col) => col.lines.some((line) => line.spans.some((span) => span.glyphMetrics?.length)));
+}
+
 /** Items of a page's blocks, as `processColumnLines` returns them for one block. */
 interface FlowItems {
     pageContent: string;
@@ -3678,13 +3705,18 @@ interface FlowItems {
  * For every line of a block below its first, the model's start probability
  * replaces `startNewItem`: the line starts an item when the probability
  * reaches the model's threshold. A block's first line starts an item, except
- * where the column detector cut one printed column into stacked blocks: when
- * the block sits under the previous one (`stacked`, not side by side) with no
- * other text, no region and no layout barrier (divider rule, shaded
- * container edge: `layoutBarrierBetween`) between them and the model says
- * the line continues, the item carries on across the cut. Column breaks, pages and
- * regions never join; sentence mapping links their sentences
- * (`annotateColumnContinuations`).
+ * where the column detector cut one printed column into blocks one below the
+ * other: when the blocks overlap horizontally (`MIN_JOIN_OVERLAP`), the line
+ * is not beside the previous block's last line (`sideBySide`), no other
+ * text, no region and no layout barrier (divider rule, shaded container
+ * edge: `layoutBarrierBetween`) lies between them and the model says the
+ * line continues, the item carries on across the cut. The blocks may
+ * overlap vertically. Column breaks, pages and regions never join; sentence mapping links
+ * their sentences (`annotateColumnContinuations`).
+ *
+ * A line wrapping around a drop cap (`wrapsAroundTallLine`) continues the
+ * previous line's item whatever the model says: drop caps are too rare in
+ * the training data for the model to learn them.
  *
  * The model reads no heuristic decision, so `startNewItem` does not run and
  * the input's heuristic trace is empty. Everything after the decision is the
@@ -3742,20 +3774,17 @@ function detectLearnedItems(
                 const row = boundaryRow(prep, b, j);
                 const p = boundaryProbability(model, row);
                 line.probability = p;
-                const continues = p < model.threshold;
+                const prevLine = j > 0 ? blocks[b].col.lines[j - 1] : lastOf(blocks[b - 1].col.lines);
+                const continues = p < model.threshold || wrapsAroundTallLine(prevLine, blocks[b].col.lines[j]);
                 start = j > 0
                     ? !continues
                     : !(
                           continues &&
-                          row[STACKED] === 1 &&
                           row[SIDE_BY_SIDE] === 0 &&
+                          row[BLOCK_OVERLAP] >= MIN_JOIN_OVERLAP &&
                           row[TEXT_BETWEEN] === 0 &&
                           row[REGION_BETWEEN] === 0 &&
-                          !layoutBarrierBetween(
-                              blocks[b - 1].col.lines[blocks[b - 1].col.lines.length - 1],
-                              blocks[b].col.lines[0],
-                              barriers,
-                          )
+                          !layoutBarrierBetween(prevLine, blocks[b].col.lines[0], barriers)
                       );
             }
             line.start = start;
@@ -3859,7 +3888,7 @@ export function detectParagraphs(
         if (pageStyle) bodyStyles = [...bodyStyles, pageStyle];
     }
 
-    if (opts.learnedBoundaries) {
+    if (opts.learnedBoundaries && hasGlyphMetrics(lineResult)) {
         const columns = lineResult.columnResults.filter((col) => col.lines.length > 0);
         const learned = detectLearnedItems(
             columns,

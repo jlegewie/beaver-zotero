@@ -119,21 +119,28 @@ const CAPITAL_STARTS: BoundaryModel = {
 
 const BODY: TextStyle = { size: 10, font: "Times-Roman", bold: false, italic: false };
 
-function makeLine(text: string, l: number, t: number, r = l + 240): PageLine {
-    const box: BoundingBox = { l, t, r, b: t + 12, origin: "top-left" };
+function makeLine(text: string, l: number, t: number, r = l + 240, h = 12, metrics = true): PageLine {
+    const box: BoundingBox = { l, t, r, b: t + h, origin: "top-left" };
     const span: DetectedSpan = {
         text, bbox: box, lineBBox: box, size: BODY.size, fontName: BODY.font, fontWeight: "normal", fontStyle: "normal",
+        ...(metrics ? { glyphMetrics: [{ size: BODY.size, glyphs: text.length, baseline: t + h - 2, top: t, bottom: t + h }] } : {}),
     };
     return { spans: [span], bboxes: [box], bbox: box, text, fontSize: BODY.size };
 }
 
-/** Blocks of lines 14pt apart, each block from (l, t). */
-function makePage(blocks: { l: number; t: number; lines: string[] }[]): PageLineResult {
-    const columnResults = blocks.map((block, columnIndex) => {
-        const lines = block.lines.map((text, k) => makeLine(text, block.l, block.t + 14 * k));
-        return { column: { x: block.l, y: block.t, w: 240, h: 14 * lines.length }, columnIndex, lines };
+function pageOf(blocks: PageLine[][]): PageLineResult {
+    const columnResults = blocks.map((lines, columnIndex) => {
+        const box = lines.map((line) => line.bbox);
+        const x = Math.min(...box.map((b) => b.l));
+        const y = Math.min(...box.map((b) => b.t));
+        return { column: { x, y, w: Math.max(...box.map((b) => b.r)) - x, h: Math.max(...box.map((b) => b.b)) - y }, columnIndex, lines };
     });
     return { pageIndex: 0, width: 612, height: 792, columnResults, allLines: columnResults.flatMap((c) => c.lines) };
+}
+
+/** Blocks of lines 14pt apart, each block from (l, t). */
+function makePage(blocks: { l: number; t: number; lines: string[] }[], metrics = true): PageLineResult {
+    return pageOf(blocks.map((block) => block.lines.map((text, k) => makeLine(text, block.l, block.t + 14 * k, undefined, 12, metrics))));
 }
 
 function detect(
@@ -218,6 +225,60 @@ describe("learned boundaries", () => {
         // The first block in a shaded box, the second outside it: apart. Both inside one box: joined.
         expect(detect(page(), [], { fillBoundaries: [{ x: 66, y: 96, w: 252, h: 30 }] }).result.items).toHaveLength(2);
         expect(detect(page(), [], { fillBoundaries: [{ x: 66, y: 96, w: 252, h: 50 }] }).result.items).toHaveLength(1);
+    });
+
+    it("joins a block that overlaps the previous one vertically, below its last line", () => {
+        // The second block starts 8pt above the first one's bottom: not `stacked`, but below and not beside.
+        const page = makePage([
+            { l: 72, t: 100, lines: ["A paragraph the block", "detector cut"] },
+            { l: 72, t: 118, lines: ["off here goes on."] },
+        ]);
+        const { result, input } = detect(page);
+        expect(result.items.map((item) => item.text)).toEqual(["A paragraph the block detector cut off here goes on."]);
+        expect(input.blocks[1].lines[0].start).toBe(false);
+    });
+
+    it("keeps a line wrapping around a drop cap in its item, whatever the model says", () => {
+        // A three-line drop cap "T"; the line beside it opens with a capital, which the stub model reads as a start.
+        const dropCap = makeLine("T", 72, 100, 100, 36);
+        const wrapped = [makeLine("Here the text wraps", 104, 100), makeLine("around the drop cap.", 104, 114)];
+        const { result, input } = detect(pageOf([[dropCap, ...wrapped]]));
+        expect(input.blocks[0].lines[1].probability).toBeGreaterThan(0.5);
+        expect(result.items.map((item) => item.text)).toEqual(["T Here the text wraps around the drop cap."]);
+        // A cap that doesn't reach below the line beside it is no drop cap: the model decides.
+        const short = makeLine("T", 72, 100, 100, 14);
+        expect(detect(pageOf([[short, ...wrapped]])).result.items.map((item) => item.text)).toEqual([
+            "T",
+            "Here the text wraps around the drop cap.",
+        ]);
+    });
+
+    it("never joins blocks that don't overlap horizontally, even beside a tall line", () => {
+        // A 48pt heading block with a body block beside it, both starting at the same height: not side by side
+        // by `sideBySide` (same top), and the heading reaches far below the body line.
+        const heading = makeLine("RESULTS", 72, 100, 160, 48);
+        const body = makeLine("and the body text goes on.", 180, 100, 420);
+        expect(detect(pageOf([[heading], [body]])).result.items).toHaveLength(2);
+    });
+
+    it("joins blocks that overlap horizontally by at least 0.3 of the narrower one", () => {
+        // The second block is 100pt wide; it overlaps the first (72–312) by 40pt (0.4), or by 20pt (0.2).
+        const page = (l: number) =>
+            pageOf([
+                [makeLine("A paragraph the block", 72, 100), makeLine("detector cut", 72, 114)],
+                [makeLine("off here goes on.", l, 128, l + 100)],
+            ]);
+        expect(detect(page(272)).result.items).toHaveLength(1);
+        expect(detect(page(292)).result.items).toHaveLength(2);
+    });
+
+    it("keeps startNewItem on pages without glyph metrics", () => {
+        const page = makePage([{ l: 72, t: 100, lines: ["First paragraph that", "Wraps with a capital.", "Second one", "ends."] }], false);
+        const { result, input } = detect(page);
+        // The heuristic decided: its trace is recorded and no probability is.
+        const lines = input.blocks[0].lines;
+        expect(lines.every((line) => line.rule !== null && line.probability === undefined)).toBe(true);
+        expect(result.items).toHaveLength(1);
     });
 
     it("leaves today's segmentation alone with the switch off", () => {
