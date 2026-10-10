@@ -49,18 +49,20 @@ export function buildProvenanceNoteHTML(options: ProvenanceNoteOptions = {}): st
 }
 
 /**
- * Create a child note that records why Beaver added an item.
+ * Create a child note that records why Beaver added an item. `save` writes the
+ * new note; it defaults to `saveTx()`.
  */
 export async function createProvenanceNote(
     parent: ProvenanceNoteParent,
     options: ProvenanceNoteOptions = {},
+    save: (note: Zotero.Item) => Promise<unknown> = (note) => note.saveTx(),
 ): Promise<void> {
     try {
         const zoteroNote = new Zotero.Item('note');
         zoteroNote.libraryID = parent.library_id;
         zoteroNote.parentKey = parent.zotero_key;
         zoteroNote.setNote(wrapWithSchemaVersion(buildProvenanceNoteHTML(options)));
-        await zoteroNote.saveTx();
+        await save(zoteroNote);
     } catch (error) {
         logger(`createProvenanceNote: Failed to create provenance note: ${error}`, 1);
     }
