@@ -884,7 +884,12 @@ export function extractPageSentences(
     // in `nextStartsStrictlyRightOfPrev` (and similar geometric
     // heuristics) operates on upright bboxes — that's the frame those
     // gates were tuned for.
-    annotateColumnContinuations(items, splitter, degradedItems);
+    annotateColumnContinuations(
+        items,
+        splitter,
+        degradedItems,
+        draftItems.map((item) => item.endColumnIndex ?? item.columnIndex),
+    );
 
     // Inverse-rotate every emitted bbox back to MuPDF frame so
     // downstream consumers see the same coord system regardless of whether
@@ -1032,7 +1037,9 @@ function shouldJoinAcrossColumns(
  * item whose successor (in reading order) begins a sentence that continues
  * the previous one across a column boundary.
  *
- * Conservative: requires strictly consecutive columns (`col` → `col + 1`),
+ * Conservative: requires strictly consecutive columns (`col` → `col + 1`,
+ * from the column the item ends in: `endColumns`, aligned with `items`,
+ * defaults to each item's `columnIndex`),
  * both sides text items, last sentence non-terminated, first sentence
  * lowercase-starting, and the splitter must agree the combined text is one
  * sentence. Only sets the flag — never writes `false` (omitted ≡ false per
@@ -1051,6 +1058,7 @@ export function annotateColumnContinuations(
     items: DocItem[],
     splitter: SentenceSplitter,
     degradedItems: ReadonlySet<string>,
+    endColumns?: readonly number[],
 ): void {
     for (let i = 0; i < items.length - 1; i++) {
         const cur = items[i];
@@ -1068,7 +1076,7 @@ export function annotateColumnContinuations(
         if (cur.kind !== "text" || next.kind !== "text") {
             continue;
         }
-        if (next.columnIndex !== cur.columnIndex + 1) continue;
+        if (next.columnIndex !== (endColumns?.[i] ?? cur.columnIndex) + 1) continue;
         if (degradedItems.has(cur.id) || degradedItems.has(next.id)) continue;
         const firstSentence = nextSentences[0];
         if (!firstSentence) continue;

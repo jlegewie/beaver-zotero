@@ -31,7 +31,19 @@ export interface DraftItem {
     lines: PageLine[];
     /** Hanging-indent role of each line (see `detectHangingRoles`), aligned with `lines`. */
     roles: HangingRole[];
+    /** Block (column) of the item's first line. */
     columnIndex: number;
+    /**
+     * Block of the item's last line, set only when it differs from
+     * `columnIndex` (an item joined across stacked blocks).
+     */
+    endColumnIndex?: number;
+    /**
+     * Block of each line, aligned with `lines`; set only when the lines span
+     * more than one block. Passes that rebuild items from lines derive the
+     * rebuilt item's block fields from it (`withLineColumns`).
+     */
+    lineColumns?: number[];
     bbox: BoundingBox;
     /** Item text, without the detector's heading marker. */
     text: string;
@@ -90,6 +102,8 @@ export function draftItemsFromParagraphs(result: PageParagraphResult): DraftItem
             lines,
             roles: roles[i] ?? lines.map(() => null),
             columnIndex: item.columnIndex,
+            ...(item.endColumnIndex !== undefined ? { endColumnIndex: item.endColumnIndex } : {}),
+            ...(item.lineColumns !== undefined ? { lineColumns: item.lineColumns } : {}),
             bbox: item.bbox,
             text: header && item.text.startsWith(HEADING_MARKER)
                 ? item.text.slice(HEADING_MARKER.length)
@@ -105,6 +119,31 @@ export function draftPageFromParagraphs(result: PageParagraphResult): DraftPage 
         width: result.width,
         height: result.height,
         items: draftItemsFromParagraphs(result),
+    };
+}
+
+/** Block of each of the item's lines. */
+export function itemLineColumns(item: DraftItem): number[] {
+    return item.lineColumns ?? item.lines.map(() => item.columnIndex);
+}
+
+/**
+ * `item` with its block fields (`columnIndex`, `endColumnIndex`,
+ * `lineColumns`) derived from `columns`, the block of each of its lines.
+ */
+export function withLineColumns(item: DraftItem, columns: readonly number[]): DraftItem {
+    const first = columns.length > 0 ? columns[0] : item.columnIndex;
+    const last = columns.length > 0 ? columns[columns.length - 1] : first;
+    const spans = columns.some((c) => c !== first);
+    if (!spans && first === item.columnIndex && item.endColumnIndex === undefined && item.lineColumns === undefined) {
+        return item;
+    }
+    const { endColumnIndex: _end, lineColumns: _lines, ...rest } = item;
+    return {
+        ...rest,
+        columnIndex: first,
+        ...(last !== first ? { endColumnIndex: last } : {}),
+        ...(spans ? { lineColumns: [...columns] } : {}),
     };
 }
 

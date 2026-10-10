@@ -1129,7 +1129,7 @@ const DIVIDER_SLOP = 2;
  * resolved by the SMALLEST containing fill (innermost wins), so a
  * nested-callout layout produces deterministic zones.
  */
-function fillZoneFor(
+export function fillZoneFor(
     rect: Rect,
     fillBoundaries: ReadonlyArray<{ x: number; y: number; w: number; h: number }>,
 ): number | null {
@@ -1161,7 +1161,8 @@ function rangesOverlap(
     return Math.max(aStart, bStart) <= Math.min(aEnd, bEnd);
 }
 
-function crossesDivider(
+/** Whether a divider runs between `a` and `b`, overlapping both (the merge phases' barrier). */
+export function crossesDivider(
     a: Rect,
     b: Rect,
     dividers: Required<ColumnDetectionOptions>["dividerLines"],

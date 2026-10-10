@@ -4,7 +4,9 @@ import { SCHEMA_VERSION } from "@beaver/agent-core/extract/schema";
 import {
     CURRENT_PDF_EXTRACTION_PRESET,
     PRODUCIBLE_PDF_SCHEMA_VERSIONS,
+    applyPresetOverrides,
     pdfExtractionPreset,
+    type PresetOverrides,
 } from "../../../src/beaver-extract/schema/presets";
 import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
@@ -24,6 +26,7 @@ describe("PDF extraction presets", () => {
             idScheme: "document",
             regions: false,
             pageNumberRuns: false,
+            learnedBoundaries: false,
         });
     });
 
@@ -42,6 +45,7 @@ describe("PDF extraction presets", () => {
             idScheme: "page",
             regions: true,
             pageNumberRuns: true,
+            learnedBoundaries: false,
         });
     });
 
@@ -61,6 +65,20 @@ describe("PDF extraction presets", () => {
         for (const version of PRODUCIBLE_PDF_SCHEMA_VERSIONS) {
             expect(pdfExtractionPreset(version)).toBeDefined();
         }
+    });
+});
+
+describe("preset overrides", () => {
+    it("turns an overridable switch on without touching the preset", () => {
+        const preset = pdfExtractionPreset("5")!;
+        expect(applyPresetOverrides(preset, { learnedBoundaries: true })).toEqual({ ...preset, learnedBoundaries: true });
+        expect(preset.learnedBoundaries).toBe(false);
+        expect(applyPresetOverrides(preset, undefined)).toBe(preset);
+    });
+
+    it("rejects switches that can't be overridden", () => {
+        const preset = pdfExtractionPreset("5")!;
+        expect(() => applyPresetOverrides(preset, { regions: false } as unknown as PresetOverrides)).toThrow(/can't be overridden/);
     });
 });
 

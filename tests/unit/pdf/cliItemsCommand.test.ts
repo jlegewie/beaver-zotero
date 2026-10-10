@@ -160,6 +160,39 @@ describe("items export", () => {
         expect(itemsExport).toHaveBeenCalledTimes(3);
     });
 
+    it("refuses to resume with preset overrides the export didn't record, or without the ones it did", async () => {
+        const itemsExport = vi.fn(async ({ pdfData }: { pdfData: Uint8Array }) => row(pdfData));
+        const deps = makeDeps({ itemsExport });
+        const list = await writeList(docs);
+        const base = ["items", "export", "--task", "boundaries", "--pdf-list", list];
+
+        const withModel = join(dir, "with-model");
+        expect(await runCli([...base, "--out", withModel, "--preset", "learnedBoundaries", "--limit", "1"], deps)).toBe(0);
+        expect(JSON.parse(await readFile(join(withModel, "manifest.json"), "utf8")).preset_overrides).toEqual({ learnedBoundaries: true });
+        expect(itemsExport).toHaveBeenLastCalledWith(expect.objectContaining({ presetOverrides: { learnedBoundaries: true } }));
+        expect(await runCli([...base, "--out", withModel], deps)).toBe(1);
+
+        const without = join(dir, "without");
+        expect(await runCli([...base, "--out", without, "--limit", "1"], deps)).toBe(0);
+        expect(itemsExport.mock.lastCall![0]).not.toHaveProperty("presetOverrides");
+        expect(await runCli([...base, "--out", without, "--preset", "learnedBoundaries"], deps)).toBe(1);
+
+        expect((deps.stderr as Sink).text).toContain("preset_overrides");
+        expect(itemsExport).toHaveBeenCalledTimes(2);
+        expect(await runCli([...base, "--out", withModel, "--preset", "learnedBoundaries"], deps)).toBe(0);
+        expect(itemsExport).toHaveBeenCalledTimes(4);
+    });
+
+    it("rejects a preset switch that can't be overridden", async () => {
+        const itemsExport = vi.fn();
+        const deps = makeDeps({ itemsExport });
+        const list = await writeList(docs);
+        const args = ["items", "export", "--task", "boundaries", "--pdf-list", list, "--out", join(dir, "out"), "--preset", "regions=false"];
+        expect(await runCli(args, deps)).toBe(1);
+        expect((deps.stderr as Sink).text).toContain("can't be overridden");
+        expect(itemsExport).not.toHaveBeenCalled();
+    });
+
     it("lets one of two shards starting together claim a new directory and refuses the other's settings", async () => {
         const itemsExport = vi.fn(async ({ pdfData }: { pdfData: Uint8Array }) => row(pdfData));
         const out = join(dir, "out");

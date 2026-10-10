@@ -103,7 +103,7 @@ src/beaver-extract/
 │   ├── geometry.ts                # Line-block geometry in em
 │   └── context.ts                 # Document context (page position, list headings so far)
 ├── itemTypes/                     # Item-type model: input, features (incl. reference item features), model, item pass, generated weights
-├── boundaries/                    # Item-boundary features: startNewItem reason codes, per-block input, feature rows (no model yet)
+├── boundaries/                    # Item boundaries: startNewItem reason codes, per-block input, feature rows, model (preset switch `learnedBoundaries`), generated weights
 ├── references/                    # Reference entries: line model, entry planning, item pass (splits and joins the item-type model's references), generated weights
 ├── regions/                       # Region detection (pictures, tables, formulas): step 2
 ├── DocumentAnalyzer.ts            # Text layer & OCR detection

@@ -25,7 +25,9 @@ import {
     loadJsonFile,
     parseAnalysisWindow,
     parsePagesList,
+    parsePresetOverrides,
     parseSchemaVersion,
+    PRESET_OPTION_HELP,
 } from "../options";
 import {
     DEFAULT_ANALYSIS_SCOPE,
@@ -75,6 +77,7 @@ import type {
     InternalProcessedPage,
 } from "@beaver/agent-core/extract/types";
 import type {
+    PresetOverrides,
     StructuredExtractResult,
     StructuredPage,
 } from "../../schema";
@@ -376,6 +379,7 @@ function buildEvaluateCommand(deps: CliDeps): Command {
             defaultRootHelp(),
         )
         .option("--bbox-tolerance <pt>", "override stored tolerance")
+        .option("--preset <switches>", `${PRESET_OPTION_HELP}; diffs the result against the captured snapshot`)
         .option("--verbose", "surface git-SHA fingerprint mismatches")
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
@@ -392,7 +396,8 @@ function buildEvaluateCommand(deps: CliDeps): Command {
                         ? parsePositiveFloat("--bbox-tolerance", opts.bboxTolerance)
                         : fixture.tolerance.bboxAbsPt;
 
-                const actual = await captureExpected(deps, pdfBytes, fixture.config);
+                const presetOverrides = opts.preset ? parsePresetOverrides(opts.preset) : undefined;
+                const actual = await captureExpected(deps, pdfBytes, fixture.config, presetOverrides);
                 const structuredDiffs = prefixDiffs(
                     "structured.",
                     diffStructuredPages(
@@ -419,7 +424,7 @@ function buildEvaluateCommand(deps: CliDeps): Command {
                     const envelope = {
                         ok,
                         input: { fixtureId: id, root },
-                        options: { bboxAbsPt: tol, verbose: !!opts.verbose },
+                        options: { bboxAbsPt: tol, verbose: !!opts.verbose, ...(presetOverrides ? { presetOverrides } : {}) },
                         result: {
                             id,
                             diffCount: diffs.length,
@@ -444,6 +449,7 @@ function buildEvaluateCommand(deps: CliDeps): Command {
 interface EvaluateOpts {
     root?: string;
     bboxTolerance?: string;
+    preset?: string;
     verbose?: boolean;
     json?: boolean;
     pretty?: boolean;
@@ -702,8 +708,12 @@ async function captureExpected(
     deps: CliDeps,
     pdfBytes: Uint8Array,
     config: FixtureConfig,
+    presetOverrides?: PresetOverrides,
 ): Promise<{ expected: ExpectedExtraction; structured: StructuredExtractResult }> {
-    const structured = await deps.api.extractPdf(buildStructuredExtractInput(pdfBytes, config));
+    const structured = await deps.api.extractPdf({
+        ...buildStructuredExtractInput(pdfBytes, config),
+        ...(presetOverrides ? { presetOverrides } : {}),
+    });
     if (structured.mode !== "structured") {
         throw new Error("fixture extraction expected a structured result");
     }
@@ -712,7 +722,10 @@ async function captureExpected(
         config.pageIndices,
     );
 
-    const markdown = await deps.api.extractPdf(buildMarkdownExtractInput(pdfBytes, config));
+    const markdown = await deps.api.extractPdf({
+        ...buildMarkdownExtractInput(pdfBytes, config),
+        ...(presetOverrides ? { presetOverrides } : {}),
+    });
     if (markdown.mode !== "markdown") {
         throw new Error("fixture extraction expected a markdown result");
     }
