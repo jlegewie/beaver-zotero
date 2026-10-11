@@ -271,10 +271,15 @@ function isCapitalsText(text: string): boolean {
 const URL_TAIL_RE =
     /^(?:com|org|net|edu|gov|mil|int|io|co|info|biz|us|uk|ca|eu|de|fr|au|nl|jp|cn|in|ru|br|ch|at|it|es|se|no|dk|fi|be|pl|kr|tw|hk|sg|nz|za|pdf|html?|php|aspx?|jsp|xml|json|csv|txt|docx?|xlsx?|pptx?|zip|gz|png|jpe?g|gif|svg)\b/i;
 
-/** A token that reads as part of a URL or DOI ("j.cell.2021", "policy/sp2016", "org)"), not a word. */
-function isUrlText(token: string): boolean {
+/**
+ * A token that reads as part of a URL or DOI ("j.cell.2021",
+ * "policy/sp2016"), not a word. A domain or file ending ("org)", "pdf") counts
+ * only after the period it follows in `prevToken`: after a "/", "in" or "at"
+ * is a word of the sentence.
+ */
+function isUrlText(token: string, prevToken: string): boolean {
     const core = token.replace(/[.,;:)\]〉>"'”’]+$/u, "");
-    return /[./\d_\-#?=&%:~]/u.test(core) || URL_TAIL_RE.test(core);
+    return /[./\d_\-#?=&%:~]/u.test(core) || (prevToken.endsWith(".") && URL_TAIL_RE.test(core));
 }
 
 /** A URL / DOI token that the line break cuts, so the next line continues it. */
@@ -349,7 +354,7 @@ export function decideLineJoin(
     // ("https://example.org/ " + "for more"): it goes on only into a token
     // that is itself URL text, or after a "-" or "_" no URL ends with. Many
     // PDFs end every line with a space, so the space alone does not end it.
-    if (continuesUrl(prevToken, nextToken) && (!/\s$/u.test(prev) || /[-_]$/u.test(prevToken) || isUrlText(nextToken))) {
+    if (continuesUrl(prevToken, nextToken) && (!/\s$/u.test(prev) || /[-_]$/u.test(prevToken) || isUrlText(nextToken, prevToken))) {
         return "glue";
     }
     if (/[\p{N}%][-\u2010\u2013]$/u.test(prevToken) && /^\p{N}/u.test(nextToken)) return "glue";

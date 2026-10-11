@@ -166,6 +166,9 @@ describe("decideLineJoin", () => {
 
     it("keeps the space the PDF set after a complete URL", () => {
         expect(decideLineJoin("Visit https://example.org/ ", "for more information.")).toBe("space");
+        // A word that is also a domain ending is a word after a "/".
+        expect(decideLineJoin("Visit https://example.org/ ", "in your browser.")).toBe("space");
+        expect(decideLineJoin("see www.example. ", "org for details")).toBe("glue");
         // Lines that all end in a space still continue into URL text.
         expect(decideLineJoin("https://doi.org/10.1016/ ", "j.cell.2021.06.012")).toBe("glue");
         expect(decideLineJoin("https://doi.org/10.3758/s13428-019-01246- ", "w.")).toBe("glue");

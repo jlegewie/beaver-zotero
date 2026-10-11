@@ -579,6 +579,7 @@ export async function runSentenceExtractionFromDoc(
         margins,
         marginZone,
         paragraphSettings,
+        compoundVocabulary,
         fillBoundaries: traceFillBoundaries,
         dividerLines: traceDividerLines,
     });
