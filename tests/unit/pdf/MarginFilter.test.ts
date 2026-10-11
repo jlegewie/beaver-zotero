@@ -2106,6 +2106,22 @@ describe("justified prose rows split word by word (PDF schema 5)", () => {
         expect(keptText(pages[1], removal, true)).not.toContain("nature");
     });
 
+    it("removes a lowercase running head that MuPDF put in a paragraph's block", () => {
+        const pages = ["climate", "water", "heat", "health"].map((subject, pageIndex) => ({
+            ...makePageWithLines([
+                makeStyledLine("nature", 280, 45, 30, "Times-Roman", 9),
+                ...[`how ${subject} is changing the`, "rows of a paragraph set in", "the body of the page"].map((text, k) =>
+                    makeStyledLine(text, 100, 300 + 12 * k, 300, "Times-Roman", 9),
+                ),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        expect(removal.candidates.map((c) => c.text)).toContain("nature");
+        expect(keptText(pages[1], removal, true)).not.toContain("nature");
+    });
+
     it("removes a lowercase running head with wide word spaces set in a block of its own", () => {
         const pages = buildPages().map((page) => ({
             ...page,

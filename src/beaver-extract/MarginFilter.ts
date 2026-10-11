@@ -764,9 +764,10 @@ function isLoneLowercaseWord(text: string): boolean {
 }
 
 /**
- * Lines of the page's paragraph blocks: MuPDF blocks holding at least three
- * rows set at most two line heights apart. Running heads and footers, even
- * with a page number or a second line, don't reach that.
+ * Lines of the page's paragraphs: runs of at least three rows of one MuPDF
+ * block set at most two line heights apart. Running heads and footers, even
+ * with a page number or a second line, don't reach that, also when MuPDF puts
+ * them in a paragraph's block: a gap wider than that sets them apart.
  */
 function paragraphBlockLines(page: RawPageData): Set<RawLine> {
     const out = new Set<RawLine>();
@@ -774,19 +775,27 @@ function paragraphBlockLines(page: RawPageData): Set<RawLine> {
         if (block.type !== "text" || !block.lines || block.lines.length < 3) continue;
         const lines = block.lines.filter(line => (line.text || "").trim() && line.bbox.b > line.bbox.t);
         const sorted = [...lines].sort((a, b) => a.bbox.t - b.bbox.t);
+        let run: RawLine[] = [];
         let rows = 0;
         let rowTop = -Infinity;
         let rowHeight = 0;
+        const endRun = () => {
+            if (rows >= 3) for (const line of run) out.add(line);
+            run = [];
+            rows = 0;
+        };
         for (const line of sorted) {
             const h = line.bbox.b - line.bbox.t;
-            if (line.bbox.t < rowTop + 0.5 * rowHeight) continue;
-            // A new row more than two line heights below the last breaks the run.
-            rows = rows > 0 && line.bbox.t - rowTop > 2 * Math.max(h, rowHeight) ? 1 : rows + 1;
-            rowTop = line.bbox.t;
-            rowHeight = h;
-            if (rows >= 3) break;
+            if (line.bbox.t >= rowTop + 0.5 * rowHeight) {
+                // A new row more than two line heights below the last breaks the run.
+                if (rows > 0 && line.bbox.t - rowTop > 2 * Math.max(h, rowHeight)) endRun();
+                rows++;
+                rowTop = line.bbox.t;
+                rowHeight = h;
+            }
+            run.push(line);
         }
-        if (rows >= 3) for (const line of block.lines) out.add(line);
+        endRun();
     }
     return out;
 }
