@@ -110,6 +110,10 @@ export interface LibMuPdf {
     _wasm_new_stext_page_with_graphics?(page: number, opts: number, maxRecords: number): number;
     _wasm_take_graphics_summary?(): number;
     _wasm_new_graphics_summary_from_page?(page: number, maxRecords: number): number;
+    // ----- Packed structured text (fork addition; absent in older WASM builds) -----
+    // The whole page in one malloc'd word array (layout in `walkPacked`); the
+    // caller frees it with `_wasm_free`.
+    _wasm_stext_page_pack?(stext: number): number;
     [key: string]: unknown;
 }
 
@@ -1238,6 +1242,69 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
         }
     }
 
+    /**
+     * `StructuredText.walk` over a packed page (`_wasm_stext_page_pack`): the
+     * same callbacks with the same values, in the same order, as walking the
+     * page with one getter call per field. The words are copied out of the
+     * heap and freed first, since a callback may call into WASM and grow (and
+     * so detach) the heap. Only text and image blocks are packed, depth first
+     * through structure nodes (options "segment", or "structured" on a tagged
+     * PDF). Layout, in 32-bit words, floats bit for bit:
+     *
+     *   [0]    total length in words
+     *   block  type, bbox (4); for a text block: line count
+     *   line   wmode, dir (2), bbox (4), char count
+     *   char   c, quad (8), font, size, origin (2)
+     */
+    const walkPacked = (ptr: number, walker: StructuredTextWalker): void => {
+        const start = ptr >> 2;
+        const words = libmupdf.HEAP32.slice(start, start + libmupdf.HEAP32[start]);
+        libmupdf._wasm_free(ptr);
+        const floats = new Float32Array(words.buffer);
+        const wantChars = !!(walker.onChar || walker.onLineFont);
+        let i = 1;
+        while (i < words.length) {
+            const blockType = words[i];
+            const blockBBox: RectTuple = [floats[i + 1], floats[i + 2], floats[i + 3], floats[i + 4]];
+            i += 5;
+            if (blockType === 1) {
+                if (walker.onImageBlock) walker.onImageBlock(blockBBox, null, null);
+                continue;
+            }
+            if (walker.beginTextBlock) walker.beginTextBlock(blockBBox);
+            const lineCount = words[i++];
+            for (let l = 0; l < lineCount; l++) {
+                const lineWmode = words[i];
+                const lineDir: [number, number] = [floats[i + 1], floats[i + 2]];
+                const lineBBox: RectTuple = [floats[i + 3], floats[i + 4], floats[i + 5], floats[i + 6]];
+                const charCount = words[i + 7];
+                i += 8;
+                if (walker.beginLine) walker.beginLine(lineBBox, lineWmode, lineDir);
+                if (wantChars) {
+                    // The line font is the first char's, as in the getter walk.
+                    if (charCount > 0 && walker.onLineFont) walker.onLineFont(words[i + 9], floats[i + 10]);
+                    if (walker.onChar) {
+                        for (let c = 0; c < charCount; c++, i += 13) {
+                            const rune = sanitizeRune(words[i]);
+                            const quad: QuadTuple = [
+                                floats[i + 1], floats[i + 2], floats[i + 3], floats[i + 4],
+                                floats[i + 5], floats[i + 6], floats[i + 7], floats[i + 8],
+                            ];
+                            if (walker.onCharFont) walker.onCharFont(words[i + 9], floats[i + 10]);
+                            if (walker.onCharOrigin) walker.onCharOrigin(floats[i + 11], floats[i + 12]);
+                            walker.onChar(rune, quad);
+                        }
+                        if (walker.endLine) walker.endLine();
+                        continue;
+                    }
+                }
+                i += 13 * charCount;
+                if (walker.endLine) walker.endLine();
+            }
+            if (walker.endTextBlock) walker.endTextBlock();
+        }
+    };
+
     class StructuredText implements StructuredTextLike {
         constructor(public pointer: number) {}
         asJSON(scale = 1) {
@@ -1249,6 +1316,10 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
             return fromStringFree(textPtr);
         }
         walk(walker: StructuredTextWalker) {
+            if (libmupdf._wasm_stext_page_pack) {
+                walkPacked(libmupdf._wasm_stext_page_pack(this.pointer), walker);
+                return;
+            }
             let block = libmupdf._wasm_stext_page_get_first_block(this.pointer);
             while (block) {
                 const blockType = libmupdf._wasm_stext_block_get_type(block);
@@ -1257,7 +1328,10 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                     if (walker.onImageBlock) {
                         walker.onImageBlock(blockBBox, null, null);
                     }
-                } else {
+                } else if (blockType === 0) {
+                    // Structure, vector and grid blocks have no lines. This
+                    // walk does not descend into structure nodes; the packed
+                    // walk does.
                     if (walker.beginTextBlock) {
                         walker.beginTextBlock(blockBBox);
                     }
