@@ -1633,13 +1633,27 @@ export class MarginFilter {
         // `proseRowLines`): a common word at the edge of a body row may
         // match a running head's text.
         const removedLines = new Set<RawLine>();
+        let pageRows: TextRow[] | undefined;
+        const rows = () => (pageRows ??= collectTextRows(page, textRows));
         // A running head set with wide word spaces is a prose row on its page
-        // too: one whose lines are all removals here, page numbers aside, is
-        // not spared. A body row holds lines no running head repeats.
+        // too: one whose lines are all removals here, page numbers aside, by
+        // their own text or that of the text row they joined ("journal of"
+        // of a head with mixed word spaces), is not spared. A body row holds
+        // lines no running head repeats.
+        let rowTexts: Map<RawLine, string> | undefined;
+        const removedHere = (line: RawLine) => {
+            if (pageRemovals!.has(normalizeText(line.text))) return true;
+            if (!rowTexts) {
+                rowTexts = new Map();
+                for (const row of rows()) for (const l of row.lines) rowTexts.set(l, normalizeText(row.text));
+            }
+            return pageRemovals!.has(rowTexts.get(line) ?? "");
+        };
         const prose = textRows && proseRows
             ? proseRowLines(page, marginZone, row => {
+                if (!pageRemovals || pageRemovals.size === 0) return false;
                 const lines = row.filter(line => !/\p{N}/u.test(line.text));
-                return lines.length > 0 && lines.every(line => pageRemovals?.has(normalizeText(line.text)) === true);
+                return lines.length > 0 && lines.every(removedHere);
             })
             : null;
         const inZone = (bbox: BoundingBox) =>
@@ -1671,7 +1685,7 @@ export class MarginFilter {
             return true;
         };
         if ((pageRemovals && pageRemovals.size > 0) || endTexts.size > 0) {
-            for (const row of collectTextRows(page, textRows)) {
+            for (const row of rows()) {
                 const normalized = normalizeText(row.text);
                 if (pageRemovals?.has(normalized) && inZone(row.bbox)) {
                     remove(row.lines, reasonByText.get(normalized));

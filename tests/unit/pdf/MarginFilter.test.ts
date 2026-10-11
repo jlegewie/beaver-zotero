@@ -2058,6 +2058,24 @@ describe("justified prose rows split word by word (PDF schema 5)", () => {
         expect(keptText(pages[1], removal, true)).toContain("is");
     });
 
+    it("removes a running head whose narrow word gaps join some of its words into one row", () => {
+        // "journal of" join into one row; "social" and "psychology" stand apart.
+        const head = (): RawLine[] => [
+            makeStyledLine("journal", 300, 45, 35, "Times-Roman", 9),
+            makeStyledLine("of", 337, 45, 10, "Times-Roman", 9),
+            ...justified(["social", "psychology"], 365, 45),
+        ];
+        const pages = buildPages().map((page) => ({
+            ...page,
+            blocks: [...page.blocks, { type: "text" as const, bbox: bboxFromXYWH(300, 45, 200, 9, "top-left"), lines: head() }],
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        expect(removal.candidates.map((c) => c.text)).toContain("journal of");
+        const kept = keptText(pages[1], removal, true);
+        for (const word of ["journal", "of", "social", "psychology"]) expect(kept).not.toContain(word);
+        expect(kept).toContain("impacting");
+    });
+
     it("spares a body row's word that a running head repeats when the row's other lines are not removals", () => {
         const page = {
             ...makePageWithLines([
