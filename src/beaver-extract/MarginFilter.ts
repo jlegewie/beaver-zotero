@@ -10,12 +10,14 @@ import type {
     BoundingBox,
     RawPageData,
     RawLine,
+    RawStyleRun,
     MarginSettings,
     MarginPosition,
     MarginElement,
     MarginAnalysis,
     RemovalCandidate,
     MarginRemovalResult,
+    PageNumberObservation,
     TextStyle,
 } from "@beaver/agent-core/extract/types";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
@@ -109,6 +111,10 @@ const PARSE_PREFIX_RANGE_RE = new RegExp(
 const PARSE_PREFIX_RE = new RegExp(`^(?:${PAGE_PREFIX_RE})\\s*(\\d+)$`, "iu");
 const PARSE_RANGE_RE = new RegExp(
     `^(\\d+)\\s*(?:${BARE_CONNECTOR_RE})\\s*\\d+$`,
+    "iu",
+);
+const BARE_COUNTER_RE = new RegExp(
+    `^(\\d+)\\s*(?:${BARE_CONNECTOR_RE})\\s*(\\d+)$`,
     "iu",
 );
 const PARSE_CJK_WRAPPED = /^第\s*(\d+)\s*(?:页|頁)$/u;
@@ -264,6 +270,312 @@ function isIncreasingSequence(numbers: number[]): boolean {
 }
 
 type PageNumberEntry = { el: MarginElement; value: number };
+
+/** A bare number or Roman numeral, as the edge word of a margin line. */
+const EDGE_PAGE_NUMBER_RE = /^(?:\d{1,5}|[ivxlcdm]+|[IVXLCDM]+)$/u;
+
+/** A number between dashes ("- 112 -"). */
+const DASH_WRAPPED_RE = /^[-–—]\s*(\d{1,5})\s*[-–—]$/u;
+
+/** A number set with spaces between its digits ("2 1"). */
+const SPACED_DIGITS_RE = /^\d(?:\s+\d){1,4}$/u;
+
+/** `text` with compatibility and common non-Latin digits folded to ASCII. */
+export function normalizePageDigits(text: string): string {
+    return normalizeDigits(text);
+}
+
+/**
+ * Whether `text` names itself a page number ("Page 3", "p. 3", "第3页",
+ * "·12·", "Page 3 of 12", "3 of 12", "3/12"), unlike a bare numeral, which
+ * can be a year or a chapter number.
+ */
+export function isPageCounter(text: string): boolean {
+    if (isStructuredPageNumber(text)) return true;
+    // A bare counter ("3 of 12", "3/12") counts when the page is within
+    // the total.
+    const counter = normalizeDigits(text).trim().toLowerCase().match(BARE_COUNTER_RE);
+    return !!counter && Number(counter[1]) >= 1 && Number(counter[1]) <= Number(counter[2]);
+}
+
+/**
+ * The page number `text` prints ("12", "Page 12", "xiv", "·12·"), or `null`
+ * when the text is not page-number shaped. `roman` marks a bare Roman
+ * numeral.
+ */
+export function parsePrintedPageNumber(text: string): { value: number; roman: boolean } | null {
+    const dashed = parseDashWrapped(text);
+    if (dashed !== null) return { value: dashed, roman: false };
+    if (!isPageNumberPattern(text)) return null;
+    const value = parsePageNumber(text);
+    return value === null ? null : { value, roman: isBareRoman(text) };
+}
+
+/**
+ * A number between dashes ("- 112 -", "-119-", "— 7 —"), or `null`. Read
+ * as a page number by label derivation only: margin removal does not use
+ * it, so extracted text stays as it was.
+ */
+function parseDashWrapped(text: string): number | null {
+    const match = normalizeDigits(text).trim().match(DASH_WRAPPED_RE);
+    return match ? parseInt(match[1], 10) : null;
+}
+
+/**
+ * The number a letter-spaced row prints ("2 1" → "21"), or `null`. The row
+ * must be about as narrow as its digits set solid (`width` at most one
+ * `fontSize` per digit): the same page number printed at both ends of a
+ * footer ("4 … 4") is not one number.
+ */
+export function spacedRowNumber(text: string, width: number, fontSize: number): string | null {
+    const normalized = normalizeDigits(text).trim();
+    if (!SPACED_DIGITS_RE.test(normalized)) return null;
+    const digits = normalized.replace(/\s+/gu, "");
+    return fontSize > 0 && width <= digits.length * fontSize ? digits : null;
+}
+
+/**
+ * Largest size of a footnote marker relative to the text it leads. Page
+ * numbers are set about as large as the running head beside them.
+ */
+const FOOTNOTE_MARKER_SIZE_RATIO = 0.7;
+
+/** Leading numeral of a footnote line ("1", "12 See also"). */
+const LEADING_NUMERAL_RE = /^\d{1,3}(?:\s|$)/u;
+
+function styleRunSize(run: RawStyleRun): number {
+    return run.exactSize ?? run.font.size;
+}
+
+/**
+ * Whether `line` opens with a footnote marker: a numeral set clearly
+ * smaller than the words right after it, either in the line itself (per
+ * `styleRuns`) or in a line of `pageLines` that starts beside it. A footnote
+ * area's markers step one per page as often as page numbers do.
+ */
+export function isFootnoteMarker(line: RawLine, pageLines: readonly RawLine[]): boolean {
+    const text = normalizeDigits(line.text).trim();
+    if (!LEADING_NUMERAL_RE.test(text)) return false;
+    const runs = line.styleRuns;
+    if (runs && runs.length > 1 && runs[0].letters === 0) {
+        const textSize = Math.max(...runs.slice(1).filter(run => run.letters > 0).map(styleRunSize));
+        if (styleRunSize(runs[0]) <= FOOTNOTE_MARKER_SIZE_RATIO * textSize) return true;
+    }
+    if (!/^\d+$/u.test(text)) return false;
+    const size = line.font?.size ?? 0;
+    if (!(size > 0)) return false;
+    return pageLines.some(other => {
+        if (other === line || !(other.font?.size > 0) || !/\p{L}/u.test(other.text)) return false;
+        const gap = other.bbox.l - line.bbox.r;
+        return gap >= -0.25 * size
+            && gap <= other.font.size
+            && other.bbox.t < line.bbox.b
+            && line.bbox.t < other.bbox.b
+            && size <= FOOTNOTE_MARKER_SIZE_RATIO * other.font.size;
+    });
+}
+
+/**
+ * Whether a row's characters stand apart without forming words ("2 1 0 7 i
+ * l"): broken-up text whose single digits repeat on a page by chance. A
+ * letter-spaced number is caught as such (`spacedRowNumber`) before this.
+ */
+export function isScatteredRow(text: string): boolean {
+    const words = normalizeDigits(text).trim().split(/[\s|]+/u).filter(Boolean);
+    return words.length >= SCATTERED_MIN_CHARACTERS && words.every(word => [...word].length === 1);
+}
+
+/** Single characters that make a row or zone broken-up text. */
+export const SCATTERED_MIN_CHARACTERS = 3;
+
+/** The one place all single digits of broken-up text share. */
+export const SCATTERED_PLACE: BoundingBox = { l: 0, t: 0, r: 0, b: 0, origin: "top-left" };
+
+/** A line's em: its font size, or most of its height. */
+export function emOf(line: RawLine): number {
+    return line.font?.size > 0 ? line.font.size : 0.7 * (line.bbox.b - line.bbox.t);
+}
+
+/** Distance, in em, between two printings of a numeral that count apart. */
+const DISTINCT_PLACE_EMS = 3;
+
+/**
+ * How many distinct places `boxes` mark: boxes whose centers lie within
+ * `DISTINCT_PLACE_EMS` em of each other are one place. The pieces of one
+ * number split into lines or glyphs ("9" and "9" of a spaced "99") are one
+ * place; a fixed numeral and a page number at opposite ends of a footer are
+ * two.
+ */
+export function distinctPlaces(boxes: readonly BoundingBox[], em: number): number {
+    const reach = DISTINCT_PLACE_EMS * Math.max(em, 1);
+    const places: { x: number; y: number }[] = [];
+    for (const box of boxes) {
+        const x = (box.l + box.r) / 2;
+        const y = (box.t + box.b) / 2;
+        if (!places.some((place) => Math.hypot(place.x - x, place.y - y) <= reach)) places.push({ x, y });
+    }
+    return places.length;
+}
+
+/**
+ * Boxes for the ends of a row whose first and last word are the same
+ * numeral ("16 Journal of Things 16"): one em at each end of `box`.
+ */
+export function rowEndBoxes(box: BoundingBox, em: number): BoundingBox[] {
+    return [
+        { ...box, r: Math.min(box.r, box.l + em) },
+        { ...box, l: Math.max(box.l, box.r - em) },
+    ];
+}
+
+function spacedElementNumber(el: MarginElement): string | null {
+    return spacedRowNumber(el.text, el.bbox.r - el.bbox.l, el.line.font?.size ?? 0);
+}
+
+/**
+ * Words of a header or footer row that may be its page number: its first
+ * and last word when a bare number or Roman numeral ("644 R. Allen and A.
+ * Vignoles", "Page | 3"). Digits come back ASCII. See `spacedRowNumber` for
+ * letter-spaced numbers.
+ */
+export function rowPageNumberWords(text: string): string[] {
+    return [...new Set(rowEndWords(text))].filter((word) => EDGE_PAGE_NUMBER_RE.test(word));
+}
+
+/**
+ * A row's first and last word (one word when the row has one), digits
+ * ASCII. The same word at both ends appears twice.
+ */
+export function rowEndWords(text: string): string[] {
+    const words = normalizeDigits(text).trim().split(/[\s|]+/u).filter(Boolean);
+    if (words.length === 0) return [];
+    return words.length === 1 ? [words[0]] : [words[0], words[words.length - 1]];
+}
+
+/**
+ * Margin numerals that may be printed page numbers. Consumers group them by
+ * `value - pageIndex` to tell page numbers from other numerals.
+ *
+ * - Every removed margin element shaped like a page number, whichever pass
+ *   removed it. A long book's bare page numbers recur often enough for the
+ *   repeat pass to take them ("2" on many pages) before the page-number
+ *   passes see them, so the reason for removal is no guide.
+ * - The candidate words of every other header or footer element
+ *   (`rowPageNumberWords`, marked `edge`). A running head set as one line
+ *   with its page number changes text on every page, so no removal pass
+ *   takes it.
+ */
+function pageNumberObservations(
+    analysis: MarginAnalysis,
+    removalsByPage: Map<number, Set<string>>,
+): PageNumberObservation[] {
+    const observations: PageNumberObservation[] = [];
+    const seen = new Map<string, PageNumberObservation>();
+    // Where each key is printed (see `distinctPlaces`). A row-end number is
+    // also its row's edge word, so only the row places it.
+    const places = new Map<string, { boxes: BoundingBox[]; em: number }>();
+    // Zones whose text is broken into single characters (a letter-spaced
+    // footer set glyph by glyph): their single digits count as one place.
+    const singles = new Map<string, number>();
+    for (const elements of analysis.elements.values()) {
+        for (const el of elements) {
+            if ([...el.text.trim()].length !== 1) continue;
+            const zone = `${el.pageIndex}\u0000${el.position}`;
+            singles.set(zone, (singles.get(zone) ?? 0) + 1);
+        }
+    }
+    const observe = (el: MarginElement, text: string, edge: boolean, spaced = false, boxes = [el.bbox]) => {
+        const value = parsePrintedPageNumber(text)?.value ?? parsePageNumber(text);
+        if (value === null) return;
+        const key = `${el.pageIndex}\u0000${el.position}\u0000${text}`;
+        let place = places.get(key);
+        if (!place) {
+            place = { boxes: [], em: 0 };
+            places.set(key, place);
+        }
+        const scattered = [...text].length === 1
+            && (singles.get(`${el.pageIndex}\u0000${el.position}`) ?? 0) >= SCATTERED_MIN_CHARACTERS;
+        if (!el.rowEndNumber) place.boxes.push(...(scattered ? [SCATTERED_PLACE] : boxes));
+        place.em = Math.max(place.em, emOf(el.line));
+        const existing = seen.get(key);
+        if (existing) {
+            // The same number seen twice (a running head's edge word and
+            // its removed row-end number): removal is the stronger evidence.
+            if (!edge) delete existing.edge;
+            return;
+        }
+        const observation: PageNumberObservation = {
+            pageIndex: el.pageIndex,
+            value,
+            text,
+            roman: isBareRoman(text),
+            position: el.position,
+            bbox: el.bbox,
+            ...(edge ? { edge } : {}),
+            ...(spaced ? { spaced } : {}),
+        };
+        seen.set(key, observation);
+        observations.push(observation);
+    };
+    // Letter-spaced page numbers ("2 1" for 21) arrive as one line per
+    // digit: the joined row reads as the number, and its digits are also
+    // collected one by one as row-end numbers. The last digit alone steps
+    // with the page index until it wraps, so it must not count.
+    const spacedRows = new Set<MarginElement>();
+    for (const elements of analysis.elements.values()) {
+        for (const el of elements) {
+            if (!el.rowEndNumber && spacedElementNumber(el)) {
+                spacedRows.add(el);
+            }
+        }
+    }
+    const insideSpacedRow = (el: MarginElement) => [...spacedRows].some((row) =>
+        row.pageIndex === el.pageIndex
+        && row.position === el.position
+        && el.bbox.l >= row.bbox.l - 1 && el.bbox.r <= row.bbox.r + 1
+        && el.bbox.t >= row.bbox.t - 1 && el.bbox.b <= row.bbox.b + 1,
+    );
+
+    for (const elements of analysis.elements.values()) {
+        for (const el of elements) {
+            if (el.rowEndNumber && spacedRows.size > 0 && insideSpacedRow(el)) continue;
+            // A footnote marker that a page-number pass removed is still a
+            // footnote marker.
+            if (el.footnoteMarker && isPageNumberPattern(el.text)) continue;
+            if (
+                !spacedRows.has(el)
+                && isPageNumberPattern(el.text)
+                && removalsByPage.get(el.pageIndex)?.has(normalizeText(el.text))
+            ) {
+                observe(el, el.text, false);
+                continue;
+            }
+            if (el.rowEndNumber || (el.position !== "top" && el.position !== "bottom")) continue;
+            const spaced = spacedElementNumber(el);
+            if (spaced) {
+                observe(el, spaced, true, true);
+                continue;
+            }
+            if (parseDashWrapped(el.text) !== null) {
+                observe(el, el.text.trim(), true);
+                continue;
+            }
+            const ends = rowEndWords(el.text);
+            const marker = el.footnoteMarker ? ends[0] : undefined;
+            const bothEnds = ends.length === 2 && ends[0] === ends[1] && !isScatteredRow(el.text);
+            for (const word of rowPageNumberWords(el.text)) {
+                if (word === marker) continue;
+                observe(el, word, true, false, bothEnds ? rowEndBoxes(el.bbox, emOf(el.line)) : [el.bbox]);
+            }
+        }
+    }
+    for (const [key, observation] of seen) {
+        const { boxes, em } = places.get(key)!;
+        const count = distinctPlaces(boxes, em);
+        if (count > 1) observation.occurrences = count;
+    }
+    return observations.sort((a, b) => a.pageIndex - b.pageIndex);
+}
 
 /**
  * Minimum pages a run of page numbers needs. Not relaxed for short documents:
@@ -764,6 +1076,10 @@ export class MarginFilter {
         for (const page of pages) {
             const positionOf = (bbox: BoundingBox) =>
                 getMarginPosition(bbox, page.width, page.height, marginZone);
+            let linesOfPage: RawLine[] | undefined;
+            const pageLines = () => linesOfPage ??= page.blocks.flatMap(block =>
+                block.type === "text" && block.lines ? block.lines : [],
+            );
             const push = (
                 text: string,
                 position: MarginPosition,
@@ -771,6 +1087,7 @@ export class MarginFilter {
                 lines: RawLine[],
                 rowEndNumber = false,
             ) => {
+                const footnoteMarker = isFootnoteMarker(lines[0], pageLines());
                 elements.get(position)!.push({
                     text,
                     position,
@@ -779,6 +1096,7 @@ export class MarginFilter {
                     line: lines[0],
                     ...(lines.length > 1 ? { lineCount: lines.length } : {}),
                     ...(rowEndNumber ? { rowEndNumber } : {}),
+                    ...(footnoteMarker ? { footnoteMarker } : {}),
                 });
             };
             for (const row of collectTextRows(page, textRows)) {
@@ -1185,7 +1503,12 @@ export class MarginFilter {
             }
         }
 
-        return { candidates, textsToRemove, removalsByPage };
+        return {
+            candidates,
+            textsToRemove,
+            removalsByPage,
+            pageNumbers: pageNumberObservations(analysis, removalsByPage),
+        };
     }
 
     /**

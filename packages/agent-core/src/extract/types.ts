@@ -683,6 +683,11 @@ export interface MarginElement {
      * index removes it.
      */
     rowEndNumber?: boolean;
+    /**
+     * The element opens with a footnote marker: a numeral set clearly
+     * smaller than the text beside it. Not page-number evidence.
+     */
+    footnoteMarker?: boolean;
 }
 
 /**
@@ -721,6 +726,43 @@ export interface MarginRemovalResult {
     textsToRemove: Set<string>;
     /** Map of pageIndex -> set of texts to remove on that page */
     removalsByPage: Map<number, Set<string>>;
+    /**
+     * Margin numerals that may be printed page numbers, with their parsed
+     * values (see `derivedPageLabels.ts`). `identifyElementsToRemove` always
+     * sets it; optional for hand-built results.
+     */
+    pageNumbers?: PageNumberObservation[];
+}
+
+/** A numeral at the edge of a page that may be its printed page number. */
+export interface PageNumberObservation {
+    pageIndex: number;
+    /** Parsed value: the page number the element prints. */
+    value: number;
+    /** Text as printed ("12", "Page 12", "xiv"). */
+    text: string;
+    /** A bare Roman numeral ("xiv", "IV") rather than an Arabic number. */
+    roman: boolean;
+    position: MarginPosition;
+    /**
+     * Read from a header or footer line that margin detection did not remove
+     * as a page number (its first or last word, as in "644 R. Allen and A.
+     * Vignoles"), or from a page's top or bottom text rows. Weaker evidence
+     * than a removed page number.
+     */
+    edge?: boolean;
+    /** Read from letter-spaced digits ("3 8" for 38). */
+    spaced?: boolean;
+    /**
+     * Box of the element, line or row the number was read from, in MuPDF's
+     * page frame. A word of a longer line has the whole line's box.
+     */
+    bbox?: BoundingBox;
+    /**
+     * How often the page prints `text` in this zone, when more than once (a
+     * page number beside an equal fixed numeral).
+     */
+    occurrences?: number;
 }
 
 // ============================================================================
@@ -892,6 +934,11 @@ export interface InternalExtractionResult {
     fullText: string;
     /** Page labels for all pages in the document (0-indexed → label string). Only non-empty labels included. */
     pageLabels?: Record<number, string>;
+    /**
+     * Page numbers printed in the margins (0-indexed → label), from
+     * `derivePageLabels`. Set by full-document structured extraction only.
+     */
+    derivedPageLabels?: Record<number, string>;
     /** Extraction metadata */
     metadata: {
         extractedAt: string;

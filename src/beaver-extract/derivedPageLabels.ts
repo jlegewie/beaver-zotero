@@ -1,0 +1,531 @@
+/**
+ * Derived page labels: the page numbers a PDF prints in its margins.
+ *
+ * Margin page-number detection (`MarginFilter.identifyElementsToRemove`)
+ * reports the margin numerals that may be page numbers, and
+ * `pageEdgeRowObservations` adds those of each page's top and bottom text
+ * rows, which can sit outside the margin zones. A printed page number
+ * advances in lockstep with the page index, so `value - pageIndex` is
+ * constant across a run of numbered pages. This module groups the
+ * observations into such runs, keeps one numbering per page, and labels the
+ * pages each run spans, including unnumbered pages inside it (an article's
+ * first page, full-page figures).
+ *
+ * The result is independent of the PDF's own `/PageLabels` (catalog labels):
+ * it reports what the pages print, not what the file declares.
+ *
+ * Worker-safe: depends only on agent-core types, `MarginFilter` and
+ * `PageRotationNormalizer`.
+ */
+
+import {
+    DEFAULT_MARGIN_ZONE,
+    type BoundingBox,
+    type MarginSettings,
+    type PageNumberObservation,
+    type RawLine,
+    type RawPageData,
+} from "@beaver/agent-core/extract/types";
+import {
+    detectDominantTextOrientation,
+    inverseRotateBBox,
+    rotateRawPage,
+} from "./PageRotationNormalizer";
+import {
+    isFootnoteMarker,
+    distinctPlaces,
+    emOf,
+    isPageCounter,
+    isScatteredRow,
+    normalizePageDigits,
+    SCATTERED_MIN_CHARACTERS,
+    SCATTERED_PLACE,
+    parsePrintedPageNumber,
+    rowEndBoxes,
+    rowEndWords,
+    rowPageNumberWords,
+    spacedRowNumber,
+} from "./MarginFilter";
+
+/** Minimum numbered pages a run needs to be trusted. */
+const MIN_RUN_PAGES = 3;
+
+/**
+ * Largest step between consecutive numbered pages of one run. Numerals that
+ * happen to match an offset far apart are not a run, and the pages between
+ * them must not be filled.
+ */
+const MAX_RUN_GAP = 6;
+
+/**
+ * A two-page run is accepted when it is all the evidence a short document
+ * can offer: at most this many pages long.
+ */
+const SHORT_DOCUMENT_PAGES = 4;
+
+/**
+ * Pages a run's labels extend past its first and last numbered page, when
+ * those pages carry no numbering of their own. Covers the unnumbered opening
+ * page of an article and a closing page without a footer.
+ */
+const RUN_EXTENSION_PAGES = 1;
+
+/**
+ * A run extends further back, up to this many pages, when that reaches page
+ * 1: a book's main text often starts with an unnumbered part title and
+ * chapter opener before the first printed number.
+ */
+const FIRST_PAGE_EXTENSION_PAGES = 3;
+
+interface Run {
+    /** Script and offset, shared by every run of one numbering. */
+    key: string;
+    roman: boolean;
+    /** `value - pageIndex` for every page of the run. */
+    offset: number;
+    /** Numbered pages, ascending. */
+    pages: number[];
+    /**
+     * Evidence for the run: a page whose number margin detection removed
+     * counts twice, a page seen only in an edge word or row once.
+     */
+    weight: number;
+    upperCase: boolean;
+    /** The run's last page says it is the last ("12 of 12"). */
+    endsDocument: boolean;
+}
+
+/**
+ * Page labels derived from printed page numbers, keyed by 0-based page
+ * index. Pages without a trusted numbering are absent.
+ */
+export function derivePageLabels(
+    observations: readonly PageNumberObservation[],
+    pageCount: number,
+): Record<number, string> {
+    const { runs, numberedPages } = candidateRuns(observations, pageCount);
+    const accepted = selectRuns(runs);
+    // A page that prints a number of another numbering is not unnumbered,
+    // even when that numbering is too short to be a run of its own.
+    const claimable = (pageIndex: number, run: Run) =>
+        pageIndex >= 0
+        && pageIndex < pageCount
+        && !owner.has(pageIndex)
+        && [...(numberedPages.get(pageIndex) ?? [])].every((key) => key === run.key);
+
+    // A run labels every page it spans. Its numbered pages on both sides
+    // outweigh a stray number on a gap page (an OCR misread, a fraction, a
+    // footnote's "p. 351"); an inserted page with its own numbering shifts
+    // the offset on the far side and so splits the run instead.
+    const owner = new Map<number, Run>();
+    for (const run of accepted) {
+        const first = run.pages[0];
+        const last = run.pages[run.pages.length - 1];
+        for (let p = first; p <= last; p++) owner.set(p, run);
+    }
+    // Extend each run into the unclaimed pages next to it: backwards first,
+    // since a numbering's unnumbered opening pages belong to it rather than
+    // to the trailing pages of the numbering before.
+    for (const run of accepted) {
+        const first = run.pages[0];
+        const firstValue = first + run.offset;
+        const reach = firstValue - 1 <= FIRST_PAGE_EXTENSION_PAGES
+            ? Math.max(RUN_EXTENSION_PAGES, firstValue - 1)
+            : RUN_EXTENSION_PAGES;
+        for (let k = 1; k <= reach; k++) {
+            const before = first - k;
+            // A page before page 1 is not this numbering's; leave it free
+            // for the numbering before (front matter's last page).
+            if (before + run.offset < 1 || !claimable(before, run)) break;
+            owner.set(before, run);
+        }
+    }
+    for (const run of accepted) {
+        if (run.endsDocument) continue;
+        const last = run.pages[run.pages.length - 1];
+        for (let k = 1; k <= RUN_EXTENSION_PAGES; k++) {
+            const after = last + k;
+            if (!claimable(after, run)) break;
+            owner.set(after, run);
+        }
+    }
+
+    const labels: Record<number, string> = {};
+    for (const [pageIndex, run] of owner) {
+        const value = pageIndex + run.offset;
+        if (value < 1) continue;
+        const label = run.roman ? toRoman(value, run.upperCase) : String(value);
+        if (label) labels[pageIndex] = label;
+    }
+    return labels;
+}
+
+/**
+ * Observations without the single digits of a letter-spaced number: "3 8"
+ * also yields "3" and "8" alone, and its last digit steps with the page
+ * index until it wraps. A digit is one of the number's own pieces when its
+ * box lies inside the spaced number's box; digits without a box are kept.
+ */
+function withoutSpacedDigits(
+    observations: readonly PageNumberObservation[],
+): PageNumberObservation[] {
+    const spacedByPage = new Map<number, BoundingBox[]>();
+    for (const obs of observations) {
+        if (!obs.spaced || !obs.bbox) continue;
+        let boxes = spacedByPage.get(obs.pageIndex);
+        if (!boxes) {
+            boxes = [];
+            spacedByPage.set(obs.pageIndex, boxes);
+        }
+        boxes.push(obs.bbox);
+    }
+    if (spacedByPage.size === 0) return [...observations];
+    return observations.filter((obs) => {
+        if (obs.roman || obs.spaced || !obs.bbox || String(obs.value).length !== 1) return true;
+        const box = obs.bbox;
+        return !(spacedByPage.get(obs.pageIndex) ?? []).some((row) =>
+            box.l >= row.l - 1 && box.r <= row.r + 1 && box.t >= row.t - 1 && box.b <= row.b + 1,
+        );
+    });
+}
+
+/** "N of N" / "N/N" (optionally after a page word): the last page of N. */
+const LAST_PAGE_RE = /(\d+)\s*(?:of|von|de|di|van|из|\/)\s*(\d+)\s*$/iu;
+
+/** Whether an observation prints its page as the document's last ("8 of 8"). */
+function printsLastPage(obs: PageNumberObservation): boolean {
+    const match = normalizePageDigits(obs.text).match(LAST_PAGE_RE);
+    return !!match && Number(match[1]) === obs.value && Number(match[2]) === obs.value;
+}
+
+/**
+ * Observations without page furniture: a numeral printed at the same
+ * position on an adjacent page as well (a publisher logo's digits, a
+ * footer's fixed numbers). A page number never repeats on the next page, and
+ * furniture paired with its neighbors would otherwise step with the page
+ * index by chance. A numbering that restarts (a compiled thesis numbering
+ * each part from 1) repeats its numerals only on pages far apart, so it
+ * stays.
+ *
+ * In a short document, a page that prints the numeral more often than its
+ * neighbors (a page number beside an equal fixed numeral: page 16 of volume
+ * 16) keeps it, since its run has no pages to spare. A longer run fills such
+ * a page from its neighbors, and counting there would revive numerals that
+ * repeat within a page (a contents entry and its page reference).
+ */
+function withoutFurniture(
+    observations: readonly PageNumberObservation[],
+    pageCount: number,
+): PageNumberObservation[] {
+    const counted = pageCount <= SHORT_DOCUMENT_PAGES;
+    // Keyed by printed text: "8 of 8" on a last page is not the "8" every
+    // footer repeats as the page count.
+    const numeral = (obs: PageNumberObservation, pageIndex: number) =>
+        `${pageIndex}\u0000${obs.position}\u0000${obs.text.trim()}`;
+    // Observations from margin detection and from edge rows read the same
+    // numerals, so a page's count is the larger of the two.
+    const counts = new Map<string, number>();
+    for (const obs of observations) {
+        const key = numeral(obs, obs.pageIndex);
+        counts.set(key, Math.max(counts.get(key) ?? 0, counted ? obs.occurrences ?? 1 : 1));
+    }
+    // Text and zone only, not location: footers that alternate sides on
+    // facing pages print their fixed numerals at mirrored positions.
+    return observations.filter((obs) => {
+        const own = counts.get(numeral(obs, obs.pageIndex))!;
+        return (counts.get(numeral(obs, obs.pageIndex - 1)) ?? 0) < own
+            && (counts.get(numeral(obs, obs.pageIndex + 1)) ?? 0) < own;
+    });
+}
+
+/**
+ * Observations grouped by script and offset into runs worth considering,
+ * and the numberings each page prints: the keys of groups in which the page
+ * has a neighbor within `MAX_RUN_GAP`. A numeral alone in its group (a year,
+ * a chapter number) is noise and claims nothing, unless it names itself a
+ * page number ("Page 1", see `isPageCounter`).
+ */
+function candidateRuns(
+    allObservations: readonly PageNumberObservation[],
+    pageCount: number,
+): { runs: Run[]; numberedPages: Map<number, Set<string>> } {
+    const observations = withoutFurniture(withoutSpacedDigits(allObservations), pageCount);
+    const groups = new Map<string, { roman: boolean; offset: number; pages: Set<number>; removedPages: Set<number>; finalPages: Set<number>; counterPages: Set<number>; upper: number; lower: number }>();
+    for (const obs of observations) {
+        if (obs.pageIndex < 0 || obs.pageIndex >= pageCount || obs.value < 1) continue;
+        const offset = obs.value - obs.pageIndex;
+        const key = `${obs.roman ? "r" : "a"}${offset}`;
+        let group = groups.get(key);
+        if (!group) {
+            group = { roman: obs.roman, offset, pages: new Set(), removedPages: new Set(), finalPages: new Set(), counterPages: new Set(), upper: 0, lower: 0 };
+            groups.set(key, group);
+        }
+        group.pages.add(obs.pageIndex);
+        if (printsLastPage(obs)) group.finalPages.add(obs.pageIndex);
+        if (isPageCounter(obs.text)) group.counterPages.add(obs.pageIndex);
+        if (!obs.edge) group.removedPages.add(obs.pageIndex);
+        if (obs.roman) {
+            if (obs.text.trim() === obs.text.trim().toUpperCase()) group.upper++;
+            else group.lower++;
+        }
+    }
+
+    const minPages = pageCount <= SHORT_DOCUMENT_PAGES ? 2 : MIN_RUN_PAGES;
+    const runs: Run[] = [];
+    const numberedPages = new Map<number, Set<string>>();
+    for (const [key, group] of groups) {
+        const pages = Array.from(group.pages).sort((a, b) => a - b);
+        pages.forEach((page, k) => {
+            const near = (k > 0 && page - pages[k - 1] <= MAX_RUN_GAP)
+                || (k + 1 < pages.length && pages[k + 1] - page <= MAX_RUN_GAP);
+            if (!near && !group.counterPages.has(page)) return;
+            let keys = numberedPages.get(page);
+            if (!keys) {
+                keys = new Set();
+                numberedPages.set(page, keys);
+            }
+            keys.add(key);
+        });
+        if (group.pages.size < minPages) continue;
+        let start = 0;
+        for (let k = 1; k <= pages.length; k++) {
+            if (k < pages.length && pages[k] - pages[k - 1] <= MAX_RUN_GAP) continue;
+            if (k - start >= minPages) {
+                const runPages = pages.slice(start, k);
+                runs.push({
+                    key,
+                    roman: group.roman,
+                    offset: group.offset,
+                    pages: runPages,
+                    weight: runPages.length
+                        + runPages.filter((p) => group.removedPages.has(p)).length,
+                    upperCase: group.upper > group.lower,
+                    endsDocument: group.finalPages.has(runPages[runPages.length - 1]),
+                });
+            }
+            start = k;
+        }
+    }
+    return { runs, numberedPages };
+}
+
+/**
+ * One numbering per stretch of pages. Runs are taken best attested first
+ * (`Run.weight`); a run whose page span overlaps an accepted run's span is
+ * dropped, so of two numberings printed on the same pages (journal
+ * pagination in the header, "page 2 of 13" in the footer) only one remains.
+ */
+function selectRuns(runs: Run[]): Run[] {
+    const ordered = [...runs].sort((a, b) =>
+        b.weight - a.weight
+        || b.pages.length - a.pages.length
+        || span(b) - span(a)
+        || b.offset - a.offset,
+    );
+    const accepted: Run[] = [];
+    for (const run of ordered) {
+        const [first, last] = [run.pages[0], run.pages[run.pages.length - 1]];
+        const overlaps = accepted.some((other) =>
+            first <= other.pages[other.pages.length - 1] && other.pages[0] <= last,
+        );
+        if (!overlaps) accepted.push(run);
+    }
+    return accepted;
+}
+
+function span(run: Run): number {
+    return run.pages[run.pages.length - 1] - run.pages[0];
+}
+
+const ROMAN_DIGITS: [number, string][] = [
+    [1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"],
+    [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"],
+];
+
+function toRoman(value: number, upperCase: boolean): string {
+    if (value < 1 || value >= 4000) return "";
+    let rest = value;
+    let out = "";
+    for (const [n, digits] of ROMAN_DIGITS) {
+        while (rest >= n) {
+            out += digits;
+            rest -= n;
+        }
+    }
+    return upperCase ? out.toUpperCase() : out;
+}
+
+/** Text rows `pageEdgeRowObservations` reads at each end of a page. */
+const EDGE_ROWS = 2;
+
+/**
+ * Candidate page numbers in the topmost and bottommost text rows of each
+ * page (`edgeRows` at each end), read with the page turned upright: on a
+ * page whose text runs sideways (`/Rotate 90`), MuPDF's frame puts the
+ * running heads at the left or right edge. `marginZone` is the zone the
+ * orientation vote ignores (see `detectDominantTextOrientation`). Running heads and feet sit there whatever the page's margins;
+ * on generous or scanned pages they fall outside the fixed margin zones
+ * `MarginFilter` reads. Observations are marked `edge`.
+ */
+export function pageEdgeRowObservations(
+    pages: readonly RawPageData[],
+    edgeRows = EDGE_ROWS,
+    marginZone: MarginSettings = DEFAULT_MARGIN_ZONE,
+): PageNumberObservation[] {
+    const observations: PageNumberObservation[] = [];
+    for (const page of pages) {
+        const rotation = detectDominantTextOrientation(page, marginZone);
+        const rows = textRows(rotateRawPage(page, rotation).page);
+        const pageLines = rows.flat();
+        // Observation boxes go back to MuPDF's frame, the frame margin
+        // detection reports its boxes in.
+        const sourceBox = (box: BoundingBox) =>
+            inverseRotateBBox(box, rotation, page.width, page.height);
+        // Where the page prints each candidate, per position and text.
+        const pagePlaces = new Map<string, BoundingBox[]>();
+        // The page's body em, which a large title does not stretch.
+        const em = median(pageLines.map(emOf));
+        const pageObservations: PageNumberObservation[] = [];
+        const picked = new Map<number, "top" | "bottom">();
+        rows.slice(-edgeRows).forEach((_, k) => picked.set(rows.length - 1 - k, "bottom"));
+        rows.slice(0, edgeRows).forEach((_, k) => picked.set(k, "top"));
+        for (const [rowIndex, position] of picked) {
+            const lines = rows[rowIndex];
+            const rowText = lines.map((line) => line.text).join(" ");
+            const uprightRowBox = unionBox(lines);
+            const rowBox = sourceBox(uprightRowBox);
+            const spaced = spacedRowNumber(
+                rowText,
+                uprightRowBox.r - uprightRowBox.l,
+                Math.max(...lines.map((line) => line.font?.size ?? 0)),
+            );
+            // Candidate texts with their boxes: the row's first and last word
+            // take the box of the line they start or end, a line read on its
+            // own its own box, the whole row the row's box.
+            const texts = new Map<string, BoundingBox>();
+            // Where the row prints each candidate, upright: the same numeral
+            // read as a word and as a line is one place (see `distinctPlaces`).
+            // The single digits of broken-up rows (a letter-spaced footer, a
+            // line set glyph by glyph) all share one place on the page.
+            const scattered = lines.filter((line) => [...line.text.trim()].length === 1).length >= SCATTERED_MIN_CHARACTERS
+                || isScatteredRow(rowText);
+            const placed = (text: string, ...boxes: BoundingBox[]) => {
+                const key = `${position}\u0000${text}`;
+                const where = scattered && [...text].length === 1 ? [SCATTERED_PLACE] : boxes;
+                pagePlaces.set(key, [...(pagePlaces.get(key) ?? []), ...where]);
+            };
+            if (!spaced) {
+                const firstLine = lines[0];
+                const lastLine = lines[lines.length - 1];
+                const words = rowText.trim().split(/\s+/u);
+                const wordBox = (word: string) =>
+                    word === words[0] ? sourceBox(firstLine.bbox)
+                    : word === words[words.length - 1] ? sourceBox(lastLine.bbox)
+                    : rowBox;
+                // A footnote line's marker steps with the pages as well.
+                const marker = isFootnoteMarker(firstLine, pageLines)
+                    ? rowPageNumberWords(words[0])[0]
+                    : undefined;
+                const ends = rowEndWords(rowText);
+                const bothEnds = ends.length === 2 && ends[0] === ends[1] && !scattered;
+                for (const word of rowPageNumberWords(rowText)) {
+                    if (word === marker) continue;
+                    texts.set(word, wordBox(word));
+                    if (bothEnds) placed(word, ...rowEndBoxes(uprightRowBox, em));
+                    else placed(word, word === ends[0] ? firstLine.bbox : lastLine.bbox);
+                }
+                // The whole row first: a counter split into lines ("Page 3",
+                // "of 3") still reads as one, keeping its last-page signal. A
+                // row that opens with a footnote marker (one raised into a row
+                // of its own) is not a counter.
+                if (marker === undefined && parsePrintedPageNumber(rowText)) {
+                    texts.set(rowText.trim(), rowBox);
+                    placed(rowText.trim(), uprightRowBox);
+                }
+            }
+            for (const line of lines) {
+                if (parsePrintedPageNumber(line.text) && !isFootnoteMarker(line, pageLines)) {
+                    const text = line.text.trim();
+                    texts.set(text, sourceBox(line.bbox));
+                    placed(text, line.bbox);
+                }
+            }
+            if (spaced) {
+                pageObservations.push({
+                    pageIndex: page.pageIndex,
+                    value: Number(spaced),
+                    text: spaced,
+                    roman: false,
+                    position,
+                    edge: true,
+                    spaced: true,
+                    bbox: rowBox,
+                });
+            }
+            for (const [text, bbox] of texts) {
+                const parsed = parsePrintedPageNumber(text);
+                if (!parsed) continue;
+                pageObservations.push({
+                    pageIndex: page.pageIndex,
+                    value: parsed.value,
+                    text,
+                    roman: parsed.roman,
+                    position,
+                    edge: true,
+                    bbox,
+                });
+            }
+        }
+        for (const obs of pageObservations) {
+            const n = distinctPlaces(pagePlaces.get(`${obs.position}\u0000${obs.text}`) ?? [], em);
+            observations.push(n > 1 ? { ...obs, occurrences: n } : obs);
+        }
+    }
+    return observations;
+}
+
+/** A page's text lines grouped into rows, top to bottom, each left to right. */
+function textRows(page: RawPageData): RawLine[][] {
+    const lines: RawLine[] = [];
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) if (line.text.trim()) lines.push(line);
+    }
+    lines.sort((a, b) => center(a) - center(b));
+    const rows: RawLine[][] = [];
+    for (const line of lines) {
+        const row = rows[rows.length - 1];
+        const anchor = row?.[0];
+        const tolerance = anchor
+            ? Math.max(2, 0.5 * Math.min(height(anchor), height(line)))
+            : 0;
+        if (anchor && Math.abs(center(line) - center(anchor)) <= tolerance) row.push(line);
+        else rows.push([line]);
+    }
+    for (const row of rows) row.sort((a, b) => a.bbox.l - b.bbox.l);
+    return rows;
+}
+
+function median(values: readonly number[]): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+}
+
+function unionBox(lines: readonly RawLine[]): BoundingBox {
+    return {
+        l: Math.min(...lines.map((line) => line.bbox.l)),
+        t: Math.min(...lines.map((line) => line.bbox.t)),
+        r: Math.max(...lines.map((line) => line.bbox.r)),
+        b: Math.max(...lines.map((line) => line.bbox.b)),
+        origin: lines[0].bbox.origin,
+    };
+}
+
+function center(line: RawLine): number {
+    return (line.bbox.t + line.bbox.b) / 2;
+}
+
+function height(line: RawLine): number {
+    return line.bbox.b - line.bbox.t;
+}

@@ -20,6 +20,7 @@
 import { DocumentAnalyzer, type RawPageProvider } from "../DocumentAnalyzer";
 import { StyleAnalyzer } from "../StyleAnalyzer";
 import { MarginFilter, getEffectiveRepeatThreshold } from "../MarginFilter";
+import { derivePageLabels, pageEdgeRowObservations } from "../derivedPageLabels";
 import { PageExtractor } from "../PageExtractor";
 import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import { resolveAnalysisPages } from "../AnalysisWindow";
@@ -635,6 +636,7 @@ export function runExtractFromIndices(
     pageCache?: PageWalkCache,
     references?: ReferenceStage,
     pageNumberRuns = true,
+    derivePrintedPageLabels = false,
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
     try {
@@ -1057,11 +1059,28 @@ export function runExtractFromIndices(
     const recordedEngine: "block" | "paragraph" | "structured" = engine;
 
     const totalMs = performance.now() - tStart;
+    // Printed page numbers need the margins of every page, which only
+    // full-document structured extraction analyzes.
+    const derivedPageLabels = derivePrintedPageLabels
+        && engine === "structured"
+        && analysisPageByIndex.size === pageCount
+        ? derivePageLabels(
+            [
+                ...(marginRemoval.pageNumbers ?? []),
+                ...pageEdgeRowObservations(analysisPages, undefined, opts.marginZone),
+            ],
+            pageCount,
+        )
+        : undefined;
+
     const baseResult: InternalExtractionResult = {
         pages,
         analysis,
         fullText,
         pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
+        ...(derivedPageLabels && Object.keys(derivedPageLabels).length > 0
+            ? { derivedPageLabels }
+            : {}),
         metadata: {
             extractedAt: new Date().toISOString(),
             version: SCHEMA_VERSION,
@@ -1311,6 +1330,9 @@ function toStructuredExtractResult(
         document: {
             pageCount: result.analysis.pageCount,
             pageLabels: pageLabelsToStringKeys(result.pageLabels),
+            ...(result.derivedPageLabels
+                ? { derivedPageLabels: pageLabelsToStringKeys(result.derivedPageLabels) }
+                : {}),
             bboxOrigin: "top-left",
             bboxPrecision,
             pages,
@@ -1714,6 +1736,7 @@ export async function opExtract(
             pageCache,
             isStructured && preset.referenceItems ? { classify: true } : undefined,
             preset.pageNumberRuns,
+            preset.derivedPageLabels,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are
@@ -1839,6 +1862,7 @@ async function withStructuredRun<T>(
             pageCache,
             references,
             preset.pageNumberRuns,
+            preset.derivedPageLabels,
         );
         if (internal.metadata.timings) {
             internal.metadata.timings.docOpenMs = docOpenMs;

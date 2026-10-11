@@ -1995,3 +1995,141 @@ describe("smart removal on word-split rows", () => {
         expect(keptText(pages[3], removal)).not.toContain("Working Paper");
     });
 });
+
+describe("pageNumbers — margin numerals that may be printed page numbers", () => {
+    function analysisOf(entries: { pageIndex: number; text: string; position?: MarginPosition; x?: number; width?: number; rowEndNumber?: boolean; lineCount?: number }[]): MarginAnalysis {
+        const elements = new Map<MarginPosition, MarginElement[]>([
+            ["top", []], ["bottom", []], ["left", []], ["right", []],
+        ]);
+        for (const { pageIndex, text, position = "top", x = 100, width, rowEndNumber, lineCount } of entries) {
+            const line = makeLine(text, x, position === "bottom" ? PAGE_H - 30 : 30);
+            const bbox = width ? bboxFromXYWH(x, line.bbox.t, width, 10, "top-left") : line.bbox;
+            elements.get(position)!.push({
+                text, position, bbox, pageIndex, line,
+                ...(rowEndNumber ? { rowEndNumber } : {}),
+                ...(lineCount ? { lineCount } : {}),
+            });
+        }
+        const counts = {
+            top: elements.get("top")!.length,
+            bottom: elements.get("bottom")!.length,
+            left: elements.get("left")!.length,
+            right: elements.get("right")!.length,
+        };
+        return { elements, counts };
+    }
+    const values = (out: MarginRemovalResult) =>
+        (out.pageNumbers ?? []).map((o) => [o.pageIndex, o.value, o.edge ?? false]);
+
+    it("reports removed page numbers with their values", () => {
+        const out = MarginFilter.identifyElementsToRemove(oneTextPerPage(["1", "2", "3", "4"], "bottom"), 3, true);
+        expect(values(out)).toEqual([[0, 1, false], [1, 2, false], [2, 3, false], [3, 4, false]]);
+    });
+
+    it("reports bare numbers the repeat pass removed", () => {
+        // A numbering that restarts: "1".."3" recur on enough pages to be
+        // removed as repeats before the page-number passes see them.
+        const texts = ["1", "2", "3", "1", "2", "3", "1", "2", "3"];
+        const out = MarginFilter.identifyElementsToRemove(oneTextPerPage(texts, "bottom"), 3, true);
+        expect((out.pageNumbers ?? []).map((o) => o.value)).toEqual([1, 2, 3, 1, 2, 3, 1, 2, 3]);
+    });
+
+    it("reports the page number at either end of a running head as an edge word", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "644 R. Allen and A. Vignoles" },
+            { pageIndex: 1, text: "Index of school segregation 645" },
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(values(out)).toEqual([[0, 644, true], [1, 645, true]]);
+    });
+
+    it("reads letter-spaced digits as one number and drops their row-end digits", () => {
+        const entries = [0, 1, 2, 3].flatMap((pageIndex) => {
+            const digits = String(21 + pageIndex).split("");
+            return [
+                { pageIndex, text: digits.join(" "), lineCount: 2, width: 14 },
+                { pageIndex, text: digits[1], rowEndNumber: true },
+            ];
+        });
+        const out = MarginFilter.identifyElementsToRemove(analysisOf(entries), 3, true);
+        expect(values(out)).toEqual([[0, 21, true], [1, 22, true], [2, 23, true], [3, 24, true]]);
+    });
+
+    it("keeps a removed page number's evidence when the same number is also an edge word", () => {
+        // A footer row ("1 Journal of Things") and its standalone number, which
+        // the page-number sequence removes.
+        const entries = [0, 1, 2, 3].flatMap((pageIndex) => [
+            { pageIndex, text: `${pageIndex + 1} Journal of Things`, position: "bottom" as const, x: 100, lineCount: 2 },
+            { pageIndex, text: String(pageIndex + 1), position: "bottom" as const, x: 300 },
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysisOf(entries), 3, true);
+        expect(values(out)).toEqual([[0, 1, false], [1, 2, false], [2, 3, false], [3, 4, false]]);
+    });
+
+    it("reports page numbers set between dashes without removing them", () => {
+        const out = MarginFilter.identifyElementsToRemove(oneTextPerPage(["- 1 -", "-2-", "— 3 —"], "bottom"), 3, true);
+        expect((out.pageNumbers ?? []).map((o) => o.value)).toEqual([1, 2, 3]);
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("reads letter-spaced digits with wider gaps as one number", () => {
+        const entries = [0, 1, 2, 3].map((pageIndex) => (
+            { pageIndex, text: String(21 + pageIndex).split("").join("  "), lineCount: 2, width: 14 }
+        ));
+        const out = MarginFilter.identifyElementsToRemove(analysisOf(entries), 3, true);
+        expect((out.pageNumbers ?? []).map((o) => o.value)).toEqual([21, 22, 23, 24]);
+    });
+
+    it("does not join the same digit printed at both ends of a row", () => {
+        const entries = [4, 5, 6].map((n, pageIndex) => (
+            { pageIndex, text: `${n} ${n}`, lineCount: 2, width: 400 }
+        ));
+        const out = MarginFilter.identifyElementsToRemove(analysisOf(entries), 3, true);
+        expect((out.pageNumbers ?? []).some((o) => o.value > 10)).toBe(false);
+    });
+
+    it("counts a numeral printed twice on a page", () => {
+        // A fixed volume number 16 in every footer, and page numbers 16-17.
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "16", position: "bottom", x: 60 },
+            { pageIndex: 0, text: "16", position: "bottom", x: 500 },
+            { pageIndex: 1, text: "16", position: "bottom", x: 60 },
+            { pageIndex: 1, text: "17", position: "bottom", x: 500 },
+            { pageIndex: 2, text: "16 Journal of Things 16", position: "bottom", lineCount: 3 },
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        const counts = (out.pageNumbers ?? []).filter((o) => o.text === "16").map((o) => [o.pageIndex, o.occurrences ?? 1]);
+        expect(counts).toEqual([[0, 2], [1, 1], [2, 2]]);
+    });
+
+    it("counts the characters of broken-up text once", () => {
+        const analysis = analysisOf([{ pageIndex: 0, text: "2 1 0 7 i 2", position: "bottom", lineCount: 6 }]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect((out.pageNumbers ?? []).map((o) => [o.text, o.occurrences ?? 1])).toEqual([["2", 1]]);
+    });
+
+    it("does not report footnote markers as page numbers", () => {
+        // Each page's footnote area opens with a small marker beside larger
+        // text: "1", "2", "3" step one per page like page numbers.
+        const sized = (text: string, x: number, size: number): RawLine => {
+            const line = makeLine(text, x, PAGE_H - 40);
+            return { ...line, bbox: bboxFromXYWH(x, PAGE_H - 40, Math.max(1, text.length * 0.6 * size), size, "top-left"), font: { ...line.font, size } };
+        };
+        const pages: RawPageData[] = [0, 1, 2, 3].map((pageIndex) => ({
+            pageIndex,
+            pageNumber: pageIndex + 1,
+            width: PAGE_W,
+            height: PAGE_H,
+            viewBox: [0, 0, PAGE_W, PAGE_H],
+            rotation: 0,
+            blocks: [{
+                type: "text",
+                bbox: bboxFromXYWH(0, 0, PAGE_W, PAGE_H, "top-left"),
+                lines: [sized(String(pageIndex + 1), 100, 5), sized("See the appendix for details.", 104, 9)],
+            }],
+        }));
+        const analysis = MarginFilter.collectMarginElements(pages, { left: 60, top: 80, right: 60, bottom: 80 });
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.pageNumbers ?? []).toEqual([]);
+    });
+});

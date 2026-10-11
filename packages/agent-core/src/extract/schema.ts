@@ -79,7 +79,15 @@ export interface MarkdownPage {
 
 export interface StructuredDocument {
     pageCount: number;
+    /** Page labels the PDF declares (its `/PageLabels`), keyed by page index. */
     pageLabels?: Record<string, string>;
+    /**
+     * Page numbers printed in the page margins, keyed by page index. Derived
+     * from the text, independent of `pageLabels`: pages inside a run of
+     * printed numbers are labeled even when unnumbered; pages outside one are
+     * absent. Not used as a page label anywhere yet.
+     */
+    derivedPageLabels?: Record<string, string>;
     /**
      * Origin for all public extraction rects on `pages[].items[].bbox` and
      * `pages[].items[].sentences[].bboxes`.
