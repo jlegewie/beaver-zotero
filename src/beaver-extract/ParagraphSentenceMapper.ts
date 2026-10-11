@@ -56,6 +56,7 @@ import {
 import { detectColumns } from "./ColumnDetector";
 import { detectLinesOnPage } from "./LineDetector";
 import { decideLineJoin, joinsWithoutSpace, SOFT_HYPHEN, type LineJoin } from "./lineJoins";
+import { MATH_OPERATORS } from "./mathOperators";
 import {
     charCodeUnits,
     hasSentenceFinalTerminator,
@@ -399,13 +400,6 @@ export interface ParagraphTextOptions {
     leadMarker?: boolean;
 }
 
-/** Function names a raised digit after is an exponent ("cos² x"), not a note marker. */
-const MATH_FUNCTIONS = new Set([
-    "sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "coth", "sech", "csch",
-    "arcsin", "arccos", "arctan", "arsinh", "arcosh", "artanh", "log", "exp", "det", "max", "min",
-    "sup", "inf", "lim", "deg", "dim", "ker", "erf", "sgn", "var", "cov",
-]);
-
 /** Unit names a decimal prefix goes before ("mrad", "µmol", "kohm"). */
 const PREFIXED_UNITS = ["rad", "bar", "mol", "ohm", "sec", "cal", "lux"];
 const UNIT_PREFIXES = ["", "p", "n", "µ", "μ", "m", "c", "k"];
@@ -471,7 +465,7 @@ function gluedNoteMarkerChars(line: RawLineDetailed, superscriptThreshold: numbe
         let w = i - 1;
         while (w >= 0 && /\p{L}/u.test(chars[w].c)) w--;
         const word = chars.slice(w + 1, i).map((ch) => ch.c).join("");
-        if (word.length < 3 || !/^\p{Ll}+$/u.test(word) || MATH_FUNCTIONS.has(word) || UNIT_WORDS.has(word)) continue;
+        if (word.length < 3 || !/^\p{Ll}+$/u.test(word) || MATH_OPERATORS.has(word) || UNIT_WORDS.has(word)) continue;
         // The marker, or a list or range of them ("105,106", "14–16"), set
         // small and raised; it ends on a digit.
         let end = i;

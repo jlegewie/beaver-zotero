@@ -126,6 +126,16 @@ describe("decideSplitWord", () => {
         expect(split("co", "operation")).toBe("join");
     });
 
+    it("follows a compound the document spells with a Unicode hyphen", () => {
+        const vocabulary = vocabularyOf("co\u2010operation and re\u2010use");
+        expect(split("co", "operation", vocabulary)).toBe("keep");
+        expect(split("re", "use", vocabulary)).toBe("keep");
+        // The schema-4 compound set stays ASCII-only.
+        expect([...vocabulary]).toEqual([]);
+        // Unless it also writes the word closed.
+        expect(split("on", "line", vocabularyOf("an on\u2010line survey", "online panels"))).toBe("join");
+    });
+
     it("keeps only attested compounds with a plain set", () => {
         expect(decideSplitWord("broken-", "broken", "windows", "", new Set(["broken-windows"]))).toBe("keep");
         expect(decideSplitWord("algorithm-", "algorithm", "generated", "", new Set())).toBe("join");

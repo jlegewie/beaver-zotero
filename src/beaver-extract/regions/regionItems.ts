@@ -42,6 +42,7 @@ import type { Rect } from "./geometry";
 import type { RegionClass } from "./model";
 import { EQUATION_NUMBER_END_RE, EQUATION_REFERENCE_END_RE, sourceLines, type RegionLine } from "./pageSignals";
 import { LINE_CAPTION, LINE_FURNITURE, LINE_GUTTER, LINE_MARGIN, LINE_RUNNING, LINE_SKEWED, type LineRouting, type RegionDetection } from "./RegionDetector";
+import { MATH_OPERATORS } from "../mathOperators";
 
 export type RegionItemKind = "table" | "picture" | "formula";
 
@@ -95,12 +96,6 @@ const LATEX_COMMAND_RE = /\\\s?[A-Za-z]{2,}/;
 const TEXT_WORD_RE = /^[\p{L}][\p{L}'’-]{2,}[.,;:!?)]*$/u;
 /** A token mixing Greek and Latin letters: a variable's name. */
 const MIXED_SCRIPT_RE = /(?=.*\p{Script=Greek})(?=.*\p{Script=Latin})/u;
-/** Names of mathematical operators, set upright in text fonts. */
-const MATH_OPERATORS = new Set([
-    "arg", "cos", "cosh", "cot", "coth", "csc", "deg", "det", "dim", "exp", "gcd", "hom", "inf", "ker", "lim", "liminf",
-    "limsup", "log", "max", "min", "mod", "sec", "sin", "sinh", "sup", "tan", "tanh", "var", "cov", "corr", "diag", "sign",
-    "tr", "rank", "argmax", "argmin", "softmax", "relu", "erf", "logit",
-]);
 /** A piece with at most this share of math characters is text. */
 const FORMULA_TEXT_MATH = 0.2;
 /** A formula row beside a running line of this many words is that line's inline math... */

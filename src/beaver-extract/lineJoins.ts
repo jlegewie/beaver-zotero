@@ -24,6 +24,12 @@ export type LineJoin = "space" | "join" | "glue";
  * which would otherwise vouch for themselves.
  */
 export class LineJoinVocabulary extends Set<string> {
+    /**
+     * Compounds spelled with the Unicode hyphen (U+2010), as consecutive
+     * pairs with "-". Kept apart from the set itself, which PDF schema 4
+     * reads with ASCII hyphens only.
+     */
+    readonly unicodeHyphenCompounds = new Set<string>();
     readonly words = new Set<string>();
     readonly compoundLefts = new Set<string>();
     readonly compoundRights = new Set<string>();
@@ -61,6 +67,10 @@ export function addBlockToVocabulary(lines: readonly string[], vocabulary: LineJ
             for (const match of tokens[t].matchAll(COMPOUND_RE)) {
                 const parts = match[0].toLowerCase().split("-");
                 for (let i = 0; i + 1 < parts.length; i++) vocabulary.add(`${parts[i]}-${parts[i + 1]}`);
+            }
+            for (const match of tokens[t].includes("\u2010") ? tokens[t].matchAll(COMPOUND_PARTS_RE) : []) {
+                const parts = match[0].toLowerCase().split(/[-\u2010]/u);
+                for (let i = 0; i + 1 < parts.length; i++) vocabulary.unicodeHyphenCompounds.add(`${parts[i]}-${parts[i + 1]}`);
             }
             if (!whole) continue;
             for (const match of tokens[t].matchAll(COMPOUND_PARTS_RE)) {
@@ -191,6 +201,9 @@ export function decideSplitWord(
     const vocab = vocabulary instanceof LineJoinVocabulary ? vocabulary : undefined;
     if (vocabulary?.has(`${l}-${r}`)) return "keep";
     if (vocab?.words.has(l + r)) return "join";
+    // A Unicode-hyphen spelling counts unless the document also writes the
+    // word closed ("on‐line" once, "online" throughout).
+    if (vocab?.unicodeHyphenCompounds.has(`${l}-${r}`)) return "keep";
     // One hyphen of several, next to a whole element ("state-of-" + "the-art",
     // "analog-" + "to-digital", "T-FAP-" + "mediated"). A break inside an
     // element ("self-determina-" + "tion") is a hyphenation point. In

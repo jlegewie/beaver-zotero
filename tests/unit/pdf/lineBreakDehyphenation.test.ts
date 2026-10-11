@@ -548,10 +548,11 @@ describe('extractPageSentences footnote markers (PDF schema 5)', () => {
         expect(schema5SentenceText(page)).toBe('two alleles, and more.');
     });
 
-    it('keeps the exponent of a mathematical function', () => {
-        const text = 'we take cos2 x as the gain.';
-        const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '2'))]);
-        expect(schema5SentenceText(page)).toBe('we take cos2 x as the gain.');
+    it('keeps the exponent of a mathematical function or operator', () => {
+        for (const text of ['we take cos2 x as the gain.', 'we take logit2 x as the gain.', 'the softmax2 output.', 'its gcd2 here.']) {
+            const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '2'))]);
+            expect(schema5SentenceText(page)).toBe(text);
+        }
     });
 
     it('keeps exponents of units and variables', () => {
