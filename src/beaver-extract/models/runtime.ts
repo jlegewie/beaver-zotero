@@ -14,9 +14,10 @@
  * - Two classes give one score, the logit of `classes[1]` (sigmoid); more
  *   classes give one score per class (softmax).
  *
- * At first use a tree model's trees are concatenated into flat typed arrays
- * (`flatTrees`, cached per model object); evaluation walks those, with the
- * same arithmetic in the same order as the per-tree arrays of the export.
+ * At first use a tree model's trees are concatenated into flat typed arrays in
+ * pre-order (`flatTrees`, cached per model object); evaluation walks those,
+ * with the same arithmetic in the same order as the per-tree arrays of the
+ * export.
  *
  * `bxm-trees-packed-v1` (`pack()` there) holds the same kind of trees as
  * complete binary trees of one `depth`, as base64 little-endian typed arrays
@@ -29,6 +30,10 @@
  * bit-identical to the `bxm-trees-v1` form of the same trees. The arrays are
  * decoded once per model object (`packedTrees`), as views of the decoded
  * bytes.
+ *
+ * Both tree forms read the input row through a reused `Float64Array` copy
+ * (`asFloat64`): engines read typed arrays faster than arrays of mixed
+ * integers and doubles, and the copy holds the same values.
  *
  * Logistic models (`bxm-logistic-v1`) standardize the input
  * (`(x - mean) / scale`) and give one score per row of `coef`, with the same
@@ -135,16 +140,15 @@ export function treeValue(tree: Tree, x: ModelInput): number {
 }
 
 /**
- * Every tree of a model in one set of node arrays: tree t starts at node
- * `root[t]`, children are indices into the same arrays, and `missingLeft` is
- * 0 where the export omits it.
+ * Every tree of a model in one set of node arrays, each tree in pre-order from
+ * `root[t]`: a split's left child is the next node and its right child is
+ * `right[k]`; a leaf has `feature[k] < 0` and its value in `threshold[k]`.
+ * `missingLeft` is 0 where the export omits it.
  */
 interface FlatTrees {
     feature: Int32Array;
     threshold: Float64Array;
-    left: Int32Array;
     right: Int32Array;
-    value: Float64Array;
     missingLeft: Uint8Array;
     root: Int32Array;
     score: Int32Array;
@@ -153,35 +157,60 @@ interface FlatTrees {
 const flatCache = new WeakMap<TreeModel, FlatTrees>();
 
 function flatTrees(model: TreeModel): FlatTrees {
-    let flat = flatCache.get(model);
-    if (flat) return flat;
+    const cached = flatCache.get(model);
+    if (cached) return cached;
     const n = model.trees.reduce((total, tree) => total + tree.feature.length, 0);
-    flat = {
+    const out: FlatTrees = {
         feature: new Int32Array(n),
         threshold: new Float64Array(n),
-        left: new Int32Array(n),
         right: new Int32Array(n),
-        value: new Float64Array(n),
         missingLeft: new Uint8Array(n),
         root: new Int32Array(model.trees.length),
         score: new Int32Array(model.trees.length),
     };
-    let offset = 0;
+    let next = 0;
     model.trees.forEach((tree, t) => {
-        flat!.root[t] = offset;
-        flat!.score[t] = tree.score;
-        for (let k = 0; k < tree.feature.length; k++) {
-            flat!.feature[offset + k] = tree.feature[k];
-            flat!.threshold[offset + k] = tree.threshold[k];
-            flat!.left[offset + k] = tree.left[k] + offset;
-            flat!.right[offset + k] = tree.right[k] + offset;
-            flat!.value[offset + k] = tree.value[k];
-            flat!.missingLeft[offset + k] = tree.missing_left?.[k] === 1 ? 1 : 0;
+        out.root[t] = next;
+        out.score[t] = tree.score;
+        // Explicit stack: node k of the tree is written at `next`, then its left
+        // subtree, then its right subtree (whose start is patched into `right`).
+        const stack: [node: number, parent: number][] = [[0, -1]];
+        while (stack.length > 0) {
+            const [k, parent] = stack.pop()!;
+            if (next >= n) throw new Error(`${TREES_FORMAT}: tree ${t} is not a tree over its nodes`);
+            const at = next++;
+            if (parent >= 0) out.right[parent] = at;
+            const leaf = tree.feature[k] < 0;
+            out.feature[at] = leaf ? -1 : tree.feature[k];
+            out.threshold[at] = leaf ? tree.value[k] : tree.threshold[k];
+            out.missingLeft[at] = tree.missing_left?.[k] === 1 ? 1 : 0;
+            if (leaf) continue;
+            stack.push([tree.right[k], at], [tree.left[k], -1]);
         }
-        offset += tree.feature.length;
     });
-    flatCache.set(model, flat);
-    return flat;
+    flatCache.set(model, out);
+    return out;
+}
+
+/** Reused buffer for `asFloat64`. */
+let float64Row = new Float64Array(64);
+
+/**
+ * `x` as a `Float64Array` holding the same values: `x` itself, or a reused copy
+ * (valid until the next call). A row shorter than the model's `features`, or
+ * holding anything but numbers, is returned as is: the copy would convert it
+ * (`undefined` to NaN, which routes differently) or expose stale values past
+ * its end.
+ */
+function asFloat64(x: ModelInput, features: number): ModelInput {
+    if (x instanceof Float64Array || x.length < features) return x;
+    if (float64Row.length < x.length) float64Row = new Float64Array(Math.max(x.length, 2 * float64Row.length));
+    for (let i = 0; i < x.length; i++) {
+        const v = x[i];
+        if (typeof v !== "number") return x;
+        float64Row[i] = v;
+    }
+    return float64Row;
 }
 
 /** A packed model's arrays, decoded. */
@@ -267,8 +296,9 @@ function packedTrees(model: PackedTreeModel): PackedTrees {
 }
 
 /** `addTreeValues` for a packed model: a fixed `depth`-step descent per tree. */
-function addPackedTreeValues(model: PackedTreeModel, x: ModelInput, scores: number[] | Float64Array): void {
+function addPackedTreeValues(model: PackedTreeModel, input: ModelInput, scores: number[] | Float64Array): void {
     const { depth, score, feature, threshold, missingLeft, value } = packedTrees(model);
+    const x = asFloat64(input, model.features.length);
     const splits = 2 ** depth - 1;
     for (let t = 0, node = 0, leaf = 0; t < score.length; t++, node += splits, leaf += splits + 1) {
         let k = 0;
@@ -288,17 +318,18 @@ function addTreeValues(model: TreeModel | PackedTreeModel, x: ModelInput, scores
         addPackedTreeValues(model, x, scores);
         return;
     }
-    const { feature, threshold, left, right, value, missingLeft, root, score } = flatTrees(model);
+    const { feature, threshold, right, missingLeft, root, score } = flatTrees(model);
+    const row = asFloat64(x, model.features.length);
     for (let t = 0; t < root.length; t++) {
         let k = root[t];
         for (;;) {
             const f = feature[k];
             if (f < 0) break;
-            const v = x[f];
+            const v = row[f];
             // NaN fails every comparison; route it explicitly.
-            k = (v !== v ? missingLeft[k] === 1 : v <= threshold[k]) ? left[k] : right[k];
+            k = (v !== v ? missingLeft[k] === 1 : v <= threshold[k]) ? k + 1 : right[k];
         }
-        scores[score[t]] += value[k];
+        scores[score[t]] += threshold[k];
     }
 }
 
