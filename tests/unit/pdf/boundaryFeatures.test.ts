@@ -45,7 +45,8 @@ async function captureInput(): Promise<BoundaryPage[]> {
         },
     };
     try {
-        await itemsExport({ pdfData: new Uint8Array(readFileSync(PDF)), task: "capture" });
+        // The heuristic decides, so the input carries its trace.
+        await itemsExport({ pdfData: new Uint8Array(readFileSync(PDF)), task: "capture", presetOverrides: { learnedBoundaries: false } });
     } finally {
         delete ITEMS_EXPORT_TASKS.capture;
     }
@@ -180,8 +181,10 @@ describe("boundary features", () => {
 describe("items export --task boundaries", () => {
     it("lists the flow lines in unit order, with the detector's decisions and a feature row each", async () => {
         const pdfData = new Uint8Array(readFileSync(PDF));
-        const row = (await itemsExport({ pdfData: pdfData.slice(), task: "boundaries", bboxPrecision: 2 })) as ItemsExportRow;
-        const itemType = (await itemsExport({ pdfData: pdfData.slice(), task: "item-type", bboxPrecision: 2 })) as ItemsExportRow;
+        // The paragraph detector's heuristic decides (schema 5 uses the model by default).
+        const heuristic = { learnedBoundaries: false };
+        const row = (await itemsExport({ pdfData: pdfData.slice(), task: "boundaries", bboxPrecision: 2, presetOverrides: heuristic })) as ItemsExportRow;
+        const itemType = (await itemsExport({ pdfData: pdfData.slice(), task: "item-type", bboxPrecision: 2, presetOverrides: heuristic })) as ItemsExportRow;
         expect(row).toMatchObject({ feature_set: FEATURE_SET, feature_version: FEATURE_VERSION, names: [...FEATURES] });
         expect(itemType.names).toBeUndefined();
         expect(row.pages.map((p) => [p.items, p.filtered_lines])).toEqual(itemType.pages.map((p) => [p.items, p.filtered_lines]));
@@ -211,13 +214,14 @@ describe("items export --task boundaries", () => {
 describe("items export --task boundaries with learned boundaries", () => {
     it("lists the model's decisions and probabilities, with the same features but no heuristic trace", async () => {
         const pdfData = new Uint8Array(readFileSync(PDF));
-        const off = (await itemsExport({ pdfData: pdfData.slice(), task: "boundaries", bboxPrecision: 2 })) as ItemsExportRow;
-        const on = (await itemsExport({
+        const off = (await itemsExport({
             pdfData: pdfData.slice(),
             task: "boundaries",
             bboxPrecision: 2,
-            presetOverrides: { learnedBoundaries: true },
+            presetOverrides: { learnedBoundaries: false },
         })) as ItemsExportRow;
+        // Schema 5's default.
+        const on = (await itemsExport({ pdfData: pdfData.slice(), task: "boundaries", bboxPrecision: 2 })) as ItemsExportRow;
         const heuristic = new Set<number>(
             FEATURE_GROUPS.heuristic.filter((name) => !/^(role|isolated)/.test(name)).map((name) => col(name)),
         );

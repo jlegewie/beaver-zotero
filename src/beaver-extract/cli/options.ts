@@ -124,7 +124,7 @@ export const PRESET_OPTION_HELP =
 
 /**
  * `--preset`: preset switches to override, comma-separated `name` or
- * `name=true|false` (e.g. `learnedBoundaries`).
+ * `name=true|false` (e.g. `learnedBoundaries=false`).
  */
 export function parsePresetOverrides(value: string): PresetOverrides {
     const overrides: Record<string, boolean> = {};

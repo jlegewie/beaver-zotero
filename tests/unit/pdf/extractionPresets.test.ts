@@ -30,7 +30,7 @@ describe("PDF extraction presets", () => {
         });
     });
 
-    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions and page-number runs on and ids page-scoped for schema 5", () => {
+    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions, page-number runs and learned boundaries on and ids page-scoped for schema 5", () => {
         expect(pdfExtractionPreset("5")).toEqual({
             schemaVersion: "5",
             textRepair: true,
@@ -45,7 +45,7 @@ describe("PDF extraction presets", () => {
             idScheme: "page",
             regions: true,
             pageNumberRuns: true,
-            learnedBoundaries: false,
+            learnedBoundaries: true,
         });
     });
 
@@ -69,10 +69,10 @@ describe("PDF extraction presets", () => {
 });
 
 describe("preset overrides", () => {
-    it("turns an overridable switch on without touching the preset", () => {
+    it("turns an overridable switch off without touching the preset", () => {
         const preset = pdfExtractionPreset("5")!;
-        expect(applyPresetOverrides(preset, { learnedBoundaries: true })).toEqual({ ...preset, learnedBoundaries: true });
-        expect(preset.learnedBoundaries).toBe(false);
+        expect(applyPresetOverrides(preset, { learnedBoundaries: false })).toEqual({ ...preset, learnedBoundaries: false });
+        expect(preset.learnedBoundaries).toBe(true);
         expect(applyPresetOverrides(preset, undefined)).toBe(preset);
     });
 

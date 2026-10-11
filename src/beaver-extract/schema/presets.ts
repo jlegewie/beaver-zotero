@@ -93,7 +93,7 @@ export interface PdfExtractionPreset {
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
     "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, learnedBoundaries: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, learnedBoundaries: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, learnedBoundaries: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */
@@ -102,9 +102,10 @@ export function pdfExtractionPreset(schemaVersion: string): PdfExtractionPreset 
 }
 
 /**
- * Preset switches a development caller (the CLI) may override, to try a
- * switch before a schema version turns it on. The plugin never overrides
- * presets: the output is no longer the schema version it names.
+ * Preset switches a development caller (the CLI) may override, to compare a
+ * switch against its schema's setting (training exports, evaluation). The
+ * plugin never overrides presets: the output is no longer the schema version
+ * it names.
  */
 export const OVERRIDABLE_PRESET_SWITCHES = ["learnedBoundaries"] as const;
 

@@ -167,19 +167,19 @@ describe("items export", () => {
         const base = ["items", "export", "--task", "boundaries", "--pdf-list", list];
 
         const withModel = join(dir, "with-model");
-        expect(await runCli([...base, "--out", withModel, "--preset", "learnedBoundaries", "--limit", "1"], deps)).toBe(0);
-        expect(JSON.parse(await readFile(join(withModel, "manifest.json"), "utf8")).preset_overrides).toEqual({ learnedBoundaries: true });
-        expect(itemsExport).toHaveBeenLastCalledWith(expect.objectContaining({ presetOverrides: { learnedBoundaries: true } }));
+        expect(await runCli([...base, "--out", withModel, "--preset", "learnedBoundaries=false", "--limit", "1"], deps)).toBe(0);
+        expect(JSON.parse(await readFile(join(withModel, "manifest.json"), "utf8")).preset_overrides).toEqual({ learnedBoundaries: false });
+        expect(itemsExport).toHaveBeenLastCalledWith(expect.objectContaining({ presetOverrides: { learnedBoundaries: false } }));
         expect(await runCli([...base, "--out", withModel], deps)).toBe(1);
 
         const without = join(dir, "without");
         expect(await runCli([...base, "--out", without, "--limit", "1"], deps)).toBe(0);
         expect(itemsExport.mock.lastCall![0]).not.toHaveProperty("presetOverrides");
-        expect(await runCli([...base, "--out", without, "--preset", "learnedBoundaries"], deps)).toBe(1);
+        expect(await runCli([...base, "--out", without, "--preset", "learnedBoundaries=false"], deps)).toBe(1);
 
         expect((deps.stderr as Sink).text).toContain("preset_overrides");
         expect(itemsExport).toHaveBeenCalledTimes(2);
-        expect(await runCli([...base, "--out", withModel, "--preset", "learnedBoundaries"], deps)).toBe(0);
+        expect(await runCli([...base, "--out", withModel, "--preset", "learnedBoundaries=false"], deps)).toBe(0);
         expect(itemsExport).toHaveBeenCalledTimes(4);
     });
 

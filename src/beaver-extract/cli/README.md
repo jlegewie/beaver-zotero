@@ -331,10 +331,13 @@ stage 2).
 ### Preset overrides (development only)
 
 `extract`, `profile`, `fixture evaluate` and `items export` take
-`--preset <switches>` to try a preset switch no schema version has turned on
-yet: comma-separated `name` or `name=true|false`. The only overridable switch
-is `learnedBoundaries` (item boundaries from the learned boundary model). The
-output is then no longer the schema version it names; `items export` records
+`--preset <switches>` to compare a preset switch against its schema's
+setting: comma-separated `name` or `name=true|false`. The only overridable
+switch is `learnedBoundaries` (item boundaries from the learned boundary model,
+on in schema 5): `learnedBoundaries=false` gives the paragraph detector's
+heuristic boundaries, which a boundary training export with the heuristic's
+decisions and reasons needs. The output is then no longer the schema version
+it names; `items export` records
 the overrides in its manifest (`preset_overrides`) and resumes a directory
 only with the same ones.
 

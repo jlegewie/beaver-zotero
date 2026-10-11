@@ -2,7 +2,7 @@
  * `beaver-extract items` — task-generic training export for item models.
  *
  *   items export --task item-type --pdf-list docs.jsonl --out dir/ [--limit N] [--shard i/n]
- *       [--schema v] [--preset learnedBoundaries]
+ *       [--schema v] [--preset learnedBoundaries=false]
  *     Full-document structured extraction per PDF; one row per document
  *     (`pipeline/itemsExport.ts`): per page the model's units with their
  *     feature rows, the structured items with their ids, boxes, columns, text,
@@ -16,8 +16,9 @@
  *     The item-boundary model's export: the same rows plus, per page, every
  *     flow line with its glyph geometry, the paragraph detector's decision and
  *     reason, its draft unit and its feature row (`ItemsExportFlowLine`).
- *     With `--preset learnedBoundaries` the units are the boundary model's
- *     and each flow line also carries its start probability.
+ *     Under schema 5 the units are the boundary model's and each flow line
+ *     also carries its start probability; `--preset learnedBoundaries=false`
+ *     exports the paragraph detector's heuristic decisions and reasons.
  *
  *   items export --task regions-v2 ... [--page-list pages.jsonl]
  *     The region model's export (`pipeline/regionsExport.ts`, format
