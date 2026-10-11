@@ -18,8 +18,19 @@
 import type { PageLine, PageLineResult, ColumnLineResult } from "./LineDetector";
 import type { BoundingBox, RawStyleRun, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
 import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
-import type { Rect } from "./ColumnDetector";
+import { crossesDivider, fillZoneFor, type ColumnDetectionOptions, type Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
+import { START_SIGNALS, START_VETOES, type StartTrace } from "./boundaries/rules";
+import {
+    boundaryLine,
+    type BlockThresholds,
+    type BoundaryBlock,
+    type BoundaryPage,
+    type LineDecision,
+} from "./boundaries/input";
+import { FEATURES as BOUNDARY_FEATURES, boundaryRow, prepareBoundaryPage } from "./boundaries/features";
+import { boundaryProbability, type BoundaryModel } from "./boundaries/model";
+import { BOUNDARY_MODEL } from "./boundaries/weights";
 
 // ============================================================================
 // Types
@@ -57,8 +68,9 @@ export interface ParagraphDetectionSettings {
     hangingIndentBlocks?: boolean;
     /**
      * Whether heading detection demotes run-in label items ("Keywords: …",
-     * "Received: …", a structured-abstract label followed by prose) and
-     * supplementary / extended-data figure and table captions (default: true).
+     * "Received: …", a structured-abstract label followed by prose), display
+     * equations, bare web addresses and supplementary / extended-data figure
+     * and table captions (default: true).
      * PDF schema 4 turns it off so its document-wide ids keep resolving.
      */
     headingLabelFilters?: boolean;
@@ -70,6 +82,22 @@ export interface ParagraphDetectionSettings {
      * preset.
      */
     isolatedHeadings?: boolean;
+    /**
+     * A page whose text is mostly set in a style other than the document's
+     * body styles (an appended or cover page in another face) adds that style
+     * to the page's body styles (`pageBodyStyle`), so its lines are not
+     * headings (default: false). Enabled by the PDF schema preset.
+     */
+    pageBodyStyles?: boolean;
+    /**
+     * Decide where items start with the learned boundary model
+     * (`boundaries/model.ts`) instead of `startNewItem`, and continue an
+     * item across a cut between stacked blocks of one printed column
+     * (`detectLearnedItems`; default: false). Applies only to pages whose
+     * lines carry glyph metrics (`hasGlyphMetrics`); others keep
+     * `startNewItem`. Enabled by the PDF schema preset.
+     */
+    learnedBoundaries?: boolean;
 }
 
 const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
@@ -85,6 +113,8 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     hangingIndentBlocks: false,
     headingLabelFilters: true,
     isolatedHeadings: false,
+    pageBodyStyles: false,
+    learnedBoundaries: false,
 };
 
 /**
@@ -155,8 +185,16 @@ export interface ContentItem {
     id: string;
     /** Bounding box for the item */
     bbox: BoundingBox;
-    /** Column index this item belongs to */
+    /** Column index this item belongs to: the block of its first line */
     columnIndex: number;
+    /**
+     * Column index of the item's last line, set only when it differs from
+     * `columnIndex`: an item joined across a cut between stacked blocks
+     * (`learnedBoundaries`).
+     */
+    endColumnIndex?: number;
+    /** Column index of each of the item's lines, set with `endColumnIndex`. */
+    lineColumns?: number[];
 }
 
 /**
@@ -270,6 +308,8 @@ function isMostlyNumeric(text: string, threshold: number = 0.8): boolean {
     return digitCount / total >= threshold;
 }
 
+const LETTER_RE = /\p{L}/u;
+
 /**
  * Check if text is all uppercase.
  *
@@ -279,9 +319,18 @@ function isMostlyNumeric(text: string, threshold: number = 0.8): boolean {
  * positives on short tokens like "USA" or "I".
  */
 function isAllCapsText(text: string, minLetters: number = 3): boolean {
-    const letters = text.match(/\p{L}/gu) || [];
     let cased = 0;
-    for (const c of letters) {
+    for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        // ASCII: only A-Z and a-z are letters.
+        if (code < 0x80) {
+            if (code >= 0x61 && code <= 0x7a) return false;
+            if (code >= 0x41 && code <= 0x5a) cased++;
+            continue;
+        }
+        const c = String.fromCodePoint(text.codePointAt(i)!);
+        if (c.length === 2) i++;
+        if (!LETTER_RE.test(c)) continue;
         if (c.toLowerCase() === c.toUpperCase()) continue; // uncased script
         cased++;
         if (c !== c.toUpperCase()) return false;
@@ -922,6 +971,54 @@ function pageBodyExactSize(
     return samples[samples.length - 1].size;
 }
 
+/** Visible glyphs a page needs before `pageBodyStyle` reads its body style. */
+const PAGE_BODY_MIN_CHARS = 600;
+/** Share of a page's visible glyphs its own body style must cover. */
+const PAGE_BODY_MIN_SHARE = 0.6;
+/** Largest share of a page's glyphs in the document's body styles for the page to have its own. */
+const PAGE_BODY_MAX_DOC_SHARE = 0.15;
+
+/**
+ * The page's own body style, when it differs from the document's: the style
+ * (font, size, weight, slant, by majority per line) that covers most of the
+ * page's text. A page appended in another face ("This article has been cited
+ * by: 1. …" in Times under a New Caledonia article) is all "different font"
+ * to the document-wide heading rules; on its own page that face is the body.
+ * A heading has to stand out on its page too. Only a page that is nearly
+ * all in another face has its own body style: where the document's body
+ * text sets more than `PAGE_BODY_MAX_DOC_SHARE` of the page, the page's
+ * headings are judged against it as everywhere else, however much of the
+ * page a block quote or a list in a heading face takes up. Null also when
+ * the page has little text or no style covers `PAGE_BODY_MIN_SHARE` of it.
+ */
+function pageBodyStyle(columnResults: ColumnLineResult[], bodyStyles: TextStyle[]): TextStyle | null {
+    if (bodyStyles.length === 0) return null;
+    const styles: { style: TextStyle; chars: number }[] = [];
+    let total = 0;
+    let docBody = 0;
+    for (const col of columnResults) {
+        for (const line of col.lines) {
+            const reported = extractLineStyle(line);
+            if (!reported) continue;
+            const style = majorityLineStyle(line, reported);
+            const chars = line.text.replace(/\s/gu, "").length;
+            if (chars === 0) continue;
+            total += chars;
+            if (matchesBodyStyle(style, bodyStyles)) {
+                docBody += chars;
+                continue;
+            }
+            const known = styles.find(entry => matchesBodyStyle(style, [entry.style]));
+            if (known) known.chars += chars;
+            else styles.push({ style, chars });
+        }
+    }
+    if (total < PAGE_BODY_MIN_CHARS || docBody > PAGE_BODY_MAX_DOC_SHARE * total) return null;
+    let best: { style: TextStyle; chars: number } | null = null;
+    for (const entry of styles) if (!best || entry.chars > best.chars) best = entry;
+    return best && best.chars >= PAGE_BODY_MIN_SHARE * total ? { ...best.style, pageLocal: true } : null;
+}
+
 /**
  * Largest exact-size difference from the body, as a share of the body size,
  * that font expansion produces. LaTeX `microtype` scales glyphs by up to 2%
@@ -1277,8 +1374,8 @@ function calculateColumnThresholds(
  *     fonts at the line's exact (size, bold, italic) — i.e. the document
  *     ALREADY shows subset fragmentation at this style class.
  *
- * Returning true means "treat as body" — the caller short-circuits before
- * any Rule 1-6 evaluation.
+ * Returning true means "treat as body": the line is not a heading whichever
+ * of Rules 1-6 it meets.
  */
 // Exported for unit tests only. Not part of the production API.
 export function looksLikeFragmentedCJKBody(
@@ -1290,7 +1387,10 @@ export function looksLikeFragmentedCJKBody(
     if (!hasCJKContent(text)) return false;
     if (NUMERIC_OUTLINE_PREFIX_CJK_RE.test(text)) return false;
 
+    // A page's own body style (`pageBodyStyle`) is another face, not a subset
+    // of the document's: it is no evidence of fragmentation.
     const sameDims = bodyStyles.filter(bs =>
+        !bs.pageLocal &&
         Math.abs(bs.size - lineStyle.size) < 0.5 &&
         bs.bold === lineStyle.bold &&
         bs.italic === lineStyle.italic
@@ -1315,6 +1415,55 @@ const MATH_FONT_RE =
     /^(?:CMMI|CMSY|CMEX|CMBSY|MSAM|MSBM|EUFM|EUSM|RSFS|MTMI|MTSY|MTEX|RMTMI|RBLMI|rtxmi|rtxsy|txmi|txsy|txex|Symbol|MT-Extra|Euclid|ESint|wasy|stmary|TeX_CM_Maths|[^,]*Math)/i;
 
 /**
+ * A line's per-glyph style runs (see `RawLine.styleRuns`) in reading order
+ * across its spans, each with its text. Runs count non-whitespace glyphs in
+ * order; empty runs are dropped.
+ */
+function lineStyleRuns(line: PageLine): { run: RawStyleRun; text: string }[] {
+    const runs: { run: RawStyleRun; text: string }[] = [];
+    for (const span of line.spans) {
+        if (!span.styleRuns) continue;
+        const spanText = span.text;
+        let pos = 0;
+        for (const run of span.styleRuns) {
+            if (run.chars === 0) continue;
+            // The run's text: its next `run.chars` non-whitespace code points.
+            let text = "";
+            for (let n = 0; n < run.chars && pos < spanText.length; ) {
+                const code = spanText.codePointAt(pos)!;
+                const c = code > 0xffff ? spanText.slice(pos, pos + 2) : spanText[pos];
+                pos += c.length;
+                if (code < 0x80 ? code === 0x20 || (code >= 0x09 && code <= 0x0d) : !/\S/u.test(c)) continue;
+                text += c;
+                n++;
+            }
+            runs.push({ run, text });
+        }
+    }
+    return runs;
+}
+
+/**
+ * Size a style run counts at in `majorityLineStyle`: the largest size its font
+ * reaches on the line (`fontMax`) when the run is smaller only as fake small
+ * caps or superscripts are, or by size-truncation jitter; its own size
+ * otherwise.
+ *
+ * Fake small caps hold no lowercase letters, and superscripts and subscripts
+ * are a few glyphs long. A longer smaller run of lowercase text is text in
+ * its own right: the body text after a run-in label that the producer set
+ * larger in the same font ("Speed: Translation by…") rather than in a bold
+ * face, or the prose around a larger operator ("if x = ab"). Lifting it
+ * would make the whole line read larger than the body.
+ */
+function liftedRunSize(run: RawStyleRun, text: string, fontMax: RawStyleRun): number {
+    const max = fontMax.font.size;
+    if (run.font.size === max || run.chars <= 3 || !/\p{Ll}/u.test(text)) return max;
+    if (run.exactSize === undefined || fontMax.exactSize === undefined) return max;
+    return fontMax.exactSize - run.exactSize <= FONT_EXPANSION_SHARE * fontMax.exactSize ? max : run.font.size;
+}
+
+/**
  * Majority styling of a line, from its per-glyph style runs.
  *
  * MuPDF reports a line's font from its first glyph, so a body line that
@@ -1329,34 +1478,30 @@ const MATH_FONT_RE =
  *     markers, trailing punctuation) and a leading section number
  *     (`numberedTitleStyle`);
  *   - math-font glyphs (`MATH_FONT_RE`);
- *   - size differences within one font: each run counts at its font's
- *     largest size on the line, so fake small caps ("I. I" + "NTRODUCTION"
- *     set smaller) and superscripts don't shrink the line.
+ *   - some size differences within one font (`liftedRunSize`), so fake small
+ *     caps ("I. I" + "NTRODUCTION" set smaller) and superscripts don't
+ *     shrink the line.
  *
  * Returns `lineStyle` itself when the line has no style runs or its majority
  * styling agrees with it.
  */
 function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
-    const runs: RawStyleRun[] = [];
-    for (const span of line.spans) {
-        for (const run of span.styleRuns ?? []) {
-            if (run.chars > 0) runs.push(run);
-        }
-    }
+    const runs = lineStyleRuns(line);
     if (runs.length === 0) return lineStyle;
 
     let start = numberedTitleStyle(line)?.numberRuns ?? 0;
     let end = runs.length;
-    while (end - start > 1 && runs[start].letters === 0 && runs[start].chars <= 3) start++;
-    while (end - start > 1 && runs[end - 1].letters === 0 && runs[end - 1].chars <= 3) end--;
+    while (end - start > 1 && runs[start].run.letters === 0 && runs[start].run.chars <= 3) start++;
+    while (end - start > 1 && runs[end - 1].run.letters === 0 && runs[end - 1].run.chars <= 3) end--;
     const voters = runs
         .slice(start, end)
-        .filter(run => !MATH_FONT_RE.test(baseFontName(run.font.name)));
+        .filter(({ run }) => !MATH_FONT_RE.test(baseFontName(run.font.name)));
     if (voters.length === 0) return lineStyle;
 
-    const fontMaxSize = new Map<string, number>();
-    for (const run of voters) {
-        fontMaxSize.set(run.font.name, Math.max(fontMaxSize.get(run.font.name) ?? 0, run.font.size));
+    const fontMax = new Map<string, RawStyleRun>();
+    for (const { run } of voters) {
+        const max = fontMax.get(run.font.name);
+        if (!max || run.font.size > max.font.size) fontMax.set(run.font.name, run);
     }
 
     let total = 0;
@@ -1365,12 +1510,13 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
     let heavyChars = 0;
     const charsBySize = new Map<number, number>();
     const charsByFont = new Map<string, number>();
-    for (const run of voters) {
+    const fontFaces = new Map<string, TextStyle>();
+    for (const { run, text } of voters) {
         const style = extractSpanStyle(
             run.font.name || "unknown",
             run.font.weight,
             run.font.style,
-            fontMaxSize.get(run.font.name)
+            liftedRunSize(run, text, fontMax.get(run.font.name)!)
         );
         total += run.chars;
         if (style.bold) boldChars += run.chars;
@@ -1378,6 +1524,7 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
         if (hasHeavyWeightToken(style.font)) heavyChars += run.chars;
         charsBySize.set(style.size, (charsBySize.get(style.size) ?? 0) + run.chars);
         charsByFont.set(style.font, (charsByFont.get(style.font) ?? 0) + run.chars);
+        fontFaces.set(style.font, style);
     }
 
     // Largest size that at least MAJORITY_STYLE_SHARE of the glyphs reach.
@@ -1391,29 +1538,28 @@ function majorityLineStyle(line: PageLine, lineStyle: TextStyle): TextStyle {
             break;
         }
     }
-    // The font with the most glyphs. A Medium / Semibold face carries a
-    // heading cue in its name (Rule 2b), so like bold it must cover
-    // MAJORITY_STYLE_SHARE of the glyphs to describe the line: a semibold
-    // run-in label ahead of plain text ("Peer review information Nature
-    // Medicine thanks…") can outnumber each of the plain faces it is
-    // followed by without making the line a heading.
+    // The font with the most glyphs, among the faces whose styling the line
+    // carries. A bold, italic, Medium or Semibold face must cover
+    // MAJORITY_STYLE_SHARE of the glyphs to describe the line, like the bold
+    // and italic flags: a semibold run-in label ahead of plain text ("Peer
+    // review information Nature Medicine thanks…") or an italic question
+    // ahead of its roman gloss can outnumber each plain face without making
+    // the line a heading face.
+    const bold = boldChars / total >= MAJORITY_STYLE_SHARE;
+    const italic = italicChars / total >= MAJORITY_STYLE_SHARE;
     const heavyMajority = heavyChars / total >= MAJORITY_STYLE_SHARE;
     let font = lineStyle.font;
     let fontChars = -1;
     for (const [name, chars] of charsByFont) {
-        if (!heavyMajority && hasHeavyWeightToken(name)) continue;
+        const face = fontFaces.get(name)!;
+        if ((!bold && face.bold) || (!italic && face.italic) || (!heavyMajority && hasHeavyWeightToken(name))) continue;
         if (chars > fontChars) {
             fontChars = chars;
             font = name;
         }
     }
 
-    const majority: TextStyle = {
-        size,
-        font,
-        bold: boldChars / total >= MAJORITY_STYLE_SHARE,
-        italic: italicChars / total >= MAJORITY_STYLE_SHARE,
-    };
+    const majority: TextStyle = { size, font, bold, italic };
     return stylesEqual(majority, lineStyle) ? lineStyle : majority;
 }
 
@@ -1427,48 +1573,60 @@ const SECTION_NUMBER_RE = /^\d{1,2}(?:(?:\.\d{1,3}){1,3}\.?|\.)$/;
 
 /**
  * Style of a numbered heading's title when its section number is set in
- * another face: "2.4 *Freeing Up Women's Time*", the number in the body face
- * and the title in italic. MuPDF reports the line's style from the number's
- * first glyph, so the line reads as body text. The title's opening style
- * describes the line instead, the way an unnumbered heading is described by
- * its first glyph.
+ * another style: "2.4 *Freeing Up Women's Time*", the number in the body face
+ * and the title in italic, or "2.1.1 **Levels of…**" with the number in the
+ * title's face at a slightly different size, which truncation reports as
+ * 11 against the title's 12. MuPDF reports the line's style from the number's
+ * first glyph, so the line reads as body text or as two styles. The title's
+ * opening style describes the line instead, the way an unnumbered heading is
+ * described by its first glyph.
  *
  * Needs per-glyph style runs: the line must open with runs that hold exactly
- * a plain (not bold or italic) section number (`SECTION_NUMBER_RE`), followed
- * by a run in a different style at the number's size (a smaller number is an affiliation or footnote
- * marker). Contents entries with dot leaders are excluded. Returns null
+ * a section number (`SECTION_NUMBER_RE`), set plain (not bold or italic) or
+ * in the title's own face, followed by a run in a different style at the
+ * number's size (a smaller number is an affiliation or footnote marker). The
+ * number may be a span of its own, as when a wide space separates it from
+ * the title. Contents entries with dot leaders are excluded. Returns null
  * otherwise.
  */
 function numberedTitleStyle(line: PageLine): { style: TextStyle; numberRuns: number } | null {
-    const span = line.spans[0];
-    const runs = (span?.styleRuns ?? []).filter(run => run.chars > 0);
-    if (runs.length < 2 || !SECTION_PREFIX_RE.test(line.text) || /(?:\.\s?){4}/.test(line.text)) return null;
+    if (!SECTION_PREFIX_RE.test(line.text) || /(?:\.\s?){4}/.test(line.text)) return null;
+    const runs = lineStyleRuns(line);
+    if (runs.length < 2) return null;
 
-    // Text of each run: runs count non-whitespace glyphs in order.
-    const glyphs = Array.from(span.text).filter(c => /\S/u.test(c));
-    let offset = 0;
     let number = "";
     let numberRuns = 0;
-    while (numberRuns < runs.length - 1) {
-        const text = glyphs.slice(offset, offset + runs[numberRuns].chars).join("");
-        if (!/^[\d.]+$/.test(text)) break;
-        number += text;
-        offset += runs[numberRuns].chars;
+    while (numberRuns < runs.length - 1 && /^[\d.]+$/.test(runs[numberRuns].text)) {
+        number += runs[numberRuns].text;
         numberRuns++;
     }
     if (numberRuns === 0 || !SECTION_NUMBER_RE.test(number)) return null;
 
-    // A bold or italic number carries the heading cue itself (see
-    // `isCJKNumberedHeading`); only a plain number defers to its title.
-    for (const run of runs.slice(0, numberRuns)) {
-        const numberStyle = extractSpanStyle(run.font.name || "unknown", run.font.weight, run.font.style, run.font.size);
-        if (numberStyle.bold || numberStyle.italic || hasHeavyWeightToken(numberStyle.font)) return null;
-    }
-    const title = runs[numberRuns];
-    const sizeOf = (run: RawStyleRun) => run.exactSize ?? run.font.size;
-    if (runs.slice(0, numberRuns).some(run => Math.abs(sizeOf(run) - sizeOf(title)) > 1)) return null;
+    const title = runs[numberRuns].run;
     const style = extractSpanStyle(title.font.name || "unknown", title.font.weight, title.font.style, title.font.size);
-    return stylesEqual(style, extractLineStyle(line)) ? null : { style, numberRuns };
+    // A bold or italic number in a face of its own carries the heading cue
+    // itself (see `isCJKNumberedHeading`); a plain number, or one in the
+    // title's face, defers to its title.
+    for (const { run } of runs.slice(0, numberRuns)) {
+        const numberStyle = extractSpanStyle(run.font.name || "unknown", run.font.weight, run.font.style, run.font.size);
+        const titleFace =
+            baseFontName(numberStyle.font) === baseFontName(style.font) &&
+            numberStyle.bold === style.bold &&
+            numberStyle.italic === style.italic;
+        if (!titleFace && (numberStyle.bold || numberStyle.italic || hasHeavyWeightToken(numberStyle.font))) {
+            return null;
+        }
+    }
+    const sizeOf = (run: RawStyleRun) => run.exactSize ?? run.font.size;
+    if (runs.slice(0, numberRuns).some(({ run }) => Math.abs(sizeOf(run) - sizeOf(title)) > 1)) return null;
+    // Another subset of the line's own font (`WHFMUD+Calibri` after
+    // `FSAPEC+Calibri`) is not another style.
+    const lineStyle = extractLineStyle(line);
+    const sameStyle = !!lineStyle && stylesEqual(
+        { ...style, font: baseFontName(style.font) },
+        { ...lineStyle, font: baseFontName(lineStyle.font) }
+    );
+    return sameStyle ? null : { style, numberRuns };
 }
 
 /** The line's opening style: a numbered title's style, else its first glyph's. */
@@ -1517,18 +1675,23 @@ function isHeaderStyle(
     }
     const lineStyle = numbered?.style ?? extractLineStyle(line);
     if (!lineStyle) return false;
-    // Item-level only (the joined item text): boundaries are decided per line
-    // and stay as they are; a run-in label item just isn't labelled a heading.
-    if (
-        settings.headingLabelFilters &&
-        phraseTextOverride !== null &&
-        looksLikeRunInLabel(phraseTextOverride)
-    ) {
-        return false;
-    }
     if (!matchesHeaderRules(
         line, lineStyle, !numbered, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
     )) {
+        return false;
+    }
+    // Item-level only (the joined item text): boundaries are decided per line
+    // and stay as they are; a run-in label, equation or link item just isn't
+    // labelled a heading. Tested after the style rules, which reject most
+    // lines more cheaply.
+    if (
+        settings.headingLabelFilters &&
+        phraseTextOverride !== null &&
+        (looksLikeRunInLabel(phraseTextOverride) ||
+            looksLikeEquation(phraseTextOverride) ||
+            looksLikeWebAddresses(phraseTextOverride) ||
+            looksLikeIdentifier(phraseTextOverride))
+    ) {
         return false;
     }
     const majority = majorityLineStyle(line, lineStyle);
@@ -1639,6 +1802,88 @@ function looksLikeRunInLabel(text: string): boolean {
     if (RUN_IN_LABEL_RE.test(t) || KEYWORDS_LABEL_RE.test(t)) return true;
     const m = STRUCTURED_ABSTRACT_LABEL_RE.exec(t);
     return !!m && isProseTail(m[1]);
+}
+
+/**
+ * Share of an equation's visible characters, at most, that words of three or
+ * more letters make up (see `looksLikeEquation`).
+ */
+const EQUATION_WORD_SHARE = 0.4;
+
+/** A complete bracketed group: a function's arguments, a set, an index. */
+const BRACKETED_GROUP_RE = /\([^()]*\)|\[[^[\]]*\]|\{[^{}]*\}/gu;
+
+/**
+ * A display equation: text that states a relation ("=") and is mostly
+ * symbols, with less than `EQUATION_WORD_SHARE` of its visible characters in
+ * words of three or more letters ("Σ* = {0, a, b, aa, ab, …}", "P(A, B) =
+ * P(A)P(B)"). An equation set in a larger or italic face, or centered with
+ * space around it, passes the style rules.
+ *
+ * An equation's left-hand side is a symbol expression, whose words, if any,
+ * sit inside function arguments ("P(can | N) = 0.9"). A heading that states a
+ * relation names its subject in words before it, however short the heading
+ * is ("2.1.1 Case n = 1", "3. Case 1: x = y", "3. Proof: a² + b² = c²").
+ */
+function looksLikeEquation(text: string): boolean {
+    const relation = text.indexOf("=");
+    if (relation < 0) return false;
+    let lhs = text.slice(0, relation);
+    for (let prev = ""; prev !== lhs; ) {
+        prev = lhs;
+        lhs = lhs.replace(BRACKETED_GROUP_RE, "");
+    }
+    if (/\p{L}{3,}/u.test(lhs)) return false;
+    const visible = text.replace(/\s/gu, "").length;
+    const wordChars = (text.match(/\p{L}{3,}/gu) ?? []).join("").length;
+    return wordChars < EQUATION_WORD_SHARE * visible;
+}
+
+/**
+ * One web address or DOI: a URL with a scheme, a "www." host, a host with a
+ * path ("babel.uoregon.edu/guides.html"), or a DOI. A bare host without
+ * "www." ("Booking.com") can be a name, so it doesn't count.
+ */
+const WEB_ADDRESS_RE =
+    /^(?:[a-z][a-z+.-]*:\/\/\S+|www\d?\.\S+|[\w-]+(?:\.[\w-]+)*\.\p{L}{2,}\/\S*|10\.\d{4,9}\/\S+)$/iu;
+
+/**
+ * Text that is only web addresses: a link line on a cover page or in a list
+ * of resources, set in a larger or distinct face. A heading names its
+ * section in words. A path wrapped after a slash ("…/ doc/cjk.inf") counts
+ * as part of its address.
+ */
+function looksLikeWebAddresses(text: string): boolean {
+    const tokens = text.trim().split(/\s+/u);
+    let address = false;
+    for (const token of tokens) {
+        if (WEB_ADDRESS_RE.test(token)) address = true;
+        else if (!(address && /^[\w.~%-]*\/\S*$|^[\w~%-]+\.\p{L}{2,4}$/u.test(token))) return false;
+    }
+    return address;
+}
+
+/**
+ * A lone identifier rather than words: an e-mail address, or a long token
+ * without spaces in an identifier's shape — code punctuation ("_", "%",
+ * "#", "=", "@"), a file name ending, or a hash (a lowercase run of eight or
+ * more hex digits, or a UUID) — such as a link wrapped onto its own line
+ * ("071d4a94-28a8-11e4-8593-da634b334390_story.html") or a rule of
+ * underscores. Hyphenated scientific names with digits
+ * ("Phosphatidylinositol-3-Kinase", "ABCC10-Mediated-Chemoresistance"),
+ * words joined by slashes and CJK headings are not identifiers.
+ */
+function looksLikeIdentifier(text: string): boolean {
+    const token = text.trim();
+    if (/[\s\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(token)) return false;
+    if (/^[^@\s]+@[^@\s]+\.\p{L}{2,}$/u.test(token)) return true;
+    if (token.length < 20) return false;
+    return (
+        /[_%#=@\\]/u.test(token) ||
+        /\.(?:html?|pdf|php|aspx?|jsp|xml|txt|docx?|xlsx?|csv|zip)\b/iu.test(token) ||
+        /(?:^|[^0-9a-z])(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}(?![0-9a-z])/u.test(token) ||
+        /(?:^|[^0-9a-z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}(?![0-9a-z])/iu.test(token)
+    );
 }
 
 /**
@@ -1754,17 +1999,28 @@ function matchesHeaderRules(
     // same-or-smaller size, non-italic, and preceded by a gap. Resolved,
     // distinct-font docs keep using Rule 5 (this bypass requires an indistinct
     // font, so it never changes their behavior).
+    //
+    // A page set in its own body face (`pageBodyStyle`) is the same case on
+    // that page: an all-caps heading in the page's face ("APPENDIX METHODS"
+    // on an appendix page in another font) matches the page's body style. It
+    // qualifies by the page's body as well as by the document's: not larger
+    // than either body in that body's face.
     const fontIndistinctFromBody =
         !lineStyle.font ||
         lineStyle.font === "unknown" ||
         lineStyle.font === primaryBodyStyle.font ||
         baseFontName(lineStyle.font) === baseFontName(primaryBodyStyle.font);
+    const indistinctFromPageBody = bodyStyles.some(
+        style =>
+            style.pageLocal &&
+            baseFontName(style.font) === baseFontName(lineStyle.font) &&
+            lineStyle.size - style.size < 0.5
+    );
     const capsWithoutFontCue =
         gapCheckPasses &&
         !bodyAllCaps &&
-        fontIndistinctFromBody &&
+        ((fontIndistinctFromBody && sizeVsBody <= 0) || indistinctFromPageBody) &&
         !lineStyle.italic &&
-        sizeVsBody <= 0 &&
         isAllCapsHeaderPhrase(phraseText) &&
         // All-caps reference-list entries (uppercased author names + year)
         // share the body face and would otherwise be promoted; the byline /
@@ -1777,20 +2033,6 @@ function matchesHeaderRules(
     // construction, so the all-caps cue is the only thing separating it from
     // body text.
     if (matchesBodyStyle(lineStyle, bodyStyles) && !capsWithoutFontCue) {
-        return false;
-    }
-
-    // CJK CID-subset body fallback: the line uses a body-sized style class
-    // that bodyStyles already shows fragmented across 2+ fonts. The "new"
-    // font here is almost certainly another subset of the same logical
-    // body font, not a real heading. Narrow text guards (CJK content,
-    // no section prefix) keep this off Latin docs and preserve Rule 6.
-    if (looksLikeFragmentedCJKBody(line, lineStyle, bodyStyles)) {
-        return false;
-    }
-
-    // Must be highly consistent (90%+ same style)
-    if (checkSpanDominance && getStyleDominance(line, lineStyle) < 0.9) {
         return false;
     }
 
@@ -1927,6 +2169,20 @@ function matchesHeaderRules(
     if (!isPotentialHeader) return false;
 
     // Apply disqualifying heuristics
+
+    // CJK CID-subset body fallback: the line uses a body-sized style class
+    // that bodyStyles already shows fragmented across 2+ fonts. The "new"
+    // font here is almost certainly another subset of the same logical
+    // body font, not a real heading. Narrow text guards (CJK content,
+    // no section prefix) keep this off Latin docs and preserve Rule 6.
+    if (looksLikeFragmentedCJKBody(line, lineStyle, bodyStyles)) {
+        return false;
+    }
+
+    // Must be highly consistent (90%+ same style)
+    if (checkSpanDominance && getStyleDominance(line, lineStyle) < 0.9) {
+        return false;
+    }
 
     // Heading-capitalization guard. Rules 2-6 promote a candidate on a
     // same-or-smaller-size font difference alone — a signal that is
@@ -2491,8 +2747,14 @@ function startNewItem(
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
     bodyAllCaps: boolean = false,
-    hangingRole: HangingRole = null
+    hangingRole: HangingRole = null,
+    trace: StartTrace | null = null
 ): boolean {
+    if (trace) {
+        trace.rule = "forced";
+        trace.signals = 0;
+        trace.vetoes = 0;
+    }
     if (i === 0) return true;
     if (!prevLine) return true;
 
@@ -2502,6 +2764,7 @@ function startNewItem(
         currentLines.length > 0 &&
         isNextNumberedEntry(currentLines[0], line)
     ) {
+        if (trace) trace.rule = "numbered";
         return true;
     }
 
@@ -2545,6 +2808,7 @@ function startNewItem(
             !prevEndsSentence
         ) {
             gapBreak = false;
+            if (trace) trace.vetoes |= START_VETOES.leader_continuation;
         }
     }
 
@@ -2638,6 +2902,7 @@ function startNewItem(
             const uniformTol = Math.max(1.5, 0.3 * referenceLeading);
             if (spacingTop <= referenceLeading + uniformTol) {
                 gapBreak = false;
+                if (trace) trace.vetoes |= START_VETOES.uniform_leading;
             }
         }
     }
@@ -2667,6 +2932,7 @@ function startNewItem(
         isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
 
     if (isLocalHeader && !prevIsLocalHeader) {
+        if (trace) trace.rule = "heading_after_body";
         return true; // Header after non-header
     }
 
@@ -2674,6 +2940,7 @@ function startNewItem(
         // Different header style. A hanging continuation stays with the
         // heading-styled line it wraps (a bold list label, an italic title).
         if (!sameOpeningStyle(line, prevLine) && hangingRole !== "continuation") {
+            if (trace) trace.rule = "heading_style_change";
             return true;
         }
         // Same style, but a paragraph-sized gap apart: two stacked headings
@@ -2687,8 +2954,10 @@ function startNewItem(
             columnThresholds.isolatedHeading[i - 1] &&
             stackedHeadingGap(line, prevLine, columnThresholds, pageThresholds)
         ) {
+            if (trace) trace.rule = "heading_stacked";
             return true;
         }
+        if (trace) trace.rule = "heading_continues";
         return false; // Same header style continues
     }
 
@@ -2708,6 +2977,7 @@ function startNewItem(
         !sameTypeface(line, prevLine) &&
         opensWithHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps)
     ) {
+        if (trace) trace.rule = "heading_opening_style";
         return true;
     }
 
@@ -2720,6 +2990,7 @@ function startNewItem(
             line, prevLine, currentLines, columnThresholds, pageThresholds, bodyStyles, settings, bodyAllCaps
         )
     ) {
+        if (trace) trace.rule = "heading_ends_before_body";
         return true;
     }
 
@@ -2819,6 +3090,7 @@ function startNewItem(
                     const prevEndsSentence = /[.!?]["'”’)]?$/u.test(prevText);
                     if (!prevEndsSentence) {
                         indentBreak = false;
+                        if (trace) trace.vetoes |= START_VETOES.indent_suppression;
                     }
                 }
             }
@@ -2879,6 +3151,7 @@ function startNewItem(
                 heightExcess <= line.fontSize;
             if (prevReportsSmaller && prevHeightComparable) {
                 fontSizeBreak = false;
+                if (trace) trace.vetoes |= START_VETOES.superscript_marker;
             }
         }
     }
@@ -2891,6 +3164,7 @@ function startNewItem(
     const prevExtendsBelow =
         prevLine.bbox.b > line.bbox.b + bboxHeight(line.bbox);
     if (prevExtendsBelow) {
+        if (trace && (indentBreak || earlyEndBreak || fontSizeBreak)) trace.vetoes |= START_VETOES.drop_cap;
         indentBreak = false;
         earlyEndBreak = false;
         fontSizeBreak = false;
@@ -2928,6 +3202,7 @@ function startNewItem(
             sameStyle &&
             !prevEndsSentence
         ) {
+            if (trace && (gapBreak || earlyEndBreak || fontSizeBreak)) trace.vetoes |= START_VETOES.same_indent_hanging;
             gapBreak = false;
             earlyEndBreak = false;
             fontSizeBreak = false;
@@ -2955,6 +3230,7 @@ function startNewItem(
     // visual break.
     let hangingEntryBreak = false;
     if (hangingRole === "continuation") {
+        if (trace && (indentBreak || earlyEndBreak)) trace.vetoes |= START_VETOES.hanging_continuation;
         indentBreak = false;
         earlyEndBreak = false;
     } else if (hangingRole === "entry") {
@@ -2969,6 +3245,23 @@ function startNewItem(
         fontSizeBreak ||
         leaderAfterContinuationBreak ||
         hangingEntryBreak;
+    if (trace) {
+        const s = START_SIGNALS;
+        trace.signals =
+            (gapBreak ? s.gap : 0) |
+            (indentBreak ? s.indent : 0) |
+            (earlyEndBreak ? s.early_end : 0) |
+            (fontSizeBreak ? s.font_size : 0) |
+            (leaderAfterContinuationBreak ? s.leader_after_continuation : 0) |
+            (hangingEntryBreak ? s.hanging_entry : 0);
+        trace.rule = gapBreak ? "gap"
+            : indentBreak ? "indent"
+            : earlyEndBreak ? "early_end"
+            : fontSizeBreak ? "font_size"
+            : leaderAfterContinuationBreak ? "leader_after_continuation"
+            : hangingEntryBreak ? "hanging_entry"
+            : "none";
+    }
     return visualBreak;
 }
 
@@ -3152,7 +3445,8 @@ function processColumnLines(
     itemCounters: ItemCounters,
     initialPageContent: string,
     bodyAllCaps: boolean = false,
-    prevDocLine: PageLine | null = null
+    prevDocLine: PageLine | null = null,
+    decisions: LineDecision[] | null = null
 ): {
     pageContent: string;
     items: ContentItem[];
@@ -3178,6 +3472,7 @@ function processColumnLines(
         const line = lines[i];
         const prevLine = i > 0 ? lines[i - 1] : null;
         const nextLine = i + 1 < lines.length ? lines[i + 1] : null;
+        const trace: StartTrace | null = decisions ? { rule: "forced", signals: 0, vetoes: 0 } : null;
 
         const shouldStartNew =
             currentLines.length === 0 ||
@@ -3192,8 +3487,18 @@ function processColumnLines(
                 bodyStyles,
                 settings,
                 bodyAllCaps,
-                hangingRoles[i]
+                hangingRoles[i],
+                trace
             );
+        if (decisions && trace) {
+            decisions.push({
+                start: shouldStartNew,
+                trace,
+                role: hangingRoles[i],
+                headerStyle: isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps),
+                isolatedHeading: columnThresholds.isolatedHeading[i],
+            });
+        }
 
         if (shouldStartNew) {
             if (currentLines.length > 0) {
@@ -3288,6 +3593,289 @@ export interface DetectParagraphsOptions {
      * callers pay nothing.
      */
     trackItemLines?: boolean;
+    /**
+     * Region items of the page (figures, tables, equations) in the
+     * detector's frame, as [l, t, r, b]: the item-boundary input's regions
+     * (`learnedBoundaries` and `boundaries`).
+     */
+    regions?: [number, number, number, number][];
+    /**
+     * Layout barriers the column detector kept blocks apart at, in the
+     * detector's frame: shaded containers and divider rules. With
+     * `learnedBoundaries`, an item never continues across one.
+     */
+    barriers?: Pick<ColumnDetectionOptions, "fillBoundaries" | "dividerLines">;
+    /**
+     * Receives the page's blocks as the item-boundary features read them
+     * (`boundaries/input.ts`), with the flow lines in the same order. Only
+     * the training export passes it.
+     */
+    boundaries?: BoundaryCapture;
+    /** The boundary model of `learnedBoundaries` (default `BOUNDARY_MODEL`). */
+    boundaryModel?: BoundaryModel;
+}
+
+/** Captures the item-boundary input of a page (`DetectParagraphsOptions.boundaries`). */
+export interface BoundaryCapture {
+    /** Called once per page: the input, and its lines in flow order (blocks in reading order). */
+    page(input: BoundaryPage, flow: PageLine[]): void;
+}
+
+/** The block thresholds the item-boundary features read. */
+function blockThresholds(t: ColumnThresholds): BlockThresholds {
+    return {
+        leftEdgeMode: t.leftEdgeMode,
+        rightEdgeMode: t.rightEdgeMode,
+        leftEdgeMad: t.leftEdgeMad,
+        rightEdgeMad: t.rightEdgeMad,
+        maxRightEdge: t.maxRightEdge,
+        indentExcessThreshold: t.indentExcessThreshold,
+        earlyEndExcessThreshold: t.earlyEndExcessThreshold,
+        gapExcessThreshold: t.gapExcessThreshold,
+        medianGap: t.medianGap,
+    };
+}
+
+/** The item-boundary input of a page, around its blocks. */
+function boundaryPage(
+    lineResult: PageLineResult,
+    bodyStyles: TextStyle[] | null,
+    pageThresholds: PageThresholds,
+    regions: [number, number, number, number][],
+    blocks: BoundaryBlock[],
+): BoundaryPage {
+    const body = bodyStyles?.[0];
+    return {
+        pageIndex: lineResult.pageIndex,
+        width: lineResult.width,
+        height: lineResult.height,
+        body: body
+            ? { size: body.exactSize ?? body.size, font: body.font, bold: body.bold, italic: body.italic }
+            : null,
+        medianHeight: pageThresholds.medianHeight,
+        gapExcessThreshold: pageThresholds.gapExcessThreshold,
+        regions,
+        blocks,
+    };
+}
+
+const SIDE_BY_SIDE = BOUNDARY_FEATURES.indexOf("sideBySide");
+const BLOCK_OVERLAP = BOUNDARY_FEATURES.indexOf("blockOverlap");
+/**
+ * Least horizontal overlap of two blocks (share of the narrower one's width)
+ * for an item to continue from one into the other: blocks of one printed
+ * column overlap; a block beside another doesn't.
+ */
+const MIN_JOIN_OVERLAP = 0.3;
+const TEXT_BETWEEN = BOUNDARY_FEATURES.indexOf("textBetween");
+const REGION_BETWEEN = BOUNDARY_FEATURES.indexOf("regionBetween");
+
+const lineRect = (line: PageLine): Rect => ({
+    x: line.bbox.l,
+    y: line.bbox.t,
+    w: line.bbox.r - line.bbox.l,
+    h: line.bbox.b - line.bbox.t,
+});
+
+/**
+ * Whether the column detector's layout barriers keep two lines apart: a
+ * divider rule runs between them, or they sit in different shaded
+ * containers (or one inside a container and one outside).
+ */
+function layoutBarrierBetween(above: PageLine, below: PageLine, barriers: DetectParagraphsOptions["barriers"]): boolean {
+    const fills = barriers?.fillBoundaries ?? [];
+    const dividers = barriers?.dividerLines ?? [];
+    const a = lineRect(above);
+    const b = lineRect(below);
+    if (fills.length > 0 && fillZoneFor(a, fills) !== fillZoneFor(b, fills)) return true;
+    return dividers.length > 0 && crossesDivider(a, b, dividers);
+}
+
+const lastOf = <T>(values: readonly T[]): T => values[values.length - 1];
+
+/**
+ * The previous line extends below this one by more than this line's height:
+ * the line wraps around a drop cap or another tall element beside it (the
+ * drop-cap check of `startNewItem`).
+ */
+function wrapsAroundTallLine(prevLine: PageLine, line: PageLine): boolean {
+    return prevLine.bbox.b > line.bbox.b + bboxHeight(line.bbox);
+}
+
+/**
+ * Whether the walk recorded glyph metrics for the page's lines (schema
+ * presets with `styleRuns`): the boundary model's gap features are measured
+ * from baselines, so it runs only on such input.
+ */
+function hasGlyphMetrics(lineResult: PageLineResult): boolean {
+    return lineResult.columnResults.some((col) => col.lines.some((line) => line.spans.some((span) => span.glyphMetrics?.length)));
+}
+
+/** Items of a page's blocks, as `processColumnLines` returns them for one block. */
+interface FlowItems {
+    pageContent: string;
+    items: ContentItem[];
+    itemLines: PageLine[][];
+    itemLineRoles: HangingRole[][];
+    paragraphCount: number;
+    headerCount: number;
+}
+
+/**
+ * Items of a page from the learned boundary model (`learnedBoundaries`).
+ *
+ * For every line of a block below its first, the model's start probability
+ * replaces `startNewItem`: the line starts an item when the probability
+ * reaches the model's threshold. A block's first line starts an item, except
+ * where the column detector cut one printed column into blocks one below the
+ * other: when the blocks overlap horizontally (`MIN_JOIN_OVERLAP`), the line
+ * is not beside the previous block's last line (`sideBySide`), no other
+ * text, no region and no layout barrier (divider rule, shaded container
+ * edge: `layoutBarrierBetween`) lies between them and the model says the
+ * line continues, the item carries on across the cut. The blocks may
+ * overlap vertically. Column breaks, pages and regions never join; sentence mapping links
+ * their sentences (`annotateColumnContinuations`).
+ *
+ * A line wrapping around a drop cap (`wrapsAroundTallLine`) continues the
+ * previous line's item whatever the model says: drop caps are too rare in
+ * the training data for the model to learn them.
+ *
+ * The model reads no heuristic decision, so `startNewItem` does not run and
+ * the input's heuristic trace is empty. Everything after the decision is the
+ * detector's own: an item is a heading by `processCurrentLinesAsItem`, keeps
+ * its lines' hanging roles, and belongs to the block it starts in (its
+ * `columnIndex`, thresholds, and per-block counters); an item ending in a
+ * later block records it as `endColumnIndex`, and each line's block as
+ * `lineColumns`.
+ */
+function detectLearnedItems(
+    columns: ColumnLineResult[],
+    lineResult: PageLineResult,
+    pageThresholds: PageThresholds,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    itemCounters: ItemCounters,
+    bodyAllCaps: boolean,
+    regions: [number, number, number, number][],
+    barriers: DetectParagraphsOptions["barriers"],
+    model: BoundaryModel,
+): FlowItems & { input: BoundaryPage } {
+    const blocks = columns.map((col) => {
+        const thresholds = calculateColumnThresholds(col.lines, pageThresholds, settings, bodyStyles, bodyAllCaps);
+        const roles: HangingRole[] = settings.hangingIndentBlocks
+            ? detectHangingRoles(col.lines, pageThresholds.medianHeight)
+            : new Array(col.lines.length).fill(null);
+        return { col, thresholds, roles };
+    });
+    const input = boundaryPage(
+        lineResult,
+        bodyStyles,
+        pageThresholds,
+        regions,
+        blocks.map(({ col, thresholds, roles }) => ({
+            index: col.columnIndex,
+            lines: col.lines.map((line, k) =>
+                boundaryLine(line, {
+                    start: false,
+                    trace: null,
+                    role: roles[k],
+                    headerStyle: isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps),
+                    isolatedHeading: thresholds.isolatedHeading[k],
+                }),
+            ),
+            thresholds: blockThresholds(thresholds),
+        })),
+    );
+
+    // Decisions: the page's first line starts; every other line asks the model.
+    const prep = prepareBoundaryPage(input);
+    const starts = input.blocks.map((block, b) =>
+        block.lines.map((line, j) => {
+            let start = true;
+            if (b > 0 || j > 0) {
+                const row = boundaryRow(prep, b, j);
+                const p = boundaryProbability(model, row);
+                line.probability = p;
+                const prevLine = j > 0 ? blocks[b].col.lines[j - 1] : lastOf(blocks[b - 1].col.lines);
+                const continues = p < model.threshold || wrapsAroundTallLine(prevLine, blocks[b].col.lines[j]);
+                start = j > 0
+                    ? !continues
+                    : !(
+                          continues &&
+                          row[SIDE_BY_SIDE] === 0 &&
+                          row[BLOCK_OVERLAP] >= MIN_JOIN_OVERLAP &&
+                          row[TEXT_BETWEEN] === 0 &&
+                          row[REGION_BETWEEN] === 0 &&
+                          !layoutBarrierBetween(prevLine, blocks[b].col.lines[0], barriers)
+                      );
+            }
+            line.start = start;
+            return start;
+        }),
+    );
+
+    const out: FlowItems = {
+        pageContent: "",
+        items: [],
+        itemLines: [],
+        itemLineRoles: [],
+        paragraphCount: 0,
+        headerCount: 0,
+    };
+    // Per-block item counters, as `processColumnLines` keeps them.
+    const counts = blocks.map(() => ({ paragraph: 0, header: 0 }));
+    let current: { block: number; first: number; lines: PageLine[]; roles: HangingRole[]; blocks: number[] } | null = null;
+    const finish = () => {
+        if (!current) return;
+        const { block: b, first, lines, roles, blocks: lineBlocks } = current;
+        const lastBlock = lineBlocks[lineBlocks.length - 1];
+        const { col, thresholds } = blocks[b];
+        const result = processCurrentLinesAsItem(
+            lines,
+            out.pageContent,
+            counts[b].paragraph,
+            counts[b].header,
+            itemCounters,
+            col.columnIndex,
+            lineResult.pageIndex,
+            bodyStyles,
+            settings,
+            thresholds,
+            col.lines.length,
+            bodyAllCaps,
+            // The previous block's last line, for the item opening a block.
+            first === 0 && b > 0 ? blocks[b - 1].col.lines[blocks[b - 1].col.lines.length - 1] : null,
+        );
+        if (lastBlock !== b) {
+            result.item.endColumnIndex = blocks[lastBlock].col.columnIndex;
+            result.item.lineColumns = lineBlocks.map((k) => blocks[k].col.columnIndex);
+        }
+        out.pageContent = result.pageContent;
+        out.items.push(result.item);
+        out.itemLines.push(lines);
+        out.itemLineRoles.push(roles);
+        if (result.item.type === "header") {
+            counts[b].header++;
+            out.headerCount++;
+        } else {
+            counts[b].paragraph++;
+            out.paragraphCount++;
+        }
+    };
+    blocks.forEach(({ col, roles }, b) => {
+        col.lines.forEach((line, j) => {
+            if (starts[b][j] || !current) {
+                finish();
+                current = { block: b, first: j, lines: [line], roles: [roles[j]], blocks: [b] };
+            } else {
+                current.lines.push(line);
+                current.roles.push(roles[j]);
+                current.blocks.push(b);
+            }
+        });
+    });
+    finish();
+    return { ...out, input };
 }
 
 /**
@@ -3317,6 +3905,29 @@ export function detectParagraphs(
         bodyStyles = [{ ...bodyStyles[0], exactSize: bodyExactSize }, ...bodyStyles.slice(1)];
     }
 
+    if (opts.pageBodyStyles && bodyStyles) {
+        const pageStyle = pageBodyStyle(lineResult.columnResults, bodyStyles);
+        if (pageStyle) bodyStyles = [...bodyStyles, pageStyle];
+    }
+
+    if (opts.learnedBoundaries && hasGlyphMetrics(lineResult)) {
+        const columns = lineResult.columnResults.filter((col) => col.lines.length > 0);
+        const learned = detectLearnedItems(
+            columns,
+            lineResult,
+            pageThresholds,
+            bodyStyles,
+            opts,
+            itemCounters,
+            bodyAllCaps,
+            options.regions ?? [],
+            options.barriers,
+            options.boundaryModel ?? BOUNDARY_MODEL,
+        );
+        options.boundaries?.page(learned.input, columns.flatMap((col) => col.lines));
+        return paragraphResult(lineResult, learned, options);
+    }
+
     let pageContent = "";
     const allItems: ContentItem[] = [];
     const allItemLines: PageLine[][] = [];
@@ -3328,6 +3939,8 @@ export function detectParagraphs(
     // line into the next column so single-line first items can detect
     // wrap-continuations of icon-font bullet lists across the column boundary.
     let prevDocLine: PageLine | null = null;
+    const boundaryBlocks: BoundaryBlock[] | null = options.boundaries ? [] : null;
+    const flow: PageLine[] = [];
     for (const colResult of lineResult.columnResults) {
         if (colResult.lines.length === 0) continue;
 
@@ -3341,6 +3954,7 @@ export function detectParagraphs(
         );
 
         // Steps 3-6: Process lines into items
+        const decisions: LineDecision[] | null = boundaryBlocks ? [] : null;
         const result = processColumnLines(
             colResult.lines,
             colResult.columnIndex,
@@ -3352,21 +3966,51 @@ export function detectParagraphs(
             itemCounters,
             pageContent,
             bodyAllCaps,
-            prevDocLine
+            prevDocLine,
+            decisions
         );
+        if (boundaryBlocks && decisions) {
+            boundaryBlocks.push({
+                index: colResult.columnIndex,
+                lines: colResult.lines.map((line, k) => boundaryLine(line, decisions[k])),
+                thresholds: blockThresholds(columnThresholds),
+            });
+            flow.push(...colResult.lines);
+        }
 
         pageContent = result.pageContent;
         allItems.push(...result.items);
-        if (options.trackItemLines) {
-            allItemLines.push(...result.itemLines);
-            allItemLineRoles.push(...result.itemLineRoles);
-        }
+        allItemLines.push(...result.itemLines);
+        allItemLineRoles.push(...result.itemLineRoles);
         totalParagraphs += result.paragraphCount;
         totalHeaders += result.headerCount;
         prevDocLine = colResult.lines[colResult.lines.length - 1];
     }
 
-    allItems.forEach((item, index) => {
+    if (options.boundaries && boundaryBlocks) {
+        options.boundaries.page(
+            boundaryPage(lineResult, bodyStyles, pageThresholds, options.regions ?? [], boundaryBlocks),
+            flow,
+        );
+    }
+
+    return paragraphResult(
+        lineResult,
+        {
+            pageContent,
+            items: allItems,
+            itemLines: allItemLines,
+            itemLineRoles: allItemLineRoles,
+            paragraphCount: totalParagraphs,
+            headerCount: totalHeaders,
+        },
+        options,
+    );
+}
+
+/** The page's result from its items; ids are page-scoped positions. */
+function paragraphResult(lineResult: PageLineResult, flow: FlowItems, options: DetectParagraphsOptions): PageParagraphResult {
+    flow.items.forEach((item, index) => {
         item.id = `p${lineResult.pageIndex}:i${index}`;
     });
 
@@ -3374,15 +4018,15 @@ export function detectParagraphs(
         pageIndex: lineResult.pageIndex,
         width: lineResult.width,
         height: lineResult.height,
-        pageContent,
-        items: allItems,
-        paragraphCount: totalParagraphs,
-        headerCount: totalHeaders,
+        pageContent: flow.pageContent,
+        items: flow.items,
+        paragraphCount: flow.paragraphCount,
+        headerCount: flow.headerCount,
     };
 
     if (options.trackItemLines) {
-        baseResult.itemLines = allItemLines;
-        baseResult.itemLineRoles = allItemLineRoles;
+        baseResult.itemLines = flow.itemLines;
+        baseResult.itemLineRoles = flow.itemLineRoles;
     }
 
     return baseResult;

@@ -18,12 +18,7 @@ import {
 import { GRID_CLUSTER_MIN, clusterRects, gridCluster } from "../../../src/beaver-extract/regions/cluster";
 import { EMPTY_DOC_CONTEXT, REGION_FEATURES, REGION_FEATURE_VERSION, candidateFeatures } from "../../../src/beaver-extract/regions/features";
 import type { Rect } from "../../../src/beaver-extract/regions/geometry";
-import {
-    assertCompatible,
-    predictRegionClass,
-    type LogisticRegionModel,
-    type TreeRegionModel,
-} from "../../../src/beaver-extract/regions/model";
+import { assertCompatible, predictRegionClass, type RegionModelWeights } from "../../../src/beaver-extract/regions/model";
 import {
     NOTE_CAPTION_RE,
     isFigureCaption,
@@ -74,6 +69,7 @@ function summary(recs: Rec[], grid?: { size: number; cells: number[] }): Graphic
         count: recs.length,
         records,
         overflow: grid !== undefined,
+        incomplete: false,
         grid: gridArray,
         gridSize: grid?.size ?? 0,
     };
@@ -190,6 +186,30 @@ describe("pagePrimitives", () => {
             BS,
         );
         expect(prims.map((p) => p.kind)).toEqual(["vrule", "image"]);
+    });
+
+    it("reads hairline images as rules: a pixel stretched along a table's rules and cell borders", () => {
+        const prims = pagePrimitives(
+            summary([
+                { kind: GS_KIND.imageMask, bbox: [72, 109.2, 584.3, 109.7] }, // a rule across the table
+                { kind: GS_KIND.imageMask, bbox: [174.3, 109.6, 174.8, 175.5] }, // one cell's border
+                { kind: GS_KIND.imageMask, bbox: [72, 300, 80, 300.5] }, // a dash, too short for a rule
+                { kind: GS_KIND.imageMask, bbox: [72, 320, 584, 320.5], rgb: 0xffffff }, // painted white: nothing
+            ]),
+            W,
+            H,
+            BS,
+        );
+        expect(prims.map((p) => p.kind)).toEqual(["hrule", "vrule"]);
+        // A raster stored as touching strips, one per row of pixels, is one image, no set of rules.
+        const strips = pagePrimitives(
+            summary(Array.from({ length: 20 }, (_, k): Rec => ({ kind: GS_KIND.image, bbox: [48, 337 + 0.35 * k, 273, 337.35 + 0.35 * k] }))),
+            W,
+            H,
+            BS,
+        );
+        expect(strips.map((p) => p.kind)).toEqual(["image"]);
+        expect(strips[0].bbox.map((v) => Math.round(v))).toEqual([48, 337, 273, 344]);
     });
 
     it("turns runs of overflow-grid cells into coarse marks", () => {
@@ -817,9 +837,11 @@ describe("resolveOverlaps", () => {
     });
 });
 
+type LogisticRegionModel = Extract<RegionModelWeights, { format: "bxm-logistic-v1" }>;
+
 describe("region model", () => {
     const model = (overrides: Partial<LogisticRegionModel> = {}): LogisticRegionModel => ({
-        kind: "logistic",
+        format: "bxm-logistic-v1",
         featureVersion: REGION_FEATURE_VERSION,
         features: [...REGION_FEATURES],
         classes: ["other", "picture", "decoration"],
@@ -840,14 +862,21 @@ describe("region model", () => {
 
     it("sums tree leaves per class on top of the baseline", () => {
         // One stump per class on feature 1: left leaf when x[1] <= 0.5.
-        const stump = (left: number, right: number) => [1, 0.5, 1, 2, 0, -1, 0, 0, 0, left, -1, 0, 0, 0, right];
-        const trees: TreeRegionModel = {
-            kind: "trees",
+        const stump = (score: number, left: number, right: number) => ({
+            score,
+            feature: [1, -1, -1],
+            threshold: [0.5, 0, 0],
+            left: [1, 0, 0],
+            right: [2, 0, 0],
+            value: [0, left, right],
+        });
+        const trees: RegionModelWeights = {
+            format: "bxm-trees-v1",
             featureVersion: REGION_FEATURE_VERSION,
             features: [...REGION_FEATURES],
             classes: ["other", "picture", "decoration"],
             baseline: [0, 0.5, 0],
-            trees: [[stump(0, 0)], [stump(-0.5, 1.5), stump(0, 0.5)], [stump(0, 0)]],
+            trees: [stump(0, 0, 0), stump(1, -0.5, 1.5), stump(2, 0, 0), stump(1, 0, 0.5)],
             trainedOn: "test",
         };
         const x = REGION_FEATURES.map(() => 0);

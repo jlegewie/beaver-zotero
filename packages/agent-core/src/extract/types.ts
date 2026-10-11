@@ -337,6 +337,24 @@ export interface RawStyleRun {
 }
 
 /**
+ * Vertical metrics of a line's glyphs set in one size (`RawLine.glyphMetrics`).
+ * Positions are medians over the glyphs, on the axis across the line's
+ * writing direction (y for horizontal text), in the line's frame.
+ */
+export interface RawGlyphMetrics {
+    /** Font size to the half point, keyed like the style run sizes. */
+    size: number;
+    /** Visible glyphs set in this size. */
+    glyphs: number;
+    /** Glyph origin: the baseline. */
+    baseline: number;
+    /** Ascent edge of the glyph boxes (the font's ascender). */
+    top: number;
+    /** Descent edge of the glyph boxes (the font's descender). */
+    bottom: number;
+}
+
+/**
  * Raw line data from MuPDF structured text JSON.
  */
 export interface RawLine {
@@ -355,6 +373,11 @@ export interface RawLine {
      * (per-glyph) walk when the schema preset enables it; absent otherwise.
      */
     styleRuns?: RawStyleRun[];
+    /**
+     * Glyph metrics per size of the visible glyphs, recorded with `styleRuns`
+     * by the detailed walk; absent otherwise.
+     */
+    glyphMetrics?: RawGlyphMetrics[];
     /** Baseline X coordinate */
     x: number;
     /** Baseline Y coordinate */
@@ -630,6 +653,11 @@ export interface TextStyle {
      * paragraph detector).
      */
     exactSize?: number;
+    /**
+     * The style is a page's own body style rather than one of the document's
+     * (see `pageBodyStyle` in the paragraph detector).
+     */
+    pageLocal?: boolean;
 }
 
 /** Create a unique key string for a TextStyle */
@@ -873,11 +901,24 @@ export interface StructuredPagePhaseTimings {
     /** Region detection and region items (schema presets with `regions`). */
     regionsMs?: number;
     /**
-     * This page's share of reference classification (presets with
-     * `referenceItems`); the document-level pass is split across pages by
-     * item count.
+     * Time spent splitting and joining this page's reference entries
+     * (presets with the `references` item pass).
      */
     referencesMs?: number;
+    /**
+     * This page's share of the item-type pass (presets with the `itemTypes`
+     * item pass), split across pages by item count. The parts below
+     * break it down; the rest is building the model input and relabeling.
+     */
+    itemTypesMs?: number;
+    /** Item-type features (part of `itemTypesMs`). */
+    itemTypeFeaturesMs?: number;
+    /** Item-type stage 1 (part of `itemTypesMs`). */
+    itemTypeStage1Ms?: number;
+    /** Item-type stage-2 context features (part of `itemTypesMs`). */
+    itemTypeContextMs?: number;
+    /** Item-type stage 2 (part of `itemTypesMs`). */
+    itemTypeStage2Ms?: number;
     /** Total character count on the target page (post-detailed-walk). */
     charCount: number;
     /** Total line count on the target page (post-detailed-walk). */

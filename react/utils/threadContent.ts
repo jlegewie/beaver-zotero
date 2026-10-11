@@ -88,7 +88,7 @@ export function extractRunResponseContent(
             if (toolCallParts.length > 0) {
                 const toolDescriptions = toolCallParts
                     .map(p => {
-                        // For create_note, include the note content inline (like <note> tags)
+                        // For create_note, include the note content inline
                         if (p.tool_name === 'create_note') {
                             const args = parseToolCallArgs(p);
                             const title = args.title as string | undefined;

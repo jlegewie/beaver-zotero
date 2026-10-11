@@ -32,7 +32,9 @@ import type {
     DegradationNote,
     DegradationSummary,
     DocItem,
+    FootnoteItem,
     ItemLine,
+    MarginItem,
     RawLineDetailed,
     RawPageDataDetailed,
     ReferenceItem,
@@ -43,12 +45,13 @@ import type {
 } from "@beaver/agent-core/extract/types";
 import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { PageLine } from "./LineDetector";
-import type {
-    ContentItem,
-    PageParagraphResult,
-    ParagraphDetectionSettings,
-} from "./ParagraphDetector";
+import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 import { detectParagraphs } from "./ParagraphDetector";
+import {
+    draftItemsFromParagraphs,
+    publicItemText,
+    type DraftItem,
+} from "./pipeline/draftItems";
 import { detectColumns } from "./ColumnDetector";
 import { detectLinesOnPage } from "./LineDetector";
 import {
@@ -66,6 +69,7 @@ import {
     rotateRawPageDetailed,
     type RotationAngle,
 } from "./PageRotationNormalizer";
+import { carriesSentences, type SentenceBearingItem } from "./schema/itemKinds";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -209,14 +213,15 @@ const SENTENCE_END_PUNCT = new Set([".", "!", "?"]);
 const SUPERSCRIPT_HEIGHT_RATIO = 0.85;
 
 function lineMedianCharHeight(line: RawLineDetailed): number {
-    const heights: number[] = [];
+    const heights = new Float64Array(line.chars.length);
+    let n = 0;
     for (const c of line.chars) {
         const height = bboxHeight(c.bbox);
-        if (height > 0) heights.push(height);
+        if (height > 0) heights[n++] = height;
     }
-    if (heights.length === 0) return 0;
-    heights.sort((a, b) => a - b);
-    return heights[Math.floor(heights.length / 2)];
+    if (n === 0) return 0;
+    // A typed array sorts numerically without a comparator.
+    return heights.subarray(0, n).sort()[Math.floor(n / 2)];
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +255,7 @@ export function collectHyphenatedCompounds(
     into: Set<string> = new Set(),
 ): Set<string> {
     for (const text of lineTexts) {
+        if (!text.includes("-")) continue;
         for (const match of text.matchAll(MIDLINE_COMPOUND_RE)) {
             const parts = match[0].toLowerCase().split("-");
             for (let i = 0; i + 1 < parts.length; i++) {
@@ -327,7 +333,11 @@ export function decideLineBreakHyphen(
     nextLineText: string,
     vocabulary?: ReadonlySet<string>,
 ): LineBreakHyphenDecision {
-    const prev = prevLineText.replace(/\s+$/u, "");
+    // Most lines don't end in a hyphen: rule them out before the regexes.
+    let end = prevLineText.length;
+    while (end > 0 && /\s/u.test(prevLineText[end - 1])) end--;
+    if (end === 0 || prevLineText.charCodeAt(end - 1) !== 0x2d) return "none";
+    const prev = prevLineText.slice(0, end);
     const prevMatch = TRAILING_HYPHEN_RE.exec(prev);
     if (!prevMatch) return "none";
     const next = nextLineText.replace(/^\s+/u, "");
@@ -505,14 +515,7 @@ export function tryBuildParagraphText(
     }
 }
 
-function itemLinesFromDetailed(
-    lines: RawLineDetailed[],
-    fallbackText: string,
-    fallbackBBox: BoundingBox,
-): ItemLine[] {
-    if (lines.length === 0) {
-        return [{ text: fallbackText, bbox: fallbackBBox }];
-    }
+function itemLinesFromDetailed(lines: RawLineDetailed[]): ItemLine[] {
     return lines.map((line) => ({
         text: line.text,
         bbox: line.bbox,
@@ -520,34 +523,37 @@ function itemLinesFromDetailed(
     }));
 }
 
-function itemFromContentItem(
-    item: ContentItem,
+function itemFromDraft(
+    item: DraftItem,
     pageIndex: number,
     index: number,
     lines: ItemLine[],
-    reference = false,
-): TextItem | SectionHeaderItem | ReferenceItem {
+): TextItem | SectionHeaderItem | ReferenceItem | FootnoteItem | MarginItem {
+    const text = publicItemText(item);
     const base: Omit<TextBearingItem, "kind"> = {
         id: `p${pageIndex}:i${index}`,
         pageIndex,
         index,
         bbox: item.bbox,
         columnIndex: item.columnIndex,
-        text: item.text,
-        lines: lines.length > 0 ? lines : [{ text: item.text, bbox: item.bbox }],
+        text,
+        lines: lines.length > 0 ? lines : [{ text, bbox: item.bbox }],
     };
-    if (reference) {
-        // The detector marks headings with "## "; a reference entry it read
-        // as a heading keeps its plain text.
-        return { ...base, text: item.text.replace(/^## /, ""), kind: "reference" };
+    switch (item.kind) {
+        case "reference":
+            return { ...base, kind: "reference" };
+        case "section_header":
+            return { ...base, kind: "section_header", level: 1 };
+        case "text":
+            return { ...base, kind: "text" };
+        case "footnote":
+            return { ...base, kind: "footnote" };
+        case "margin":
+            return { ...base, kind: "margin" };
     }
-    if (item.type === "header") {
-        return { ...base, kind: "section_header", level: 1 };
-    }
-    return { ...base, kind: "text" };
 }
 
-function fallbackSentenceFromItem(item: TextItem): SentenceItem {
+function fallbackSentenceFromItem(item: SentenceBearingItem): SentenceItem {
     return {
         parentId: item.id,
         index: 0,
@@ -606,10 +612,6 @@ function resolveSentencesInParagraph(
     return out;
 }
 
-function itemSupportsSentences(item: DocItem): item is TextItem {
-    return item.kind === "text";
-}
-
 function inverseRotateItem(
     item: DocItem,
     pageRotation: RotationAngle,
@@ -622,7 +624,7 @@ function inverseRotateItem(
             line.bbox = inverseRotateBBox(line.bbox, pageRotation, sourceWidth, sourceHeight);
         }
     }
-    if (itemSupportsSentences(item) && item.sentences) {
+    if (carriesSentences(item) && item.sentences) {
         for (const sentence of item.sentences) {
             for (let i = 0; i < sentence.bboxes.length; i++) {
                 sentence.bboxes[i] = inverseRotateBBox(
@@ -672,13 +674,13 @@ export interface PageSentenceOptions {
     /** Forwarded to `detectParagraphs`. */
     paragraphSettings?: ParagraphDetectionSettings;
     /**
-     * If provided, skip running columns + lines + paragraphs and reuse this
-     * pre-computed result. Useful when the caller already ran the line /
-     * paragraph pipeline for other reasons and wants to add sentence bboxes
-     * without re-doing detection.
+     * If provided, skip running columns + lines + paragraphs and map these
+     * draft items (`draftItemsFromParagraphs`, edited by any item passes).
+     * Useful when the caller already ran the line / paragraph pipeline and
+     * wants to add sentence bboxes without re-doing detection.
      *
      * Rotation handshake: when `pageRotation !== 0`, the supplied
-     * `paragraphResult` is in the **upright working frame** (the
+     * `items` are in the **upright working frame** (the
      * upstream `FilteredParagraphPipeline` rotated the raw page before
      * column/paragraph detection). The mapper normalizes the
      * `detailedPage` argument with the same rotation before
@@ -688,7 +690,7 @@ export interface PageSentenceOptions {
      * `pageRotation = 0`) preserves the existing un-rotated path.
      */
     precomputed?: {
-        paragraphResult: PageParagraphResult;
+        items: readonly DraftItem[];
         pageRotation?: RotationAngle;
         sourceWidth?: number;
         sourceHeight?: number;
@@ -714,11 +716,6 @@ export interface PageSentenceOptions {
      * `collectHyphenatedCompounds` / `decideLineBreakHyphen`.
      */
     compoundVocabulary?: ReadonlySet<string>;
-    /**
-     * Indices into the paragraph result's items to emit as `reference`
-     * items: one bibliographic entry each, with lines but no sentences.
-     */
-    referenceItems?: ReadonlySet<number>;
 }
 
 /**
@@ -755,29 +752,21 @@ export function extractPageSentences(
     //    `RawPageDataDetailed` is structurally a `RawPageData`, so the
     //    existing detectors accept it unchanged — they just ignore the
     //    extra `chars` field on each line.
-    let paragraphResult: PageParagraphResult;
-    if (options.precomputed?.paragraphResult) {
-        paragraphResult = options.precomputed.paragraphResult;
-        if (!paragraphResult.itemLines) {
-            throw new Error(
-                "[ParagraphSentenceMapper] precomputed.paragraphResult must " +
-                "have itemLines set (call detectParagraphs with " +
-                "{ trackItemLines: true })",
-            );
-        }
+    let draftItems: readonly DraftItem[];
+    if (options.precomputed) {
+        draftItems = options.precomputed.items;
     } else {
         const columnResult = detectColumns(detailedPage);
         const lineResult = detectLinesOnPage(detailedPage, columnResult.columns);
-        paragraphResult = detectParagraphs(
+        draftItems = draftItemsFromParagraphs(detectParagraphs(
             lineResult,
             null,
             options.paragraphSettings ?? {},
             { paragraph: 0, header: 0 },
             { trackItemLines: true },
-        );
+        ));
     }
 
-    const itemLines = paragraphResult.itemLines!;
     const detailedLookup = buildDetailedLineLookup(detailedPage);
 
     const items: DocItem[] = [];
@@ -794,30 +783,22 @@ export function extractPageSentences(
         }
     };
 
-    for (let i = 0; i < paragraphResult.items.length; i++) {
-        const item = paragraphResult.items[i];
-        const group = itemLines[i] ?? [];
+    for (let i = 0; i < draftItems.length; i++) {
+        const item = draftItems[i];
         const detailedLines = collectDetailedLinesForParagraph(
-            group,
+            item.lines,
             detailedLookup,
         );
-        const isReference = options.referenceItems?.has(i) ?? false;
 
         // Degradation path 1: paragraph could not be mapped back to any
         // detailed line. We still want a usable SentenceItem for the
         // caller, so we emit a fallback covering the whole paragraph.
         if (detailedLines.length === 0) {
-            const docItem = itemFromContentItem(
-                item,
-                detailedPage.pageIndex,
-                i,
-                [{ text: item.text, bbox: item.bbox }],
-                isReference,
-            );
+            const docItem = itemFromDraft(item, detailedPage.pageIndex, i, []);
             degradedCount++;
             degradedItems.add(docItem.id);
             addNote({ itemId: docItem.id, itemKind: docItem.kind, reason: "unmapped" });
-            if (docItem.kind === "text") {
+            if (carriesSentences(docItem)) {
                 const fallback = fallbackSentenceFromItem(docItem);
                 docItem.sentences = [fallback];
                 flatSentences.push(fallback);
@@ -833,13 +814,7 @@ export function extractPageSentences(
             options.compoundVocabulary,
         );
         if (!built.ok) {
-            const docItem = itemFromContentItem(
-                item,
-                detailedPage.pageIndex,
-                i,
-                [{ text: item.text, bbox: item.bbox }],
-                isReference,
-            );
+            const docItem = itemFromDraft(item, detailedPage.pageIndex, i, []);
             degradedCount++;
             degradedItems.add(docItem.id);
             addNote({
@@ -848,7 +823,7 @@ export function extractPageSentences(
                 reason: "invariant_violation",
                 message: built.error,
             });
-            if (docItem.kind === "text") {
+            if (carriesSentences(docItem)) {
                 const fallback = fallbackSentenceFromItem(docItem);
                 docItem.sentences = [fallback];
                 flatSentences.push(fallback);
@@ -858,17 +833,16 @@ export function extractPageSentences(
         }
 
         const paragraphText = built.paragraphText;
-        const docItem = itemFromContentItem(
+        const docItem = itemFromDraft(
             item,
             detailedPage.pageIndex,
             i,
-            itemLinesFromDetailed(detailedLines, item.text, item.bbox),
-            isReference,
+            itemLinesFromDetailed(detailedLines),
         );
 
-        // Heading and reference paths: never split into sentences, and
-        // exclude them from the flattened sentence view.
-        if (docItem.kind === "section_header" || docItem.kind === "reference") {
+        // Headings, references and margin items: never split into
+        // sentences, and excluded from the flattened sentence view.
+        if (!carriesSentences(docItem)) {
             if (docItem.kind === "reference") {
                 // A reference has no sentences to carry the repaired text, so
                 // its own text takes it: line-break hyphens are resolved per
@@ -916,7 +890,12 @@ export function extractPageSentences(
     // in `nextStartsStrictlyRightOfPrev` (and similar geometric
     // heuristics) operates on upright bboxes — that's the frame those
     // gates were tuned for.
-    annotateColumnContinuations(items, splitter, degradedItems);
+    annotateColumnContinuations(
+        items,
+        splitter,
+        degradedItems,
+        draftItems.map((item) => item.endColumnIndex ?? item.columnIndex),
+    );
 
     // Inverse-rotate every emitted bbox back to MuPDF frame so
     // downstream consumers see the same coord system regardless of whether
@@ -1064,7 +1043,9 @@ function shouldJoinAcrossColumns(
  * item whose successor (in reading order) begins a sentence that continues
  * the previous one across a column boundary.
  *
- * Conservative: requires strictly consecutive columns (`col` → `col + 1`),
+ * Conservative: requires strictly consecutive columns (`col` → `col + 1`,
+ * from the column the item ends in: `endColumns`, aligned with `items`,
+ * defaults to each item's `columnIndex`),
  * both sides text items, last sentence non-terminated, first sentence
  * lowercase-starting, and the splitter must agree the combined text is one
  * sentence. Only sets the flag — never writes `false` (omitted ≡ false per
@@ -1083,12 +1064,13 @@ export function annotateColumnContinuations(
     items: DocItem[],
     splitter: SentenceSplitter,
     degradedItems: ReadonlySet<string>,
+    endColumns?: readonly number[],
 ): void {
     for (let i = 0; i < items.length - 1; i++) {
         const cur = items[i];
         const next = items[i + 1];
-        const curSentences = itemSupportsSentences(cur) ? cur.sentences ?? [] : [];
-        const nextSentences = itemSupportsSentences(next) ? next.sentences ?? [] : [];
+        const curSentences = cur.kind === "text" ? cur.sentences ?? [] : [];
+        const nextSentences = next.kind === "text" ? next.sentences ?? [] : [];
         const lastSentence = curSentences[curSentences.length - 1];
 
         // Always clear any stale flag before re-evaluating; only set on
@@ -1100,7 +1082,7 @@ export function annotateColumnContinuations(
         if (cur.kind !== "text" || next.kind !== "text") {
             continue;
         }
-        if (next.columnIndex !== cur.columnIndex + 1) continue;
+        if (next.columnIndex !== (endColumns?.[i] ?? cur.columnIndex) + 1) continue;
         if (degradedItems.has(cur.id) || degradedItems.has(next.id)) continue;
         const firstSentence = nextSentences[0];
         if (!firstSentence) continue;
@@ -1198,7 +1180,7 @@ export function buildPageSentenceFeasibilityReport(
     }
 
     const previews = result.items.slice(0, maxParagraphs).map((item, idx) => {
-        const sentences = itemSupportsSentences(item) ? item.sentences ?? [] : [];
+        const sentences = carriesSentences(item) ? item.sentences ?? [] : [];
         return {
             index: idx,
             itemKind: item.kind,

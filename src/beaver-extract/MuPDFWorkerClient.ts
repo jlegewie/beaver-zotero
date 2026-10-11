@@ -238,6 +238,10 @@ interface PendingEntry {
     reject: (reason: any) => void;
     op: string;
     fatalCandidate?: FatalOperationCandidate;
+    /** Filled in from the reply (`WorkerCallTiming`). */
+    timing?: WorkerCallTiming;
+    /** When the op message was posted to the worker, epoch ms (timed ops only). */
+    postedAt?: number;
     /** Epoch-ms when the client accepted this operation. */
     startedAt: number;
 }
@@ -284,6 +288,10 @@ interface WorkerSuccessReply {
     ok: true;
     result: any;
     heapBytes?: number | null;
+    /** When the worker started the op, epoch ms. */
+    startedAt?: number;
+    /** Time the worker spent on the op, ms. */
+    opMs?: number;
 }
 
 interface WorkerFailureReply {
@@ -291,7 +299,41 @@ interface WorkerFailureReply {
     ok: false;
     error: WorkerErrorPayload;
     heapBytes?: number | null;
+    startedAt?: number;
+    opMs?: number;
 }
+
+/**
+ * Where one operation's time went, filled in by the client for a caller that
+ * passes it to an op (`getPageCount`, `extract`, `extractSerialized`), in ms.
+ * The caller measures the round trip itself; what remains after these parts is
+ * transfer and reply handling.
+ */
+export interface WorkerCallTiming {
+    /**
+     * The worker when the op was dispatched: `starting` (the op waited for the
+     * worker to spawn and load), `first_extract` (no extraction has run on this
+     * worker yet, so its code is not yet optimised by the engine), or `warm`.
+     */
+    workerState?: "starting" | "first_extract" | "warm";
+    /** Waiting in the client's work queue behind this client's earlier ops. */
+    clientQueueMs?: number;
+    /** After admission, waiting for the worker to start (spawn, MuPDF load, recycle). */
+    startMs?: number;
+    /**
+     * Sent to the worker, waiting there until it started the op (the worker
+     * runs one op at a time; a message waits while an earlier op runs).
+     */
+    queueMs?: number;
+    /** The worker running the op. */
+    opMs?: number;
+}
+
+/** When the work queue admitted each timed op (for `WorkerCallTiming.startMs`). */
+const admittedAt = new WeakMap<WorkerCallTiming, number>();
+
+/** Ops that run a document extraction (for `WorkerCallTiming.workerState`). */
+const EXTRACTION_OPS: ReadonlySet<string> = new Set(["extract", "extractSerialized", "structuredExtractWithDebug"]);
 
 interface WorkerLogMessage {
     kind: "log";
@@ -416,6 +458,8 @@ export function isWorkerDeadlineError(error: unknown): boolean {
 
 export class MuPDFWorkerClient {
     private readonly workQueue: DocumentWorkQueue | null;
+    /** Extraction ops dispatched to each worker (`WorkerCallTiming.workerState`). */
+    private readonly extractionDispatches = new WeakMap<Worker, number>();
     private readonly slotName: PDFWorkerSlotName;
     private idleTimeoutMs: number;
     private busyLeaseMs: number | null;
@@ -1237,6 +1281,12 @@ export class MuPDFWorkerClient {
             return;
         }
         this.deletePending(reply.id);
+        if (entry.timing) {
+            if (typeof reply.startedAt === "number" && entry.postedAt !== undefined) {
+                entry.timing.queueMs = Math.max(0, reply.startedAt - entry.postedAt);
+            }
+            if (typeof reply.opMs === "number") entry.timing.opMs = reply.opMs;
+        }
         const proactiveRecycleReason = this.recordCompletedOperation(
             worker,
             entry,
@@ -1376,16 +1426,25 @@ export class MuPDFWorkerClient {
     async call<T>(
         op: string,
         args: Record<string, unknown> = {},
-        opts: { signal?: AbortSignal } = {},
+        opts: { signal?: AbortSignal; timing?: WorkerCallTiming } = {},
     ): Promise<T> {
-        return this.workQueue ? this.workQueue.run(() => this.callAdmitted<T>(op, args, opts), opts.signal)
-            : this.callAdmitted<T>(op, args, opts);
+        const { timing } = opts;
+        const calledAt = Date.now();
+        const admitted = () => {
+            if (timing) {
+                const now = Date.now();
+                timing.clientQueueMs = now - calledAt;
+                admittedAt.set(timing, now);
+            }
+            return this.callAdmitted<T>(op, args, opts);
+        };
+        return this.workQueue ? this.workQueue.run(admitted, opts.signal) : admitted();
     }
 
     private async callAdmitted<T>(
         op: string,
         args: Record<string, unknown>,
-        opts: { signal?: AbortSignal },
+        opts: { signal?: AbortSignal; timing?: WorkerCallTiming },
     ): Promise<T> {
         if (opts.signal?.aborted) {
             throw new WorkerAbortError();
@@ -1393,7 +1452,7 @@ export class MuPDFWorkerClient {
         this.dispatchCounts[op] = (this.dispatchCounts[op] ?? 0) + 1;
         getConfig().log(`[MuPDFWorkerClient ${this.slotName}] dispatch op=${op}`, 3);
         try {
-            return await this.dispatch<T>(op, args, opts.signal);
+            return await this.dispatch<T>(op, args, opts.signal, opts.timing);
         } catch (e) {
             // Only retry on stale-worker recovery, and only when the client is
             // still live. After dispose() the singleton slot has been cleared
@@ -1408,7 +1467,7 @@ export class MuPDFWorkerClient {
                     `[MuPDFWorkerClient ${this.slotName}] retry op=${op} after stale worker`,
                     2,
                 );
-                return await this.dispatch<T>(op, args, opts.signal);
+                return await this.dispatch<T>(op, args, opts.signal, opts.timing);
             }
             throw e;
         }
@@ -1418,6 +1477,7 @@ export class MuPDFWorkerClient {
         op: string,
         args: Record<string, unknown>,
         signal?: AbortSignal,
+        timing?: WorkerCallTiming,
     ): Promise<T> {
         this.reapOverdueWorker();
         if (signal?.aborted) {
@@ -1432,7 +1492,7 @@ export class MuPDFWorkerClient {
         }
         const recycleBarrier = this.prepareForDataOperationDispatch(op, signal);
         if (recycleBarrier) {
-            return recycleBarrier.then(() => this.dispatch<T>(op, args, signal));
+            return recycleBarrier.then(() => this.dispatch<T>(op, args, signal, timing));
         }
         const worker = this.ensureWorker();
         const startup = this.pendingStartupFor(worker);
@@ -1448,6 +1508,8 @@ export class MuPDFWorkerClient {
                         signal,
                         fatalCandidate,
                         startedAt ?? undefined,
+                        timing,
+                        true,
                     );
                 },
                 (error) => {
@@ -1462,6 +1524,9 @@ export class MuPDFWorkerClient {
             args,
             signal,
             fatalCandidate,
+            undefined,
+            timing,
+            false,
         );
     }
 
@@ -1524,6 +1589,8 @@ export class MuPDFWorkerClient {
         signal: AbortSignal | undefined,
         fatalCandidate: FatalOperationCandidate | null,
         startedAt?: number,
+        timing?: WorkerCallTiming,
+        waitedForStartup = false,
     ): Promise<T> {
         if (signal?.aborted) {
             return Promise.reject(new WorkerAbortError());
@@ -1531,6 +1598,11 @@ export class MuPDFWorkerClient {
         if (this.worker !== worker) {
             return Promise.reject(new StaleWorkerError("configured worker changed"));
         }
+        const extractions = this.extractionDispatches.get(worker) ?? 0;
+        if (timing) {
+            timing.workerState = waitedForStartup ? "starting" : extractions === 0 ? "first_extract" : "warm";
+        }
+        if (EXTRACTION_OPS.has(op)) this.extractionDispatches.set(worker, extractions + 1);
         const id = this.nextId++;
 
         return new Promise<T>((resolve, reject) => {
@@ -1570,6 +1642,7 @@ export class MuPDFWorkerClient {
                     reject: rejectWithCleanup,
                     op,
                     fatalCandidate: fatalCandidate ?? undefined,
+                    timing,
                 },
                 startedAt,
             );
@@ -1580,6 +1653,12 @@ export class MuPDFWorkerClient {
             }
             try {
                 this.clearIdleTimer();
+                if (timing) {
+                    const postedAt = Date.now();
+                    const entry = this.pending.get(id);
+                    if (entry) entry.postedAt = postedAt;
+                    timing.startMs = postedAt - (admittedAt.get(timing) ?? postedAt);
+                }
                 worker.postMessage({ id, op, args });
             } catch (e) {
                 this.deletePending(id);
@@ -1619,12 +1698,13 @@ export class MuPDFWorkerClient {
     async getPageCount(
         pdfData: Uint8Array | ArrayBuffer,
         signal?: AbortSignal,
+        timing?: WorkerCallTiming,
     ): Promise<number> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         const result = await this.call<{ count: number }>("getPageCount", {
             pdfData: bytes,
-        }, { signal });
+        }, { signal, timing });
         return result.count;
     }
 
@@ -1742,6 +1822,7 @@ export class MuPDFWorkerClient {
             schemaVersion?: string;
         },
         signal?: AbortSignal,
+        timing?: WorkerCallTiming,
     ): Promise<BeaverExtractResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
@@ -1757,13 +1838,14 @@ export class MuPDFWorkerClient {
             analysisWindow: args?.analysisWindow,
             includeDiagnostics: args?.includeDiagnostics,
             schemaVersion: args?.schemaVersion,
-        }, { signal });
+        }, { signal, timing });
     }
 
     async extractSerialized(
         pdfData: Uint8Array | ArrayBuffer,
         args?: Parameters<MuPDFWorkerClient["extract"]>[1],
         signal?: AbortSignal,
+        timing?: WorkerCallTiming,
     ): Promise<SerializedBeaverExtractResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
@@ -1779,7 +1861,7 @@ export class MuPDFWorkerClient {
             analysisWindow: args?.analysisWindow,
             includeDiagnostics: args?.includeDiagnostics,
             schemaVersion: args?.schemaVersion,
-        }, { signal });
+        }, { signal, timing });
     }
 
     async structuredExtractWithDebug(

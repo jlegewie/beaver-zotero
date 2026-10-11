@@ -522,8 +522,8 @@ export interface ItemSearchFrontendResultItem {
  * Used for backend diagnostics to understand where time is spent during search operations.
  */
 export interface FrontendTimingMetadata {
-    /** Allow additional timing keys from TimingAccumulator */
-    [key: string]: number | undefined;
+    /** Allow additional timing keys from TimingAccumulator, plus string diagnostics such as `active_addons` */
+    [key: string]: number | string | undefined;
     /** Total operation time in milliseconds */
     total_ms?: number;
     /** Time spent in search/query phase */
@@ -585,6 +585,16 @@ export interface FrontendTimingMetadata {
     pdf_check_ms?: number;
     /** Total time inside applyCreateItemData (createZoteroItem + post-processing) */
     apply_ms?: number;
+
+    // Committed-transaction timings (summed over an action's writes)
+    /** Time from starting a write transaction to its commit */
+    tx_commit_ms?: number;
+    /** Time from the commit until the write returned (Notifier observers, capped by the grace period) */
+    post_commit_ms?: number;
+    /** Writes that returned while their Notifier observers were still running */
+    observers_deferred?: number;
+    /** Active non-system add-ons (`id@version`, comma separated), sent only when observers were slow */
+    active_addons?: string;
 
     // Reference check specific timings
     /** Time spent in phase 1: identifier (DOI/ISBN) lookup */
@@ -1017,6 +1027,56 @@ export interface ServedAttachmentDiagnostics {
 }
 
 /** Response to whole-document extraction request */
+/**
+ * Where a document request spent its time in the plugin, in whole
+ * milliseconds. Sent on PDF success responses so backend traces can split a
+ * fetch's latency between the plugin and the rest of the round trip. Stages
+ * that did not run are absent.
+ */
+export interface WSDocumentTimings {
+    /** From receiving the request to building the response. */
+    total_ms: number;
+    /**
+     * How the document was obtained: `cache` (the plugin's document cache had
+     * it), `extracted` (this request ran the extraction), or `shared` (another
+     * request's extraction of the same document, or a cache entry written
+     * meanwhile).
+     */
+    source: 'cache' | 'extracted' | 'shared';
+    /** Resolving the attachment's file (local path, size, remote availability). */
+    resolve_ms?: number;
+    /** Document-cache lookups before extracting. */
+    cache_lookup_ms?: number;
+    /** Reading (or downloading) the PDF bytes. */
+    file_read_ms?: number;
+    /** Page-count worker op, on a cache miss without stored metadata. */
+    page_count_ms?: number;
+    /** Extraction worker op, round trip as seen by the plugin. */
+    extract_ms?: number;
+    /**
+     * Waiting for other work, summed over the request's worker ops (page count
+     * and extraction, so part of `page_count_ms` and `extract_ms`): in the
+     * plugin's worker queue behind other requests' operations.
+     */
+    client_queue_ms?: number;
+    /** Likewise: waiting for the worker to start (spawn, MuPDF load, recycle). */
+    worker_start_ms?: number;
+    /** Likewise: sent to the worker, waiting while an earlier operation ran there. */
+    worker_queue_ms?: number;
+    /** Of `extract_ms`: the worker running the extraction. */
+    worker_op_ms?: number;
+    /**
+     * The worker when this request used it: `starting` (it waited for the
+     * worker to spawn and load), `first_extract` (no extraction had run on
+     * this worker yet, so its code was not yet optimised), or `warm`.
+     */
+    worker_state?: 'starting' | 'first_extract' | 'warm';
+    /** Writing the extracted result to the document cache. */
+    cache_write_ms?: number;
+    /** Waiting for `attachment_diagnostics` before responding. */
+    diagnostics_wait_ms?: number;
+}
+
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
     request_id: string;
@@ -1044,6 +1104,8 @@ export interface WSZoteroDocumentResponse {
     error_code?: ZoteroDocumentErrorCode | null;
     /** Worker health snapshot, attached to timeout error responses. */
     worker_diagnostics?: WSWorkerDiagnostics | null;
+    /** Where the request spent its time in the plugin (PDF success responses). */
+    timings?: WSDocumentTimings | null;
 }
 
 /** Error codes for attachment page image rendering failures */
@@ -2109,7 +2171,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -2835,6 +2897,13 @@ export const CLIENT_FEATURES = {
      * Citation "Import" proposals arrive as unresolved `import_item` actions.
      */
     ITEM_IMPORT_V2: 'item_import_v2',
+    /**
+     * `book_chapters` capability (`find_book_chapters`), offered together with
+     * ITEM_IMPORT_V2. Declare it only while the import duplicate check matches
+     * ISBNs book-to-book: a chapter resolved from its DOI carries its book's
+     * ISBN.
+     */
+    BOOK_CHAPTERS: 'book_chapters',
     /**
      * Chat markdown follows `[label](u-KEY)` (and `zotero://select/...`) as a
      * link that reveals the named library object. Without it those hrefs render

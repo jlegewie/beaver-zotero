@@ -38,9 +38,12 @@ export interface ThreadBlockOptions extends ResponseBlockOptions {
     includeUserPrompts?: boolean;
 }
 
-/** `<note title="…">…</note>` sections inside assistant text. */
-const NOTE_TAG_PATTERN = /<note\b([^>]*)>([\s\S]*?)(?:<\/note>|$)/g;
-const TITLE_ATTR_PATTERN = /\btitle\s*=\s*"([^"]*)"/;
+/**
+ * Legacy `<note …>…</note>` sections in assistant text from older threads.
+ * Note creation moved to the `create_note` tool; the tags only have to be
+ * unwrapped now so historical exports carry their body and not the markup.
+ */
+const NOTE_TAG_PATTERN = /<note\b[^>]*>([\s\S]*?)(?:<\/note>|$)/g;
 
 function pushMarkdown(blocks: ExportSourceBlock[], markdown: string): void {
     if (!markdown.trim()) return;
@@ -64,8 +67,8 @@ function maskCode(text: string): string {
     return masked + text.slice(cursor);
 }
 
-/** Split assistant text into plain markdown and the `<note>` sections it contains. */
-export function splitNoteTags(text: string, includeNotes: boolean): ExportSourceBlock[] {
+/** Assistant text with any legacy `<note>` tag replaced by its body. */
+export function unwrapNoteTags(text: string): ExportSourceBlock[] {
     const blocks: ExportSourceBlock[] = [];
     let cursor = 0;
     // A `<note>` written inside code is an example, not a note. Tags are matched
@@ -77,16 +80,8 @@ export function splitNoteTags(text: string, includeNotes: boolean): ExportSource
         const start = match.index ?? 0;
         pushMarkdown(blocks, text.slice(cursor, start));
         cursor = start + match[0].length;
-        // A matched opening tag lies outside code, so its attributes read the same in both.
-        const title = TITLE_ATTR_PATTERN.exec(match[1] ?? '')?.[1]?.trim() ?? '';
         const bodyStart = start + match[0].indexOf('>') + 1;
-        const body = text.slice(bodyStart, bodyStart + (match[2]?.length ?? 0));
-        if (!body.trim()) continue;
-        if (includeNotes) {
-            blocks.push({ type: 'note', title, markdown: body });
-        } else {
-            pushMarkdown(blocks, body);
-        }
+        pushMarkdown(blocks, text.slice(bodyStart, bodyStart + (match[1]?.length ?? 0)));
     }
     pushMarkdown(blocks, text.slice(cursor));
     return blocks;
@@ -110,9 +105,8 @@ function responseEvents(runs: AgentRun[], includeNotes: boolean): ResponseEvent[
             if (!isRenderableMessage(message)) continue;
             for (const part of message.parts) {
                 if (part.part_kind === 'text') {
-                    for (const block of splitNoteTags(part.content ?? '', includeNotes)) {
+                    for (const block of unwrapNoteTags(part.content ?? '')) {
                         if (block.type === 'markdown') events.push({ kind: 'text', markdown: block.markdown });
-                        else if (block.type === 'note') events.push({ kind: 'note', title: block.title, markdown: block.markdown });
                     }
                 } else if (part.part_kind === 'tool-call') {
                     // Follow-up suggestions and backend plumbing are neither work nor content.

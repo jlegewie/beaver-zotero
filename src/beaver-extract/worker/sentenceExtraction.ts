@@ -1,19 +1,16 @@
 /**
  * Worker-side sentence extraction helpers.
  *
- * Two entry points:
+ * Entry points:
  *
- *   - `extractSentencesForPage` (the per-page core): given a doc, target
- *     page index, pre-walked analysis pages, a pre-computed analysis
- *     context (`marginRemoval` + `styleProfile`) and the caller's
- *     extraction margins, walks the detailed target page, runs
- *     `detectFilteredParagraphs`, and maps paragraphs to sentence
- *     bboxes. Returns both the sentence result AND the
- *     `FilteredParagraphResult` so callers (the structured-mode
- *     `runExtractFromIndices` branch) can read columns / lines /
- *     content from the same single call. Used by the structured
- *     multi-page `extract` path AND by the single-page debug
- *     `runSentenceExtractionFromDoc` below.
+ *   - `detectPageParagraphs` + `mapPageSentences` (the per-page core):
+ *     given a doc, target page index, pre-walked analysis pages, a
+ *     pre-computed analysis context (`marginRemoval` + `styleProfile`)
+ *     and the caller's extraction margins, walk the detailed target page,
+ *     run `detectFilteredParagraphs`, and map paragraphs to sentence
+ *     bboxes. The structured pipeline (`../pipeline/structured.ts`) runs
+ *     the first half for every page before any document-level item pass
+ *     and the second half after. `extractSentencesForPage` runs both.
  *
  *   - `runSentenceExtractionFromDoc` (debug-only single-page): owns
  *     splitter resolution, JSON walk over the analysis window, and
@@ -23,7 +20,7 @@
  *     fixture capture, extract-trace endpoint).
  *
  * **Quality bar, not parity.** The structured multi-page caller
- * (`runExtractFromIndices` in `worker/ops.ts`) computes
+ * (`../pipeline/structured.ts`) computes
  * `marginRemoval` / `styleProfile` ONCE over JSON-walked analysis
  * pages — no per-target detailed substitution. The debug single-page
  * path (`runSentenceExtractionFromDoc` in trace mode) computes them
@@ -51,6 +48,7 @@ import {
     detectFilteredParagraphs,
     marginItemsForLines,
     reindexMarginItems,
+    type FilteredParagraphContext,
     type FilteredParagraphResult,
 } from "../FilteredParagraphPipeline";
 import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
@@ -64,6 +62,7 @@ import type {
 } from "../sentenceTypes";
 import type {
     GraphicsLayerMode,
+    MarginItem,
     MarginRemovalResult,
     MarginSettings,
     RawLine,
@@ -85,6 +84,7 @@ import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
 import { CURRENT_PDF_EXTRACTION_PRESET } from "../schema";
 import { placeRegionItems, splitRegionItems, type RegionItemDraft } from "../regions/regionItems";
+import { draftItemsFromParagraphs, draftPageFromParagraphs, type DraftPage } from "../pipeline/draftItems";
 
 /** Arguments of the per-page structured work (`extractSentencesForPage`). */
 export interface PageSentenceArgs {
@@ -131,7 +131,7 @@ export interface PageSentenceArgs {
     /**
      * Optional pre-walked detailed page for `pageIndex`. Lets the
      * multi-page structured caller walk the target once (in
-     * `runExtractFromIndices`) and reuse it both as the analysis-window
+     * `analyzeDocument`) and reuse it both as the analysis-window
      * entry AND the input to the sentence mapper, eliminating the
      * redundant per-target JSON walk.
      */
@@ -165,22 +165,30 @@ export interface PageSentenceArgs {
      * from `preWalkedDetailed` (`detectDominantTextOrientation`).
      */
     pageRotation?: RotationAngle;
+    /** Receives the page's item-boundary input (training export only). */
+    boundaries?: FilteredParagraphContext["boundaries"];
 }
 
 /** First half of the per-page work: paragraphs, before sentence mapping. */
 export interface PageParagraphs {
     detailed: RawPageDataDetailed;
     filteredResult: FilteredParagraphResult;
+    /**
+     * The page's draft items, created from `filteredResult.paragraphResult`.
+     * Item passes edit them; `mapPageSentences` maps them. The paragraph
+     * result itself stays the detector's output (and markdown).
+     */
+    draft: DraftPage;
     detailedWalkMs: number;
     fontBridgeMs: number;
     filteredParagraphsMs: number;
 }
 
 /**
- * Walk (or reuse) the detailed target page and detect its paragraphs. The
- * multi-page caller runs this for every page before `mapPageSentences`, so
- * document-level decisions (reference classification) can edit the
- * paragraphs in between.
+ * Walk (or reuse) the detailed target page, detect its paragraphs and create
+ * its draft items. The multi-page caller runs this for every page before
+ * `mapPageSentences`, so document-level item passes (reference
+ * classification) can edit the draft items in between.
  */
 export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
     const tDetailed = performance.now();
@@ -236,15 +244,18 @@ export function detectPageParagraphs(args: PageSentenceArgs): PageParagraphs {
             ...(region.kind === "formula" ? { content: region.rows.flat().map((cell) => cell.bbox) } : {}),
         })),
         pageRotation: args.pageRotation,
+        ...(args.boundaries ? { boundaries: args.boundaries } : {}),
     });
     const filteredParagraphsMs = performance.now() - tFiltered;
-    return { detailed, filteredResult, detailedWalkMs, fontBridgeMs, filteredParagraphsMs };
+    const draft = draftPageFromParagraphs(filteredResult.paragraphResult);
+    return { detailed, filteredResult, draft, detailedWalkMs, fontBridgeMs, filteredParagraphsMs };
 }
 
 /**
- * Second half of the per-page work: map paragraphs to sentence bboxes.
- * `referenceItems` (indices into the paragraph result's items) are emitted
- * as `reference` items without sentences.
+ * Second half of the per-page work: map the draft items to sentence bboxes,
+ * then place region and margin items. `passTimings` holds the page's share
+ * of the item passes (`referencesMs`, `itemTypesMs`, …), reported in the
+ * phase timings.
  */
 export function mapPageSentences(
     args: Pick<
@@ -252,8 +263,7 @@ export function mapPageSentences(
         "paragraphSettings" | "splitter" | "compoundVocabulary" | "regionItems" | "regionMargin" | "regionsMs"
     >,
     paragraphs: PageParagraphs,
-    referenceItems?: ReadonlySet<number>,
-    referenceMs = 0,
+    passTimings: Partial<StructuredPagePhaseTimings> = {},
 ): {
     sentenceResult: PageSentenceResult;
     filteredResult: FilteredParagraphResult;
@@ -261,18 +271,30 @@ export function mapPageSentences(
 } {
     const { detailed, filteredResult } = paragraphs;
     const tSentence = performance.now();
+    // Margin draft items (furniture an item pass found) leave the reading
+    // order: they are mapped last, so they don't break sentence continuations
+    // or region placement, and join the margin filter's items at the end.
+    const drafts = paragraphs.draft.items;
+    const marginDrafts = drafts.filter((item) => item.kind === "margin");
     const sentenceResult = extractPageSentences(detailed, {
         paragraphSettings: args.paragraphSettings,
         splitter: args.splitter,
         compoundVocabulary: args.compoundVocabulary,
-        referenceItems,
         precomputed: {
-            paragraphResult: filteredResult.paragraphResult,
+            items: marginDrafts.length > 0 ? [...drafts.filter((item) => item.kind !== "margin"), ...marginDrafts] : drafts,
             pageRotation: filteredResult.pageRotation,
             sourceWidth: filteredResult.sourceWidth,
             sourceHeight: filteredResult.sourceHeight,
         },
     });
+    const draftMargins = sentenceResult.items.splice(sentenceResult.items.length - marginDrafts.length) as MarginItem[];
+    // Their degradation notes, taken before region placement renames the other items.
+    const marginNotes = draftMargins.length > 0
+        ? (sentenceResult.degradation?.notes ?? []).flatMap((note) => {
+            const k = draftMargins.findIndex((item) => item.id === note.itemId);
+            return k >= 0 ? [{ note, k }] : [];
+        })
+        : [];
     let regionsMs = args.regionsMs ?? 0;
     if (args.regionItems?.length) {
         const tRegions = performance.now();
@@ -293,13 +315,12 @@ export function mapPageSentences(
         }
         regionsMs += performance.now() - tRegions;
     }
-    sentenceResult.items = [
-        ...sentenceResult.items,
-        ...reindexMarginItems(
-            [...filteredResult.marginItems, ...marginItemsForLines(detailed.pageIndex, args.regionMargin ?? [])],
-            sentenceResult.items.length,
-        ),
-    ];
+    const margins = reindexMarginItems(
+        [...draftMargins, ...filteredResult.marginItems, ...marginItemsForLines(detailed.pageIndex, args.regionMargin ?? [])],
+        sentenceResult.items.length,
+    );
+    for (const { note, k } of marginNotes) note.itemId = margins[k].id;
+    sentenceResult.items = [...sentenceResult.items, ...margins];
     const sentenceMapMs = performance.now() - tSentence;
 
     const { charCount, lineCount } = countDetailedPageSizes(detailed);
@@ -314,7 +335,7 @@ export function mapPageSentences(
         paragraphDetectMs: filteredResult.timings.paragraphDetectMs,
         sentenceMapMs,
         ...(args.regionItems !== undefined ? { regionsMs } : {}),
-        ...(referenceItems !== undefined ? { referencesMs: referenceMs } : {}),
+        ...passTimings,
         charCount,
         lineCount,
         itemCount: sentenceResult.items.length,
@@ -515,7 +536,7 @@ export async function runSentenceExtractionFromDoc(
             splitter,
             compoundVocabulary,
             precomputed: {
-                paragraphResult: filtered.paragraphResult,
+                items: draftItemsFromParagraphs(filtered.paragraphResult),
                 pageRotation: filtered.pageRotation,
                 sourceWidth: filtered.sourceWidth,
                 sourceHeight: filtered.sourceHeight,
@@ -561,7 +582,7 @@ export async function runSentenceExtractionFromDoc(
         splitter,
         compoundVocabulary,
         precomputed: {
-            paragraphResult: filteredResult.paragraphResult,
+            items: draftItemsFromParagraphs(filteredResult.paragraphResult),
             pageRotation: filteredResult.pageRotation,
             sourceWidth: filteredResult.sourceWidth,
             sourceHeight: filteredResult.sourceHeight,

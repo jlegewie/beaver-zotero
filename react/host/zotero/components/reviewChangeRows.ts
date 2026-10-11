@@ -91,9 +91,10 @@ export function getOpenNoteTarget(row: ReviewRow): OpenNoteTarget | null {
 }
 
 /**
- * Types the shared executor has no apply path for: inline notes apply through
- * their own surface, and the per-annotation types are legacy. A row here would
- * offer a dead ✓.
+ * Types the shared executor has no apply path for, all of them retired: the
+ * per-annotation types, and `zotero_note` from before note creation moved to
+ * the `create_note` tool. Threads still hold their records, and a row here
+ * would offer a ✓ and an Undo that no executor answers.
  */
 const UNAPPLIABLE_ACTION_TYPES = new Set<string>([
     'zotero_note',

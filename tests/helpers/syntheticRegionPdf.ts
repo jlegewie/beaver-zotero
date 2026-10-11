@@ -5,9 +5,10 @@ const PROSE = "Region detection needs a page with ordinary body text around the 
 
 /**
  * A page with body prose, a vector chart (frame, axes, curve, tick labels)
- * above its caption, and a raster photo above its caption.
+ * above its caption, and a raster photo above its caption. `rotate` sets the
+ * page's `/Rotate`.
  */
-export function syntheticFigurePdf(): Uint8Array {
+export function syntheticFigurePdf(rotate = 0): Uint8Array {
     const ops: string[] = [];
     for (let i = 0; i < 6; i++) ops.push(text(72, 740 - i * 12, 10, PROSE));
     // Chart: frame, axes, a curve, tick labels, axis title.
@@ -22,7 +23,7 @@ export function syntheticFigurePdf(): Uint8Array {
     ops.push("q 290 0 0 180 72 200 cm /Im1 Do Q");
     ops.push(text(72, 184, 9, "Figure 2. A synthetic photo."));
     for (let i = 0; i < 4; i++) ops.push(text(72, 150 - i * 12, 10, PROSE));
-    return buildPdf(ops.join("\n"), true);
+    return buildPdf(ops.join("\n"), true, rotate);
 }
 
 /**
@@ -59,12 +60,12 @@ export function syntheticSpanningTablePdf(upsideDown = false, sparse = false): U
     return buildPdf(ops.join("\n"), false);
 }
 
-function buildPdf(content: string, withImage: boolean): Uint8Array {
+function buildPdf(content: string, withImage: boolean, rotate = 0): Uint8Array {
     const pixels = Array.from({ length: 8 * 8 * 3 }, (_, i) => ((i * 37) % 251).toString(16).padStart(2, "0")).join("");
     const objects = [
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R " +
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]${rotate ? ` /Rotate ${rotate}` : ""} /Contents 4 0 R ` +
             `/Resources << /Font << /F1 5 0 R >>${withImage ? " /XObject << /Im1 6 0 R >>" : ""} >> >>`,
         `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",

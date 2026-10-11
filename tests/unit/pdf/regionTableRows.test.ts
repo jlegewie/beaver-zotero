@@ -401,6 +401,87 @@ describe("completeTableRows", () => {
         );
     });
 
+    it("routes a group label set between the header rule and the table's first row", () => {
+        const header: TestLine[] = [
+            { bbox: [72, 84, 110, 94], text: "Study" },
+            { bbox: [398, 84, 432, 94], text: "Mean" },
+            { bbox: [478, 84, 512, 94], text: "SD" },
+        ];
+        const rules: Rect[] = [[70, 80, 512, 80.5], [70, 97, 512, 97.5]];
+        const label: TestLine = { bbox: [72, 100, 100, 110], text: "Crime" };
+        const lines = [...header, label, ...row(114, "Age"), ...row(126, "Income"), ...row(138, "Sex"), ...text];
+        expect(complete(lines, [70, 112, 512, 150], rules)).toBe("T".repeat(13) + "---");
+    });
+
+    it("routes rows that MuPDF set as one line across the table's column gaps", () => {
+        // On some rows MuPDF joins the cells of the first columns into one line of words:
+        // running text, as wide as the other such lines at its edge.
+        const cells = (y: number): TestLine[] => [
+            { bbox: [72, y, 120, y + 10], text: "Hoxby (2000)", cell: true },
+            { bbox: [150, y, 200, y + 10], text: "Connecticut", cell: true },
+            { bbox: [230, y, 280, y + 10], text: "Test scores", cell: true },
+            { bbox: [400, y, 430, y + 10], text: "Class size", cell: true },
+        ];
+        const joined = (y: number, gaps: [number, number][]): TestLine[] => [
+            { bbox: [72, y, 290, y + 10], text: "Chen and Shapiro (2004) Ex-prisoners recidivism, Arrest rates", running: true, gaps },
+            { bbox: [400, y, 430, y + 10], text: "Age", cell: true },
+        ];
+        const atGutters: [number, number][] = [[132, 150], [212, 230]];
+        expect(complete([...cells(100), ...joined(114, atGutters), ...joined(128, atGutters), ...cells(142)], [70, 98, 432, 154])).toBe(
+            "T".repeat(12),
+        );
+        // A row set entirely as such lines joins as well.
+        const whole: TestLine[] = [
+            { bbox: [72, 128, 210, 138], text: "Card, Mas, and Rothstein Racial segregation,", running: true, gaps: [[132, 150]] },
+            { bbox: [230, 128, 430, 138], text: "Changes in census tract Initial share", running: true, gaps: [[282, 400]] },
+        ];
+        expect(complete([...cells(100), ...joined(114, atGutters), ...whole, ...cells(142)], [70, 98, 432, 154])).toBe("T".repeat(12));
+        // A line of words whose gaps fall inside the table's columns stays in prose.
+        const offGutters: [number, number][] = [[95, 105], [175, 185]];
+        expect(complete([...cells(100), ...joined(114, offGutters), ...joined(128, offGutters), ...cells(142)], [70, 98, 432, 154])).toBe(
+            "TTTT-T-TTTTT",
+        );
+    });
+
+    it("keeps prose beside a table in prose when its gaps line up with another table's columns", () => {
+        // A table in the left column, its box reaching over a short justified paragraph in
+        // the right column; a second table lower down sets its columns where the paragraph's
+        // lines have wide gaps.
+        const table: TestLine[] = [100, 114, 128].flatMap((y) => [
+            { bbox: [40, y, 120, y + 10], text: "Label", cell: true },
+            { bbox: [200, y, 240, y + 10], text: "1.23", cell: true },
+        ]);
+        const paragraph: TestLine[] = [100, 114, 128].map((y) => ({
+            bbox: [320, y, 560, y + 10],
+            text: PROSE,
+            running: true,
+            gaps: [[402, 418]] as [number, number][],
+        }));
+        const lower: TestLine[] = [400, 414, 428].flatMap((y) => [
+            { bbox: [320, y, 400, y + 10], text: "Region" },
+            { bbox: [420, y, 560, y + 10], text: "Mean annual rainfall" },
+        ]);
+        const second = Array.from({ length: 6 }, (_, k) => 9 + k);
+        const lines = [...table, ...paragraph, ...lower, ...text];
+        expect(completeTwo(lines, [38, 98, 560, 140], [318, 398, 562, 440], [], second).slice(0, 9)).toBe("TTTTTT---");
+    });
+
+    it("routes a group label set in the table's type size, however wide the paragraphs at its edge", () => {
+        // An 8pt table on a page of 10pt two-column prose; its panel label is as wide as a
+        // text column and starts at that column's edge.
+        const values = (y: number): TestLine[] => [
+            { bbox: [51, y, 74, y + 8], text: "Left", cell: true, size: 8 },
+            { bbox: [242, y, 262, y + 8], text: "0.162", cell: true, size: 8 },
+            { bbox: [376, y, 396, y + 8], text: "0.164", cell: true, size: 8 },
+        ];
+        const label: TestLine = { bbox: [51, 141, 246, 149], text: "B. Optimal bandwidth selected by cross-validation", running: true, size: 8 };
+        // The table's notes, in its type size and set across it, under its bottom rule.
+        const notes: TestLine[] = [183, 192].map((y) => ({ bbox: [51, y, 453, y + 8], text: `${PROSE} ${PROSE}`, running: true, size: 8 }));
+        const column: TestLine[] = Array.from({ length: 8 }, (_, k) => 300 + 12 * k).map((y) => ({ bbox: [51, y, 246, y + 10], text: PROSE, running: true }));
+        const lines = [...values(117), ...values(129), label, ...values(153), ...values(165), ...notes, ...column];
+        expect(complete(lines, [50, 115, 400, 175], [[50, 179, 453, 179.5]])).toBe("T".repeat(13) + "-".repeat(10));
+    });
+
     it("leaves a label column to the table whose cells are nearer on its rows", () => {
         // Two side-by-side tables; the left table's box reaches over the right table's labels.
         const left: TestLine[] = [100, 114, 128].flatMap((y) => [
@@ -567,6 +648,36 @@ describe("completeTableRows", () => {
             const lowerPanel = Array.from({ length: 14 }, (_, k) => 12 + k);
             const ruledPanel: Rect[] = [100, 112, 124, 136, 160, 172, 184, 196].map((y): Rect => [70, y - 2.5, 540, y - 2]);
             expect(new Set(completeTwo(panel, [70, 86, 540, 134], [70, 134, 540, 194], ruledPanel, lowerPanel, new Map()).slice(0, 26)).size).toBe(1);
+        });
+
+        it("merges a fragment of the table that the rows found under its box reach", () => {
+            // A framed text table: the box ends after its first row, and a second box holds
+            // the labels and values of rows further down, whose descriptions read as prose.
+            // The rows between them reach that fragment.
+            const rule = (y: number): Rect => [70, y, 540, y + 0.5];
+            const rules = [rule(88), rule(90), rule(104), rule(250)];
+            const r = (y: number, label: string, cell: boolean): TestLine[] => [
+                { bbox: [72, y, 150, y + 10], text: label, cell },
+                { bbox: [200, y, 220, y + 10], text: "2.6", cell },
+                { bbox: [300, y, 540, y + 10], text: "A number of service requests unrelated to conflict", running: true, cell: cell && y === 108 },
+            ];
+            const header: TestLine[] = [
+                { bbox: [72, 92, 120, 102], text: "Category", cell: true },
+                { bbox: [200, 92, 230, 102], text: "(%)", cell: true },
+                { bbox: [300, 92, 360, 102], text: "Description", cell: true },
+            ];
+            const lines = [
+                ...header,
+                ...r(108, "Noise", true),
+                ...[122, 136, 150, 164, 178].flatMap((y) => r(y, "Blocked driveway", false)),
+                ...r(202, "Heat", false),
+                ...r(216, "Plumbing", false),
+                ...r(230, "Paint", false),
+                ...text,
+            ];
+            const merged = new Map<number, number>();
+            expect(completeTwo(lines, [70, 90, 540, 118], [70, 200, 222, 240], rules, [21, 22, 24, 25, 27, 28], merged)).toBe("T".repeat(30) + "---");
+            expect([...merged]).toEqual([[1, 0]]);
         });
 
         it("bounds its grid by its frame, not by a stray line the box took beside it", () => {

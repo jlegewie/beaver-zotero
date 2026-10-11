@@ -451,11 +451,11 @@ async function validateEditNoteBatchAction(
         const itemId = modelObjectIdFromReference({ library_id: resolvedLibraryId, library_ref, zotero_key });
         let error = `Item ${itemId} is not a note`;
         if (item.isRegularItem()) {
-            error = `Item ${itemId} is a regular item and not a note. To create a new zotero note that is attached to the regular item ${itemId}, use the the <note title="..." item_id="${itemId}">...</note> tag in your response.`;
+            error = `Item ${itemId} is a regular item and not a note. To create a new note attached to it, use create_note with parent_item_id="${itemId}".`;
         } else if (item.isAttachment()) {
-            error = `Item ${itemId} is an attachment and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+            error = `Item ${itemId} is an attachment and not a note. To create a new note, use create_note. To edit a note, use edit_note with an existing note id.`;
         } else if (item.isAnnotation()) {
-            error = `Item ${itemId} is an annotation and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+            error = `Item ${itemId} is an annotation and not a note. To create a new note, use create_note. To edit a note, use edit_note with an existing note id.`;
         }
         return validateError(request.request_id, error, 'not_a_note');
     }

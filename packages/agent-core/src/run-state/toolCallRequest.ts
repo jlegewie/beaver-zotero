@@ -169,6 +169,7 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     external_search: 'Web search',
     lookup_work: 'Lookup work',
     find_related_works: 'Related works',
+    find_book_chapters: 'Book chapters',
 
     // Batch jobs
     batch_start: 'Batch job',
@@ -180,3 +181,15 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     load_capability: 'Loading tools',
     search_tools: 'Finding tools',
 };
+
+/**
+ * Base label for a tool call. Tools without an entry in TOOL_BASE_LABELS (e.g.
+ * tools the backend added after this client shipped) get a humanized tool name
+ * ("find_book_chapters" → "Find book chapters").
+ */
+export function getToolBaseLabel(toolName: string): string {
+    const known = TOOL_BASE_LABELS[toolName];
+    if (known) return known;
+    const spaced = toolName.replace(/[_-]+/g, ' ').trim();
+    return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'Calling function';
+}

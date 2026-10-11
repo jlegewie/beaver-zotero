@@ -1887,6 +1887,189 @@ describe('header detection', () => {
         });
     });
 
+    describe('size differences within one font', () => {
+        // Style runs in one font at different sizes: fake small caps,
+        // superscripts and subscripts, size-truncation jitter, and text set
+        // larger in the body font for emphasis.
+        function kindOf(spec: LeaderLineSpec, needle: string): string | undefined {
+            return items([...FILLERS_BEFORE_HEADING, spec, ...FILLERS.slice(0, 2)], [BODY]).find(it =>
+                it.text.includes(needle),
+            )?.type;
+        }
+
+        it('demotes a line whose run-in label is set larger in the body font', () => {
+            // "Speed: Translation by…": the label is emphasized by size, not
+            // by a bold face, so the first glyph reads larger than the body.
+            const spec: LeaderLineSpec = {
+                text: 'Speed: Translation by or with the aid of machines can be faster.',
+                l: 0,
+                size: 11,
+                font: 'Times-Roman',
+            };
+            expect(kindOf({ ...spec, gapAfter: 12 }, 'Speed:')).toBe('header');
+            const runs = [
+                run('Times-Roman', 6, 5, { size: 11, exactSize: 10.8 }),
+                run('Times-Roman', 49, 44, { size: 10, exactSize: 10 }),
+            ];
+            expect(kindOf({ ...spec, gapAfter: 12, styleRuns: runs }, 'Speed:')).toBe('paragraph');
+        });
+
+        it('demotes prose around a larger operator glyph', () => {
+            const runs = [
+                run('Times-Roman', 2, 2, { size: 13, exactSize: 13.6 }),
+                run('Times-Roman', 16, 14, { size: 10, exactSize: 10 }),
+                run('Times-Roman', 1, 0, { size: 13, exactSize: 13.6 }),
+                run('Times-Roman', 20, 18, { size: 10, exactSize: 10 }),
+            ];
+            const spec: LeaderLineSpec = {
+                text: 'If x is part of y, then x = ab is a substring of y here',
+                l: 0,
+                size: 13,
+                font: 'Times-Roman',
+                styleRuns: runs,
+                gapAfter: 12,
+            };
+            expect(kindOf(spec, 'If x is part')).toBe('paragraph');
+        });
+
+        it('keeps a heading whose acronyms are set in small caps', () => {
+            // Capital letters set smaller in the heading's own font.
+            const runs = [
+                run('Sans', 10, 10, { size: 12, exactSize: 12 }),
+                run('Sans', 5, 5, { size: 10, exactSize: 9.6 }),
+                run('Sans', 3, 3, { size: 12, exactSize: 12 }),
+                run('Sans', 4, 4, { size: 10, exactSize: 9.6 }),
+            ];
+            const spec: LeaderLineSpec = {
+                text: 'Estimating NAIRU for OECD',
+                l: 0,
+                size: 12,
+                font: 'Sans',
+                styleRuns: runs,
+                gapAfter: 12,
+            };
+            expect(kindOf(spec, 'Estimating NAIRU')).toBe('header');
+        });
+
+        it('keeps a heading with lowercase subscripts', () => {
+            // "2. Case 2h2m": the subscripts are set much smaller than the
+            // italic title, in the title's own font.
+            const runs = [
+                run('Times-Roman', 2, 0, { exactSize: 10 }),
+                run('Times-Italic', 4, 4, { exactSize: 10, italic: true }),
+                run('Times-Roman', 1, 0, { size: 6, exactSize: 6 }),
+                run('Times-Italic', 1, 1, { size: 6, exactSize: 6, italic: true }),
+                run('Times-Roman', 1, 0, { size: 6, exactSize: 6 }),
+                run('Times-Italic', 1, 1, { size: 6, exactSize: 6, italic: true }),
+            ];
+            const spec: LeaderLineSpec = {
+                text: '2. Case 2h2m',
+                l: 0,
+                size: 10,
+                font: 'Times-Roman',
+                styleRuns: runs,
+                gapAfter: 12,
+            };
+            expect(kindOf(spec, 'Case 2h2m')).toBe('header');
+        });
+    });
+
+    describe('numbered titles split from their section number', () => {
+        // A wide space after the section number makes the number a span of
+        // its own; the number and the title read as two styles when their
+        // sizes truncate differently (11.94 → 11, 12.0 → 12).
+        function lineOf(parts: { text: string; font: string; size: number; runs: RawStyleRun[] }[]): {
+            page: PageLineResult;
+            text: string;
+        } {
+            const page = makeColumnPageResult([...FILLERS_BEFORE_HEADING, ...FILLERS.slice(0, 2)]);
+            const lines = page.columnResults[0].lines;
+            const top = lines[FILLERS_BEFORE_HEADING.length - 1].bbox.b + 14;
+            let l = 0;
+            const spans: DetectedSpan[] = parts.map(part => {
+                const r = l + part.text.length * 5;
+                const span: DetectedSpan = {
+                    text: part.text,
+                    bbox: bbox(l, top, r, top + part.size),
+                    lineBBox: bbox(l, top, r, top + part.size),
+                    size: part.size,
+                    fontName: part.font,
+                    fontWeight: part.font.includes('Bold') ? 'bold' : 'normal',
+                    fontStyle: part.font.includes('Italic') ? 'italic' : 'normal',
+                    styleRuns: part.runs,
+                };
+                l = r + 15;
+                return span;
+            });
+            const text = parts.map(p => p.text).join(' ');
+            const line: PageLine = {
+                spans,
+                bboxes: spans.map(s => s.lineBBox),
+                bbox: bbox(0, top, l, top + 13),
+                text,
+                fontSize: parts[0].size,
+            };
+            for (const below of lines.slice(FILLERS_BEFORE_HEADING.length)) {
+                below.bbox = bbox(below.bbox.l, below.bbox.t + 30, below.bbox.r, below.bbox.b + 30);
+            }
+            lines.splice(FILLERS_BEFORE_HEADING.length, 0, line);
+            page.allLines = lines;
+            return { page, text };
+        }
+
+        it('promotes a numbered title whose number is set in its face at a jittered size', () => {
+            const { page } = lineOf([
+                {
+                    text: '2.1.1',
+                    font: 'Sans-Bold',
+                    size: 11,
+                    runs: [run('Sans-Bold', 5, 0, { size: 11, exactSize: 11.94, bold: true })],
+                },
+                {
+                    text: 'Levels of Linguistic Description',
+                    font: 'Sans-Bold',
+                    size: 12,
+                    runs: [run('Sans-Bold', 29, 29, { size: 12, exactSize: 12, bold: true })],
+                },
+            ]);
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('Levels of Linguistic'))!.type).toBe('header');
+        });
+
+        it('does not read another subset of the number’s font as a title face', () => {
+            // A numbered reference entry set larger than the body: the
+            // author names need a glyph from a second subset of the same face.
+            const { page } = lineOf([
+                { text: '27.', font: 'AAAAAA+Calibri', size: 11, runs: [run('AAAAAA+Calibri', 3, 0, { size: 11 })] },
+                {
+                    text: 'Henyš P and Čapek L. Individual yarn fibre extraction',
+                    font: 'BBBBBB+Calibri',
+                    size: 11,
+                    runs: [run('BBBBBB+Calibri', 46, 42, { size: 11 })],
+                },
+            ]);
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('Henyš'))!.type).toBe('paragraph');
+        });
+
+        it('does not describe a line by an italic face that covers only part of it', () => {
+            // A numbered question: an italic question, then its roman gloss.
+            // The italic face has the most glyphs but doesn't make the line
+            // italic.
+            const { page } = lineOf([
+                { text: '2.', font: 'Garamond', size: 10, runs: [run('Garamond', 2, 0)] },
+                {
+                    text: 'Was sind Medienveränderungen im Netzwerk? Konkret: Was sind die',
+                    font: 'Garamond-Italic',
+                    size: 10,
+                    runs: [run('Garamond-Italic', 37, 35, { italic: true }), run('Garamond', 25, 22)],
+                },
+            ]);
+            const all = detectParagraphs(page, [bodyStyle(10, 'Garamond')]).items;
+            expect(all.find(it => it.text.includes('Medienveränderungen'))!.type).toBe('paragraph');
+        });
+    });
+
     describe('heading followed by a flush-left paragraph', () => {
         // The column's right edge sits at 305 (filler lines). A long heading
         // that stops short of it by less than the early-line-end threshold
@@ -2364,6 +2547,204 @@ describe('header detection', () => {
         it('keeps a label word standing alone as a heading', () => {
             expect(kindOf('Abstract')).toBe('header');
             expect(kindOf('Keywords')).toBe('header');
+        });
+    });
+
+    describe('equations and web addresses', () => {
+        // Display equations and link lines pass the style rules when set in
+        // a larger face; a heading names its section in words.
+        function kindOf(text: string, settings: ParagraphDetectionSettings = {}): string | undefined {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { text, l: 0, size: 12, font: 'Times-Italic', italic: true }],
+                [BODY],
+                settings,
+            );
+            return all.find(it => it.text.includes(text.slice(0, 8)))?.type;
+        }
+
+        it('demotes a display equation', () => {
+            expect(kindOf('Σ* = {0, a, b, aa, ab, aabb, abab, ... }')).toBe('paragraph');
+            expect(kindOf('P(A, B) = P(A)P(B)')).toBe('paragraph');
+            expect(kindOf('T = {(x,a,y),(x,b,z),(y,a,x),(y,b,z)}')).toBe('paragraph');
+        });
+
+        it('keeps a heading that mentions an equation', () => {
+            expect(kindOf('4.3 Proving the efficiency for the k = const case')).toBe('header');
+            expect(kindOf('B.3 PROOF FOR EQUATION ∆PK0(K0)T = 0')).toBe('header');
+        });
+
+        it('keeps a short mathematical title that names its subject in words', () => {
+            expect(kindOf('2.1.1 Case n = 1')).toBe('header');
+            expect(kindOf('3. Proof of a² + b² = c²')).toBe('header');
+            expect(kindOf('3. Case 1: x = y')).toBe('header');
+            expect(kindOf('3. Proof: a² + b² = c²')).toBe('header');
+            expect(kindOf('Theorem 3.1 (n = 2)')).toBe('header');
+        });
+
+        it('demotes a numbered equation', () => {
+            expect(kindOf('3. P(A U B) = P(A) + P(B) if A ∩ B = {}')).toBe('paragraph');
+        });
+
+        it('demotes an equation whose function arguments are words', () => {
+            expect(kindOf('P(can | N) = 0.9 P(can | V) = 0.1')).toBe('paragraph');
+        });
+
+        it('demotes a line of web addresses', () => {
+            expect(kindOf('www.aclweb.org')).toBe('paragraph');
+            expect(kindOf('babel.uoregon.edu/yamada/guides.html')).toBe('paragraph');
+            expect(kindOf('https://doi.org/10.1353/gsr.2014.0029')).toBe('paragraph');
+            expect(kindOf('ftp://ftp.ora.com/pub/examples/nutshell/ujip/ doc/cjk.inf')).toBe('paragraph');
+        });
+
+        it('keeps a heading that names a site or a slash pair', () => {
+            expect(kindOf('Booking.com')).toBe('header');
+            expect(kindOf('Input/Output Systems')).toBe('header');
+            expect(kindOf('Resources at www.aclweb.org')).toBe('header');
+        });
+
+        it('keeps equations and web addresses as headings without heading label filters', () => {
+            const off = { headingLabelFilters: false };
+            expect(kindOf('P(A, B) = P(A)P(B)', off)).toBe('header');
+            expect(kindOf('www.aclweb.org', off)).toBe('header');
+        });
+
+        it('demotes a lone identifier: a wrapped link tail, an e-mail address, a rule', () => {
+            expect(kindOf('071d4a94-28a8-11e4-8593-da634b334390_story.html')).toBe('paragraph');
+            expect(kindOf('/content/333/6042/627.full.html')).toBe('paragraph');
+            expect(kindOf('3f2a9c1e7b4d5a6c8e9f0a1b2c3d4e5f6a7b8c9d')).toBe('paragraph');
+            expect(kindOf('9B2E4F1A-7C3D-4E5F-8A9B-0C1D2E3F4A5B')).toBe('paragraph');
+            expect(kindOf('ophir.klein@ucsf.edu')).toBe('paragraph');
+            expect(kindOf('______________________________')).toBe('paragraph');
+        });
+
+        it('keeps one-word headings, slash pairs and CJK headings', () => {
+            expect(kindOf('ABCC10-Mediated-Chemoresistance')).toBe('header');
+            expect(kindOf('Phosphatidylinositol-3-Kinase')).toBe('header');
+            expect(kindOf('17β-Hydroxysteroid-Dehydrogenase')).toBe('header');
+            expect(kindOf('Acknowledgements')).toBe('header');
+            expect(kindOf('Literaturverzeichnis')).toBe('header');
+            expect(kindOf('Metabolism/Elimination')).toBe('header');
+            expect(kindOf('一、中国共产党纪律体系的历史演进2021')).toBe('header');
+        });
+    });
+
+    describe('page body styles', () => {
+        // A page appended in another face ("This article has been cited by:"
+        // in Times under a New Caledonia article): its numbered entries fit
+        // Rule 6 (same size, different font, section-number prefix) against
+        // the document body, but on their own page that face is the body.
+        const DOC_BODY = bodyStyle(10, 'NewCaledonia');
+        const ENTRIES: LeaderLineSpec[] = Array.from({ length: 8 }, (_, i): LeaderLineSpec[] => [
+            {
+                text: `${i + 1}. A. Author, B. Author. 2011. A study of something that matters a great deal to`,
+                l: 0,
+                size: 10,
+                font: 'Times-Roman',
+            },
+            { text: 'Economic Perspectives and Policy 3: 1-9.', l: 10, size: 10, font: 'Times-Roman', gapAfter: 14 },
+        ]).flat();
+
+        function types(specs: LeaderLineSpec[], settings: ParagraphDetectionSettings) {
+            return items(specs, [DOC_BODY], settings).map(it => it.type);
+        }
+
+        it('reads the page style as body on a page set in another face', () => {
+            expect(types(ENTRIES, { pageBodyStyles: true })).not.toContain('header');
+        });
+
+        it('keeps the document-wide reading without page body styles (PDF schema 4)', () => {
+            expect(types(ENTRIES, { pageBodyStyles: false })).toContain('header');
+        });
+
+        it('keeps a heading that stands out on its page', () => {
+            const heading: LeaderLineSpec = {
+                text: 'This article has been cited by:',
+                l: 0,
+                size: 10,
+                font: 'Times-Bold',
+                bold: true,
+                gapAfter: 10,
+            };
+            const all = items([heading, ...ENTRIES], [DOC_BODY], { pageBodyStyles: true });
+            expect(all.filter(it => it.type === 'header').map(it => it.text)).toEqual([
+                '## This article has been cited by:',
+            ]);
+        });
+
+        it('keeps an all-caps heading set in the page body face', () => {
+            // An appendix page set in Times under a New Caledonia document.
+            const prose = (n: number): LeaderLineSpec[] =>
+                Array.from({ length: n }, (_, i) => ({
+                    text: `Appendix prose in the page face, line ${i + 1} of a paragraph that runs across the page.`,
+                    l: 0,
+                    size: 10,
+                    font: 'Times-Roman',
+                }));
+            const before = prose(6);
+            before[5] = { ...before[5], gapAfter: 14 };
+            const heading: LeaderLineSpec = { text: 'APPENDIX METHODS', l: 0, size: 10, font: 'Times-Roman' };
+            for (const pageBodyStyles of [false, true]) {
+                const all = items([...before, heading, ...prose(6)], [DOC_BODY], { pageBodyStyles });
+                expect(all.find(it => it.text.includes('APPENDIX METHODS'))?.type, String(pageBodyStyles)).toBe('header');
+            }
+        });
+
+        it('keeps an all-caps heading that qualifies by the document body on a page with its own', () => {
+            // Document body 11pt, the page's own body 9pt, the heading 10pt,
+            // all in one face: not larger than the document body, it is a
+            // heading as it would be without the page's body style.
+            const docBody = bodyStyle(11, 'Times-Bold', true);
+            const prose = (n: number): LeaderLineSpec[] =>
+                Array.from({ length: n }, (_, i) => ({
+                    text: `Reference list text set smaller, line ${i + 1} of an entry that runs across the page.`,
+                    l: 0,
+                    size: 9,
+                    font: 'Times-Bold',
+                    bold: true,
+                }));
+            const before = prose(6);
+            before[5] = { ...before[5], gapAfter: 14 };
+            const heading: LeaderLineSpec = { text: 'REFERENCES', l: 0, size: 10, font: 'Times-Bold', bold: true };
+            for (const pageBodyStyles of [false, true]) {
+                const all = items([...before, heading, ...prose(6)], [docBody], { pageBodyStyles });
+                expect(all.find(it => it.text.includes('REFERENCES'))?.type, String(pageBodyStyles)).toBe('header');
+            }
+        });
+
+        it('keeps a CJK heading on a page set in another body face at the body size', () => {
+            // A 10pt SimSun document with an appendix page in NotoSansCJK: the
+            // page's body face is no evidence that the document's body font is
+            // split across subsets.
+            const prose = (n: number): LeaderLineSpec[] =>
+                Array.from({ length: n }, () => ({
+                    text: '本附录说明研究所使用的数据来源样本构成以及变量的测量方式和处理过程',
+                    l: 0,
+                    size: 10,
+                    font: 'NotoSansCJK-Regular',
+                }));
+            const before = prose(12);
+            before[11] = { ...before[11], gapAfter: 14 };
+            const heading: LeaderLineSpec = { text: '研究方法', l: 0, size: 10, font: 'NotoSansCJK-Medium' };
+            for (const pageBodyStyles of [false, true]) {
+                const all = items([...before, heading, ...prose(12)], [bodyStyle(10, 'SimSun')], { pageBodyStyles });
+                expect(all.find(it => it.text.includes('研究方法'))?.type, String(pageBodyStyles)).toBe('header');
+            }
+        });
+
+        it('leaves a page with document body text to the document-wide rules', () => {
+            const body: LeaderLineSpec[] = Array.from({ length: 12 }, (_, i) => ({
+                text: `Ordinary body text in the document face, line ${i + 1} of the section that continues.`,
+                l: 0,
+                size: 10,
+                font: 'NewCaledonia',
+            }));
+            const heading: LeaderLineSpec = { text: '2.1 Methods and Data', l: 0, size: 10, font: 'Helvetica' };
+            const all = items(
+                [...body.slice(0, 6), { ...body[5], gapAfter: 14 }, heading, ...body.slice(6)],
+                [DOC_BODY],
+                { pageBodyStyles: true },
+            );
+            expect(all.find(it => it.text.includes('Methods'))?.type).toBe('header');
         });
     });
 

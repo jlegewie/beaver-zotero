@@ -118,6 +118,23 @@ describe("annotateColumnContinuations", () => {
         expect(right.sentences[0].joinWithNext).toBeUndefined();
     });
 
+    it("reads the column an item joined across stacked blocks ends in", () => {
+        const joined = () => makeParagraph(0, [makeSentence("For this purpose, we examine changes in violent and property")]);
+        const nextColumn = makeParagraph(2, [makeSentence("crime before, during, and after.")], { idx: 1 });
+        const first = joined();
+        annotateColumnContinuations([first, nextColumn], simpleRegexSentenceSplit, new Set(), [1, 2]);
+        expect((first as TextItem).sentences[0].joinWithNext).toBe(true);
+        // Without the end column, the item reads as column 0 and column 2 is not next to it.
+        const plain = joined();
+        annotateColumnContinuations([plain, nextColumn], simpleRegexSentenceSplit, new Set());
+        expect((plain as TextItem).sentences[0].joinWithNext).toBeUndefined();
+        // The next item below in the block the joined item ends in is no column break.
+        const sameBlock = joined();
+        const below = makeParagraph(1, [makeSentence("crime before, during, and after.")], { idx: 1 });
+        annotateColumnContinuations([sameBlock, below], simpleRegexSentenceSplit, new Set(), [1, 1]);
+        expect((sameBlock as TextItem).sentences[0].joinWithNext).toBeUndefined();
+    });
+
     it("leaves the flag unset when last sentence ends with a period", () => {
         const left = makeParagraph(0, [makeSentence("Sentence ended.")]);
         const right = makeParagraph(1, [makeSentence("continuation here.")]);

@@ -5,7 +5,8 @@
 import type { RawLine, RawLineDetailed, RawPageData } from "@beaver/agent-core/extract/types";
 
 import { GRAPHICS_SUMMARY_STRIDE, GS_FIELD, GS_FLAG, GS_KIND, type GraphicsSummary } from "../worker/graphicsSummary";
-import type { Rect } from "./geometry";
+import { UnionFind } from "./cluster";
+import { unionRect, type Rect } from "./geometry";
 
 /** "Supplementary Figure 2", "Extended Data Fig. 3", "Appendix Table A1". */
 const CAPTION_PREFIX = String.raw`(?:supp(?:lementary)?\.?\s+|extended\s+data\s+|appendix\s+|online\s+)?`;
@@ -76,6 +77,8 @@ export const EQUATION_REFERENCE_END_RE = new RegExp(
 const MATH_FONT_RE =
     /^(?:[A-Z]{6}\+)?(?:CM(?:MI|SY|EX|BSY|MIB)|MSAM|MSBM|EUFM|EUSM|EUEX|RSFS|STIX|XITS|LMMath|LatinModernMath|Asana|Euclid|MTMI|MTSY|MTEX|MathematicalPi|Mathematica|Symbol|.*Math|.*MT ?Extra|txsy|txex|pxsy|pxex|txmi|pxmi|NewCM.*Math)/i;
 
+/** A relation sign: what separates the sides of an equation. */
+const RELATION_CHAR_RE = /[=≤≥<>≈≡∝≠≃≅∼]/;
 /** Mathematical symbols: Greek, operators, arrows, letterlike and math alphanumerics. */
 const MATH_CHAR_RE = /[\u0391-\u03c9\u2190-\u21ff\u2200-\u22ff\u2A00-\u2AFF\u27C0-\u27EF\u2100-\u214F=<>±×÷∞√∑∏∫∂∇′″]|[\u{1D400}-\u{1D7FF}]/u;
 
@@ -102,6 +105,21 @@ export interface RegionLine {
     mathChars: number;
     /** Non-space characters. */
     inkChars: number;
+    /**
+     * Largest type size of a relation sign (=, ≤, …) on the line, when it has one: a
+     * relation set smaller than the line's text is in a script (a sum's limit "i=1").
+     */
+    relationSize?: number;
+    /**
+     * Horizontal spans of what takes limits on the line: a big operator (∑, ∫, …) or an
+     * operator name ("lim sup", "arg max"). Limits are set centred under or over them.
+     */
+    limitSpans?: [number, number][];
+    /**
+     * Type size setting most of the line's inked characters (font runs; else `size`, which
+     * is the size of the line's first character: an enlarged ∑ opening an equation).
+     */
+    inkSize?: number;
     /** Name of the font setting most of the line's characters, when known. */
     font?: string;
     /** Smallest and largest font size on the line (font runs; else `size`). */
@@ -136,15 +154,19 @@ export interface RegionLine {
 const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/g;
 const ALPHA_WORD_RE = /^[\p{L}][\p{L}'’-]{2,}[.,;:!?)]*$/u;
 
-/** Words of at least three letters; each two CJK characters count as one. */
-function alphaWordCount(text: string): number {
-    const cjk = text.match(CJK_RE)?.length ?? 0;
-    return text.split(/\s+/).filter((w) => ALPHA_WORD_RE.test(w)).length + Math.floor(cjk / 2);
-}
+/** A letter or digit. */
+const TEXT_CHAR_RE = /[\p{L}\p{N}]/u;
 
-function wordCount(text: string): number {
-    const cjk = text.match(CJK_RE)?.length ?? 0;
-    return text.split(/\s+/).length + Math.floor(cjk / 2);
+/**
+ * Whitespace-separated words (`RegionLine.words`) and words of at least three
+ * letters (`RegionLine.alphaWords`); each two CJK characters count as one.
+ */
+function wordCounts(text: string): { words: number; alphaWords: number } {
+    const cjk = Math.floor((text.match(CJK_RE)?.length ?? 0) / 2);
+    const tokens = text.split(/\s+/);
+    let alpha = 0;
+    for (const w of tokens) if (ALPHA_WORD_RE.test(w)) alpha++;
+    return { words: tokens.length + cjk, alphaWords: alpha + cjk };
 }
 
 const mathFontCache = new Map<string, boolean>();
@@ -175,20 +197,38 @@ export interface Primitive {
 
 type FontRun = { start: number; font: { name: string; size: number } };
 
+/** Adds `n` to `key`'s count in a flat [key, count, …] list (first-seen order, like a Map's). */
+function addInk<K>(counts: (K | number)[], key: K, n: number): void {
+    for (let k = 0; k < counts.length; k += 2) {
+        const c = counts[k];
+        // SameValueZero, as Map keys compare.
+        if (c === key || (c !== c && key !== key)) {
+            counts[k + 1] = (counts[k + 1] as number) + n;
+            return;
+        }
+    }
+    counts.push(key, n);
+}
+
 /** Math and size statistics of chars [a, b) of a line, from its font runs. */
 function rangeMath(
     chars: readonly string[],
+    classes: Uint8Array,
     runs: readonly FontRun[],
     a: number,
     b: number,
     textFont: string | undefined,
+    size: number,
 ) {
     let math = 0;
     let ink = 0;
     let minSize = Infinity;
     let maxSize = 0;
-    // Ink per font name: a line can return to its font after an emphasized span.
-    const fontInk = new Map<string, number>();
+    let relationSize = 0;
+    // Ink per type size, for the size setting most of the range, and per font name
+    // (a line can return to its font after an emphasized span); in first-seen order.
+    const sizeInk: number[] = [];
+    const fontInk: (string | number)[] = [];
     for (let r = 0; r < runs.length; r++) {
         const s0 = Math.max(a, runs[r].start);
         const s1 = Math.min(b, r + 1 < runs.length ? runs[r + 1].start : chars.length);
@@ -196,13 +236,16 @@ function rangeMath(
         const mathFont = runs[r].font.name !== textFont && isMathFont(runs[r].font.name);
         let runInk = 0;
         for (let i = s0; i < s1; i++) {
-            const c = chars[i];
-            if (c === undefined || /\s/.test(c)) continue;
+            if (chars[i] === undefined) continue;
+            const cls = classes[i];
+            if (cls & CHAR_SPACE) continue;
             runInk++;
-            if (mathFont || MATH_CHAR_RE.test(c)) math++;
+            if (mathFont || cls & CHAR_MATH) math++;
+            if (cls & CHAR_RELATION) relationSize = Math.max(relationSize, runs[r].font.size > 0 ? runs[r].font.size : size);
         }
         ink += runInk;
-        if (runInk > 0 && runs[r].font.name) fontInk.set(runs[r].font.name, (fontInk.get(runs[r].font.name) ?? 0) + runInk);
+        if (runInk > 0 && runs[r].font.name) addInk(fontInk, runs[r].font.name, runInk);
+        if (runInk > 0) addInk(sizeInk, runs[r].font.size > 0 ? runs[r].font.size : size, runInk);
         if (runInk > 0 && runs[r].font.size > 0) {
             minSize = Math.min(minSize, runs[r].font.size);
             maxSize = Math.max(maxSize, runs[r].font.size);
@@ -210,13 +253,109 @@ function rangeMath(
     }
     let font: string | undefined;
     let best = 0;
-    for (const [name, n] of fontInk) {
+    for (let k = 0; k < fontInk.length; k += 2) {
+        const n = fontInk[k + 1] as number;
         if (n > best) {
-            font = name;
+            font = fontInk[k] as string;
             best = n;
         }
     }
-    return { math, ink, minSize, maxSize, font };
+    let inkSize = size;
+    let inkBest = 0;
+    for (let k = 0; k < sizeInk.length; k += 2) {
+        const s = sizeInk[k];
+        const n = sizeInk[k + 1];
+        if (n > inkBest || (n === inkBest && s > inkSize)) {
+            inkSize = s;
+            inkBest = n;
+        }
+    }
+    return { math, ink, minSize, maxSize, font, relationSize, inkSize };
+}
+
+/** A big operator: its limits are set in script size under or over it. */
+const BIG_OPERATOR_RE = /[∑∏∐∫∬∭∮⋀⋁⋂⋃⨀⨁⨂⨄⨆]/u;
+/** An operator name that takes limits. */
+const OPERATOR_NAME_RE = /^(?:lim|sup|inf|max|min|arg|limsup|liminf|argmax|argmin)$/u;
+/** Operator names this many em apart or closer are one ("lim sup", "arg max"). */
+const OPERATOR_GAP_EM = 0.6;
+/** Text that may hold an operator name (`OPERATOR_NAME_RE`) or a big operator. */
+const MAY_TAKE_LIMITS_RE = /lim|sup|inf|max|min|arg|[∑∏∐∫∬∭∮⋀⋁⋂⋃⨀⨁⨂⨄⨆]/u;
+
+/** Character classes (`charClass`), as bits. */
+const CHAR_SPACE = 1;
+const CHAR_LETTER = 2;
+const CHAR_MATH = 4;
+const CHAR_RELATION = 8;
+const CHAR_BIG_OPERATOR = 16;
+
+function computeCharClass(c: string): number {
+    return (
+        (/\s/.test(c) ? CHAR_SPACE : 0) |
+        (/\p{L}/u.test(c) ? CHAR_LETTER : 0) |
+        (MATH_CHAR_RE.test(c) ? CHAR_MATH : 0) |
+        (RELATION_CHAR_RE.test(c) ? CHAR_RELATION : 0) |
+        (BIG_OPERATOR_RE.test(c) ? CHAR_BIG_OPERATOR : 0)
+    );
+}
+
+const ASCII_CHAR_CLASS = Uint8Array.from({ length: 128 }, (_, code) => computeCharClass(String.fromCharCode(code)));
+const charClassCache = new Map<string, number>();
+
+/** `charClass` of each character of a line (`[...text]`). */
+function charClasses(chars: readonly string[]): Uint8Array {
+    const out = new Uint8Array(chars.length);
+    for (let i = 0; i < chars.length; i++) out[i] = charClass(chars[i]);
+    return out;
+}
+
+/** Class of character `i`, or of a space past the end (as `charClass(chars[i] ?? " ")`). */
+function classAt(classes: Uint8Array, i: number): number {
+    return i < classes.length ? classes[i] : CHAR_SPACE;
+}
+
+/** The classes of one character of a line (an element of `[...text]`), tested once per character. */
+function charClass(c: string): number {
+    if (c.length === 1) {
+        const code = c.charCodeAt(0);
+        if (code < 128) return ASCII_CHAR_CLASS[code];
+    }
+    let cls = charClassCache.get(c);
+    if (cls === undefined) {
+        cls = computeCharClass(c);
+        charClassCache.set(c, cls);
+    }
+    return cls;
+}
+
+/** Spans of chars [a, b) of a horizontal line that take limits (`RegionLine.limitSpans`). */
+function limitSpans(line: RawLineDetailed, chars: readonly string[], classes: Uint8Array, a: number, b: number, em: number): [number, number][] {
+    const spans: [number, number][] = [];
+    if (!MAY_TAKE_LIMITS_RE.test(line.text)) return spans;
+    const add = (x0: number, x1: number) => {
+        const last = spans[spans.length - 1];
+        if (last && x0 - last[1] <= OPERATOR_GAP_EM * em) last[1] = Math.max(last[1], x1);
+        else spans.push([x0, x1]);
+    };
+    let word = "";
+    let start = -1;
+    const endWord = (end: number) => {
+        if (start >= 0 && OPERATOR_NAME_RE.test(word)) add(line.chars[start].bbox.l, line.chars[end - 1].bbox.r);
+        word = "";
+        start = -1;
+    };
+    for (let i = a; i < b; i++) {
+        const cls = classAt(classes, i);
+        if (cls & CHAR_LETTER) {
+            if (start < 0) start = i;
+            word += chars[i];
+            continue;
+        }
+        endWord(i);
+        if (cls & CHAR_BIG_OPERATOR) add(line.chars[i].bbox.l, line.chars[i].bbox.r);
+    }
+    endWord(b);
+    return spans;
 }
 
 /** Gap (in em) between two inked characters that splits a line into separate pieces. */
@@ -226,12 +365,12 @@ const SPLIT_GAP_EM = 2;
  * Character ranges of a horizontal line separated by wide gaps: an equation and
  * its number, or table cells that MuPDF set on one line.
  */
-function linePieces(line: RawLineDetailed, chars: readonly string[], em: number): [number, number][] {
+function linePieces(line: RawLineDetailed, classes: Uint8Array, em: number): [number, number][] {
     const pieces: [number, number][] = [];
     let start = 0;
     let prevRight = -Infinity;
     for (let i = 0; i < line.chars.length; i++) {
-        if (/\s/.test(chars[i] ?? " ")) continue;
+        if (classAt(classes, i) & CHAR_SPACE) continue;
         const b = line.chars[i].bbox;
         if (prevRight !== -Infinity && b.l - prevRight > SPLIT_GAP_EM * em && i > start) {
             pieces.push([start, i]);
@@ -244,11 +383,11 @@ function linePieces(line: RawLineDetailed, chars: readonly string[], em: number)
 }
 
 /** Gaps of at least `min` between consecutive inked characters in [a, b) of a horizontal line. */
-function innerGaps(line: RawLineDetailed, chars: readonly string[], a: number, b: number, min: number): [number, number][] {
+function innerGaps(line: RawLineDetailed, classes: Uint8Array, a: number, b: number, min: number): [number, number][] {
     const gaps: [number, number][] = [];
     let prevRight = -Infinity;
     for (let i = a; i < b; i++) {
-        if (/\s/.test(chars[i] ?? " ")) continue;
+        if (classAt(classes, i) & CHAR_SPACE) continue;
         const box = line.chars[i].bbox;
         if (prevRight !== -Infinity && box.l - prevRight >= min) gaps.push([prevRight, box.l]);
         prevRight = Math.max(prevRight === -Infinity ? box.r : prevRight, box.r);
@@ -294,6 +433,7 @@ const SKEW_RATIO = 3;
 function isSkewed(
     line: RawLineDetailed,
     chars: readonly string[],
+    classes: Uint8Array,
     a: number,
     b: number,
     rot: 0 | 90 | 270,
@@ -307,9 +447,9 @@ function isSkewed(
     }
     // First and last inked characters.
     let first = a;
-    while (first < b && /\s/.test(chars[first])) first++;
+    while (first < b && classes[first] & CHAR_SPACE) first++;
     let last = b - 1;
-    while (last > first && /\s/.test(chars[last])) last--;
+    while (last > first && classes[last] & CHAR_SPACE) last--;
     if (first >= last) return false;
     const f = line.chars[first].bbox;
     const l = line.chars[last].bbox;
@@ -329,7 +469,7 @@ function isSkewed(
     let prevAcross = across(f);
     let prevAlong = along(f);
     for (let i = first + 1; i <= last; i++) {
-        if (/\s/.test(chars[i])) continue;
+        if (classes[i] & CHAR_SPACE) continue;
         const c = line.chars[i].bbox;
         steps++;
         // Each step moves across the line and along it, as rotated text does.
@@ -396,6 +536,7 @@ export function pageLines(page: RawPageData): RegionLine[] {
             const rot = line.rotation === 270 ? 270 : line.wmode === 1 || line.rotation === 90 ? 90 : 0;
             const detailed = line as RawLineDetailed;
             const chars = [...line.text];
+            const classes = charClasses(chars);
             const runs: FontRun[] = detailed.spans?.length ? detailed.spans : [{ start: 0, font: line.font }];
             // Some PDFs set text in a 0-size font scaled by the text matrix: the line
             // height is then the only size there is.
@@ -403,49 +544,63 @@ export function pageLines(page: RawPageData): RegionLine[] {
             const size = line.font.size > 0 ? line.font.size : Math.max(1, Math.round(height));
             const pieces: [number, number][] =
                 !rot && detailed.chars?.length === chars.length
-                    ? linePieces(detailed, chars, Math.max(1, size))
+                    ? linePieces(detailed, classes, Math.max(1, size))
                     : [[0, chars.length]];
             source++;
             for (const [a, b] of pieces) {
-                const text = chars.slice(a, b).join("").trim();
+                // One piece is the whole line: `chars` joined is its text.
+                const text = (pieces.length === 1 ? line.text : chars.slice(a, b).join("")).trim();
                 if (!text) continue;
                 let bbox: Rect = [line.bbox.l, line.bbox.t, line.bbox.r, line.bbox.b];
                 if (pieces.length > 1) {
                     bbox = [Infinity, Infinity, -Infinity, -Infinity];
                     for (let i = a; i < b; i++) {
-                        if (/\s/.test(chars[i])) continue;
+                        if (classes[i] & CHAR_SPACE) continue;
                         const cb = detailed.chars[i].bbox;
                         bbox = [Math.min(bbox[0], cb.l), Math.min(bbox[1], cb.t), Math.max(bbox[2], cb.r), Math.max(bbox[3], cb.b)];
                     }
                 }
-                const m = rangeMath(chars, runs, a, b, textFont);
+                const m = rangeMath(chars, classes, runs, a, b, textFont, size);
+                const operators = !rot && detailed.chars?.length === chars.length ? limitSpans(detailed, chars, classes, a, b, Math.max(1, size)) : [];
                 const maxSize = m.maxSize || size;
-                const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, chars, a, b, WORD_GAP_EM * Math.max(1, size)) : [];
-                lines.push({
-                    bbox,
-                    text,
-                    size,
-                    rot,
-                    ...(line.rotation === 180 ? { turned: true as const } : {}),
-                    words: wordCount(text),
-                    nchar: text.length,
-                    alphaWords: alphaWordCount(text),
-                    mathChars: m.math,
-                    inkChars: m.ink,
-                    ...(m.font ? { font: m.font } : {}),
-                    minSize: m.minSize === Infinity ? size : m.minSize,
-                    maxSize,
-                    eqNumber: EQUATION_NUMBER_RE.test(text),
-                    ...(isSkewed(detailed, chars, a, b, rot, bbox, Math.max(size, maxSize)) ? { skewed: true as const } : {}),
-                    source,
-                    pieces: pieces.length,
-                    range: [a, b],
-                    ...(gaps.length ? { gaps } : {}),
-                });
+                const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, classes, a, b, WORD_GAP_EM * Math.max(1, size)) : [];
+                const counts = wordCounts(text);
+                // Built field by field, optional fields in place: the same keys in the
+                // same order as a literal, without a temporary object per optional field.
+                const out = { bbox, text, size, rot } as RegionLine;
+                if (line.rotation === 180) out.turned = true;
+                out.words = counts.words;
+                out.nchar = text.length;
+                out.alphaWords = counts.alphaWords;
+                out.mathChars = m.math;
+                if (m.relationSize) out.relationSize = m.relationSize;
+                out.inkSize = m.inkSize;
+                if (operators.length) out.limitSpans = operators;
+                out.inkChars = m.ink;
+                if (m.font) out.font = m.font;
+                out.minSize = m.minSize === Infinity ? size : m.minSize;
+                out.maxSize = maxSize;
+                out.eqNumber = EQUATION_NUMBER_RE.test(text);
+                if (isSkewed(detailed, chars, classes, a, b, rot, bbox, Math.max(size, maxSize))) out.skewed = true;
+                out.source = source;
+                out.pieces = pieces.length;
+                out.range = [a, b];
+                if (gaps.length) out.gaps = gaps;
+                lines.push(out);
             }
         }
     }
     return lines;
+}
+
+/** Type size setting most of the ink of these pieces (each counted at its own `inkSize`), the larger on a tie. */
+export function inkSizeOf(pieces: readonly RegionLine[]): number {
+    const bySize = new Map<number, number>();
+    for (const p of pieces) {
+        const size = p.inkSize ?? p.size;
+        bySize.set(size, (bySize.get(size) ?? 0) + p.inkChars);
+    }
+    return [...bySize].reduce((a, b) => (b[1] > a[1] || (b[1] === a[1] && b[0] > a[0]) ? b : a))[0];
 }
 
 /** Pieces on one row closer than this many em are words of one line. */
@@ -496,8 +651,13 @@ export function mergeRowFragments(lines: RegionLine[], prims: readonly Primitive
     for (const row of rows) {
         row.sort((a, b) => a.bbox[0] - b.bbox[0]);
         const gaps = row.slice(1).map((l, i) => l.bbox[0] - row[i].bbox[2]);
-        const sortedGaps = [...gaps].sort((a, b) => a - b);
-        const medianGap = sortedGaps.length ? sortedGaps[Math.floor(sortedGaps.length / 2)] : 0;
+        // Justified spacing is judged against the row's other word spaces: a gap is never
+        // its own evidence, so a column gutter on a row of two or three pieces (one of them
+        // an accent overlapping its neighbour) does not pass for an even word space.
+        const otherGap = (k: number): number => {
+            const others = gaps.filter((g, j) => j !== k && g > 0).sort((a, b) => a - b);
+            return others.length ? others[Math.floor(others.length / 2)] : -Infinity;
+        };
         const wordRow =
             row.length >= 3 &&
             row.filter((l) => l.alphaWords >= 1 && l.mathChars <= 0.2 * l.inkChars).length >= 0.7 * row.length;
@@ -508,7 +668,7 @@ export function mergeRowFragments(lines: RegionLine[], prims: readonly Primitive
             const gap = gaps[i - 1];
             const wordGap =
                 gap <= WORD_GAP_EM * em ||
-                (wordRow && gap <= JUSTIFIED_GAP_EM * em && gap <= 1.5 * medianGap + 1);
+                (wordRow && gap <= JUSTIFIED_GAP_EM * em && gap <= 1.5 * otherGap(i - 1) + 1);
             if (wordGap && gap >= -em && !cur.eqNumber && !next.eqNumber && !separated(cur, next)) {
                 const text = `${cur.text} ${next.text}`;
                 cur = {
@@ -521,6 +681,9 @@ export function mergeRowFragments(lines: RegionLine[], prims: readonly Primitive
                     nchar: cur.nchar + next.nchar + 1,
                     alphaWords: cur.alphaWords + next.alphaWords,
                     mathChars: cur.mathChars + next.mathChars,
+                    ...(cur.relationSize || next.relationSize ? { relationSize: Math.max(cur.relationSize ?? 0, next.relationSize ?? 0) } : {}),
+                    inkSize: inkSizeOf([...(cur.parts ?? [cur]), next]),
+                    ...(cur.limitSpans || next.limitSpans ? { limitSpans: [...(cur.limitSpans ?? []), ...(next.limitSpans ?? [])] } : {}),
                     inkChars: cur.inkChars + next.inkChars,
                     minSize: Math.min(cur.minSize, next.minSize),
                     maxSize: Math.max(cur.maxSize, next.maxSize),
@@ -639,10 +802,15 @@ function numbersTable(
     );
 }
 
-/** Character-weighted mode of horizontal line font sizes (0.5pt bins). */
+/**
+ * The page's body text size: the character-weighted mode of horizontal line font sizes
+ * (0.5pt bins) over lines of text. Lines without a letter or digit (a plot's markers or a heatmap set as rows of
+ * glyphs, dashes, leader dots) can outnumber the page's text and say nothing about it.
+ */
 export function bodySize(lines: readonly RegionLine[]): number {
+    const text = lines.filter((l) => !l.rot && TEXT_CHAR_RE.test(l.text));
     const counts = new Map<number, number>();
-    for (const l of lines) {
+    for (const l of text.length ? text : lines) {
         if (l.rot) continue;
         const k = Math.round(l.size * 2) / 2;
         counts.set(k, (counts.get(k) ?? 0) + l.nchar);
@@ -683,6 +851,7 @@ export function pagePrimitives(g: GraphicsSummary, pageWidth: number, pageHeight
     const out: Primitive[] = [];
     const pageArea = pageWidth * pageHeight;
     const r = g.records;
+    const { strips, rasters } = rasterStrips(g, bs);
     for (let o = 0; o < g.count * GRAPHICS_SUMMARY_STRIDE; o += GRAPHICS_SUMMARY_STRIDE) {
         const kindCode = r[o + GS_FIELD.kind];
         if (r[o + GS_FIELD.alpha] < MIN_VISIBLE_ALPHA) continue;
@@ -694,10 +863,20 @@ export function pagePrimitives(g: GraphicsSummary, pageWidth: number, pageHeight
         const isRect = (flags & GS_FLAG.isRect) !== 0;
         const rgb = r[o + GS_FIELD.rgb];
         let kind: PrimitiveKind;
-        if (kindCode === GS_KIND.image || kindCode === GS_KIND.imageMask) {
-            if (w < 6 || h < 6) continue;
-            // A long, thin image is a rule drawn as a bitmap (column separators, header lines).
-            if (Math.max(w, h) >= 25 * Math.min(w, h) && (w >= 0.3 * pageWidth || h >= 0.3 * pageHeight)) {
+        // A hairline image (a pixel stretched along a table's rules or cell borders) is a rule,
+        // and is described as the filled rectangle a path of that shape would be.
+        const hairline =
+            (kindCode === GS_KIND.image || (kindCode === GS_KIND.imageMask && !isWhite(rgb))) &&
+            Math.min(w, h) <= 2 &&
+            Math.max(w, h) > 3 * bs &&
+            !strips.has(o);
+        if (hairline) {
+            kind = w >= h ? "hrule" : "vrule";
+        } else if (kindCode === GS_KIND.image || kindCode === GS_KIND.imageMask) {
+            if (w < 6 || h < 6) {
+                continue;
+            } else if (Math.max(w, h) >= 25 * Math.min(w, h) && (w >= 0.3 * pageWidth || h >= 0.3 * pageHeight)) {
+                // A long, thin image is a rule drawn as a bitmap (column separators, header lines).
                 kind = w >= h ? "hrule" : "vrule";
             } else {
                 kind = "image";
@@ -722,15 +901,67 @@ export function pagePrimitives(g: GraphicsSummary, pageWidth: number, pageHeight
         out.push({
             bbox,
             kind,
-            rgb: kindCode === GS_KIND.image || kindCode === GS_KIND.shade ? -1 : rgb,
+            // An image mask paints in its colour; an image's colour is unknown (black, as rules are).
+            rgb: hairline ? (kindCode === GS_KIND.imageMask ? rgb : 0) : kindCode === GS_KIND.image || kindCode === GS_KIND.shade ? -1 : rgb,
             curve,
             stroked: kindCode === GS_KIND.strokePath,
-            rect: isRect,
-            imageHash: kindCode === GS_KIND.image || kindCode === GS_KIND.imageMask ? r[o + GS_FIELD.imageHash] : 0,
+            rect: hairline || isRect,
+            imageHash: !hairline && (kindCode === GS_KIND.image || kindCode === GS_KIND.imageMask) ? r[o + GS_FIELD.imageHash] : 0,
         });
+    }
+    // A raster stored as strips is one image.
+    for (const bbox of rasters) {
+        if (bbox[2] - bbox[0] < 6 || bbox[3] - bbox[1] < 6) continue;
+        out.push({ bbox, kind: "image", rgb: -1, curve: false, stroked: false, rect: false, imageHash: 0 });
     }
     if (g.grid) out.push(...overflowMarks(g));
     return out;
+}
+
+/** Parallel hairline images this close (in points) or overlapping touch. */
+const STRIP_TOUCH = 0.5;
+
+/**
+ * Hairline images that touch a parallel one along most of its length: a raster stored as
+ * thin strips (one per row of pixels), not rules. Returns their record offsets and one box
+ * per raster (the union of its touching strips).
+ */
+function rasterStrips(g: GraphicsSummary, bs: number): { strips: Set<number>; rasters: Rect[] } {
+    const r = g.records;
+    const thin: { o: number; box: Rect; along: [number, number]; across: [number, number]; horizontal: boolean }[] = [];
+    for (let o = 0; o < g.count * GRAPHICS_SUMMARY_STRIDE; o += GRAPHICS_SUMMARY_STRIDE) {
+        const kindCode = r[o + GS_FIELD.kind];
+        // A white mask paints nothing on a white page (a white path is no content either).
+        if (kindCode !== GS_KIND.image && !(kindCode === GS_KIND.imageMask && !isWhite(r[o + GS_FIELD.rgb]))) continue;
+        if (r[o + GS_FIELD.alpha] < MIN_VISIBLE_ALPHA) continue;
+        const box: Rect = [r[o + GS_FIELD.x0], r[o + GS_FIELD.y0], r[o + GS_FIELD.x1], r[o + GS_FIELD.y1]];
+        const w = box[2] - box[0];
+        const h = box[3] - box[1];
+        if (Math.min(w, h) > 2 || Math.max(w, h) <= 3 * bs) continue;
+        const horizontal = w >= h;
+        thin.push({ o, box, horizontal, along: horizontal ? [box[0], box[2]] : [box[1], box[3]], across: horizontal ? [box[1], box[3]] : [box[0], box[2]] });
+    }
+    const uf = new UnionFind(thin.length);
+    const touching = new Set<number>();
+    const order = thin.map((_, i) => i).sort((a, b) => thin[a].across[0] - thin[b].across[0]);
+    for (let p = 0; p < order.length; p++) {
+        const a = thin[order[p]];
+        for (let q = p + 1; q < order.length && thin[order[q]].across[0] <= a.across[1] + STRIP_TOUCH; q++) {
+            const b = thin[order[q]];
+            if (a.horizontal !== b.horizontal) continue;
+            const shared = Math.min(a.along[1], b.along[1]) - Math.max(a.along[0], b.along[0]);
+            if (shared < 0.5 * Math.min(a.along[1] - a.along[0], b.along[1] - b.along[0])) continue;
+            uf.union(order[p], order[q]);
+            touching.add(order[p]).add(order[q]);
+        }
+    }
+    const boxes = new Map<number, Rect>();
+    for (const i of touching) {
+        const root = uf.find(i);
+        const b = boxes.get(root);
+        boxes.set(root, b ? unionRect(b, thin[i].box) : thin[i].box);
+    }
+    return { strips: new Set([...touching].map((i) => thin[i].o)), rasters: [...boxes.values()] };
 }
 
 /**

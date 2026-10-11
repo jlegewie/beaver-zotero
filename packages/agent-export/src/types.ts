@@ -29,7 +29,7 @@ export type ExportSourceKind = 'note' | 'response' | 'thread';
 export type ExportSourceBlock =
     /** Assistant text. */
     | { type: 'markdown'; markdown: string }
-    /** A note the agent wrote (`create_note` body or a `<note>` tag), exported as its own section. */
+    /** A note the agent wrote (a `create_note` body), exported as its own section. */
     | { type: 'note'; title: string; markdown: string }
     /** A user prompt as typed: plain text, not markdown (thread export). */
     | { type: 'user'; text: string }

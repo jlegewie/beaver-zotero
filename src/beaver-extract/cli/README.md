@@ -82,6 +82,8 @@ npm run beaver-extract -- overlay --help
 | `render`         | Render one or more pages to PNG.                       |
 | `fixture`        | Manage extraction-regression fixtures (see below).     |
 | `ocr-fixture`    | Manage OCR-detection regression fixtures (see below).  |
+| `items`          | Training export for item models (`items export --task`, see below). |
+| `references`     | Reference line-model export and line features.         |
 
 Overlay levels: `columns | lines | items | sentences | margins`.
 
@@ -227,6 +229,117 @@ ms fields so you can chart timing vs. page complexity offline.
   is WASM/MuPDF cost, the second is JS cost on the target page.
   `fontBridge` is typically <1% and should not be optimized
   speculatively.
+
+## Training export for item models
+
+```bash
+npm run beaver-extract -- items export --task item-type \
+    --pdf-list docs.jsonl --out /tmp/items-export [--shard 0/4] [--limit N] [--schema 5]
+```
+
+One row per document (`<out>/docs/<doc_id>.json.gz`; list rows are JSONL with
+`doc_id` and `pdf_path`). Every row records its `commit` (and `dirty` when
+tracked files differ from it), `feature_set` and `feature_version`. Per page:
+
+- `units`: the draft items where the task's model runs (start of step 3), one
+  training row each: `unit` (index on the page), draft `kind`, box, text, lines
+  and the task's `features` (null for a missing value).
+- `items`: the structured result's items with their ids, boxes
+  (`--bbox-precision`, default 2, as in the training repo's structured export),
+  columns, text, lines (box, text, font, size, hanging role) and the `units`
+  their lines came from. A reference entry split from a unit lists that unit;
+  an item merged from several lists them all; region items list none.
+- `filtered_lines`: the lines the margin filter removed (`filtered: true`) and,
+  in presets with the item-type pass, the items it read as page furniture.
+
+Labels made on the structured export of the same commit match items by id and
+map onto units through `units`. `<out>/manifest.json` records the task,
+feature names and version, schema, box precision and commit; a directory is
+only resumed with the same settings and commit (use a new `--out` otherwise).
+An unsupported `--schema` fails before any document is attempted. Extraction
+uses the plugin's settings, so features see the same analysis window as at
+runtime: every page of the document. Resumable and shardable like
+`references export`; each shard keeps its own `ledger-<i>of<n>.jsonl`.
+
+### Item-boundary export (`--task boundaries`)
+
+```bash
+npm run beaver-extract -- items export --task boundaries \
+    --pdf-list docs.jsonl --out /tmp/boundaries-export [--shard 0/4] [--schema 5]
+```
+
+The same rows, plus per page `lines`: every flow line (the lines the paragraph
+detector segments: blocks in reading order, lines top to bottom), so the n-th
+is unit `l<n>` of a boundary label. Each has the box, text, font, size and
+hanging role of an item line, its `block`, the `baseline`, `coreTop` and
+`coreBottom` of its dominant-size glyphs (y in the page's upright frame; null
+without the per-glyph walk, schema 4), the detector's `start` decision with
+its `reason` (`START_RULES`) and `signals`/`vetoes` bits, the draft `unit`
+holding it, and its `features` (`names` once per row, and in the manifest).
+The rows are captured where the paragraph detector builds the boundary input
+(`BoundaryObserver`), before segmentation; `units`, `items` and
+`filtered_lines` are those of the item-type export of the same commit, except
+that units carry no features.
+
+### Region model export (`--task regions-v2`)
+
+```bash
+npm run beaver-extract -- items export --task regions-v2 \
+    --pdf-list docs.jsonl --out /tmp/regions-export [--page-list pages.jsonl] [--shard 0/4]
+```
+
+Format `beaver-regions-v1`: what the region pass of a real structured
+extraction saw and did, observed inside `segmentPages` (`RegionPassObserver`),
+so document context, line flags and routing are those of production. Every
+document runs whole; `--page-list` (JSONL rows with `doc_id` and `page_index`)
+limits the documents run and the pages written, and its digest is recorded in
+the manifest. Listed pages a document lacks are noted in the ledger
+(`missing_pages`). Requires a schema with region detection (5).
+
+Per page: size, `/Rotate` (`rotation`), dominant text orientation
+(`textRotation`), body size, scanned flag, `timing` (`walkMs`, `regionsMs`),
+graphics summary counts (`records`, `overflow`, `incomplete`) and:
+
+- `pieces`: every line unit `routeLines` routes (structured-text lines split at
+  wide gaps, word fragments joined within a row; skewed, furniture and gutter
+  lines included), ordered by structured-text position (`p<k>`). Each has its
+  box, text, inked `chars`, majority `font`/`size`, `mono`/`bold`/`italic`,
+  reading direction `rot`, `skewed`, `source` (index of its structured-text
+  line; `sources` when joined from several), production's `LINE_*` `flags`
+  and `v5Route`: where the shipped detector finally put its text, after every
+  routing fix-up, the source-line vote, formula prose rows and the
+  `readsAsTable` gate: `-1` prose, `-2` taken from the prose without an item
+  (furniture such as a diagonal watermark, set aside as margin text), else the
+  index in `v5.regions`.
+- `primitives`: the detector's typed primitives as
+  `[kind, x0, y0, x1, y1, rgb, curve, stroked, rect, imageHash]` (raster strips
+  joined, overflow grid runs as `mark`s; near-invisible primitives and tiny
+  images are dropped before typing, as in detection).
+- `v5.regions`: the emitted region items (kind, public box, candidate), the
+  structured export's region items in detection order (column detection's
+  splits applied); `v5.candidates`: the candidates with their
+  features, class probabilities, label and `containedIn` after routing.
+
+Boxes are in the structured export's frame: points, top-left origin, the page
+as displayed (`/Rotate` applied); a page set sideways keeps that frame, with
+`rot` telling how its text reads.
+
+`profile` also takes `--schema-version`; in presets with the item-type pass
+it adds an `itemTypes` phase and its parts (features, stage 1, context,
+stage 2).
+
+### Preset overrides (development only)
+
+`extract`, `profile`, `fixture evaluate` and `items export` take
+`--preset <switches>` to compare a preset switch against its schema's
+setting: comma-separated `name` or `name=true|false`. The only overridable
+switch is `learnedBoundaries` (item boundaries from the learned boundary model,
+on in schema 5): `learnedBoundaries=false` gives the paragraph detector's
+heuristic boundaries, which a boundary training export with the heuristic's
+decisions and reasons needs. The output is then no longer the schema version
+it names; `items export` records
+the overrides in its manifest (`preset_overrides`) and resumes a directory
+only with the same ones.
 
 ## Configuration
 
@@ -415,7 +528,10 @@ src/beaver-extract/
 │   │   ├── rawDetailed.ts           # `raw-detailed`
 │   │   ├── render.ts                # `render`
 │   │   ├── fixture.ts               # `fixture {capture,evaluate,update,migrate,list}`
-│   │   └── ocrFixture.ts            # `ocr-fixture {capture,evaluate,update,list}`
+│   │   ├── ocrFixture.ts            # `ocr-fixture {capture,evaluate,update,list}`
+│   │   ├── items.ts                 # `items export` (training export for item models and the region model)
+│   │   └── references.ts            # `references {export,featurize,render}`
+│   ├── batch.ts                 # document lists, shards, resume ledger (export commands)
 │   └── fixture/                 # extract + OCR fixture file format (Node-only)
 │       ├── fixtureFile.ts           # atomic read/write, _shared/ dedup
 │       ├── fixtureSchema.ts         # validators with targeted errors

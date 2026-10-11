@@ -4,7 +4,7 @@ import type { RawLineDetailed, RawPageData } from "@beaver/agent-core/extract/ty
 
 import { findCandidates } from "../../../src/beaver-extract/regions/candidates";
 import type { Rect } from "../../../src/beaver-extract/regions/geometry";
-import { mergeRowFragments, pageLines, type Primitive } from "../../../src/beaver-extract/regions/pageSignals";
+import { bodySize, mergeRowFragments, pageLines, type Primitive } from "../../../src/beaver-extract/regions/pageSignals";
 import { runningTextLines } from "../../../src/beaver-extract/regions/textCandidates";
 
 const W = 612;
@@ -17,6 +17,8 @@ interface Spec {
     size?: number;
     font?: string;
     rotation?: number;
+    /** Font runs as [start, size]: the line's characters from `start` on are set in `size`. */
+    runs?: [number, number][];
 }
 
 /** A page of structured-text lines; each line's characters are spread evenly over its box. */
@@ -39,7 +41,7 @@ function page(specs: Spec[]): RawPageData {
                 const bbox = { l: x0 + i * step, t: y0, r: x0 + (i + 1) * step, b: y1 };
                 return { c, bbox, quad: [bbox.l, bbox.t, bbox.r, bbox.t, bbox.l, bbox.b, bbox.r, bbox.b] };
             }),
-            spans: [{ start: 0, font }],
+            spans: sp.runs ? sp.runs.map(([start, s]) => ({ start, font: { ...font, size: s } })) : [{ start: 0, font }],
         } as unknown as RawLineDetailed;
     });
     return {
@@ -89,6 +91,13 @@ describe("pageLines", () => {
     });
 });
 
+describe("page signals", () => {
+    it("reads the body size from lines of words, not from glyphs a plot sets as markers", () => {
+        const markers: Spec[] = Array.from({ length: 40 }, (_, k) => ({ box: [352, 82 + 2 * k, 402, 84 + 2 * k], text: "−".repeat(150), size: 2 }));
+        expect(bodySize(pageLines(page([...markers, prose(400), prose(414)])))).toBe(BS);
+    });
+});
+
 describe("mergeRowFragments", () => {
     const WORDS = ["these", "words", "form", "one", "justified", "line"];
     const words = (y: number, xs: number[], w = 30, size?: number): Spec[] =>
@@ -105,6 +114,22 @@ describe("mergeRowFragments", () => {
         const justified = pageLines(page(words(120, [72, 114, 156, 198, 240])));
         expect(mergeRowFragments(tight, []).map((l) => l.text)).toEqual(["these words form one"]);
         expect(mergeRowFragments(justified, [])).toHaveLength(1);
+    });
+
+    it("keeps a column gutter apart that only it could show to be a justified space", () => {
+        // A left-column line set as two pieces (an accented letter overlapping the next
+        // word) and the right column's line on its row, 15pt (1.5 em) across the gutter.
+        const row = pageLines(page([
+            { box: [51, 436, 89, 449], text: "where ˜" },
+            { box: [80, 436, 245.6, 449], text: "X is a vector of polynomial terms in X," },
+            { box: [261, 436, 455.6, 449], text: "this may seem to impose linearity in how W" },
+        ]));
+        expect(mergeRowFragments(row, []).map((l) => l.text)).toEqual([
+            "where ˜ X is a vector of polynomial terms in X,",
+            "this may seem to impose linearity in how W",
+        ]);
+        // Three words at even justified spacing still read as one line.
+        expect(mergeRowFragments(pageLines(page(words(140, [72, 114, 156]))), [])).toHaveLength(1);
     });
 
     it("keeps table cells and pieces across a vertical rule apart", () => {
@@ -146,11 +171,107 @@ describe("text candidates", () => {
             { box: [200, 110, 330, 122], text: "b2=x+y", font: "CMMI10" },
             { box: [200, 124, 330, 136], text: "−θ=x−y", font: "CMMI10" },
             { box: [210, 138, 330, 150], text: "=x+2y", font: "CMMI10" }, // continues the row above
+            { box: [210, 152, 330, 164], text: ":=z−y", font: "CMMI10" }, // so does a definition
+            prose(180),
+        ]);
+        expect(groups.map((g) => [Math.round(g.bbox[1]), Math.round(g.bbox[3])])).toEqual([
+            [110, 122],
+            [124, 164],
+        ]);
+    });
+
+    it("keeps a sum's limits, set in script size, with the equation above them", () => {
+        const groups = textGroups([
+            prose(80),
+            { box: [200, 110, 330, 122], text: "h=2.702s", font: "CMMI10" },
+            // "∑ i=1 N m(x)": the limit "i=1" is set in 7pt.
+            { box: [240, 124, 330, 138], text: "∑i=1Nm(x)", font: "CMMI10", runs: [[0, 10], [1, 7], [4, 10]] },
+            prose(170),
+        ]);
+        expect(groups.map((g) => [Math.round(g.bbox[1]), Math.round(g.bbox[3])])).toEqual([[110, 138]]);
+    });
+
+    it("splits two equations at a relation in their type size when the first opens with an enlarged sum", () => {
+        // The first line's size is its first glyph's: a 20pt ∑ before 10pt terms.
+        const groups = textGroups([
+            prose(80),
+            { box: [200, 106, 330, 126], text: "∑x=a+b", font: "CMMI10", size: 20, runs: [[0, 20], [1, 10]] },
+            { box: [200, 128, 330, 140], text: "y=c+d", font: "CMMI10" },
+            prose(170),
+        ]);
+        expect(groups.map((g) => [Math.round(g.bbox[1]), Math.round(g.bbox[3])])).toEqual([
+            [106, 126],
+            [128, 140],
+        ]);
+    });
+
+    it("splits an equation from an enlarged sum's equation above it, its terms set as separate pieces", () => {
+        // A 20pt ∑ and the 10pt pieces after it join into one line set mostly at 10pt.
+        const lines = mergeRowFragments(
+            pageLines(page([
+                prose(80),
+                { box: [200, 106, 214, 126], text: "∑", font: "CMEX10", size: 20 },
+                { box: [216, 110, 223, 122], text: "x", font: "CMMI10" },
+                { box: [225, 110, 232, 122], text: "=", font: "CMMI10" },
+                { box: [234, 110, 260, 122], text: "a+b", font: "CMMI10" },
+                { box: [200, 130, 260, 142], text: "y=c+d", font: "CMMI10" },
+                prose(170),
+            ])),
+            [],
+        );
+        const sum = lines.find((l) => l.text.startsWith("∑"))!;
+        expect(sum.inkSize).toBe(BS);
+        const groups = findCandidates(lines, [], W, H, BS).candidates.filter((c) => c.source === "text");
+        expect(groups.map((g) => [Math.round(g.bbox[1]), Math.round(g.bbox[3])])).toEqual([
+            [106, 126],
+            [130, 142],
+        ]);
+    });
+
+    it("splits a smaller equation set under an equation holding a sum", () => {
+        const twoEquations = (second: Spec) =>
+            textGroups([
+                prose(80),
+                // "x=∑a+b": the ∑ is set at x 243-265.
+                { box: [200, 110, 330, 122], text: "x=∑a+b", font: "CMMI10" },
+                second,
+                prose(170),
+            ]).map((g) => [Math.round(g.bbox[1]), Math.round(g.bbox[3])]);
+        // Short, off the ∑, and wide, centred on it: neither is the sum's limit.
+        expect(twoEquations({ box: [200, 124, 236, 134], text: "y=c+d", font: "CMMI10", size: 8 })).toEqual([
+            [110, 122],
+            [124, 134],
+        ]);
+        expect(twoEquations({ box: [190, 124, 318, 134], text: "y=c+d", font: "CMMI10", size: 8 })).toEqual([
+            [110, 122],
+            [124, 134],
+        ]);
+        // Centred under it and narrow: its limit.
+        expect(twoEquations({ box: [244, 124, 264, 134], text: "i=1", font: "CMMI10", size: 7 })).toEqual([[110, 134]]);
+    });
+
+    it("keeps limits stacked under an operator name with their equation", () => {
+        // "lim sup" with "y→x" under it and "y≠x" under that, both in script size.
+        const groups = textGroups([
+            prose(80),
+            { box: [61, 113, 191, 122], text: "L(x)=lim sup d(x,y)", font: "CMMI10", size: 8 },
+            { box: [109, 123, 124, 129], text: "y→x", font: "CMMI10", size: 6 },
+            { box: [111, 130, 123, 136], text: "y≠x", font: "CMMI10", size: 6 },
+            prose(170),
+        ]);
+        expect(groups.map((g) => [Math.round(g.bbox[1]), Math.round(g.bbox[3])])).toEqual([[113, 136]]);
+    });
+
+    it("splits an equation set smaller than the one above it, however short", () => {
+        const groups = textGroups([
+            prose(80),
+            { box: [200, 110, 330, 122], text: "x=a+b", font: "CMMI10" },
+            { box: [200, 124, 236, 134], text: "y=c+d", font: "CMMI10", size: 8 },
             prose(170),
         ]);
         expect(groups.map((g) => [Math.round(g.bbox[1]), Math.round(g.bbox[3])])).toEqual([
             [110, 122],
-            [124, 150],
+            [124, 134],
         ]);
     });
 

@@ -1,6 +1,6 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from '../agents/types';
-import { parseArgs, TOOL_BASE_LABELS } from './toolCallRequest';
+import { getToolBaseLabel, parseArgs } from './toolCallRequest';
 import { isExternalReferenceListView, isItemRow, type ToolResultView } from './toolResultViews';
 import { extractAuthorLastName, type ExternalReference } from '../types/externalReferences';
 
@@ -33,6 +33,8 @@ export interface ToolCallLabelOptions {
      * label reports that instead of naming an edit that never happened.
      */
     noChange?: boolean;
+    /** With `noChange`: the target did not exist (see isNotFoundWriteReturn). */
+    notFound?: boolean;
 }
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -163,6 +165,10 @@ export function getToolResultLabelSuffix(
             if (toolName === 'lookup_work') {
                 const n = view.found_count ?? view.references.length;
                 return n != null ? ` (${n} found)` : null;
+            }
+            if (toolName === 'find_book_chapters') {
+                const n = view.found_count ?? view.references.length;
+                return n ? ` (${plural(n, 'chapter')})` : null;
             }
             // find_related_works: the page is a window into a larger set.
             if (view.tool_info) {
@@ -410,7 +416,7 @@ function computeMainLabel(
     opts?: ToolCallLabelOptions,
 ): string {
     const toolName = part.tool_name;
-    const baseLabel = TOOL_BASE_LABELS[toolName] ?? 'Calling function';
+    const baseLabel = getToolBaseLabel(toolName);
 
     // Progress messages take precedence when present
     if (status === 'in_progress' && part.progress) {
@@ -420,7 +426,9 @@ function computeMainLabel(
     // A write that changed nothing: the return holds guidance written for the
     // model, so the label is the whole story the row can tell.
     if (opts?.noChange) {
-        return `${baseLabel}: no change needed`;
+        return opts.notFound
+            ? `${baseLabel}: nothing found to change`
+            : `${baseLabel}: no change needed`;
     }
 
     const args = parseArgs(part);
@@ -852,7 +860,7 @@ function computeMainLabel(
         }
 
         case 'manage_tags': {
-            const tag = args.tag as string | undefined;
+            const tag = args.name as string | undefined;
             if (tag) {
                 return `${baseLabel}: "${truncate(tag, 20)}"`;
             }

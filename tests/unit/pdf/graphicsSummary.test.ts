@@ -8,7 +8,7 @@ import {
     parseGraphicsSummary,
 } from "../../../src/beaver-extract/worker/graphicsSummary";
 
-function summaryBytes(records: number[][], opts: { overflow?: boolean; version?: number } = {}): Uint8Array {
+function summaryBytes(records: number[][], opts: { overflow?: boolean; version?: number; incomplete?: boolean } = {}): Uint8Array {
     const grid = opts.overflow ? new Array(32 * 32).fill(0).map((_, i) => (i === 5 ? 7 : 0)) : [];
     const header = new Array(GRAPHICS_SUMMARY_HEADER).fill(0);
     header[0] = opts.version ?? 1;
@@ -19,6 +19,7 @@ function summaryBytes(records: number[][], opts: { overflow?: boolean; version?:
     header[8] = opts.overflow ? 1 : 0;
     header[9] = opts.overflow ? 32 : 0;
     header.splice(10, 4, 0, 0, 612, 792);
+    header[14] = opts.incomplete ? 1 : 0;
     return new Uint8Array(new Float32Array([...header, ...records.flat(), ...grid]).buffer);
 }
 
@@ -32,6 +33,7 @@ describe("parseGraphicsSummary", () => {
         expect(summary.area).toEqual([0, 0, 612, 792]);
         expect(summary.seen).toEqual({ fillPath: 3, strokePath: 0, image: 1, imageMask: 0, shade: 0 });
         expect(summary.overflow).toBe(false);
+        expect(summary.incomplete).toBe(false);
         expect(summary.grid).toBeNull();
         expect(graphicsRecord(summary, 0)).toMatchObject({
             kind: GS_KIND.fillPath,
@@ -53,6 +55,12 @@ describe("parseGraphicsSummary", () => {
         expect(summary.overflow).toBe(true);
         expect(summary.gridSize).toBe(32);
         expect(summary.grid?.[5]).toBe(7);
+    });
+
+    it("reports a summary whose recording stopped at an error", () => {
+        const summary = parseGraphicsSummary(summaryBytes([fillRect], { incomplete: true }));
+        expect(summary.incomplete).toBe(true);
+        expect(summary.count).toBe(1);
     });
 
     it("copies the bytes so the source buffer can be freed", () => {

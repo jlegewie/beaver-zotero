@@ -4,7 +4,6 @@ import { hasLibraryIdentity } from '../identity/libraryRef';
 import {
     ActionStatus,
     ActionType,
-    NoteProposedData,
     EditMetadataProposedData,
 } from '../types/agentActions/base';
 import {
@@ -101,13 +100,6 @@ export const isCreateAnnotationsAgentAction = (action: AgentAction): action is C
 
 export const isEditAnnotationsAgentAction = (action: AgentAction): action is EditAnnotationsAgentAction =>
     action.action_type === 'edit_annotations';
-
-/**
- * Type guard for zotero note actions
- */
-export const isZoteroNoteAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'zotero_note';
-};
 
 /**
  * Type guard for create note actions (via create_note tool)
@@ -586,33 +578,6 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 ...carried,
             } as EditAnnotationsProposedData;
         }
-    } else if (actionType === 'zotero_note') {
-        const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
-        const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
-        const rawTag = proposedData.raw_tag ?? proposedData.rawTag;
-
-        let normalizedLibraryId: number | undefined;
-        if (libraryIdRaw !== undefined && libraryIdRaw !== null) {
-            const parsed = typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw);
-            normalizedLibraryId = Number.isNaN(parsed) ? undefined : parsed;
-        }
-
-        proposedData = {
-            title: proposedData.title ?? '',
-            content: typeof proposedData.content === 'string' || proposedData.content === null
-                ? proposedData.content
-                : (proposedData.content ?? null),
-            library_id: normalizedLibraryId,
-            zotero_key: typeof zoteroKeyRaw === 'string'
-                ? zoteroKeyRaw
-                : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
-            library_ref: typeof proposedData.library_ref === 'string'
-                ? proposedData.library_ref
-                : (typeof proposedData.libraryRef === 'string' ? proposedData.libraryRef : undefined),
-            library: typeof proposedData.library === 'string' ? proposedData.library : undefined,
-            collection: typeof proposedData.collection === 'string' ? proposedData.collection : undefined,
-            raw_tag: typeof rawTag === 'string' ? rawTag : undefined,
-        } as NoteProposedData;
     } else if (actionType === 'create_item') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const parsedLibraryId = libraryIdRaw == null || libraryIdRaw === ''
@@ -784,19 +749,6 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             ...(skipped?.length ? { skipped } : {}),
             ...(relocated?.length ? { relocated } : {}),
         } as EditAnnotationsResultData;
-    } else if (resultData && actionType === 'zotero_note') {
-        const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
-        const libraryId = resultData.library_id ?? resultData.libraryId;
-        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
-        const parentKey = resultData.parent_key ?? resultData.parentKey;
-        if (zoteroKey) {
-            resultData = {
-                zotero_key: String(zoteroKey),
-                library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
-                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-                ...(parentKey ? { parent_key: String(parentKey) } : {})
-            };
-        }
     } else if (resultData && actionType === 'import_item') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;

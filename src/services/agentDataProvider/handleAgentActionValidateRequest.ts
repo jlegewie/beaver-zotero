@@ -1,6 +1,7 @@
 import { DuplicateError } from '../duplicates/discovery';
 import { validateMergeItemsAction } from '../duplicates/merge';
 import { CollectionResolutionError } from '../collections/collectionIdentity';
+import { waitForDeferredCommits } from '../committedTransaction';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSAgentActionValidateResponse
@@ -32,6 +33,14 @@ export async function handleAgentActionValidateRequest(
     logger(`handleAgentActionValidateRequest: Validating ${request.action_type}`, 1);
 
     try {
+        // Other plugins' observers may still be writing to items Beaver just
+        // saved. Snapshot existing items after those writes land, or the
+        // execute-time staleness check refuses the action. Imports snapshot no
+        // existing item, so they don't wait.
+        if (request.action_type !== 'import_item' && !(await waitForDeferredCommits())) {
+            logger(`handleAgentActionValidateRequest: validating ${request.action_type} while earlier writes are still delivering Notifier events`, 1);
+        }
+
         if (request.action_type === 'edit_metadata') {
             return await validateEditMetadataAction(request);
         }

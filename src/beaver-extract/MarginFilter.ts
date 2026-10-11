@@ -723,6 +723,35 @@ function getMarginPosition(
     return null;
 }
 
+interface CandidateLookups {
+    /** A removal text's reason (its first candidate's). */
+    reasonByText: Map<string, RemovalCandidate["reason"]>;
+    /** `position|text` of candidates other than page numbers, matching a row's end line. */
+    endTexts: Set<string>;
+    /** `position|template` of substantial ones (`rowTemplateKey`), matching a row's end run. */
+    endKeys: Set<string>;
+}
+
+/** Per removal result: every page filtered with it reads the same lookups. */
+const candidateLookupsCache = new WeakMap<readonly RemovalCandidate[], { length: number; lookups: CandidateLookups }>();
+
+/** The lookups `filterPageWithSmartRemoval` matches a page's rows against. */
+function candidateLookups(candidates: readonly RemovalCandidate[]): CandidateLookups {
+    const cached = candidateLookupsCache.get(candidates);
+    if (cached && cached.length === candidates.length) return cached.lookups;
+    const lookups: CandidateLookups = { reasonByText: new Map(), endTexts: new Set(), endKeys: new Set() };
+    for (const c of candidates) {
+        if (!lookups.reasonByText.has(c.text)) lookups.reasonByText.set(c.text, c.reason);
+    }
+    for (const c of candidates) {
+        if (c.reason === "page_number") continue;
+        lookups.endTexts.add(`${c.position}|${c.text}`);
+        if (isSubstantialSideMarginText(c.text)) lookups.endKeys.add(`${c.position}|${rowTemplateKey(c.text)}`);
+    }
+    candidateLookupsCache.set(candidates, { length: candidates.length, lookups });
+    return lookups;
+}
+
 /** Normalize text for exact-match comparison (does NOT fold digits). */
 function normalizeText(text: string): string {
     return text.trim().toLowerCase();
@@ -1543,10 +1572,7 @@ export class MarginFilter {
         // `repeat` removals — page-number sequences and identifier matches
         // are structural classifications that must NOT be overridden by
         // font size (a large page-number stamp is still a page number).
-        const reasonByText = new Map<string, RemovalCandidate["reason"]>();
-        for (const c of removalResult.candidates) {
-            if (!reasonByText.has(c.text)) reasonByText.set(c.text, c.reason);
-        }
+        const { reasonByText, endTexts, endKeys } = candidateLookups(removalResult.candidates);
 
         // Smart removal matches text rows, as the analysis collected them
         // (see `collectTextRows`), and removes or keeps a row's lines
@@ -1584,13 +1610,6 @@ export class MarginFilter {
             }
             for (const line of lines) removedLines.add(line);
         };
-        const endTexts = new Set<string>();
-        const endKeys = new Set<string>();
-        for (const c of removalResult.candidates) {
-            if (c.reason === "page_number") continue;
-            endTexts.add(`${c.position}|${c.text}`);
-            if (isSubstantialSideMarginText(c.text)) endKeys.add(`${c.position}|${rowTemplateKey(c.text)}`);
-        }
         const removeEndRun = (lines: RawLine[]): boolean => {
             const position = getMarginPosition(unionBBox(lines), page.width, page.height, marginZone);
             if (!position) return false;

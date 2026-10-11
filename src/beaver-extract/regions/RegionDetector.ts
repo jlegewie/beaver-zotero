@@ -15,7 +15,7 @@ import type { RawLine, RawPageData } from "@beaver/agent-core/extract/types";
 import type { GraphicsSummary } from "../worker/graphicsSummary";
 import { findCandidates } from "./candidates";
 import { EMPTY_DOC_CONTEXT, candidateFeatures, type RegionDocContext } from "./features";
-import { intersect, overlapFrac, rectArea, type Rect } from "./geometry";
+import { intersectionArea, overlapFrac, rectArea, type Rect } from "./geometry";
 import { assertCompatible, predictRegionClass, type RegionClass, type RegionModelWeights } from "./model";
 import { bodySize, lineNumberGutter, mergeRowFragments, pageLines, pagePrimitives, sourceLines, type RegionLine } from "./pageSignals";
 import { completeTableRows } from "./tableRows";
@@ -172,8 +172,8 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
         // variable or a panel letter repeating in the margin band is content.
         const inMargin = (l: RegionLine) =>
             !!numbered &&
-            ((l.text.match(/\p{L}/gu) ?? []).length >= MARGIN_MIN_LETTERS || /\d/u.test(l.text)) &&
-            (l.parts ?? [l]).every((p) => opts.margin!.has(numbered[p.source - 1]));
+            (l.parts ?? [l]).every((p) => opts.margin!.has(numbered[p.source - 1])) &&
+            ((l.text.match(/\p{L}/gu) ?? []).length >= MARGIN_MIN_LETTERS || /\d/u.test(l.text));
         const flags = routed.map((l) =>
             l.skewed
                 ? LINE_SKEWED | (furniture(l) ? LINE_FURNITURE : 0)
@@ -397,7 +397,7 @@ export function resolveOverlaps(regions: DetectedRegion[]): void {
                 j !== i &&
                 rectArea(regions[j].bbox) < rectArea(regions[i].bbox) &&
                 prob(j) >= prob(i) + CONFIDENCE_MARGIN &&
-                rectArea(intersect(regions[j].bbox, regions[i].bbox)) >= CONTAINED_FRACTION * rectArea(regions[j].bbox),
+                intersectionArea(regions[j].bbox, regions[i].bbox) >= CONTAINED_FRACTION * rectArea(regions[j].bbox),
         ),
     );
     for (const i of outweighed) regions[i].label = "other";
@@ -409,7 +409,7 @@ export function resolveOverlaps(regions: DetectedRegion[]): void {
         const box = regions[i].bbox;
         const area = rectArea(box);
         const outer = kept.find((k) => {
-            const inter = rectArea(intersect(box, regions[k].bbox));
+            const inter = intersectionArea(box, regions[k].bbox);
             const union = area + rectArea(regions[k].bbox) - inter;
             return inter >= CONTAINED_FRACTION * area || (union > 0 && inter / union >= DUPLICATE_IOU);
         });

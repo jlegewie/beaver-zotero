@@ -218,12 +218,18 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
         let v = paragraphWidth.get(i);
         if (v === undefined) {
             const x = lines[i].bbox[0];
-            const columnWidth = quantile(
-                runningLines.filter((j) => Math.abs(lines[j].bbox[0] - x) <= EDGE_TOLERANCE).map(widthOf),
-                0.75,
-            );
+            const atEdge = runningLines.filter((j) => Math.abs(lines[j].bbox[0] - x) <= EDGE_TOLERANCE);
+            const columnWidth = quantile(atEdge.map(widthOf), 0.75);
+            // The line must also be nearly as wide as the running text at that edge in its own
+            // type size: a label set in a table's smaller type, as wide as the page's paragraphs
+            // beside it, is narrow for the table's own wide lines (its notes).
+            const sizedWidth = quantile(atEdge.filter((j) => Math.abs(lines[j].size - lines[i].size) <= ROW_SIZE).map(widthOf), 0.75);
             // No prose at that edge: no text column to belong to.
-            v = columnWidth > 0 && widthOf(i) >= PARAGRAPH_WIDTH * columnWidth && widthOf(i) >= MIN_COLUMN_WIDTH * pageWidth;
+            v =
+                columnWidth > 0 &&
+                widthOf(i) >= PARAGRAPH_WIDTH * columnWidth &&
+                widthOf(i) >= PARAGRAPH_WIDTH * sizedWidth &&
+                widthOf(i) >= MIN_COLUMN_WIDTH * pageWidth;
             paragraphWidth.set(i, v);
         }
         return v;
@@ -232,7 +238,8 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
     // Prose, whether or not the running-text flags caught it: paragraph text, or a wide
     // line of words justified with the line above or below it (row labels are ragged).
     const proseLine = (i: number): boolean =>
-        paragraphLine(i) ||
+        !cellRow(i) &&
+        (paragraphLine(i) ||
         (lines[i].alphaWords >= MIN_PARAGRAPH_WORDS &&
             widthOf(i) >= MIN_COLUMN_WIDTH * pageWidth &&
             ([-1, 1] as const).some((dir) => {
@@ -246,7 +253,7 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
                     Math.abs(a[2] - b[2]) <= EDGE_TOLERANCE &&
                     gap <= STACK_GAP * Math.max(height(a), height(b))
                 );
-            }));
+            })));
 
     // A line set directly above or below a paragraph, within its span: the paragraph's
     // indented first line or its short last line. The paragraph is two prose lines or
@@ -331,6 +338,61 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
         }
         out.push([start, lines[i].bbox[2]]);
         return out;
+    };
+    // A table's columns: spans of its cells that overlap horizontally. A line split at gaps
+    // wider than a word space spans its pieces, so cells of two columns set on one line do
+    // not join the columns.
+    const columnsOf = (cells: readonly number[]): [number, number][] => {
+        const columns: [number, number][] = [];
+        for (const [x0, x1] of cells.flatMap(segments).sort((a, b) => a[0] - b[0])) {
+            const last = columns[columns.length - 1];
+            if (last && x0 < last[1]) last[1] = Math.max(last[1], x1);
+            else columns.push([x0, x1]);
+        }
+        return columns;
+    };
+    // Each table's columns and the band of its rows (its cells' extent, a line height beyond).
+    const tableGrids = cellSpans.map(({ cells }) => {
+        const lineHeight = median(cells.map((c) => height(lines[c].bbox)));
+        return {
+            cells: new Set(cells),
+            columns: columnsOf(cells),
+            top: Math.min(...cells.map((c) => lines[c].bbox[1])) - lineHeight,
+            bottom: Math.max(...cells.map((c) => lines[c].bbox[3])) + lineHeight,
+        };
+    });
+    // Where the pieces of a line (split at gaps wider than a word space) stand in a table's
+    // columns, left to right: each in the column nearest its centre, overlapping it and
+    // reaching into no other. Undefined when a piece stands in no column or two share one.
+    const placement = (i: number, columns: readonly [number, number][]): number[] | undefined => {
+        const placed = segments(i).map(([x0, x1]) => {
+            const cx = (x0 + x1) / 2;
+            let k = 0;
+            while (k + 1 < columns.length && cx > (columns[k][1] + columns[k + 1][0]) / 2) k++;
+            if (Math.min(columns[k][1], x1) <= Math.max(columns[k][0], x0)) return -1;
+            const crosses = columns.some(([l, r], m) => m !== k && Math.min(r, x1) - Math.max(l, x0) > EDGE_TOLERANCE);
+            return crosses ? -1 : k;
+        });
+        return placed.every((k, m) => k >= 0 && (m === 0 || k > placed[m - 1])) ? placed : undefined;
+    };
+    // Cells of a table that MuPDF set as one line across the table's column gaps: within the
+    // band of the table's rows, the line's pieces stand in two of its columns or more, on a
+    // row with its cells or with another such line (a row set entirely as such lines).
+    // However much the line reads like prose, it is a row of the table.
+    const cellRowCache = new Map<number, boolean>();
+    const cellRow = (i: number): boolean => {
+        let v = cellRowCache.get(i);
+        if (v === undefined) {
+            const b = lines[i].bbox;
+            v = tableGrids.some(({ cells, columns, top, bottom }) => {
+                if (centerY(b) < top || centerY(b) > bottom || (placement(i, columns)?.length ?? 0) < 2) return false;
+                return upright.some(
+                    (j) => j !== i && sameRow(b, lines[j].bbox) && (cells.has(j) || (placement(j, columns)?.length ?? 0) >= 2),
+                );
+            });
+            cellRowCache.set(i, v);
+        }
+        return v;
     };
     // Another line set on the row of lines `i` and `j`, between them.
     const runningBetween = (i: number, j: number): boolean => {
@@ -530,15 +592,7 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
         // Ruled blocks of rows past the cells, below and above.
         const spanning = rules.filter((r) => Math.min(r[2], right) - Math.max(r[0], left) >= RULE_SPAN * (right - left));
         const joined: number[] = [];
-        // The table's columns: spans of its cells that overlap horizontally. A line split
-        // at gaps wider than a word space spans its pieces, so cells of two columns set on
-        // one line do not join the columns.
-        const columns: [number, number][] = [];
-        for (const [x0, x1] of cells.flatMap(segments).sort((a, b) => a[0] - b[0])) {
-            const last = columns[columns.length - 1];
-            if (last && x0 < last[1]) last[1] = Math.max(last[1], x1);
-            else columns.push([x0, x1]);
-        }
+        const columns = columnsOf(cells);
         // A table framed by its own rules (two or more: top and bottom, or a header rule and
         // the bottom) holds the text in its column grid between them, however much a cell
         // reads like a paragraph: a long row label, a definition set as justified or centred
@@ -652,6 +706,17 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
                 gridCache.set(i, v);
             }
             return v;
+        };
+        // The line continues one directly above it (stacked, no rule between) that is caption
+        // text, paragraph text or another region's: a caption's title, the end of a label wrapped
+        // from the row above.
+        const continuesForeign = (i: number): boolean => {
+            const j = neighbour(i, -1);
+            if (j < 0) return false;
+            const a = lines[i].bbox;
+            const b = lines[j].bbox;
+            if (a[1] - b[3] > STACK_GAP * Math.max(height(a), height(b)) || ruledBetween(a, b)) return false;
+            return caption[j] || isStart.get(j) === true || (routes[j] === -1 && proseLine(j)) || (routes[j] >= 0 && routes[j] !== table.index);
         };
         // A line directly under (or, going up, over) one of `cellsSoFar` in its grid column.
         const continuesCell = (i: number, cellsSoFar: readonly number[], dir: 1 | -1): boolean => {
@@ -862,8 +927,19 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
                     );
                     if (mates.some((j) => routes[j] !== -1 && routes[j] !== table.index)) break;
                     // A line alone on its row continues a cell when it stands in the grid
-                    // under (or over) a line of that cell in its column.
-                    if (!mates.length && !(text && (first || continuesCell(i, rowed, dir) || inTableParagraph(i)))) break;
+                    // under (or over) a line of that cell in its column. Going up, the first block
+                    // lies between the rows and a rule spanning the table (its header rule): a line
+                    // there set at the table's left edge in its type size labels the group of rows
+                    // under it. A heading is set apart in type; a caption's title or the last line
+                    // of a label wrapped from another table continues the line above it.
+                    const groupLabel =
+                        dir < 0 &&
+                        first &&
+                        Math.abs(lines[i].bbox[0] - cellLeft) <= EDGE_TOLERANCE &&
+                        Math.abs(lines[i].size - cellSize) <= ROW_SIZE &&
+                        !proseLine(i) &&
+                        !continuesForeign(i);
+                    if (!mates.length && !groupLabel && !(text && (first || continuesCell(i, rowed, dir) || inTableParagraph(i)))) break;
                     rowed.push(i);
                 }
                 // A row is taken whole: lines on the row of the line that ended the block go too.
@@ -876,6 +952,15 @@ export function completeTableRows(input: TableRowInput, routes: number[]): Map<n
                     for (const i of kept) {
                         if (dir > 0) bottom = Math.max(bottom, lines[i].bbox[3]);
                         else top = Math.min(top, lines[i].bbox[1]);
+                    }
+                    // The rows taken reach another fragment of the table (one the detector cut
+                    // off at rows it missed): it merges, and the walk goes on past it, its next
+                    // block being the first past the merged rows.
+                    const k = routes[block[taken]];
+                    if (k >= 0 && k !== table.index && mergeable(k)) {
+                        merge(k);
+                        first = true;
+                        continue;
                     }
                     break;
                 }

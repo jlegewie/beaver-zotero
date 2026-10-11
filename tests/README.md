@@ -375,3 +375,42 @@ rather than at the window count. `globalSetup` therefore refuses to start a run 
 more than one main window, unless `BEAVER_MULTI_WINDOW_TEST=1` is set. Close the extra window
 rather than working around the guard. The underlying call sites belong to a later PR; see
 `tasks/multiple-windows/getMainWindow-audit.md`.
+
+## Testing on Zotero 11
+
+Zotero 11 (Firefox 153) is available as dev-channel builds only. Run it in a worktree with
+its own cloned profile and data dir, never against your everyday profile.
+
+1. **Install beside the stable app.** Download
+   `https://www.zotero.org/download/client/dl?channel=dev&platform=mac` and copy its
+   `Zotero.app` to `/Applications/Zotero 11 Dev.app`. Don't replace `/Applications/Zotero.app`:
+   the main dev instance and the worktree tooling default to it.
+2. **Set up the worktree with that binary.** `ZOTERO_BIN` is written to the worktree's `.env`
+   as `ZOTERO_PLUGIN_ZOTERO_BIN_PATH`, which `npm start` and `worktree-zotero.sh` launch:
+
+   ```bash
+   ZOTERO_BIN="/Applications/Zotero 11 Dev.app/Contents/MacOS/zotero" \
+     scripts/worktree/setup-worktree.sh [--zotero11-hardening] <branch>
+   scripts/worktree/worktree-zotero.sh reload
+   ```
+
+   To switch an existing worktree, edit `ZOTERO_PLUGIN_ZOTERO_BIN_PATH` in its `.env`.
+3. **Schema upgrade.** Zotero 11 upgrades the schema of the data dir it opens, so only point
+   it at a cloned data dir; setup clones one. Once Zotero 11 has opened a clone, keep that
+   worktree on Zotero 11, or delete and re-clone the data dir to go back to Zotero 10.
+4. **Hardening prefs.** Zotero 11 temporarily overrides two Firefox security prefs so older
+   plugins keep working, and plans to drop both overrides:
+   - `security.allow_unsafe_subscript_loads`: Zotero ships `true`; Firefox's value `false`
+     makes `loadSubScript` of `jar:` / `file:` URIs fail.
+   - `security.chrome_baseline_csp.enabled`: Zotero ships `false`; Firefox's value `true`
+     blocks inline scripts and `on*` handlers in chrome documents.
+
+   `--zotero11-hardening` (at setup), or `worktree-zotero.sh hardening on|off` (Zotero
+   stopped), writes or removes the Firefox values in the profile's `user.js`. Zotero's own
+   Preferences window breaks under the CSP, so judge only Beaver surfaces with it on.
+5. **Check what you're running.** `worktree-zotero.sh status` prints the binary version and,
+   when the instance is up, the running Zotero version, `platformMajorVersion` (140 on
+   Zotero 10, 153 on Zotero 11) and the hardening prefs. `/beaver/test/ping` returns the same
+   under `platform`, so a live test can branch or skip on it.
+
+A Zotero 11 run doesn't replace a Zotero 10 run. Verify platform changes on both.

@@ -35,7 +35,6 @@ declare namespace _ZoteroTypes {
       "accessRemoteFiles": boolean;
       "dataProviderEnabled": boolean;
       "autoApplyAnnotations": boolean;
-      "autoCreateNotes": boolean;
       "autoImportItems": boolean;
       "confirmExtractionCosts": boolean;
       "confirmExternalSearchCosts": boolean;

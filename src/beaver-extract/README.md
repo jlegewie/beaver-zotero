@@ -84,9 +84,28 @@ src/beaver-extract/
 │   ├── wasmHelpers.ts             # WASM utility helpers
 │   ├── workerScope.ts             # Worker globalThis typing
 │   ├── errors.ts                  # Worker-side error envelopes
-│   ├── sentenceExtraction.ts      # Worker-side sentence-bbox pipeline
+│   ├── sentenceExtraction.ts      # Per-page structured phases (paragraphs, sentence mapping)
 │   ├── sentencexInit.ts           # sentencex bootstrap (lazy, with fallback)
 │   └── splitterResolver.ts        # Resolves SentenceSplitterConfig → splitter fn
+├── pipeline/                      # Extraction pipeline (runs in the worker)
+│   ├── documentAnalysis.ts        # Page-walk cache + cross-page analysis context
+│   ├── structured.ts              # Structured extraction phases (analyze → segment → item passes → sentences → project)
+│   ├── draftItems.ts              # Draft items between segmentation and sentence mapping
+│   ├── itemPasses.ts              # Step 3: `ItemPass` interface; presets list their passes
+│   ├── itemsExport.ts             # `items export` rows (items, lines, filtered lines, task features; flow lines for `boundaries`)
+│   ├── regionsExport.ts           # `items export --task regions-v2` rows (region pass observed in `segmentPages`)
+│   └── output.ts                  # Helpers shared by the markdown and structured results
+├── models/runtime.ts              # One evaluator for every learned model (bxm-trees-v1, bxm-logistic-v1)
+├── features/                      # Feature parts shared by the item models
+│   ├── itemInput.ts               # Per-page model input built from draft items
+│   ├── text.ts                    # Text patterns (word counts, leaders, bibliographic details, list headings)
+│   ├── style.ts                   # Line typography (size, font, bold/italic, lead marker) and glyph geometry (baseline, core)
+│   ├── geometry.ts                # Line-block geometry in em
+│   └── context.ts                 # Document context (page position, list headings so far)
+├── itemTypes/                     # Item-type model: input, features (incl. reference item features), model, item pass, generated weights
+├── boundaries/                    # Item boundaries: startNewItem reason codes, per-block input, feature rows, model (preset switch `learnedBoundaries`), generated weights
+├── references/                    # Reference entries: line model, entry planning, item pass (splits and joins the item-type model's references), generated weights
+├── regions/                       # Region detection (pictures, tables, formulas): step 2
 ├── DocumentAnalyzer.ts            # Text layer & OCR detection
 ├── StyleAnalyzer.ts               # Font/style analysis
 ├── MarginFilter.ts                # Header/footer removal
@@ -403,8 +422,9 @@ export interface InternalProcessedPage {
 3. **Integrate in the worker pipeline**:
 
 The fused `extract` op runs inside the worker. Wire new analyzers into
-`worker/ops.ts` (or `PageExtractor.ts`) so they execute alongside the
-existing column/line/paragraph passes:
+`worker/ops.ts` (markdown engines), `pipeline/structured.ts` (structured
+extraction) or `PageExtractor.ts` so they execute alongside the existing
+column/line/paragraph passes:
 
 ```typescript
 import { detectSections } from "../SectionDetector";

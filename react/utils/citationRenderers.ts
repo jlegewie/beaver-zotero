@@ -15,6 +15,7 @@ import { formatExternalCitation } from '@beaver/agent-core/citations/externalRef
 import { UNRESOLVED_LIBRARY_ID, libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
 import { loadCitedLibraries } from './citationRenderContext';
+import { unwrapLegacyNoteTags } from './legacyNoteTags';
 import {
     baseCitationKey,
     getPageLocator,
@@ -25,22 +26,6 @@ import {
 
 // Regex for citation syntax - matches self-closing (/>) and non-self-closing (>) with or without closing tag
 const citationRegex = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;
-const attributeRegex = /(\w+)\s*=\s*"([^"]*)"/g;
-
-/**
- * Parses attributes from a string
- * @param attrString String to parse attributes from
- * @returns Object containing parsed attributes
- */
-function parseAttributes(attrString: string) {
-    const attrs: Record<string, string> = {};
-    attrString.replace(attributeRegex, (fullMatch, attrName, attrValue) => {
-        attrs[attrName] = attrValue;
-        return fullMatch;
-    });
-    return attrs;
-}
-
 function getEarliestExistingMarker(markerMap: Record<string, string>, keys: string[]): string | undefined {
     const markers = keys
         .map((key) => markerMap[key])
@@ -56,22 +41,15 @@ function getEarliestExistingMarker(markerMap: Record<string, string>, keys: stri
 }
 
 /**
- * Preprocesses markdown content to replace note tags with headers and separators.
- * @param text Raw markdown text containing note tags
+ * Replace the legacy `<note>` sections of older threads with headers and
+ * separators, so a saved or copied response carries their body rather than the
+ * markup. Note creation itself moved to the `create_note` tool.
+ * @param text Raw markdown text that may contain legacy note tags
  * @returns Processed markdown with note tags replaced by headers/lines
  */
 export function preprocessNoteContent(text: string): string {
     // Clean up backticks around complete citations (handles both /> and > endings)
-    text = text.replace(/`(<citation[^>]*\/?>)`/g, '$1');
-
-    // Remove note tags (keep content), add title as markdown header if present
-    return text.replace(/(\s*)<note\s+([^>]*?)>(\s*)/g, (match, before, attrString, after) => {
-        const attrs = parseAttributes(attrString);
-        if (attrs.title) {
-            return `\n\n---\n## ${attrs.title}\n\n`;
-        }
-        return before + '---\n' + after;
-    }).replace(/<\/note>/g, '\n---');
+    return unwrapLegacyNoteTags(text.replace(/`(<citation[^>]*\/?>)`/g, '$1'));
 }
 
 /** Citation state the Markdown renderer reads from the current thread. */
@@ -369,7 +347,6 @@ export function renderToHTML(
         content,
         className,
         exportRendering: true,
-        enableNoteBlocks: false
     });
 
     // Wrap in Jotai Provider to share state

@@ -77,6 +77,12 @@ export interface PageRegionItems {
     items: RegionItemDraft[];
     /** Page furniture set aside as margin text (`LINE_FURNITURE`), in page order. */
     margin: RawLine[];
+    /**
+     * Where each absorbed structured-text line went, by `RegionLine.source`: the
+     * index of its region in `RegionDetection.candidates`, after the source-line
+     * vote and the `readsAsTable` gate. Lines not listed stay on the page.
+     */
+    destinations?: ReadonlyMap<number, number>;
 }
 
 const ITEM_KINDS: ReadonlySet<RegionClass> = new Set<RegionClass>(["table", "picture", "formula"]);
@@ -256,7 +262,7 @@ export function regionItemsForPage(
         const line = numbered[source - 1];
         if (line) absorbed.add(line);
     }
-    return { page: withoutLines(page, absorbed), items, margin };
+    return { page: withoutLines(page, absorbed), items, margin, destinations: destination };
 }
 
 /** Whether text lines of the page (other than furniture) stand in `rect`, centre inside. */

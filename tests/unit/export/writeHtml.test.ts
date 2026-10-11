@@ -3,6 +3,7 @@ import { parseExportSource } from '@beaver/agent-export/parse/parseExportDoc';
 import { writeHtml } from '@beaver/agent-export/html/writeHtml';
 import { keepUrlStartsTogether, sanitizeCslHtml } from '@beaver/agent-export/html/escape';
 import { paperSize } from '@beaver/agent-export/page';
+import { HTML_THEME } from '@beaver/agent-export/html/theme';
 import type { ExportDoc, FormattedCitations, FormattedCluster } from '@beaver/agent-export/types';
 
 function cluster(html: string, noteIndex = 0): FormattedCluster {
@@ -244,5 +245,34 @@ describe('paperSize', () => {
         expect(paperSize('en-CA')).toBe('letter');
         expect(paperSize('en-GB')).toBe('a4');
         expect(paperSize('en-US', 'a4')).toBe('a4');
+    });
+});
+
+describe('PDF font stacks', () => {
+    /** Each `font-family` list in a stylesheet, as unquoted family names. */
+    const fontFamilies = (css: string) => [...css.matchAll(/font-family:\s*([^;]+);/g)]
+        .map(([, list]) => list.split(',').map(name => name.trim().replace(/^"|"$/g, '')));
+
+    // Variable fonts that ship with Windows. Gecko prints variable-font glyphs
+    // as outlines, so text set in them cannot be selected, searched or extracted.
+    const windowsVariableFont = /^(Sitka\b|Segoe UI Variable\b|Bahnschrift\b)/i;
+    // Serifs installed on every Windows system.
+    const windowsSerifs = new Set(['Sitka Text', 'Cambria', 'Georgia', 'Times New Roman', 'Constantia', 'Palatino Linotype']);
+
+    it('names no Windows variable font in the exported stylesheet', () => {
+        const doc = parseExportSource({ title: 'T', blocks: [{ type: 'markdown', markdown: 'Text' }] });
+        const { html } = writeHtml({ doc, citations: citations(doc, 'in-text'), options });
+        const families = fontFamilies(html);
+        expect(families.length).toBeGreaterThan(0);
+        for (const name of families.flat()) expect(name).not.toMatch(windowsVariableFont);
+    });
+
+    it('sets prose in Charter on macOS and Cambria on Windows', () => {
+        for (const list of [HTML_THEME.fonts.body, HTML_THEME.fonts.headings]) {
+            const names = fontFamilies(`font-family: ${list};`)[0];
+            expect(names[0]).toBe('Charter');
+            expect(names.find(name => windowsSerifs.has(name))).toBe('Cambria');
+            expect(names[names.length - 1]).toBe('serif');
+        }
     });
 });
