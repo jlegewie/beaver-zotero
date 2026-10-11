@@ -65,6 +65,9 @@ describe("decideSplitWord", () => {
         // A break inside the last element is a hyphenation point.
         expect(split("determina", "tion", vocabulary, "self-determina-")).toBe("join");
         expect(split("dou", "ble", vocabulary, "dou-", "-stranded")).toBe("join");
+        // Elements joined with Unicode hyphens count the same.
+        expect(split("of", "the", vocabulary, "state\u2010of\u2010", "\u2010art")).toBe("keep");
+        expect(split("analog", "to", vocabulary, "analog\u2010", "\u2010digital")).toBe("keep");
     });
 
     it("keeps the hyphen before a capitalized right part or after an acronym", () => {
@@ -174,6 +177,17 @@ describe("decideLineJoin", () => {
         expect(decideLineJoin("https://doi.org/10.3758/s13428-019-01246- ", "w.")).toBe("glue");
     });
 
+    it("goes on with the sentence after a URL ending in a slash, without a space at the line end", () => {
+        expect(decideLineJoin("Visit https://example.org/", "for more information.")).toBe("space");
+        expect(decideLineJoin("files at https://example.org/data/", "and the code")).toBe("space");
+        // A path goes on.
+        expect(decideLineJoin("https://huggingface.co/spaces/mouseland/", "cellpose.")).toBe("glue");
+        expect(decideLineJoin("https://verfassungsblog.de/", "the-judicial-overhaul/.")).toBe("glue");
+        // Alone, a function word may be the path's last segment.
+        expect(decideLineJoin("https://en.wiktionary.org/wiki/", "and")).toBe("glue");
+        expect(decideLineJoin("https://en.wiktionary.org/wiki/", "and.")).toBe("glue");
+    });
+
     it("keeps the space after a URL that ends its sentence", () => {
         expect(decideLineJoin("available at https://example.org/page.", "The results")).toBe("space");
         expect(decideLineJoin("at http://www.cell.com/content/full/DC1).", "for the cells")).toBe("space");
@@ -222,6 +236,7 @@ describe("joinLineTexts", () => {
         expect(joinLineTexts(["under high-", "and low-stress conditions"]))
             .toBe("under high- and low-stress conditions");
         expect(joinLineTexts(["DNA-", "and RNA-based assays"])).toBe("DNA- and RNA-based assays");
+        expect(joinLineTexts(["a state\u2010of\u2010", "the\u2010art method"])).toBe("a state\u2010of\u2010the\u2010art method");
         expect(joinLineTexts(["non-", "sense"])).toBe("nonsense");
         expect(joinLineTexts(["the four-", "th wave"])).toBe("the fourth wave");
         expect(joinLineTexts(["INTER-", "NATIONAL LAW"])).toBe("INTERNATIONAL LAW");

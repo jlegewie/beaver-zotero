@@ -216,10 +216,10 @@ export function decideSplitWord(
         COMPOUND_CONNECTORS.has(capitalsText ? part.toLowerCase() : part) ||
         (!capitalsText && /^\p{Lu}+$/u.test(part)) ||
         (part.length >= 3 && vocab?.words.has(part.toLowerCase()) === true);
-    if ((leftRest.includes("-") && isElement(left)) || (rightRest.startsWith("-") && isElement(right))) return "keep";
+    if ((/[-‐]/u.test(leftRest) && isElement(left)) || (/^[-‐]/u.test(rightRest) && isElement(right))) return "keep";
     // Before the capitals tests: an acronym can open a suspended compound
     // ("DNA- and RNA-based").
-    if (SUSPENDED_BEFORE.has(r) && !/^[\p{L}-]/u.test(rightRest)) return "suspend";
+    if (SUSPENDED_BEFORE.has(r) && !/^[\p{L}\-‐]/u.test(rightRest)) return "suspend";
     // In all-capitals text ("INTER-" + "NATIONAL LAW") capitals say nothing
     // about the word.
     if (!capitalsText) {
@@ -282,15 +282,27 @@ function isUrlText(token: string, prevToken: string): boolean {
     return /[./\d_\-#?=&%:~]/u.test(core) || (prevToken.endsWith(".") && URL_TAIL_RE.test(core));
 }
 
-/** A URL / DOI token that the line break cuts, so the next line continues it. */
-function continuesUrl(prevToken: string, nextToken: string): boolean {
+/** Function words that go on the sentence after a complete URL, not its path. */
+const SENTENCE_WORDS_AFTER_URL = new Set([
+    "a", "an", "and", "are", "as", "at", "by", "for", "from", "in", "is", "of", "on", "or", "that", "the", "to",
+    "was", "were", "which", "with",
+]);
+
+/**
+ * A URL / DOI token that the line break cuts, so the next line continues it.
+ * `next` is the next line's text, from `nextToken`.
+ */
+function continuesUrl(prevToken: string, nextToken: string, next = ""): boolean {
     // "https:" + "//github.com/…"
     if (/^[a-z][a-z0-9+.-]*:$/iu.test(prevToken) && nextToken.startsWith("//")) return true;
     if (prevToken.length < 4 || !isUrlishToken(prevToken)) return false;
     if (/^[/.?&=#_~%]/u.test(nextToken)) return true;
     if (!/[/:._\-?=&#~%]$/u.test(prevToken) || /\)[.:]$/u.test(prevToken)) return false;
-    // A sentence after a URL that ends it starts with a capital.
+    // A sentence after a URL that ends it starts with a capital, or after a
+    // "/" with a function word that more words follow ("https://example.org/"
+    // + "for more"); alone, the word may be the path's last segment.
     if (/^\p{Lu}\p{Ll}/u.test(nextToken)) return false;
+    if (prevToken.endsWith("/") && SENTENCE_WORDS_AFTER_URL.has(nextToken) && /^\S+\s+\p{Ll}/u.test(next)) return false;
     // After a period, the URL goes on only into more URL ("j." +
     // "learninstruc.2006.09.001", "www." + "congressionalbills.org"), not
     // into a word of the sentence.
@@ -354,7 +366,7 @@ export function decideLineJoin(
     // ("https://example.org/ " + "for more"): it goes on only into a token
     // that is itself URL text, or after a "-" or "_" no URL ends with. Many
     // PDFs end every line with a space, so the space alone does not end it.
-    if (continuesUrl(prevToken, nextToken) && (!/\s$/u.test(prev) || /[-_]$/u.test(prevToken) || isUrlText(nextToken, prevToken))) {
+    if (continuesUrl(prevToken, nextToken, n) && (!/\s$/u.test(prev) || /[-_]$/u.test(prevToken) || isUrlText(nextToken, prevToken))) {
         return "glue";
     }
     if (/[\p{N}%][-\u2010\u2013]$/u.test(prevToken) && /^\p{N}/u.test(nextToken)) return "glue";
