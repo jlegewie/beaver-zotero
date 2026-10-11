@@ -773,11 +773,16 @@ function computeBodyAllCaps(
 
 /**
  * An item's text from its line texts: `joinLineTexts` when `lineJoins` is
- * on, `joinLines` otherwise.
+ * on, `joinLines` otherwise. Passes that rebuild items from their lines join
+ * them the same way.
  */
-function joinItemLines(lines: PageLine[], settings: Required<ParagraphDetectionSettings>): string {
-    if (!settings.lineJoins || !settings.removeHyphenation) {
-        return joinLines(lines.map(l => l.text), settings.removeHyphenation);
+export function joinItemLines(
+    lines: PageLine[],
+    settings: Pick<ParagraphDetectionSettings, "lineJoins" | "removeHyphenation" | "lineJoinVocabulary">,
+): string {
+    const removeHyphenation = settings.removeHyphenation ?? DEFAULT_SETTINGS.removeHyphenation;
+    if (!settings.lineJoins || !removeHyphenation) {
+        return joinLines(lines.map(l => l.text), removeHyphenation);
     }
     // A line keeps the space the PDF set after its last word.
     const texts = lines.map(l => (l.spans[l.spans.length - 1]?.trailingSpace ? `${l.text} ` : l.text));
