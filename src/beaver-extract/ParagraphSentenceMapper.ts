@@ -216,14 +216,15 @@ const SENTENCE_END_PUNCT = new Set([".", "!", "?"]);
 const SUPERSCRIPT_HEIGHT_RATIO = 0.85;
 
 function lineMedianCharHeight(line: RawLineDetailed): number {
-    const heights: number[] = [];
+    const heights = new Float64Array(line.chars.length);
+    let n = 0;
     for (const c of line.chars) {
         const height = bboxHeight(c.bbox);
-        if (height > 0) heights.push(height);
+        if (height > 0) heights[n++] = height;
     }
-    if (heights.length === 0) return 0;
-    heights.sort((a, b) => a - b);
-    return heights[Math.floor(heights.length / 2)];
+    if (n === 0) return 0;
+    // A typed array sorts numerically without a comparator.
+    return heights.subarray(0, n).sort()[Math.floor(n / 2)];
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +258,7 @@ export function collectHyphenatedCompounds(
     into: Set<string> = new Set(),
 ): Set<string> {
     for (const text of lineTexts) {
+        if (!text.includes("-")) continue;
         for (const match of text.matchAll(MIDLINE_COMPOUND_RE)) {
             const parts = match[0].toLowerCase().split("-");
             for (let i = 0; i + 1 < parts.length; i++) {
@@ -341,7 +343,11 @@ export function decideLineBreakHyphen(
     nextLineText: string,
     vocabulary?: ReadonlySet<string>,
 ): LineBreakHyphenDecision {
-    const prev = prevLineText.replace(/\s+$/u, "");
+    // Most lines don't end in a hyphen: rule them out before the regexes.
+    let end = prevLineText.length;
+    while (end > 0 && /\s/u.test(prevLineText[end - 1])) end--;
+    if (end === 0 || prevLineText.charCodeAt(end - 1) !== 0x2d) return "none";
+    const prev = prevLineText.slice(0, end);
     const prevMatch = TRAILING_HYPHEN_RE.exec(prev);
     if (!prevMatch) return "none";
     const next = nextLineText.replace(/^\s+/u, "");

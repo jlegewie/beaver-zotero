@@ -186,11 +186,18 @@ workerSelf.onmessage = (event: MessageEvent) => {
         return;
     }
 
+    // Replies report when the op started (epoch ms, comparable with the
+    // client's clock) and how long it ran, so the client can tell waiting from
+    // work (`WorkerCallTiming`). Waiting is measured on the client: a message
+    // reaches this handler only after the previous synchronous op returns.
     enqueue(async () => {
+        const startedAtEpoch = Date.now();
+        const startedAt = performance.now();
+        const timing = () => ({ startedAt: startedAtEpoch, opMs: performance.now() - startedAt });
         try {
             const { result, transfer } = await dispatch(op, args);
             workerSelf.postMessage(
-                { id, ok: true, result, heapBytes: currentHeapBytes() },
+                { id, ok: true, result, heapBytes: currentHeapBytes(), ...timing() },
                 transfer || [],
             );
         } catch (e: unknown) {
@@ -229,6 +236,7 @@ workerSelf.onmessage = (event: MessageEvent) => {
                 ok: false,
                 error,
                 heapBytes: currentHeapBytes(),
+                ...timing(),
             });
         }
     });

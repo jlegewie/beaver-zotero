@@ -341,6 +341,8 @@ function isMostlyNumeric(text: string, threshold: number = 0.8): boolean {
     return digitCount / total >= threshold;
 }
 
+const LETTER_RE = /\p{L}/u;
+
 /**
  * Check if text is all uppercase.
  *
@@ -350,9 +352,18 @@ function isMostlyNumeric(text: string, threshold: number = 0.8): boolean {
  * positives on short tokens like "USA" or "I".
  */
 function isAllCapsText(text: string, minLetters: number = 3): boolean {
-    const letters = text.match(/\p{L}/gu) || [];
     let cased = 0;
-    for (const c of letters) {
+    for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        // ASCII: only A-Z and a-z are letters.
+        if (code < 0x80) {
+            if (code >= 0x61 && code <= 0x7a) return false;
+            if (code >= 0x41 && code <= 0x5a) cased++;
+            continue;
+        }
+        const c = String.fromCodePoint(text.codePointAt(i)!);
+        if (c.length === 2) i++;
+        if (!LETTER_RE.test(c)) continue;
         if (c.toLowerCase() === c.toUpperCase()) continue; // uncased script
         cased++;
         if (c !== c.toUpperCase()) return false;
@@ -1414,8 +1425,8 @@ function calculateColumnThresholds(
  *     fonts at the line's exact (size, bold, italic) — i.e. the document
  *     ALREADY shows subset fragmentation at this style class.
  *
- * Returning true means "treat as body" — the caller short-circuits before
- * any Rule 1-6 evaluation.
+ * Returning true means "treat as body": the line is not a heading whichever
+ * of Rules 1-6 it meets.
  */
 // Exported for unit tests only. Not part of the production API.
 export function looksLikeFragmentedCJKBody(
@@ -1462,12 +1473,22 @@ const MATH_FONT_RE =
 function lineStyleRuns(line: PageLine): { run: RawStyleRun; text: string }[] {
     const runs: { run: RawStyleRun; text: string }[] = [];
     for (const span of line.spans) {
-        const glyphs = Array.from(span.text).filter(c => /\S/u.test(c));
-        let offset = 0;
-        for (const run of span.styleRuns ?? []) {
+        if (!span.styleRuns) continue;
+        const spanText = span.text;
+        let pos = 0;
+        for (const run of span.styleRuns) {
             if (run.chars === 0) continue;
-            runs.push({ run, text: glyphs.slice(offset, offset + run.chars).join("") });
-            offset += run.chars;
+            // The run's text: its next `run.chars` non-whitespace code points.
+            let text = "";
+            for (let n = 0; n < run.chars && pos < spanText.length; ) {
+                const code = spanText.codePointAt(pos)!;
+                const c = code > 0xffff ? spanText.slice(pos, pos + 2) : spanText[pos];
+                pos += c.length;
+                if (code < 0x80 ? code === 0x20 || (code >= 0x09 && code <= 0x0d) : !/\S/u.test(c)) continue;
+                text += c;
+                n++;
+            }
+            runs.push({ run, text });
         }
     }
     return runs;
@@ -1705,9 +1726,15 @@ function isHeaderStyle(
     }
     const lineStyle = numbered?.style ?? extractLineStyle(line);
     if (!lineStyle) return false;
+    if (!matchesHeaderRules(
+        line, lineStyle, !numbered, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
+    )) {
+        return false;
+    }
     // Item-level only (the joined item text): boundaries are decided per line
     // and stay as they are; a run-in label, equation or link item just isn't
-    // labelled a heading.
+    // labelled a heading. Tested after the style rules, which reject most
+    // lines more cheaply.
     if (
         settings.headingLabelFilters &&
         phraseTextOverride !== null &&
@@ -1716,11 +1743,6 @@ function isHeaderStyle(
             looksLikeWebAddresses(phraseTextOverride) ||
             looksLikeIdentifier(phraseTextOverride))
     ) {
-        return false;
-    }
-    if (!matchesHeaderRules(
-        line, lineStyle, !numbered, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
-    )) {
         return false;
     }
     const majority = majorityLineStyle(line, lineStyle);
@@ -2065,20 +2087,6 @@ function matchesHeaderRules(
         return false;
     }
 
-    // CJK CID-subset body fallback: the line uses a body-sized style class
-    // that bodyStyles already shows fragmented across 2+ fonts. The "new"
-    // font here is almost certainly another subset of the same logical
-    // body font, not a real heading. Narrow text guards (CJK content,
-    // no section prefix) keep this off Latin docs and preserve Rule 6.
-    if (looksLikeFragmentedCJKBody(line, lineStyle, bodyStyles)) {
-        return false;
-    }
-
-    // Must be highly consistent (90%+ same style)
-    if (checkSpanDominance && getStyleDominance(line, lineStyle) < 0.9) {
-        return false;
-    }
-
     let isPotentialHeader = false;
     // True when the candidate carries an independent size cue (Rule 1).
     // Used to exempt size-cued headings from the heading-capitalization
@@ -2212,6 +2220,20 @@ function matchesHeaderRules(
     if (!isPotentialHeader) return false;
 
     // Apply disqualifying heuristics
+
+    // CJK CID-subset body fallback: the line uses a body-sized style class
+    // that bodyStyles already shows fragmented across 2+ fonts. The "new"
+    // font here is almost certainly another subset of the same logical
+    // body font, not a real heading. Narrow text guards (CJK content,
+    // no section prefix) keep this off Latin docs and preserve Rule 6.
+    if (looksLikeFragmentedCJKBody(line, lineStyle, bodyStyles)) {
+        return false;
+    }
+
+    // Must be highly consistent (90%+ same style)
+    if (checkSpanDominance && getStyleDominance(line, lineStyle) < 0.9) {
+        return false;
+    }
 
     // Heading-capitalization guard. Rules 2-6 promote a candidate on a
     // same-or-smaller-size font difference alone — a signal that is

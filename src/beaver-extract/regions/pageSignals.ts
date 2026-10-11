@@ -197,9 +197,23 @@ export interface Primitive {
 
 type FontRun = { start: number; font: { name: string; size: number } };
 
+/** Adds `n` to `key`'s count in a flat [key, count, …] list (first-seen order, like a Map's). */
+function addInk<K>(counts: (K | number)[], key: K, n: number): void {
+    for (let k = 0; k < counts.length; k += 2) {
+        const c = counts[k];
+        // SameValueZero, as Map keys compare.
+        if (c === key || (c !== c && key !== key)) {
+            counts[k + 1] = (counts[k + 1] as number) + n;
+            return;
+        }
+    }
+    counts.push(key, n);
+}
+
 /** Math and size statistics of chars [a, b) of a line, from its font runs. */
 function rangeMath(
     chars: readonly string[],
+    classes: Uint8Array,
     runs: readonly FontRun[],
     a: number,
     b: number,
@@ -211,10 +225,10 @@ function rangeMath(
     let minSize = Infinity;
     let maxSize = 0;
     let relationSize = 0;
-    // Ink per type size, for the size setting most of the range.
-    const sizeInk = new Map<number, number>();
-    // Ink per font name: a line can return to its font after an emphasized span.
-    const fontInk = new Map<string, number>();
+    // Ink per type size, for the size setting most of the range, and per font name
+    // (a line can return to its font after an emphasized span); in first-seen order.
+    const sizeInk: number[] = [];
+    const fontInk: (string | number)[] = [];
     for (let r = 0; r < runs.length; r++) {
         const s0 = Math.max(a, runs[r].start);
         const s1 = Math.min(b, r + 1 < runs.length ? runs[r + 1].start : chars.length);
@@ -222,20 +236,16 @@ function rangeMath(
         const mathFont = runs[r].font.name !== textFont && isMathFont(runs[r].font.name);
         let runInk = 0;
         for (let i = s0; i < s1; i++) {
-            const c = chars[i];
-            if (c === undefined) continue;
-            const cls = charClass(c);
+            if (chars[i] === undefined) continue;
+            const cls = classes[i];
             if (cls & CHAR_SPACE) continue;
             runInk++;
             if (mathFont || cls & CHAR_MATH) math++;
             if (cls & CHAR_RELATION) relationSize = Math.max(relationSize, runs[r].font.size > 0 ? runs[r].font.size : size);
         }
         ink += runInk;
-        if (runInk > 0 && runs[r].font.name) fontInk.set(runs[r].font.name, (fontInk.get(runs[r].font.name) ?? 0) + runInk);
-        if (runInk > 0) {
-            const runSize = runs[r].font.size > 0 ? runs[r].font.size : size;
-            sizeInk.set(runSize, (sizeInk.get(runSize) ?? 0) + runInk);
-        }
+        if (runInk > 0 && runs[r].font.name) addInk(fontInk, runs[r].font.name, runInk);
+        if (runInk > 0) addInk(sizeInk, runs[r].font.size > 0 ? runs[r].font.size : size, runInk);
         if (runInk > 0 && runs[r].font.size > 0) {
             minSize = Math.min(minSize, runs[r].font.size);
             maxSize = Math.max(maxSize, runs[r].font.size);
@@ -243,15 +253,18 @@ function rangeMath(
     }
     let font: string | undefined;
     let best = 0;
-    for (const [name, n] of fontInk) {
+    for (let k = 0; k < fontInk.length; k += 2) {
+        const n = fontInk[k + 1] as number;
         if (n > best) {
-            font = name;
+            font = fontInk[k] as string;
             best = n;
         }
     }
     let inkSize = size;
     let inkBest = 0;
-    for (const [s, n] of sizeInk) {
+    for (let k = 0; k < sizeInk.length; k += 2) {
+        const s = sizeInk[k];
+        const n = sizeInk[k + 1];
         if (n > inkBest || (n === inkBest && s > inkSize)) {
             inkSize = s;
             inkBest = n;
@@ -289,6 +302,18 @@ function computeCharClass(c: string): number {
 const ASCII_CHAR_CLASS = Uint8Array.from({ length: 128 }, (_, code) => computeCharClass(String.fromCharCode(code)));
 const charClassCache = new Map<string, number>();
 
+/** `charClass` of each character of a line (`[...text]`). */
+function charClasses(chars: readonly string[]): Uint8Array {
+    const out = new Uint8Array(chars.length);
+    for (let i = 0; i < chars.length; i++) out[i] = charClass(chars[i]);
+    return out;
+}
+
+/** Class of character `i`, or of a space past the end (as `charClass(chars[i] ?? " ")`). */
+function classAt(classes: Uint8Array, i: number): number {
+    return i < classes.length ? classes[i] : CHAR_SPACE;
+}
+
 /** The classes of one character of a line (an element of `[...text]`), tested once per character. */
 function charClass(c: string): number {
     if (c.length === 1) {
@@ -304,7 +329,7 @@ function charClass(c: string): number {
 }
 
 /** Spans of chars [a, b) of a horizontal line that take limits (`RegionLine.limitSpans`). */
-function limitSpans(line: RawLineDetailed, chars: readonly string[], a: number, b: number, em: number): [number, number][] {
+function limitSpans(line: RawLineDetailed, chars: readonly string[], classes: Uint8Array, a: number, b: number, em: number): [number, number][] {
     const spans: [number, number][] = [];
     if (!MAY_TAKE_LIMITS_RE.test(line.text)) return spans;
     const add = (x0: number, x1: number) => {
@@ -320,11 +345,10 @@ function limitSpans(line: RawLineDetailed, chars: readonly string[], a: number, 
         start = -1;
     };
     for (let i = a; i < b; i++) {
-        const c = chars[i] ?? " ";
-        const cls = charClass(c);
+        const cls = classAt(classes, i);
         if (cls & CHAR_LETTER) {
             if (start < 0) start = i;
-            word += c;
+            word += chars[i];
             continue;
         }
         endWord(i);
@@ -341,12 +365,12 @@ const SPLIT_GAP_EM = 2;
  * Character ranges of a horizontal line separated by wide gaps: an equation and
  * its number, or table cells that MuPDF set on one line.
  */
-function linePieces(line: RawLineDetailed, chars: readonly string[], em: number): [number, number][] {
+function linePieces(line: RawLineDetailed, classes: Uint8Array, em: number): [number, number][] {
     const pieces: [number, number][] = [];
     let start = 0;
     let prevRight = -Infinity;
     for (let i = 0; i < line.chars.length; i++) {
-        if (charClass(chars[i] ?? " ") & CHAR_SPACE) continue;
+        if (classAt(classes, i) & CHAR_SPACE) continue;
         const b = line.chars[i].bbox;
         if (prevRight !== -Infinity && b.l - prevRight > SPLIT_GAP_EM * em && i > start) {
             pieces.push([start, i]);
@@ -359,11 +383,11 @@ function linePieces(line: RawLineDetailed, chars: readonly string[], em: number)
 }
 
 /** Gaps of at least `min` between consecutive inked characters in [a, b) of a horizontal line. */
-function innerGaps(line: RawLineDetailed, chars: readonly string[], a: number, b: number, min: number): [number, number][] {
+function innerGaps(line: RawLineDetailed, classes: Uint8Array, a: number, b: number, min: number): [number, number][] {
     const gaps: [number, number][] = [];
     let prevRight = -Infinity;
     for (let i = a; i < b; i++) {
-        if (charClass(chars[i] ?? " ") & CHAR_SPACE) continue;
+        if (classAt(classes, i) & CHAR_SPACE) continue;
         const box = line.chars[i].bbox;
         if (prevRight !== -Infinity && box.l - prevRight >= min) gaps.push([prevRight, box.l]);
         prevRight = Math.max(prevRight === -Infinity ? box.r : prevRight, box.r);
@@ -409,6 +433,7 @@ const SKEW_RATIO = 3;
 function isSkewed(
     line: RawLineDetailed,
     chars: readonly string[],
+    classes: Uint8Array,
     a: number,
     b: number,
     rot: 0 | 90 | 270,
@@ -422,9 +447,9 @@ function isSkewed(
     }
     // First and last inked characters.
     let first = a;
-    while (first < b && charClass(chars[first]) & CHAR_SPACE) first++;
+    while (first < b && classes[first] & CHAR_SPACE) first++;
     let last = b - 1;
-    while (last > first && charClass(chars[last]) & CHAR_SPACE) last--;
+    while (last > first && classes[last] & CHAR_SPACE) last--;
     if (first >= last) return false;
     const f = line.chars[first].bbox;
     const l = line.chars[last].bbox;
@@ -444,7 +469,7 @@ function isSkewed(
     let prevAcross = across(f);
     let prevAlong = along(f);
     for (let i = first + 1; i <= last; i++) {
-        if (charClass(chars[i]) & CHAR_SPACE) continue;
+        if (classes[i] & CHAR_SPACE) continue;
         const c = line.chars[i].bbox;
         steps++;
         // Each step moves across the line and along it, as rotated text does.
@@ -511,6 +536,7 @@ export function pageLines(page: RawPageData): RegionLine[] {
             const rot = line.rotation === 270 ? 270 : line.wmode === 1 || line.rotation === 90 ? 90 : 0;
             const detailed = line as RawLineDetailed;
             const chars = [...line.text];
+            const classes = charClasses(chars);
             const runs: FontRun[] = detailed.spans?.length ? detailed.spans : [{ start: 0, font: line.font }];
             // Some PDFs set text in a 0-size font scaled by the text matrix: the line
             // height is then the only size there is.
@@ -518,7 +544,7 @@ export function pageLines(page: RawPageData): RegionLine[] {
             const size = line.font.size > 0 ? line.font.size : Math.max(1, Math.round(height));
             const pieces: [number, number][] =
                 !rot && detailed.chars?.length === chars.length
-                    ? linePieces(detailed, chars, Math.max(1, size))
+                    ? linePieces(detailed, classes, Math.max(1, size))
                     : [[0, chars.length]];
             source++;
             for (const [a, b] of pieces) {
@@ -529,40 +555,38 @@ export function pageLines(page: RawPageData): RegionLine[] {
                 if (pieces.length > 1) {
                     bbox = [Infinity, Infinity, -Infinity, -Infinity];
                     for (let i = a; i < b; i++) {
-                        if (charClass(chars[i]) & CHAR_SPACE) continue;
+                        if (classes[i] & CHAR_SPACE) continue;
                         const cb = detailed.chars[i].bbox;
                         bbox = [Math.min(bbox[0], cb.l), Math.min(bbox[1], cb.t), Math.max(bbox[2], cb.r), Math.max(bbox[3], cb.b)];
                     }
                 }
-                const m = rangeMath(chars, runs, a, b, textFont, size);
-                const operators = !rot && detailed.chars?.length === chars.length ? limitSpans(detailed, chars, a, b, Math.max(1, size)) : [];
+                const m = rangeMath(chars, classes, runs, a, b, textFont, size);
+                const operators = !rot && detailed.chars?.length === chars.length ? limitSpans(detailed, chars, classes, a, b, Math.max(1, size)) : [];
                 const maxSize = m.maxSize || size;
-                const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, chars, a, b, WORD_GAP_EM * Math.max(1, size)) : [];
+                const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, classes, a, b, WORD_GAP_EM * Math.max(1, size)) : [];
                 const counts = wordCounts(text);
-                lines.push({
-                    bbox,
-                    text,
-                    size,
-                    rot,
-                    ...(line.rotation === 180 ? { turned: true as const } : {}),
-                    words: counts.words,
-                    nchar: text.length,
-                    alphaWords: counts.alphaWords,
-                    mathChars: m.math,
-                    ...(m.relationSize ? { relationSize: m.relationSize } : {}),
-                    inkSize: m.inkSize,
-                    ...(operators.length ? { limitSpans: operators } : {}),
-                    inkChars: m.ink,
-                    ...(m.font ? { font: m.font } : {}),
-                    minSize: m.minSize === Infinity ? size : m.minSize,
-                    maxSize,
-                    eqNumber: EQUATION_NUMBER_RE.test(text),
-                    ...(isSkewed(detailed, chars, a, b, rot, bbox, Math.max(size, maxSize)) ? { skewed: true as const } : {}),
-                    source,
-                    pieces: pieces.length,
-                    range: [a, b],
-                    ...(gaps.length ? { gaps } : {}),
-                });
+                // Built field by field, optional fields in place: the same keys in the
+                // same order as a literal, without a temporary object per optional field.
+                const out = { bbox, text, size, rot } as RegionLine;
+                if (line.rotation === 180) out.turned = true;
+                out.words = counts.words;
+                out.nchar = text.length;
+                out.alphaWords = counts.alphaWords;
+                out.mathChars = m.math;
+                if (m.relationSize) out.relationSize = m.relationSize;
+                out.inkSize = m.inkSize;
+                if (operators.length) out.limitSpans = operators;
+                out.inkChars = m.ink;
+                if (m.font) out.font = m.font;
+                out.minSize = m.minSize === Infinity ? size : m.minSize;
+                out.maxSize = maxSize;
+                out.eqNumber = EQUATION_NUMBER_RE.test(text);
+                if (isSkewed(detailed, chars, classes, a, b, rot, bbox, Math.max(size, maxSize))) out.skewed = true;
+                out.source = source;
+                out.pieces = pieces.length;
+                out.range = [a, b];
+                if (gaps.length) out.gaps = gaps;
+                lines.push(out);
             }
         }
     }

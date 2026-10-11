@@ -36,6 +36,7 @@ import {
     __resetIdleTimeoutForTest,
     __setModuleWindowForTest,
     __resetModuleWindowForTest,
+    type WorkerCallTiming,
 } from '../../../src/beaver-extract/MuPDFWorkerClient';
 import {
     DEFAULT_ATTACHMENT_IMAGE_TIMEOUT_SECONDS,
@@ -50,7 +51,7 @@ import {
     ExtractionError,
     ExtractionErrorCode,
 } from '@beaver/agent-core/extract/types';
-import type { WorkerStartFailureInfo } from '../../../src/beaver-extract/config';
+import { configurePDF, getConfig, type WorkerStartFailureInfo } from '../../../src/beaver-extract/config';
 
 describe('MuPDFWorkerClient', () => {
     beforeEach(() => {
@@ -2201,5 +2202,95 @@ describe('MuPDFWorkerClient', () => {
             expect(client.isCreatorRealmDead).toBe(false);
             expect(getMuPDFWorkerClient()).toBe(client);
         });
+    });
+});
+
+describe('MuPDFWorkerClient call timing', () => {
+    beforeEach(() => {
+        MockWorker.instances.length = 0;
+        MockWorker.dropNextConfigureAck = false;
+        setupZoteroMainWindowWithMockWorker();
+        vi.useFakeTimers();
+        vi.setSystemTime(1_000);
+    });
+
+    afterEach(async () => {
+        vi.useRealTimers();
+        await disposeMuPDFWorker();
+        delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot;
+    });
+
+    const extractArgs = { mode: 'structured' as const, settings: { checkTextLayer: true } };
+    const serialized = { mode: 'structured', schemaVersion: '5', pageCount: 1, byteLength: 2, jsonBytes: new Uint8Array([123, 125]), cacheMetadata: { pageCount: 1, pageLabels: {}, pages: [] } };
+
+    it('splits an op into waiting for the worker to start, waiting in the worker, and running', async () => {
+        MockWorker.dropNextConfigureAck = true;
+        const client = getMuPDFWorkerClient();
+
+        // The first op waits for the worker to start.
+        const pageCountTiming: WorkerCallTiming = {};
+        const pageCount = client.getPageCount(new Uint8Array([1]), undefined, pageCountTiming);
+        const worker = MockWorker.instances[0];
+        expect(worker.posted).toHaveLength(0);
+        vi.setSystemTime(1_100);
+        worker.onmessage?.({ data: { kind: 'configured' } });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(worker.posted).toHaveLength(1);
+        // The worker started it 30 ms after it was posted (busy with earlier work).
+        worker.replyToLast({ ok: true, result: { count: 3 }, startedAt: 1_130, opMs: 7 });
+        await expect(pageCount).resolves.toBe(3);
+        expect(pageCountTiming).toEqual({ workerState: 'starting', clientQueueMs: 0, startMs: 100, queueMs: 30, opMs: 7 });
+
+        // No extraction has run on this worker yet.
+        const firstTiming: WorkerCallTiming = {};
+        const first = client.extractSerialized(new Uint8Array([1]), extractArgs, undefined, firstTiming);
+        worker.replyToLast({ ok: true, result: serialized, startedAt: 1_100, opMs: 40 });
+        await first;
+        expect(firstTiming).toEqual({ workerState: 'first_extract', clientQueueMs: 0, startMs: 0, queueMs: 0, opMs: 40 });
+
+        // A failed op still reports its times.
+        const failedTiming: WorkerCallTiming = {};
+        const failed = client.extractSerialized(new Uint8Array([1]), extractArgs, undefined, failedTiming);
+        worker.replyToLast({ ok: false, error: { name: 'Error', message: 'boom' }, startedAt: 1_105, opMs: 3 });
+        await expect(failed).rejects.toThrow('boom');
+        expect(failedTiming).toMatchObject({ workerState: 'warm', queueMs: 5, opMs: 3 });
+    });
+
+    it('reports the wait in the work queue behind an earlier op', async () => {
+        configurePDF({ ...getConfig(), maxQueuedOperations: 32 });
+        const client = getMuPDFWorkerClient();
+        const firstTiming: WorkerCallTiming = {};
+        const secondTiming: WorkerCallTiming = {};
+        const first = client.extractSerialized(new Uint8Array([1]), extractArgs, undefined, firstTiming);
+        const second = client.extractSerialized(new Uint8Array([2]), extractArgs, undefined, secondTiming);
+        const worker = MockWorker.instances[0];
+        await vi.advanceTimersByTimeAsync(0);
+        expect(worker.posted).toHaveLength(1);
+
+        // The second op is admitted only when the first settles, 105 ms later.
+        vi.setSystemTime(1_105);
+        worker.replyToLast({ ok: true, result: serialized, startedAt: 1_000, opMs: 104 });
+        await first;
+        await vi.advanceTimersByTimeAsync(0);
+        expect(worker.posted).toHaveLength(2);
+        vi.setSystemTime(1_200);
+        worker.replyToLast({ ok: true, result: serialized, startedAt: 1_106, opMs: 94 });
+        await second;
+
+        expect(firstTiming).toMatchObject({ clientQueueMs: 0, queueMs: 0, opMs: 104 });
+        expect(secondTiming).toMatchObject({ clientQueueMs: 105, startMs: 0, queueMs: 1, opMs: 94 });
+    });
+
+    it('leaves the worker times unset when the worker does not report them', async () => {
+        const client = getMuPDFWorkerClient();
+        const timing: WorkerCallTiming = {};
+        const pageCount = client.getPageCount(new Uint8Array([1]), undefined, timing);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(MockWorker.instances[0]?.posted).toHaveLength(1);
+        MockWorker.instances[0].replyToLast({ ok: true, result: { count: 1 } });
+        await pageCount;
+        expect(timing.queueMs).toBeUndefined();
+        expect(timing.opMs).toBeUndefined();
+        expect(timing.clientQueueMs).toBe(0);
     });
 });

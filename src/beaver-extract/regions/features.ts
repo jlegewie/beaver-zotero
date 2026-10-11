@@ -7,7 +7,7 @@
  * `REGION_FEATURE_VERSION` (the model refuses mismatched weights) and retraining.
  */
 import type { Candidate, PageCandidates } from "./candidates";
-import { hgap, intersect, overlapFrac, rectArea, vgap, type Rect } from "./geometry";
+import { hgap, intersectionArea, overlapFrac, rectArea, vgap, type Rect } from "./geometry";
 import { NUMERIC_RE, isProse, type RegionLine } from "./pageSignals";
 import { spansColumn } from "./textCandidates";
 
@@ -116,7 +116,7 @@ export function candidateFeatures(
     let strokes = 0;
     for (const m of members) {
         if (m.kind === "image") {
-            imageArea += rectArea(intersect(m.bbox, bbox));
+            imageArea += intersectionArea(m.bbox, bbox);
             imgRepeat = Math.max(imgRepeat, doc.imagePageCount(m.imageHash));
         }
         if (m.rgb >= 0) colors.add(m.rgb);
