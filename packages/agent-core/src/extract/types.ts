@@ -721,6 +721,13 @@ export interface MarginElement {
     unnumberedRowsAbove?: number;
     /** For a page's last numeral in the left zone: body text rows below it. */
     unnumberedRowsBelow?: number;
+    /**
+     * A numeral of the header or footer zone that lies in the left zone too
+     * and continues the page's left-zone numbers by one: the line number of
+     * a body row that reaches into the header or footer zone. Read with the
+     * left zone's numerals for manuscript line numbering.
+     */
+    leftCorner?: boolean;
 }
 
 /**

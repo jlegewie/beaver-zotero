@@ -2058,6 +2058,23 @@ describe("justified prose rows split word by word (PDF schema 5)", () => {
         expect(keptText(pages[1], removal, true)).toContain("is");
     });
 
+    it("spares a body row's word that a running head repeats when the row's other lines are not removals", () => {
+        const page = {
+            ...makePageWithLines([
+                ...justified(["in these examples binaural", "inhibition", "was observed in neurons"], 100, 60),
+                makeStyledLine("the", 100, 72, 15, "Times-Roman", 9),
+            ]),
+            pageIndex: 1,
+            pageNumber: 2,
+        };
+        const removal: MarginRemovalResult = {
+            candidates: [{ text: "inhibition", originalText: "Inhibition", pageIndices: [0, 2, 3], reason: "repeat", position: "top" }],
+            textsToRemove: new Set(["inhibition"]),
+            removalsByPage: new Map([[1, new Set(["inhibition"])]]),
+        };
+        expect(keptText(page, removal, true)).toContain("inhibition");
+    });
+
     it("still removes a lowercase running head set in a block of its own", () => {
         const pages = buildPages().map((page) => ({
             ...page,
@@ -2069,6 +2086,24 @@ describe("justified prose rows split word by word (PDF schema 5)", () => {
         const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
         expect(removal.candidates.map((c) => c.text)).toContain("nature");
         expect(keptText(pages[1], removal, true)).not.toContain("nature");
+    });
+
+    it("removes a lowercase running head with wide word spaces set in a block of its own", () => {
+        const pages = buildPages().map((page) => ({
+            ...page,
+            blocks: [
+                ...page.blocks,
+                {
+                    type: "text" as const,
+                    bbox: bboxFromXYWH(300, 45, 200, 9, "top-left"),
+                    lines: justified(["journal", "of", "social", "psychology"], 300, 45),
+                },
+            ],
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        const kept = keptText(pages[1], removal, true);
+        for (const word of ["journal", "of", "social", "psychology"]) expect(kept).not.toContain(word);
+        expect(kept).toContain("impacting");
     });
 
     it("leaves single-line matching as it was with text rows off (PDF schema 4)", () => {
@@ -2146,6 +2181,29 @@ describe("manuscript line numbers in the left margin (PDF schema 5)", () => {
         const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
         expect(removal.removalsByPage.get(0)?.size).toBe(12);
         expect(removal.removalsByPage.get(2)?.size).toBe(20);
+    });
+
+    it("removes the line numbers of rows in the header and footer zones", () => {
+        // 24 rows from y=70: each page's first row is in the header zone and
+        // its last in the footer zone, so their numbers sit in the corners.
+        let next = 1;
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines([
+                // A page number in the top-left corner continues no line numbers.
+                makeStyledLine(`${101 + pageIndex}`, 40, 30, 15, "Times-Roman", 9),
+                ...Array.from({ length: 24 }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 70 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`body text row ${k} on page ${pageIndex}`, 100, 70 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        for (const pageIndex of [0, 1, 2]) {
+            const removed = removal.removalsByPage.get(pageIndex) ?? new Set();
+            for (let n = 24 * pageIndex + 1; n <= 24 * (pageIndex + 1); n++) expect(removed.has(`${n}`)).toBe(true);
+        }
     });
 
     /** Pages of left-margin numbers 1, 2, … running on across pages, one per body row. */
