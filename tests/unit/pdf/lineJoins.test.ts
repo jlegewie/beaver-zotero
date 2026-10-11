@@ -239,6 +239,13 @@ describe("joinLineTexts", () => {
         expect(joinLineTexts(["a state\u2010of\u2010", "the\u2010art method"])).toBe("a state\u2010of\u2010the\u2010art method");
         expect(joinLineTexts(["non-", "sense"])).toBe("nonsense");
         expect(joinLineTexts(["the four-", "th wave"])).toBe("the fourth wave");
+        // Inflections of a prefix's closed words join too.
+        expect(joinLineTexts(["the short-", "ening of"])).toBe("the shortening of");
+        expect(joinLineTexts(["a short-", "ener for"])).toBe("a shortener for");
+        expect(joinLineTexts(["it low-", "ered the"])).toBe("it lowered the");
+        expect(joinLineTexts(["the four-", "teenth wave"])).toBe("the fourteenth wave");
+        expect(joinLineTexts(["a short-", "term loan"])).toBe("a short-term loan");
+        expect(joinLineTexts(["growth in the low-", "teens range"])).toBe("growth in the low-teens range");
         expect(joinLineTexts(["INTER-", "NATIONAL LAW"])).toBe("INTERNATIONAL LAW");
         // A capitalized syllable of a mixed-case compound is no connector.
         expect(joinLineTexts(["die US-An-", "leihen steigen"])).toBe("die US-Anleihen steigen");

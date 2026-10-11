@@ -163,8 +163,15 @@ const BOUND_PREFIXES = new Set([
     "pseudo", "quasi", "socio", "psycho", "per", "out", "off", "bi",
 ]);
 
-/** Endings that make a word of a hyphen prefix ("four-th", "short-en", "real-istic"). */
-const PREFIX_WORD_ENDINGS = new Set(["th", "ths", "ties", "en", "ens", "ened", "age", "ages", "istic", "istically"]);
+/**
+ * Endings that make a word of a hyphen prefix, with their inflections
+ * ("four-th", "short-en", "short-ening", "low-ered", "real-istic").
+ */
+const PREFIX_WORD_ENDING_RE = /^(?:ths?|ties|en(?:s|ed|ing|ings|er|ers)?|er(?:ed|ing)|ages?|istic|istically)$/u;
+
+/** Number words a numeral prefix forms ("four-teenth", "nine-tieth"); after "low-", "teens" is a word. */
+const NUMBER_WORD_PREFIXES = new Set(["four", "six", "seven", "eight", "nine"]);
+const NUMBER_WORD_ENDING_RE = /^(?:teens?|teenths?|tieths?)$/u;
 
 /**
  * Closed words (by their stem) that a hyphen prefix forms ("high-" + "light",
@@ -238,7 +245,12 @@ export function decideSplitWord(
     // A prefix keeps its hyphen before a word-sized right part, unless the
     // two form a closed word.
     if (HYPHEN_PREFIXES.has(l)) {
-        if (r.length < 3 || PREFIX_WORD_ENDINGS.has(r) || CLOSED_AFTER_PREFIX.some((stem) => (l + r).startsWith(stem))) {
+        if (
+            r.length < 3 ||
+            PREFIX_WORD_ENDING_RE.test(r) ||
+            (NUMBER_WORD_PREFIXES.has(l) && NUMBER_WORD_ENDING_RE.test(r)) ||
+            CLOSED_AFTER_PREFIX.some((stem) => (l + r).startsWith(stem))
+        ) {
             return "join";
         }
         return "keep";
