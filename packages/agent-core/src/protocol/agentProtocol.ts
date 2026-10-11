@@ -1027,6 +1027,56 @@ export interface ServedAttachmentDiagnostics {
 }
 
 /** Response to whole-document extraction request */
+/**
+ * Where a document request spent its time in the plugin, in whole
+ * milliseconds. Sent on PDF success responses so backend traces can split a
+ * fetch's latency between the plugin and the rest of the round trip. Stages
+ * that did not run are absent.
+ */
+export interface WSDocumentTimings {
+    /** From receiving the request to building the response. */
+    total_ms: number;
+    /**
+     * How the document was obtained: `cache` (the plugin's document cache had
+     * it), `extracted` (this request ran the extraction), or `shared` (another
+     * request's extraction of the same document, or a cache entry written
+     * meanwhile).
+     */
+    source: 'cache' | 'extracted' | 'shared';
+    /** Resolving the attachment's file (local path, size, remote availability). */
+    resolve_ms?: number;
+    /** Document-cache lookups before extracting. */
+    cache_lookup_ms?: number;
+    /** Reading (or downloading) the PDF bytes. */
+    file_read_ms?: number;
+    /** Page-count worker op, on a cache miss without stored metadata. */
+    page_count_ms?: number;
+    /** Extraction worker op, round trip as seen by the plugin. */
+    extract_ms?: number;
+    /**
+     * Waiting for other work, summed over the request's worker ops (page count
+     * and extraction, so part of `page_count_ms` and `extract_ms`): in the
+     * plugin's worker queue behind other requests' operations.
+     */
+    client_queue_ms?: number;
+    /** Likewise: waiting for the worker to start (spawn, MuPDF load, recycle). */
+    worker_start_ms?: number;
+    /** Likewise: sent to the worker, waiting while an earlier operation ran there. */
+    worker_queue_ms?: number;
+    /** Of `extract_ms`: the worker running the extraction. */
+    worker_op_ms?: number;
+    /**
+     * The worker when this request used it: `starting` (it waited for the
+     * worker to spawn and load), `first_extract` (no extraction had run on
+     * this worker yet, so its code was not yet optimised), or `warm`.
+     */
+    worker_state?: 'starting' | 'first_extract' | 'warm';
+    /** Writing the extracted result to the document cache. */
+    cache_write_ms?: number;
+    /** Waiting for `attachment_diagnostics` before responding. */
+    diagnostics_wait_ms?: number;
+}
+
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
     request_id: string;
@@ -1054,6 +1104,8 @@ export interface WSZoteroDocumentResponse {
     error_code?: ZoteroDocumentErrorCode | null;
     /** Worker health snapshot, attached to timeout error responses. */
     worker_diagnostics?: WSWorkerDiagnostics | null;
+    /** Where the request spent its time in the plugin (PDF success responses). */
+    timings?: WSDocumentTimings | null;
 }
 
 /** Error codes for attachment page image rendering failures */
