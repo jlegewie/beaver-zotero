@@ -408,14 +408,17 @@ export interface ParagraphTextOptions {
 
 /** Unit names a decimal prefix goes before ("mrad", "µmol", "kohm"). */
 const PREFIXED_UNITS = ["rad", "bar", "mol", "ohm", "sec", "cal", "lux"];
-const UNIT_PREFIXES = ["", "p", "n", "µ", "μ", "m", "c", "k"];
+const UNIT_PREFIXES = ["", "q", "r", "y", "z", "a", "f", "p", "n", "µ", "μ", "m", "c", "d", "da", "h", "k"];
+/** Words a prefix and a unit spell, which keep dropping a glued marker ("flux12"). */
+const PREFIXED_UNIT_WORDS = new Set(["flux", "arad"]);
 
 /**
  * Units of three or more letters a raised digit after is a power of
  * ("4 rad²", "2 mbar³", "ohm²"), not a note marker.
  */
 const UNIT_WORDS = new Set([
-    ...PREFIXED_UNITS.flatMap((unit) => UNIT_PREFIXES.map((prefix) => prefix + unit)),
+    ...PREFIXED_UNITS.flatMap((unit) => UNIT_PREFIXES.map((prefix) => prefix + unit))
+        .filter((word) => !PREFIXED_UNIT_WORDS.has(word)),
     "ohms", "ppm", "ppb", "ppt", "rpm", "mph", "kph", "atm", "torr", "dyn", "erg", "gal", "lbs",
     "arcsec", "arcmin", "mas",
 ]);

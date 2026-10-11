@@ -2240,6 +2240,38 @@ describe("manuscript line numbers in the left margin (PDF schema 5)", () => {
         }
     });
 
+    it("removes line numbers on analysed pages that skip pages between them", () => {
+        // Pages 0, 2 and 4 of a manuscript numbering 20 rows a page.
+        const pages = [0, 2, 4].map((pageIndex) => ({
+            ...makePageWithLines(
+                Array.from({ length: 20 }, (_, k) => [
+                    makeStyledLine(`${20 * pageIndex + k + 1}`, 40, 100 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`body text row ${k} on page ${pageIndex}`, 100, 100 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(removal.removalsByPage.get(2)?.has("41")).toBe(true);
+        expect(removal.removalsByPage.get(4)?.size).toBe(20);
+    });
+
+    it("keeps numbers that go back down on a later analysed page", () => {
+        const pages = [0, 2].map((pageIndex) => ({
+            ...makePageWithLines(
+                Array.from({ length: 20 }, (_, k) => [
+                    makeStyledLine(`${k + 1}`, 40, 100 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`item ${k} on page ${pageIndex}`, 100, 100 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect([...removal.removalsByPage.values()].flatMap((texts) => [...texts])).toEqual([]);
+    });
+
     /** Pages of left-margin numbers 1, 2, … running on across pages, one per body row. */
     function numberedPages(pageCount: number, perPage: number, extra: (pageIndex: number) => RawLine[] = () => []): RawPageData[] {
         let next = 1;

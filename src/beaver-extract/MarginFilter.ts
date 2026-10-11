@@ -353,10 +353,11 @@ const MAX_UNNUMBERED_ROW_SHARE = 0.25;
 /**
  * Pages whose numbers in the left zone are manuscript line numbers: at least
  * `MIN_LINE_NUMBERS_PER_PAGE` numbers stepping by one from top to bottom,
- * the count going on from the last such page. They increase across pages far
- * faster than page numbers. Read for the left zone only: line numbers stand
- * before the text rows they number, while a contents page sets its page
- * references after its entries, at the right. A numbered list can step by
+ * the count going on from such a page just before, or rising past the last
+ * such page across pages between (not analysed, or without numbers). They
+ * increase across pages far faster than page numbers. Read for the left
+ * zone only: line numbers stand before the text rows they number, while a
+ * contents page sets its page references after its entries, at the right. A numbered list can step by
  * one too, so the numbering must also cover at least half of the
  * `analysedPages` pages, with `MIN_LINE_NUMBERS_PER_PAGE_MEAN` numbers per
  * page on average, and few body text rows on the page without one: line
@@ -376,10 +377,13 @@ function lineNumberingPages(entries: PageNumberEntry[], analysedPages: number): 
     const pages = new Set<number>();
     let numbers = 0;
     let last: number | undefined;
+    let lastPage = -1;
     for (const pageIndex of [...byPage.keys()].sort((a, b) => a - b)) {
         const values = byPage.get(pageIndex)!.sort((a, b) => a.el.bbox.t - b.el.bbox.t).map((e) => e.value);
         if (values.length < MIN_LINE_NUMBERS_PER_PAGE || values.some((v, i) => i > 0 && v !== values[i - 1] + 1)) continue;
-        if (last !== undefined && values[0] !== last + 1) continue;
+        // The count goes on from the page before; across pages the analysis
+        // skipped, it only goes up.
+        if (last !== undefined && (pageIndex === lastPage + 1 ? values[0] !== last + 1 : values[0] <= last)) continue;
         const onPage = byPage.get(pageIndex)!;
         // Without row evidence (text rows off), nothing reads as line numbers.
         if (onPage[0].el.unnumberedRowsAbove === undefined) return new Set();
@@ -391,6 +395,7 @@ function lineNumberingPages(entries: PageNumberEntry[], analysedPages: number): 
         pages.add(pageIndex);
         numbers += values.length;
         last = values[values.length - 1];
+        lastPage = pageIndex;
     }
     const lineNumbered = pages.size >= 2 && 2 * pages.size >= analysedPages &&
         numbers >= MIN_LINE_NUMBERS_PER_PAGE_MEAN * pages.size;

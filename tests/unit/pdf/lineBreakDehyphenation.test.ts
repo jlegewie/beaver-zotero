@@ -574,6 +574,20 @@ describe('extractPageSentences footnote markers (PDF schema 5)', () => {
         }
     });
 
+    it('keeps the power of a unit with any lowercase SI prefix', () => {
+        for (const [text, power] of [['The yield was 4 fmol2 here.', 'fmol2'], ['It was 1 amol3 at most.', 'amol3'], ['The sea at 5 dbar2 was calm.', 'dbar2'], ['The gas at 7 hbar2 was dense.', 'hbar2'], ['It held 3 qmol2 then.', 'qmol2'], ['It held 6 rmol2 then.', 'rmol2']]) {
+            const start = text.indexOf(power) + power.length - 1;
+            const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, new Set([start]))]);
+            expect(schema5SentenceText(page)).toBe(text);
+        }
+    });
+
+    it('still drops a marker glued to a word that a prefix and a unit spell', () => {
+        const text = 'the heat flux12 rose.';
+        const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '12'))]);
+        expect(schema5SentenceText(page)).toBe('the heat flux rose.');
+    });
+
     it("sets a footnote's glued lead marker off from its text", () => {
         const text = '1AI is a collection of algorithms.';
         const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, new Set([0]))]);
