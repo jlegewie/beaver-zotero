@@ -157,15 +157,16 @@ const ALPHA_WORD_RE = /^[\p{L}][\p{L}'’-]{2,}[.,;:!?)]*$/u;
 /** A letter or digit. */
 const TEXT_CHAR_RE = /[\p{L}\p{N}]/u;
 
-/** Words of at least three letters; each two CJK characters count as one. */
-function alphaWordCount(text: string): number {
-    const cjk = text.match(CJK_RE)?.length ?? 0;
-    return text.split(/\s+/).filter((w) => ALPHA_WORD_RE.test(w)).length + Math.floor(cjk / 2);
-}
-
-function wordCount(text: string): number {
-    const cjk = text.match(CJK_RE)?.length ?? 0;
-    return text.split(/\s+/).length + Math.floor(cjk / 2);
+/**
+ * Whitespace-separated words (`RegionLine.words`) and words of at least three
+ * letters (`RegionLine.alphaWords`); each two CJK characters count as one.
+ */
+function wordCounts(text: string): { words: number; alphaWords: number } {
+    const cjk = Math.floor((text.match(CJK_RE)?.length ?? 0) / 2);
+    const tokens = text.split(/\s+/);
+    let alpha = 0;
+    for (const w of tokens) if (ALPHA_WORD_RE.test(w)) alpha++;
+    return { words: tokens.length + cjk, alphaWords: alpha + cjk };
 }
 
 const mathFontCache = new Map<string, boolean>();
@@ -222,10 +223,12 @@ function rangeMath(
         let runInk = 0;
         for (let i = s0; i < s1; i++) {
             const c = chars[i];
-            if (c === undefined || /\s/.test(c)) continue;
+            if (c === undefined) continue;
+            const cls = charClass(c);
+            if (cls & CHAR_SPACE) continue;
             runInk++;
-            if (mathFont || MATH_CHAR_RE.test(c)) math++;
-            if (RELATION_CHAR_RE.test(c)) relationSize = Math.max(relationSize, runs[r].font.size > 0 ? runs[r].font.size : size);
+            if (mathFont || cls & CHAR_MATH) math++;
+            if (cls & CHAR_RELATION) relationSize = Math.max(relationSize, runs[r].font.size > 0 ? runs[r].font.size : size);
         }
         ink += runInk;
         if (runInk > 0 && runs[r].font.name) fontInk.set(runs[r].font.name, (fontInk.get(runs[r].font.name) ?? 0) + runInk);
@@ -263,10 +266,47 @@ const BIG_OPERATOR_RE = /[∑∏∐∫∬∭∮⋀⋁⋂⋃⨀⨁⨂⨄⨆]/u;
 const OPERATOR_NAME_RE = /^(?:lim|sup|inf|max|min|arg|limsup|liminf|argmax|argmin)$/u;
 /** Operator names this many em apart or closer are one ("lim sup", "arg max"). */
 const OPERATOR_GAP_EM = 0.6;
+/** Text that may hold an operator name (`OPERATOR_NAME_RE`) or a big operator. */
+const MAY_TAKE_LIMITS_RE = /lim|sup|inf|max|min|arg|[∑∏∐∫∬∭∮⋀⋁⋂⋃⨀⨁⨂⨄⨆]/u;
+
+/** Character classes (`charClass`), as bits. */
+const CHAR_SPACE = 1;
+const CHAR_LETTER = 2;
+const CHAR_MATH = 4;
+const CHAR_RELATION = 8;
+const CHAR_BIG_OPERATOR = 16;
+
+function computeCharClass(c: string): number {
+    return (
+        (/\s/.test(c) ? CHAR_SPACE : 0) |
+        (/\p{L}/u.test(c) ? CHAR_LETTER : 0) |
+        (MATH_CHAR_RE.test(c) ? CHAR_MATH : 0) |
+        (RELATION_CHAR_RE.test(c) ? CHAR_RELATION : 0) |
+        (BIG_OPERATOR_RE.test(c) ? CHAR_BIG_OPERATOR : 0)
+    );
+}
+
+const ASCII_CHAR_CLASS = Uint8Array.from({ length: 128 }, (_, code) => computeCharClass(String.fromCharCode(code)));
+const charClassCache = new Map<string, number>();
+
+/** The classes of one character of a line (an element of `[...text]`), tested once per character. */
+function charClass(c: string): number {
+    if (c.length === 1) {
+        const code = c.charCodeAt(0);
+        if (code < 128) return ASCII_CHAR_CLASS[code];
+    }
+    let cls = charClassCache.get(c);
+    if (cls === undefined) {
+        cls = computeCharClass(c);
+        charClassCache.set(c, cls);
+    }
+    return cls;
+}
 
 /** Spans of chars [a, b) of a horizontal line that take limits (`RegionLine.limitSpans`). */
 function limitSpans(line: RawLineDetailed, chars: readonly string[], a: number, b: number, em: number): [number, number][] {
     const spans: [number, number][] = [];
+    if (!MAY_TAKE_LIMITS_RE.test(line.text)) return spans;
     const add = (x0: number, x1: number) => {
         const last = spans[spans.length - 1];
         if (last && x0 - last[1] <= OPERATOR_GAP_EM * em) last[1] = Math.max(last[1], x1);
@@ -281,13 +321,14 @@ function limitSpans(line: RawLineDetailed, chars: readonly string[], a: number, 
     };
     for (let i = a; i < b; i++) {
         const c = chars[i] ?? " ";
-        if (/\p{L}/u.test(c)) {
+        const cls = charClass(c);
+        if (cls & CHAR_LETTER) {
             if (start < 0) start = i;
             word += c;
             continue;
         }
         endWord(i);
-        if (BIG_OPERATOR_RE.test(c)) add(line.chars[i].bbox.l, line.chars[i].bbox.r);
+        if (cls & CHAR_BIG_OPERATOR) add(line.chars[i].bbox.l, line.chars[i].bbox.r);
     }
     endWord(b);
     return spans;
@@ -305,7 +346,7 @@ function linePieces(line: RawLineDetailed, chars: readonly string[], em: number)
     let start = 0;
     let prevRight = -Infinity;
     for (let i = 0; i < line.chars.length; i++) {
-        if (/\s/.test(chars[i] ?? " ")) continue;
+        if (charClass(chars[i] ?? " ") & CHAR_SPACE) continue;
         const b = line.chars[i].bbox;
         if (prevRight !== -Infinity && b.l - prevRight > SPLIT_GAP_EM * em && i > start) {
             pieces.push([start, i]);
@@ -322,7 +363,7 @@ function innerGaps(line: RawLineDetailed, chars: readonly string[], a: number, b
     const gaps: [number, number][] = [];
     let prevRight = -Infinity;
     for (let i = a; i < b; i++) {
-        if (/\s/.test(chars[i] ?? " ")) continue;
+        if (charClass(chars[i] ?? " ") & CHAR_SPACE) continue;
         const box = line.chars[i].bbox;
         if (prevRight !== -Infinity && box.l - prevRight >= min) gaps.push([prevRight, box.l]);
         prevRight = Math.max(prevRight === -Infinity ? box.r : prevRight, box.r);
@@ -381,9 +422,9 @@ function isSkewed(
     }
     // First and last inked characters.
     let first = a;
-    while (first < b && /\s/.test(chars[first])) first++;
+    while (first < b && charClass(chars[first]) & CHAR_SPACE) first++;
     let last = b - 1;
-    while (last > first && /\s/.test(chars[last])) last--;
+    while (last > first && charClass(chars[last]) & CHAR_SPACE) last--;
     if (first >= last) return false;
     const f = line.chars[first].bbox;
     const l = line.chars[last].bbox;
@@ -403,7 +444,7 @@ function isSkewed(
     let prevAcross = across(f);
     let prevAlong = along(f);
     for (let i = first + 1; i <= last; i++) {
-        if (/\s/.test(chars[i])) continue;
+        if (charClass(chars[i]) & CHAR_SPACE) continue;
         const c = line.chars[i].bbox;
         steps++;
         // Each step moves across the line and along it, as rotated text does.
@@ -481,13 +522,14 @@ export function pageLines(page: RawPageData): RegionLine[] {
                     : [[0, chars.length]];
             source++;
             for (const [a, b] of pieces) {
-                const text = chars.slice(a, b).join("").trim();
+                // One piece is the whole line: `chars` joined is its text.
+                const text = (pieces.length === 1 ? line.text : chars.slice(a, b).join("")).trim();
                 if (!text) continue;
                 let bbox: Rect = [line.bbox.l, line.bbox.t, line.bbox.r, line.bbox.b];
                 if (pieces.length > 1) {
                     bbox = [Infinity, Infinity, -Infinity, -Infinity];
                     for (let i = a; i < b; i++) {
-                        if (/\s/.test(chars[i])) continue;
+                        if (charClass(chars[i]) & CHAR_SPACE) continue;
                         const cb = detailed.chars[i].bbox;
                         bbox = [Math.min(bbox[0], cb.l), Math.min(bbox[1], cb.t), Math.max(bbox[2], cb.r), Math.max(bbox[3], cb.b)];
                     }
@@ -496,15 +538,16 @@ export function pageLines(page: RawPageData): RegionLine[] {
                 const operators = !rot && detailed.chars?.length === chars.length ? limitSpans(detailed, chars, a, b, Math.max(1, size)) : [];
                 const maxSize = m.maxSize || size;
                 const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, chars, a, b, WORD_GAP_EM * Math.max(1, size)) : [];
+                const counts = wordCounts(text);
                 lines.push({
                     bbox,
                     text,
                     size,
                     rot,
                     ...(line.rotation === 180 ? { turned: true as const } : {}),
-                    words: wordCount(text),
+                    words: counts.words,
                     nchar: text.length,
-                    alphaWords: alphaWordCount(text),
+                    alphaWords: counts.alphaWords,
                     mathChars: m.math,
                     ...(m.relationSize ? { relationSize: m.relationSize } : {}),
                     inkSize: m.inkSize,
