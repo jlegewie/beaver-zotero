@@ -18,10 +18,19 @@
 import type { PageLine, PageLineResult, ColumnLineResult } from "./LineDetector";
 import type { BoundingBox, RawStyleRun, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
 import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
-import type { Rect } from "./ColumnDetector";
+import { crossesDivider, fillZoneFor, type ColumnDetectionOptions, type Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { START_SIGNALS, START_VETOES, type StartTrace } from "./boundaries/rules";
-import { boundaryLine, type BoundaryBlock, type BoundaryPage, type LineDecision } from "./boundaries/input";
+import {
+    boundaryLine,
+    type BlockThresholds,
+    type BoundaryBlock,
+    type BoundaryPage,
+    type LineDecision,
+} from "./boundaries/input";
+import { FEATURES as BOUNDARY_FEATURES, boundaryRow, prepareBoundaryPage } from "./boundaries/features";
+import { boundaryProbability, type BoundaryModel } from "./boundaries/model";
+import { BOUNDARY_MODEL } from "./boundaries/weights";
 
 // ============================================================================
 // Types
@@ -80,6 +89,15 @@ export interface ParagraphDetectionSettings {
      * headings (default: false). Enabled by the PDF schema preset.
      */
     pageBodyStyles?: boolean;
+    /**
+     * Decide where items start with the learned boundary model
+     * (`boundaries/model.ts`) instead of `startNewItem`, and continue an
+     * item across a cut between stacked blocks of one printed column
+     * (`detectLearnedItems`; default: false). Applies only to pages whose
+     * lines carry glyph metrics (`hasGlyphMetrics`); others keep
+     * `startNewItem`. Enabled by the PDF schema preset.
+     */
+    learnedBoundaries?: boolean;
 }
 
 const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
@@ -96,6 +114,7 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     headingLabelFilters: true,
     isolatedHeadings: false,
     pageBodyStyles: false,
+    learnedBoundaries: false,
 };
 
 /**
@@ -166,8 +185,16 @@ export interface ContentItem {
     id: string;
     /** Bounding box for the item */
     bbox: BoundingBox;
-    /** Column index this item belongs to */
+    /** Column index this item belongs to: the block of its first line */
     columnIndex: number;
+    /**
+     * Column index of the item's last line, set only when it differs from
+     * `columnIndex`: an item joined across a cut between stacked blocks
+     * (`learnedBoundaries`).
+     */
+    endColumnIndex?: number;
+    /** Column index of each of the item's lines, set with `endColumnIndex`. */
+    lineColumns?: number[];
 }
 
 /**
@@ -3545,19 +3572,288 @@ export interface DetectParagraphsOptions {
      */
     trackItemLines?: boolean;
     /**
+     * Region items of the page (figures, tables, equations) in the
+     * detector's frame, as [l, t, r, b]: the item-boundary input's regions
+     * (`learnedBoundaries` and `boundaries`).
+     */
+    regions?: [number, number, number, number][];
+    /**
+     * Layout barriers the column detector kept blocks apart at, in the
+     * detector's frame: shaded containers and divider rules. With
+     * `learnedBoundaries`, an item never continues across one.
+     */
+    barriers?: Pick<ColumnDetectionOptions, "fillBoundaries" | "dividerLines">;
+    /**
      * Receives the page's blocks as the item-boundary features read them
      * (`boundaries/input.ts`), with the flow lines in the same order. Only
      * the training export passes it.
      */
     boundaries?: BoundaryCapture;
+    /** The boundary model of `learnedBoundaries` (default `BOUNDARY_MODEL`). */
+    boundaryModel?: BoundaryModel;
 }
 
 /** Captures the item-boundary input of a page (`DetectParagraphsOptions.boundaries`). */
 export interface BoundaryCapture {
-    /** Region items of the page in the detector's frame, as [l, t, r, b]. */
-    regions: [number, number, number, number][];
     /** Called once per page: the input, and its lines in flow order (blocks in reading order). */
     page(input: BoundaryPage, flow: PageLine[]): void;
+}
+
+/** The block thresholds the item-boundary features read. */
+function blockThresholds(t: ColumnThresholds): BlockThresholds {
+    return {
+        leftEdgeMode: t.leftEdgeMode,
+        rightEdgeMode: t.rightEdgeMode,
+        leftEdgeMad: t.leftEdgeMad,
+        rightEdgeMad: t.rightEdgeMad,
+        maxRightEdge: t.maxRightEdge,
+        indentExcessThreshold: t.indentExcessThreshold,
+        earlyEndExcessThreshold: t.earlyEndExcessThreshold,
+        gapExcessThreshold: t.gapExcessThreshold,
+        medianGap: t.medianGap,
+    };
+}
+
+/** The item-boundary input of a page, around its blocks. */
+function boundaryPage(
+    lineResult: PageLineResult,
+    bodyStyles: TextStyle[] | null,
+    pageThresholds: PageThresholds,
+    regions: [number, number, number, number][],
+    blocks: BoundaryBlock[],
+): BoundaryPage {
+    const body = bodyStyles?.[0];
+    return {
+        pageIndex: lineResult.pageIndex,
+        width: lineResult.width,
+        height: lineResult.height,
+        body: body
+            ? { size: body.exactSize ?? body.size, font: body.font, bold: body.bold, italic: body.italic }
+            : null,
+        medianHeight: pageThresholds.medianHeight,
+        gapExcessThreshold: pageThresholds.gapExcessThreshold,
+        regions,
+        blocks,
+    };
+}
+
+const SIDE_BY_SIDE = BOUNDARY_FEATURES.indexOf("sideBySide");
+const BLOCK_OVERLAP = BOUNDARY_FEATURES.indexOf("blockOverlap");
+/**
+ * Least horizontal overlap of two blocks (share of the narrower one's width)
+ * for an item to continue from one into the other: blocks of one printed
+ * column overlap; a block beside another doesn't.
+ */
+const MIN_JOIN_OVERLAP = 0.3;
+const TEXT_BETWEEN = BOUNDARY_FEATURES.indexOf("textBetween");
+const REGION_BETWEEN = BOUNDARY_FEATURES.indexOf("regionBetween");
+
+const lineRect = (line: PageLine): Rect => ({
+    x: line.bbox.l,
+    y: line.bbox.t,
+    w: line.bbox.r - line.bbox.l,
+    h: line.bbox.b - line.bbox.t,
+});
+
+/**
+ * Whether the column detector's layout barriers keep two lines apart: a
+ * divider rule runs between them, or they sit in different shaded
+ * containers (or one inside a container and one outside).
+ */
+function layoutBarrierBetween(above: PageLine, below: PageLine, barriers: DetectParagraphsOptions["barriers"]): boolean {
+    const fills = barriers?.fillBoundaries ?? [];
+    const dividers = barriers?.dividerLines ?? [];
+    const a = lineRect(above);
+    const b = lineRect(below);
+    if (fills.length > 0 && fillZoneFor(a, fills) !== fillZoneFor(b, fills)) return true;
+    return dividers.length > 0 && crossesDivider(a, b, dividers);
+}
+
+const lastOf = <T>(values: readonly T[]): T => values[values.length - 1];
+
+/**
+ * The previous line extends below this one by more than this line's height:
+ * the line wraps around a drop cap or another tall element beside it (the
+ * drop-cap check of `startNewItem`).
+ */
+function wrapsAroundTallLine(prevLine: PageLine, line: PageLine): boolean {
+    return prevLine.bbox.b > line.bbox.b + bboxHeight(line.bbox);
+}
+
+/**
+ * Whether the walk recorded glyph metrics for the page's lines (schema
+ * presets with `styleRuns`): the boundary model's gap features are measured
+ * from baselines, so it runs only on such input.
+ */
+function hasGlyphMetrics(lineResult: PageLineResult): boolean {
+    return lineResult.columnResults.some((col) => col.lines.some((line) => line.spans.some((span) => span.glyphMetrics?.length)));
+}
+
+/** Items of a page's blocks, as `processColumnLines` returns them for one block. */
+interface FlowItems {
+    pageContent: string;
+    items: ContentItem[];
+    itemLines: PageLine[][];
+    itemLineRoles: HangingRole[][];
+    paragraphCount: number;
+    headerCount: number;
+}
+
+/**
+ * Items of a page from the learned boundary model (`learnedBoundaries`).
+ *
+ * For every line of a block below its first, the model's start probability
+ * replaces `startNewItem`: the line starts an item when the probability
+ * reaches the model's threshold. A block's first line starts an item, except
+ * where the column detector cut one printed column into blocks one below the
+ * other: when the blocks overlap horizontally (`MIN_JOIN_OVERLAP`), the line
+ * is not beside the previous block's last line (`sideBySide`), no other
+ * text, no region and no layout barrier (divider rule, shaded container
+ * edge: `layoutBarrierBetween`) lies between them and the model says the
+ * line continues, the item carries on across the cut. The blocks may
+ * overlap vertically. Column breaks, pages and regions never join; sentence mapping links
+ * their sentences (`annotateColumnContinuations`).
+ *
+ * A line wrapping around a drop cap (`wrapsAroundTallLine`) continues the
+ * previous line's item whatever the model says: drop caps are too rare in
+ * the training data for the model to learn them.
+ *
+ * The model reads no heuristic decision, so `startNewItem` does not run and
+ * the input's heuristic trace is empty. Everything after the decision is the
+ * detector's own: an item is a heading by `processCurrentLinesAsItem`, keeps
+ * its lines' hanging roles, and belongs to the block it starts in (its
+ * `columnIndex`, thresholds, and per-block counters); an item ending in a
+ * later block records it as `endColumnIndex`, and each line's block as
+ * `lineColumns`.
+ */
+function detectLearnedItems(
+    columns: ColumnLineResult[],
+    lineResult: PageLineResult,
+    pageThresholds: PageThresholds,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    itemCounters: ItemCounters,
+    bodyAllCaps: boolean,
+    regions: [number, number, number, number][],
+    barriers: DetectParagraphsOptions["barriers"],
+    model: BoundaryModel,
+): FlowItems & { input: BoundaryPage } {
+    const blocks = columns.map((col) => {
+        const thresholds = calculateColumnThresholds(col.lines, pageThresholds, settings, bodyStyles, bodyAllCaps);
+        const roles: HangingRole[] = settings.hangingIndentBlocks
+            ? detectHangingRoles(col.lines, pageThresholds.medianHeight)
+            : new Array(col.lines.length).fill(null);
+        return { col, thresholds, roles };
+    });
+    const input = boundaryPage(
+        lineResult,
+        bodyStyles,
+        pageThresholds,
+        regions,
+        blocks.map(({ col, thresholds, roles }) => ({
+            index: col.columnIndex,
+            lines: col.lines.map((line, k) =>
+                boundaryLine(line, {
+                    start: false,
+                    trace: null,
+                    role: roles[k],
+                    headerStyle: isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps),
+                    isolatedHeading: thresholds.isolatedHeading[k],
+                }),
+            ),
+            thresholds: blockThresholds(thresholds),
+        })),
+    );
+
+    // Decisions: the page's first line starts; every other line asks the model.
+    const prep = prepareBoundaryPage(input);
+    const starts = input.blocks.map((block, b) =>
+        block.lines.map((line, j) => {
+            let start = true;
+            if (b > 0 || j > 0) {
+                const row = boundaryRow(prep, b, j);
+                const p = boundaryProbability(model, row);
+                line.probability = p;
+                const prevLine = j > 0 ? blocks[b].col.lines[j - 1] : lastOf(blocks[b - 1].col.lines);
+                const continues = p < model.threshold || wrapsAroundTallLine(prevLine, blocks[b].col.lines[j]);
+                start = j > 0
+                    ? !continues
+                    : !(
+                          continues &&
+                          row[SIDE_BY_SIDE] === 0 &&
+                          row[BLOCK_OVERLAP] >= MIN_JOIN_OVERLAP &&
+                          row[TEXT_BETWEEN] === 0 &&
+                          row[REGION_BETWEEN] === 0 &&
+                          !layoutBarrierBetween(prevLine, blocks[b].col.lines[0], barriers)
+                      );
+            }
+            line.start = start;
+            return start;
+        }),
+    );
+
+    const out: FlowItems = {
+        pageContent: "",
+        items: [],
+        itemLines: [],
+        itemLineRoles: [],
+        paragraphCount: 0,
+        headerCount: 0,
+    };
+    // Per-block item counters, as `processColumnLines` keeps them.
+    const counts = blocks.map(() => ({ paragraph: 0, header: 0 }));
+    let current: { block: number; first: number; lines: PageLine[]; roles: HangingRole[]; blocks: number[] } | null = null;
+    const finish = () => {
+        if (!current) return;
+        const { block: b, first, lines, roles, blocks: lineBlocks } = current;
+        const lastBlock = lineBlocks[lineBlocks.length - 1];
+        const { col, thresholds } = blocks[b];
+        const result = processCurrentLinesAsItem(
+            lines,
+            out.pageContent,
+            counts[b].paragraph,
+            counts[b].header,
+            itemCounters,
+            col.columnIndex,
+            lineResult.pageIndex,
+            bodyStyles,
+            settings,
+            thresholds,
+            col.lines.length,
+            bodyAllCaps,
+            // The previous block's last line, for the item opening a block.
+            first === 0 && b > 0 ? blocks[b - 1].col.lines[blocks[b - 1].col.lines.length - 1] : null,
+        );
+        if (lastBlock !== b) {
+            result.item.endColumnIndex = blocks[lastBlock].col.columnIndex;
+            result.item.lineColumns = lineBlocks.map((k) => blocks[k].col.columnIndex);
+        }
+        out.pageContent = result.pageContent;
+        out.items.push(result.item);
+        out.itemLines.push(lines);
+        out.itemLineRoles.push(roles);
+        if (result.item.type === "header") {
+            counts[b].header++;
+            out.headerCount++;
+        } else {
+            counts[b].paragraph++;
+            out.paragraphCount++;
+        }
+    };
+    blocks.forEach(({ col, roles }, b) => {
+        col.lines.forEach((line, j) => {
+            if (starts[b][j] || !current) {
+                finish();
+                current = { block: b, first: j, lines: [line], roles: [roles[j]], blocks: [b] };
+            } else {
+                current.lines.push(line);
+                current.roles.push(roles[j]);
+                current.blocks.push(b);
+            }
+        });
+    });
+    finish();
+    return { ...out, input };
 }
 
 /**
@@ -3590,6 +3886,24 @@ export function detectParagraphs(
     if (opts.pageBodyStyles && bodyStyles) {
         const pageStyle = pageBodyStyle(lineResult.columnResults, bodyStyles);
         if (pageStyle) bodyStyles = [...bodyStyles, pageStyle];
+    }
+
+    if (opts.learnedBoundaries && hasGlyphMetrics(lineResult)) {
+        const columns = lineResult.columnResults.filter((col) => col.lines.length > 0);
+        const learned = detectLearnedItems(
+            columns,
+            lineResult,
+            pageThresholds,
+            bodyStyles,
+            opts,
+            itemCounters,
+            bodyAllCaps,
+            options.regions ?? [],
+            options.barriers,
+            options.boundaryModel ?? BOUNDARY_MODEL,
+        );
+        options.boundaries?.page(learned.input, columns.flatMap((col) => col.lines));
+        return paragraphResult(lineResult, learned, options);
     }
 
     let pageContent = "";
@@ -3634,72 +3948,63 @@ export function detectParagraphs(
             decisions
         );
         if (boundaryBlocks && decisions) {
-            const t = columnThresholds;
             boundaryBlocks.push({
                 index: colResult.columnIndex,
                 lines: colResult.lines.map((line, k) => boundaryLine(line, decisions[k])),
-                thresholds: {
-                    leftEdgeMode: t.leftEdgeMode,
-                    rightEdgeMode: t.rightEdgeMode,
-                    leftEdgeMad: t.leftEdgeMad,
-                    rightEdgeMad: t.rightEdgeMad,
-                    maxRightEdge: t.maxRightEdge,
-                    indentExcessThreshold: t.indentExcessThreshold,
-                    earlyEndExcessThreshold: t.earlyEndExcessThreshold,
-                    gapExcessThreshold: t.gapExcessThreshold,
-                    medianGap: t.medianGap,
-                },
+                thresholds: blockThresholds(columnThresholds),
             });
             flow.push(...colResult.lines);
         }
 
         pageContent = result.pageContent;
         allItems.push(...result.items);
-        if (options.trackItemLines) {
-            allItemLines.push(...result.itemLines);
-            allItemLineRoles.push(...result.itemLineRoles);
-        }
+        allItemLines.push(...result.itemLines);
+        allItemLineRoles.push(...result.itemLineRoles);
         totalParagraphs += result.paragraphCount;
         totalHeaders += result.headerCount;
         prevDocLine = colResult.lines[colResult.lines.length - 1];
     }
 
-    allItems.forEach((item, index) => {
-        item.id = `p${lineResult.pageIndex}:i${index}`;
-    });
-
     if (options.boundaries && boundaryBlocks) {
-        const body = bodyStyles?.[0];
         options.boundaries.page(
-            {
-                pageIndex: lineResult.pageIndex,
-                width: lineResult.width,
-                height: lineResult.height,
-                body: body
-                    ? { size: body.exactSize ?? body.size, font: body.font, bold: body.bold, italic: body.italic }
-                    : null,
-                medianHeight: pageThresholds.medianHeight,
-                gapExcessThreshold: pageThresholds.gapExcessThreshold,
-                regions: options.boundaries.regions,
-                blocks: boundaryBlocks,
-            },
+            boundaryPage(lineResult, bodyStyles, pageThresholds, options.regions ?? [], boundaryBlocks),
             flow,
         );
     }
+
+    return paragraphResult(
+        lineResult,
+        {
+            pageContent,
+            items: allItems,
+            itemLines: allItemLines,
+            itemLineRoles: allItemLineRoles,
+            paragraphCount: totalParagraphs,
+            headerCount: totalHeaders,
+        },
+        options,
+    );
+}
+
+/** The page's result from its items; ids are page-scoped positions. */
+function paragraphResult(lineResult: PageLineResult, flow: FlowItems, options: DetectParagraphsOptions): PageParagraphResult {
+    flow.items.forEach((item, index) => {
+        item.id = `p${lineResult.pageIndex}:i${index}`;
+    });
 
     const baseResult: PageParagraphResult = {
         pageIndex: lineResult.pageIndex,
         width: lineResult.width,
         height: lineResult.height,
-        pageContent,
-        items: allItems,
-        paragraphCount: totalParagraphs,
-        headerCount: totalHeaders,
+        pageContent: flow.pageContent,
+        items: flow.items,
+        paragraphCount: flow.paragraphCount,
+        headerCount: flow.headerCount,
     };
 
     if (options.trackItemLines) {
-        baseResult.itemLines = allItemLines;
-        baseResult.itemLineRoles = allItemLineRoles;
+        baseResult.itemLines = flow.itemLines;
+        baseResult.itemLineRoles = flow.itemLineRoles;
     }
 
     return baseResult;

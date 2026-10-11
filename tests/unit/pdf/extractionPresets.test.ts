@@ -4,7 +4,9 @@ import { SCHEMA_VERSION } from "@beaver/agent-core/extract/schema";
 import {
     CURRENT_PDF_EXTRACTION_PRESET,
     PRODUCIBLE_PDF_SCHEMA_VERSIONS,
+    applyPresetOverrides,
     pdfExtractionPreset,
+    type PresetOverrides,
 } from "../../../src/beaver-extract/schema/presets";
 import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
@@ -24,10 +26,11 @@ describe("PDF extraction presets", () => {
             idScheme: "document",
             regions: false,
             pageNumberRuns: false,
+            learnedBoundaries: false,
         });
     });
 
-    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions and page-number runs on and ids page-scoped for schema 5", () => {
+    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions, page-number runs and learned boundaries on and ids page-scoped for schema 5", () => {
         expect(pdfExtractionPreset("5")).toEqual({
             schemaVersion: "5",
             textRepair: true,
@@ -42,6 +45,7 @@ describe("PDF extraction presets", () => {
             idScheme: "page",
             regions: true,
             pageNumberRuns: true,
+            learnedBoundaries: true,
         });
     });
 
@@ -61,6 +65,20 @@ describe("PDF extraction presets", () => {
         for (const version of PRODUCIBLE_PDF_SCHEMA_VERSIONS) {
             expect(pdfExtractionPreset(version)).toBeDefined();
         }
+    });
+});
+
+describe("preset overrides", () => {
+    it("turns an overridable switch off without touching the preset", () => {
+        const preset = pdfExtractionPreset("5")!;
+        expect(applyPresetOverrides(preset, { learnedBoundaries: false })).toEqual({ ...preset, learnedBoundaries: false });
+        expect(preset.learnedBoundaries).toBe(true);
+        expect(applyPresetOverrides(preset, undefined)).toBe(preset);
+    });
+
+    it("rejects switches that can't be overridden", () => {
+        const preset = pdfExtractionPreset("5")!;
+        expect(() => applyPresetOverrides(preset, { regions: false } as unknown as PresetOverrides)).toThrow(/can't be overridden/);
     });
 });
 

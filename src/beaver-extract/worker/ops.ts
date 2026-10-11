@@ -71,8 +71,10 @@ import {
     CURRENT_PDF_EXTRACTION_PRESET,
     ITEM_KINDS,
     SCHEMA_VERSION,
+    applyPresetOverrides,
     pdfExtractionPreset,
     type PdfExtractionPreset,
+    type PresetOverrides,
     type BeaverExtractResult,
     type ExtractionDebug,
     type DebugSentence,
@@ -882,8 +884,8 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
 
 /**
  * Paragraph settings with the schema preset's switches applied. The caller may
- * override `hangingIndentBlocks`; `headingLabelFilters`, `isolatedHeadings` and
- * `pageBodyStyles` always follow the preset.
+ * override `hangingIndentBlocks`; `headingLabelFilters`, `isolatedHeadings`,
+ * `pageBodyStyles` and `learnedBoundaries` always follow the preset.
  */
 function presetParagraphSettings(
     preset: PdfExtractionPreset,
@@ -895,13 +897,14 @@ function presetParagraphSettings(
         headingLabelFilters: preset.headingLabelFilters,
         isolatedHeadings: preset.isolatedHeadings,
         pageBodyStyles: preset.pageBodyStyles,
+        learnedBoundaries: preset.learnedBoundaries,
     };
 }
 
-function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtractionPreset {
+function resolvePdfExtractionPreset(schemaVersion: string | undefined, overrides?: PresetOverrides): PdfExtractionPreset {
     const preset = schemaVersion == null ? CURRENT_PDF_EXTRACTION_PRESET : pdfExtractionPreset(schemaVersion);
     if (!preset) throw new Error(`No extraction preset for PDF schema ${schemaVersion}`);
-    return preset;
+    return applyPresetOverrides(preset, overrides);
 }
 
 /**
@@ -970,6 +973,8 @@ export async function opExtract(
         includeDiagnostics?: boolean;
         /** PDF schema version to produce; defaults to the current version. */
         schemaVersion?: string;
+        /** Development only (CLI): switches of the schema's preset to override. */
+        presetOverrides?: PresetOverrides;
     },
 ): Promise<OpReply<BeaverExtractResult>> {
     // Defense in depth: the facade enforces this too, but the worker is
@@ -996,7 +1001,7 @@ export async function opExtract(
     const engine: "block" | "paragraph" | "structured" = isStructured
         ? "structured"
         : (explicitEngine ?? "paragraph");
-    const preset = resolvePdfExtractionPreset(args.schemaVersion);
+    const preset = resolvePdfExtractionPreset(args.schemaVersion, args.presetOverrides);
 
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
@@ -1148,6 +1153,8 @@ type StructuredRunArgs = {
     analysisWindow?: number;
     /** PDF schema version to produce; defaults to the current version. */
     schemaVersion?: string;
+    /** Development only (CLI): switches of the schema's preset to override. */
+    presetOverrides?: PresetOverrides;
 };
 
 /**
@@ -1163,7 +1170,7 @@ async function withStructuredRun<T>(
     /** Observe the region pass or the item-boundary input of every page (training exports). */
     observers: StructuredRunObservers = {},
 ): Promise<T> {
-    const preset = resolvePdfExtractionPreset(args.schemaVersion);
+    const preset = resolvePdfExtractionPreset(args.schemaVersion, args.presetOverrides);
     const itemPasses = (itemPassesFor ?? createItemPasses)(preset);
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
@@ -1346,7 +1353,7 @@ export async function opItemsExport(
 export async function opRegionsExport(
     args: StructuredRunArgs & { pages?: number[] },
 ): Promise<OpReply<RegionsExportRow>> {
-    const preset = resolvePdfExtractionPreset(args.schemaVersion);
+    const preset = resolvePdfExtractionPreset(args.schemaVersion, args.presetOverrides);
     if (!preset.regions) throw new Error(`PDF schema ${preset.schemaVersion} has no region detection`);
     const bboxPrecision = args.structured?.bboxPrecision ?? 1;
     const collector = new RegionsExportCollector(bboxPrecision, args.pages ? new Set(args.pages) : undefined);

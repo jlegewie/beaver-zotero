@@ -124,7 +124,7 @@ export interface FilteredParagraphContext {
      * Receives the item-boundary input of the target page; the region
      * barriers are its regions (training export only).
      */
-    boundaries?: Pick<BoundaryCapture, "page">;
+    boundaries?: BoundaryCapture;
 }
 
 /**
@@ -420,19 +420,14 @@ export function detectFilteredParagraphs(
                 { paragraph: 0, header: 0 },
                 {
                     trackItemLines: true,
-                    ...(ctx.boundaries
-                        ? {
-                              boundaries: {
-                                  regions: regionBarriers.map(({ box }): [number, number, number, number] => [
-                                      box.x,
-                                      box.y,
-                                      box.x + box.w,
-                                      box.y + box.h,
-                                  ]),
-                                  page: ctx.boundaries.page,
-                              },
-                          }
-                        : {}),
+                    regions: regionBarriers.map(({ box }): [number, number, number, number] => [
+                        box.x,
+                        box.y,
+                        box.x + box.w,
+                        box.y + box.h,
+                    ]),
+                    barriers: { fillBoundaries, dividerLines },
+                    ...(ctx.boundaries ? { boundaries: ctx.boundaries } : {}),
                 },
             );
             paragraphDetectMs = performance.now() - tParagraphDetect;

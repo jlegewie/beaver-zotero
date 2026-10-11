@@ -11,7 +11,8 @@ import {
     planEntries,
     type EntryPagePlan,
 } from "../../../src/beaver-extract/references/entries";
-import type { InputItem, InputLine, InputPage } from "../../../src/beaver-extract/features/itemInput";
+import { buildInputPage, type InputItem, type InputLine, type InputPage } from "../../../src/beaver-extract/features/itemInput";
+import type { StyleProfile } from "@beaver/agent-core/extract/types";
 
 function bbox(l: number, t: number, r: number, b: number): BoundingBox {
     return { l, t, r, b, origin: "top-left" };
@@ -88,6 +89,59 @@ describe("applyReferencePlan", () => {
             "continues across the column break.",
         ]);
         expect(out.map((i) => i.kind)).toEqual(["reference", "reference"]);
+    });
+
+    it("merges a continuation into a previous reference that ends in its column", () => {
+        const input = draft(
+            [
+                [pageLine("3. Singh, P., et al., Antimicrobial Effects.", 100), pageLine("Nanomaterials, 2018. 8(12):", 112)],
+                [pageLine("p. 1009.", 124, 70)],
+            ],
+            undefined,
+            [0, 1],
+        );
+        expect(applyReferencePlan(input, plan(2, { mergeWithPrevious: [false, true] }))).toHaveLength(2);
+        // The first entry was joined across stacked blocks: its second line is in block 1.
+        Object.assign(input[0], { endColumnIndex: 1, lineColumns: [0, 1] });
+        const out = applyReferencePlan(input, plan(2, { mergeWithPrevious: [false, true] }));
+        expect(out.map((i) => i.text)).toEqual(["3. Singh, P., et al., Antimicrobial Effects. Nanomaterials, 2018. 8(12): p. 1009."]);
+        expect(out[0]).toMatchObject({ columnIndex: 0, endColumnIndex: 1, lineColumns: [0, 1, 1] });
+    });
+
+    it("derives a rebuilt entry's blocks from its lines, so a merge chain across stacked blocks continues", () => {
+        // An entry joined across blocks 0–1, a fragment spanning blocks 1–2, then a continuation in block 2.
+        const joined = (text: string, lines: PageLine[], columns: number[]): DraftItem => ({
+            ...draftItem(text, lines, columns[0]),
+            endColumnIndex: columns[columns.length - 1],
+            lineColumns: columns,
+        });
+        const input = [
+            joined("Smith, J. 2010. A title that", [pageLine("Smith, J. 2010. A title that", 100), pageLine("wraps into the next block", 130)], [0, 1]),
+            joined("and on into a third block", [pageLine("and on", 142, 70), pageLine("into a third block", 170, 70)], [1, 2]),
+            draftItem("Journal 3: 1-10.", [pageLine("Journal 3: 1-10.", 182, 70)], 2),
+        ];
+        const out = applyReferencePlan(input, plan(3, { mergeWithPrevious: [false, true, true] }));
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ columnIndex: 0, endColumnIndex: 2, lineColumns: [0, 1, 1, 2, 2] });
+    });
+
+    it("gives each piece of a split joined entry the blocks of its own lines", () => {
+        const lines = [pageLine("Smith, J. 2010. A title.", 100), pageLine("Jones, K. 2011. Another.", 130)];
+        const item: DraftItem = { ...draftItem("Smith … Jones …", lines, 0), endColumnIndex: 1, lineColumns: [0, 1] };
+        const out = applyReferencePlan([item], plan(1, { splits: [[1]] }));
+        expect(out.map((piece) => [piece.columnIndex, piece.endColumnIndex, piece.lineColumns])).toEqual([
+            [0, undefined, undefined],
+            [1, undefined, undefined],
+        ]);
+        expect(out[0]).not.toHaveProperty("endColumnIndex");
+    });
+
+    it("carries an item's end block into the reference model input", () => {
+        const items = draft([[pageLine("Smith, J. 2010. A title", 100)], [pageLine("Jones, K. 2011.", 120)]], undefined, [0, 1]);
+        items[0].endColumnIndex = 1;
+        const page = buildInputPage({ pageIndex: 0, width: 600, height: 800, items }, {} as StyleProfile);
+        expect(page.items.map((item) => [item.column, item.endColumn])).toEqual([[0, 1], [1, undefined]]);
+        expect(page.items[1]).not.toHaveProperty("endColumn");
     });
 
     it("merges an item's opening lines into the previous entry and keeps its later entries apart", () => {
@@ -210,6 +264,21 @@ describe("planEntries", () => {
             { pageIndex: 9, width: 531, height: 657, bodySize: 8, items: second },
         ];
     }
+
+    it("continues an entry that ends in the block a continuation starts in (an item joined across stacked blocks)", () => {
+        const reference = [
+            [false, true, true],
+            [true, true, true, true, true, false],
+        ];
+        // The run-together item starts in block 0 and ends in block 1; "1890–1935 …" sits below it in block 1.
+        const pages = document();
+        pages[1].items.forEach((item, i) => (item.column = i === 0 ? 0 : 1));
+        pages[1].items[0].endColumn = 1;
+        expect(planEntries(pages, reference)[1].mergeWithPrevious[1]).toBe(true);
+        // Without the end block the previous item reads as another column's: no line before, no merge.
+        delete pages[1].items[0].endColumn;
+        expect(planEntries(pages, reference)[1].mergeWithPrevious[1]).toBe(false);
+    });
 
     it("splits run-together entries and joins broken-off continuations of the items labeled references", () => {
         const pages = document();

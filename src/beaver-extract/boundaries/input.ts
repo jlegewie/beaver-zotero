@@ -46,10 +46,15 @@ export interface BoundaryLine {
     coreBottom: number | null;
     /** The paragraph detector's decision: the line starts an item. */
     start: boolean;
-    /** Its rule, signals and vetoes (`StartTrace`). */
-    rule: StartRule;
+    /**
+     * The heuristic's rule, signals and vetoes (`StartTrace`); `rule` is null
+     * (signals and vetoes 0) where the boundary model decided instead.
+     */
+    rule: StartRule | null;
     signals: number;
     vetoes: number;
+    /** The boundary model's start probability, where it decided. */
+    probability?: number;
     /** Hanging-indent role: 0 none, 1 entry start, 2 continuation. */
     role: 0 | 1 | 2;
     /** `isHeaderStyle` of the line on its own (no gap context). */
@@ -97,7 +102,8 @@ export interface BoundaryPage {
 /** What the paragraph detector decided about one line, beside the line itself. */
 export interface LineDecision {
     start: boolean;
-    trace: StartTrace;
+    /** Why the heuristic decided; null where the boundary model decides. */
+    trace: StartTrace | null;
     role: HangingRole;
     headerStyle: boolean;
     isolatedHeading: boolean;
@@ -148,9 +154,9 @@ export function boundaryLine(line: PageLine, decision: LineDecision): BoundaryLi
         coreTop: geometry?.coreTop ?? null,
         coreBottom: geometry?.coreBottom ?? null,
         start: decision.start,
-        rule: decision.trace.rule,
-        signals: decision.trace.signals,
-        vetoes: decision.trace.vetoes,
+        rule: decision.trace?.rule ?? null,
+        signals: decision.trace?.signals ?? 0,
+        vetoes: decision.trace?.vetoes ?? 0,
         role: decision.role === "entry" ? 1 : decision.role === "continuation" ? 2 : 0,
         headerStyle: decision.headerStyle,
         isolatedHeading: decision.isolatedHeading,
