@@ -106,16 +106,44 @@ export interface PdfExtractionPreset {
      * (`ParagraphDetectionSettings.noteMarkers`).
      */
     noteMarkers: boolean;
+    /**
+     * Item boundaries from the learned boundary model instead of the
+     * paragraph detector's line rules, and joins of blocks the column
+     * detector cut out of one printed column
+     * (`ParagraphDetectionSettings.learnedBoundaries`).
+     */
+    learnedBoundaries: boolean;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, exclusiveColumnLines: false, lineJoins: false, noteMarkers: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, exclusiveColumnLines: true, lineJoins: true, noteMarkers: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, exclusiveColumnLines: false, lineJoins: false, noteMarkers: false, learnedBoundaries: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, exclusiveColumnLines: true, lineJoins: true, noteMarkers: true, learnedBoundaries: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */
 export function pdfExtractionPreset(schemaVersion: string): PdfExtractionPreset | undefined {
     return PDF_EXTRACTION_PRESETS[schemaVersion];
+}
+
+/**
+ * Preset switches a development caller (the CLI) may override, to compare a
+ * switch against its schema's setting (training exports, evaluation). The
+ * plugin never overrides presets: the output is no longer the schema version
+ * it names.
+ */
+export const OVERRIDABLE_PRESET_SWITCHES = ["learnedBoundaries"] as const;
+
+export type PresetOverrides = Partial<Pick<PdfExtractionPreset, (typeof OVERRIDABLE_PRESET_SWITCHES)[number]>>;
+
+/** `preset` with `overrides` applied; throws on a switch that can't be overridden. */
+export function applyPresetOverrides(preset: PdfExtractionPreset, overrides: PresetOverrides | undefined): PdfExtractionPreset {
+    if (!overrides) return preset;
+    for (const [key, value] of Object.entries(overrides)) {
+        if (!(OVERRIDABLE_PRESET_SWITCHES as readonly string[]).includes(key) || typeof value !== "boolean") {
+            throw new Error(`Preset switch "${key}" can't be overridden (overridable: ${OVERRIDABLE_PRESET_SWITCHES.join(", ")})`);
+        }
+    }
+    return { ...preset, ...overrides };
 }
 
 /** Preset for the current PDF schema version (`SCHEMA_VERSION`). */

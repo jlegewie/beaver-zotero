@@ -119,6 +119,23 @@ describe("annotateColumnContinuations", () => {
         expect(right.sentences[0].joinWithNext).toBeUndefined();
     });
 
+    it("reads the column an item joined across stacked blocks ends in", () => {
+        const joined = () => makeParagraph(0, [makeSentence("For this purpose, we examine changes in violent and property")]);
+        const nextColumn = makeParagraph(2, [makeSentence("crime before, during, and after.")], { idx: 1 });
+        const first = joined();
+        annotateColumnContinuations([first, nextColumn], simpleRegexSentenceSplit, new Set(), { endColumns: [1, 2] });
+        expect((first as TextItem).sentences[0].joinWithNext).toBe(true);
+        // Without the end column, the item reads as column 0 and column 2 is not next to it.
+        const plain = joined();
+        annotateColumnContinuations([plain, nextColumn], simpleRegexSentenceSplit, new Set());
+        expect((plain as TextItem).sentences[0].joinWithNext).toBeUndefined();
+        // The next item below in the block the joined item ends in is no column break.
+        const sameBlock = joined();
+        const below = makeParagraph(1, [makeSentence("crime before, during, and after.")], { idx: 1 });
+        annotateColumnContinuations([sameBlock, below], simpleRegexSentenceSplit, new Set(), { endColumns: [1, 1] });
+        expect((sameBlock as TextItem).sentences[0].joinWithNext).toBeUndefined();
+    });
+
     it("leaves the flag unset when last sentence ends with a period", () => {
         const left = makeParagraph(0, [makeSentence("Sentence ended.")]);
         const right = makeParagraph(1, [makeSentence("continuation here.")]);
@@ -567,7 +584,7 @@ describe("annotateColumnContinuations past footnotes (PDF schema 5)", () => {
 
     it("joins a body sentence to its continuation in the next column after the column's notes", () => {
         const { left, items } = page();
-        annotateColumnContinuations(items, simpleRegexSentenceSplit, new Set(), true);
+        annotateColumnContinuations(items, simpleRegexSentenceSplit, new Set(), { skipFootnotes: true });
         expect(left.kind === "text" && left.sentences![0].joinWithNext).toBe(true);
     });
 
@@ -575,5 +592,18 @@ describe("annotateColumnContinuations past footnotes (PDF schema 5)", () => {
         const { left, items } = page();
         annotateColumnContinuations(items, simpleRegexSentenceSplit, new Set());
         expect(left.kind === "text" && left.sentences![0].joinWithNext).toBeUndefined();
+    });
+
+    it("reads the column after the notes from the column a joined item ends in", () => {
+        // The body item starts in block 0 and continues into stacked block 1;
+        // its notes sit in block 1 and the next printed column is block 2.
+        const left = makeParagraph(0, [makeSentence("we examine changes in violent and property")], { idx: 0 });
+        const note = { ...footnote("1 Crime data come from the city.", 1), columnIndex: 1 };
+        const right = makeParagraph(2, [makeSentence("crime before, during, and after.")], { idx: 2 });
+        annotateColumnContinuations([left, note, right], simpleRegexSentenceSplit, new Set(), {
+            endColumns: [1, 1, 2],
+            skipFootnotes: true,
+        });
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBe(true);
     });
 });

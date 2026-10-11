@@ -135,7 +135,7 @@ export interface FilteredParagraphContext {
      * Receives the item-boundary input of the target page; the region
      * barriers are its regions (training export only).
      */
-    boundaries?: Pick<BoundaryCapture, "page">;
+    boundaries?: BoundaryCapture;
 }
 
 /**
@@ -437,19 +437,14 @@ export function detectFilteredParagraphs(
                 { paragraph: 0, header: 0 },
                 {
                     trackItemLines: true,
-                    ...(ctx.boundaries
-                        ? {
-                              boundaries: {
-                                  regions: regionBarriers.map(({ box }): [number, number, number, number] => [
-                                      box.x,
-                                      box.y,
-                                      box.x + box.w,
-                                      box.y + box.h,
-                                  ]),
-                                  page: ctx.boundaries.page,
-                              },
-                          }
-                        : {}),
+                    regions: regionBarriers.map(({ box }): [number, number, number, number] => [
+                        box.x,
+                        box.y,
+                        box.x + box.w,
+                        box.y + box.h,
+                    ]),
+                    barriers: { fillBoundaries, dividerLines },
+                    ...(ctx.boundaries ? { boundaries: ctx.boundaries } : {}),
                 },
             );
             paragraphDetectMs = performance.now() - tParagraphDetect;
@@ -554,37 +549,60 @@ export function marginFilteredLines(
  * not one text for it. The lines returned are `page`'s.
  */
 export function numberedRunningLines(page: RawPageData, analysis: MarginAnalysis, repeat: number, marginZone: MarginSettings = DEFAULT_MARGIN_ZONE): Set<RawLine> {
-    const shape = (text: string) => {
-        const compact = text.toLowerCase().replace(/\s+/gu, "");
-        return { key: compact.replace(/\d+/gu, "#"), numbers: (compact.match(/\d+/gu) ?? []).map(Number) };
-    };
+    const keys = numberedRunningKeys(analysis, repeat);
     const found = new Set<RawLine>();
+    for (const position of ["top", "bottom"] as const) {
+        const numbered = keys[position];
+        if (!numbered.size) continue;
+        for (const block of page.blocks) {
+            if (block.type !== "text") continue;
+            for (const line of block.lines ?? []) {
+                if (!line.text.trim() || MarginFilter.getMarginPosition(line.bbox, page.width, page.height, marginZone) !== position) continue;
+                if (numbered.has(runningLineShape(line.text).key)) found.add(line);
+            }
+        }
+    }
+    return found;
+}
+
+/** A margin text with spaces dropped and its numbers masked, and the numbers. */
+function runningLineShape(text: string): { key: string; numbers: number[] } {
+    const compact = text.toLowerCase().replace(/\s+/gu, "");
+    return { key: compact.replace(/\d+/gu, "#"), numbers: (compact.match(/\d+/gu) ?? []).map(Number) };
+}
+
+type NumberedRunningKeys = Record<"top" | "bottom", Set<string>>;
+
+/** Per document: a margin analysis is built once and read by every page. */
+const numberedRunningKeysCache = new WeakMap<MarginAnalysis, Map<number, NumberedRunningKeys>>();
+
+/** The shapes (`runningLineShape`) of `numberedRunningLines` in each band of a document. */
+function numberedRunningKeys(analysis: MarginAnalysis, repeat: number): NumberedRunningKeys {
+    let byRepeat = numberedRunningKeysCache.get(analysis);
+    if (!byRepeat) numberedRunningKeysCache.set(analysis, (byRepeat = new Map()));
+    const cached = byRepeat.get(repeat);
+    if (cached) return cached;
+    const keys: NumberedRunningKeys = { top: new Set(), bottom: new Set() };
     for (const position of ["top", "bottom"] as const) {
         const byKey = new Map<string, { page: number; numbers: number[] }[]>();
         for (const el of analysis.elements.get(position) ?? []) {
-            const { key, numbers } = shape(el.text);
+            const { key, numbers } = runningLineShape(el.text);
             if (!numbers.length) continue;
-            byKey.set(key, [...(byKey.get(key) ?? []), { page: el.pageIndex, numbers }]);
+            const seen = byKey.get(key);
+            if (seen) seen.push({ page: el.pageIndex, numbers });
+            else byKey.set(key, [{ page: el.pageIndex, numbers }]);
         }
-        const numbered = new Set<string>();
         for (const [key, seen] of byKey) {
             const pages = new Map(seen.map((s) => [s.page, s.numbers]));
             if (pages.size < repeat) continue;
             const counts = [...pages.values()];
             if (counts.some((n) => n.length !== counts[0].length)) continue;
             const stepsWithPage = counts[0].some((_, k) => new Set([...pages].map(([p, n]) => n[k] - p)).size === 1);
-            if (stepsWithPage) numbered.add(key);
-        }
-        if (!numbered.size) continue;
-        for (const block of page.blocks) {
-            if (block.type !== "text") continue;
-            for (const line of block.lines ?? []) {
-                if (!line.text.trim() || MarginFilter.getMarginPosition(line.bbox, page.width, page.height, marginZone) !== position) continue;
-                if (numbered.has(shape(line.text).key)) found.add(line);
-            }
+            if (stepsWithPage) keys[position].add(key);
         }
     }
-    return found;
+    byRepeat.set(repeat, keys);
+    return keys;
 }
 
 /** A line of body text holds at least this many words. */

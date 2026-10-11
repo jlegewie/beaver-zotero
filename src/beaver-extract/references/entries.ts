@@ -14,7 +14,7 @@
 import { mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { PageLine } from "../LineDetector";
 import { joinLines, type HangingRole } from "../ParagraphDetector";
-import type { DraftItem } from "../pipeline/draftItems";
+import { itemLineColumns, withLineColumns, type DraftItem } from "../pipeline/draftItems";
 import {
     HANGING_MAX_INDENT_EM,
     LINE_FEATURES,
@@ -170,21 +170,30 @@ export function applyReferencePlan(
     }
 
     const out: DraftItem[] = [];
-    const push = (base: DraftItem, lines: PageLine[], roles: HangingRole[], isRef: boolean, piece = false) => {
+    // Rebuilt items take their blocks from their lines (`lineColumns`).
+    const push = (
+        base: DraftItem,
+        lines: PageLine[],
+        roles: HangingRole[],
+        columns: number[],
+        isRef: boolean,
+        piece = false,
+    ) => {
         const text = joinLines(lines.map((l) => l.text), removeHyphenation);
         const bbox = mergeBoxes(lines.map((l) => l.bbox));
         // A list heading the detector merged into the first entry ("FURTHER
         // READING Heyman, K. …") is split off as a piece of its own; it is the
         // list's heading, not an entry.
         if (isRef && piece && isReferenceHeading({ header: false, text })) {
-            out.push({ ...base, kind: "section_header", text, bbox, lines, roles });
+            out.push(withLineColumns({ ...base, kind: "section_header", text, bbox, lines, roles }, columns));
             return;
         }
-        out.push({ ...base, kind: isRef ? "reference" : base.kind, text, bbox, lines, roles });
+        out.push(withLineColumns({ ...base, kind: isRef ? "reference" : base.kind, text, bbox, lines, roles }, columns));
     };
 
     items.forEach((item, i) => {
         const group = item.lines;
+        const columns = itemLineColumns(item);
         const isRef = plan.reference[i];
         if (group.length === 0) {
             // No lines to rebuild from (not produced by the detector); keep as is.
@@ -203,7 +212,7 @@ export function applyReferencePlan(
                 isRef &&
                 plan.mergeWithPrevious[i] &&
                 previous?.kind === "reference" &&
-                previous.columnIndex === item.columnIndex
+                (previous.endColumnIndex ?? previous.columnIndex) === item.columnIndex
             ) {
                 // The item's opening lines finish the previous entry.
                 out.pop();
@@ -211,10 +220,11 @@ export function applyReferencePlan(
                     previous,
                     [...previous.lines, ...group.slice(0, cut)],
                     [...previous.roles, ...item.roles.slice(0, cut)],
+                    [...itemLineColumns(previous), ...columns.slice(0, cut)],
                     true,
                 );
             } else {
-                push(item, group.slice(start, cut), item.roles.slice(start, cut), isRef, cuts.length > 0);
+                push(item, group.slice(start, cut), item.roles.slice(start, cut), columns.slice(start, cut), isRef, cuts.length > 0);
             }
             start = cut;
         }

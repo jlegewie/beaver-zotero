@@ -1060,7 +1060,10 @@ export function extractPageSentences(
         items,
         splitter,
         degradedItems,
-        options.paragraphSettings?.noteMarkers ?? false,
+        {
+            endColumns: draftItems.map((item) => item.endColumnIndex ?? item.columnIndex),
+            skipFootnotes: options.paragraphSettings?.noteMarkers ?? false,
+        },
     );
 
     // Inverse-rotate every emitted bbox back to MuPDF frame so
@@ -1204,12 +1207,28 @@ function shouldJoinAcrossColumns(
     return r.end >= end;
 }
 
+/** Options of `annotateColumnContinuations`. */
+export interface ColumnContinuationOptions {
+    /**
+     * Column index each item ends in, aligned with `items`; defaults to each
+     * item's `columnIndex`. An item the detector joined across stacked blocks
+     * ends in a later block than it starts in (`ContentItem.endColumnIndex`).
+     */
+    endColumns?: readonly number[];
+    /**
+     * The item that continues a text item is the next one that is not a
+     * footnote (`ParagraphDetectionSettings.noteMarkers`).
+     */
+    skipFootnotes?: boolean;
+}
+
 /**
  * Set `SentenceItem.joinWithNext = true` on the last sentence of each text
  * item whose successor (in reading order) begins a sentence that continues
  * the previous one across a column boundary.
  *
- * Conservative: requires strictly consecutive columns (`col` → `col + 1`),
+ * Conservative: requires strictly consecutive columns (`col` → `col + 1`,
+ * from the column the item ends in: `endColumns`),
  * both sides text items, last sentence non-terminated, first sentence
  * lowercase-starting, and the splitter must agree the combined text is one
  * sentence. Only sets the flag — never writes `false` (omitted ≡ false per
@@ -1233,7 +1252,7 @@ export function annotateColumnContinuations(
     items: DocItem[],
     splitter: SentenceSplitter,
     degradedItems: ReadonlySet<string>,
-    skipFootnotes = false,
+    { endColumns, skipFootnotes = false }: ColumnContinuationOptions = {},
 ): void {
     for (let i = 0; i < items.length - 1; i++) {
         const cur = items[i];
@@ -1253,7 +1272,7 @@ export function annotateColumnContinuations(
         if (cur.kind !== "text" || next.kind !== "text") {
             continue;
         }
-        if (next.columnIndex !== cur.columnIndex + 1) continue;
+        if (next.columnIndex !== (endColumns?.[i] ?? cur.columnIndex) + 1) continue;
         if (degradedItems.has(cur.id) || degradedItems.has(next.id)) continue;
         const firstSentence = nextSentences[0];
         if (!firstSentence) continue;

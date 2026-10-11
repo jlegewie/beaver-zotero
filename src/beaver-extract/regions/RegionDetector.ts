@@ -172,8 +172,8 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
         // variable or a panel letter repeating in the margin band is content.
         const inMargin = (l: RegionLine) =>
             !!numbered &&
-            ((l.text.match(/\p{L}/gu) ?? []).length >= MARGIN_MIN_LETTERS || /\d/u.test(l.text)) &&
-            (l.parts ?? [l]).every((p) => opts.margin!.has(numbered[p.source - 1]));
+            (l.parts ?? [l]).every((p) => opts.margin!.has(numbered[p.source - 1])) &&
+            ((l.text.match(/\p{L}/gu) ?? []).length >= MARGIN_MIN_LETTERS || /\d/u.test(l.text));
         const flags = routed.map((l) =>
             l.skewed
                 ? LINE_SKEWED | (furniture(l) ? LINE_FURNITURE : 0)

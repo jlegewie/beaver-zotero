@@ -106,7 +106,7 @@ export interface StructuredRunContext {
  * paragraph detector builds it (`BoundaryCapture.page`), during segmentation.
  * It must not modify what it is given.
  */
-export type BoundaryObserver = Pick<BoundaryCapture, "page">;
+export type BoundaryObserver = BoundaryCapture;
 
 /** Observers of a structured run (training exports); none in production. */
 export interface StructuredRunObservers {

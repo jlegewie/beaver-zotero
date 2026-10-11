@@ -9,7 +9,12 @@ const mocks = vi.hoisted(() => ({
     resolveCollectionMemberships: vi.fn(),
     writeImportItem: vi.fn(),
     resolve: vi.fn(),
-    canSave: vi.fn(),
+    describeActiveAddons: vi.fn(),
+}));
+
+vi.mock('../../../src/services/committedTransaction', () => ({
+    SLOW_OBSERVERS_MS: 1000,
+    describeActiveAddons: mocks.describeActiveAddons,
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
@@ -65,14 +70,13 @@ beforeEach(() => {
     Z.Beaver = {
         libraryScopeInitialized: true,
         searchableLibraryIds: [1, 7],
-        itemImport: { resolve: mocks.resolve, canSave: mocks.canSave },
+        itemImport: { resolve: mocks.resolve },
     };
     Z.Libraries.get = vi.fn(() => libraryInfo);
     mocks.resolveWriteTargetLibrary.mockReturnValue({ ok: true, libraryID: 1 });
     mocks.resolveCollectionMemberships.mockReturnValue([]);
     mocks.getDeferredToolPreference.mockReturnValue('always_ask');
     mocks.checkLibraryExcluded.mockReturnValue(null);
-    mocks.canSave.mockReturnValue(true);
     mocks.resolve.mockResolvedValue([{ key: 'a', status: 'resolved', item: { itemType: 'book', title: 'T' } }]);
 });
 
@@ -133,13 +137,6 @@ describe('validateImportItemsAction', () => {
         const response = await validateImportItemsAction(validateRequest({ items: [spec('a')] }));
         expect(response).toMatchObject({ valid: false, error_code: 'library_not_searchable' });
         expect(JSON.stringify(response)).not.toContain('SECRET01');
-    });
-
-    it('fails before resolving when this Zotero version cannot save items', async () => {
-        mocks.canSave.mockReturnValue(false);
-        expect(await validateImportItemsAction(validateRequest({ items: [spec('a')] })))
-            .toMatchObject({ valid: false, error_code: 'item_import_unsupported' });
-        expect(mocks.resolve).not.toHaveBeenCalled();
     });
 
     it('fails clearly when the plugin-realm import service is missing', async () => {
@@ -257,6 +254,25 @@ describe('executeImportItemAction', () => {
             source: { kind: 'file', input: 'a.pdf' }, file: { path: '/x/a.pdf' },
         }), ctx());
         expect(fileOnly.success).toBe(true);
+    });
+
+    it('names the active add-ons only when Notifier observers held the write', async () => {
+        mocks.describeActiveAddons.mockResolvedValue('linter@northword.cn@3.3.2');
+        mocks.writeImportItem.mockImplementation(async (_data: unknown, options: any) => {
+            options.timing.record('post_commit_ms', 3000);
+            options.timing.record('observers_deferred', 1);
+            return { library_id: 1, zotero_key: 'K', attachment_status: 'none' };
+        });
+        const slow: any = await executeImportItemAction(executeRequest(data()), ctx());
+        expect(slow.timing).toMatchObject({ observers_deferred: 1, active_addons: 'linter@northword.cn@3.3.2' });
+
+        mocks.writeImportItem.mockImplementation(async (_data: unknown, options: any) => {
+            options.timing.record('post_commit_ms', 40);
+            options.timing.record('observers_deferred', 0);
+            return { library_id: 1, zotero_key: 'K', attachment_status: 'none' };
+        });
+        const fast: any = await executeImportItemAction(executeRequest(data()), ctx());
+        expect(fast.timing).not.toHaveProperty('active_addons');
     });
 
     it('fails with the library error when the target cannot be resolved', async () => {
