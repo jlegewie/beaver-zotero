@@ -294,12 +294,6 @@ function isUrlText(token: string, prevToken: string): boolean {
     return /[./\d_\-#?=&%:~]/u.test(core) || (prevToken.endsWith(".") && URL_TAIL_RE.test(core));
 }
 
-/** Function words that go on the sentence after a complete URL, not its path. */
-const SENTENCE_WORDS_AFTER_URL = new Set([
-    "a", "an", "and", "are", "as", "at", "by", "for", "from", "in", "is", "of", "on", "or", "that", "the", "to",
-    "was", "were", "which", "with",
-]);
-
 /**
  * A URL / DOI token that the line break cuts, so the next line continues it.
  * `next` is the next line's text, from `nextToken`.
@@ -310,11 +304,19 @@ function continuesUrl(prevToken: string, nextToken: string, next = ""): boolean 
     if (prevToken.length < 4 || !isUrlishToken(prevToken)) return false;
     if (/^[/.?&=#_~%]/u.test(nextToken)) return true;
     if (!/[/:._\-?=&#~%]$/u.test(prevToken) || /\)[.:]$/u.test(prevToken)) return false;
-    // A sentence after a URL that ends it starts with a capital, or after a
-    // "/" with a function word that more words follow ("https://example.org/"
-    // + "for more"); alone, the word may be the path's last segment.
+    // A sentence after a URL that ends it starts with a capital. After a
+    // "/", a plain word that more lowercase words follow
+    // ("https://example.org/" + "using the supplied credentials") or a label
+    // ("e4/" + "doi: 10.2196/…") goes on with the sentence, while a path's
+    // last segment ends the line or meets punctuation ("mouseland/" +
+    // "cellpose. Scripts", "infolit.be/" + "edudoc), which").
     if (/^\p{Lu}\p{Ll}/u.test(nextToken)) return false;
-    if (prevToken.endsWith("/") && SENTENCE_WORDS_AFTER_URL.has(nextToken) && /^\S+\s+\p{Ll}/u.test(next)) return false;
+    if (
+        prevToken.endsWith("/") &&
+        (/^\p{L}+:$/u.test(nextToken) || (/^\p{Ll}+$/u.test(nextToken) && /^\S+\s+\p{Ll}/u.test(next)))
+    ) {
+        return false;
+    }
     // After a period, the URL goes on only into more URL ("j." +
     // "learninstruc.2006.09.001", "www." + "congressionalbills.org"), not
     // into a word of the sentence.

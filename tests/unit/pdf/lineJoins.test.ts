@@ -183,6 +183,11 @@ describe("decideLineJoin", () => {
         // A path goes on.
         expect(decideLineJoin("https://huggingface.co/spaces/mouseland/", "cellpose.")).toBe("glue");
         expect(decideLineJoin("https://verfassungsblog.de/", "the-judicial-overhaul/.")).toBe("glue");
+        expect(decideLineJoin("downloaded at https://example.org/", "using the supplied credentials.")).toBe("space");
+        expect(decideLineJoin("http://www.jmir.org/2019/8/e15062/", "doi: 10.2196/15062")).toBe("space");
+        // A path's last segment ends the line or meets punctuation.
+        expect(decideLineJoin("http://infolit.be/", "edudoc), which was")).toBe("glue");
+        expect(decideLineJoin("https://github.com/gambalab/", "gficf. While scripts")).toBe("glue");
         // Alone, a function word may be the path's last segment.
         expect(decideLineJoin("https://en.wiktionary.org/wiki/", "and")).toBe("glue");
         expect(decideLineJoin("https://en.wiktionary.org/wiki/", "and.")).toBe("glue");
