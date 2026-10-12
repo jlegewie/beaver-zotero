@@ -19,6 +19,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
+// The save-stabilization and editor-refresh loops poll with real delays; the
+// note HTML here changes synchronously, so the waits only cost wall time.
+vi.mock('../../../src/utils/systemTimers', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/utils/systemTimers')>()),
+    systemDelay: () => Promise.resolve(),
+}));
+
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     createCitationHTML: vi.fn(
         (item: any, page?: string) => {

@@ -9,6 +9,9 @@ export default defineConfig({
     test: {
         globals: true,
         environment: 'node',
+        // Worker threads start far faster than forked processes, and module
+        // collection dominates this suite's runtime.
+        pool: 'threads',
         include: ['tests/unit/**/*.test.ts'],
         setupFiles: ['tests/setup.ts'],
         testTimeout: 10000,
