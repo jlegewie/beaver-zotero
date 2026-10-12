@@ -423,6 +423,31 @@ const UNIT_WORDS = new Set([
     "arcsec", "arcmin", "mas",
 ]);
 
+/** Spelled-out metric units, which take a spelled-out prefix ("kilometres", "milliseconds"). */
+const SPELLED_METRIC_UNITS = [
+    "meter", "metre", "gram", "liter", "litre", "second", "newton", "joule", "watt", "pascal", "ampere", "volt",
+    "coulomb", "tesla", "hertz", "mole", "radian", "steradian",
+];
+const SPELLED_UNIT_PREFIXES = ["", "kilo", "hecto", "deca", "deci", "centi", "milli", "micro", "nano", "pico", "femto", "mega", "giga"];
+/** Plural of a spelled-out unit ("seconds", "inches", "feet"); "hertz" has none. */
+function unitPlural(unit: string): string {
+    if (unit.endsWith("hertz")) return unit;
+    if (unit === "foot") return "feet";
+    return unit.endsWith("inch") ? `${unit}es` : `${unit}s`;
+}
+
+/**
+ * Spelled-out units and their plurals, a single raised 2, 3 or 4 after which
+ * is a power ("metres per second²", "variance in seconds²"), not a note
+ * marker. A longer marker after them ("seconds12") is still dropped.
+ */
+const SPELLED_UNIT_WORDS = new Set(
+    [
+        ...SPELLED_METRIC_UNITS.flatMap((unit) => SPELLED_UNIT_PREFIXES.map((prefix) => prefix + unit)),
+        "minute", "hour", "kelvin", "ohm", "inch", "foot", "yard", "mile",
+    ].flatMap((unit) => [unit, unitPlural(unit)]),
+);
+
 /** Marker characters a footnote opens with: numbers, note symbols, lettered notes. */
 const LEAD_MARKER_RE = /^[0-9*†‡§¶#a-z]$/u;
 
@@ -460,7 +485,8 @@ function gluedLeadMarkerEnd(line: RawLineDetailed, superscriptThreshold: number)
  * punctuation or the end of the line. The word length and case keep
  * exponents of units and variables ("mm3", "cm2", "R2") out, and lists of
  * longer unit names and function names those of units and mathematics
- * ("rad²", "cos² x", "log² n").
+ * ("rad²", "cos² x", "log² n"); a spelled-out unit keeps a single-digit
+ * power ("seconds²").
  */
 function gluedNoteMarkerChars(line: RawLineDetailed, superscriptThreshold: number): Set<number> {
     const out = new Set<number>();
@@ -483,7 +509,9 @@ function gluedNoteMarkerChars(line: RawLineDetailed, superscriptThreshold: numbe
             (/[0-9]/u.test(chars[end].c) || (/[,\u2013-]/u.test(chars[end].c) && isRaisedAgainst(chars[end], prev)))
         ) end++;
         while (end > i && !/[0-9]/u.test(chars[end - 1].c)) end--;
-        if (/[0-9]{4}/u.test(chars.slice(i, end).map((ch) => ch.c).join(""))) continue;
+        const run = chars.slice(i, end).map((ch) => ch.c).join("");
+        if (/[0-9]{4}/u.test(run)) continue;
+        if (SPELLED_UNIT_WORDS.has(word) && /^[2-4]$/u.test(run)) continue;
         if (end < chars.length && !/[\s.,;:!?)\]”’"']/u.test(chars[end].c)) continue;
         for (let k = i; k < end; k++) out.add(k);
         i = end - 1;

@@ -582,6 +582,27 @@ describe('extractPageSentences footnote markers (PDF schema 5)', () => {
         }
     });
 
+    it('keeps the power of a spelled-out unit', () => {
+        for (const [text, power] of [
+            ['The variance is in seconds2.', 'seconds2'],
+            ['It accelerates at 9.8 metres per second2 here.', 'second2'],
+            ['The area in kilometers2 was mapped.', 'kilometers2'],
+            ['The volume in cubic feet3 was small.', 'feet3'],
+            ['It spread over 3 square miles2 then.', 'miles2'],
+            ['The variance in hours2 was low.', 'hours2'],
+        ]) {
+            const start = text.indexOf(power) + power.length - 1;
+            const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, new Set([start]))]);
+            expect(schema5SentenceText(page)).toBe(text);
+        }
+    });
+
+    it('still drops a longer marker glued to a spelled-out unit', () => {
+        const text = 'within a few seconds12 of onset.';
+        const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '12'))]);
+        expect(schema5SentenceText(page)).toBe('within a few seconds of onset.');
+    });
+
     it('still drops a marker glued to a word that a prefix and a unit spell', () => {
         const text = 'the heat flux12 rose.';
         const page = makeSingleBlockPage([makeLineWithSuperscripts(text, 100, indicesOf(text, '12'))]);
