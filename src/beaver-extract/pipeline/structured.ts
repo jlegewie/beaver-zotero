@@ -51,7 +51,7 @@ import { REFERENCE_PASS, referencePass } from "../references/pass";
 import { detectRegions, type RegionDetection } from "../regions/RegionDetector";
 import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
 import type { RegionDocContext } from "../regions/features";
-import { regionItemsForPage, type PageRegionItems, type RegionItemDraft } from "../regions/regionItems";
+import { regionItemsForPage, type PageRegionItems, type RegionItemDraft, type RegionItemSettings } from "../regions/regionItems";
 import { REGION_MODEL } from "../regions/weights";
 import { postLog } from "../worker/errors";
 import { extractRawPageDetailedFromDoc } from "../worker/docHelpers";
@@ -95,6 +95,8 @@ export interface StructuredRunContext {
     pageCache: PageWalkCache | undefined;
     paragraphSettings: ParagraphDetectionSettings | undefined;
     splitter: SentenceSplitter;
+    /** Switches of the region pass (from the preset). */
+    regionSettings?: RegionItemSettings;
     /** Region detection proposes grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
     gridCandidates?: boolean;
     /** Receives each page's region pass; absent in production. */
@@ -305,7 +307,7 @@ export function segmentPages(
                 bodyExtents,
             });
             const graphics = pageCache!.graphicsFor(i);
-            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.gridCandidates ?? false);
+            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings, ctx.gridCandidates ?? false);
             const regions = pass.result;
             if (regions.page !== detailed) {
                 // The target without absorbed lines replaces the walked page, so
@@ -344,6 +346,7 @@ export function segmentPages(
             compoundVocabulary,
             margins: opts.margins,
             marginZone: opts.marginZone,
+            marginProseRows: opts.marginTextRows,
             graphicsLayerMode: opts.graphicsLayerMode,
             // Reuse the detailed walk done in `analyzeDocument` so we don't pay
             // a second walk per target page.
@@ -377,11 +380,12 @@ export function segmentPages(
 
 /**
  * Step 3. Runs the item passes in order over the draft items of every page;
- * they edit them in place. Returns each page's pass timings.
+ * they edit them in place, and join the lines of items they rebuild with the
+ * document's line-break vocabulary. Returns each page's pass timings.
  */
 export function runItemPasses(
     pages: SegmentedPage[],
-    study: Pick<StructuredDocumentStudy, "styleProfile" | "marginAnalysis" | "analysisPages">,
+    study: Pick<StructuredDocumentStudy, "styleProfile" | "marginAnalysis" | "analysisPages" | "compoundVocabulary">,
     pageCount: number,
     passes: readonly ItemPass[],
     paragraphSettings: ParagraphDetectionSettings | undefined,
@@ -393,7 +397,7 @@ export function runItemPasses(
         marginAnalysis: study.marginAnalysis,
         analysisPageIndices: study.analysisPages.map((page) => page.pageIndex),
     };
-    return runPasses(passes, doc, paragraphSettings);
+    return runPasses(passes, doc, { ...paragraphSettings, lineJoinVocabulary: study.compoundVocabulary });
 }
 
 /**
@@ -526,6 +530,7 @@ function pageRegions(
     pageCount: number,
     vocabulary: ReadonlySet<string>,
     margin: ReadonlySet<RawLine>,
+    settings: RegionItemSettings | undefined,
     gridCandidates: boolean,
 ): Pick<RegionPassPage, "doc" | "detection" | "result" | "error"> {
     if (!graphics || !REGION_MODEL) {
@@ -542,7 +547,7 @@ function pageRegions(
             margin,
             gridCandidates,
         });
-        return { doc, detection, result: regionItemsForPage(page, detection, vocabulary) };
+        return { doc, detection, result: regionItemsForPage(page, detection, vocabulary, settings) };
     } catch (err) {
         postLog("warn", `[mupdf-worker] region detection failed on page ${page.pageIndex}: ${String(err)}`);
         return { doc, detection, result: { page, items: [], margin: [] }, error: String(err) };

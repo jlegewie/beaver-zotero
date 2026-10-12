@@ -338,11 +338,16 @@ const SAME_LINE_MAX_GAP_RATIO = 3.0;
  * Fragments are merged in document order — `sentenceToBoxes` already
  * walks the source map linearly, so same-line pieces always appear
  * consecutively.
+ *
+ * Merged texts are joined with a space only where a filler separated the
+ * pieces (`precededByFiller`), as the sentence text is: pieces split by a
+ * character the text builder dropped (a soft hyphen inside a word, a
+ * footnote marker glued to a word) abut.
  */
 function mergeSameLineFragments(
-    fragments: NonNullable<PageWideSentence["fragments"]>,
+    fragments: Array<NonNullable<PageWideSentence["fragments"]>[number] & { precededByFiller: boolean }>,
 ): NonNullable<PageWideSentence["fragments"]> {
-    if (fragments.length < 2) return fragments;
+    if (fragments.length < 2) return fragments.map(({ precededByFiller: _drop, ...f }) => f);
     const out: NonNullable<PageWideSentence["fragments"]> = [];
     for (const frag of fragments) {
         const last = out.length > 0 ? out[out.length - 1] : null;
@@ -359,11 +364,12 @@ function mergeSameLineFragments(
             const maxGap = refHeight * SAME_LINE_MAX_GAP_RATIO;
             if (gap >= -SAME_LINE_Y_TOL_PT && gap <= maxGap) {
                 last.bbox = mergeBoxes([last.bbox, frag.bbox]);
-                last.text = last.text + " " + frag.text;
+                last.text = last.text + (frag.precededByFiller ? " " : "") + frag.text;
                 continue;
             }
         }
-        out.push({ ...frag, bbox: { ...frag.bbox } });
+        const { precededByFiller: _drop, ...fragment } = frag;
+        out.push({ ...fragment, bbox: { ...frag.bbox } });
     }
     return out;
 }
@@ -411,11 +417,14 @@ export function sentenceToBoxes(
         const last = runs.length > 0 ? runs[runs.length - 1] : null;
         // Extend a run only if we're still on the same line AND the char
         // index advanced by exactly one (contiguous) or repeated (the second
-        // code unit of a surrogate-pair char). Anything else starts a new
-        // run — this handles out-of-order mapping defensively, though in
-        // practice runs are always contiguous here.
+        // code unit of a surrogate-pair char), with no filler between (a
+        // space the text builder put between two adjacent chars, e.g. after
+        // a footnote's lead marker). Anything else starts a new run — this
+        // handles out-of-order mapping defensively, though in practice runs
+        // are always contiguous here.
         if (
             last &&
+            !pendingFiller &&
             last.lineIndex === src.lineIndex &&
             (src.charIndex === last.charEnd ||
                 src.charIndex === last.charEnd + 1)
@@ -462,9 +471,7 @@ export function sentenceToBoxes(
         text += rawFragments[i].text;
     }
 
-    const fragments = mergeSameLineFragments(
-        rawFragments.map(({ precededByFiller: _drop, ...f }) => f),
-    );
+    const fragments = mergeSameLineFragments(rawFragments);
     const bboxes = fragments.map((f) => f.bbox);
     return {
         pageIndex,

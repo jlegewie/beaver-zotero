@@ -17,7 +17,7 @@ import { findCandidates, type CandidateSource } from "./candidates";
 import { EMPTY_DOC_CONTEXT, candidateFeatures, gridFeatures, type RegionDocContext } from "./features";
 import { intersectionArea, overlapFrac, rectArea, type Rect } from "./geometry";
 import { assertCompatible, predictRegionClass, usesGridFeatures, type RegionClass, type RegionModelWeights } from "./model";
-import { bodySize, lineNumberGutter, mergeRowFragments, pageLines, pagePrimitives, sourceLines, type RegionLine } from "./pageSignals";
+import { bodySize, lineNumberGutter, mergeRowFragments, pageLines, pagePrimitives, sourceLines, tableGraphics, type RegionLine, type TableGraphics } from "./pageSignals";
 import { completeTableRows } from "./tableRows";
 
 export interface DetectedRegion {
@@ -123,6 +123,8 @@ export interface LineRouting {
     rules?: Rect[];
     /** The page's vertical rules (row separators of sideways tables). */
     verticalRules?: Rect[];
+    /** Rules and fills as row evidence for tables (`tableGraphics`), typed on first call. */
+    tableGraphics?: () => TableGraphics;
 }
 
 export interface DetectRegionsOptions {
@@ -203,7 +205,10 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
         const takes = opts.gridCandidates ? found.candidates.map((c) => (c.memberLines ? new Set(c.memberLines) : undefined)) : undefined;
         const routes = routeLines(routed, flags, candidates, rules, takes);
         const verticalRules = primitives.filter((p) => p.kind === "vrule").map((p) => p.bbox);
-        if (opts.route) detection.routing = { lines: routed, flags, routes, rules, verticalRules };
+        if (opts.route) {
+            let typed: TableGraphics | undefined;
+            detection.routing = { lines: routed, flags, routes, rules, verticalRules, tableGraphics: () => (typed ??= tableGraphics(primitives)) };
+        }
         if (opts.includeLines) {
             detection.lines = routed.map((l, i) => [
                 ...l.bbox.map((v) => Math.round(v * 10) / 10),

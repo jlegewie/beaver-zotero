@@ -996,3 +996,105 @@ function overflowMarks(g: GraphicsSummary): Primitive[] {
     }
     return out;
 }
+
+/** A fill whose channels all reach this value is white: no shading. */
+const FILL_WHITE_CHANNEL = 0xfa;
+/** Shapes at most this thick (points) are rules, at least `SEPARATOR_ASPECT` times longer than thick. */
+const SEPARATOR_THICKNESS = 2;
+const SEPARATOR_ASPECT = 4;
+
+/**
+ * The drawing a table's rows can be read from (`LineRouting.tableGraphics`), typed apart from the
+ * primitives' kinds so the region features keep their meaning.
+ */
+export interface TableGraphics {
+    /**
+     * Horizontal row separators: thin shapes of any length or colour (rules drawn one segment per
+     * cell, light rules, white rules on shading) and the top and bottom edges of shaded and
+     * stroked rectangles (fill bands, cell borders).
+     */
+    horizontal: Rect[];
+    /** The same for sideways tables: vertical thin shapes and the side edges of rectangles. */
+    vertical: Rect[];
+    /** Shaded rectangles (not white), light fills included: rows or cells set on a band. */
+    fills: Rect[];
+}
+
+/**
+ * Rules and fills of a page as row evidence for tables. A white shape (a rule, a stroked frame's
+ * edge) counts only where it lies on shading (a white rule between shaded rows); on the page it
+ * paints nothing.
+ */
+export function tableGraphics(prims: readonly Primitive[]): TableGraphics {
+    const white = (rgb: number) => rgb >= 0 && ((rgb >> 16) & 255) >= FILL_WHITE_CHANNEL && ((rgb >> 8) & 255) >= FILL_WHITE_CHANNEL && (rgb & 255) >= FILL_WHITE_CHANNEL;
+    const usable = (p: Primitive) => p.kind !== "bg" && p.kind !== "image" && p.kind !== "pixel" && !p.curve;
+    const thin = (p: Primitive) => {
+        const w = p.bbox[2] - p.bbox[0];
+        const h = p.bbox[3] - p.bbox[1];
+        return Math.min(w, h) <= SEPARATOR_THICKNESS && Math.max(w, h) >= SEPARATOR_ASPECT * Math.max(Math.min(w, h), 0.1);
+    };
+    const shaded = prims.filter((p) => usable(p) && p.rect && !p.stroked && !thin(p) && !white(p.rgb) && p.rgb >= 0);
+    const fills = shaded.map((p) => p.bbox);
+    // The stretches of a separator (a horizontal or vertical segment) that lie on shading: a white
+    // one is seen only there.
+    const onFill = (r: Rect): Rect[] => {
+        const horizontal = r[2] - r[0] >= r[3] - r[1];
+        const mid = horizontal ? (r[1] + r[3]) / 2 : (r[0] + r[2]) / 2;
+        const [lo, hi] = horizontal ? [r[0], r[2]] : [r[1], r[3]];
+        const spans = fills
+            .filter((f) => (horizontal ? f[1] <= mid && f[3] >= mid : f[0] <= mid && f[2] >= mid))
+            .map((f): [number, number] => (horizontal ? [Math.max(lo, f[0]), Math.min(hi, f[2])] : [Math.max(lo, f[1]), Math.min(hi, f[3])]))
+            .filter(([a, b]) => b > a)
+            .sort((u, v) => u[0] - v[0]);
+        const merged: [number, number][] = [];
+        for (const [a, b] of spans) {
+            const last = merged[merged.length - 1];
+            if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+            else merged.push([a, b]);
+        }
+        return merged.map(([a, b]): Rect => (horizontal ? [a, r[1], b, r[3]] : [r[0], a, r[2], b]));
+    };
+    // Where fills of one colour meet or overlap (a band painted as strips, a cell on a band of its
+    // colour), their edges divide nothing: an edge keeps only the stretches no fill of its colour
+    // continues across.
+    const exposed = (p: Primitive, side: 0 | 1 | 2 | 3): [number, number][] => {
+        const across = side % 2 === 1;
+        const [lo, hi] = across ? [p.bbox[0], p.bbox[2]] : [p.bbox[1], p.bbox[3]];
+        const shared = shaded
+            .filter((q) => {
+                if (q === p || q.rgb !== p.rgb) return false;
+                // `q` covers the far side of the edge: it meets it there or reaches across it.
+                const edge = p.bbox[side];
+                const [near, far] = across ? [q.bbox[1], q.bbox[3]] : [q.bbox[0], q.bbox[2]];
+                return side < 2 ? near < edge && far >= edge - 1 : far > edge && near <= edge + 1;
+            })
+            .map((q): [number, number] => (across ? [q.bbox[0], q.bbox[2]] : [q.bbox[1], q.bbox[3]]))
+            .sort((u, v) => u[0] - v[0]);
+        const out: [number, number][] = [];
+        let from = lo;
+        for (const [a, b] of shared) {
+            if (a > from) out.push([from, Math.min(a, hi)]);
+            from = Math.max(from, b);
+            if (from >= hi) break;
+        }
+        if (from < hi) out.push([from, hi]);
+        return out.filter(([a, b]) => b > a);
+    };
+    const horizontal: Rect[] = [];
+    const vertical: Rect[] = [];
+    for (const p of prims) {
+        if (!usable(p)) continue;
+        const [x0, y0, x1, y1] = p.bbox;
+        if (thin(p)) {
+            (x1 - x0 >= y1 - y0 ? horizontal : vertical).push(...(white(p.rgb) ? onFill(p.bbox) : [p.bbox]));
+        } else if (p.rect && (p.stroked || (!white(p.rgb) && p.rgb >= 0))) {
+            const edges = (side: 0 | 1 | 2 | 3): [number, number][] => (p.stroked ? [side % 2 ? [x0, x1] : [y0, y1]] : exposed(p, side));
+            const seen = (r: Rect) => (p.stroked && white(p.rgb) ? onFill(r) : [r]);
+            for (const [a, b] of edges(1)) horizontal.push(...seen([a, y0, b, y0]));
+            for (const [a, b] of edges(3)) horizontal.push(...seen([a, y1, b, y1]));
+            for (const [a, b] of edges(0)) vertical.push(...seen([x0, a, x0, b]));
+            for (const [a, b] of edges(2)) vertical.push(...seen([x1, a, x1, b]));
+        }
+    }
+    return { horizontal, vertical, fills };
+}

@@ -137,6 +137,7 @@ import {
     type StructuredRunContext,
     type StructuredRunObservers,
 } from "../pipeline/structured";
+import type { RegionItemSettings } from "../regions/regionItems";
 
 
 export interface OpReply<T = unknown> {
@@ -422,6 +423,7 @@ export function runExtractFromIndices(
     itemPasses: readonly ItemPass[] = [],
     pageNumberRuns = true,
     observers: StructuredRunObservers = {},
+    regionSettings: RegionItemSettings = {},
     gridCandidates = false,
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
@@ -514,6 +516,7 @@ export function runExtractFromIndices(
                 marginZone: opts.marginZone,
                 marginTextRows: opts.marginTextRows,
                 paragraphSettings,
+                compoundVocabulary: study.compoundVocabulary,
                 fillBoundaries,
                 dividerLines,
             });
@@ -570,6 +573,7 @@ export function runExtractFromIndices(
             pageCache,
             paragraphSettings,
             splitter,
+            regionSettings,
             gridCandidates,
             ...(observers.region ? { regionObserver: observers.region } : {}),
             ...(observers.boundaries ? { boundaryObserver: observers.boundaries } : {}),
@@ -593,6 +597,7 @@ export function runExtractFromIndices(
                 marginRemoval,
                 styleProfile.bodyStyles,
                 styleProfile.primaryBodyStyle,
+                opts.marginTextRows,
                 opts.marginTextRows,
             );
             const marginItems = collectMarginItemsFromFilteredPage(
@@ -887,7 +892,8 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
 /**
  * Paragraph settings with the schema preset's switches applied. The caller may
  * override `hangingIndentBlocks`; `headingLabelFilters`, `isolatedHeadings`,
- * `pageBodyStyles` and `learnedBoundaries` always follow the preset.
+ * `pageBodyStyles`, `exclusiveColumnLines`, `lineJoins`, `noteMarkers` and
+ * `learnedBoundaries` always follow the preset.
  */
 function presetParagraphSettings(
     preset: PdfExtractionPreset,
@@ -899,6 +905,9 @@ function presetParagraphSettings(
         headingLabelFilters: preset.headingLabelFilters,
         isolatedHeadings: preset.isolatedHeadings,
         pageBodyStyles: preset.pageBodyStyles,
+        exclusiveColumnLines: preset.exclusiveColumnLines,
+        lineJoins: preset.lineJoins,
+        noteMarkers: preset.noteMarkers,
         learnedBoundaries: preset.learnedBoundaries,
     };
 }
@@ -1108,6 +1117,7 @@ export async function opExtract(
             isStructured ? createItemPasses(preset) : [],
             preset.pageNumberRuns,
             {},
+            { tableRowEvidence: preset.tableRowEvidence },
             preset.gridTableCandidates,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
@@ -1237,6 +1247,7 @@ async function withStructuredRun<T>(
             itemPasses,
             preset.pageNumberRuns,
             observers,
+            { tableRowEvidence: preset.tableRowEvidence },
             preset.gridTableCandidates,
         );
         if (internal.metadata.timings) {

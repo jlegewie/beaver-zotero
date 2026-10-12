@@ -345,9 +345,12 @@ setting: comma-separated `name` or `name=true|false`. The overridable
 switches are `learnedBoundaries` (item boundaries from the learned boundary
 model, on in schema 5): `learnedBoundaries=false` gives the paragraph detector's
 heuristic boundaries, which a boundary training export with the heuristic's
-decisions and reasons needs; and `gridTableCandidates` (grid candidates for
-text-heavy tables, off until a region model trained on them ships), for the
-region training export. The output is then no longer the schema version
+decisions and reasons needs; `tableRowEvidence` (table rows read from row
+rules, fill bands and an anchor column before the text, on in schema 5):
+`tableRowEvidence=false` gives the text-only rows, for comparing table output
+on and off; and `gridTableCandidates` (grid candidates for text-heavy tables,
+off until a region model trained on them ships), for the region training
+export. The output is then no longer the schema version
 it names; `items export` records
 the overrides in its manifest (`preset_overrides`) and resumes a directory
 only with the same ones.
