@@ -14,7 +14,7 @@ import {
 } from "../../../src/beaver-extract/regions/features";
 import type { Rect } from "../../../src/beaver-extract/regions/geometry";
 import { gridGroups, rowStructure } from "../../../src/beaver-extract/regions/gridCandidates";
-import { assertCompatible, type RegionModelWeights } from "../../../src/beaver-extract/regions/model";
+import { assertCompatible, readsGridFeatures, type RegionModelWeights } from "../../../src/beaver-extract/regions/model";
 import { mergeRowFragments, pageLines, sourceLines } from "../../../src/beaver-extract/regions/pageSignals";
 import { LINE_RUNNING, detectRegions, routeLines, type DetectedRegion } from "../../../src/beaver-extract/regions/RegionDetector";
 import { GRAPHICS_SUMMARY_STRIDE, type GraphicsSummary } from "../../../src/beaver-extract/worker/graphicsSummary";
@@ -332,6 +332,47 @@ describe("cells MuPDF set on one line", () => {
         expect(withSources(specs)).toEqual([]);
     });
 
+    it("takes a line's ink span only when its characters are its text's and run left to right", () => {
+        const raw = page([{ box: [72, 100, 200, 111], text: "Some text here" }]);
+        const [x0, x1] = pageLines(raw, true)[0].inkSpan!;
+        expect([x0, x1]).toEqual([72, expect.closeTo(200)]);
+        expect(pageLines(raw)[0].inkSpan).toBeUndefined();
+        const chars = (raw.blocks[0].lines![0] as RawLineDetailed).chars;
+        [chars[1].bbox, chars[2].bbox] = [chars[2].bbox, chars[1].bbox];
+        expect(pageLines(raw, true)[0].inkSpan).toBeUndefined();
+        [chars[1].bbox, chars[2].bbox] = [chars[2].bbox, chars[1].bbox];
+        chars[3].c = "x";
+        expect(pageLines(raw, true)[0].inkSpan).toBeUndefined();
+    });
+
+    it("finds the same candidates and features taking lines whole by their gaps as cutting them from their characters", () => {
+        const labelled: Spec[] = [];
+        let y = 130;
+        for (let r = 0; r < 6; r++) {
+            const text = `Label ${r + 1}   ${SENTENCES[r]}`;
+            labelled.push({ box: [72, y, 72 + text.length * 5.5, y + LINE], text });
+            labelled.push({ box: [72 + 10 * 5.5, y + PITCH, 72 + (10 + SENTENCES[(r + 1) % 6].length) * 5.5, y + PITCH + LINE], text: SENTENCES[(r + 1) % 6] });
+            y += 2 * PITCH + 4;
+        }
+        const table = definitions(72, 180, 540, 130, 6);
+        for (const specs of [labelled, [...prose(72, 540, 72, 3), ...table.specs, ...prose(72, 540, table.bottom + 20, 4)]]) {
+            const raw = page(specs);
+            const run = (inkSpans: boolean) => {
+                const lines = pageLines(raw, inkSpans);
+                const found = findCandidates(lines, [], W, H, BS, { grid: true, sources: sourceLines(raw) });
+                return {
+                    whole: lines.filter((l) => l.inkSpan).length,
+                    candidates: found.candidates.map((c) => ({ source: c.source, bbox: c.bbox, lines: c.lines?.map((l) => l.text), grid: gridFeatures(c, found) })),
+                };
+            };
+            const [fromGaps, fromChars] = [run(true), run(false)];
+            expect(fromGaps.whole).toBeGreaterThan(0);
+            expect(fromChars.whole).toBe(0);
+            expect(fromGaps.candidates.some((c) => c.source === "grid")).toBe(true);
+            expect(fromGaps.candidates).toEqual(fromChars.candidates);
+        }
+    });
+
     it("keeps a table's column of justified descriptions, which ends with the table", () => {
         const specs: Spec[] = [];
         let y = 130;
@@ -531,6 +572,31 @@ describe("grid candidates in detection", () => {
         const definition = lines.findIndex((l, i) => l.text === SENTENCES[0] && l.bbox[1] >= 130 && l.bbox[1] < table.bottom && flags[i] & LINE_RUNNING);
         expect(definition).toBeGreaterThanOrEqual(0);
         expect(routes[definition]).toBe(k);
+    });
+
+    it("computes grid features only where the model may read them, giving the same classes", () => {
+        // A tree model on the grid feature set: other candidates (src_grid 0) never read a
+        // grid feature; grid candidates read their gutters.
+        const names = [...REGION_GRID_FEATURES];
+        const [src, gutters] = [names.indexOf("src_grid"), names.indexOf("grid_gutters")];
+        const model: RegionModelWeights = {
+            format: "bxm-trees-v1",
+            featureVersion: REGION_GRID_FEATURE_VERSION,
+            features: names,
+            classes: ["other", "picture", "decoration", "table", "formula"],
+            baseline: [0, -5, -5, -1, -5],
+            trees: [{ score: 3, feature: [src, -1, gutters, -1, -1], threshold: [0.5, 0, 0.5, 0, 0], left: [1, 0, 3, 0, 0], right: [2, 0, 4, 0, 0], value: [0, -2, 0, 0, 5] }],
+            trainedOn: "test",
+        };
+        expect([readsGridFeatures(model, 0), readsGridFeatures(model, 1)]).toEqual([false, true]);
+        expect([readsGridFeatures(gridFeatureModel(), 0), readsGridFeatures(gridFeatureModel(), 1)]).toEqual([true, true]);
+        const opts = { pageIndex: 0, model, gridCandidates: true };
+        const lean = detectRegions(page(specs), EMPTY_GRAPHICS, opts);
+        const all = detectRegions(page(specs), EMPTY_GRAPHICS, { ...opts, allGridFeatures: true });
+        expect(lean.candidates.some((c) => c.source === "grid" && c.label === "table")).toBe(true);
+        expect(lean.candidates.map((c) => [c.probs, c.label])).toEqual(all.candidates.map((c) => [c.probs, c.label]));
+        expect(lean.candidates.every((c) => (c.source === "grid") === !!c.gridFeatures)).toBe(true);
+        expect(all.candidates.every((c) => c.gridFeatures)).toBe(true);
     });
 
     it("leaves running text in the prose unless a grid table takes it", () => {

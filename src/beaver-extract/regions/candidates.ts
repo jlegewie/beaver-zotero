@@ -26,7 +26,7 @@ import {
     type PrimitiveKind,
     type RegionLine,
 } from "./pageSignals";
-import { gridGroups, type CharsOf, type LineChar } from "./gridCandidates";
+import { gridGroups, type CharsOf, type LineChar, type LineChars } from "./gridCandidates";
 import { runningTextLines, textGroups } from "./textCandidates";
 
 /** Candidate merging is quadratic; beyond this the page keeps its unmerged candidates. */
@@ -313,7 +313,7 @@ export function findCandidates(
     // candidates and the grid features read cells from them.
     const inFrame = new Map<RegionLine, { line: RegionLine; toFrame: (r: Rect) => Rect }>();
     for (const { source, frameLines, toFrame } of frames) frameLines.forEach((t, i) => inFrame.set(t, { line: source[i], toFrame }));
-    const charsOf = options.sources ? lineChars(options.sources, (l) => inFrame.get(l) ?? { line: l, toFrame: (r) => r }) : undefined;
+    const charsOf = options.sources ? lineChars(options.sources, (l) => inFrame.get(l)) : undefined;
     if (options.grid) {
         // Grid candidates come last, so that the other sources' candidates keep their order.
         const addGrids = (
@@ -390,51 +390,115 @@ export function findCandidates(
 
 /**
  * Characters of lines from their structured-text lines (`sources`), left to right
- * in the reading frame `place` gives each line (its page line and the frame's
- * mapping); a line joined from pieces has its pieces' characters, a space between
- * each two. Undefined when a structured-text line has no per-character boxes.
+ * in the reading frame `place` gives a line (its page line and the frame's
+ * mapping; none for an upright page line); a line joined from pieces has its
+ * pieces' characters, a space between each two. Undefined when a structured-text
+ * line has no per-character boxes.
  */
 function lineChars(
     sources: readonly RawLine[],
-    place: (l: RegionLine) => { line: RegionLine; toFrame: (r: Rect) => Rect },
+    place: (l: RegionLine) => { line: RegionLine; toFrame: (r: Rect) => Rect } | undefined,
 ): CharsOf {
-    const cache = new Map<RegionLine, LineChar[] | undefined>();
-    return (l) => {
-        if (cache.has(l)) return cache.get(l);
-        const { line, toFrame } = place(l);
+    const cache = new Map<RegionLine, LineChars | undefined>();
+    // Per structured-text line: 1 when it has a box per code point of its text, 2 when not.
+    const boxed = new Uint8Array(sources.length);
+    const rawLine = (part: RegionLine): RawLineDetailed | undefined => {
+        const k = part.source - 1;
+        const raw = sources[k] as RawLineDetailed | undefined;
+        if (!raw) return undefined;
+        if (!boxed[k]) boxed[k] = raw.chars?.length && raw.chars.length === codePoints(raw.text) ? 1 : 2;
+        return boxed[k] === 1 ? raw : undefined;
+    };
+    const read = (l: RegionLine): LineChars | undefined => {
+        const framed = place(l);
+        // An upright page line of one piece whose characters already run left to right
+        // is its structured-text line's range as it is: sorting would keep that order.
+        // (A NaN coordinate fails the order test, so its line takes the sort below.)
+        if (!framed && !l.parts) {
+            const raw = rawLine(l);
+            if (!raw) return undefined;
+            const [start, end] = l.range;
+            if (start >= 0 && end <= raw.chars.length) {
+                let ordered = true;
+                for (let i = start, prev = -Infinity; i < end; i++) {
+                    const ch = raw.chars[i];
+                    const x = ch ? ch.bbox.l : NaN;
+                    if (!(x >= prev)) {
+                        ordered = false;
+                        break;
+                    }
+                    prev = x;
+                }
+                if (ordered) return end > start ? { chars: raw.chars, start, end } : undefined;
+            }
+        }
+        const { line, toFrame } = framed ?? { line: l, toFrame: (r: Rect) => r };
         // Each piece's characters in the reading frame, left to right.
         const pieces: LineChar[][] = [];
         for (const part of line.parts ?? [line]) {
-            const raw = sources[part.source - 1] as RawLineDetailed | undefined;
-            if (!raw?.chars?.length || raw.chars.length !== [...raw.text].length) {
-                cache.set(l, undefined);
-                return undefined;
-            }
+            const raw = rawLine(part);
+            if (!raw) return undefined;
             const piece: LineChar[] = [];
             for (let i = part.range[0]; i < part.range[1]; i++) {
                 const ch = raw.chars[i];
                 if (!ch) continue;
                 const f = toFrame([ch.bbox.l, ch.bbox.t, ch.bbox.r, ch.bbox.b]);
-                piece.push({ x0: f[0], x1: f[2], c: ch.c });
+                piece.push({ c: ch.c, bbox: { l: f[0], r: f[2] } });
             }
-            if (piece.length) pieces.push(piece.sort((a, b) => a.x0 - b.x0));
+            if (piece.length) pieces.push(piece.sort((a, b) => a.bbox.l - b.bbox.l));
         }
         // Joined pieces are words of one line (`mergeRowFragments` joins them with a
         // space): in reading order, a space at the end of each piece keeps the words apart.
-        pieces.sort((a, b) => a[0].x0 - b[0].x0);
+        pieces.sort((a, b) => a[0].bbox.l - b[0].bbox.l);
         const out: LineChar[] = [];
         pieces.forEach((piece, k) => {
             if (k > 0) {
-                const right = Math.max(...pieces[k - 1].map((ch) => ch.x1));
-                out.push({ x0: right, x1: right, c: " " });
+                const right = Math.max(...pieces[k - 1].map((ch) => ch.bbox.r));
+                out.push({ c: " ", bbox: { l: right, r: right } });
             }
             out.push(...piece);
         });
-        out.sort((a, b) => a.x0 - b.x0);
-        const chars = out.length ? out : undefined;
-        cache.set(l, chars);
-        return chars;
+        out.sort((a, b) => a.bbox.l - b.bbox.l);
+        return out.length ? { chars: out, start: 0, end: out.length } : undefined;
     };
+    return {
+        chars(l) {
+            let chars = cache.get(l);
+            if (chars === undefined && !cache.has(l)) {
+                chars = read(l);
+                cache.set(l, chars);
+            }
+            return chars;
+        },
+        uncut(l, minGap) {
+            // An upright page line of one piece with an `inkSpan` reads as its
+            // structured-text line's characters in its range, in that order (`read`: they
+            // run left to right), each its text's code point, so `isSpaceChar` inks the
+            // ones `innerGaps` inked. `innerGaps` took its `gaps` over those, in that order,
+            // with the same furthest right edge so far as `segments`: each gap where
+            // `segments` cuts it (at least `minGap`, above `innerGaps`' minimum) is one of
+            // `gaps`, and a fallback to `wideGaps` cuts only at `gaps` too. Without such a
+            // gap the line is one cell; its extent is `inkSpan`, and its text, its
+            // characters joined and trimmed, is the piece's text.
+            const span = l.inkSpan;
+            if (!span || l.parts || place(l)) return undefined;
+            for (const [g0, g1] of l.gaps ?? []) if (!(g1 - g0 < minGap)) return undefined;
+            return span;
+        },
+    };
+}
+
+/** Code points of `text` (`[...text].length`), counted without splitting it. */
+function codePoints(text: string): number {
+    let n = 0;
+    for (let i = 0; i < text.length; i++, n++) {
+        const c = text.charCodeAt(i);
+        if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) {
+            const d = text.charCodeAt(i + 1);
+            if (d >= 0xdc00 && d <= 0xdfff) i++;
+        }
+    }
+    return n;
 }
 
 /** Frame rules lie within this many points of the cluster's edge... */

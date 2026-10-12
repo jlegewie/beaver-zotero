@@ -351,6 +351,57 @@ function logisticScores(model: LogisticModel, x: ModelInput): number[] {
 }
 
 /**
+ * The input columns a model may read for rows whose columns in `fixed` hold the
+ * given values: every column of a split some such row can reach, a split on a
+ * fixed column sending them down the branch its value takes (as evaluation
+ * routes it). A logistic model reads every column.
+ */
+export function columnsRead(model: Model, fixed: ReadonlyMap<number, number>): Set<number> {
+    const read = new Set<number>();
+    if (model.format === LOGISTIC_FORMAT) {
+        model.features.forEach((_, i) => read.add(i));
+        return read;
+    }
+    // Which children of split k rows can reach: 1 left, 2 right, 3 both.
+    const branches = (f: number, threshold: number, missingLeft: boolean): number => {
+        const v = fixed.get(f);
+        if (v === undefined) return 3;
+        return (v !== v ? missingLeft : v <= threshold) ? 1 : 2;
+    };
+    if (model.format === PACKED_TREES_FORMAT) {
+        const { depth, feature, threshold, missingLeft } = packedTrees(model);
+        const splits = 2 ** depth - 1;
+        if (splits === 0) return read;
+        for (let node = 0; node < feature.length; node += splits) {
+            const stack = [0];
+            while (stack.length) {
+                const k = stack.pop()!;
+                const i = node + k;
+                read.add(feature[i]);
+                const to = branches(feature[i], threshold[i], missingLeft[i] === 1);
+                for (const child of [2 * k + 1, 2 * k + 2]) {
+                    if (child < splits && to & (child === 2 * k + 1 ? 1 : 2)) stack.push(child);
+                }
+            }
+        }
+        return read;
+    }
+    for (const tree of model.trees) {
+        const stack = [0];
+        while (stack.length) {
+            const k = stack.pop()!;
+            const f = tree.feature[k];
+            if (f < 0) continue;
+            read.add(f);
+            const to = branches(f, tree.threshold[k], tree.missing_left?.[k] === 1);
+            if (to & 1) stack.push(tree.left[k]);
+            if (to & 2) stack.push(tree.right[k]);
+        }
+    }
+    return read;
+}
+
+/**
  * The single score (logit of `classes[1]`) of a binary model, without the
  * per-row allocations of `modelScores`; the same arithmetic in the same order.
  */

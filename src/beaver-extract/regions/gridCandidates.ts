@@ -25,7 +25,7 @@
  *   text in another column), or cells that are not running text side by side.
  */
 import { iou, unionRect, type Rect } from "./geometry";
-import { wideGaps, wordCounts, type Primitive, type RegionLine } from "./pageSignals";
+import { isSpaceChar, wideGaps, wordCounts, type Primitive, type RegionLine } from "./pageSignals";
 import { extendOverRules } from "./textCandidates";
 
 /** Text on one row this many em apart is in separate columns. */
@@ -84,21 +84,41 @@ const PROSE_OCCUPANCY = 0.8;
 /** Two candidates this similar (IoU) are one. */
 const DUPLICATE_IOU = 0.9;
 
-/** A character of a line: its extent along the line's row (in its reading frame) and the character. */
+/**
+ * A character of a line: the character and its extent along the line's row, in
+ * its reading frame, from `bbox.l` to `bbox.r` (a structured-text character of
+ * an upright line is one as it is).
+ */
 export interface LineChar {
-    x0: number;
-    x1: number;
     c: string;
+    bbox: { l: number; r: number };
+}
+
+/** A line's characters, left to right in its reading frame: `chars[start]` to `chars[end - 1]`. */
+export interface LineChars {
+    chars: readonly LineChar[];
+    start: number;
+    end: number;
 }
 
 /**
- * A line's characters, left to right in its reading frame, from its structured-text
- * line (`FindCandidatesOptions.sources`); undefined when unknown. Cells MuPDF set on
- * one line meet at the gaps between them, and each cell has its own text. Without
- * them a line splits at its `wideGaps` (upright lines only), and each of its cells
- * reads as the whole line's text.
+ * Lines' characters from their structured-text lines (`FindCandidatesOptions.sources`).
+ * Cells MuPDF set on one line meet at the gaps between them, and each cell has its
+ * own text. Without them a line splits at its `wideGaps` (upright lines only), and
+ * each of its cells reads as the whole line's text.
  */
-export type CharsOf = (l: RegionLine) => readonly LineChar[] | undefined;
+export interface CharsOf {
+    /** A line's characters; undefined when unknown. */
+    chars(l: RegionLine): LineChars | undefined;
+    /**
+     * The extent of a line's one cell when `segments` provably does not cut it at
+     * `minGap` (no gap between its inked characters is that wide) and the cell's
+     * text is the line's, told without reading its characters; undefined when not
+     * known so (an upright page line of one piece with an `inkSpan` and narrower
+     * `gaps`).
+     */
+    uncut(l: RegionLine, minGap: number): readonly [number, number] | undefined;
+}
 
 export interface GridGroup {
     bbox: Rect;
@@ -121,27 +141,100 @@ export interface GridShape {
     breaks: number;
 }
 
-interface Segment {
-    x0: number;
-    x1: number;
-    line: RegionLine;
-    /** Caption or figure text: it cuts gutters, but borders none and joins no grid. */
-    blocker: boolean;
-    /** The cell's text and words; the whole line's when its characters are unknown (`exact` false). */
-    text: string;
-    words: number;
-    exact: boolean;
+/**
+ * A cell of a line. Its text and words are read on first use: most cells never
+ * reach the tests that read them.
+ */
+class Segment {
+    private cellText?: string;
+    private cellWords?: number;
+
+    constructor(
+        readonly x0: number,
+        readonly x1: number,
+        readonly line: RegionLine,
+        /** Caption or figure text: it cuts gutters, but borders none and joins no grid. */
+        readonly blocker: boolean,
+        /** The cell's own text: from its characters, or a line that is one cell. */
+        public exact: boolean,
+        /**
+         * The cell's characters, `chars[a]` to `chars[b - 1]`; absent when they are its
+         * line's text (a line `CharsOf.uncut` leaves whole) or unknown.
+         */
+        private readonly chars?: readonly LineChar[],
+        private readonly a = 0,
+        private readonly b = 0,
+    ) {}
+
+    /** The cell's text: its characters joined, or its line's. */
+    get text(): string {
+        if (this.cellText === undefined) {
+            if (!this.chars) {
+                this.cellText = this.line.text;
+            } else {
+                let text = "";
+                for (let i = this.a; i < this.b; i++) text += this.chars[i].c;
+                this.cellText = text.trim();
+            }
+        }
+        return this.cellText;
+    }
+
+    /** The cell's words: of its text, or its line's. */
+    get words(): number {
+        this.cellWords ??= this.chars ? wordCounts(this.text).words : this.line.words;
+        return this.cellWords;
+    }
 }
 
-interface Row {
-    y0: number;
-    y1: number;
-    /** Typical line height of the row. */
-    h: number;
-    em: number;
-    segs: Segment[];
-    /** The row holds a caption: a table's top or bottom, which no gutter crosses. */
-    caption: boolean;
+/** How a row's lines are cut into cells. */
+interface CellSource {
+    blockers: ReadonlySet<RegionLine>;
+    charsOf?: CharsOf;
+}
+
+/** Lines sharing a baseline band. Its lines are cut into cells on first use (`segs`). */
+class Row {
+    readonly lines: RegionLine[] = [];
+    private cells?: Segment[];
+
+    constructor(
+        public y0: number,
+        public y1: number,
+        /** Typical line height of the row. */
+        readonly h: number,
+        public em: number,
+        /** The row holds a caption: a table's top or bottom, which no gutter crosses. */
+        public caption: boolean,
+        private readonly source: CellSource,
+    ) {}
+
+    /** The cells of the row's lines, left to right. */
+    get segs(): Segment[] {
+        if (!this.cells) {
+            const cells: Segment[] = [];
+            for (const l of this.lines) cells.push(...segments(l, Math.max(1, l.size), this.source.blockers.has(l), this.source.charsOf));
+            this.cells = cells.sort((a, b) => a.x0 - b.x0);
+        }
+        return this.cells;
+    }
+
+    /**
+     * Whether two cells of the row may border a gap (`freeIntervals`): false only
+     * when at most one of its cells is not a blocker. Told without cutting its lines
+     * when they are not cut yet: a blocker's line has no such cell, and a line
+     * `oneCell` vouches for has one.
+     */
+    mayBorder(): boolean {
+        if (this.cells) return this.cells.filter((s) => !s.blocker).length >= 2;
+        let cells = 0;
+        for (const l of this.lines) {
+            if (this.source.blockers.has(l)) continue;
+            cells += oneCell(l, Math.max(1, l.size), this.source.charsOf) ? 1 : 2;
+            if (cells >= 2) return true;
+        }
+        return false;
+    }
 }
 
 interface Chain {
@@ -155,6 +248,7 @@ interface Chain {
 /** Lines in rows (sharing most of their height), top to bottom; each row's segments left to right. */
 function buildRows(lines: readonly RegionLine[], blockers: ReadonlySet<RegionLine>, captions: ReadonlySet<RegionLine>, charsOf?: CharsOf): Row[] {
     const sorted = [...lines].sort((a, b) => a.bbox[1] + a.bbox[3] - (b.bbox[1] + b.bbox[3]));
+    const source: CellSource = { blockers, charsOf };
     const rows: Row[] = [];
     for (const l of sorted) {
         const h = l.bbox[3] - l.bbox[1];
@@ -169,54 +263,69 @@ function buildRows(lines: readonly RegionLine[], blockers: ReadonlySet<RegionLin
             }
         }
         const em = Math.max(1, l.size);
-        const segs = segments(l, em, blockers.has(l), charsOf);
         if (row) {
             row.y0 = Math.min(row.y0, l.bbox[1]);
             row.y1 = Math.max(row.y1, l.bbox[3]);
-            row.segs.push(...segs);
             row.em = Math.max(row.em, em);
             row.caption ||= captions.has(l);
         } else {
-            rows.push({ y0: l.bbox[1], y1: l.bbox[3], h, em, segs, caption: captions.has(l) });
+            row = new Row(l.bbox[1], l.bbox[3], h, em, captions.has(l), source);
+            rows.push(row);
         }
+        row.lines.push(l);
     }
-    for (const row of rows) row.segs.sort((a, b) => a.x0 - b.x0);
     return rows;
+}
+
+/**
+ * Whether `segments` provably makes one cell of a line (at `em`), told without its
+ * characters: `CharsOf.uncut` vouches for it, or, without characters, none of its
+ * `wideGaps` (where alone it is then cut) is `GUTTER_EM` wide.
+ */
+function oneCell(l: RegionLine, em: number, charsOf?: CharsOf): boolean {
+    if (charsOf) return !!charsOf.uncut(l, GUTTER_EM * em);
+    return wideGaps(l).every(([g0, g1]) => g1 - g0 < GUTTER_EM * em);
 }
 
 /** A line's extent cut at gaps of at least `GUTTER_EM` between its inked characters (cells MuPDF set on one line). */
 function segments(l: RegionLine, em: number, blocker: boolean, charsOf?: CharsOf): Segment[] {
-    const chars = charsOf?.(l);
-    if (chars?.length) {
+    const uncut = charsOf?.uncut(l, GUTTER_EM * em);
+    if (uncut) return [new Segment(uncut[0], uncut[1], l, blocker, true)];
+    const known = charsOf?.chars(l);
+    if (known && known.end > known.start) {
+        const { chars, end } = known;
         const out: Segment[] = [];
-        let cell: LineChar[] = [];
+        // The current cell: its first character (spaces before its first inked one
+        // included), its inked extent, and whether its text is more than spaces.
+        let first = known.start;
         let left = Infinity;
         let right = -Infinity;
-        const close = () => {
-            const text = cell.map((ch) => ch.c).join("").trim();
-            if (text) out.push({ x0: left, x1: right, line: l, blocker, text, words: wordCounts(text).words, exact: true });
-        };
-        for (const ch of chars) {
-            if (/\s/u.test(ch.c)) {
-                cell.push(ch);
+        let text = false;
+        for (let i = first; i < end; i++) {
+            const ch = chars[i];
+            if (isSpaceChar(ch.c)) {
+                // A space stays in the cell; a "character" of several code points may
+                // hold more than one.
+                if (ch.c.length > 1 && ch.c.trim()) text = true;
                 continue;
             }
-            if (right !== -Infinity && ch.x0 - right >= GUTTER_EM * em) {
-                close();
-                cell = [];
+            if (right !== -Infinity && ch.bbox.l - right >= GUTTER_EM * em) {
+                if (text) out.push(new Segment(left, right, l, blocker, true, chars, first, i));
+                first = i;
                 left = Infinity;
                 right = -Infinity;
+                text = false;
             }
-            cell.push(ch);
-            left = Math.min(left, ch.x0);
-            right = Math.max(right, ch.x1);
+            if (ch.c) text = true;
+            left = Math.min(left, ch.bbox.l);
+            right = Math.max(right, ch.bbox.r);
         }
-        close();
+        if (text) out.push(new Segment(left, right, l, blocker, true, chars, first, end));
         if (out.length) return out;
     }
     const out: Segment[] = [];
     let x0 = l.bbox[0];
-    const cut = (x1: number) => out.push({ x0, x1, line: l, blocker, text: l.text, words: l.words, exact: false });
+    const cut = (x1: number) => out.push(new Segment(x0, x1, l, blocker, false));
     for (const [g0, g1] of wideGaps(l)) {
         if (g1 - g0 < GUTTER_EM * em || g0 <= x0 || g1 >= l.bbox[2]) continue;
         cut(g0);
@@ -257,6 +366,9 @@ function findChains(rows: readonly Row[]): Chain[] {
             active = [];
             return;
         }
+        // With no gutter running, a row starts one only at a gap that two of its cells
+        // border; one that cannot need not be cut into cells.
+        if (!active.length && !row.mayBorder()) return;
         const free = freeIntervals(row);
         const gmin = GUTTER_EM * row.em;
         const next: Chain[] = [];
@@ -365,11 +477,26 @@ function blockShape(
         const beside = occupied[k].filter((v, i) => v && occupied.some((o, j) => j !== k && o[i])).length;
         anchored = counts[k] ? beside / counts[k] : 0;
     }
-    // Bands of space between rows that hold text, wider than `BREAK_GAP` line heights.
+    return {
+        rows: rowsWithText,
+        multiRows: rowsWithText ? multi / rowsWithText : 0,
+        sparseOccupancy,
+        anchored,
+        breaks: breakShare(rows, first, textRows),
+        columns,
+        occupied,
+    };
+}
+
+/**
+ * Share of the transitions between rows that hold text (`textRows`, from row
+ * `first`) that are bands of space wider than `BREAK_GAP` line heights.
+ */
+function breakShare(rows: readonly Row[], first: number, textRows: readonly boolean[]): number {
     let transitions = 0;
     let breaks = 0;
     let prev = -1;
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < textRows.length; i++) {
         if (!textRows[i]) continue;
         if (prev >= 0) {
             transitions++;
@@ -379,15 +506,7 @@ function blockShape(
         }
         prev = i;
     }
-    return {
-        rows: rowsWithText,
-        multiRows: rowsWithText ? multi / rowsWithText : 0,
-        sparseOccupancy,
-        anchored,
-        breaks: transitions ? breaks / transitions : 0,
-        columns,
-        occupied,
-    };
+    return transitions ? breaks / transitions : 0;
 }
 
 /**
@@ -399,6 +518,11 @@ export function rowStructure(lines: readonly RegionLine[], charsOf?: CharsOf): G
     if (!upright.length) return { rows: 0, gutters: 0, multiRows: 0, sparseOccupancy: 1, anchored: 0, breaks: 0 };
     const rows = buildRows(upright, new Set(), new Set(), charsOf);
     const cuts = cutsOf(findChains(rows));
+    if (!cuts.length) {
+        // One column holding every row: each line has a cell and there are no blockers,
+        // so the shape follows from the rows alone (as `blockShape` would give it).
+        return { rows: rows.length, gutters: 0, multiRows: 0, sparseOccupancy: 1, anchored: 0, breaks: breakShare(rows, 0, rows.map(() => true)) };
+    }
     const shape = blockShape(rows, 0, rows.length - 1, cuts, -Infinity, Infinity);
     return {
         rows: shape.rows,
@@ -493,9 +617,9 @@ export function gridGroups(
         // the grid left out (prose beside it, set on one structured-text line) stays out,
         // since taking the line would take that text too. The box is the cells'.
         const kept = new Set(cells);
-        const members = [...new Set(cells.map((s) => s.line))].filter((l) =>
-            rows.slice(first, last + 1).every((row) => row.segs.every((s) => s.line !== l || kept.has(s))),
-        );
+        const partly = new Set<RegionLine>();
+        for (let r = first; r <= last; r++) for (const s of rows[r].segs) if (!kept.has(s)) partly.add(s.line);
+        const members = [...new Set(cells.map((s) => s.line))].filter((l) => !partly.has(l));
         if (members.length < MIN_ROWS) continue;
         let span: Rect = [cells[0].x0, cells[0].line.bbox[1], cells[0].x1, cells[0].line.bbox[3]];
         for (const s of cells) span = unionRect(span, [s.x0, s.line.bbox[1], s.x1, s.line.bbox[3]]);
