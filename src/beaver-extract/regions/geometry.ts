@@ -18,10 +18,15 @@ export function unionRect(a: Rect, b: Rect): Rect {
     return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
 }
 
+/** `rectArea(intersect(a, b))`, without the intermediate rect. */
+export function intersectionArea(a: Rect, b: Rect): number {
+    return Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+}
+
 /** Fraction of `a` covered by `b`. */
 export function overlapFrac(a: Rect, b: Rect): number {
     const area = rectArea(a);
-    return area > 0 ? rectArea(intersect(a, b)) / area : 0;
+    return area > 0 ? intersectionArea(a, b) / area : 0;
 }
 
 export function dilate(r: Rect, d: number): Rect {

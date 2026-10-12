@@ -13,6 +13,7 @@ import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
 import { LibraryMutations } from './services/libraryMutations';
 import { LibraryOperations } from './services/libraryOperations';
+import { DeferredCommits } from './services/committedTransaction';
 import { ItemImportService } from './services/itemImport/service';
 import { InstanceExport } from './services/export/instanceExport';
 import { NotePreviews } from './services/notePreviews';
@@ -45,6 +46,7 @@ class Addon {
         },
     );
     public libraryOperations = new LibraryOperations();
+    public deferredCommits = new DeferredCommits();
     public itemImport = new ItemImportService();
     public exporter = new InstanceExport();
     public runtime = new BeaverInstance();

@@ -32,7 +32,10 @@ import type {
     DegradationNote,
     DegradationSummary,
     DocItem,
+    FootnoteItem,
     ItemLine,
+    MarginItem,
+    RawChar,
     RawLineDetailed,
     RawPageDataDetailed,
     ReferenceItem,
@@ -52,6 +55,8 @@ import {
 } from "./pipeline/draftItems";
 import { detectColumns } from "./ColumnDetector";
 import { detectLinesOnPage } from "./LineDetector";
+import { decideLineJoin, joinsWithoutSpace, SOFT_HYPHEN, type LineJoin } from "./lineJoins";
+import { MATH_OPERATORS } from "./mathOperators";
 import {
     charCodeUnits,
     hasSentenceFinalTerminator,
@@ -211,14 +216,15 @@ const SENTENCE_END_PUNCT = new Set([".", "!", "?"]);
 const SUPERSCRIPT_HEIGHT_RATIO = 0.85;
 
 function lineMedianCharHeight(line: RawLineDetailed): number {
-    const heights: number[] = [];
+    const heights = new Float64Array(line.chars.length);
+    let n = 0;
     for (const c of line.chars) {
         const height = bboxHeight(c.bbox);
-        if (height > 0) heights.push(height);
+        if (height > 0) heights[n++] = height;
     }
-    if (heights.length === 0) return 0;
-    heights.sort((a, b) => a - b);
-    return heights[Math.floor(heights.length / 2)];
+    if (n === 0) return 0;
+    // A typed array sorts numerically without a comparator.
+    return heights.subarray(0, n).sort()[Math.floor(n / 2)];
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +258,7 @@ export function collectHyphenatedCompounds(
     into: Set<string> = new Set(),
 ): Set<string> {
     for (const text of lineTexts) {
+        if (!text.includes("-")) continue;
         for (const match of text.matchAll(MIDLINE_COMPOUND_RE)) {
             const parts = match[0].toLowerCase().split("-");
             for (let i = 0; i + 1 < parts.length; i++) {
@@ -306,6 +313,13 @@ function isUrlishToken(token: string): boolean {
 
 export type LineBreakHyphenDecision = "none" | "join" | "keep";
 
+/** `decideLineJoin`'s answer in `decideLineBreakHyphen`'s terms: "glue" keeps the last character. */
+const LINE_JOIN_AS_HYPHEN_DECISION: Record<LineJoin, LineBreakHyphenDecision> = {
+    space: "none",
+    join: "join",
+    glue: "keep",
+};
+
 /**
  * Decide how to treat a hyphen that falls at a physical line break.
  *
@@ -329,7 +343,11 @@ export function decideLineBreakHyphen(
     nextLineText: string,
     vocabulary?: ReadonlySet<string>,
 ): LineBreakHyphenDecision {
-    const prev = prevLineText.replace(/\s+$/u, "");
+    // Most lines don't end in a hyphen: rule them out before the regexes.
+    let end = prevLineText.length;
+    while (end > 0 && /\s/u.test(prevLineText[end - 1])) end--;
+    if (end === 0 || prevLineText.charCodeAt(end - 1) !== 0x2d) return "none";
+    const prev = prevLineText.slice(0, end);
     const prevMatch = TRAILING_HYPHEN_RE.exec(prev);
     if (!prevMatch) return "none";
     const next = nextLineText.replace(/^\s+/u, "");
@@ -346,6 +364,159 @@ export function decideLineBreakHyphen(
     }
     const compound = `${prevMatch[1]}-${nextMatch[1]}`.toLowerCase();
     return vocabulary?.has(compound) ? "keep" : "join";
+}
+
+/**
+ * `next` continues `prev`'s row: they overlap vertically by at least half the
+ * shorter line and `next` starts to the right of `prev`.
+ */
+function onSameRow(prev: RawLineDetailed, next: RawLineDetailed): boolean {
+    const minH = Math.min(bboxHeight(prev.bbox), bboxHeight(next.bbox));
+    if (!(minH > 0)) return false;
+    const overlap = Math.min(prev.bbox.b, next.bbox.b) - Math.max(prev.bbox.t, next.bbox.t);
+    return overlap >= 0.5 * minH && next.bbox.l >= prev.bbox.r - 0.25 * minH;
+}
+
+/**
+ * `next` continues `prev`'s word on their row: set in the same size (a raised
+ * marker or a subscript keeps its space, as before), no whitespace at the
+ * boundary, and a gap of at most a tenth of an em, narrower than any word
+ * space.
+ */
+function touches(prev: RawLineDetailed, next: RawLineDetailed): boolean {
+    if (/\s$/u.test(prev.text) || /^\s/u.test(next.text)) return false;
+    const a = prev.font?.size ?? 0;
+    const b = next.font?.size ?? 0;
+    if (!(a > 0 && b > 0) || Math.max(a, b) > 1.15 * Math.min(a, b)) return false;
+    return next.bbox.l - prev.bbox.r <= 0.1 * a;
+}
+
+/** Switches of `buildParagraphText`, from the PDF schema preset. */
+export interface ParagraphTextOptions {
+    /** Join line breaks with `decideLineJoin` (`ParagraphDetectionSettings.lineJoins`). */
+    lineJoins?: boolean;
+    /**
+     * Footnote markers glued to text (`ParagraphDetectionSettings.noteMarkers`):
+     * a raised marker after a word is dropped, as one after sentence-ending
+     * punctuation already is, and, with `leadMarker`, the paragraph's raised
+     * lead marker is set off from the text after it.
+     */
+    noteMarkers?: boolean;
+    /** The paragraph is a footnote, whose first line may open with its marker. */
+    leadMarker?: boolean;
+}
+
+/** Unit names a decimal prefix goes before ("mrad", "µmol", "kohm"). */
+const PREFIXED_UNITS = ["rad", "bar", "mol", "ohm", "sec", "cal", "lux"];
+const UNIT_PREFIXES = ["", "q", "r", "y", "z", "a", "f", "p", "n", "µ", "μ", "m", "c", "d", "da", "h", "k"];
+/** Words a prefix and a unit spell, which keep dropping a glued marker ("flux12"). */
+const PREFIXED_UNIT_WORDS = new Set(["flux", "arad"]);
+
+/**
+ * Units of three or more letters a raised digit after is a power of
+ * ("4 rad²", "2 mbar³", "ohm²"), not a note marker.
+ */
+const UNIT_WORDS = new Set([
+    ...PREFIXED_UNITS.flatMap((unit) => UNIT_PREFIXES.map((prefix) => prefix + unit))
+        .filter((word) => !PREFIXED_UNIT_WORDS.has(word)),
+    "ohms", "ppm", "ppb", "ppt", "rpm", "mph", "kph", "atm", "torr", "dyn", "erg", "gal", "lbs",
+    "arcsec", "arcmin", "mas",
+]);
+
+/** Spelled-out metric units, which take a spelled-out prefix ("kilometres", "milliseconds"). */
+const SPELLED_METRIC_UNITS = [
+    "meter", "metre", "gram", "liter", "litre", "second", "newton", "joule", "watt", "pascal", "ampere", "volt",
+    "coulomb", "tesla", "hertz", "mole", "radian", "steradian",
+];
+const SPELLED_UNIT_PREFIXES = ["", "kilo", "hecto", "deca", "deci", "centi", "milli", "micro", "nano", "pico", "femto", "mega", "giga"];
+/** Plural of a spelled-out unit ("seconds", "inches", "feet"); "hertz" has none. */
+function unitPlural(unit: string): string {
+    if (unit.endsWith("hertz")) return unit;
+    if (unit === "foot") return "feet";
+    return unit.endsWith("inch") ? `${unit}es` : `${unit}s`;
+}
+
+/**
+ * Spelled-out units and their plurals, a single raised 2, 3 or 4 after which
+ * is a power ("metres per second²", "variance in seconds²"), not a note
+ * marker. A longer marker after them ("seconds12") is still dropped.
+ */
+const SPELLED_UNIT_WORDS = new Set(
+    [
+        ...SPELLED_METRIC_UNITS.flatMap((unit) => SPELLED_UNIT_PREFIXES.map((prefix) => prefix + unit)),
+        "minute", "hour", "kelvin", "ohm", "inch", "foot", "yard", "mile",
+    ].flatMap((unit) => [unit, unitPlural(unit)]),
+);
+
+/** Marker characters a footnote opens with: numbers, note symbols, lettered notes. */
+const LEAD_MARKER_RE = /^[0-9*†‡§¶#a-z]$/u;
+
+/** A raised glyph sits at least this share of its neighbour's height above the neighbour's bottom. */
+const RAISED_RATIO = 0.15;
+
+function isRaisedAgainst(ch: RawChar, neighbour: RawChar): boolean {
+    return ch.bbox.b <= neighbour.bbox.b - RAISED_RATIO * bboxHeight(neighbour.bbox);
+}
+
+/**
+ * Index just past a footnote's lead marker that runs into its text ("1AI is
+ * a collection…"): one to four small, raised marker characters at the start
+ * of the line, directly followed by a full-size character. `-1` when there
+ * is none (no marker, or a space already follows it).
+ */
+function gluedLeadMarkerEnd(line: RawLineDetailed, superscriptThreshold: number): number {
+    const chars = line.chars;
+    let start = 0;
+    while (start < chars.length && /\s/u.test(chars[start].c)) start++;
+    let end = start;
+    const isSmall = (ch: RawChar) => bboxHeight(ch.bbox) > 0 && bboxHeight(ch.bbox) < superscriptThreshold;
+    while (end < chars.length && end - start < 4 && LEAD_MARKER_RE.test(chars[end].c) && isSmall(chars[end])) end++;
+    if (end === start || end >= chars.length) return -1;
+    const next = chars[end];
+    if (/\s/u.test(next.c) || isSmall(next)) return -1;
+    return chars.slice(start, end).every((ch) => isRaisedAgainst(ch, next)) ? end : -1;
+}
+
+/**
+ * Indices of footnote markers glued to the word before them
+ * ("programmes52", "context53", "alleles105,106"): small, raised digits
+ * (numbers of up to three digits, with commas and dashes between) right
+ * after a lowercase word of three or more letters, followed by a space,
+ * punctuation or the end of the line. The word length and case keep
+ * exponents of units and variables ("mm3", "cm2", "R2") out, and lists of
+ * longer unit names and function names those of units and mathematics
+ * ("rad²", "cos² x", "log² n"); a spelled-out unit keeps a single-digit
+ * power ("seconds²").
+ */
+function gluedNoteMarkerChars(line: RawLineDetailed, superscriptThreshold: number): Set<number> {
+    const out = new Set<number>();
+    const chars = line.chars;
+    const isSmall = (ch: RawChar) => bboxHeight(ch.bbox) > 0 && bboxHeight(ch.bbox) < superscriptThreshold;
+    for (let i = 3; i < chars.length; i++) {
+        const code = chars[i].c.charCodeAt(0);
+        if (code < 48 || code > 57 || chars[i].c.length !== 1 || !isSmall(chars[i])) continue;
+        const prev = chars[i - 1];
+        if (!/\p{Ll}/u.test(prev.c) || isSmall(prev) || !isRaisedAgainst(chars[i], prev)) continue;
+        let w = i - 1;
+        while (w >= 0 && /\p{L}/u.test(chars[w].c)) w--;
+        const word = chars.slice(w + 1, i).map((ch) => ch.c).join("");
+        if (word.length < 3 || !/^\p{Ll}+$/u.test(word) || MATH_OPERATORS.has(word) || UNIT_WORDS.has(word)) continue;
+        // The marker, or a list or range of them ("105,106", "14–16"), set
+        // small and raised; it ends on a digit.
+        let end = i;
+        while (
+            end < chars.length && end - i < 12 && isSmall(chars[end]) &&
+            (/[0-9]/u.test(chars[end].c) || (/[,\u2013-]/u.test(chars[end].c) && isRaisedAgainst(chars[end], prev)))
+        ) end++;
+        while (end > i && !/[0-9]/u.test(chars[end - 1].c)) end--;
+        const run = chars.slice(i, end).map((ch) => ch.c).join("");
+        if (/[0-9]{4}/u.test(run)) continue;
+        if (SPELLED_UNIT_WORDS.has(word) && /^[2-4]$/u.test(run)) continue;
+        if (end < chars.length && !/[\s.,;:!?)\]”’"']/u.test(chars[end].c)) continue;
+        for (let k = i; k < end; k++) out.add(k);
+        i = end - 1;
+    }
+    return out;
 }
 
 /**
@@ -377,11 +548,25 @@ export function decideLineBreakHyphen(
  * trailing whitespace contribute no source entry, preserving the text/source
  * lockstep; the rejoined word's bboxes simply span both source lines. See
  * `decideLineBreakHyphen`. With no `vocabulary`, every line-break hyphen joins.
+ *
+ * With `lineJoins`, each line break (not a boundary between two raw lines
+ * side by side on one row) follows `decideLineJoin` instead (shared
+ * with the markdown text, see `lineJoins.ts`): hyphens are decided from the
+ * document's spelling and the word's shape, URLs, DOIs, number ranges and
+ * CJK text join without a space, a soft hyphen at a line end joins the word,
+ * and soft hyphens inside a line are dropped.
+ *
+ * With `noteMarkers`, a footnote marker glued to the word before it is
+ * dropped ("programmes52 (which" → "programmes (which"), and with
+ * `leadMarker` a footnote's own glued lead marker gets a space after it
+ * ("1AI is…" → "1 AI is…"), keeping the marker.
  */
 export function buildParagraphText(
     lines: RawLineDetailed[],
     vocabulary?: ReadonlySet<string>,
+    options: ParagraphTextOptions = {},
 ): ParagraphText {
+    const lineJoins = options.lineJoins ?? false;
     const textParts: string[] = [];
     const source: ParagraphText["source"] = [];
     let lastEmittedNonWhitespaceRealChar: string | null = null;
@@ -397,11 +582,15 @@ export function buildParagraphText(
         { lastRealIdx: number; dropHyphen: boolean } | null
     > = new Array(lines.length).fill(null);
     for (let li = 0; li < lines.length - 1; li++) {
-        const decision = decideLineBreakHyphen(
-            lines[li].text,
-            lines[li + 1].text,
-            vocabulary,
-        );
+        // `decideLineJoin` reads line breaks. Two raw lines side by side on
+        // one row are not a line break: a hyphen between them is literal, and
+        // they join directly only when they touch (MuPDF split a word) or
+        // meet in Chinese or Japanese text, with a word space otherwise.
+        const decision = !lineJoins
+            ? decideLineBreakHyphen(lines[li].text, lines[li + 1].text, vocabulary)
+            : onSameRow(lines[li], lines[li + 1])
+                ? (touches(lines[li], lines[li + 1]) || joinsWithoutSpace(lines[li].text, lines[li + 1].text) ? "keep" : "none")
+                : LINE_JOIN_AS_HYPHEN_DECISION[decideLineJoin(lines[li].text, lines[li + 1].text, vocabulary)];
         if (decision === "none") continue;
         const chars = lines[li].chars;
         let lastRealIdx = -1;
@@ -432,8 +621,18 @@ export function buildParagraphText(
         const median = lineMedianCharHeight(line);
         const superscriptThreshold =
             median > 0 ? median * SUPERSCRIPT_HEIGHT_RATIO : 0;
+        const leadEnd = options.noteMarkers && options.leadMarker && li === 0 && superscriptThreshold > 0
+            ? gluedLeadMarkerEnd(line, superscriptThreshold)
+            : -1;
+        const gluedMarkers = options.noteMarkers && superscriptThreshold > 0
+            ? gluedNoteMarkerChars(line, superscriptThreshold)
+            : null;
         for (let ci = 0; ci < line.chars.length; ci++) {
             const ch = line.chars[ci];
+            if (ci === leadEnd) {
+                textParts.push(" ");
+                source.push(null);
+            }
             // Line-break de-hyphenation: drop the trailing whitespace after the
             // last real char, and (join only) the trailing hyphen itself.
             if (
@@ -447,12 +646,16 @@ export function buildParagraphText(
                 if (/\s/.test(ch.c)) continue;
                 leadingWhitespace = false;
             }
+            if (lineJoins && ch.c === SOFT_HYPHEN) continue;
             const isSmall =
                 superscriptThreshold > 0 &&
                 bboxHeight(ch.bbox) > 0 &&
                 bboxHeight(ch.bbox) < superscriptThreshold;
             const isFootnoteMarker =
                 isSmall && FOOTNOTE_MARKER_CHARS.has(ch.c);
+            // A marker glued to a word is dropped; the space or punctuation
+            // after it follows the word directly.
+            if (gluedMarkers?.has(ci)) continue;
             if (
                 isFootnoteMarker &&
                 (inFootnoteRun ||
@@ -494,11 +697,12 @@ export function buildParagraphText(
 export function tryBuildParagraphText(
     lines: RawLineDetailed[],
     vocabulary?: ReadonlySet<string>,
+    options: ParagraphTextOptions = {},
 ):
     | { ok: true; paragraphText: ParagraphText }
     | { ok: false; error: string } {
     try {
-        return { ok: true, paragraphText: buildParagraphText(lines, vocabulary) };
+        return { ok: true, paragraphText: buildParagraphText(lines, vocabulary, options) };
     } catch (err) {
         return {
             ok: false,
@@ -520,7 +724,7 @@ function itemFromDraft(
     pageIndex: number,
     index: number,
     lines: ItemLine[],
-): TextItem | SectionHeaderItem | ReferenceItem {
+): TextItem | SectionHeaderItem | ReferenceItem | FootnoteItem | MarginItem {
     const text = publicItemText(item);
     const base: Omit<TextBearingItem, "kind"> = {
         id: `p${pageIndex}:i${index}`,
@@ -538,6 +742,10 @@ function itemFromDraft(
             return { ...base, kind: "section_header", level: 1 };
         case "text":
             return { ...base, kind: "text" };
+        case "footnote":
+            return { ...base, kind: "footnote" };
+        case "margin":
+            return { ...base, kind: "margin" };
     }
 }
 
@@ -745,7 +953,9 @@ export function extractPageSentences(
         draftItems = options.precomputed.items;
     } else {
         const columnResult = detectColumns(detailedPage);
-        const lineResult = detectLinesOnPage(detailedPage, columnResult.columns);
+        const lineResult = detectLinesOnPage(detailedPage, columnResult.columns, {
+            exclusiveColumns: options.paragraphSettings?.exclusiveColumnLines ?? false,
+        });
         draftItems = draftItemsFromParagraphs(detectParagraphs(
             lineResult,
             null,
@@ -800,6 +1010,11 @@ export function extractPageSentences(
         const built = tryBuildParagraphText(
             detailedLines,
             options.compoundVocabulary,
+            {
+                lineJoins: options.paragraphSettings?.lineJoins ?? false,
+                noteMarkers: options.paragraphSettings?.noteMarkers ?? false,
+                leadMarker: item.kind === "footnote",
+            },
         );
         if (!built.ok) {
             const docItem = itemFromDraft(item, detailedPage.pageIndex, i, []);
@@ -828,8 +1043,8 @@ export function extractPageSentences(
             itemLinesFromDetailed(detailedLines),
         );
 
-        // Headings and references: never split into sentences, and
-        // excluded from the flattened sentence view.
+        // Headings, references and margin items: never split into
+        // sentences, and excluded from the flattened sentence view.
         if (!carriesSentences(docItem)) {
             if (docItem.kind === "reference") {
                 // A reference has no sentences to carry the repaired text, so
@@ -878,7 +1093,15 @@ export function extractPageSentences(
     // in `nextStartsStrictlyRightOfPrev` (and similar geometric
     // heuristics) operates on upright bboxes — that's the frame those
     // gates were tuned for.
-    annotateColumnContinuations(items, splitter, degradedItems);
+    annotateColumnContinuations(
+        items,
+        splitter,
+        degradedItems,
+        {
+            endColumns: draftItems.map((item) => item.endColumnIndex ?? item.columnIndex),
+            skipFootnotes: options.paragraphSettings?.noteMarkers ?? false,
+        },
+    );
 
     // Inverse-rotate every emitted bbox back to MuPDF frame so
     // downstream consumers see the same coord system regardless of whether
@@ -1021,12 +1244,28 @@ function shouldJoinAcrossColumns(
     return r.end >= end;
 }
 
+/** Options of `annotateColumnContinuations`. */
+export interface ColumnContinuationOptions {
+    /**
+     * Column index each item ends in, aligned with `items`; defaults to each
+     * item's `columnIndex`. An item the detector joined across stacked blocks
+     * ends in a later block than it starts in (`ContentItem.endColumnIndex`).
+     */
+    endColumns?: readonly number[];
+    /**
+     * The item that continues a text item is the next one that is not a
+     * footnote (`ParagraphDetectionSettings.noteMarkers`).
+     */
+    skipFootnotes?: boolean;
+}
+
 /**
  * Set `SentenceItem.joinWithNext = true` on the last sentence of each text
  * item whose successor (in reading order) begins a sentence that continues
  * the previous one across a column boundary.
  *
- * Conservative: requires strictly consecutive columns (`col` → `col + 1`),
+ * Conservative: requires strictly consecutive columns (`col` → `col + 1`,
+ * from the column the item ends in: `endColumns`),
  * both sides text items, last sentence non-terminated, first sentence
  * lowercase-starting, and the splitter must agree the combined text is one
  * sentence. Only sets the flag — never writes `false` (omitted ≡ false per
@@ -1038,6 +1277,11 @@ function shouldJoinAcrossColumns(
  * caller's flat view shares SentenceItem object identity with
  * `items[i].sentences`, the flag is observable through both.
  *
+ * With `skipFootnotes`, the item that continues a text item is the next one
+ * that is not a footnote: on a two-column page with notes under the first
+ * column, the column's last paragraph goes on in the second column after
+ * the notes.
+ *
  * @internal Public surface is `extractPageSentences`; this helper is
  * exported for direct unit testing.
  */
@@ -1045,10 +1289,13 @@ export function annotateColumnContinuations(
     items: DocItem[],
     splitter: SentenceSplitter,
     degradedItems: ReadonlySet<string>,
+    { endColumns, skipFootnotes = false }: ColumnContinuationOptions = {},
 ): void {
     for (let i = 0; i < items.length - 1; i++) {
         const cur = items[i];
-        const next = items[i + 1];
+        let j = i + 1;
+        while (skipFootnotes && j < items.length - 1 && items[j].kind === "footnote") j++;
+        const next = items[j];
         const curSentences = cur.kind === "text" ? cur.sentences ?? [] : [];
         const nextSentences = next.kind === "text" ? next.sentences ?? [] : [];
         const lastSentence = curSentences[curSentences.length - 1];
@@ -1062,7 +1309,7 @@ export function annotateColumnContinuations(
         if (cur.kind !== "text" || next.kind !== "text") {
             continue;
         }
-        if (next.columnIndex !== cur.columnIndex + 1) continue;
+        if (next.columnIndex !== (endColumns?.[i] ?? cur.columnIndex) + 1) continue;
         if (degradedItems.has(cur.id) || degradedItems.has(next.id)) continue;
         const firstSentence = nextSentences[0];
         if (!firstSentence) continue;

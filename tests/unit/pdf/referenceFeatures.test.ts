@@ -1,26 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import {
-    CONTEXT_FEATURES,
-    ITEM_FEATURES,
-    contextFeatures,
-    isNotesHeading,
-    isReferenceHeading,
-    itemFeatures,
-    leadingNumber,
-} from "../../../src/beaver-extract/references/features";
+import { listContext } from "../../../src/beaver-extract/features/context";
+import { ITEM_FEATURES, itemFeatures } from "../../../src/beaver-extract/itemTypes/referenceFeatures";
+import { isNotesHeading, isReferenceHeading, leadingNumber } from "../../../src/beaver-extract/features/text";
 import { LINE_FEATURES, hangingLevels, opensLikeEntry, pageLineFeatures } from "../../../src/beaver-extract/references/lines";
-import type { RefItem, RefLine, RefPage } from "../../../src/beaver-extract/references/pageInput";
+import type { InputItem, InputLine, InputPage } from "../../../src/beaver-extract/features/itemInput";
 
-function line(text: string, l: number, t: number, role: 0 | 1 | 2 = 0, r = 500): RefLine {
+function line(text: string, l: number, t: number, role: 0 | 1 | 2 = 0, r = 500): InputLine {
     return { text, l, t, r, b: t + 10, size: 10, role, lead: 1 };
 }
 
-function item(text: string, lines: RefLine[] = [line(text, 50, 100)], header = false): RefItem {
+function item(text: string, lines: InputLine[] = [line(text, 50, 100)], header = false): InputItem {
     return { header, column: 0, text, lines };
 }
 
-function page(items: RefItem[], pageIndex = 0): RefPage {
+function page(items: InputItem[], pageIndex = 0): InputPage {
     return { pageIndex, width: 600, height: 800, bodySize: 10, items };
 }
 
@@ -62,22 +56,21 @@ describe("reference item features", () => {
     });
 });
 
-describe("reference context features", () => {
-    const col = (name: (typeof CONTEXT_FEATURES)[number]) => CONTEXT_FEATURES.indexOf(name);
+describe("reference list context", () => {
 
     it("tracks reference and notes headings in reading order across pages", () => {
         const pages = [
             page([item("Body text."), item("References", undefined, true), item("1. Smith, J. 2001. Title.")], 0),
             page([item("2. Jones, K. 2002. Title."), item("Notes", undefined, true), item("1. Ibid.")], 1),
         ];
-        const ctx = contextFeatures(pages, 2);
-        expect(ctx[0][0][col("refHeading")]).toBe(0);
-        expect(ctx[0][1][col("listHeading")]).toBe(1);
-        expect(ctx[0][2][col("refHeading")]).toBe(1);
-        expect(ctx[0][2][col("refHeadingPage")]).toBe(1);
-        expect(ctx[1][0][col("refHeading")]).toBe(1);
-        expect(ctx[1][0][col("refHeadingPage")]).toBe(0);
-        expect(ctx[1][2][col("notesHeading")]).toBe(1);
+        const ctx = listContext(pages);
+        expect(ctx[0][0].refHeadingBefore).toBe(false);
+        expect(ctx[0][1].listHeading).toBe(true);
+        expect(ctx[0][2].refHeadingBefore).toBe(true);
+        expect(ctx[0][2].refHeadingOnPage).toBe(true);
+        expect(ctx[1][0].refHeadingBefore).toBe(true);
+        expect(ctx[1][0].refHeadingOnPage).toBe(false);
+        expect(ctx[1][2].notesBefore).toBe(true);
     });
 
     it("marks consecutive list numbers, including across a page break", () => {
@@ -85,10 +78,10 @@ describe("reference context features", () => {
             page([item("7. Smith, J. 2001."), item("8. Jones, K. 2002.")], 0),
             page([item("9. Brown, A. 2003."), item("Results were 4. robust")], 1),
         ];
-        const ctx = contextFeatures(pages, 2);
-        expect(ctx[0][0][col("numberSeq")]).toBe(1);
-        expect(ctx[1][0][col("numberSeq")]).toBe(1);
-        expect(ctx[1][1][col("numberSeq")]).toBe(0);
+        const ctx = listContext(pages);
+        expect(ctx[0][0].numberSeq).toBe(true);
+        expect(ctx[1][0].numberSeq).toBe(true);
+        expect(ctx[1][1].numberSeq).toBe(false);
     });
 
     it("recognizes headings and leaders", () => {

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({ excluded: false, bodyRan: false }));
+const deferredCommits = vi.hoisted(() => ({ wait: vi.fn(async () => true) }));
+vi.mock("../../../src/services/committedTransaction", () => ({
+    waitForDeferredCommits: deferredCommits.wait,
+}));
 vi.mock("../../../src/services/agentDataProvider/utils", () => ({
     checkLibraryExcluded: () =>
         state.excluded ? { message: "Excluded library" } : null,
@@ -98,6 +102,8 @@ function mergeWithRelatedItem() {
 beforeEach(() => {
     state.excluded = false;
     state.bodyRan = false;
+    deferredCommits.wait.mockReset();
+    deferredCommits.wait.mockResolvedValue(true);
     items = [
         makeItem(1, "AAAA1111", {
             itemType: "journalArticle",
@@ -385,6 +391,22 @@ describe("native merge action", () => {
         );
         await expect(applyMerge(data)).rejects.toThrow("native failure");
         expect(items.map((i) => i.json)).toEqual(before);
+    });
+    it("starts the native merge only after earlier deferred commits have settled", async () => {
+        let release!: (settled: boolean) => void;
+        deferredCommits.wait.mockReturnValue(new Promise<boolean>((resolve) => { release = resolve; }));
+        const pending = applyMerge(await proposal());
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(deferredCommits.wait).toHaveBeenCalledOnce();
+        expect(Zotero.Items.merge).not.toHaveBeenCalled();
+        release(true);
+        await pending;
+        expect(Zotero.Items.merge).toHaveBeenCalledOnce();
+    });
+    it("still merges when earlier deferred commits outlast the wait", async () => {
+        deferredCommits.wait.mockResolvedValue(false);
+        await applyMerge(await proposal());
+        expect(Zotero.Items.merge).toHaveBeenCalledOnce();
     });
     it("does not open an outer transaction around the native merge", async () => {
         const native = vi.mocked(Zotero.Items.merge);

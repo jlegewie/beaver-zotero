@@ -337,6 +337,24 @@ export interface RawStyleRun {
 }
 
 /**
+ * Vertical metrics of a line's glyphs set in one size (`RawLine.glyphMetrics`).
+ * Positions are medians over the glyphs, on the axis across the line's
+ * writing direction (y for horizontal text), in the line's frame.
+ */
+export interface RawGlyphMetrics {
+    /** Font size to the half point, keyed like the style run sizes. */
+    size: number;
+    /** Visible glyphs set in this size. */
+    glyphs: number;
+    /** Glyph origin: the baseline. */
+    baseline: number;
+    /** Ascent edge of the glyph boxes (the font's ascender). */
+    top: number;
+    /** Descent edge of the glyph boxes (the font's descender). */
+    bottom: number;
+}
+
+/**
  * Raw line data from MuPDF structured text JSON.
  */
 export interface RawLine {
@@ -355,6 +373,11 @@ export interface RawLine {
      * (per-glyph) walk when the schema preset enables it; absent otherwise.
      */
     styleRuns?: RawStyleRun[];
+    /**
+     * Glyph metrics per size of the visible glyphs, recorded with `styleRuns`
+     * by the detailed walk; absent otherwise.
+     */
+    glyphMetrics?: RawGlyphMetrics[];
     /** Baseline X coordinate */
     x: number;
     /** Baseline Y coordinate */
@@ -513,8 +536,9 @@ export interface SentenceItem {
         bbox: BoundingBox;
     }>;
     /**
-     * Hint that this sentence is continued by the *next* sentence in reading
-     * order. Omitted means false.
+     * Hint that this sentence is continued by the *next* sentence of body text
+     * in reading order. Footnote items between the two (notes under a column
+     * that the sentence continues past) don't count. Omitted means false.
      */
     joinWithNext?: boolean;
 }
@@ -688,6 +712,22 @@ export interface MarginElement {
      * index removes it.
      */
     rowEndNumber?: boolean;
+    /**
+     * For a numeral in the left zone: body text rows between it and the
+     * numeral above it (or the top of the body, for a page's first numeral)
+     * that carry no numeral of their own. Manuscript line numbers number
+     * every row. Collected only with text rows on.
+     */
+    unnumberedRowsAbove?: number;
+    /** For a page's last numeral in the left zone: body text rows below it. */
+    unnumberedRowsBelow?: number;
+    /**
+     * A numeral of the header or footer zone that lies in the left zone too
+     * and continues the page's left-zone numbers by one: the line number of
+     * a body row that reaches into the header or footer zone. Read with the
+     * left zone's numerals for manuscript line numbering.
+     */
+    leftCorner?: boolean;
 }
 
 /**
@@ -698,6 +738,8 @@ export interface MarginAnalysis {
     elements: Map<MarginPosition, MarginElement[]>;
     /** Total elements found per zone */
     counts: Record<MarginPosition, number>;
+    /** Number of pages analysed, including pages with no margin elements. */
+    pageCount?: number;
 }
 
 /**
@@ -836,11 +878,24 @@ export interface StructuredPagePhaseTimings {
     /** Region detection and region items (schema presets with `regions`). */
     regionsMs?: number;
     /**
-     * This page's share of reference classification (presets with
-     * `referenceItems`); the document-level pass is split across pages by
-     * item count.
+     * Time spent splitting and joining this page's reference entries
+     * (presets with the `references` item pass).
      */
     referencesMs?: number;
+    /**
+     * This page's share of the item-type pass (presets with the `itemTypes`
+     * item pass), split across pages by item count. The parts below
+     * break it down; the rest is building the model input and relabeling.
+     */
+    itemTypesMs?: number;
+    /** Item-type features (part of `itemTypesMs`). */
+    itemTypeFeaturesMs?: number;
+    /** Item-type stage 1 (part of `itemTypesMs`). */
+    itemTypeStage1Ms?: number;
+    /** Item-type stage-2 context features (part of `itemTypesMs`). */
+    itemTypeContextMs?: number;
+    /** Item-type stage 2 (part of `itemTypesMs`). */
+    itemTypeStage2Ms?: number;
     /** Total character count on the target page (post-detailed-walk). */
     charCount: number;
     /** Total line count on the target page (post-detailed-walk). */

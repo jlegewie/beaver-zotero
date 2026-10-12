@@ -7,7 +7,7 @@ import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { AppliedMetadataEdit, CreatorJSON, EditMetadataResultData, FailedMetadataEdit, MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, resolveItemReference } from '../../utils/libraryIdentity';
-import { sanitizeCreators } from '../../utils/zoteroUtils';
+import { resolveFieldForItemType, sanitizeCreators } from '../../utils/zoteroUtils';
 
 /**
  * Result of an undo operation
@@ -89,10 +89,16 @@ export async function executeEditMetadataAction(
     // Apply each field edit, capturing current value BEFORE applying for reliable undo
     for (const edit of edits) {
         try {
+            // The agent may supply a label belonging to another item type
+            // (e.g. 'institution' on a document). Validation accepts it via the
+            // shared base field, but setField() rejects wrong-type labels, so
+            // read and write the type-resolved field.
+            const field = resolveFieldForItemType(item.itemTypeID, edit.field) ?? edit.field;
+
             // Capture current value before applying (for undo)
             let oldValue: any = null;
             try {
-                const currentValue = item.getField(edit.field);
+                const currentValue = item.getField(field, false, true);
                 oldValue = currentValue ?? null;
             } catch {
                 // Field might not exist, treat as null
@@ -100,8 +106,9 @@ export async function executeEditMetadataAction(
             }
 
             // Apply the new value
-            item.setField(edit.field, edit.new_value);
+            item.setField(field, edit.new_value);
             appliedEdits.push({
+                // Keep the field the agent supplied so results match its request.
                 field: edit.field,
                 applied_value: edit.new_value,
                 old_value: oldValue, // Store for undo
@@ -222,14 +229,16 @@ export async function undoEditMetadataAction(
     let needsSave = false;
 
     for (const edit of editsToProcess) {
-        const field = edit.field;
+        // Stored edits keep the agent-supplied label, which may belong to
+        // another item type; resolve it the same way the apply path did.
+        const field = resolveFieldForItemType(item.itemTypeID, edit.field) ?? edit.field;
         const oldValue = 'old_value' in edit ? edit.old_value : null;
         const appliedValue = 'applied_value' in edit ? edit.applied_value : (edit as MetadataEdit).new_value;
 
         // Get current value in Zotero
         let currentValue: any = null;
         try {
-            currentValue = item.getField(field);
+            currentValue = item.getField(field, false, true);
         } catch {
             currentValue = null;
         }

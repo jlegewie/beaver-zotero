@@ -71,8 +71,10 @@ import {
     CURRENT_PDF_EXTRACTION_PRESET,
     ITEM_KINDS,
     SCHEMA_VERSION,
+    applyPresetOverrides,
     pdfExtractionPreset,
     type PdfExtractionPreset,
+    type PresetOverrides,
     type BeaverExtractResult,
     type ExtractionDebug,
     type DebugSentence,
@@ -94,8 +96,10 @@ import { runSentenceExtractionFromDoc } from "./sentenceExtraction";
 import { resolveSplitter } from "./splitterResolver";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
-import type { RefPage } from "../references/pageInput";
-import type { ReferencePagePlan } from "../references/classify";
+import { buildInputPage, type InputPage } from "../features/itemInput";
+import type { ItemPass } from "../pipeline/itemPasses";
+import { ITEMS_EXPORT_TASKS, ItemsExportCollector, type ItemsExportRow } from "../pipeline/itemsExport";
+import { RegionsExportCollector, type RegionsExportRow } from "../pipeline/regionsExport";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
@@ -128,12 +132,13 @@ import {
     mapSentences,
     project,
     runItemPasses,
+    createItemPasses,
     segmentPages,
-    type ReferenceStage,
     type StructuredRunContext,
+    type StructuredRunObservers,
 } from "../pipeline/structured";
+import type { RegionItemSettings } from "../regions/regionItems";
 
-export type { ReferenceStage };
 
 export interface OpReply<T = unknown> {
     result: T;
@@ -415,8 +420,10 @@ export function runExtractFromIndices(
     splitter?: SentenceSplitter,
     fontApi?: FontApi,
     pageCache?: PageWalkCache,
-    references?: ReferenceStage,
+    itemPasses: readonly ItemPass[] = [],
     pageNumberRuns = true,
+    observers: StructuredRunObservers = {},
+    regionSettings: RegionItemSettings = {},
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
     try {
@@ -508,6 +515,7 @@ export function runExtractFromIndices(
                 marginZone: opts.marginZone,
                 marginTextRows: opts.marginTextRows,
                 paragraphSettings,
+                compoundVocabulary: study.compoundVocabulary,
                 fillBoundaries,
                 dividerLines,
             });
@@ -564,9 +572,12 @@ export function runExtractFromIndices(
             pageCache,
             paragraphSettings,
             splitter,
+            regionSettings,
+            ...(observers.region ? { regionObserver: observers.region } : {}),
+            ...(observers.boundaries ? { boundaryObserver: observers.boundaries } : {}),
         };
         const segmented = segmentPages(ctx, structuredStudy!, effectiveTargetIndices);
-        const passes = runItemPasses(segmented, styleProfile, pageCount, references, paragraphSettings);
+        const passes = runItemPasses(segmented, structuredStudy!, pageCount, itemPasses, paragraphSettings);
         const mapped = mapSentences(ctx, segmented, passes, study.compoundVocabulary);
         pages.push(...mapped.pages);
         perPageMs.push(...mapped.perPageMs);
@@ -584,6 +595,7 @@ export function runExtractFromIndices(
                 marginRemoval,
                 styleProfile.bodyStyles,
                 styleProfile.primaryBodyStyle,
+                opts.marginTextRows,
                 opts.marginTextRows,
             );
             const marginItems = collectMarginItemsFromFilteredPage(
@@ -877,8 +889,9 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
 
 /**
  * Paragraph settings with the schema preset's switches applied. The caller may
- * override `hangingIndentBlocks`; `headingLabelFilters`, `isolatedHeadings` and
- * `pageBodyStyles` always follow the preset.
+ * override `hangingIndentBlocks`; `headingLabelFilters`, `isolatedHeadings`,
+ * `pageBodyStyles`, `exclusiveColumnLines`, `lineJoins`, `noteMarkers` and
+ * `learnedBoundaries` always follow the preset.
  */
 function presetParagraphSettings(
     preset: PdfExtractionPreset,
@@ -890,14 +903,17 @@ function presetParagraphSettings(
         headingLabelFilters: preset.headingLabelFilters,
         isolatedHeadings: preset.isolatedHeadings,
         pageBodyStyles: preset.pageBodyStyles,
+        exclusiveColumnLines: preset.exclusiveColumnLines,
+        lineJoins: preset.lineJoins,
+        noteMarkers: preset.noteMarkers,
+        learnedBoundaries: preset.learnedBoundaries,
     };
 }
 
-function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtractionPreset {
-    if (schemaVersion == null) return CURRENT_PDF_EXTRACTION_PRESET;
-    const preset = pdfExtractionPreset(schemaVersion);
+function resolvePdfExtractionPreset(schemaVersion: string | undefined, overrides?: PresetOverrides): PdfExtractionPreset {
+    const preset = schemaVersion == null ? CURRENT_PDF_EXTRACTION_PRESET : pdfExtractionPreset(schemaVersion);
     if (!preset) throw new Error(`No extraction preset for PDF schema ${schemaVersion}`);
-    return preset;
+    return applyPresetOverrides(preset, overrides);
 }
 
 /**
@@ -966,6 +982,8 @@ export async function opExtract(
         includeDiagnostics?: boolean;
         /** PDF schema version to produce; defaults to the current version. */
         schemaVersion?: string;
+        /** Development only (CLI): switches of the schema's preset to override. */
+        presetOverrides?: PresetOverrides;
     },
 ): Promise<OpReply<BeaverExtractResult>> {
     // Defense in depth: the facade enforces this too, but the worker is
@@ -992,7 +1010,7 @@ export async function opExtract(
     const engine: "block" | "paragraph" | "structured" = isStructured
         ? "structured"
         : (explicitEngine ?? "paragraph");
-    const preset = resolvePdfExtractionPreset(args.schemaVersion);
+    const preset = resolvePdfExtractionPreset(args.schemaVersion, args.presetOverrides);
 
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
@@ -1094,8 +1112,10 @@ export async function opExtract(
             splitter,
             fontApi,
             pageCache,
-            isStructured && preset.referenceItems ? { classify: true } : undefined,
+            isStructured ? createItemPasses(preset) : [],
             preset.pageNumberRuns,
+            {},
+            { tableRowEvidence: preset.tableRowEvidence },
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are
@@ -1144,6 +1164,8 @@ type StructuredRunArgs = {
     analysisWindow?: number;
     /** PDF schema version to produce; defaults to the current version. */
     schemaVersion?: string;
+    /** Development only (CLI): switches of the schema's preset to override. */
+    presetOverrides?: PresetOverrides;
 };
 
 /**
@@ -1153,14 +1175,14 @@ type StructuredRunArgs = {
  */
 async function withStructuredRun<T>(
     args: StructuredRunArgs,
-    /** Reference stage; defaults to the preset's classification. */
-    referenceStage: ((preset: PdfExtractionPreset) => ReferenceStage | undefined) | undefined,
+    /** Item passes to run; defaults to the preset's. */
+    itemPassesFor: ((preset: PdfExtractionPreset) => ItemPass[]) | undefined,
     finish: (internal: InternalExtractionResult, preset: PdfExtractionPreset) => T,
+    /** Observe the region pass or the item-boundary input of every page (training exports). */
+    observers: StructuredRunObservers = {},
 ): Promise<T> {
-    const preset = resolvePdfExtractionPreset(args.schemaVersion);
-    const references = referenceStage
-        ? referenceStage(preset)
-        : preset.referenceItems ? { classify: true } : undefined;
+    const preset = resolvePdfExtractionPreset(args.schemaVersion, args.presetOverrides);
+    const itemPasses = (itemPassesFor ?? createItemPasses)(preset);
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
     const doc = await acquireDoc(args.pdfData);
@@ -1219,8 +1241,10 @@ async function withStructuredRun<T>(
             splitter,
             fontApi,
             pageCache,
-            references,
+            itemPasses,
             preset.pageNumberRuns,
+            observers,
+            { tableRowEvidence: preset.tableRowEvidence },
         );
         if (internal.metadata.timings) {
             internal.metadata.timings.docOpenMs = docOpenMs;
@@ -1260,40 +1284,35 @@ export async function opStructuredExtractWithDebug(
     });
 }
 
-/** A page of `opReferenceInputs`: the classifier input and the page's items. */
+/** A page of `opReferenceInputs`: the line model's input and the page's items. */
 export interface ReferenceInputPage {
-    input: RefPage;
+    input: InputPage;
     /** Page size in the public (MuPDF) frame; `input` uses the upright frame. */
     width: number;
     height: number;
     /**
-     * The page's published (citable) items in public-frame coordinates. Without
-     * classification they are aligned with `input.items` by index; with it
-     * they are the emitted items, after reference splits and merges.
+     * The page's published (citable) items in public-frame coordinates,
+     * aligned with `input.items` by index.
      */
-    items: Array<{ kind: DocItem["kind"]; bbox: [number, number, number, number]; text?: string }>;
-    /** The classification plan for `input.items` (with `classify`). */
-    plan?: ReferencePagePlan;
+    items: Array<{ kind: DocItem["kind"]; bbox: [number, number, number, number] }>;
 }
 
 /**
- * Full-document structured extraction that returns the reference
- * classifier's per-page inputs (training export) and, with `classify`, its
- * plans and the resulting items (debugging and evaluation).
+ * Full-document structured extraction that returns every page's step-2
+ * items as the reference line model reads them (`InputPage`), before any
+ * item pass: the training export of the line model.
  */
 export async function opReferenceInputs(
-    args: StructuredRunArgs & { classify?: boolean },
+    args: StructuredRunArgs,
 ): Promise<OpReply<{ pageCount: number; pages: ReferenceInputPage[] }>> {
-    let inputs: RefPage[] = [];
-    let plans: ReferencePagePlan[] | undefined;
-    const stage: ReferenceStage = {
-        classify: args.classify === true,
-        collect: (collected, collectedPlans) => {
-            inputs = collected;
-            plans = collectedPlans;
+    let inputs: InputPage[] = [];
+    const collect: ItemPass = {
+        name: "referenceInputs",
+        run(doc) {
+            inputs = doc.pages.map((page) => buildInputPage(page, doc.styleProfile));
         },
     };
-    return withStructuredRun(args, () => stage, (internal) => {
+    return withStructuredRun(args, () => [collect], (internal) => {
         const pages = internal.pages.map((page, i): ReferenceInputPage => {
             const input = inputs[i];
             const items = page.items.filter((item) => ITEM_KINDS[item.kind].citable);
@@ -1301,16 +1320,61 @@ export async function opReferenceInputs(
                 input,
                 width: page.width,
                 height: page.height,
-                items: (plans ? items : items.slice(0, input.items.length)).map((item) => ({
+                items: items.slice(0, input.items.length).map((item) => ({
                     kind: item.kind,
                     bbox: bboxToRect(item.bbox, 1),
-                    ...(plans && "text" in item ? { text: item.text } : {}),
                 })),
-                ...(plans ? { plan: plans[i] } : {}),
             };
         });
         return { result: { pageCount: internal.pages.length, pages } };
     });
+}
+
+/**
+ * Full-document structured extraction that returns the `items export` row of
+ * a model task: the structured items with their lines, the lines the margin
+ * filter removed and the task's feature rows (see `pipeline/itemsExport.ts`).
+ */
+export async function opItemsExport(
+    args: StructuredRunArgs & { task: string },
+): Promise<OpReply<ItemsExportRow>> {
+    const task = ITEMS_EXPORT_TASKS[args.task];
+    if (!task) {
+        throw new Error(`Unknown items export task "${args.task}" (known: ${Object.keys(ITEMS_EXPORT_TASKS).join(", ")})`);
+    }
+    const collector = new ItemsExportCollector(task);
+    const bboxPrecision = args.structured?.bboxPrecision ?? 1;
+    const boundaries = collector.boundaryObserver();
+    return withStructuredRun(
+        args,
+        (preset) => collector.passes(createItemPasses(preset)),
+        (internal, preset) => {
+            const projected = project(internal, preset, bboxPrecision);
+            return { result: collector.row(internal, projected, args.task, bboxPrecision) };
+        },
+        boundaries ? { boundaries } : {},
+    );
+}
+
+/**
+ * Full-document structured extraction that returns the `regions-v2` export
+ * row: per page, the region pass's text pieces and primitives and what the
+ * detector did with them (see `pipeline/regionsExport.ts`). `pages` limits
+ * the pages written; every page is extracted, as in production.
+ */
+export async function opRegionsExport(
+    args: StructuredRunArgs & { pages?: number[] },
+): Promise<OpReply<RegionsExportRow>> {
+    const preset = resolvePdfExtractionPreset(args.schemaVersion, args.presetOverrides);
+    if (!preset.regions) throw new Error(`PDF schema ${preset.schemaVersion} has no region detection`);
+    const bboxPrecision = args.structured?.bboxPrecision ?? 1;
+    const collector = new RegionsExportCollector(bboxPrecision, args.pages ? new Set(args.pages) : undefined);
+    return withStructuredRun(
+        args,
+        undefined,
+        (internal) => ({ result: collector.row(preset.schemaVersion, internal.analysis.pageCount) }),
+        { region: collector },
+    );
 }
 
 /**

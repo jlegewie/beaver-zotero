@@ -5,9 +5,11 @@
  *     cross-page study of the analysis window (body style, repeating margin
  *     text).
  *  2. `segmentPages` — per page: region detection, rotation, margin filter,
- *     columns, lines and items.
- *  3. `runItemPasses` — document-level passes over the items of every page
- *     (reference classification).
+ *     columns, lines and items. An optional `RegionPassObserver` sees what the
+ *     region pass saw and did on each page (training export).
+ *  3. `runItemPasses` — ordered document-level passes over the draft items
+ *     of every page (`itemPasses.ts`); each preset lists its passes
+ *     (`createItemPasses`).
  *  4. `mapSentences` — per page: sentence mapping, region item placement and
  *     margin items.
  *  5. `project` — the public structured result: projection and ids.
@@ -20,10 +22,10 @@
  */
 
 import { getEffectiveRepeatThreshold } from "../MarginFilter";
-import { logColumnDetection } from "../ColumnDetector";
+import { logColumnDetection, type ColumnDetectionResult } from "../ColumnDetector";
 import { documentBodyExtents, regionFurnitureLines } from "../FilteredParagraphPipeline";
-import { detectDominantTextOrientation, type RotationAngle } from "../PageRotationNormalizer";
-import type { ParagraphDetectionSettings } from "../ParagraphDetector";
+import { detectDominantTextOrientation, rotateBBox, type RotationAngle } from "../PageRotationNormalizer";
+import type { BoundaryCapture, ParagraphDetectionSettings } from "../ParagraphDetector";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type {
     DegradationSummary,
@@ -35,6 +37,7 @@ import type {
     StructuredPagePhaseTimings,
     StyleProfile,
 } from "@beaver/agent-core/extract/types";
+import { bboxFromXYWH } from "@beaver/agent-core/extract/types";
 import {
     ITEM_KINDS,
     assignDocumentIds,
@@ -43,11 +46,12 @@ import {
     type PdfExtractionPreset,
     type StructuredExtractResult,
 } from "../schema";
-import { buildRefPage, type RefPage } from "../references/pageInput";
-import { applyReferencePlan, planReferences, type ReferencePagePlan } from "../references/classify";
-import { detectRegions } from "../regions/RegionDetector";
+import { ITEM_TYPE_PASS, itemTypePass } from "../itemTypes/pass";
+import { REFERENCE_PASS, referencePass } from "../references/pass";
+import { detectRegions, type RegionDetection } from "../regions/RegionDetector";
 import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
-import { regionItemsForPage, type PageRegionItems, type RegionItemDraft } from "../regions/regionItems";
+import type { RegionDocContext } from "../regions/features";
+import { regionItemsForPage, type PageRegionItems, type RegionItemDraft, type RegionItemSettings } from "../regions/regionItems";
 import { REGION_MODEL } from "../regions/weights";
 import { postLog } from "../worker/errors";
 import { extractRawPageDetailedFromDoc } from "../worker/docHelpers";
@@ -66,17 +70,20 @@ import {
     type PageWalkCache,
     type ResolvedExtractionSettings,
 } from "./documentAnalysis";
+import { runPasses, type ItemPass, type PagePassTimings } from "./itemPasses";
 import { pageLabelsToStringKeys, projectColumnRect, replaceControlCharsInResult } from "./output";
 
-/** Reference classification in structured extraction. */
-export interface ReferenceStage {
-    /** Emit classified reference-list entries as `reference` items. */
-    classify: boolean;
-    /**
-     * Receives every page's classifier input, in page order, and the plans
-     * when `classify` is set (export and debugging).
-     */
-    collect?: (inputs: RefPage[], plans: ReferencePagePlan[] | undefined) => void;
+/** Item pass factories, by the name presets list them under. */
+const ITEM_PASSES: Record<ItemPassName, () => ItemPass> = {
+    itemTypes: () => itemTypePass(),
+    references: () => referencePass(),
+};
+
+export type ItemPassName = PdfExtractionPreset["itemPasses"][number];
+
+/** The item passes of a preset, in order. */
+export function createItemPasses(preset: PdfExtractionPreset): ItemPass[] {
+    return preset.itemPasses.map((name) => ITEM_PASSES[name]());
 }
 
 /** Inputs shared by the per-page phases of one structured run. */
@@ -88,6 +95,62 @@ export interface StructuredRunContext {
     pageCache: PageWalkCache | undefined;
     paragraphSettings: ParagraphDetectionSettings | undefined;
     splitter: SentenceSplitter;
+    /** Switches of the region pass (from the preset). */
+    regionSettings?: RegionItemSettings;
+    /** Receives each page's region pass; absent in production. */
+    regionObserver?: RegionPassObserver;
+    /** Receives each page's item-boundary input; absent in production. */
+    boundaryObserver?: BoundaryObserver;
+}
+
+/**
+ * Observes the item-boundary input of every page of a structured run, as the
+ * paragraph detector builds it (`BoundaryCapture.page`), during segmentation.
+ * It must not modify what it is given.
+ */
+export type BoundaryObserver = BoundaryCapture;
+
+/** Observers of a structured run (training exports); none in production. */
+export interface StructuredRunObservers {
+    region?: RegionPassObserver;
+    boundaries?: BoundaryObserver;
+}
+
+/** What the region pass saw and did on one page (`RegionPassObserver`). */
+export interface RegionPassPage {
+    pageIndex: number;
+    /** The walked page before regions removed any line (MuPDF frame). */
+    page: RawPageDataDetailed;
+    graphics: GraphicsSummary;
+    /** Dominant text orientation: the page's reading frame. */
+    textRotation: RotationAngle;
+    /** Lines the document's margin analysis removes (`LINE_MARGIN`). */
+    margin: ReadonlySet<RawLine>;
+    /** The detector's document context for this page. */
+    doc: RegionDocContext;
+    /** The detection with its line routing; absent when the detector failed. */
+    detection?: RegionDetection;
+    /** The page's region items and the lines they absorbed. */
+    result: PageRegionItems;
+    /** The detector's error; the page then keeps its text as prose. */
+    error?: string;
+    /**
+     * Column detection's split of the region items
+     * (`ColumnDetectionResult.regionPieces`, `splitRegionItems`).
+     */
+    regionPieces: ColumnDetectionResult["regionPieces"];
+    /** The page's detailed walk (with the graphics summary). */
+    walkMs: number;
+    /** Region detection, routing and items (orientation and margin lines included). */
+    regionsMs: number;
+}
+
+/**
+ * Observes the region pass of a structured run, page by page, after the page's
+ * segmentation. It must not modify what it is given.
+ */
+export interface RegionPassObserver {
+    page(page: RegionPassPage): void;
 }
 
 /** Step 1 result: the analysis context plus the detailed target walks. */
@@ -105,12 +168,6 @@ export interface SegmentedPage {
     regions?: Pick<PageSentenceArgs, "regionItems" | "regionMargin" | "regionsMs">;
     /** Page time so far: its detailed walk and segmentation. */
     ms: number;
-}
-
-/** Step 3 result for one page. */
-export interface PageItemPasses {
-    /** The page's share of reference classification time, when references were classified. */
-    referencesMs?: number;
 }
 
 /** Step 4 result. */
@@ -229,6 +286,7 @@ export function segmentPages(
         let regionsMs: number | undefined;
         let pageRotation: RotationAngle | undefined;
         let pagesForTarget = analysisPages;
+        let observed: Omit<RegionPassPage, "regionPieces"> | undefined;
         if (regionImages && detailed) {
             const tRegions = performance.now();
             // Orientation is read from the full page: removing region text can
@@ -246,7 +304,9 @@ export function segmentPages(
                 repeat: runningRepeat,
                 bodyExtents,
             });
-            const regions = pageRegions(detailed, pageCache!.graphicsFor(i), regionImages, pageCount, compoundVocabulary, margin);
+            const graphics = pageCache!.graphicsFor(i);
+            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings);
+            const regions = pass.result;
             if (regions.page !== detailed) {
                 // The target without absorbed lines replaces the walked page, so
                 // paragraph detection never sees them (and no font bridge runs).
@@ -260,6 +320,18 @@ export function segmentPages(
             regionItems = regions.items;
             regionMargin = regions.margin;
             regionsMs = performance.now() - tRegions;
+            if (ctx.regionObserver) {
+                observed = {
+                    pageIndex: i,
+                    page: study.detailedTargets.get(i)!,
+                    graphics: graphics!,
+                    textRotation: rotation,
+                    margin,
+                    ...pass,
+                    walkMs: preWalkedDetailedMs,
+                    regionsMs,
+                };
+            }
         }
         const paragraphs = detectPageParagraphs({
             doc: ctx.doc,
@@ -272,6 +344,7 @@ export function segmentPages(
             compoundVocabulary,
             margins: opts.margins,
             marginZone: opts.marginZone,
+            marginProseRows: opts.marginTextRows,
             graphicsLayerMode: opts.graphicsLayerMode,
             // Reuse the detailed walk done in `analyzeDocument` so we don't pay
             // a second walk per target page.
@@ -281,49 +354,48 @@ export function segmentPages(
             regionMargin,
             regionsMs,
             pageRotation,
+            ...(ctx.boundaryObserver ? { boundaries: ctx.boundaryObserver } : {}),
         });
+        const { pageRotation: rotation, sourceWidth, sourceHeight, columnResult } = paragraphs.filteredResult;
+        paragraphs.draft.columns = columnResult.columns.map((col) => bboxFromXYWH(col.x, col.y, col.w, col.h, "top-left"));
+        paragraphs.draft.frame = { rotation, sourceWidth, sourceHeight };
+        if (regionItems) {
+            paragraphs.draft.regions = regionItems.map((region) => ({
+                kind: region.kind,
+                bbox: rotation !== 0 ? rotateBBox(region.bbox, rotation, sourceWidth, sourceHeight) : region.bbox,
+            }));
+        }
         segmented.push({
             rawPage,
             paragraphs,
             regions: regionItems !== undefined ? { regionItems, regionMargin, regionsMs } : undefined,
             ms: preWalkedDetailedMs + (performance.now() - tPage),
         });
+        if (observed) ctx.regionObserver!.page({ ...observed, regionPieces: columnResult.regionPieces });
     }
     return segmented;
 }
 
 /**
- * Step 3. Document-level passes that relabel, split or merge the draft items
- * of every page, in place. Reference classification scores the items of
- * every page, then relabels each page's reference entries and splits and
- * merges them. Without a reference stage this is a no-op.
+ * Step 3. Runs the item passes in order over the draft items of every page;
+ * they edit them in place, and join the lines of items they rebuild with the
+ * document's line-break vocabulary. Returns each page's pass timings.
  */
 export function runItemPasses(
     pages: SegmentedPage[],
-    styleProfile: StyleProfile,
+    study: Pick<StructuredDocumentStudy, "styleProfile" | "marginAnalysis" | "analysisPages" | "compoundVocabulary">,
     pageCount: number,
-    references: ReferenceStage | undefined,
+    passes: readonly ItemPass[],
     paragraphSettings: ParagraphDetectionSettings | undefined,
-): PageItemPasses[] {
-    if (!references) return pages.map(() => ({}));
-    const tReferences = performance.now();
-    const inputs = pages.map(({ paragraphs }) => buildRefPage(paragraphs.draft, styleProfile));
-    const plans = references.classify ? planReferences(inputs, pageCount) : undefined;
-    references.collect?.(inputs, plans);
-    const referencesMs = performance.now() - tReferences;
-    if (!plans) return pages.map(() => ({}));
-    const itemTotal = inputs.reduce((n, page) => n + page.items.length, 0);
-    return pages.map(({ paragraphs }, k) => {
-        const tApply = performance.now();
-        const { draft } = paragraphs;
-        draft.items = applyReferencePlan(draft.items, plans[k], paragraphSettings?.removeHyphenation ?? true);
-        // Classification time is shared by item count; applying the plan is
-        // the page's own.
-        const share = itemTotal > 0
-            ? (referencesMs * plans[k].probs.length) / itemTotal
-            : referencesMs / pages.length;
-        return { referencesMs: share + (performance.now() - tApply) };
-    });
+): PagePassTimings[] {
+    const doc = {
+        pages: pages.map(({ paragraphs }) => paragraphs.draft),
+        pageCount,
+        styleProfile: study.styleProfile,
+        marginAnalysis: study.marginAnalysis,
+        analysisPageIndices: study.analysisPages.map((page) => page.pageIndex),
+    };
+    return runPasses(passes, doc, { ...paragraphSettings, lineJoinVocabulary: study.compoundVocabulary });
 }
 
 /**
@@ -334,7 +406,7 @@ export function runItemPasses(
 export function mapSentences(
     ctx: StructuredRunContext,
     pages: SegmentedPage[],
-    passes: PageItemPasses[],
+    passes: PagePassTimings[],
     compoundVocabulary: ReadonlySet<string>,
 ): MappedPages {
     const sentenceArgs = { paragraphSettings: ctx.paragraphSettings, splitter: ctx.splitter, compoundVocabulary };
@@ -342,11 +414,17 @@ export function mapSentences(
     pages.forEach(({ rawPage, paragraphs, regions, ms }, k) => {
         const tPage = performance.now();
         const { filteredResult } = paragraphs;
-        const { referencesMs } = passes[k];
+        const { passes: byPass, parts } = passes[k];
+        let passMs = 0;
+        for (const ms of Object.values(byPass)) passMs += ms;
+        const passTimings: Partial<StructuredPagePhaseTimings> = {
+            ...(byPass[REFERENCE_PASS] !== undefined ? { referencesMs: byPass[REFERENCE_PASS] } : {}),
+            ...(byPass[ITEM_TYPE_PASS] !== undefined ? { itemTypesMs: byPass[ITEM_TYPE_PASS], ...parts } : {}),
+        };
         const { sentenceResult, phaseTimings } = mapPageSentences(
             { ...sentenceArgs, ...regions },
             paragraphs,
-            referencesMs,
+            passTimings,
         );
         logColumnDetection(rawPage.pageIndex, filteredResult.columnResult);
         out.pages.push({
@@ -371,7 +449,7 @@ export function mapSentences(
             sentences: sentenceResult.sentences,
             degradation: sentenceResult.degradation,
         } as InternalProcessedPage);
-        out.perPageMs.push(ms + (referencesMs ?? 0) + (performance.now() - tPage));
+        out.perPageMs.push(ms + passMs + (performance.now() - tPage));
         out.perPagePhases.push(phaseTimings);
     });
     return out;
@@ -439,8 +517,9 @@ export function project(
 }
 
 /**
- * Region items of one page and the page without the lines they absorb. A page
- * the detector fails on keeps its text as prose; the failure is logged.
+ * Region items of one page and the page without the lines they absorb, with
+ * the detection they come from. A page the detector fails on keeps its text
+ * as prose; the failure is logged.
  */
 function pageRegions(
     page: RawPageDataDetailed,
@@ -449,22 +528,25 @@ function pageRegions(
     pageCount: number,
     vocabulary: ReadonlySet<string>,
     margin: ReadonlySet<RawLine>,
-): PageRegionItems {
+    settings: RegionItemSettings | undefined,
+): Pick<RegionPassPage, "doc" | "detection" | "result" | "error"> {
     if (!graphics || !REGION_MODEL) {
         throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
     }
+    const doc = pageRegionDocContext(page.pageIndex, imagesByPage, pageCount, DEFAULT_REGION_CONTEXT_PAGES);
+    let detection: RegionDetection | undefined;
     try {
-        const detection = detectRegions(page, graphics, {
+        detection = detectRegions(page, graphics, {
             pageIndex: page.pageIndex,
-            doc: pageRegionDocContext(page.pageIndex, imagesByPage, pageCount, DEFAULT_REGION_CONTEXT_PAGES),
+            doc,
             model: REGION_MODEL,
             route: true,
             margin,
         });
-        return regionItemsForPage(page, detection, vocabulary);
+        return { doc, detection, result: regionItemsForPage(page, detection, vocabulary, settings) };
     } catch (err) {
         postLog("warn", `[mupdf-worker] region detection failed on page ${page.pageIndex}: ${String(err)}`);
-        return { page, items: [], margin: [] };
+        return { doc, detection, result: { page, items: [], margin: [] }, error: String(err) };
     }
 }
 

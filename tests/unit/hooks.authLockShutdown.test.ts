@@ -367,6 +367,13 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect(Zotero.debug).toHaveBeenCalledWith(expect.stringContaining('disposeAccount timed out after 3000ms'));
     });
 
+    it('clears the shutdown flag for the next startup even when cleanup throws', async () => {
+        const hooks = await loadHooks();
+        vi.mocked(ztoolkit.unregisterAll).mockImplementation(() => { throw new Error('cleanup failure'); });
+        await hooks.onShutdown();
+        expect(Zotero.__beaverShuttingDown).toBeUndefined();
+    });
+
     it('disposes instance auth in fallback shutdown cleanup', async () => {
         const hooks = await loadHooks();
         const mainWin = makeWindow();

@@ -180,7 +180,7 @@ it("boots the standalone through instance hooks without reading its opener", asy
     };
     const context = {
         window: win,
-        document: { getElementById: () => ({}) },
+        document: { getElementById: () => ({ addEventListener: vi.fn() }) },
         Services: { scriptloader: { loadSubScript: vi.fn() } },
         ChromeUtils: {
             importESModule: () => ({
@@ -206,6 +206,59 @@ it("boots the standalone through instance hooks without reading its opener", asy
     expect(loaded).toHaveBeenCalledWith(win);
     listeners.unload();
     expect(unloaded).toHaveBeenCalledWith(win);
+});
+
+it("wires the standalone window's menu commands with listeners, not inline handlers", async () => {
+    const xhtml = readFileSync("addon/content/beaverWindow.xhtml", "utf8");
+    expect(xhtml).not.toMatch(/\son[a-z]+=/);
+
+    const commands: Record<string, () => void> = {};
+    const listeners: Record<string, (...args: any[]) => any> = {};
+    const handleWindowMenuCommand = vi.fn().mockResolvedValue(undefined);
+    const win = {
+        closed: false,
+        close: vi.fn(),
+        minimize: vi.fn(),
+        BeaverReact: { handleWindowMenuCommand },
+        addEventListener: (name: string, fn: (...args: any[]) => any) => {
+            listeners[name] = fn;
+        },
+    };
+    const context = {
+        window: win,
+        document: {
+            getElementById: (id: string) => ({
+                addEventListener: (name: string, fn: () => void) => {
+                    if (name === "command") commands[id] = fn;
+                },
+            }),
+        },
+        Services: { scriptloader: { loadSubScript: vi.fn() } },
+        ChromeUtils: {
+            importESModule: () => ({
+                Zotero: {
+                    initializationPromise: Promise.resolve(),
+                    UIProperties: { registerRoot: vi.fn() },
+                    Beaver: { data: { alive: false }, hooks: {} },
+                },
+            }),
+        },
+    };
+    runInNewContext(readFileSync("addon/content/beaverWindow.js", "utf8"), context);
+    await listeners.load();
+
+    expect(Object.keys(commands).sort()).toEqual(
+        ["cmd_beaverNewChat", "cmd_beaverSettings", "cmd_close", "minimizeWindow", "zoomWindow"],
+    );
+    commands.cmd_beaverNewChat();
+    commands.cmd_beaverSettings();
+    expect(handleWindowMenuCommand.mock.calls).toEqual([["new-chat"], ["settings"]]);
+    commands.cmd_close();
+    expect(win.close).toHaveBeenCalled();
+    commands.minimizeWindow();
+    expect(win.minimize).toHaveBeenCalled();
+    // zoomWindow() exists only once macWindowMenu.js has loaded.
+    expect(() => commands.zoomWindow()).not.toThrow();
 });
 
 it('pins a newly opened window before the window mediator can enumerate it', async () => {

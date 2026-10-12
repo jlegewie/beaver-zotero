@@ -24,6 +24,8 @@ import {
     opExtractRawPageDetailed,
     opGetMetadata,
     opGetPageCount,
+    opItemsExport,
+    opRegionsExport,
     opReferenceInputs,
     opRenderPages,
     opStructuredExtractWithDebug,
@@ -47,6 +49,7 @@ import type {
     StructuredExtractWithDebugResult,
 } from "../schema";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
+import type { PresetOverrides } from "../schema/presets";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 
 export type PdfBytes = Uint8Array | ArrayBuffer;
@@ -71,6 +74,8 @@ export interface ExtractInput {
     includeDiagnostics?: boolean;
     /** PDF schema version to produce (its extraction preset); default current. */
     schemaVersion?: string;
+    /** Development only (CLI): switches of the schema's preset to override. */
+    presetOverrides?: PresetOverrides;
 }
 
 export interface AnalyzeLayoutInput {
@@ -138,17 +143,49 @@ export async function structuredExtractWithDebug(
 }
 
 /**
- * Full-document structured extraction returning the reference classifier's
- * per-page inputs (training export and debugging).
+ * Full-document structured extraction returning the reference line model's
+ * per-page inputs, before any item pass (training export).
  */
 export async function referenceInputs(
-    input: Pick<ExtractInput, "pdfData" | "settings" | "paragraphSettings" | "analysisWindow" | "schemaVersion"> & {
-        /** Classify too: return plans and the emitted items. */
-        classify?: boolean;
-    },
+    input: Pick<ExtractInput, "pdfData" | "settings" | "paragraphSettings" | "analysisWindow" | "schemaVersion">,
 ): Promise<Awaited<ReturnType<typeof opReferenceInputs>>["result"]> {
     await ensureExtractionRuntime();
     const reply = await enqueue(() => opReferenceInputs(input));
+    return reply.result;
+}
+
+/**
+ * Full-document structured extraction returning the `items export` row of a
+ * model task (training export; see `pipeline/itemsExport.ts`). It runs with
+ * the plugin's extraction settings: the defaults, which the plugin uses too,
+ * so features see what they will see at runtime.
+ */
+export async function itemsExport(
+    input: Pick<ExtractInput, "pdfData" | "schemaVersion" | "presetOverrides"> & {
+        task: string;
+        bboxPrecision?: number;
+    },
+): Promise<Awaited<ReturnType<typeof opItemsExport>>["result"]> {
+    await ensureExtractionRuntime();
+    const { bboxPrecision, ...args } = input;
+    const reply = await enqueue(() => opItemsExport({ ...args, structured: { bboxPrecision } }));
+    return reply.result;
+}
+
+/**
+ * Full-document structured extraction returning the `regions-v2` export row
+ * (training export of the region model; see `pipeline/regionsExport.ts`),
+ * with the plugin's extraction settings. `pages` limits the pages written.
+ */
+export async function regionsExport(
+    input: Pick<ExtractInput, "pdfData" | "schemaVersion"> & {
+        bboxPrecision?: number;
+        pages?: number[];
+    },
+): Promise<Awaited<ReturnType<typeof opRegionsExport>>["result"]> {
+    await ensureExtractionRuntime();
+    const { bboxPrecision, ...args } = input;
+    const reply = await enqueue(() => opRegionsExport({ ...args, structured: { bboxPrecision } }));
     return reply.result;
 }
 

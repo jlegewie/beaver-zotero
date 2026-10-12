@@ -4,12 +4,14 @@ import { SCHEMA_VERSION } from "@beaver/agent-core/extract/schema";
 import {
     CURRENT_PDF_EXTRACTION_PRESET,
     PRODUCIBLE_PDF_SCHEMA_VERSIONS,
+    applyPresetOverrides,
     pdfExtractionPreset,
+    type PresetOverrides,
 } from "../../../src/beaver-extract/schema/presets";
 import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
 describe("PDF extraction presets", () => {
-    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, reference items, regions and page-number runs off and ids document-wide for schema 4", () => {
+    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, item passes, regions, page-number runs, exclusive column lines, line joins, note markers, learned boundaries and table row evidence off and ids document-wide for schema 4", () => {
         expect(pdfExtractionPreset("4")).toEqual({
             schemaVersion: "4",
             textRepair: false,
@@ -20,14 +22,19 @@ describe("PDF extraction presets", () => {
             pageBodyStyles: false,
             captionLabels: false,
             marginTextRows: false,
-            referenceItems: false,
+            itemPasses: [],
             idScheme: "document",
             regions: false,
             pageNumberRuns: false,
+            exclusiveColumnLines: false,
+            lineJoins: false,
+            noteMarkers: false,
+            learnedBoundaries: false,
+            tableRowEvidence: false,
         });
     });
 
-    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, reference items, regions and page-number runs on and ids page-scoped for schema 5", () => {
+    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions, page-number runs, exclusive column lines, line joins, note markers, learned boundaries and table row evidence on and ids page-scoped for schema 5", () => {
         expect(pdfExtractionPreset("5")).toEqual({
             schemaVersion: "5",
             textRepair: true,
@@ -38,10 +45,15 @@ describe("PDF extraction presets", () => {
             pageBodyStyles: true,
             captionLabels: true,
             marginTextRows: true,
-            referenceItems: true,
+            itemPasses: ["itemTypes", "references"],
             idScheme: "page",
             regions: true,
             pageNumberRuns: true,
+            exclusiveColumnLines: true,
+            lineJoins: true,
+            noteMarkers: true,
+            learnedBoundaries: true,
+            tableRowEvidence: true,
         });
     });
 
@@ -61,6 +73,20 @@ describe("PDF extraction presets", () => {
         for (const version of PRODUCIBLE_PDF_SCHEMA_VERSIONS) {
             expect(pdfExtractionPreset(version)).toBeDefined();
         }
+    });
+});
+
+describe("preset overrides", () => {
+    it("turns an overridable switch off without touching the preset", () => {
+        const preset = pdfExtractionPreset("5")!;
+        expect(applyPresetOverrides(preset, { learnedBoundaries: false })).toEqual({ ...preset, learnedBoundaries: false });
+        expect(preset.learnedBoundaries).toBe(true);
+        expect(applyPresetOverrides(preset, undefined)).toBe(preset);
+    });
+
+    it("rejects switches that can't be overridden", () => {
+        const preset = pdfExtractionPreset("5")!;
+        expect(() => applyPresetOverrides(preset, { regions: false } as unknown as PresetOverrides)).toThrow(/can't be overridden/);
     });
 });
 

@@ -3,8 +3,8 @@
  *
  * Segmentation creates them from the paragraph detector's result
  * (`draftItemsFromParagraphs`), item passes relabel, split and merge them
- * (reference classification), and sentence mapping turns them into the
- * page's `DocItem`s. Coordinates are in the upright working frame.
+ * (`itemPasses.ts`), and sentence mapping turns them into the page's
+ * `DocItem`s. Coordinates are in the upright working frame.
  *
  * The kind is a field. The paragraph detector marks a heading with a "## "
  * prefix in its text, which its markdown output (`pageContent`) keeps; draft
@@ -15,9 +15,15 @@
 import type { BoundingBox } from "@beaver/agent-core/extract/types";
 import type { PageLine } from "../LineDetector";
 import type { HangingRole, PageParagraphResult } from "../ParagraphDetector";
+import type { RotationAngle } from "../PageRotationNormalizer";
+import type { RegionItemKind } from "../regions/regionItems";
 
-/** Kinds a draft item can have; region items are placed after sentence mapping. */
-export type DraftItemKind = "text" | "section_header" | "reference";
+/**
+ * Kinds a draft item can have; region items are placed after sentence mapping.
+ * `margin` items (page furniture an item pass found) leave the reading order:
+ * they become internal margin items, like the margin filter's.
+ */
+export type DraftItemKind = "text" | "section_header" | "reference" | "footnote" | "margin";
 
 export interface DraftItem {
     kind: DraftItemKind;
@@ -25,10 +31,33 @@ export interface DraftItem {
     lines: PageLine[];
     /** Hanging-indent role of each line (see `detectHangingRoles`), aligned with `lines`. */
     roles: HangingRole[];
+    /** Block (column) of the item's first line. */
     columnIndex: number;
+    /**
+     * Block of the item's last line, set only when it differs from
+     * `columnIndex` (an item joined across stacked blocks).
+     */
+    endColumnIndex?: number;
+    /**
+     * Block of each line, aligned with `lines`; set only when the lines span
+     * more than one block. Passes that rebuild items from lines derive the
+     * rebuilt item's block fields from it (`withLineColumns`).
+     */
+    lineColumns?: number[];
     bbox: BoundingBox;
     /** Item text, without the detector's heading marker. */
     text: string;
+}
+
+/**
+ * A region item of the page (picture, table, formula). Regions are context
+ * for item passes, not draft items: they are placed among the page's items
+ * after sentence mapping.
+ */
+export interface DraftRegion {
+    kind: RegionItemKind;
+    /** Upright working frame. */
+    bbox: BoundingBox;
 }
 
 /** The draft items of one page. */
@@ -38,6 +67,15 @@ export interface DraftPage {
     width: number;
     height: number;
     items: DraftItem[];
+    /** Column rectangles of the page (upright working frame). */
+    columns?: BoundingBox[];
+    /**
+     * How the upright working frame relates to the page (MuPDF) frame: the
+     * text's rotation and the page size before it was turned upright.
+     */
+    frame?: { rotation: RotationAngle; sourceWidth: number; sourceHeight: number };
+    /** The page's region items, when region detection ran. */
+    regions?: DraftRegion[];
 }
 
 /** The paragraph detector's heading marker (markdown heading syntax). */
@@ -64,6 +102,8 @@ export function draftItemsFromParagraphs(result: PageParagraphResult): DraftItem
             lines,
             roles: roles[i] ?? lines.map(() => null),
             columnIndex: item.columnIndex,
+            ...(item.endColumnIndex !== undefined ? { endColumnIndex: item.endColumnIndex } : {}),
+            ...(item.lineColumns !== undefined ? { lineColumns: item.lineColumns } : {}),
             bbox: item.bbox,
             text: header && item.text.startsWith(HEADING_MARKER)
                 ? item.text.slice(HEADING_MARKER.length)
@@ -79,6 +119,31 @@ export function draftPageFromParagraphs(result: PageParagraphResult): DraftPage 
         width: result.width,
         height: result.height,
         items: draftItemsFromParagraphs(result),
+    };
+}
+
+/** Block of each of the item's lines. */
+export function itemLineColumns(item: DraftItem): number[] {
+    return item.lineColumns ?? item.lines.map(() => item.columnIndex);
+}
+
+/**
+ * `item` with its block fields (`columnIndex`, `endColumnIndex`,
+ * `lineColumns`) derived from `columns`, the block of each of its lines.
+ */
+export function withLineColumns(item: DraftItem, columns: readonly number[]): DraftItem {
+    const first = columns.length > 0 ? columns[0] : item.columnIndex;
+    const last = columns.length > 0 ? columns[columns.length - 1] : first;
+    const spans = columns.some((c) => c !== first);
+    if (!spans && first === item.columnIndex && item.endColumnIndex === undefined && item.lineColumns === undefined) {
+        return item;
+    }
+    const { endColumnIndex: _end, lineColumns: _lines, ...rest } = item;
+    return {
+        ...rest,
+        columnIndex: first,
+        ...(last !== first ? { endColumnIndex: last } : {}),
+        ...(spans ? { lineColumns: [...columns] } : {}),
     };
 }
 

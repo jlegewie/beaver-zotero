@@ -68,6 +68,11 @@ export interface GraphicsSummary {
     records: Float32Array;
     /** True when the record cap was reached. */
     overflow: boolean;
+    /**
+     * True when recording stopped at an error (header[14]): the records end
+     * there, so primitives drawn after it are missing.
+     */
+    incomplete: boolean;
     /** Row-major `gridSize x gridSize` counts of primitives past the cap, or null. */
     grid: Float32Array | null;
     gridSize: number;
@@ -121,6 +126,7 @@ export function parseGraphicsSummary(bytes: Uint8Array): GraphicsSummary {
         count,
         records: floats.subarray(GRAPHICS_SUMMARY_HEADER, recordsEnd),
         overflow,
+        incomplete: floats[14] === 1,
         grid: overflow ? floats.subarray(recordsEnd, expected) : null,
         gridSize: overflow ? gridSize : 0,
     };

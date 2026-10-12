@@ -90,7 +90,22 @@ src/beaver-extract/
 ├── pipeline/                      # Extraction pipeline (runs in the worker)
 │   ├── documentAnalysis.ts        # Page-walk cache + cross-page analysis context
 │   ├── structured.ts              # Structured extraction phases (analyze → segment → item passes → sentences → project)
+│   ├── draftItems.ts              # Draft items between segmentation and sentence mapping
+│   ├── itemPasses.ts              # Step 3: `ItemPass` interface; presets list their passes
+│   ├── itemsExport.ts             # `items export` rows (items, lines, filtered lines, task features; flow lines for `boundaries`)
+│   ├── regionsExport.ts           # `items export --task regions-v2` rows (region pass observed in `segmentPages`)
 │   └── output.ts                  # Helpers shared by the markdown and structured results
+├── models/runtime.ts              # One evaluator for every learned model (bxm-trees-v1, bxm-logistic-v1)
+├── features/                      # Feature parts shared by the item models
+│   ├── itemInput.ts               # Per-page model input built from draft items
+│   ├── text.ts                    # Text patterns (word counts, leaders, bibliographic details, list headings)
+│   ├── style.ts                   # Line typography (size, font, bold/italic, lead marker) and glyph geometry (baseline, core)
+│   ├── geometry.ts                # Line-block geometry in em
+│   └── context.ts                 # Document context (page position, list headings so far)
+├── itemTypes/                     # Item-type model: input, features (incl. reference item features), model, item pass, generated weights
+├── boundaries/                    # Item boundaries: startNewItem reason codes, per-block input, feature rows, model (preset switch `learnedBoundaries`), generated weights
+├── references/                    # Reference entries: line model, entry planning, item pass (splits and joins the item-type model's references), generated weights
+├── regions/                       # Region detection (pictures, tables, formulas): step 2
 ├── DocumentAnalyzer.ts            # Text layer & OCR detection
 ├── StyleAnalyzer.ts               # Font/style analysis
 ├── MarginFilter.ts                # Header/footer removal
@@ -281,15 +296,19 @@ DEFAULT_MARGIN_ZONE = { left: 60, top: 80, right: 60, bottom: 80 }
 
 1. Join lines MuPDF split on one baseline back into text rows (word-split
    PDFs emit every word as a line), and collect the rows that sit in a
-   margin zone
+   margin zone. Words of a justified prose row, split too far apart to
+   join, and lone lowercase words ("the", "and") are not margin elements
+   (schema 5)
 2. Group by normalized text (case-insensitive, trimmed; digits ignored for
    joined rows)
 3. Remove if appears on ≥3 pages (repeatThreshold); a row that does not
    match as a whole still loses a leading/trailing run matching a running
-   head of the same zone
+   head of the same zone; words of justified prose rows stay (schema 5)
 4. Detect page numbers:
    - Regex patterns: /^\d+$/, /^page \d+$/, /^[ivxlcm]+$/
-   - Verify strictly increasing sequence
+   - Verify strictly increasing sequence that, in schema 5, advances with
+     the pages; only each page's own number is removed (a contents page
+     keeps its page references)
 5. Log what was removed
 ```
 

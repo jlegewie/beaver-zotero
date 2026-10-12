@@ -18,8 +18,20 @@
 import type { PageLine, PageLineResult, ColumnLineResult } from "./LineDetector";
 import type { BoundingBox, RawStyleRun, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
 import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
-import type { Rect } from "./ColumnDetector";
+import { crossesDivider, fillZoneFor, type ColumnDetectionOptions, type Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
+import { joinLineTexts } from "./lineJoins";
+import { START_SIGNALS, START_VETOES, type StartTrace } from "./boundaries/rules";
+import {
+    boundaryLine,
+    type BlockThresholds,
+    type BoundaryBlock,
+    type BoundaryPage,
+    type LineDecision,
+} from "./boundaries/input";
+import { FEATURES as BOUNDARY_FEATURES, boundaryRow, prepareBoundaryPage } from "./boundaries/features";
+import { boundaryProbability, type BoundaryModel } from "./boundaries/model";
+import { BOUNDARY_MODEL } from "./boundaries/weights";
 
 // ============================================================================
 // Types
@@ -78,6 +90,43 @@ export interface ParagraphDetectionSettings {
      * headings (default: false). Enabled by the PDF schema preset.
      */
     pageBodyStyles?: boolean;
+    /**
+     * Line detection gives each raw line to one column only, so a line inside
+     * two overlapping column boxes is not read twice
+     * (`LineDetectionOptions.exclusiveColumns`; default: false). Enabled by
+     * the PDF schema preset.
+     */
+    exclusiveColumnLines?: boolean;
+    /**
+     * Join an item's lines with `joinLineTexts` (see `lineJoins.ts`): line-end
+     * hyphens decided from the document's spelling and the word's shape,
+     * URLs, DOIs, number ranges and CJK text joined without a space, soft
+     * hyphens removed (default: false). Enabled by the PDF schema preset.
+     */
+    lineJoins?: boolean;
+    /**
+     * The document's line-break vocabulary for `lineJoins`, set by the
+     * pipeline (`buildCompoundVocabulary`).
+     */
+    lineJoinVocabulary?: ReadonlySet<string>;
+    /**
+     * Footnote markers glued to text: a footnote's raised lead marker is set
+     * off from its text, a raised marker glued to a word in body text is
+     * dropped, and a body sentence continues past footnotes into the next
+     * column (see `ParagraphTextOptions.noteMarkers`,
+     * `annotateColumnContinuations`; default: false). Enabled by the PDF
+     * schema preset.
+     */
+    noteMarkers?: boolean;
+    /**
+     * Decide where items start with the learned boundary model
+     * (`boundaries/model.ts`) instead of `startNewItem`, and continue an
+     * item across a cut between stacked blocks of one printed column
+     * (`detectLearnedItems`; default: false). Applies only to pages whose
+     * lines carry glyph metrics (`hasGlyphMetrics`); others keep
+     * `startNewItem`. Enabled by the PDF schema preset.
+     */
+    learnedBoundaries?: boolean;
 }
 
 const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
@@ -94,6 +143,11 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     headingLabelFilters: true,
     isolatedHeadings: false,
     pageBodyStyles: false,
+    exclusiveColumnLines: false,
+    lineJoins: false,
+    lineJoinVocabulary: new Set<string>(),
+    noteMarkers: false,
+    learnedBoundaries: false,
 };
 
 /**
@@ -164,8 +218,16 @@ export interface ContentItem {
     id: string;
     /** Bounding box for the item */
     bbox: BoundingBox;
-    /** Column index this item belongs to */
+    /** Column index this item belongs to: the block of its first line */
     columnIndex: number;
+    /**
+     * Column index of the item's last line, set only when it differs from
+     * `columnIndex`: an item joined across a cut between stacked blocks
+     * (`learnedBoundaries`).
+     */
+    endColumnIndex?: number;
+    /** Column index of each of the item's lines, set with `endColumnIndex`. */
+    lineColumns?: number[];
 }
 
 /**
@@ -279,6 +341,8 @@ function isMostlyNumeric(text: string, threshold: number = 0.8): boolean {
     return digitCount / total >= threshold;
 }
 
+const LETTER_RE = /\p{L}/u;
+
 /**
  * Check if text is all uppercase.
  *
@@ -288,9 +352,18 @@ function isMostlyNumeric(text: string, threshold: number = 0.8): boolean {
  * positives on short tokens like "USA" or "I".
  */
 function isAllCapsText(text: string, minLetters: number = 3): boolean {
-    const letters = text.match(/\p{L}/gu) || [];
     let cased = 0;
-    for (const c of letters) {
+    for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        // ASCII: only A-Z and a-z are letters.
+        if (code < 0x80) {
+            if (code >= 0x61 && code <= 0x7a) return false;
+            if (code >= 0x41 && code <= 0x5a) cased++;
+            continue;
+        }
+        const c = String.fromCodePoint(text.codePointAt(i)!);
+        if (c.length === 2) i++;
+        if (!LETTER_RE.test(c)) continue;
         if (c.toLowerCase() === c.toUpperCase()) continue; // uncased script
         cased++;
         if (c !== c.toUpperCase()) return false;
@@ -707,6 +780,24 @@ function computeBodyAllCaps(
     }
     if (total < 5) return false;
     return allCaps / total >= 0.8;
+}
+
+/**
+ * An item's text from its line texts: `joinLineTexts` when `lineJoins` is
+ * on, `joinLines` otherwise. Passes that rebuild items from their lines join
+ * them the same way.
+ */
+export function joinItemLines(
+    lines: PageLine[],
+    settings: Pick<ParagraphDetectionSettings, "lineJoins" | "removeHyphenation" | "lineJoinVocabulary">,
+): string {
+    const removeHyphenation = settings.removeHyphenation ?? DEFAULT_SETTINGS.removeHyphenation;
+    if (!settings.lineJoins || !removeHyphenation) {
+        return joinLines(lines.map(l => l.text), removeHyphenation);
+    }
+    // A line keeps the space the PDF set after its last word.
+    const texts = lines.map(l => (l.spans[l.spans.length - 1]?.trailingSpace ? `${l.text} ` : l.text));
+    return joinLineTexts(texts, settings.lineJoinVocabulary);
 }
 
 /**
@@ -1334,8 +1425,8 @@ function calculateColumnThresholds(
  *     fonts at the line's exact (size, bold, italic) — i.e. the document
  *     ALREADY shows subset fragmentation at this style class.
  *
- * Returning true means "treat as body" — the caller short-circuits before
- * any Rule 1-6 evaluation.
+ * Returning true means "treat as body": the line is not a heading whichever
+ * of Rules 1-6 it meets.
  */
 // Exported for unit tests only. Not part of the production API.
 export function looksLikeFragmentedCJKBody(
@@ -1382,12 +1473,22 @@ const MATH_FONT_RE =
 function lineStyleRuns(line: PageLine): { run: RawStyleRun; text: string }[] {
     const runs: { run: RawStyleRun; text: string }[] = [];
     for (const span of line.spans) {
-        const glyphs = Array.from(span.text).filter(c => /\S/u.test(c));
-        let offset = 0;
-        for (const run of span.styleRuns ?? []) {
+        if (!span.styleRuns) continue;
+        const spanText = span.text;
+        let pos = 0;
+        for (const run of span.styleRuns) {
             if (run.chars === 0) continue;
-            runs.push({ run, text: glyphs.slice(offset, offset + run.chars).join("") });
-            offset += run.chars;
+            // The run's text: its next `run.chars` non-whitespace code points.
+            let text = "";
+            for (let n = 0; n < run.chars && pos < spanText.length; ) {
+                const code = spanText.codePointAt(pos)!;
+                const c = code > 0xffff ? spanText.slice(pos, pos + 2) : spanText[pos];
+                pos += c.length;
+                if (code < 0x80 ? code === 0x20 || (code >= 0x09 && code <= 0x0d) : !/\S/u.test(c)) continue;
+                text += c;
+                n++;
+            }
+            runs.push({ run, text });
         }
     }
     return runs;
@@ -1625,9 +1726,15 @@ function isHeaderStyle(
     }
     const lineStyle = numbered?.style ?? extractLineStyle(line);
     if (!lineStyle) return false;
+    if (!matchesHeaderRules(
+        line, lineStyle, !numbered, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
+    )) {
+        return false;
+    }
     // Item-level only (the joined item text): boundaries are decided per line
     // and stay as they are; a run-in label, equation or link item just isn't
-    // labelled a heading.
+    // labelled a heading. Tested after the style rules, which reject most
+    // lines more cheaply.
     if (
         settings.headingLabelFilters &&
         phraseTextOverride !== null &&
@@ -1636,11 +1743,6 @@ function isHeaderStyle(
             looksLikeWebAddresses(phraseTextOverride) ||
             looksLikeIdentifier(phraseTextOverride))
     ) {
-        return false;
-    }
-    if (!matchesHeaderRules(
-        line, lineStyle, !numbered, bodyStyles, settings, precededByGap, bodyAllCaps, phraseTextOverride
-    )) {
         return false;
     }
     const majority = majorityLineStyle(line, lineStyle);
@@ -1985,20 +2087,6 @@ function matchesHeaderRules(
         return false;
     }
 
-    // CJK CID-subset body fallback: the line uses a body-sized style class
-    // that bodyStyles already shows fragmented across 2+ fonts. The "new"
-    // font here is almost certainly another subset of the same logical
-    // body font, not a real heading. Narrow text guards (CJK content,
-    // no section prefix) keep this off Latin docs and preserve Rule 6.
-    if (looksLikeFragmentedCJKBody(line, lineStyle, bodyStyles)) {
-        return false;
-    }
-
-    // Must be highly consistent (90%+ same style)
-    if (checkSpanDominance && getStyleDominance(line, lineStyle) < 0.9) {
-        return false;
-    }
-
     let isPotentialHeader = false;
     // True when the candidate carries an independent size cue (Rule 1).
     // Used to exempt size-cued headings from the heading-capitalization
@@ -2132,6 +2220,20 @@ function matchesHeaderRules(
     if (!isPotentialHeader) return false;
 
     // Apply disqualifying heuristics
+
+    // CJK CID-subset body fallback: the line uses a body-sized style class
+    // that bodyStyles already shows fragmented across 2+ fonts. The "new"
+    // font here is almost certainly another subset of the same logical
+    // body font, not a real heading. Narrow text guards (CJK content,
+    // no section prefix) keep this off Latin docs and preserve Rule 6.
+    if (looksLikeFragmentedCJKBody(line, lineStyle, bodyStyles)) {
+        return false;
+    }
+
+    // Must be highly consistent (90%+ same style)
+    if (checkSpanDominance && getStyleDominance(line, lineStyle) < 0.9) {
+        return false;
+    }
 
     // Heading-capitalization guard. Rules 2-6 promote a candidate on a
     // same-or-smaller-size font difference alone — a signal that is
@@ -2635,12 +2737,12 @@ function headingEndsBeforeBodyLine(
     const shortfall = columnThresholds.rightEdgeMode - prevLine.bbox.r;
     if (shortfall <= Math.max(pageThresholds.medianHeight, 0.03 * measure)) return false;
 
-    const headingText = joinLines(currentLines.map(l => l.text), settings.removeHyphenation);
+    const headingText = joinItemLines(currentLines, settings);
     if (headingText.length >= settings.maxHeaderLength || /[:：]\s*$/u.test(headingText)) return false;
     if (!currentLines.every(l => isHeaderStyle(l, bodyStyles, settings, null, bodyAllCaps, headingText))) {
         return false;
     }
-    const joinedText = joinLines([...currentLines, line].map(l => l.text), settings.removeHyphenation);
+    const joinedText = joinItemLines([...currentLines, line], settings);
     if (openingLineStyle(currentLines[0])?.italic && looksLikeJournalCitation(joinedText)) return false;
     return !isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps, joinedText);
 }
@@ -2696,8 +2798,14 @@ function startNewItem(
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
     bodyAllCaps: boolean = false,
-    hangingRole: HangingRole = null
+    hangingRole: HangingRole = null,
+    trace: StartTrace | null = null
 ): boolean {
+    if (trace) {
+        trace.rule = "forced";
+        trace.signals = 0;
+        trace.vetoes = 0;
+    }
     if (i === 0) return true;
     if (!prevLine) return true;
 
@@ -2707,6 +2815,7 @@ function startNewItem(
         currentLines.length > 0 &&
         isNextNumberedEntry(currentLines[0], line)
     ) {
+        if (trace) trace.rule = "numbered";
         return true;
     }
 
@@ -2750,6 +2859,7 @@ function startNewItem(
             !prevEndsSentence
         ) {
             gapBreak = false;
+            if (trace) trace.vetoes |= START_VETOES.leader_continuation;
         }
     }
 
@@ -2843,6 +2953,7 @@ function startNewItem(
             const uniformTol = Math.max(1.5, 0.3 * referenceLeading);
             if (spacingTop <= referenceLeading + uniformTol) {
                 gapBreak = false;
+                if (trace) trace.vetoes |= START_VETOES.uniform_leading;
             }
         }
     }
@@ -2872,6 +2983,7 @@ function startNewItem(
         isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
 
     if (isLocalHeader && !prevIsLocalHeader) {
+        if (trace) trace.rule = "heading_after_body";
         return true; // Header after non-header
     }
 
@@ -2879,6 +2991,7 @@ function startNewItem(
         // Different header style. A hanging continuation stays with the
         // heading-styled line it wraps (a bold list label, an italic title).
         if (!sameOpeningStyle(line, prevLine) && hangingRole !== "continuation") {
+            if (trace) trace.rule = "heading_style_change";
             return true;
         }
         // Same style, but a paragraph-sized gap apart: two stacked headings
@@ -2892,8 +3005,10 @@ function startNewItem(
             columnThresholds.isolatedHeading[i - 1] &&
             stackedHeadingGap(line, prevLine, columnThresholds, pageThresholds)
         ) {
+            if (trace) trace.rule = "heading_stacked";
             return true;
         }
+        if (trace) trace.rule = "heading_continues";
         return false; // Same header style continues
     }
 
@@ -2913,6 +3028,7 @@ function startNewItem(
         !sameTypeface(line, prevLine) &&
         opensWithHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps)
     ) {
+        if (trace) trace.rule = "heading_opening_style";
         return true;
     }
 
@@ -2925,6 +3041,7 @@ function startNewItem(
             line, prevLine, currentLines, columnThresholds, pageThresholds, bodyStyles, settings, bodyAllCaps
         )
     ) {
+        if (trace) trace.rule = "heading_ends_before_body";
         return true;
     }
 
@@ -3024,6 +3141,7 @@ function startNewItem(
                     const prevEndsSentence = /[.!?]["'”’)]?$/u.test(prevText);
                     if (!prevEndsSentence) {
                         indentBreak = false;
+                        if (trace) trace.vetoes |= START_VETOES.indent_suppression;
                     }
                 }
             }
@@ -3084,6 +3202,7 @@ function startNewItem(
                 heightExcess <= line.fontSize;
             if (prevReportsSmaller && prevHeightComparable) {
                 fontSizeBreak = false;
+                if (trace) trace.vetoes |= START_VETOES.superscript_marker;
             }
         }
     }
@@ -3096,6 +3215,7 @@ function startNewItem(
     const prevExtendsBelow =
         prevLine.bbox.b > line.bbox.b + bboxHeight(line.bbox);
     if (prevExtendsBelow) {
+        if (trace && (indentBreak || earlyEndBreak || fontSizeBreak)) trace.vetoes |= START_VETOES.drop_cap;
         indentBreak = false;
         earlyEndBreak = false;
         fontSizeBreak = false;
@@ -3133,6 +3253,7 @@ function startNewItem(
             sameStyle &&
             !prevEndsSentence
         ) {
+            if (trace && (gapBreak || earlyEndBreak || fontSizeBreak)) trace.vetoes |= START_VETOES.same_indent_hanging;
             gapBreak = false;
             earlyEndBreak = false;
             fontSizeBreak = false;
@@ -3160,6 +3281,7 @@ function startNewItem(
     // visual break.
     let hangingEntryBreak = false;
     if (hangingRole === "continuation") {
+        if (trace && (indentBreak || earlyEndBreak)) trace.vetoes |= START_VETOES.hanging_continuation;
         indentBreak = false;
         earlyEndBreak = false;
     } else if (hangingRole === "entry") {
@@ -3174,6 +3296,23 @@ function startNewItem(
         fontSizeBreak ||
         leaderAfterContinuationBreak ||
         hangingEntryBreak;
+    if (trace) {
+        const s = START_SIGNALS;
+        trace.signals =
+            (gapBreak ? s.gap : 0) |
+            (indentBreak ? s.indent : 0) |
+            (earlyEndBreak ? s.early_end : 0) |
+            (fontSizeBreak ? s.font_size : 0) |
+            (leaderAfterContinuationBreak ? s.leader_after_continuation : 0) |
+            (hangingEntryBreak ? s.hanging_entry : 0);
+        trace.rule = gapBreak ? "gap"
+            : indentBreak ? "indent"
+            : earlyEndBreak ? "early_end"
+            : fontSizeBreak ? "font_size"
+            : leaderAfterContinuationBreak ? "leader_after_continuation"
+            : hangingEntryBreak ? "hanging_entry"
+            : "none";
+    }
     return visualBreak;
 }
 
@@ -3204,8 +3343,7 @@ function processCurrentLinesAsItem(
 } {
     // b. Build text content (needed by header check below for Rule 5's
     // phrase test on multi-line headers)
-    const itemLines = currentLines.map(l => l.text);
-    const rawItemText = joinLines(itemLines, settings.removeHyphenation);
+    const rawItemText = joinItemLines(currentLines, settings);
 
     // a. Check if all lines are headers. Pass the joined text so Rule 5's
     // multi-word all-caps phrase check sees the full heading even when it
@@ -3357,7 +3495,8 @@ function processColumnLines(
     itemCounters: ItemCounters,
     initialPageContent: string,
     bodyAllCaps: boolean = false,
-    prevDocLine: PageLine | null = null
+    prevDocLine: PageLine | null = null,
+    decisions: LineDecision[] | null = null
 ): {
     pageContent: string;
     items: ContentItem[];
@@ -3383,6 +3522,7 @@ function processColumnLines(
         const line = lines[i];
         const prevLine = i > 0 ? lines[i - 1] : null;
         const nextLine = i + 1 < lines.length ? lines[i + 1] : null;
+        const trace: StartTrace | null = decisions ? { rule: "forced", signals: 0, vetoes: 0 } : null;
 
         const shouldStartNew =
             currentLines.length === 0 ||
@@ -3397,8 +3537,18 @@ function processColumnLines(
                 bodyStyles,
                 settings,
                 bodyAllCaps,
-                hangingRoles[i]
+                hangingRoles[i],
+                trace
             );
+        if (decisions && trace) {
+            decisions.push({
+                start: shouldStartNew,
+                trace,
+                role: hangingRoles[i],
+                headerStyle: isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps),
+                isolatedHeading: columnThresholds.isolatedHeading[i],
+            });
+        }
 
         if (shouldStartNew) {
             if (currentLines.length > 0) {
@@ -3493,6 +3643,289 @@ export interface DetectParagraphsOptions {
      * callers pay nothing.
      */
     trackItemLines?: boolean;
+    /**
+     * Region items of the page (figures, tables, equations) in the
+     * detector's frame, as [l, t, r, b]: the item-boundary input's regions
+     * (`learnedBoundaries` and `boundaries`).
+     */
+    regions?: [number, number, number, number][];
+    /**
+     * Layout barriers the column detector kept blocks apart at, in the
+     * detector's frame: shaded containers and divider rules. With
+     * `learnedBoundaries`, an item never continues across one.
+     */
+    barriers?: Pick<ColumnDetectionOptions, "fillBoundaries" | "dividerLines">;
+    /**
+     * Receives the page's blocks as the item-boundary features read them
+     * (`boundaries/input.ts`), with the flow lines in the same order. Only
+     * the training export passes it.
+     */
+    boundaries?: BoundaryCapture;
+    /** The boundary model of `learnedBoundaries` (default `BOUNDARY_MODEL`). */
+    boundaryModel?: BoundaryModel;
+}
+
+/** Captures the item-boundary input of a page (`DetectParagraphsOptions.boundaries`). */
+export interface BoundaryCapture {
+    /** Called once per page: the input, and its lines in flow order (blocks in reading order). */
+    page(input: BoundaryPage, flow: PageLine[]): void;
+}
+
+/** The block thresholds the item-boundary features read. */
+function blockThresholds(t: ColumnThresholds): BlockThresholds {
+    return {
+        leftEdgeMode: t.leftEdgeMode,
+        rightEdgeMode: t.rightEdgeMode,
+        leftEdgeMad: t.leftEdgeMad,
+        rightEdgeMad: t.rightEdgeMad,
+        maxRightEdge: t.maxRightEdge,
+        indentExcessThreshold: t.indentExcessThreshold,
+        earlyEndExcessThreshold: t.earlyEndExcessThreshold,
+        gapExcessThreshold: t.gapExcessThreshold,
+        medianGap: t.medianGap,
+    };
+}
+
+/** The item-boundary input of a page, around its blocks. */
+function boundaryPage(
+    lineResult: PageLineResult,
+    bodyStyles: TextStyle[] | null,
+    pageThresholds: PageThresholds,
+    regions: [number, number, number, number][],
+    blocks: BoundaryBlock[],
+): BoundaryPage {
+    const body = bodyStyles?.[0];
+    return {
+        pageIndex: lineResult.pageIndex,
+        width: lineResult.width,
+        height: lineResult.height,
+        body: body
+            ? { size: body.exactSize ?? body.size, font: body.font, bold: body.bold, italic: body.italic }
+            : null,
+        medianHeight: pageThresholds.medianHeight,
+        gapExcessThreshold: pageThresholds.gapExcessThreshold,
+        regions,
+        blocks,
+    };
+}
+
+const SIDE_BY_SIDE = BOUNDARY_FEATURES.indexOf("sideBySide");
+const BLOCK_OVERLAP = BOUNDARY_FEATURES.indexOf("blockOverlap");
+/**
+ * Least horizontal overlap of two blocks (share of the narrower one's width)
+ * for an item to continue from one into the other: blocks of one printed
+ * column overlap; a block beside another doesn't.
+ */
+const MIN_JOIN_OVERLAP = 0.3;
+const TEXT_BETWEEN = BOUNDARY_FEATURES.indexOf("textBetween");
+const REGION_BETWEEN = BOUNDARY_FEATURES.indexOf("regionBetween");
+
+const lineRect = (line: PageLine): Rect => ({
+    x: line.bbox.l,
+    y: line.bbox.t,
+    w: line.bbox.r - line.bbox.l,
+    h: line.bbox.b - line.bbox.t,
+});
+
+/**
+ * Whether the column detector's layout barriers keep two lines apart: a
+ * divider rule runs between them, or they sit in different shaded
+ * containers (or one inside a container and one outside).
+ */
+function layoutBarrierBetween(above: PageLine, below: PageLine, barriers: DetectParagraphsOptions["barriers"]): boolean {
+    const fills = barriers?.fillBoundaries ?? [];
+    const dividers = barriers?.dividerLines ?? [];
+    const a = lineRect(above);
+    const b = lineRect(below);
+    if (fills.length > 0 && fillZoneFor(a, fills) !== fillZoneFor(b, fills)) return true;
+    return dividers.length > 0 && crossesDivider(a, b, dividers);
+}
+
+const lastOf = <T>(values: readonly T[]): T => values[values.length - 1];
+
+/**
+ * The previous line extends below this one by more than this line's height:
+ * the line wraps around a drop cap or another tall element beside it (the
+ * drop-cap check of `startNewItem`).
+ */
+function wrapsAroundTallLine(prevLine: PageLine, line: PageLine): boolean {
+    return prevLine.bbox.b > line.bbox.b + bboxHeight(line.bbox);
+}
+
+/**
+ * Whether the walk recorded glyph metrics for the page's lines (schema
+ * presets with `styleRuns`): the boundary model's gap features are measured
+ * from baselines, so it runs only on such input.
+ */
+function hasGlyphMetrics(lineResult: PageLineResult): boolean {
+    return lineResult.columnResults.some((col) => col.lines.some((line) => line.spans.some((span) => span.glyphMetrics?.length)));
+}
+
+/** Items of a page's blocks, as `processColumnLines` returns them for one block. */
+interface FlowItems {
+    pageContent: string;
+    items: ContentItem[];
+    itemLines: PageLine[][];
+    itemLineRoles: HangingRole[][];
+    paragraphCount: number;
+    headerCount: number;
+}
+
+/**
+ * Items of a page from the learned boundary model (`learnedBoundaries`).
+ *
+ * For every line of a block below its first, the model's start probability
+ * replaces `startNewItem`: the line starts an item when the probability
+ * reaches the model's threshold. A block's first line starts an item, except
+ * where the column detector cut one printed column into blocks one below the
+ * other: when the blocks overlap horizontally (`MIN_JOIN_OVERLAP`), the line
+ * is not beside the previous block's last line (`sideBySide`), no other
+ * text, no region and no layout barrier (divider rule, shaded container
+ * edge: `layoutBarrierBetween`) lies between them and the model says the
+ * line continues, the item carries on across the cut. The blocks may
+ * overlap vertically. Column breaks, pages and regions never join; sentence mapping links
+ * their sentences (`annotateColumnContinuations`).
+ *
+ * A line wrapping around a drop cap (`wrapsAroundTallLine`) continues the
+ * previous line's item whatever the model says: drop caps are too rare in
+ * the training data for the model to learn them.
+ *
+ * The model reads no heuristic decision, so `startNewItem` does not run and
+ * the input's heuristic trace is empty. Everything after the decision is the
+ * detector's own: an item is a heading by `processCurrentLinesAsItem`, keeps
+ * its lines' hanging roles, and belongs to the block it starts in (its
+ * `columnIndex`, thresholds, and per-block counters); an item ending in a
+ * later block records it as `endColumnIndex`, and each line's block as
+ * `lineColumns`.
+ */
+function detectLearnedItems(
+    columns: ColumnLineResult[],
+    lineResult: PageLineResult,
+    pageThresholds: PageThresholds,
+    bodyStyles: TextStyle[] | null,
+    settings: Required<ParagraphDetectionSettings>,
+    itemCounters: ItemCounters,
+    bodyAllCaps: boolean,
+    regions: [number, number, number, number][],
+    barriers: DetectParagraphsOptions["barriers"],
+    model: BoundaryModel,
+): FlowItems & { input: BoundaryPage } {
+    const blocks = columns.map((col) => {
+        const thresholds = calculateColumnThresholds(col.lines, pageThresholds, settings, bodyStyles, bodyAllCaps);
+        const roles: HangingRole[] = settings.hangingIndentBlocks
+            ? detectHangingRoles(col.lines, pageThresholds.medianHeight)
+            : new Array(col.lines.length).fill(null);
+        return { col, thresholds, roles };
+    });
+    const input = boundaryPage(
+        lineResult,
+        bodyStyles,
+        pageThresholds,
+        regions,
+        blocks.map(({ col, thresholds, roles }) => ({
+            index: col.columnIndex,
+            lines: col.lines.map((line, k) =>
+                boundaryLine(line, {
+                    start: false,
+                    trace: null,
+                    role: roles[k],
+                    headerStyle: isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps),
+                    isolatedHeading: thresholds.isolatedHeading[k],
+                }),
+            ),
+            thresholds: blockThresholds(thresholds),
+        })),
+    );
+
+    // Decisions: the page's first line starts; every other line asks the model.
+    const prep = prepareBoundaryPage(input);
+    const starts = input.blocks.map((block, b) =>
+        block.lines.map((line, j) => {
+            let start = true;
+            if (b > 0 || j > 0) {
+                const row = boundaryRow(prep, b, j);
+                const p = boundaryProbability(model, row);
+                line.probability = p;
+                const prevLine = j > 0 ? blocks[b].col.lines[j - 1] : lastOf(blocks[b - 1].col.lines);
+                const continues = p < model.threshold || wrapsAroundTallLine(prevLine, blocks[b].col.lines[j]);
+                start = j > 0
+                    ? !continues
+                    : !(
+                          continues &&
+                          row[SIDE_BY_SIDE] === 0 &&
+                          row[BLOCK_OVERLAP] >= MIN_JOIN_OVERLAP &&
+                          row[TEXT_BETWEEN] === 0 &&
+                          row[REGION_BETWEEN] === 0 &&
+                          !layoutBarrierBetween(prevLine, blocks[b].col.lines[0], barriers)
+                      );
+            }
+            line.start = start;
+            return start;
+        }),
+    );
+
+    const out: FlowItems = {
+        pageContent: "",
+        items: [],
+        itemLines: [],
+        itemLineRoles: [],
+        paragraphCount: 0,
+        headerCount: 0,
+    };
+    // Per-block item counters, as `processColumnLines` keeps them.
+    const counts = blocks.map(() => ({ paragraph: 0, header: 0 }));
+    let current: { block: number; first: number; lines: PageLine[]; roles: HangingRole[]; blocks: number[] } | null = null;
+    const finish = () => {
+        if (!current) return;
+        const { block: b, first, lines, roles, blocks: lineBlocks } = current;
+        const lastBlock = lineBlocks[lineBlocks.length - 1];
+        const { col, thresholds } = blocks[b];
+        const result = processCurrentLinesAsItem(
+            lines,
+            out.pageContent,
+            counts[b].paragraph,
+            counts[b].header,
+            itemCounters,
+            col.columnIndex,
+            lineResult.pageIndex,
+            bodyStyles,
+            settings,
+            thresholds,
+            col.lines.length,
+            bodyAllCaps,
+            // The previous block's last line, for the item opening a block.
+            first === 0 && b > 0 ? blocks[b - 1].col.lines[blocks[b - 1].col.lines.length - 1] : null,
+        );
+        if (lastBlock !== b) {
+            result.item.endColumnIndex = blocks[lastBlock].col.columnIndex;
+            result.item.lineColumns = lineBlocks.map((k) => blocks[k].col.columnIndex);
+        }
+        out.pageContent = result.pageContent;
+        out.items.push(result.item);
+        out.itemLines.push(lines);
+        out.itemLineRoles.push(roles);
+        if (result.item.type === "header") {
+            counts[b].header++;
+            out.headerCount++;
+        } else {
+            counts[b].paragraph++;
+            out.paragraphCount++;
+        }
+    };
+    blocks.forEach(({ col, roles }, b) => {
+        col.lines.forEach((line, j) => {
+            if (starts[b][j] || !current) {
+                finish();
+                current = { block: b, first: j, lines: [line], roles: [roles[j]], blocks: [b] };
+            } else {
+                current.lines.push(line);
+                current.roles.push(roles[j]);
+                current.blocks.push(b);
+            }
+        });
+    });
+    finish();
+    return { ...out, input };
 }
 
 /**
@@ -3527,6 +3960,24 @@ export function detectParagraphs(
         if (pageStyle) bodyStyles = [...bodyStyles, pageStyle];
     }
 
+    if (opts.learnedBoundaries && hasGlyphMetrics(lineResult)) {
+        const columns = lineResult.columnResults.filter((col) => col.lines.length > 0);
+        const learned = detectLearnedItems(
+            columns,
+            lineResult,
+            pageThresholds,
+            bodyStyles,
+            opts,
+            itemCounters,
+            bodyAllCaps,
+            options.regions ?? [],
+            options.barriers,
+            options.boundaryModel ?? BOUNDARY_MODEL,
+        );
+        options.boundaries?.page(learned.input, columns.flatMap((col) => col.lines));
+        return paragraphResult(lineResult, learned, options);
+    }
+
     let pageContent = "";
     const allItems: ContentItem[] = [];
     const allItemLines: PageLine[][] = [];
@@ -3538,6 +3989,8 @@ export function detectParagraphs(
     // line into the next column so single-line first items can detect
     // wrap-continuations of icon-font bullet lists across the column boundary.
     let prevDocLine: PageLine | null = null;
+    const boundaryBlocks: BoundaryBlock[] | null = options.boundaries ? [] : null;
+    const flow: PageLine[] = [];
     for (const colResult of lineResult.columnResults) {
         if (colResult.lines.length === 0) continue;
 
@@ -3551,6 +4004,7 @@ export function detectParagraphs(
         );
 
         // Steps 3-6: Process lines into items
+        const decisions: LineDecision[] | null = boundaryBlocks ? [] : null;
         const result = processColumnLines(
             colResult.lines,
             colResult.columnIndex,
@@ -3562,21 +4016,51 @@ export function detectParagraphs(
             itemCounters,
             pageContent,
             bodyAllCaps,
-            prevDocLine
+            prevDocLine,
+            decisions
         );
+        if (boundaryBlocks && decisions) {
+            boundaryBlocks.push({
+                index: colResult.columnIndex,
+                lines: colResult.lines.map((line, k) => boundaryLine(line, decisions[k])),
+                thresholds: blockThresholds(columnThresholds),
+            });
+            flow.push(...colResult.lines);
+        }
 
         pageContent = result.pageContent;
         allItems.push(...result.items);
-        if (options.trackItemLines) {
-            allItemLines.push(...result.itemLines);
-            allItemLineRoles.push(...result.itemLineRoles);
-        }
+        allItemLines.push(...result.itemLines);
+        allItemLineRoles.push(...result.itemLineRoles);
         totalParagraphs += result.paragraphCount;
         totalHeaders += result.headerCount;
         prevDocLine = colResult.lines[colResult.lines.length - 1];
     }
 
-    allItems.forEach((item, index) => {
+    if (options.boundaries && boundaryBlocks) {
+        options.boundaries.page(
+            boundaryPage(lineResult, bodyStyles, pageThresholds, options.regions ?? [], boundaryBlocks),
+            flow,
+        );
+    }
+
+    return paragraphResult(
+        lineResult,
+        {
+            pageContent,
+            items: allItems,
+            itemLines: allItemLines,
+            itemLineRoles: allItemLineRoles,
+            paragraphCount: totalParagraphs,
+            headerCount: totalHeaders,
+        },
+        options,
+    );
+}
+
+/** The page's result from its items; ids are page-scoped positions. */
+function paragraphResult(lineResult: PageLineResult, flow: FlowItems, options: DetectParagraphsOptions): PageParagraphResult {
+    flow.items.forEach((item, index) => {
         item.id = `p${lineResult.pageIndex}:i${index}`;
     });
 
@@ -3584,15 +4068,15 @@ export function detectParagraphs(
         pageIndex: lineResult.pageIndex,
         width: lineResult.width,
         height: lineResult.height,
-        pageContent,
-        items: allItems,
-        paragraphCount: totalParagraphs,
-        headerCount: totalHeaders,
+        pageContent: flow.pageContent,
+        items: flow.items,
+        paragraphCount: flow.paragraphCount,
+        headerCount: flow.headerCount,
     };
 
     if (options.trackItemLines) {
-        baseResult.itemLines = allItemLines;
-        baseResult.itemLineRoles = allItemLineRoles;
+        baseResult.itemLines = flow.itemLines;
+        baseResult.itemLineRoles = flow.itemLineRoles;
     }
 
     return baseResult;

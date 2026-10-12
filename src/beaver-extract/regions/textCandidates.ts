@@ -165,16 +165,33 @@ function justifiedParagraphs(units: readonly RegionLine[]): Set<RegionLine> {
     const below = new Set(next.values());
     // Text beside a line on its line, in its type size: the cells of a table row.
     // A narrow column beside a table differs in size or lines up only by chance.
+    // Such text ends within ROW_ALIGN line heights of the line's bottom, so only
+    // units in that window of `byBottom` are tested (the window is padded against
+    // rounding; the test itself decides).
+    // (A NaN bottom never lines up, and would disorder the sort.)
+    const byBottom = units.filter((o) => !o.rot && !Number.isNaN(o.bbox[3])).sort((a, b) => a.bbox[3] - b.bbox[3]);
     const sharesLine = (l: RegionLine) => {
         const h = l.bbox[3] - l.bbox[1];
-        return units.some(
-            (o) =>
+        const reach = ROW_ALIGN * h * 1.001 + 1e-6;
+        let lo = 0;
+        let hi = byBottom.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (byBottom[mid].bbox[3] < l.bbox[3] - reach) lo = mid + 1;
+            else hi = mid;
+        }
+        for (let i = lo; i < byBottom.length && byBottom[i].bbox[3] <= l.bbox[3] + reach; i++) {
+            const o = byBottom[i];
+            if (
                 o !== l &&
-                !o.rot &&
                 (o.bbox[0] >= l.bbox[2] || o.bbox[2] <= l.bbox[0]) &&
                 Math.abs(o.size - l.size) <= 0.5 &&
-                Math.abs(o.bbox[3] - l.bbox[3]) <= ROW_ALIGN * Math.min(h, o.bbox[3] - o.bbox[1]),
-        );
+                Math.abs(o.bbox[3] - l.bbox[3]) <= ROW_ALIGN * Math.min(h, o.bbox[3] - o.bbox[1])
+            ) {
+                return true;
+            }
+        }
+        return false;
     };
     const out = new Set<RegionLine>();
     for (const start of text) {

@@ -15,6 +15,27 @@ export async function handleTestPingHttpRequest(_request: any) {
         ok: true,
         cache_available: !!cache,
         db_available: !!db,
+        platform: getPlatformInfo(),
+    };
+}
+
+/**
+ * The running Zotero and Gecko versions, plus the two security prefs that
+ * Zotero 11 relaxes temporarily (`null` when the build does not define them).
+ * Lets tests and harness logs record which platform they ran against.
+ */
+function getPlatformInfo() {
+    const boolPref = (name: string): boolean | null => {
+        const value = Zotero.Prefs.get(name, true);
+        return typeof value === 'boolean' ? value : null;
+    };
+    return {
+        zoteroVersion: Zotero.version,
+        platformMajorVersion: Zotero.platformMajorVersion,
+        prefs: {
+            allowUnsafeSubscriptLoads: boolPref('security.allow_unsafe_subscript_loads'),
+            chromeBaselineCsp: boolPref('security.chrome_baseline_csp.enabled'),
+        },
     };
 }
 

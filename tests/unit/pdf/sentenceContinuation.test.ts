@@ -16,6 +16,7 @@ import { simpleRegexSentenceSplit } from "../../../src/beaver-extract/SentenceMa
 import {
     bboxFromXYWH,
     type BoundingBox,
+    type DocItem,
     type SectionHeaderItem,
     type SentenceItem,
     type TextItem,
@@ -116,6 +117,23 @@ describe("annotateColumnContinuations", () => {
         expect(left.sentences[0].joinWithNext).toBe(true);
         // Never set on the trailing-side last sentence (no successor here).
         expect(right.sentences[0].joinWithNext).toBeUndefined();
+    });
+
+    it("reads the column an item joined across stacked blocks ends in", () => {
+        const joined = () => makeParagraph(0, [makeSentence("For this purpose, we examine changes in violent and property")]);
+        const nextColumn = makeParagraph(2, [makeSentence("crime before, during, and after.")], { idx: 1 });
+        const first = joined();
+        annotateColumnContinuations([first, nextColumn], simpleRegexSentenceSplit, new Set(), { endColumns: [1, 2] });
+        expect((first as TextItem).sentences[0].joinWithNext).toBe(true);
+        // Without the end column, the item reads as column 0 and column 2 is not next to it.
+        const plain = joined();
+        annotateColumnContinuations([plain, nextColumn], simpleRegexSentenceSplit, new Set());
+        expect((plain as TextItem).sentences[0].joinWithNext).toBeUndefined();
+        // The next item below in the block the joined item ends in is no column break.
+        const sameBlock = joined();
+        const below = makeParagraph(1, [makeSentence("crime before, during, and after.")], { idx: 1 });
+        annotateColumnContinuations([sameBlock, below], simpleRegexSentenceSplit, new Set(), { endColumns: [1, 1] });
+        expect((sameBlock as TextItem).sentences[0].joinWithNext).toBeUndefined();
     });
 
     it("leaves the flag unset when last sentence ends with a period", () => {
@@ -538,5 +556,54 @@ describe("annotateColumnContinuations", () => {
                 new Set(),
             ),
         ).not.toThrow();
+    });
+});
+
+describe("annotateColumnContinuations past footnotes (PDF schema 5)", () => {
+    function footnote(text: string, idx: number): DocItem {
+        const bbox = bboxFromXYWH(50, 700, 250, 12, "top-left");
+        return {
+            id: `p0:i${idx}`,
+            pageIndex: 0,
+            index: idx,
+            bbox,
+            columnIndex: 0,
+            text,
+            lines: [{ text, bbox }],
+            kind: "footnote",
+            sentences: [makeSentence(text, { bboxes: [bbox] })],
+        };
+    }
+
+    function page() {
+        const left = makeParagraph(0, [makeSentence("we examine changes in violent and property")], { idx: 0 });
+        const note = footnote("1 Crime data come from the city.", 1);
+        const right = makeParagraph(1, [makeSentence("crime before, during, and after.")], { idx: 2 });
+        return { left, note, right, items: [left, note, right] };
+    }
+
+    it("joins a body sentence to its continuation in the next column after the column's notes", () => {
+        const { left, items } = page();
+        annotateColumnContinuations(items, simpleRegexSentenceSplit, new Set(), { skipFootnotes: true });
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBe(true);
+    });
+
+    it("stops at the notes without the switch", () => {
+        const { left, items } = page();
+        annotateColumnContinuations(items, simpleRegexSentenceSplit, new Set());
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBeUndefined();
+    });
+
+    it("reads the column after the notes from the column a joined item ends in", () => {
+        // The body item starts in block 0 and continues into stacked block 1;
+        // its notes sit in block 1 and the next printed column is block 2.
+        const left = makeParagraph(0, [makeSentence("we examine changes in violent and property")], { idx: 0 });
+        const note = { ...footnote("1 Crime data come from the city.", 1), columnIndex: 1 };
+        const right = makeParagraph(2, [makeSentence("crime before, during, and after.")], { idx: 2 });
+        annotateColumnContinuations([left, note, right], simpleRegexSentenceSplit, new Set(), {
+            endColumns: [1, 1, 2],
+            skipFootnotes: true,
+        });
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBe(true);
     });
 });

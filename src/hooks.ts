@@ -1029,9 +1029,7 @@ async function disposePlugin(): Promise<void> {
         addon.data.alive = false;
 
         // Drop React-bundle cross-bundle globals so plugin disable doesn't
-        // leak the Jotai store (dead atom-keyed entries) or leave a stale
-        // shutdown flag that would short-circuit the next onStartup().
-        Zotero.__beaverShuttingDown = undefined;
+        // leak the Jotai store (dead atom-keyed entries).
         Zotero.__beaverWrittenAnnotationItems = undefined;
         Zotero.__beaverWrittenAnnotationKeys = undefined;
         // Note: the singleton is removed from Zotero in addon/bootstrap.js's
@@ -1045,6 +1043,9 @@ async function disposePlugin(): Promise<void> {
         } catch (e) {
             ztoolkit.log("onShutdown: disposeMuPDFWorker failed:", e);
         }
+        // Cleared even when cleanup threw: a stale flag would short-circuit
+        // the next onStartup() after a reload.
+        Zotero.__beaverShuttingDown = undefined;
     }
 }
 

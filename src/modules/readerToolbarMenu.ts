@@ -78,6 +78,26 @@ function categoryIconDataUri(category: ActionCategory | undefined, win: Window):
 // ---------------------------------------------------------------------------
 
 /**
+ * Give a menuitem its icon. Firefox 153 (Zotero 11) renders menu icons as an
+ * `<html:img class="menu-icon">` that shows `--menuitem-icon`, in native macOS
+ * menus too, unless `image` is set: that maps to the img's `srcset`, which
+ * suppresses the variable and does not render a data: URI there. Earlier
+ * versions map `image` to the icon's `src` and need the attribute.
+ */
+function setMenuItemIcon(menuitem: Element, uri: string): void {
+    let usesSrcset = false;
+    try {
+        const mapping = (menuitem.constructor as any).inheritedAttributes?.['.menu-icon'];
+        usesSrcset = typeof mapping === 'string' && /(^|,)srcset=image(,|$)/.test(mapping);
+    } catch { /* unknown menuitem implementation: use the attribute */ }
+    if (usesSrcset) {
+        (menuitem as HTMLElement).style.setProperty('--menuitem-icon', `url("${uri.replace(/"/g, '%22')}")`);
+    } else {
+        menuitem.setAttribute('image', uri);
+    }
+}
+
+/**
  * Build an inline SVG that embeds the PNG icon via an <image> element.
  * This avoids <img> border issues in the reader iframe.
  */
@@ -244,7 +264,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
                 const menuitem = xulDoc.createXULElement('menuitem');
                 menuitem.setAttribute('label', action.title);
                 menuitem.classList.add('menuitem-iconic');
-                menuitem.setAttribute('image', categoryIconDataUri(action.category, win));
+                setMenuItemIcon(menuitem, categoryIconDataUri(action.category, win));
                 menuitem.addEventListener('command', async () => {
                     const mainWin = await resolveChatWindow(win);
                     const eventBus = mainWin?.__beaverEventBus;
