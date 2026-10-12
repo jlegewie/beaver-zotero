@@ -52,13 +52,17 @@ function normalizedDOI(value: string): string | null {
 /**
  * DOI lookups can return the record that contains the requested one: Zotero's
  * Crossref XML import turns a chapter of a book Crossref registered as a
- * monograph into the book itself. Accept a record only if it carries the
- * requested DOI (or none).
+ * monograph into the book itself, whatever the DOIs look like. True when the
+ * record carries a different DOI and is either a whole book or has the requested
+ * DOI minus a trailing part (`10.4324/9780429265365` for `10.4324/9780429265365-1`).
+ * Other differences, such as a version or alias DOI on a non-book, are not.
  */
-function doiMatches(requested: string, json: Record<string, any>): boolean {
+function returnsContainerRecord(requested: string, json: Record<string, any>): boolean {
     const returned = typeof json.DOI === 'string' ? normalizedDOI(json.DOI) : null;
     const wanted = normalizedDOI(requested);
-    return !returned || !wanted || returned === wanted;
+    if (!returned || !wanted || returned === wanted) return false;
+    if (json.itemType === 'book') return true;
+    return wanted.startsWith(returned) && !/[a-z0-9]/.test(wanted[returned.length]);
 }
 
 // Crossref REST types a record by its own Crossref type, so it returns such a
@@ -202,13 +206,13 @@ export async function translateIdentifier(identifier: TypedIdentifier, timeoutMs
         if (identifier.type === 'isbn' && !isbnMatches(identifier.value, json)) {
             return { ok: false, code: 'not_found', message: `The lookup for ${label} returned a different book.` };
         }
-        if (identifier.type === 'doi' && !doiMatches(identifier.value, json)) {
+        if (identifier.type === 'doi' && returnsContainerRecord(identifier.value, json)) {
             let retry = await searchCrossrefRest();
             if (!retry?.json && left() > CROSSREF_REST_RETRY_DELAY_MS) {
                 await systemDelay(CROSSREF_REST_RETRY_DELAY_MS);
                 retry = await searchCrossrefRest();
             }
-            if (!retry?.json || !doiMatches(identifier.value, retry.json)) {
+            if (!retry?.json || returnsContainerRecord(identifier.value, retry.json)) {
                 return { ok: false, code: 'not_found', message: `The lookup for ${label} returned a different record.` };
             }
             json = chapterAuthors(retry.json);

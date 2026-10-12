@@ -312,6 +312,38 @@ describe('translateIdentifier', () => {
             expect(((await translateIdentifier({ type: 'doi', value: CHAPTER }, 5000)) as any).json.creators).toEqual(creators);
         });
 
+        it('retries when the returned book has a DOI that is not a prefix of the chapter DOI', async () => {
+            const oupChapter = { itemType: 'bookSection', title: 'Ch', DOI: '10.1093/acprof:oso/9780199.003.0006' };
+            const oupBook = { itemType: 'book', title: 'Book', DOI: '10.1093/acprof:oso/9780199.001.0001' };
+            installSearch({
+                items: async (translator) => (translator === REST ? [oupChapter] : [oupBook]),
+            });
+            const result = await translateIdentifier({ type: 'doi', value: oupChapter.DOI }, 5000);
+            expect(result).toMatchObject({ ok: true, json: oupChapter, translator: 'Crossref REST' });
+        });
+
+        it('fails when a non-prefix book is returned and Crossref REST cannot confirm the chapter', async () => {
+            const oupBook = { itemType: 'book', title: 'Book', DOI: '10.1093/acprof:oso/9780199.001.0001' };
+            installSearch({ items: [oupBook] });
+            const result = await translateIdentifier({ type: 'doi', value: '10.1093/acprof:oso/9780199.003.0006' }, 5000);
+            expect(result).toMatchObject({ ok: false, code: 'not_found' });
+        });
+
+        it('keeps a record with an unrelated DOI, such as a version DOI, without retrying', async () => {
+            const versioned = { itemType: 'computerProgram', title: 'Dataset', DOI: '10.5281/zenodo.456' };
+            installSearch({ items: [versioned] });
+            const result = await translateIdentifier({ type: 'doi', value: '10.5281/zenodo.123' }, 5000);
+            expect(result).toMatchObject({ ok: true, json: versioned });
+            expect(timers.systemDelay).not.toHaveBeenCalled();
+        });
+
+        it('does not treat a DOI that is only a character-level prefix as the container', async () => {
+            const other = { itemType: 'journalArticle', title: 'Other', DOI: '10.5281/zenodo.12' };
+            installSearch({ items: [other] });
+            const result = await translateIdentifier({ type: 'doi', value: '10.5281/zenodo.123' }, 5000);
+            expect(result).toMatchObject({ ok: true, json: other });
+        });
+
         it('accepts the DOI in another case or form', async () => {
             installSearch({ items: [{ ...chapter, DOI: 'https://doi.org/10.4324/9780429265365-1'.toUpperCase() }] });
             expect((await translateIdentifier({ type: 'doi', value: CHAPTER }, 5000)).ok).toBe(true);
