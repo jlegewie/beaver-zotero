@@ -55,6 +55,8 @@ export interface FindCandidatesOptions {
      * text), each with its own text.
      */
     sources?: readonly RawLine[];
+    /** The page's furniture (running heads and feet, page numbers): no grid candidate takes it. */
+    margin?: ReadonlySet<RegionLine>;
 }
 
 export interface Candidate {
@@ -325,11 +327,13 @@ export function findCandidates(
             toPageLine: (l: RegionLine) => RegionLine,
             rotated: boolean,
         ) => {
-            for (const g of gridGroups(groupLines, figureText, groupCaptions, groupRunning, prims, bs, charsOf)) {
+            for (const g of gridGroups(groupLines, figureText, groupCaptions, groupRunning, prims, bs, charsOf, options.margin)) {
                 const bbox = toPage(g.bbox);
                 const memberLines = g.lines.map(toPageLine);
-                // A candidate the grid repeats (a ruled table's graphics) takes the grid's lines.
-                const same = candidates.find((c) => iou(c.bbox, bbox) >= GRID_DUPLICATE_IOU);
+                // A candidate the grid repeats (a ruled table's graphics), with or without the rows
+                // past its own cells, takes the grid's lines.
+                const reach = g.reach && toPage(g.reach);
+                const same = candidates.find((c) => iou(c.bbox, bbox) >= GRID_DUPLICATE_IOU || (!!reach && iou(c.bbox, reach) >= GRID_DUPLICATE_IOU));
                 if (same) {
                     same.memberLines = [...new Set([...(same.memberLines ?? []), ...memberLines])];
                     continue;
