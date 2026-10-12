@@ -11,7 +11,7 @@ import {
 import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
 describe("PDF extraction presets", () => {
-    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, item passes, regions and page-number runs off and ids document-wide for schema 4", () => {
+    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, item passes, regions, page-number runs and table row evidence off and ids document-wide for schema 4", () => {
         expect(pdfExtractionPreset("4")).toEqual({
             schemaVersion: "4",
             textRepair: false,
@@ -27,10 +27,11 @@ describe("PDF extraction presets", () => {
             regions: false,
             pageNumberRuns: false,
             learnedBoundaries: false,
+            tableRowEvidence: false,
         });
     });
 
-    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions, page-number runs and learned boundaries on and ids page-scoped for schema 5", () => {
+    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions, page-number runs, learned boundaries and table row evidence on and ids page-scoped for schema 5", () => {
         expect(pdfExtractionPreset("5")).toEqual({
             schemaVersion: "5",
             textRepair: true,
@@ -46,6 +47,7 @@ describe("PDF extraction presets", () => {
             regions: true,
             pageNumberRuns: true,
             learnedBoundaries: true,
+            tableRowEvidence: true,
         });
     });
 

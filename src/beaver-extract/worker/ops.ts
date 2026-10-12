@@ -137,6 +137,7 @@ import {
     type StructuredRunContext,
     type StructuredRunObservers,
 } from "../pipeline/structured";
+import type { RegionItemSettings } from "../regions/regionItems";
 
 
 export interface OpReply<T = unknown> {
@@ -422,6 +423,7 @@ export function runExtractFromIndices(
     itemPasses: readonly ItemPass[] = [],
     pageNumberRuns = true,
     observers: StructuredRunObservers = {},
+    regionSettings: RegionItemSettings = {},
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
     try {
@@ -569,6 +571,7 @@ export function runExtractFromIndices(
             pageCache,
             paragraphSettings,
             splitter,
+            regionSettings,
             ...(observers.region ? { regionObserver: observers.region } : {}),
             ...(observers.boundaries ? { boundaryObserver: observers.boundaries } : {}),
         };
@@ -1105,6 +1108,8 @@ export async function opExtract(
             pageCache,
             isStructured ? createItemPasses(preset) : [],
             preset.pageNumberRuns,
+            {},
+            { tableRowEvidence: preset.tableRowEvidence },
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are
@@ -1233,6 +1238,7 @@ async function withStructuredRun<T>(
             itemPasses,
             preset.pageNumberRuns,
             observers,
+            { tableRowEvidence: preset.tableRowEvidence },
         );
         if (internal.metadata.timings) {
             internal.metadata.timings.docOpenMs = docOpenMs;

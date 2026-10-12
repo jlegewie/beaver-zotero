@@ -51,7 +51,7 @@ import { REFERENCE_PASS, referencePass } from "../references/pass";
 import { detectRegions, type RegionDetection } from "../regions/RegionDetector";
 import { pageImageHashes, pageRegionDocContext } from "../regions/docContext";
 import type { RegionDocContext } from "../regions/features";
-import { regionItemsForPage, type PageRegionItems, type RegionItemDraft } from "../regions/regionItems";
+import { regionItemsForPage, type PageRegionItems, type RegionItemDraft, type RegionItemSettings } from "../regions/regionItems";
 import { REGION_MODEL } from "../regions/weights";
 import { postLog } from "../worker/errors";
 import { extractRawPageDetailedFromDoc } from "../worker/docHelpers";
@@ -95,6 +95,8 @@ export interface StructuredRunContext {
     pageCache: PageWalkCache | undefined;
     paragraphSettings: ParagraphDetectionSettings | undefined;
     splitter: SentenceSplitter;
+    /** Switches of the region pass (from the preset). */
+    regionSettings?: RegionItemSettings;
     /** Receives each page's region pass; absent in production. */
     regionObserver?: RegionPassObserver;
     /** Receives each page's item-boundary input; absent in production. */
@@ -303,7 +305,7 @@ export function segmentPages(
                 bodyExtents,
             });
             const graphics = pageCache!.graphicsFor(i);
-            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin);
+            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings);
             const regions = pass.result;
             if (regions.page !== detailed) {
                 // The target without absorbed lines replaces the walked page, so
@@ -524,6 +526,7 @@ function pageRegions(
     pageCount: number,
     vocabulary: ReadonlySet<string>,
     margin: ReadonlySet<RawLine>,
+    settings: RegionItemSettings | undefined,
 ): Pick<RegionPassPage, "doc" | "detection" | "result" | "error"> {
     if (!graphics || !REGION_MODEL) {
         throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
@@ -538,7 +541,7 @@ function pageRegions(
             route: true,
             margin,
         });
-        return { doc, detection, result: regionItemsForPage(page, detection, vocabulary) };
+        return { doc, detection, result: regionItemsForPage(page, detection, vocabulary, settings) };
     } catch (err) {
         postLog("warn", `[mupdf-worker] region detection failed on page ${page.pageIndex}: ${String(err)}`);
         return { doc, detection, result: { page, items: [], margin: [] }, error: String(err) };
