@@ -33,7 +33,57 @@ export class LineJoinVocabulary extends Set<string> {
     readonly words = new Set<string>();
     readonly compoundLefts = new Set<string>();
     readonly compoundRights = new Set<string>();
+
+    // Derived from `words`, rebuilt when it has grown since.
+    private sortedWords: string[] = [];
+    private sortedWordCount = -1;
+    private german = false;
+    private germanWordCount = -1;
+
+    /** Some word of the document starts with `prefix` (lowercase). */
+    hasWordStartingWith(prefix: string): boolean {
+        if (this.sortedWordCount !== this.words.size) {
+            this.sortedWords = [...this.words].sort();
+            this.sortedWordCount = this.words.size;
+        }
+        const sorted = this.sortedWords;
+        let lo = 0;
+        let hi = sorted.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (sorted[mid] < prefix) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo < sorted.length && sorted[lo].startsWith(prefix);
+    }
+
+    /**
+     * The document reads as German prose: it uses more of the common German
+     * function words than of the English ones, and at least a few.
+     */
+    get readsAsGerman(): boolean {
+        if (this.germanWordCount !== this.words.size) {
+            const english = ENGLISH_FUNCTION_WORDS.filter((word) => this.words.has(word)).length;
+            const german = GERMAN_FUNCTION_WORDS.filter((word) => this.words.has(word)).length;
+            this.german = german >= 6 && german > english;
+            this.germanWordCount = this.words.size;
+        }
+        return this.german;
+    }
 }
+
+/**
+ * Function words of running prose, rare in reference titles, so a document
+ * citing work in the other language still reads as its own.
+ */
+const ENGLISH_FUNCTION_WORDS = [
+    "that", "which", "were", "these", "have", "been", "this", "there", "their", "also", "would", "should",
+    "however", "between", "than", "such", "other", "into", "because", "when",
+];
+const GERMAN_FUNCTION_WORDS = [
+    "nicht", "sich", "wird", "werden", "wurde", "wurden", "sind", "auch", "oder", "dass", "kann", "diese",
+    "dieser", "zwischen", "durch", "sowie", "jedoch", "einer", "einem", "nach",
+];
 
 const WORD_RE = /\p{L}+/gu;
 /** A hyphenated compound of letters (ASCII hyphen-minus), as `collectHyphenatedCompounds` reads them. */
@@ -164,6 +214,13 @@ const BOUND_PREFIXES = new Set([
 ]);
 
 /**
+ * Right parts that form closed words only ("else-where", "which-ever",
+ * "outer-most", "worth-while"), unlike words that also end hyphenated
+ * compounds ("wrong-way", "inside-out").
+ */
+const CLOSED_COMPOUND_RIGHTS = new Set(["where", "ever", "most", "while"]);
+
+/**
  * Endings that make a word of a hyphen prefix, with their inflections
  * ("four-th", "short-en", "short-ening", "low-ered", "real-istic").
  */
@@ -191,8 +248,9 @@ const CLOSED_AFTER_PREFIX = [
  * ("suspend": "high- and low-stress")? Evidence in order: the document's
  * own spelling (the hyphenated or the joined form elsewhere), the word's
  * shape (a further hyphen, a capitalized right part, an acronym on the left),
- * then common prefixes and suffixes, then whether both parts are words or
- * compound parts the document uses. Without evidence, the hyphen joins: most
+ * then common prefixes and suffixes, then (outside German text, unless the
+ * parts form a closed word) whether both parts are words or compound parts
+ * the document uses. Without evidence, the hyphen joins: most
  * line-end hyphens are hyphenation points.
  */
 export function decideSplitWord(
@@ -258,7 +316,22 @@ export function decideSplitWord(
     // A bound prefix keeps its hyphen before the vowel it ends with
     // ("meta-analysis", "anti-inflammatory", "re-enter").
     if (BOUND_PREFIXES.has(l) && /[aei]$/u.test(l) && r.startsWith(l[l.length - 1])) return "keep";
-    if (vocab) {
+    // Words and compound parts vouch for a compound, but not in German
+    // text, which writes compounds of words closed ("unter-" + "stellen",
+    // "Literatur-" + "geschichte"), nor when the parts form a closed word:
+    // a right part that only closes words ("else-" + "where"), or the
+    // joined word with another ending, written closed elsewhere in the
+    // document ("cor-" + "related" beside "correlation", "methyl-" +
+    // "ations" beside "methylation"). The stem leaves off two letters and
+    // keeps at least three of the right part, so a word that merely shares
+    // the start ("maneater" for "man-" + "eating") is no evidence.
+    const stem = (l + r).slice(0, -2);
+    if (
+        vocab &&
+        !vocab.readsAsGerman &&
+        !CLOSED_COMPOUND_RIGHTS.has(r) &&
+        !(stem.length >= l.length + 3 && vocab.hasWordStartingWith(stem))
+    ) {
         // A bound prefix starts closed words ("under-" + "standing"),
         // whatever compounds the document builds elsewhere.
         const bound = BOUND_PREFIXES.has(l);
@@ -270,6 +343,12 @@ export function decideSplitWord(
 
 /** Han, kana, CJK punctuation and fullwidth forms: scripts written without word spaces. */
 const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF01-\uFF60\u30FC]/u;
+/** Fullwidth Latin letters and digits. */
+const FULLWIDTH_ALNUM_RE = /[\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A]/u;
+const FULLWIDTH_DIGIT_RE = /[\uFF10-\uFF19]/u;
+/** Two fullwidth words with a space (ASCII or ideographic) between them. */
+const SPACED_FULLWIDTH_RE =
+    /[\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A][\uFF0C\uFF0E\uFF1A\uFF1B]?[ \u3000][\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A]/u;
 const HANGUL_RE = /\p{Script=Hangul}/u;
 
 /** Letters around a line break are capitals (a heading or label set in capitals). */
@@ -342,12 +421,22 @@ function continuesUrl(prevToken: string, nextToken: string, next = ""): boolean 
 /**
  * The text ends and the next starts with Chinese or Japanese script, which
  * has no word spaces (whole code points: Han extensions lie outside the BMP).
+ * Fullwidth letters and digits break anywhere in CJK typesetting
+ * ("研究于２０" + "２２年", "Ｓ" + "ＮＳの利用"), but a phrase that spaces its
+ * fullwidth words breaks between words, except inside a number: the PDF
+ * sets a space at the end of the line ("Ｊｏｕｒｎａｌ\u3000" + "ｏｆ"), or
+ * the lines space their words ("Ｔｈｅ Ｉｍｐａｃｔ ｏｆ Ｆｉｎａｎｃｅ" + "ｏｎ").
  */
 export function joinsWithoutSpace(prev: string, next: string): boolean {
     const p = prev.trimEnd();
     const n = next.trimStart();
     if (!p || !n) return false;
-    return CJK_RE.test(Array.from(p.slice(-2)).pop()!) && CJK_RE.test(String.fromCodePoint(n.codePointAt(0)!));
+    const last = Array.from(p.slice(-2)).pop()!;
+    const first = String.fromCodePoint(n.codePointAt(0)!);
+    if (!CJK_RE.test(last) || !CJK_RE.test(first)) return false;
+    if (!FULLWIDTH_ALNUM_RE.test(last) || !FULLWIDTH_ALNUM_RE.test(first)) return true;
+    if (FULLWIDTH_DIGIT_RE.test(last) && FULLWIDTH_DIGIT_RE.test(first)) return true;
+    return !/\s$/u.test(prev) && !SPACED_FULLWIDTH_RE.test(p) && !SPACED_FULLWIDTH_RE.test(n);
 }
 
 export function decideLineJoin(
@@ -384,7 +473,7 @@ export function decideLineJoin(
         return "glue";
     }
     if (/[\p{N}%][-\u2010\u2013]$/u.test(prevToken) && /^\p{N}/u.test(nextToken)) return "glue";
-    if (joinsWithoutSpace(p, n)) return "glue";
+    if (joinsWithoutSpace(prev, next)) return "glue";
     const last = Array.from(p.slice(-2)).pop()!;
     const first = String.fromCodePoint(n.codePointAt(0)!);
     if (HANGUL_RE.test(last) && HANGUL_RE.test(first) && !/\s$/u.test(prev)) return "glue";

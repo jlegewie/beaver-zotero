@@ -129,6 +129,39 @@ describe("decideSplitWord", () => {
         expect(split("co", "operation")).toBe("join");
     });
 
+    it("takes no words or compound parts as evidence in German text", () => {
+        // German writes compounds of words closed.
+        const german = vocabularyOf(
+            "Diese Ergebnisse wurden nicht durch die Methode erklärt, sondern sind auch",
+            "zwischen den Gruppen sowie nach einer Studie oder einem Test, jedoch kann dieser",
+            "wird werden sich dass unter dem stellen Alltags-Leben",
+        );
+        expect(split("unter", "stellen", german)).toBe("join");
+        expect(split("Alltags", "praktiken", german)).toBe("join");
+        expect(split("Literatur", "Geschichte", german)).toBe("keep");
+    });
+
+    it("joins parts that form a closed word", () => {
+        const vocabulary = vocabularyOf(
+            "a frame for the work where we lived else, the wrong way, inside out",
+            "age-related differences in the correlation and methylation of the tumor",
+            "the maneater man was eating",
+        );
+        // A right part that only closes words.
+        expect(split("else", "where", vocabulary)).toBe("join");
+        // Words that also end hyphenated compounds.
+        expect(split("wrong", "way", vocabulary)).toBe("keep");
+        expect(split("inside", "out", vocabulary)).toBe("keep");
+        // The joined word with another ending, written closed elsewhere.
+        expect(split("cor", "related", vocabulary)).toBe("join");
+        expect(split("methyl", "ations", vocabularyOf("methylation of an ethyl-methyl group"))).toBe("join");
+        expect(split("income", "related", vocabulary)).toBe("keep");
+        // A word that only shares the start is no evidence.
+        expect(split("man", "eating", vocabulary)).toBe("keep");
+        // Too short a stem to stand for a word ("c-h" beside "change").
+        expect(split("c", "h", vocabularyOf("a change in a-h"))).toBe("keep");
+    });
+
     it("follows a compound the document spells with a Unicode hyphen", () => {
         const vocabulary = vocabularyOf("co\u2010operation and re\u2010use");
         expect(split("co", "operation", vocabulary)).toBe("keep");
@@ -212,6 +245,18 @@ describe("decideLineJoin", () => {
         expect(decideLineJoin("我们使用", "Transformer 模型")).toBe("space");
         // Han extension characters outside the BMP.
         expect(decideLineJoin("常用\u{20000}", "\u{20001}字")).toBe("glue");
+        // Fullwidth letters and digits break anywhere in CJK typesetting,
+        // except in a phrase whose lines space its fullwidth words.
+        expect(decideLineJoin("研究于２０", "２２年开展")).toBe("glue");
+        expect(decideLineJoin("Ｓ", "ＮＳの利用")).toBe("glue");
+        expect(decideLineJoin("我国Ａ", "股上市公司")).toBe("glue");
+        expect(decideLineJoin("２０２２", "年３月")).toBe("glue");
+        expect(decideLineJoin("Ｔｈｅ Ｉｍｐａｃｔ ｏｆ Ｆｉｎａｎｃｅ", "ｏｎ Ｉｎｎｏｖａｔｉｏｎ")).toBe("space");
+        expect(decideLineJoin("Ｖｏｌ．３７， Ｎｏ．６", "Ｊｏｕｒｎａｌ")).toBe("space");
+        expect(decideLineJoin("Ｔｈｅ\u3000ｖａｌｕｅ\u3000ｏｆ\u3000ｄａｔａ”，Ｊｏｕｒｎａｌ\u3000", "ｏｆ\u3000")).toBe("space");
+        expect(decideLineJoin("Ｊｏｕｒｎａｌ\u3000", "ｏｆ")).toBe("space");
+        // Not inside a number.
+        expect(decideLineJoin("Ｖｏｌ． ２０", "２２ Ｎｏ．６")).toBe("glue");
     });
 
     it("joins Korean lines without a space only when the line has no trailing space", () => {
