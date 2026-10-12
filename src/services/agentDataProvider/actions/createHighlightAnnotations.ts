@@ -372,7 +372,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         anchorId: item.anchor_id ?? undefined,
                         text: item.text ?? '',
                         color: item.color,
-                        comment: item.comment ?? item.title,
+                        comment: item.comment ?? '',
                         pageLabel: item.page_label ?? null,
                         tags,
                     });
@@ -402,7 +402,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         anchorId: item.anchor_id ?? undefined,
                         text: item.text ?? '',
                         color: item.color,
-                        comment: item.comment ?? item.title,
+                        comment: item.comment ?? '',
                         tags,
                     }, snapshotDoc);
                     created.push({
