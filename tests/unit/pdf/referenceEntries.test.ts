@@ -56,6 +56,25 @@ describe("applyReferencePlan", () => {
         expect(input[1].kind).toBe("text");
     });
 
+    it("keeps the text of items the plan leaves alone when it splits another", () => {
+        const body = draftItem("their self-identity grew.", [pageLine("their self-", 60), pageLine("identity grew.", 72)]);
+        const note = draftItem("1 AI is a collection of methods.", [pageLine("1AI is a collection of methods.", 84)], 0, "footnote");
+        const refs = draftItem("", [pageLine("1. Smith, J. 2001. Title.", 100), pageLine("2. Jones, K. 2002. Title.", 112)]);
+        const out = applyReferencePlan([body, note, refs], plan(3, { reference: [false, false, true], splits: [[], [], [1]] }));
+        expect(out[0]).toBe(body);
+        expect(out[1]).toBe(note);
+        expect(out.slice(2).map((i) => [i.kind, i.text])).toEqual([
+            ["reference", "1. Smith, J. 2001. Title."],
+            ["reference", "2. Jones, K. 2002. Title."],
+        ]);
+    });
+
+    it("joins the lines of split and merged entries with the given join", () => {
+        const input = draft([[pageLine("1. Smith, J. Title.", 100), pageLine("2. Jones, K. Self-", 112), pageLine("regulation.", 124)]]);
+        const out = applyReferencePlan(input, plan(1, { splits: [[1]] }), (lines) => lines.map((l) => l.text).join(" + "));
+        expect(out.map((i) => i.text)).toEqual(["1. Smith, J. Title.", "2. Jones, K. Self- + regulation."]);
+    });
+
     it("splits an item where a new entry starts", () => {
         const input = draft([[
             pageLine("26. Kozinets, R.V. Influencers. Sage, 2023.", 100),

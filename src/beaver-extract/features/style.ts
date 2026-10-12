@@ -21,17 +21,22 @@ function styleRuns(span: DetectedSpan): readonly RawStyleRun[] | null {
 
 /** Size of the line's opening run when it is a short marker (≤ 4 glyphs). */
 export function leadMarkerSize(line: PageLine): number | null {
+    return leadMarkerRun(line)?.size ?? null;
+}
+
+/** The line's opening run when it is a short marker (≤ 4 glyphs): its glyphs and size. */
+export function leadMarkerRun(line: PageLine): { chars: number; size: number } | null {
     for (const span of line.spans) {
         const runs = styleRuns(span);
         if (runs) {
             for (const run of runs) {
                 if (run.chars === 0) continue;
-                return run.chars <= 4 ? (run.exactSize ?? run.font.size) : null;
+                return run.chars <= 4 ? { chars: run.chars, size: run.exactSize ?? run.font.size } : null;
             }
         } else {
             const n = visibleLength(span.text);
             if (n === 0) continue;
-            return n <= 4 && span.size ? span.size : null;
+            return n <= 4 && span.size ? { chars: n, size: span.size } : null;
         }
     }
     return null;

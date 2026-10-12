@@ -515,6 +515,7 @@ export function runExtractFromIndices(
                 marginZone: opts.marginZone,
                 marginTextRows: opts.marginTextRows,
                 paragraphSettings,
+                compoundVocabulary: study.compoundVocabulary,
                 fillBoundaries,
                 dividerLines,
             });
@@ -594,6 +595,7 @@ export function runExtractFromIndices(
                 marginRemoval,
                 styleProfile.bodyStyles,
                 styleProfile.primaryBodyStyle,
+                opts.marginTextRows,
                 opts.marginTextRows,
             );
             const marginItems = collectMarginItemsFromFilteredPage(
@@ -888,7 +890,8 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
 /**
  * Paragraph settings with the schema preset's switches applied. The caller may
  * override `hangingIndentBlocks`; `headingLabelFilters`, `isolatedHeadings`,
- * `pageBodyStyles` and `learnedBoundaries` always follow the preset.
+ * `pageBodyStyles`, `exclusiveColumnLines`, `lineJoins`, `noteMarkers` and
+ * `learnedBoundaries` always follow the preset.
  */
 function presetParagraphSettings(
     preset: PdfExtractionPreset,
@@ -900,6 +903,9 @@ function presetParagraphSettings(
         headingLabelFilters: preset.headingLabelFilters,
         isolatedHeadings: preset.isolatedHeadings,
         pageBodyStyles: preset.pageBodyStyles,
+        exclusiveColumnLines: preset.exclusiveColumnLines,
+        lineJoins: preset.lineJoins,
+        noteMarkers: preset.noteMarkers,
         learnedBoundaries: preset.learnedBoundaries,
     };
 }

@@ -155,14 +155,14 @@ const LINE_HAS_PREV = LINE_FEATURES.indexOf("hasPrev");
  * Apply a page plan to its draft items. Returns the edited items: reference
  * entries become `reference` items, an item holding several entries is split
  * at their first lines, and an item that continues the previous entry in the
- * same column is merged into it. Items are rebuilt from their lines (text via
- * `joinLines`) when the plan splits or merges anything on the page; otherwise
- * only reference items are relabeled.
+ * same column is merged into it. Only split and merged items are rebuilt from
+ * their lines, with text from `joinText` (the detector's line joining, see
+ * `joinItemLines`); every other item keeps its text and is only relabeled.
  */
 export function applyReferencePlan(
     items: readonly DraftItem[],
     plan: EntryPagePlan,
-    removeHyphenation = true,
+    joinText: (lines: PageLine[]) => string = (lines) => joinLines(lines.map((l) => l.text)),
 ): DraftItem[] {
     const edits = plan.splits.some((s) => s.length > 0) || plan.mergeWithPrevious.some(Boolean);
     if (!edits) {
@@ -179,7 +179,7 @@ export function applyReferencePlan(
         isRef: boolean,
         piece = false,
     ) => {
-        const text = joinLines(lines.map((l) => l.text), removeHyphenation);
+        const text = joinText(lines);
         const bbox = mergeBoxes(lines.map((l) => l.bbox));
         // A list heading the detector merged into the first entry ("FURTHER
         // READING Heyman, K. …") is split off as a piece of its own; it is the
@@ -203,18 +203,18 @@ export function applyReferencePlan(
         const cuts = isRef
             ? plan.splits[i].filter((k) => k > 0 && k < group.length).sort((a, b) => a - b)
             : [];
+        const previous = out[out.length - 1];
+        // The item's opening lines finish the previous entry.
+        const merges = isRef && plan.mergeWithPrevious[i] && previous?.kind === "reference" &&
+            (previous.endColumnIndex ?? previous.columnIndex) === item.columnIndex;
+        if (cuts.length === 0 && !merges) {
+            out.push(isRef ? { ...item, kind: "reference" } : item);
+            return;
+        }
         let start = 0;
         for (const cut of [...cuts, group.length]) {
             if (cut <= start) continue;
-            const previous = out[out.length - 1];
-            if (
-                start === 0 &&
-                isRef &&
-                plan.mergeWithPrevious[i] &&
-                previous?.kind === "reference" &&
-                (previous.endColumnIndex ?? previous.columnIndex) === item.columnIndex
-            ) {
-                // The item's opening lines finish the previous entry.
+            if (start === 0 && merges) {
                 out.pop();
                 push(
                     previous,

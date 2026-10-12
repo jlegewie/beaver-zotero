@@ -344,6 +344,7 @@ export function segmentPages(
             compoundVocabulary,
             margins: opts.margins,
             marginZone: opts.marginZone,
+            marginProseRows: opts.marginTextRows,
             graphicsLayerMode: opts.graphicsLayerMode,
             // Reuse the detailed walk done in `analyzeDocument` so we don't pay
             // a second walk per target page.
@@ -377,11 +378,12 @@ export function segmentPages(
 
 /**
  * Step 3. Runs the item passes in order over the draft items of every page;
- * they edit them in place. Returns each page's pass timings.
+ * they edit them in place, and join the lines of items they rebuild with the
+ * document's line-break vocabulary. Returns each page's pass timings.
  */
 export function runItemPasses(
     pages: SegmentedPage[],
-    study: Pick<StructuredDocumentStudy, "styleProfile" | "marginAnalysis" | "analysisPages">,
+    study: Pick<StructuredDocumentStudy, "styleProfile" | "marginAnalysis" | "analysisPages" | "compoundVocabulary">,
     pageCount: number,
     passes: readonly ItemPass[],
     paragraphSettings: ParagraphDetectionSettings | undefined,
@@ -393,7 +395,7 @@ export function runItemPasses(
         marginAnalysis: study.marginAnalysis,
         analysisPageIndices: study.analysisPages.map((page) => page.pageIndex),
     };
-    return runPasses(passes, doc, paragraphSettings);
+    return runPasses(passes, doc, { ...paragraphSettings, lineJoinVocabulary: study.compoundVocabulary });
 }
 
 /**
