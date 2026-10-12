@@ -317,8 +317,17 @@ graphics summary counts (`records`, `overflow`, `incomplete`) and:
   images are dropped before typing, as in detection).
 - `v5.regions`: the emitted region items (kind, public box, candidate), the
   structured export's region items in detection order (column detection's
-  splits applied); `v5.candidates`: the candidates with their
-  features, class probabilities, label and `containedIn` after routing.
+  splits applied); `v5.candidates`: the candidates with their `source`
+  (`graphics`, `caption`, `text` or `grid`), features, class probabilities,
+  label and `containedIn` after routing.
+
+With `--preset gridTableCandidates` the candidates include grid candidates
+(`regions/gridCandidates.ts`: text-heavy tables, running text included) and
+each carries `gridFeatures` too; the manifest names them (`grid_features`), and
+`features` followed by `gridFeatures` is feature set `grid_feature_version`
+(`REGION_GRID_FEATURES`). `v5.regions` and `v5Route` are then the shipped
+weights' decisions over these candidates, which grid tables' running text
+follows: not the shipped extraction.
 
 Boxes are in the structured export's frame: points, top-left origin, the page
 as displayed (`/Rotate` applied); a page set sideways keeps that frame, with
@@ -336,10 +345,12 @@ setting: comma-separated `name` or `name=true|false`. The overridable
 switches are `learnedBoundaries` (item boundaries from the learned boundary
 model, on in schema 5): `learnedBoundaries=false` gives the paragraph detector's
 heuristic boundaries, which a boundary training export with the heuristic's
-decisions and reasons needs; and `tableRowEvidence` (table rows read from row
+decisions and reasons needs; `tableRowEvidence` (table rows read from row
 rules, fill bands and an anchor column before the text, on in schema 5):
 `tableRowEvidence=false` gives the text-only rows, for comparing table output
-on and off. The output is then no longer the schema version
+on and off; and `gridTableCandidates` (grid candidates for text-heavy tables,
+off until a region model trained on them ships), for the region training
+export. The output is then no longer the schema version
 it names; `items export` records
 the overrides in its manifest (`preset_overrides`) and resumes a directory
 only with the same ones.

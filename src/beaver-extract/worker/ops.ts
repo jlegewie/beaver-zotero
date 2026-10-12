@@ -424,6 +424,7 @@ export function runExtractFromIndices(
     pageNumberRuns = true,
     observers: StructuredRunObservers = {},
     regionSettings: RegionItemSettings = {},
+    gridCandidates = false,
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
     try {
@@ -573,6 +574,7 @@ export function runExtractFromIndices(
             paragraphSettings,
             splitter,
             regionSettings,
+            gridCandidates,
             ...(observers.region ? { regionObserver: observers.region } : {}),
             ...(observers.boundaries ? { boundaryObserver: observers.boundaries } : {}),
         };
@@ -1116,6 +1118,7 @@ export async function opExtract(
             preset.pageNumberRuns,
             {},
             { tableRowEvidence: preset.tableRowEvidence },
+            preset.gridTableCandidates,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are
@@ -1245,6 +1248,7 @@ async function withStructuredRun<T>(
             preset.pageNumberRuns,
             observers,
             { tableRowEvidence: preset.tableRowEvidence },
+            preset.gridTableCandidates,
         );
         if (internal.metadata.timings) {
             internal.metadata.timings.docOpenMs = docOpenMs;

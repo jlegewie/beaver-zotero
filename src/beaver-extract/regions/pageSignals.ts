@@ -149,6 +149,14 @@ export interface RegionLine {
      * one line meet.
      */
     gaps?: [number, number][];
+    /**
+     * Set when the piece's characters are its text's code points and run left to
+     * right (their left edges never decrease), so that `gaps` holds every gap between
+     * its inked characters in left-to-right order: the leftmost and the furthest right
+     * edge of its inked characters. Only for grid detection, which asks `pageLines`
+     * for it.
+     */
+    inkSpan?: [number, number];
 }
 
 const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/g;
@@ -161,7 +169,7 @@ const TEXT_CHAR_RE = /[\p{L}\p{N}]/u;
  * Whitespace-separated words (`RegionLine.words`) and words of at least three
  * letters (`RegionLine.alphaWords`); each two CJK characters count as one.
  */
-function wordCounts(text: string): { words: number; alphaWords: number } {
+export function wordCounts(text: string): { words: number; alphaWords: number } {
     const cjk = Math.floor((text.match(CJK_RE)?.length ?? 0) / 2);
     const tokens = text.split(/\s+/);
     let alpha = 0;
@@ -328,6 +336,15 @@ function charClass(c: string): number {
     return cls;
 }
 
+/**
+ * Whether `c` holds whitespace: `/\s/u.test(c)`, cached per character. (No
+ * whitespace character lies outside the BMP, so `/\s/` without the `u` flag
+ * matches the same strings.)
+ */
+export function isSpaceChar(c: string): boolean {
+    return (charClass(c) & CHAR_SPACE) !== 0;
+}
+
 /** Spans of chars [a, b) of a horizontal line that take limits (`RegionLine.limitSpans`). */
 function limitSpans(line: RawLineDetailed, chars: readonly string[], classes: Uint8Array, a: number, b: number, em: number): [number, number][] {
     const spans: [number, number][] = [];
@@ -382,16 +399,38 @@ function linePieces(line: RawLineDetailed, classes: Uint8Array, em: number): [nu
     return pieces;
 }
 
-/** Gaps of at least `min` between consecutive inked characters in [a, b) of a horizontal line. */
-function innerGaps(line: RawLineDetailed, classes: Uint8Array, a: number, b: number, min: number): [number, number][] {
+/**
+ * Gaps of at least `min` between consecutive inked characters in [a, b) of a horizontal line.
+ * With `ink`, also sets `ink.span` (`RegionLine.inkSpan`) when every character there is its
+ * code point of the text (`ink.chars`) and their left edges never decrease (a NaN fails).
+ */
+function innerGaps(
+    line: RawLineDetailed,
+    classes: Uint8Array,
+    a: number,
+    b: number,
+    min: number,
+    ink?: { chars: readonly string[]; span?: [number, number] },
+): [number, number][] {
     const gaps: [number, number][] = [];
     let prevRight = -Infinity;
+    // With `ink`: the inked characters' leftmost edge, the last character's, and whether they stay in order.
+    let left = Infinity;
+    let prevLeft = -Infinity;
+    let ordered = true;
     for (let i = a; i < b; i++) {
+        if (ink) {
+            const ch = line.chars[i];
+            if (!ch || ch.c !== ink.chars[i] || !(ch.bbox.l >= prevLeft)) ordered = false;
+            else prevLeft = ch.bbox.l;
+        }
         if (classAt(classes, i) & CHAR_SPACE) continue;
         const box = line.chars[i].bbox;
+        if (ink) left = Math.min(left, box.l);
         if (prevRight !== -Infinity && box.l - prevRight >= min) gaps.push([prevRight, box.l]);
         prevRight = Math.max(prevRight === -Infinity ? box.r : prevRight, box.r);
     }
+    if (ink && ordered && prevRight !== -Infinity) ink.span = [left, prevRight];
     return gaps;
 }
 
@@ -525,7 +564,12 @@ function pageTextFont(page: RawPageData): string | undefined {
     return best;
 }
 
-export function pageLines(page: RawPageData): RegionLine[] {
+/**
+ * The page's text lines, split into pieces at wide gaps. With `inkSpans`, upright
+ * pieces whose `gaps` are complete in left-to-right order also have their
+ * `inkSpan`.
+ */
+export function pageLines(page: RawPageData, inkSpans = false): RegionLine[] {
     const lines: RegionLine[] = [];
     const textFont = pageTextFont(page);
     let source = 0;
@@ -563,7 +607,8 @@ export function pageLines(page: RawPageData): RegionLine[] {
                 const m = rangeMath(chars, classes, runs, a, b, textFont, size);
                 const operators = !rot && detailed.chars?.length === chars.length ? limitSpans(detailed, chars, classes, a, b, Math.max(1, size)) : [];
                 const maxSize = m.maxSize || size;
-                const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, classes, a, b, WORD_GAP_EM * Math.max(1, size)) : [];
+                const ink: { chars: readonly string[]; span?: [number, number] } | undefined = inkSpans ? { chars } : undefined;
+                const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, classes, a, b, WORD_GAP_EM * Math.max(1, size), ink) : [];
                 const counts = wordCounts(text);
                 // Built field by field, optional fields in place: the same keys in the
                 // same order as a literal, without a temporary object per optional field.
@@ -586,6 +631,7 @@ export function pageLines(page: RawPageData): RegionLine[] {
                 out.pieces = pieces.length;
                 out.range = [a, b];
                 if (gaps.length) out.gaps = gaps;
+                if (ink?.span) out.inkSpan = ink.span;
                 lines.push(out);
             }
         }

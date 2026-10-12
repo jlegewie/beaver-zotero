@@ -97,6 +97,8 @@ export interface StructuredRunContext {
     splitter: SentenceSplitter;
     /** Switches of the region pass (from the preset). */
     regionSettings?: RegionItemSettings;
+    /** Region detection proposes grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
+    gridCandidates?: boolean;
     /** Receives each page's region pass; absent in production. */
     regionObserver?: RegionPassObserver;
     /** Receives each page's item-boundary input; absent in production. */
@@ -305,7 +307,7 @@ export function segmentPages(
                 bodyExtents,
             });
             const graphics = pageCache!.graphicsFor(i);
-            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings);
+            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings, ctx.gridCandidates ?? false, !!ctx.regionObserver);
             const regions = pass.result;
             if (regions.page !== detailed) {
                 // The target without absorbed lines replaces the walked page, so
@@ -529,6 +531,8 @@ function pageRegions(
     vocabulary: ReadonlySet<string>,
     margin: ReadonlySet<RawLine>,
     settings: RegionItemSettings | undefined,
+    gridCandidates: boolean,
+    allGridFeatures: boolean,
 ): Pick<RegionPassPage, "doc" | "detection" | "result" | "error"> {
     if (!graphics || !REGION_MODEL) {
         throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
@@ -542,6 +546,8 @@ function pageRegions(
             model: REGION_MODEL,
             route: true,
             margin,
+            gridCandidates,
+            allGridFeatures,
         });
         return { doc, detection, result: regionItemsForPage(page, detection, vocabulary, settings) };
     } catch (err) {
