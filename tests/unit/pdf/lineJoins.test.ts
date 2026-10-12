@@ -34,6 +34,18 @@ describe("addBlockToVocabulary", () => {
         expect(vocabulary.compoundRights).toEqual(new Set(["adoption", "covid"]));
     });
 
+    it("reads a word with a soft hyphen inside it as the whole word", () => {
+        const vocabulary = vocabularyOf("the air\u00ADport was busy, a self-con\u00ADtained unit");
+        expect(vocabulary.words.has("airport")).toBe(true);
+        expect(vocabulary.words.has("air")).toBe(false);
+        expect(vocabulary.compoundRights.has("contained")).toBe(true);
+        // The compound set reads the raw text, as PDF schema 4 does.
+        expect([...vocabulary]).toEqual(["self-con"]);
+        expect(joinLineTexts(["the air-", "port was busy"], vocabulary)).toBe("the airport was busy");
+        // A soft hyphen at the line end still splits the word.
+        expect(vocabularyOf("an air\u00AD", "port").words.has("port")).toBe(false);
+    });
+
     it("leaves both halves of a word split at a line end out of the words", () => {
         const vocabulary = vocabularyOf("the effects of con-", "sequences matter", "consequences differ");
         expect(vocabulary.words.has("con")).toBe(false);

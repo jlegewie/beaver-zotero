@@ -101,7 +101,8 @@ const LINE_END_HYPHEN_RE = /[-\u2010\u00AD]$/u;
  * Add a block's lines (in reading order) to `vocabulary`. Compounds come from
  * every line, so the set matches `collectHyphenatedCompounds` (PDF schema 4
  * reads it); words and compound parts skip the last word of a line ending in
- * a hyphen and the first word of the line after it.
+ * a hyphen and the first word of the line after it, and read a word with a
+ * soft hyphen inside it ("air" + U+00AD + "port") as the whole word.
  */
 export function addBlockToVocabulary(lines: readonly string[], vocabulary: LineJoinVocabulary): void {
     let afterHyphen = false;
@@ -110,27 +111,29 @@ export function addBlockToVocabulary(lines: readonly string[], vocabulary: LineJ
         const endsWithHyphen = LINE_END_HYPHEN_RE.test(line.trimEnd());
         for (let t = 0; t < tokens.length; t++) {
             const whole = !(afterHyphen && t === 0) && !(endsWithHyphen && t === tokens.length - 1);
-            if (!/[-\u2010]/u.test(tokens[t])) {
-                if (whole) for (const word of tokens[t].matchAll(WORD_RE)) vocabulary.words.add(word[0].toLowerCase());
+            const token = tokens[t].split(SOFT_HYPHEN).join("");
+            if (!/[-\u2010]/u.test(token)) {
+                if (whole) for (const word of token.matchAll(WORD_RE)) vocabulary.words.add(word[0].toLowerCase());
                 continue;
             }
+            // The raw token, as `collectHyphenatedCompounds` reads it.
             for (const match of tokens[t].matchAll(COMPOUND_RE)) {
                 const parts = match[0].toLowerCase().split("-");
                 for (let i = 0; i + 1 < parts.length; i++) vocabulary.add(`${parts[i]}-${parts[i + 1]}`);
             }
-            for (const match of tokens[t].includes("\u2010") ? tokens[t].matchAll(COMPOUND_PARTS_RE) : []) {
+            for (const match of token.includes("\u2010") ? token.matchAll(COMPOUND_PARTS_RE) : []) {
                 const parts = match[0].toLowerCase().split(/[-\u2010]/u);
                 for (let i = 0; i + 1 < parts.length; i++) vocabulary.unicodeHyphenCompounds.add(`${parts[i]}-${parts[i + 1]}`);
             }
             if (!whole) continue;
-            for (const match of tokens[t].matchAll(COMPOUND_PARTS_RE)) {
+            for (const match of token.matchAll(COMPOUND_PARTS_RE)) {
                 const parts = match[0].toLowerCase().split(/[-\u2010]/u);
                 for (let i = 0; i + 1 < parts.length; i++) {
                     vocabulary.compoundLefts.add(parts[i]);
                     vocabulary.compoundRights.add(parts[i + 1]);
                 }
             }
-            for (const word of tokens[t].matchAll(WORD_RE)) vocabulary.words.add(word[0].toLowerCase());
+            for (const word of token.matchAll(WORD_RE)) vocabulary.words.add(word[0].toLowerCase());
         }
         if (tokens.length > 0) afterHyphen = endsWithHyphen;
     }
