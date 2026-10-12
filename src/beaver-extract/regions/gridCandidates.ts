@@ -24,8 +24,9 @@
  *   text columns): a label column (short lines on some rows only, each beside
  *   text in another column), or cells that are not running text side by side.
  */
+import { isBoldFont } from "../StyleAnalyzer";
 import { iou, unionRect, type Rect } from "./geometry";
-import { isSpaceChar, wideGaps, wordCounts, type Primitive, type RegionLine } from "./pageSignals";
+import { NOTE_CAPTION_RE, isSpaceChar, wideGaps, wordCounts, type Primitive, type RegionLine } from "./pageSignals";
 import { extendOverRules } from "./textCandidates";
 
 /** Text on one row this many em apart is in separate columns. */
@@ -83,6 +84,18 @@ const PROSE_RUNNING = 0.6;
 const PROSE_OCCUPANCY = 0.8;
 /** Two candidates this similar (IoU) are one. */
 const DUPLICATE_IOU = 0.9;
+/** A wrapped line of a cell starts at most this many em left of its column's cells. */
+const WRAP_INDENT_EM = 0.5;
+/** A note's marker opening a line: a symbol, or a letter with a bracket or period ("a)", "b. "). */
+const NOTE_MARKER_RE = /^\s*(?:[*∗†‡§¶#]|\(?[a-z]\)|[a-z]\.\s)/u;
+/** A list of abbreviations ("h, human; m, mouse"). */
+const ABBREVIATIONS_RE = /^[^\s,;]{1,15},\s[^,;]{2,60};/u;
+/** A numbered heading ("3.2. Results", "B. Analysis", "IV. Discussion"). */
+const NUMBERED_HEADING_RE = /^(?:\d{1,2}(?:\.\d{1,2})*\.?|[A-Z]\.|[IVX]{1,4}\.)\s+\p{Lu}/u;
+/** A line set this many points larger than its column's cells, at the median, is a heading... */
+const HEADING_SIZE = 0.5;
+/** ...and so is a numbered line of at most this many words. */
+const HEADING_WORDS = 4;
 
 /**
  * A character of a line: the character and its extent along the line's row, in
@@ -123,6 +136,11 @@ export interface CharsOf {
 export interface GridGroup {
     bbox: Rect;
     lines: RegionLine[];
+    /**
+     * The box with the rows past the block's own cells that it left out (`ownRows`),
+     * when it left any: a candidate that repeats it so repeats the grid.
+     */
+    reach?: Rect;
 }
 
 /** What a grid candidate looks like, for the region features (`rowStructure`). */
@@ -538,7 +556,8 @@ export function rowStructure(lines: readonly RegionLine[], charsOf?: CharsOf): G
  * Grid candidates among upright `lines` (in a reading frame). `blockers`
  * (captions, figure text) cut gutters and never join, and a caption's row ends
  * every gutter (`captions`); `running` marks running text; `prims` give the
- * rules a block may extend over; `charsOf` gives the cells of a line.
+ * rules a block may extend over; `charsOf` gives the cells of a line; `margin`
+ * holds the page's furniture (running heads and feet), which no block takes.
  */
 export function gridGroups(
     lines: readonly RegionLine[],
@@ -548,6 +567,7 @@ export function gridGroups(
     prims: readonly Primitive[],
     bs: number,
     charsOf?: CharsOf,
+    margin?: ReadonlySet<RegionLine>,
 ): GridGroup[] {
     const upright = lines.filter((l) => !l.rot && !l.skewed && l.inkChars > 0);
     if (upright.length < MIN_ROWS) return [];
@@ -560,7 +580,7 @@ export function gridGroups(
     const out: GridGroup[] = [];
     const blocks: { first: number; last: number; x0: number; x1: number }[] = [];
     for (const chain of chains) {
-        const first = chain.bordered[0];
+        let first = chain.bordered[0];
         // The last row's cell may wrap on below the last row bordered on both sides: the
         // rows the gutter runs on through, stacked at line spacing, are its lines.
         let last = chain.bordered[chain.bordered.length - 1];
@@ -610,6 +630,13 @@ export function gridGroups(
               evidence(shape, cuts.length, running, rows, first, last, hrules)
             : evidence(shape, cuts.length, running, rows, first, last, hrules);
         if (!accepted) continue;
+        const [start, end] = ownRows(rows, chain, first, last, cuts, x0, x1, running, margin);
+        let reach: Rect | undefined;
+        if (start > first || end < last) {
+            reach = extendOverRules(cellSpan(shape.columns.flat(2)), prims, bs);
+            [first, last] = [start, end];
+            shape = blockShape(rows, first, last, cuts, x0, x1);
+        }
         // At least two cells on each of `MIN_ROWS` rows, however MuPDF set them in lines.
         const cells = shape.columns.flat(2);
         if (cells.length < MIN_ROWS * 2) continue;
@@ -621,13 +648,173 @@ export function gridGroups(
         for (let r = first; r <= last; r++) for (const s of rows[r].segs) if (!kept.has(s)) partly.add(s.line);
         const members = [...new Set(cells.map((s) => s.line))].filter((l) => !partly.has(l));
         if (members.length < MIN_ROWS) continue;
-        let span: Rect = [cells[0].x0, cells[0].line.bbox[1], cells[0].x1, cells[0].line.bbox[3]];
-        for (const s of cells) span = unionRect(span, [s.x0, s.line.bbox[1], s.x1, s.line.bbox[3]]);
+        const span = cellSpan(cells);
         blocks.push({ first, last, x0: span[0], x1: span[2] });
         const bbox = extendOverRules(span, prims, bs);
-        if (!out.some((g) => iou(g.bbox, bbox) >= DUPLICATE_IOU)) out.push({ bbox, lines: members });
+        if (!out.some((g) => iou(g.bbox, bbox) >= DUPLICATE_IOU)) out.push({ bbox, lines: members, ...(reach ? { reach } : {}) });
     }
     return out;
+}
+
+/** The box of cells: their extents across, their lines' down. */
+function cellSpan(cells: readonly Segment[]): Rect {
+    let span: Rect = [cells[0].x0, cells[0].line.bbox[1], cells[0].x1, cells[0].line.bbox[3]];
+    for (const s of cells) span = unionRect(span, [s.x0, s.line.bbox[1], s.x1, s.line.bbox[3]]);
+    return span;
+}
+
+/**
+ * The block's rows (of `first`..`last`) from the first to the last row its own
+ * cells border, and the rows after them that join as a cell's wrapped lines
+ * (`wraps`). Its own cells are text of the block (within [x0, x1]) on both sides
+ * of the gutter `chain`: the page's other text column beyond a bound borders the
+ * gutter too, and so, below the first row, does a line of prose whose word spaces
+ * are as wide as a gutter. A row without text of the block neither joins nor
+ * stops the wrapped lines. A block whose cells border none of its rows keeps them
+ * all.
+ */
+function ownRows(
+    rows: readonly Row[],
+    chain: Chain,
+    first: number,
+    last: number,
+    cuts: readonly number[],
+    x0: number,
+    x1: number,
+    running: ReadonlySet<RegionLine>,
+    margin?: ReadonlySet<RegionLine>,
+): [number, number] {
+    const inBlock = (s: Segment) => (s.x0 + s.x1) / 2 >= x0 && (s.x0 + s.x1) / 2 <= x1;
+    // Whether the block's cells border the gutter on row `r`; below its first row, not
+    // both from one line of running text cut into more cells than the block has
+    // columns: prose with wide word spaces (a header MuPDF set on one line is cells).
+    const own = (r: number, prose: boolean): boolean => {
+        let left: Segment | undefined;
+        let right: Segment | undefined;
+        for (const s of rows[r].segs) {
+            if (s.x1 <= chain.x0 + 0.5 && (!left || s.x1 > left.x1)) left = s;
+            if (s.x0 >= chain.x1 - 0.5 && (!right || s.x0 < right.x0)) right = s;
+        }
+        if (!left || !right || left.blocker || right.blocker || !inBlock(left) || !inBlock(right)) return false;
+        if (prose || left.line !== right.line || !running.has(left.line)) return true;
+        return rows[r].segs.filter((s) => s.line === left.line && inBlock(s)).length <= cuts.length + 1;
+    };
+    const start = chain.bordered.find((r) => own(r, true));
+    if (start === undefined) return [first, last];
+    let end = start;
+    for (const r of chain.bordered) if (r > end && own(r, false)) end = r;
+    if (end === last) return [start, end];
+    const column = (s: Segment) => {
+        const cx = (s.x0 + s.x1) / 2;
+        let k = 0;
+        while (k < cuts.length && cx > cuts[k]) k++;
+        return k;
+    };
+    // The columns' cells as far as the block's rows go; the style of the cells of the
+    // rows the block's cells border.
+    const columns = new Map<number, BlockColumn>();
+    const cells: Segment[] = [];
+    const record = (r: number) => {
+        const added = new Set<number>();
+        for (const s of rows[r].segs) {
+            if (s.blocker || !inBlock(s)) continue;
+            const k = column(s);
+            let c = columns.get(k);
+            if (!c) columns.set(k, (c = { above: [], left: s.x0, right: s.x1 }));
+            if (!added.has(k)) c.above = [];
+            added.add(k);
+            c.above.push(s);
+            c.left = Math.min(c.left, s.x0);
+            c.right = Math.max(c.right, s.x1);
+        }
+    };
+    for (let r = start; r <= end; r++) {
+        record(r);
+        for (const s of rows[r].segs) if (!s.blocker && inBlock(s)) cells.push(s);
+    }
+    const style = cellStyle(cells, column);
+    for (let r = end + 1, prev = end; r <= last; r++) {
+        const segs = rows[r].segs.filter(inBlock);
+        if (!segs.length) continue;
+        const lines = rows[prev].segs.filter((s) => !s.blocker && inBlock(s));
+        if (!wraps(lines, segs, columns, column, style, margin)) break;
+        record(r);
+        end = prev = r;
+    }
+    return [start, end];
+}
+
+/** A column of a block as far as its rows go, for the wrapped lines of its cells. */
+interface BlockColumn {
+    /** Its cells on the last row with text in it. */
+    above: Segment[];
+    /** The extent of its cells. */
+    left: number;
+    right: number;
+}
+
+/** What a block's cells look like, for telling a heading below it. */
+interface CellStyle {
+    /** Per column, the type size of its cells (`inkSize`) at the median. */
+    size: Map<number, number>;
+    /** Share of cells set bold. */
+    bold: number;
+    /** Share of cells opening like a numbered heading. */
+    numbered: number;
+}
+
+function cellStyle(cells: readonly Segment[], column: (s: Segment) => number): CellStyle {
+    const sizes = new Map<number, number[]>();
+    for (const s of cells) sizes.set(column(s), [...(sizes.get(column(s)) ?? []), inkSize(s)]);
+    const size = new Map([...sizes].map(([k, v]) => [k, v.sort((a, b) => a - b)[Math.floor(v.length / 2)]]));
+    const share = (test: (s: Segment) => boolean) => (cells.length ? cells.filter(test).length / cells.length : 0);
+    return {
+        size,
+        bold: share((s) => isBoldFont(s.line.font ?? "", undefined)),
+        numbered: share((s) => NUMBERED_HEADING_RE.test(s.text)),
+    };
+}
+
+const inkSize = (s: Segment) => s.line.inkSize ?? s.line.size;
+
+/**
+ * Whether the cells `segs` of a row are wrapped lines of cells above them: set at
+ * the line spacing of the row above (`prev`, the block's cells on it), each in its
+ * column and clear of the cells of the columns beside it, under a cell it
+ * continues: starting no further left than `WRAP_INDENT_EM` beyond the column's
+ * cells, or centred or right-aligned with the column's cell on the last row with
+ * text there. A line that starts something else is none: a note
+ * (`NOTE_CAPTION_RE`, a marker, a list of abbreviations), page furniture
+ * (`margin`), or a heading (larger than its column's cells, bold, or short and
+ * numbered, unlike the cells). A line of prose after the block crosses its
+ * columns.
+ */
+function wraps(
+    prev: readonly Segment[],
+    segs: readonly Segment[],
+    columns: ReadonlyMap<number, BlockColumn>,
+    column: (s: Segment) => number,
+    style: CellStyle,
+    margin?: ReadonlySet<RegionLine>,
+): boolean {
+    if (!prev.length || segs.some((s) => s.blocker)) return false;
+    const height = (s: Segment) => s.line.bbox[3] - s.line.bbox[1];
+    const top = Math.min(...segs.map((s) => s.line.bbox[1]));
+    const bottom = Math.max(...prev.map((s) => s.line.bbox[3]));
+    if (top - bottom > BREAK_GAP * Math.min(Math.max(...segs.map(height)), Math.max(...prev.map(height)))) return false;
+    return segs.every((s) => {
+        const k = column(s);
+        const own = columns.get(k);
+        if (!own || s.x0 < (columns.get(k - 1)?.right ?? -Infinity) || s.x1 > (columns.get(k + 1)?.left ?? Infinity)) return false;
+        const text = s.text;
+        if (margin?.has(s.line) || NOTE_CAPTION_RE.test(text) || NOTE_MARKER_RE.test(text) || ABBREVIATIONS_RE.test(text)) return false;
+        if (inkSize(s) >= (style.size.get(k) ?? Infinity) + HEADING_SIZE) return false;
+        if (style.bold < 0.5 && isBoldFont(s.line.font ?? "", undefined)) return false;
+        if (style.numbered < 0.5 && NUMBERED_HEADING_RE.test(text) && s.words <= HEADING_WORDS) return false;
+        const tol = WRAP_INDENT_EM * Math.max(1, s.line.size);
+        if (s.x0 >= own.left - tol) return true;
+        return own.above.some((t) => Math.abs(s.x0 + s.x1 - t.x0 - t.x1) <= 2 * tol || Math.abs(s.x1 - t.x1) <= tol);
+    });
 }
 
 /**

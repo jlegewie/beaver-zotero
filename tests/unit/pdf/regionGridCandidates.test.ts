@@ -16,7 +16,17 @@ import type { Rect } from "../../../src/beaver-extract/regions/geometry";
 import { gridGroups, rowStructure } from "../../../src/beaver-extract/regions/gridCandidates";
 import { assertCompatible, readsGridFeatures, type RegionModelWeights } from "../../../src/beaver-extract/regions/model";
 import { mergeRowFragments, pageLines, sourceLines } from "../../../src/beaver-extract/regions/pageSignals";
-import { LINE_RUNNING, detectRegions, routeLines, type DetectedRegion } from "../../../src/beaver-extract/regions/RegionDetector";
+import type { RawPageDataDetailed } from "@beaver/agent-core/extract/types";
+import {
+    LINE_RUNNING,
+    detectRegions,
+    gridFallback,
+    resolveOverlaps,
+    routeLines,
+    type DetectedRegion,
+    type RegionDetection,
+} from "../../../src/beaver-extract/regions/RegionDetector";
+import { regionItemsForPage } from "../../../src/beaver-extract/regions/regionItems";
 import { GRAPHICS_SUMMARY_STRIDE, type GraphicsSummary } from "../../../src/beaver-extract/worker/graphicsSummary";
 
 const W = 612;
@@ -226,6 +236,43 @@ describe("grid candidates", () => {
         const found = grids(specs);
         expect(found).toHaveLength(1);
         expect(found[0].bbox[2]).toBeLessThanOrEqual(300);
+    });
+});
+
+describe("grid candidates' rows past the last bordered row", () => {
+    const table = () => definitions(72, 180, 540, 130, 6);
+    const memberTexts = (specs: Spec[]) => grids(specs)[0]?.memberLines?.map((l) => l.text) ?? [];
+
+    it("takes a cell's wrapped lines but no note, list of abbreviations or heading set under the table", () => {
+        const t = table();
+        // The line after the last row's wrapped lines, at their line spacing.
+        const next = t.bottom - 4;
+        const at = (x0: number, x1: number, text: string): Spec => ({ box: [x0, next, x1, next + LINE], text });
+        expect(memberTexts(t.specs)).toContain(t.specs[t.specs.length - 1].text);
+        for (const extra of [
+            at(72, 300, "h, human; m, mouse; NR, no response."),
+            at(72, 240, "a) values at baseline in the trial"),
+            at(72, 130, "3.2. Results"),
+        ]) {
+            const texts = memberTexts([...t.specs, extra]);
+            expect(texts).toContain(t.specs[t.specs.length - 1].text);
+            expect(texts).not.toContain(extra.text);
+        }
+        // A wrapped line of the last definition joins.
+        const wrapped = at(180, 420, "and the review of the course work in the program");
+        expect(memberTexts([...t.specs, wrapped])).toContain(wrapped.text);
+    });
+
+    it("measures the gap to a line under the table from the table's own rows, not the next text column's", () => {
+        const t = definitions(72, 140, 300, 72 + 6 * PITCH, 5);
+        // A note in the label column a line and a half under the table; the prose of the next
+        // column runs on beside it, a line of it between the two.
+        const note: Spec = { box: [72, t.bottom - 4 + 0.6 * PITCH, 128, t.bottom - 4 + 0.6 * PITCH + LINE], text: "Values (SEM)." };
+        const specs = [...prose(72, 300, 72, 5), ...t.specs, note, ...prose(72, 300, t.bottom + 2 * PITCH, 8), ...prose(312, 540, 72, 40)];
+        const found = grids(specs);
+        expect(found).toHaveLength(1);
+        expect(found[0].memberLines!.map((l) => l.text)).not.toContain(note.text);
+        expect(found[0].bbox[3]).toBeLessThan(note.box[1]);
     });
 });
 
@@ -609,5 +656,113 @@ describe("grid candidates in detection", () => {
         const outer: DetectedRegion = { bbox: [50, 80, 560, 300], anchored: false, source: "graphics", features: [], label: "table" };
         const inner: DetectedRegion = { ...regions[0], label: "other", containedIn: 0 };
         expect(routeLines(lines, [LINE_RUNNING], [outer, inner], [], [undefined, new Set(lines)])).toEqual([0]);
+        // Another source's table takes only the grid's lines inside its box.
+        const above: DetectedRegion = { ...outer, bbox: [50, 40, 560, 95] };
+        expect(routeLines(lines, [LINE_RUNNING], [above, { ...inner, containedIn: 0 }], [], [undefined, new Set(lines)])).toEqual([-1]);
+        expect(routeLines(lines, [LINE_RUNNING], [above], [], [new Set(lines)])).toEqual([-1]);
+    });
+});
+
+describe("grid candidates and the emission gate", () => {
+    /** Four rows of a label and two numbers, from `y`, in [72, 300]. */
+    const numbers = (y: number): Spec[] =>
+        ["Alpha", "Beta", "Gamma", "Delta"].flatMap((label, r): Spec[] => [
+            { box: [72, y + r * PITCH, 120, y + r * PITCH + LINE], text: label },
+            { box: [180, y + r * PITCH, 210, y + r * PITCH + LINE], text: `0.${r + 1}2` },
+            { box: [260, y + r * PITCH, 290, y + r * PITCH + LINE], text: `0.${r + 3}4` },
+        ]);
+    /**
+     * A page routed as the detector does with grid candidates: `regions` with their labels
+     * before overlap resolution, and the grid lines each takes as a table (by text).
+     */
+    const routed = (specs: Spec[], running: string[], regions: DetectedRegion[], takes: (string[] | undefined)[]) => {
+        const raw = page(specs) as unknown as RawPageDataDetailed;
+        const lines = mergeRowFragments(pageLines(raw), []);
+        const flags = lines.map((l) => (running.includes(l.text) ? LINE_RUNNING : 0));
+        const labels = regions.map((r) => r.label);
+        const boxes = regions.map((r) => r.bbox);
+        resolveOverlaps(regions);
+        const sets = takes.map((t) => (t ? new Set(lines.filter((l) => t.includes(l.text))) : undefined));
+        const handed = lines.map(() => -1);
+        const routes = routeLines(lines, flags, regions, [], sets, { handed });
+        const detection: RegionDetection = { pageIndex: 0, scanned: false, bodySize: BS, candidates: regions, routing: { lines, flags, routes, rules: [] }, ms: 0 };
+        detection.routing!.gridFallback = gridFallback(regions, labels, boxes, detection.routing!, sets, handed);
+        return { raw, detection };
+    };
+    const region = (source: DetectedRegion["source"], bbox: Rect, p: number): DetectedRegion => ({
+        bbox,
+        anchored: false,
+        source,
+        features: [],
+        probs: { other: 1 - p, picture: 0, decoration: 0, table: p, formula: 0 },
+        label: "table",
+    });
+    const sentences = SENTENCES.slice(0, 4);
+
+    it("restores the tables a grid table displaced when it fails the gate", () => {
+        // A grid over a table of numbers and the paragraph under it: as a table, its rows
+        // are fragments of the paragraph's sentences.
+        const specs = [...numbers(100), ...prose(72, 300, 100 + 4 * PITCH, 4).map((sp, i) => ({ ...sp, text: sentences[i] }))];
+        const v5 = region("text", [72, 100, 290, 100 + 3 * PITCH + LINE], 1);
+        const grid = region("grid", [72, 100, 300, 100 + 7 * PITCH + LINE], 0.85);
+        const { raw, detection } = routed(specs, sentences, [v5, grid], [undefined, specs.map((sp) => sp.text)]);
+        expect(detection.candidates[0]).toMatchObject({ label: "other", containedIn: 1 });
+        const { items, page: rest } = regionItemsForPage(raw, detection);
+        expect(items.map((it) => it.region)).toEqual([0]);
+        expect(items[0].rows).toHaveLength(4);
+        expect(detection.candidates.map((c) => c.label)).toEqual(["table", "other"]);
+        const left = rest.blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text));
+        expect(left).toEqual(sentences);
+    });
+
+    it("undoes a grid table's merge into another table, its box and what it displaced", () => {
+        // A ruled table of numbers, two rows its box missed, and a grid table of more rows in
+        // its columns under them: row completion takes the missed rows and merges the grid
+        // fragment, growing the table's box over it. An equation box lies in the fragment.
+        const cells = (y: number, n: number, k: number): Spec[] =>
+            Array.from({ length: n }, (_, r): Spec[] => [
+                { box: [72, y + r * PITCH, 120, y + r * PITCH + LINE], text: ["Alpha", "Beta", "Gamma", "Delta", "Eps", "Zeta", "Eta", "Theta"][(k + r) % 8] },
+                { box: [180, y + r * PITCH, 210, y + r * PITCH + LINE], text: `${k}.${r + 1}2` },
+                { box: [260, y + r * PITCH, 290, y + r * PITCH + LINE], text: `${k}.${r + 3}4` },
+            ]).flat();
+        const top = 100 + 6 * PITCH;
+        const raw = page([...cells(100, 4, 0), ...cells(100 + 4 * PITCH, 2, 2), ...cells(top, 4, 4)]);
+        const lines = mergeRowFragments(pageLines(raw), []);
+        const rules = Array.from({ length: 11 }, (_, i): Rect => {
+            const y = i < 6 ? 98.5 + i * PITCH : top - 1.5 + (i - 6) * PITCH;
+            return [72, y, 290, y + 0.5];
+        });
+        const v5 = region("text", [72, 100, 290, 100 + 3 * PITCH + LINE], 1);
+        const grid = region("grid", [72, top, 290, top + 3 * PITCH + LINE], 0.9);
+        const equation: DetectedRegion = { ...region("text", [215, top + PITCH, 255, top + 2 * PITCH], 0), label: "formula" };
+        const regions = [v5, grid, equation];
+        const labels = regions.map((r) => r.label);
+        const boxes = regions.map((r) => r.bbox);
+        resolveOverlaps(regions);
+        const takes = [undefined, new Set(lines.filter((l) => l.bbox[1] >= top)), undefined];
+        const handed = lines.map(() => -1);
+        const routing = { lines, flags: lines.map(() => 0), routes: routeLines(lines, lines.map(() => 0), regions, rules, takes, { handed }), rules };
+        expect(regions.map((r) => [r.label, r.containedIn])).toEqual([["table", undefined], ["other", 0], ["other", 1]]);
+        expect(v5.bbox[3]).toBeCloseTo(top + 3 * PITCH + LINE);
+        const fallback = gridFallback(regions, labels, boxes, routing, takes, handed);
+        expect(fallback.involved(0)).toBe(true);
+        fallback.release([0]);
+        // The grid is withdrawn with its merge: the table has its own box, the equation its label.
+        expect(regions.map((r) => r.label)).toEqual(["table", "other", "formula"]);
+        expect(regions[0].bbox).toEqual([72, 100, 290, 100 + 3 * PITCH + LINE]);
+        expect(regions[2].containedIn).toBeUndefined();
+    });
+
+    it("emits a table with its own lines when it fails the gate only with a grid's", () => {
+        // A table whose box takes in the paragraph beside it, set on baselines of its own; the
+        // grid that repeats the table hands it the paragraph's lines, rows of sentence fragments.
+        const specs = [...numbers(100), ...prose(320, 540, 100 + PITCH / 2, 4).map((sp, i) => ({ ...sp, text: sentences[i] }))];
+        const v5 = region("text", [72, 100, 540, 100 + 4 * PITCH], 1);
+        const { raw, detection } = routed(specs, sentences, [v5], [specs.map((sp) => sp.text)]);
+        expect(detection.routing!.routes.filter((r) => r === 0)).toHaveLength(16);
+        const { items, page: rest } = regionItemsForPage(raw, detection);
+        expect(items.map((it) => it.region)).toEqual([0]);
+        expect(items[0].rows.map((row) => row.length)).toEqual([3, 3, 3, 3]);
+        expect(rest.blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text))).toEqual(sentences);
     });
 });

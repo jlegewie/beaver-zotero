@@ -137,6 +137,57 @@ export function regionItemsForPage(
     vocabulary?: ReadonlySet<string>,
     settings: RegionItemSettings = {},
 ): PageRegionItems {
+    const failed: number[] = [];
+    let result = pageItems(page, detection, failed, vocabulary, settings);
+    // A table that grid candidates gave text to and that fails the gate is released
+    // (`GridFallback`): the page is read again as without them there, until no such
+    // table fails. Each round releases at least one table for good.
+    const fallback = detection.routing?.gridFallback;
+    let retried = false;
+    for (let round = 0; fallback && failed.length && round < detection.candidates.length; round++) {
+        const released = failed.filter((k) => fallback.involved(k));
+        const before = [...failed];
+        failed.length = 0;
+        if (released.length) {
+            fallback.release(released);
+            result = pageItems(page, detection, failed, vocabulary, settings);
+            continue;
+        }
+        // A table that took no grid text can still fail because of it: row completion
+        // joins it to a table beside it as without grid candidates only while that table
+        // holds no grid lines. Once per page it is retried with every table that grid
+        // candidates gave text to released, which stands only if a failed table is then
+        // emitted, itself or as part of another.
+        const holders = retried ? [] : fallback.holders();
+        retried = true;
+        if (!holders.length) break;
+        const undo = fallback.release(holders);
+        const retry = pageItems(page, detection, failed, vocabulary, settings);
+        if (before.some((k) => emits(retry, detection, k))) {
+            result = retry;
+            continue;
+        }
+        undo();
+        break;
+    }
+    return result;
+}
+
+/** Whether region `k`, or the region it became part of (`containedIn`), is one of `result`'s items. */
+function emits(result: PageRegionItems, detection: RegionDetection, k: number): boolean {
+    const regions = detection.candidates;
+    for (let n = 0; regions[k].containedIn !== undefined && n < regions.length; n++) k = regions[k].containedIn!;
+    return result.items.some((item) => item.region === k);
+}
+
+/** `regionItemsForPage` for the detection as routed; tables that fail `readsAsTable` go to `failed`. */
+function pageItems(
+    page: RawPageDataDetailed,
+    detection: RegionDetection,
+    failed: number[],
+    vocabulary?: ReadonlySet<string>,
+    settings: RegionItemSettings = {},
+): PageRegionItems {
     const routing = detection.routing;
     const regions = detection.candidates;
     const kept = regions.map((r) => r.label !== undefined && r.label !== "other");
@@ -241,6 +292,7 @@ export function regionItemsForPage(
         if (table && table.rows.length && !readsAsTable(table, tableLeak(k, routing, lineDestination, table), runningShare(k, routing, lineDestination))) {
             // Not a table to read row by row: its text stays in the prose.
             for (const [source, d] of destination) if (d === k) destination.delete(source);
+            failed.push(k);
             return;
         }
         // A figure keeps its labels and data values; only axis ticks are dropped.
