@@ -23,6 +23,13 @@ export function intersectionArea(a: Rect, b: Rect): number {
     return Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
 }
 
+/** Intersection over union of two rects (0 when either is empty). */
+export function iou(a: Rect, b: Rect): number {
+    const inter = intersectionArea(a, b);
+    const union = rectArea(a) + rectArea(b) - inter;
+    return union > 0 ? inter / union : 0;
+}
+
 /** Fraction of `a` covered by `b`. */
 export function overlapFrac(a: Rect, b: Rect): number {
     const area = rectArea(a);

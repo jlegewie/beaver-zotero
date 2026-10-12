@@ -105,7 +105,7 @@ src/beaver-extract/
 ├── itemTypes/                     # Item-type model: input, features (incl. reference item features), model, item pass, generated weights
 ├── boundaries/                    # Item boundaries: startNewItem reason codes, per-block input, feature rows, model (preset switch `learnedBoundaries`), generated weights
 ├── references/                    # Reference entries: line model, entry planning, item pass (splits and joins the item-type model's references), generated weights
-├── regions/                       # Region detection (pictures, tables, formulas): step 2
+├── regions/                       # Region detection (pictures, tables, formulas): step 2; grid candidates for text-heavy tables (preset switch `gridTableCandidates`)
 ├── DocumentAnalyzer.ts            # Text layer & OCR detection
 ├── StyleAnalyzer.ts               # Font/style analysis
 ├── MarginFilter.ts                # Header/footer removal

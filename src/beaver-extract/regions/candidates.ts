@@ -6,11 +6,16 @@
  * - caption: regions anchored on a figure caption, for sparse or text-built
  *   figures;
  * - text: groups of lines that are not running text (tables, display
- *   equations; see `textCandidates.ts`).
+ *   equations; see `textCandidates.ts`);
+ * - grid (with `FindCandidatesOptions.grid`): blocks of lines whose column
+ *   gutters stay aligned over several rows, running text included (text-heavy
+ *   tables; see `gridCandidates.ts`).
  * Candidates are classified afterwards (see `features.ts`).
  */
+import type { RawLine, RawLineDetailed } from "@beaver/agent-core/extract/types";
+
 import { UnionFind, clusterRects } from "./cluster";
-import { dilate, hgap, overlapFrac, rectArea, touches, unionRect, vgap, type Rect } from "./geometry";
+import { dilate, hgap, iou, overlapFrac, rectArea, touches, unionRect, vgap, type Rect } from "./geometry";
 import {
     NOTE_CAPTION_RE,
     isFigureCaption,
@@ -21,6 +26,7 @@ import {
     type PrimitiveKind,
     type RegionLine,
 } from "./pageSignals";
+import { gridGroups, type CharsOf, type LineChar } from "./gridCandidates";
 import { runningTextLines, textGroups } from "./textCandidates";
 
 /** Candidate merging is quadratic; beyond this the page keeps its unmerged candidates. */
@@ -33,7 +39,23 @@ const CLUSTERED: ReadonlySet<PrimitiveKind> = new Set(["image", "mark", "glyph",
 /** Primitive kinds that make up table rulings rather than pictures. */
 const RULE_KINDS: ReadonlySet<PrimitiveKind> = new Set(["hrule", "vrule", "box", "pixel"]);
 
-export type CandidateSource = "graphics" | "caption" | "text";
+export type CandidateSource = "graphics" | "caption" | "text" | "grid";
+
+/** A grid candidate this similar (IoU) to another candidate adds nothing. */
+const GRID_DUPLICATE_IOU = 0.9;
+
+export interface FindCandidatesOptions {
+    /** Also propose grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
+    grid?: boolean;
+    /**
+     * The page's structured-text lines that `RegionLine.source` numbers
+     * (`sourceLines`): with them, grid candidates and the grid features
+     * (`PageCandidates.charsOf`) read the cells MuPDF set on one line from its
+     * characters, rotated text included (`pageLines` reads gaps only for upright
+     * text), each with its own text.
+     */
+    sources?: readonly RawLine[];
+}
 
 export interface Candidate {
     bbox: Rect;
@@ -43,11 +65,18 @@ export interface Candidate {
     anchored: boolean;
     source: CandidateSource;
     /**
-     * Text candidates: the grouped lines, in the group's reading frame (rotated
-     * text is turned so that its lines read left to right, stacked top to bottom).
+     * Text and grid candidates: the grouped lines, in the group's reading frame
+     * (rotated text is turned so that its lines read left to right, stacked top
+     * to bottom).
      */
     lines?: RegionLine[];
-    /** Text candidates built from rotated (landscape) text. */
+    /**
+     * Grid candidates, and a candidate a grid candidate repeats: the grid's page
+     * lines (in page coordinates), which the candidate takes when it becomes a
+     * table, running text included.
+     */
+    memberLines?: readonly RegionLine[];
+    /** Text and grid candidates built from rotated (landscape) text. */
     rotated?: boolean;
 }
 
@@ -65,6 +94,12 @@ export interface PageCandidates {
     /** Running text (prose and other wide lines of words), upright or rotated. */
     running: ReadonlySet<RegionLine>;
     bodySize: number;
+    /**
+     * With `FindCandidatesOptions.sources`: the characters of a line (an upright page
+     * line, or a rotated line's copy in its reading frame, `Candidate.lines`), in its
+     * reading frame.
+     */
+    charsOf?: CharsOf;
     /** A page-sized image carries most of the page text (scan with a text layer). */
     scanned: boolean;
     width: number;
@@ -117,6 +152,7 @@ export function findCandidates(
     W: number,
     H: number,
     bs: number,
+    options: FindCandidatesOptions = {},
 ): PageCandidates {
     const { kept, scanned } = dropScanAndEdges(allPrimitives, lines, W, H);
     const { figureCaptions, tableCaptions, noteCaptions, captionText } = findCaptions(lines, bs);
@@ -272,6 +308,68 @@ export function findCandidates(
         }));
         addGroups(frameLines, frameRunning, frameCaptions, framePrims, toPage, true);
     }
+    // With the structured-text lines, every line's characters: a rotated line's copy in
+    // its reading frame reads its page line's through the frame's mapping. Grid
+    // candidates and the grid features read cells from them.
+    const inFrame = new Map<RegionLine, { line: RegionLine; toFrame: (r: Rect) => Rect }>();
+    for (const { source, frameLines, toFrame } of frames) frameLines.forEach((t, i) => inFrame.set(t, { line: source[i], toFrame }));
+    const charsOf = options.sources ? lineChars(options.sources, (l) => inFrame.get(l) ?? { line: l, toFrame: (r) => r }) : undefined;
+    if (options.grid) {
+        // Grid candidates come last, so that the other sources' candidates keep their order.
+        const addGrids = (
+            groupLines: readonly RegionLine[],
+            groupCaptions: ReadonlySet<RegionLine>,
+            groupRunning: ReadonlySet<RegionLine>,
+            prims: Primitive[],
+            toPage: (r: Rect) => Rect,
+            toPageLine: (l: RegionLine) => RegionLine,
+            rotated: boolean,
+        ) => {
+            for (const g of gridGroups(groupLines, figureText, groupCaptions, groupRunning, prims, bs, charsOf)) {
+                const bbox = toPage(g.bbox);
+                const memberLines = g.lines.map(toPageLine);
+                // A candidate the grid repeats (a ruled table's graphics) takes the grid's lines.
+                const same = candidates.find((c) => iou(c.bbox, bbox) >= GRID_DUPLICATE_IOU);
+                if (same) {
+                    same.memberLines = [...new Set([...(same.memberLines ?? []), ...memberLines])];
+                    continue;
+                }
+                const members: number[] = [];
+                rects.forEach((r, i) => {
+                    if (overlapFrac(r, bbox) >= 0.5) members.push(i);
+                });
+                candidates.push({ bbox, members, anchored: false, source: "grid", lines: g.lines, memberLines, rotated });
+            }
+        };
+        // Text set upside down (`RegionLine.turned`) reads right to left and bottom to top:
+        // its rows and columns, and the characters of its cells, are read turned upright.
+        addGrids(lines.filter((l) => !l.turned), captionText, running, primitives, (r) => r, (l) => l, false);
+        const turned = lines.filter((l) => l.turned && !l.rot);
+        if (turned.length) {
+            const turn = (r: Rect): Rect => [W - r[2], H - r[3], W - r[0], H - r[1]];
+            const upright = turned.map((l): RegionLine => {
+                const t: RegionLine = { ...l, bbox: turn(l.bbox) };
+                delete t.turned;
+                return t;
+            });
+            upright.forEach((t, i) => {
+                inFrame.set(t, { line: turned[i], toFrame: turn });
+                if (figureText.has(turned[i])) figureText.add(t);
+            });
+            const pageLine = new Map(upright.map((t, i) => [t, turned[i]]));
+            const prims = primitives.map((p) => ({ ...p, bbox: turn(p.bbox) }));
+            addGrids(upright, findCaptions(upright, bs).captionText, runningTextLines(upright, bs), prims, turn, (l) => pageLine.get(l)!, false);
+        }
+        for (const { source, frameLines, frameCaptions, frameRunning, toFrame, toPage } of frames) {
+            const framePrims = primitives.map((p) => ({
+                ...p,
+                bbox: toFrame(p.bbox),
+                kind: p.kind === "hrule" ? ("vrule" as const) : p.kind === "vrule" ? ("hrule" as const) : p.kind,
+            }));
+            const pageLine = new Map(frameLines.map((t, i) => [t, source[i]]));
+            addGrids(frameLines, frameCaptions, frameRunning, framePrims, toPage, (l) => pageLine.get(l)!, true);
+        }
+    }
 
     return {
         candidates,
@@ -282,10 +380,60 @@ export function findCandidates(
         noteCaptions,
         captionText,
         running: pageRunning,
+        ...(charsOf ? { charsOf } : {}),
         bodySize: bs,
         scanned,
         width: W,
         height: H,
+    };
+}
+
+/**
+ * Characters of lines from their structured-text lines (`sources`), left to right
+ * in the reading frame `place` gives each line (its page line and the frame's
+ * mapping); a line joined from pieces has its pieces' characters, a space between
+ * each two. Undefined when a structured-text line has no per-character boxes.
+ */
+function lineChars(
+    sources: readonly RawLine[],
+    place: (l: RegionLine) => { line: RegionLine; toFrame: (r: Rect) => Rect },
+): CharsOf {
+    const cache = new Map<RegionLine, LineChar[] | undefined>();
+    return (l) => {
+        if (cache.has(l)) return cache.get(l);
+        const { line, toFrame } = place(l);
+        // Each piece's characters in the reading frame, left to right.
+        const pieces: LineChar[][] = [];
+        for (const part of line.parts ?? [line]) {
+            const raw = sources[part.source - 1] as RawLineDetailed | undefined;
+            if (!raw?.chars?.length || raw.chars.length !== [...raw.text].length) {
+                cache.set(l, undefined);
+                return undefined;
+            }
+            const piece: LineChar[] = [];
+            for (let i = part.range[0]; i < part.range[1]; i++) {
+                const ch = raw.chars[i];
+                if (!ch) continue;
+                const f = toFrame([ch.bbox.l, ch.bbox.t, ch.bbox.r, ch.bbox.b]);
+                piece.push({ x0: f[0], x1: f[2], c: ch.c });
+            }
+            if (piece.length) pieces.push(piece.sort((a, b) => a.x0 - b.x0));
+        }
+        // Joined pieces are words of one line (`mergeRowFragments` joins them with a
+        // space): in reading order, a space at the end of each piece keeps the words apart.
+        pieces.sort((a, b) => a[0].x0 - b[0].x0);
+        const out: LineChar[] = [];
+        pieces.forEach((piece, k) => {
+            if (k > 0) {
+                const right = Math.max(...pieces[k - 1].map((ch) => ch.x1));
+                out.push({ x0: right, x1: right, c: " " });
+            }
+            out.push(...piece);
+        });
+        out.sort((a, b) => a.x0 - b.x0);
+        const chars = out.length ? out : undefined;
+        cache.set(l, chars);
+        return chars;
     };
 }
 

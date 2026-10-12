@@ -6,15 +6,21 @@
  * generated into `weights.ts`.
  */
 import { assertModelFeatures, modelProbabilities, type Model, type ModelInfo } from "../models/runtime";
-import { REGION_FEATURES, REGION_FEATURE_VERSION } from "./features";
+import { REGION_FEATURES, REGION_FEATURE_VERSION, REGION_GRID_FEATURES, REGION_GRID_FEATURE_VERSION } from "./features";
 
 export type RegionClass = "other" | "picture" | "decoration" | "table" | "formula";
 
 export type RegionModelWeights = Model<RegionClass> & ModelInfo;
 
-/** Throws when weights were trained on a different feature set. */
+/** Weights trained on the grid feature set (`REGION_GRID_FEATURES`) rather than `REGION_FEATURES`. */
+export function usesGridFeatures(model: RegionModelWeights): boolean {
+    return model.featureVersion === REGION_GRID_FEATURE_VERSION;
+}
+
+/** Throws when weights were trained on a feature set the detector does not compute. */
 export function assertCompatible(model: RegionModelWeights): void {
-    assertModelFeatures(model, REGION_FEATURE_VERSION, REGION_FEATURES, "region");
+    if (usesGridFeatures(model)) assertModelFeatures(model, REGION_GRID_FEATURE_VERSION, REGION_GRID_FEATURES, "region");
+    else assertModelFeatures(model, REGION_FEATURE_VERSION, REGION_FEATURES, "region");
 }
 
 /** Class probabilities (softmax), keyed by class. */
