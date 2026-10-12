@@ -20,6 +20,7 @@ import type { BoundingBox, RawStyleRun, TextStyle, StyleProfile } from "@beaver/
 import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import { crossesDivider, fillZoneFor, type ColumnDetectionOptions, type Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
+import { joinLineTexts } from "./lineJoins";
 import { START_SIGNALS, START_VETOES, type StartTrace } from "./boundaries/rules";
 import {
     boundaryLine,
@@ -90,6 +91,34 @@ export interface ParagraphDetectionSettings {
      */
     pageBodyStyles?: boolean;
     /**
+     * Line detection gives each raw line to one column only, so a line inside
+     * two overlapping column boxes is not read twice
+     * (`LineDetectionOptions.exclusiveColumns`; default: false). Enabled by
+     * the PDF schema preset.
+     */
+    exclusiveColumnLines?: boolean;
+    /**
+     * Join an item's lines with `joinLineTexts` (see `lineJoins.ts`): line-end
+     * hyphens decided from the document's spelling and the word's shape,
+     * URLs, DOIs, number ranges and CJK text joined without a space, soft
+     * hyphens removed (default: false). Enabled by the PDF schema preset.
+     */
+    lineJoins?: boolean;
+    /**
+     * The document's line-break vocabulary for `lineJoins`, set by the
+     * pipeline (`buildCompoundVocabulary`).
+     */
+    lineJoinVocabulary?: ReadonlySet<string>;
+    /**
+     * Footnote markers glued to text: a footnote's raised lead marker is set
+     * off from its text, a raised marker glued to a word in body text is
+     * dropped, and a body sentence continues past footnotes into the next
+     * column (see `ParagraphTextOptions.noteMarkers`,
+     * `annotateColumnContinuations`; default: false). Enabled by the PDF
+     * schema preset.
+     */
+    noteMarkers?: boolean;
+    /**
      * Decide where items start with the learned boundary model
      * (`boundaries/model.ts`) instead of `startNewItem`, and continue an
      * item across a cut between stacked blocks of one printed column
@@ -114,6 +143,10 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     headingLabelFilters: true,
     isolatedHeadings: false,
     pageBodyStyles: false,
+    exclusiveColumnLines: false,
+    lineJoins: false,
+    lineJoinVocabulary: new Set<string>(),
+    noteMarkers: false,
     learnedBoundaries: false,
 };
 
@@ -747,6 +780,24 @@ function computeBodyAllCaps(
     }
     if (total < 5) return false;
     return allCaps / total >= 0.8;
+}
+
+/**
+ * An item's text from its line texts: `joinLineTexts` when `lineJoins` is
+ * on, `joinLines` otherwise. Passes that rebuild items from their lines join
+ * them the same way.
+ */
+export function joinItemLines(
+    lines: PageLine[],
+    settings: Pick<ParagraphDetectionSettings, "lineJoins" | "removeHyphenation" | "lineJoinVocabulary">,
+): string {
+    const removeHyphenation = settings.removeHyphenation ?? DEFAULT_SETTINGS.removeHyphenation;
+    if (!settings.lineJoins || !removeHyphenation) {
+        return joinLines(lines.map(l => l.text), removeHyphenation);
+    }
+    // A line keeps the space the PDF set after its last word.
+    const texts = lines.map(l => (l.spans[l.spans.length - 1]?.trailingSpace ? `${l.text} ` : l.text));
+    return joinLineTexts(texts, settings.lineJoinVocabulary);
 }
 
 /**
@@ -2686,12 +2737,12 @@ function headingEndsBeforeBodyLine(
     const shortfall = columnThresholds.rightEdgeMode - prevLine.bbox.r;
     if (shortfall <= Math.max(pageThresholds.medianHeight, 0.03 * measure)) return false;
 
-    const headingText = joinLines(currentLines.map(l => l.text), settings.removeHyphenation);
+    const headingText = joinItemLines(currentLines, settings);
     if (headingText.length >= settings.maxHeaderLength || /[:：]\s*$/u.test(headingText)) return false;
     if (!currentLines.every(l => isHeaderStyle(l, bodyStyles, settings, null, bodyAllCaps, headingText))) {
         return false;
     }
-    const joinedText = joinLines([...currentLines, line].map(l => l.text), settings.removeHyphenation);
+    const joinedText = joinItemLines([...currentLines, line], settings);
     if (openingLineStyle(currentLines[0])?.italic && looksLikeJournalCitation(joinedText)) return false;
     return !isHeaderStyle(line, bodyStyles, settings, null, bodyAllCaps, joinedText);
 }
@@ -3292,8 +3343,7 @@ function processCurrentLinesAsItem(
 } {
     // b. Build text content (needed by header check below for Rule 5's
     // phrase test on multi-line headers)
-    const itemLines = currentLines.map(l => l.text);
-    const rawItemText = joinLines(itemLines, settings.removeHyphenation);
+    const rawItemText = joinItemLines(currentLines, settings);
 
     // a. Check if all lines are headers. Pass the joined text so Rule 5's
     // multi-word all-caps phrase check sees the full heading even when it

@@ -244,6 +244,10 @@ export interface Sentence {
     text: string;
     /** Sentence fragment rects in the document's public extraction bbox frame. */
     bboxes: Rect[];
+    /**
+     * The sentence continues in the next sentence of body text in reading
+     * order; `footnote` items between the two don't count.
+     */
     joinWithNext?: boolean;
 }
 

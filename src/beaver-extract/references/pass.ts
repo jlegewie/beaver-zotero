@@ -5,6 +5,7 @@
  * the pages that have any.
  */
 
+import { joinItemLines } from "../ParagraphDetector";
 import type { ItemPass } from "../pipeline/itemPasses";
 import { applyReferencePlan, planEntries } from "./entries";
 import { buildInputPage } from "../features/itemInput";
@@ -15,13 +16,13 @@ export function referencePass(): ItemPass {
     return {
         name: REFERENCE_PASS,
         run(doc, ctx) {
-            const removeHyphenation = ctx.paragraphSettings?.removeHyphenation ?? true;
+            const settings = ctx.paragraphSettings ?? {};
             doc.pages.forEach((page, k) => {
                 const reference = page.items.map((item) => item.kind === "reference");
                 if (!reference.some(Boolean)) return;
                 const t0 = performance.now();
                 const [plan] = planEntries([buildInputPage(page, doc.styleProfile)], [reference]);
-                page.items = applyReferencePlan(page.items, plan, removeHyphenation);
+                page.items = applyReferencePlan(page.items, plan, (lines) => joinItemLines(lines, settings));
                 ctx.addPageMs(k, performance.now() - t0);
             });
         },

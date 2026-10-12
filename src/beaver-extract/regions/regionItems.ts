@@ -42,6 +42,7 @@ import type { Rect } from "./geometry";
 import type { RegionClass } from "./model";
 import { EQUATION_NUMBER_END_RE, EQUATION_REFERENCE_END_RE, sourceLines, type RegionLine } from "./pageSignals";
 import { LINE_CAPTION, LINE_FURNITURE, LINE_GUTTER, LINE_MARGIN, LINE_RUNNING, LINE_SKEWED, type LineRouting, type RegionDetection } from "./RegionDetector";
+import { MATH_OPERATORS } from "../mathOperators";
 
 export type RegionItemKind = "table" | "picture" | "formula";
 
@@ -95,12 +96,6 @@ const LATEX_COMMAND_RE = /\\\s?[A-Za-z]{2,}/;
 const TEXT_WORD_RE = /^[\p{L}][\p{L}'’-]{2,}[.,;:!?)]*$/u;
 /** A token mixing Greek and Latin letters: a variable's name. */
 const MIXED_SCRIPT_RE = /(?=.*\p{Script=Greek})(?=.*\p{Script=Latin})/u;
-/** Names of mathematical operators, set upright in text fonts. */
-const MATH_OPERATORS = new Set([
-    "arg", "cos", "cosh", "cot", "coth", "csc", "deg", "det", "dim", "exp", "gcd", "hom", "inf", "ker", "lim", "liminf",
-    "limsup", "log", "max", "min", "mod", "sec", "sin", "sinh", "sup", "tan", "tanh", "var", "cov", "corr", "diag", "sign",
-    "tr", "rank", "argmax", "argmin", "softmax", "relu", "erf", "logit",
-]);
 /** A piece with at most this share of math characters is text. */
 const FORMULA_TEXT_MATH = 0.2;
 /** A formula row beside a running line of this many words is that line's inline math... */
@@ -2185,8 +2180,8 @@ export interface ReadingFrame {
  * every item (`p<page>:i<index>`). A region goes before the first item below
  * its centre that overlaps it horizontally, else after the last such item above
  * it, else at the end. A table or figure never goes between a sentence and its
- * continuation in the next item; a display equation may, as it is part of the
- * sentence around it. Regions sharing a position keep reading order: one placed
+ * continuation in the next body item, nor among the footnotes between them; a
+ * display equation may, as it is part of the sentence around it. Regions sharing a position keep reading order: one placed
  * after an item comes before one placed before the next item, then rows top to
  * bottom, left to right within a row. `sentences` is rebuilt from the items
  * (they share sentence objects); `renamed` maps old item ids to new ones.
@@ -2207,6 +2202,14 @@ export function placeRegionItems(
     const overlapsX = (a: BoundingBox, b: BoundingBox) => Math.min(a.r, b.r) > Math.max(a.l, b.l);
     const continues = (item: DocItem) =>
         "sentences" in item && !!item.sentences?.length && !!item.sentences[item.sentences.length - 1].joinWithNext;
+    // A sentence continues past the footnotes between it and its next body
+    // item (`SentenceItem.joinWithNext`), so a position after such a footnote
+    // is inside the continuation too.
+    const insideContinuation = (position: number) => {
+        let k = position - 1;
+        while (k > 0 && items[k].kind === "footnote") k--;
+        return k >= 0 && continues(items[k]);
+    };
 
     // Position = number of text items before the region.
     const itemBoxes = items.map((item) => upright(item.bbox));
@@ -2223,7 +2226,7 @@ export function placeRegionItems(
             position = last >= 0 ? last + 1 : items.length;
         }
         if (region.kind !== "formula") {
-            while (position > 0 && position < items.length && continues(items[position - 1])) position++;
+            while (position > 0 && position < items.length && insideContinuation(position)) position++;
         }
         return { region, box, position, after, order };
     });

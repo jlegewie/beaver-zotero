@@ -47,6 +47,12 @@ export interface DetectedSpan {
     fontStyle?: string;
     /** Per-glyph style runs of the source line, when recorded (see `RawLine.styleRuns`) */
     styleRuns?: RawStyleRun[];
+    /**
+     * The source line's text ends in whitespace (trimmed from `text`): the
+     * PDF set a space after its last word, so a break after it falls between
+     * words (see `decideLineJoin`).
+     */
+    trailingSpace?: true;
     /** Glyph metrics of the source line, when recorded (see `RawLine.glyphMetrics`) */
     glyphMetrics?: RawGlyphMetrics[];
 }
@@ -107,6 +113,13 @@ export interface LineDetectionOptions {
     /** Minimum overlap ratio for span to belong to column (default: 0.5) */
     minColumnOverlap?: number;
     /**
+     * Give each raw line to one column only when column boxes overlap (see
+     * `lineColumnOwners`; default: false). Without it a
+     * line inside two column boxes is read in both, and its text appears
+     * twice. Enabled by the PDF schema preset.
+     */
+    exclusiveColumns?: boolean;
+    /**
      * Writing direction of the page's upright text (the rotation its working
      * frame was turned by; default 0). Glyph metrics are kept only for lines
      * written in it: those of other lines lie on another axis.
@@ -119,6 +132,7 @@ const DEFAULT_OPTIONS: Required<LineDetectionOptions> = {
     overlapThreshold: 0.5,
     gapMultiplier: 5.0,
     minColumnOverlap: 0.5,
+    exclusiveColumns: false,
     textRotation: 0,
 };
 
@@ -190,7 +204,8 @@ function extractSpansInColumn(
     page: RawPageData,
     column: Rect,
     minOverlap: number,
-    textRotation: number
+    textRotation: number,
+    owner?: { columnOf: Map<RawLine, number>; columnIndex: number },
 ): DetectedSpan[] {
     const spans: DetectedSpan[] = [];
 
@@ -202,6 +217,7 @@ function extractSpansInColumn(
             if (calculateColumnOverlap(line.bbox, column) < minOverlap) {
                 continue;
             }
+            if (owner && owner.columnOf.get(line) !== owner.columnIndex) continue;
 
             const text = cleanText(line.text || "");
             if (!text) continue;
@@ -215,6 +231,7 @@ function extractSpansInColumn(
                 fontWeight: line.font?.weight,
                 fontStyle: line.font?.style,
                 styleRuns: line.styleRuns,
+                ...(/\s$/u.test(line.text) ? { trailingSpace: true as const } : {}),
                 // Metrics of a line in another direction (a rotated label on
                 // an upright page) are not positions in this frame.
                 glyphMetrics: (line.rotation ?? 0) === textRotation ? line.glyphMetrics : undefined,
@@ -512,12 +529,19 @@ export function detectLinesInColumn(
     page: RawPageData,
     column: Rect,
     columnIndex: number,
-    options: LineDetectionOptions = {}
+    options: LineDetectionOptions = {},
+    columnOf?: Map<RawLine, number>,
 ): ColumnLineResult {
     const opts = { ...DEFAULT_OPTIONS, ...options };
 
     // Step 1: Extract spans in column
-    let spans = extractSpansInColumn(page, column, opts.minColumnOverlap, opts.textRotation);
+    let spans = extractSpansInColumn(
+        page,
+        column,
+        opts.minColumnOverlap,
+        opts.textRotation,
+        columnOf ? { columnOf, columnIndex } : undefined,
+    );
 
     if (spans.length === 0) {
         return {
@@ -553,6 +577,212 @@ export function detectLinesInColumn(
 }
 
 /**
+ * Whether the smaller of two overlapping column boxes, `inner`, is a column
+ * of its own: text of `outer` that `inner` lacks sits beside `inner`'s lines
+ * across a gap (a real column under a box that spans the page, a table
+ * column, a heading or figure label beside the text).
+ *
+ * When such text comes within half an em of one of `inner`'s lines, `inner`
+ * is a piece cut out of `outer`'s rows (a superscript, the second half of a
+ * wrapped title). Justified word spaces can be wider than half an em, so
+ * `inner` is also a piece when it holds the middles of rows MuPDF split
+ * apart: most of its rows with text beside them have it on both sides,
+ * nearer than 1.5 em (a table cell has wide gaps on some side of most rows).
+ * Text beside it on two or more rows, or beside an `inner` of several rows,
+ * makes it a column.
+ *
+ * A one-row `inner` is a piece of its row when a line of its own MuPDF block
+ * on the row above or below spans a gap to the text beside it: the gap is
+ * one inside a paragraph (inline math MuPDF left out), while a column's
+ * gutter stays empty above and below. Otherwise it is a column with text on
+ * both sides, or with text on one side at least 0.85 em away (a word space,
+ * even a justified one, stays below that).
+ */
+function isColumnBeside(innerLines: RawLine[], outerLines: RawLine[], blockOf: Map<RawLine, number>): boolean {
+    const inner = new Set(innerLines);
+    type Nearest = { a: RawLine; b: RawLine; gapEm: number };
+    const rows: { top: number; height: number; left?: Nearest; right?: Nearest }[] = [];
+    for (const b of outerLines) {
+        if (inner.has(b)) continue;
+        for (const a of innerLines) {
+            const minH = Math.min(bboxHeight(a.bbox), bboxHeight(b.bbox));
+            const overlapY = Math.min(a.bbox.b, b.bbox.b) - Math.max(a.bbox.t, b.bbox.t);
+            if (!(minH > 0) || overlapY < 0.5 * minH) continue;
+            const em = Math.min(a.font?.size || 0.7 * bboxHeight(a.bbox), b.font?.size || 0.7 * bboxHeight(b.bbox));
+            const gap = Math.max(b.bbox.l - a.bbox.r, a.bbox.l - b.bbox.r);
+            if (gap <= 0.5 * em) return false;
+            let row = rows.find((r) => Math.abs(r.top - a.bbox.t) < 0.5 * r.height);
+            if (!row) {
+                row = { top: a.bbox.t, height: bboxHeight(a.bbox) };
+                rows.push(row);
+            }
+            const side = b.bbox.r <= a.bbox.l ? "left" : "right";
+            if (!row[side] || gap / em < row[side]!.gapEm) row[side] = { a, b, gapEm: gap / em };
+        }
+    }
+    if (rows.length === 0) return false;
+    const gapEm = (n?: Nearest) => n?.gapEm ?? Infinity;
+    const rowMiddles = rows.filter((r) => gapEm(r.left) < 1.5 && gapEm(r.right) < 1.5).length;
+    if (2 * rowMiddles > rows.length) return false;
+    if (rows.length >= 2 || rowCount(innerLines) >= 2) return true;
+
+    const [{ left, right }] = rows;
+    /** A line of `a`'s block on a nearby row spans the gap from `x0` to `x1`. */
+    const bridged = (a: RawLine, x0: number, x1: number) => {
+        const h = bboxHeight(a.bbox);
+        const centerY = (a.bbox.t + a.bbox.b) / 2;
+        return outerLines.some((c) => {
+            if (inner.has(c) || blockOf.get(c) !== blockOf.get(a)) return false;
+            const ch = bboxHeight(c.bbox);
+            const overlapY = Math.min(a.bbox.b, c.bbox.b) - Math.max(a.bbox.t, c.bbox.t);
+            if (overlapY > 0.3 * Math.min(h, ch)) return false;
+            if (Math.abs((c.bbox.t + c.bbox.b) / 2 - centerY) > 1.5 * Math.max(h, ch)) return false;
+            return c.bbox.l <= x0 + 0.1 * h && c.bbox.r >= x1 - 0.1 * h;
+        });
+    };
+    if (left && bridged(left.a, left.b.bbox.r, left.a.bbox.l)) return false;
+    if (right && bridged(right.a, right.a.bbox.r, right.b.bbox.l)) return false;
+    return left && right ? true : Math.min(gapEm(left), gapEm(right)) >= 0.85;
+}
+
+/** Number of rows (lines sharing a vertical band) the lines are set in. */
+function rowCount(lines: RawLine[]): number {
+    let count = 0;
+    let rowTop = -Infinity;
+    let rowHeight = 0;
+    for (const line of [...lines].sort((a, b) => a.bbox.t - b.bbox.t)) {
+        if (line.bbox.t < rowTop + 0.5 * rowHeight) continue;
+        count++;
+        rowTop = line.bbox.t;
+        rowHeight = bboxHeight(line.bbox);
+    }
+    return count;
+}
+
+/**
+ * Whether two column boxes overlap or touch. When none do and a line must
+ * have at least half its area in a box to be read there, no line lies in two
+ * of them (a line meeting two separate boxes also covers the gap between
+ * them, so its overlap shares sum below 1), and lines need no owner.
+ */
+function columnsMeet(columns: Rect[]): boolean {
+    for (let i = 0; i < columns.length; i++) {
+        for (let j = i + 1; j < columns.length; j++) {
+            const a = columns[i];
+            const b = columns[j];
+            if (Math.min(a.x + a.w, b.x + b.w) >= Math.max(a.x, b.x) && Math.min(a.y + a.h, b.y + b.h) >= Math.max(a.y, b.y)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Each text line's MuPDF block, as an index that counts text blocks
+ * separated only by inline images as one block: MuPDF ends a text block at an
+ * inline image (a formula set as an image), and the paragraph goes on in the
+ * next one. An inline image is no taller than a line and sits in the row
+ * where one block ends or the next begins, within a line height of that
+ * row's line or of another inline image.
+ */
+function textBlockGroups(page: RawPageData): Map<RawLine, number> {
+    const groupOf = new Map<RawLine, number>();
+    /** `image` is set in `line`'s row, within a line height of `near`. */
+    const inRow = (image: BoundingBox, line: RawLine, near: BoundingBox) => {
+        const h = bboxHeight(line.bbox);
+        const centerY = (image.t + image.b) / 2;
+        return bboxHeight(image) <= h && centerY >= line.bbox.t && centerY <= line.bbox.b &&
+            Math.max(image.l - near.r, near.l - image.r) <= h;
+    };
+    /** Every image sits inline beside one of `lines`, or beside another such image (a formula of pieces). */
+    const allInline = (images: BoundingBox[], lines: RawLine[]) => {
+        const placed: { box: BoundingBox; line: RawLine }[] = [];
+        let rest = images;
+        while (rest.length > 0) {
+            const next = rest.filter((image) => {
+                const line = lines.find((l) => inRow(image, l, l.bbox)) ??
+                    placed.find((p) => inRow(image, p.line, p.box))?.line;
+                if (line) placed.push({ box: image, line });
+                return !line;
+            });
+            if (next.length === rest.length) return false;
+            rest = next;
+        }
+        return true;
+    };
+    let group = -1;
+    let previousLine: RawLine | undefined;
+    // Blocks between the last text block and the next.
+    let images: BoundingBox[] = [];
+    let otherBetween = false;
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines) {
+            if (block.type === "image") images.push(block.bbox);
+            else otherBetween = true;
+            continue;
+        }
+        const first = block.lines[0];
+        const inline = !otherBetween && images.length > 0 && previousLine !== undefined && first !== undefined &&
+            allInline(images, [previousLine, first]);
+        if (!inline) group++;
+        for (const line of block.lines) groupOf.set(line, group);
+        previousLine = block.lines[block.lines.length - 1];
+        images = [];
+        otherBetween = false;
+    }
+    return groupOf;
+}
+
+/**
+ * The column each raw line is read in, when column boxes overlap and a line
+ * lies in two of them: the smaller box when it is a column of its own (see
+ * `isColumnBeside`), the larger box otherwise (it holds the paragraph the
+ * smaller one is a piece of).
+ */
+function lineColumnOwners(
+    page: RawPageData,
+    columns: Rect[],
+    minOverlap: number,
+): Map<RawLine, number> {
+    const candidates = new Map<RawLine, number[]>();
+    const members: RawLine[][] = columns.map(() => []);
+    const blockOf = textBlockGroups(page);
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) {
+            const inColumns: number[] = [];
+            for (let i = 0; i < columns.length; i++) {
+                if (calculateColumnOverlap(line.bbox, columns[i]) < minOverlap) continue;
+                inColumns.push(i);
+                members[i].push(line);
+            }
+            candidates.set(line, inColumns);
+        }
+    }
+    const area = (i: number) => columns[i].w * columns[i].h;
+    const preferred = new Map<string, number>();
+    const prefer = (i: number, j: number): number => {
+        const key = `${i}|${j}`;
+        let winner = preferred.get(key);
+        if (winner === undefined) {
+            const [small, large] = area(j) < area(i) ? [j, i] : [i, j];
+            winner = isColumnBeside(members[small], members[large], blockOf) ? small : large;
+            preferred.set(key, winner);
+        }
+        return winner;
+    };
+    const owners = new Map<RawLine, number>();
+    for (const [line, inColumns] of candidates) {
+        if (inColumns.length === 0) continue;
+        let best = inColumns[0];
+        for (const i of inColumns.slice(1)) best = prefer(best, i);
+        owners.set(line, best);
+    }
+    return owners;
+}
+
+/**
  * Detect lines for all columns on a page
  */
 export function detectLinesOnPage(
@@ -562,9 +792,13 @@ export function detectLinesOnPage(
 ): PageLineResult {
     const columnResults: ColumnLineResult[] = [];
     const allLines: PageLine[] = [];
+    const minOverlap = options.minColumnOverlap ?? DEFAULT_OPTIONS.minColumnOverlap;
+    const columnOf = options.exclusiveColumns && (minOverlap < 0.5 || columnsMeet(columns))
+        ? lineColumnOwners(page, columns, minOverlap)
+        : undefined;
 
     for (let i = 0; i < columns.length; i++) {
-        const result = detectLinesInColumn(page, columns[i], i, options);
+        const result = detectLinesInColumn(page, columns[i], i, options, columnOf);
         columnResults.push(result);
         allLines.push(...result.lines);
     }

@@ -289,4 +289,20 @@ describe("learned boundaries", () => {
         const off = detectParagraphs(page, [BODY], {}, { paragraph: 0, header: 0 }, { boundaryModel: CAPITAL_STARTS });
         expect(off.items.map((item) => item.columnIndex)).toEqual([0, 1]);
     });
+
+    it("joins the lines of an item it continued across blocks with the schema's line joins", () => {
+        const page = makePage([
+            { l: 72, t: 100, lines: ["The files are at", "https://example.org/data-"] },
+            { l: 72, t: 140, lines: ["sets/v2 for all years."] },
+        ]);
+        const items = (lineJoins: boolean) =>
+            detectParagraphs(page, [BODY], { learnedBoundaries: true, lineJoins }, { paragraph: 0, header: 0 }, {
+                boundaryModel: CAPITAL_STARTS,
+            }).items;
+        const text = (lineJoins: boolean) => items(lineJoins).map((item) => item.text);
+        expect(items(true)[0].endColumnIndex).toBe(1);
+        // A URL broken at a hyphen keeps it.
+        expect(text(true)).toEqual(["The files are at https://example.org/data-sets/v2 for all years."]);
+        expect(text(false)).toEqual(["The files are at https://example.org/datasets/v2 for all years."]);
+    });
 });
