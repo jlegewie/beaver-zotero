@@ -14,9 +14,9 @@ import type { RawLine, RawPageData } from "@beaver/agent-core/extract/types";
 
 import type { GraphicsSummary } from "../worker/graphicsSummary";
 import { findCandidates, type CandidateSource } from "./candidates";
-import { EMPTY_DOC_CONTEXT, candidateFeatures, gridFeatures, type RegionDocContext } from "./features";
+import { EMPTY_DOC_CONTEXT, GRID_FEATURES, candidateFeatures, gridFeatures, type RegionDocContext } from "./features";
 import { intersectionArea, overlapFrac, rectArea, type Rect } from "./geometry";
-import { assertCompatible, predictRegionClass, usesGridFeatures, type RegionClass, type RegionModelWeights } from "./model";
+import { assertCompatible, predictRegionClass, readsGridFeatures, usesGridFeatures, type RegionClass, type RegionModelWeights } from "./model";
 import { bodySize, lineNumberGutter, mergeRowFragments, pageLines, pagePrimitives, sourceLines, tableGraphics, type RegionLine, type TableGraphics } from "./pageSignals";
 import { completeTableRows } from "./tableRows";
 
@@ -29,7 +29,8 @@ export interface DetectedRegion {
     features: number[];
     /**
      * With grid candidates, or a model trained on the grid feature set: the
-     * `GRID_FEATURES`, which follow `features` in `REGION_GRID_FEATURES`.
+     * `GRID_FEATURES`, which follow `features` in `REGION_GRID_FEATURES`. Without
+     * `DetectRegionsOptions.allGridFeatures`, only where the model reads them.
      */
     gridFeatures?: number[];
     /** Present when a model was given. */
@@ -142,12 +143,29 @@ export interface DetectRegionsOptions {
     margin?: ReadonlySet<RawLine>;
     /** Also propose grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
     gridCandidates?: boolean;
+    /**
+     * Compute every candidate's grid features (`DetectedRegion.gridFeatures`), also
+     * where the model never reads them: training exports and debugging. Otherwise
+     * they are computed only for candidates the model may read them for.
+     */
+    allGridFeatures?: boolean;
 }
 
 export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts: DetectRegionsOptions): RegionDetection {
     const start = performance.now();
     if (opts.model) assertCompatible(opts.model);
-    const all = pageLines(page);
+    const gridModel = !!opts.model && usesGridFeatures(opts.model);
+    // Grid features of a candidate are needed for the model when it may read them at
+    // the candidate's `src_grid`; without, the row passes the model `src_grid` and NaN.
+    const gridFeaturesFor = (source: CandidateSource): boolean =>
+        opts.allGridFeatures || !opts.model
+            ? !!opts.gridCandidates || gridModel
+            : gridModel && readsGridFeatures(opts.model, source === "grid" ? 1 : 0);
+    // Grid candidates and the grid features read cells from the characters of the
+    // structured-text lines (the features are the same with or without grid candidates),
+    // and take a line as one cell without them where its gaps tell (`RegionLine.inkSpan`).
+    const cells = !!opts.gridCandidates || gridFeaturesFor("text");
+    const all = pageLines(page, cells);
     // Skewed text has meaningless boxes: it neither forms nor shapes candidates.
     const pieces = all.filter((l) => !l.skewed);
     const skewed = all.filter((l) => l.skewed);
@@ -158,20 +176,19 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
     // no region takes them, and they are no column of a table.
     const gutter = lineNumberGutter(visual);
     const lines = visual.filter((l) => !gutter.has(l));
-    const gridModel = !!opts.model && usesGridFeatures(opts.model);
-    // Grid candidates and the grid features both read cells from the characters of the
-    // structured-text lines: the features are the same with or without grid candidates.
     const found = findCandidates(lines, primitives, page.width, page.height, bs, {
         ...(opts.gridCandidates ? { grid: true } : {}),
-        ...(opts.gridCandidates || gridModel ? { sources: sourceLines(page) } : {}),
+        ...(cells ? { sources: sourceLines(page) } : {}),
     });
     const doc = opts.doc ?? EMPTY_DOC_CONTEXT;
     const candidates = found.candidates.map((c): DetectedRegion => {
         const features = candidateFeatures(c, found, doc);
         const region: DetectedRegion = { bbox: c.bbox, anchored: c.anchored, source: c.source, features };
-        if (opts.gridCandidates || gridModel) region.gridFeatures = gridFeatures(c, found);
+        if (gridFeaturesFor(c.source)) region.gridFeatures = gridFeatures(c, found);
         if (opts.model) {
-            const probs = predictRegionClass(opts.model, gridModel ? [...features, ...region.gridFeatures!] : features);
+            // Grid features not computed are `src_grid` followed by values the model never reads.
+            const grid = gridModel ? (region.gridFeatures ?? GRID_FEATURES.map((_, i) => (i > 0 ? NaN : c.source === "grid" ? 1 : 0))) : [];
+            const probs = predictRegionClass(opts.model, gridModel ? [...features, ...grid] : features);
             region.probs = probs;
             const best = opts.model.classes.reduce((a, b) => (probs[b] > probs[a] ? b : a));
             region.label = best !== "other" && probs[best] < REGION_MIN_PROB[best] ? "other" : best;

@@ -307,7 +307,7 @@ export function segmentPages(
                 bodyExtents,
             });
             const graphics = pageCache!.graphicsFor(i);
-            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings, ctx.gridCandidates ?? false);
+            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings, ctx.gridCandidates ?? false, !!ctx.regionObserver);
             const regions = pass.result;
             if (regions.page !== detailed) {
                 // The target without absorbed lines replaces the walked page, so
@@ -532,6 +532,7 @@ function pageRegions(
     margin: ReadonlySet<RawLine>,
     settings: RegionItemSettings | undefined,
     gridCandidates: boolean,
+    allGridFeatures: boolean,
 ): Pick<RegionPassPage, "doc" | "detection" | "result" | "error"> {
     if (!graphics || !REGION_MODEL) {
         throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
@@ -546,6 +547,7 @@ function pageRegions(
             route: true,
             margin,
             gridCandidates,
+            allGridFeatures,
         });
         return { doc, detection, result: regionItemsForPage(page, detection, vocabulary, settings) };
     } catch (err) {

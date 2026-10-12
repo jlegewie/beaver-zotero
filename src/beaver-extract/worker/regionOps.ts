@@ -150,6 +150,8 @@ export async function opDetectRegions(args: {
                 model,
                 includeLines: args.includeLines,
                 gridCandidates: args.gridCandidates,
+                // The candidates are reported with their features.
+                allGridFeatures: true,
             });
             return {
                 pageIndex: i,
