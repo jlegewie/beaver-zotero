@@ -89,11 +89,18 @@ export interface PdfExtractionPreset {
      * (`ParagraphDetectionSettings.learnedBoundaries`).
      */
     learnedBoundaries: boolean;
+    /**
+     * Region detection also proposes grid candidates: blocks of lines whose
+     * column gutters stay aligned over several rows, running text included
+     * (`regions/gridCandidates.ts`), for text-heavy tables without rules.
+     * Off until a region model trained on them ships.
+     */
+    gridTableCandidates: boolean;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, learnedBoundaries: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, learnedBoundaries: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, learnedBoundaries: false, gridTableCandidates: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, learnedBoundaries: true, gridTableCandidates: false },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */
@@ -107,7 +114,7 @@ export function pdfExtractionPreset(schemaVersion: string): PdfExtractionPreset 
  * plugin never overrides presets: the output is no longer the schema version
  * it names.
  */
-export const OVERRIDABLE_PRESET_SWITCHES = ["learnedBoundaries"] as const;
+export const OVERRIDABLE_PRESET_SWITCHES = ["learnedBoundaries", "gridTableCandidates"] as const;
 
 export type PresetOverrides = Partial<Pick<PdfExtractionPreset, (typeof OVERRIDABLE_PRESET_SWITCHES)[number]>>;
 

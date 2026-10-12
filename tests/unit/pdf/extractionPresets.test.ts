@@ -27,6 +27,7 @@ describe("PDF extraction presets", () => {
             regions: false,
             pageNumberRuns: false,
             learnedBoundaries: false,
+            gridTableCandidates: false,
         });
     });
 
@@ -46,6 +47,7 @@ describe("PDF extraction presets", () => {
             regions: true,
             pageNumberRuns: true,
             learnedBoundaries: true,
+            gridTableCandidates: false,
         });
     });
 
@@ -74,6 +76,12 @@ describe("preset overrides", () => {
         expect(applyPresetOverrides(preset, { learnedBoundaries: false })).toEqual({ ...preset, learnedBoundaries: false });
         expect(preset.learnedBoundaries).toBe(true);
         expect(applyPresetOverrides(preset, undefined)).toBe(preset);
+    });
+
+    it("turns grid table candidates on for a development run", () => {
+        const preset = pdfExtractionPreset("5")!;
+        expect(applyPresetOverrides(preset, { gridTableCandidates: true }).gridTableCandidates).toBe(true);
+        expect(preset.gridTableCandidates).toBe(false);
     });
 
     it("rejects switches that can't be overridden", () => {

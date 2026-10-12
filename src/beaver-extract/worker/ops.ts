@@ -422,6 +422,7 @@ export function runExtractFromIndices(
     itemPasses: readonly ItemPass[] = [],
     pageNumberRuns = true,
     observers: StructuredRunObservers = {},
+    gridCandidates = false,
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
     try {
@@ -569,6 +570,7 @@ export function runExtractFromIndices(
             pageCache,
             paragraphSettings,
             splitter,
+            gridCandidates,
             ...(observers.region ? { regionObserver: observers.region } : {}),
             ...(observers.boundaries ? { boundaryObserver: observers.boundaries } : {}),
         };
@@ -1105,6 +1107,8 @@ export async function opExtract(
             pageCache,
             isStructured ? createItemPasses(preset) : [],
             preset.pageNumberRuns,
+            {},
+            preset.gridTableCandidates,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are
@@ -1233,6 +1237,7 @@ async function withStructuredRun<T>(
             itemPasses,
             preset.pageNumberRuns,
             observers,
+            preset.gridTableCandidates,
         );
         if (internal.metadata.timings) {
             internal.metadata.timings.docOpenMs = docOpenMs;

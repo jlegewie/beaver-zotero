@@ -161,7 +161,7 @@ const TEXT_CHAR_RE = /[\p{L}\p{N}]/u;
  * Whitespace-separated words (`RegionLine.words`) and words of at least three
  * letters (`RegionLine.alphaWords`); each two CJK characters count as one.
  */
-function wordCounts(text: string): { words: number; alphaWords: number } {
+export function wordCounts(text: string): { words: number; alphaWords: number } {
     const cjk = Math.floor((text.match(CJK_RE)?.length ?? 0) / 2);
     const tokens = text.split(/\s+/);
     let alpha = 0;

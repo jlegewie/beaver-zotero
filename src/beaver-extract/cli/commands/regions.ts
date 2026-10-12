@@ -5,7 +5,7 @@
  * items structured extraction emits come from `extract`.
  *
  * Single PDF:
- *   beaver-extract regions paper.pdf --pages 0,3 [--json] [--overlay-dir out/]
+ *   beaver-extract regions paper.pdf --pages 0,3 [--json] [--overlay-dir out/] [--grid-candidates]
  * Batch (training-data export / evaluation), resumable by page id:
  *   beaver-extract regions --page-list pages.jsonl --root <dir> --out regions.jsonl [--no-classify]
  *
@@ -52,6 +52,7 @@ interface RegionsOptions {
     contextPages?: string;
     classify?: boolean;
     lines?: boolean;
+    gridCandidates?: boolean;
     overlayDir?: string;
     json?: boolean;
     pretty?: boolean;
@@ -78,11 +79,16 @@ export function buildRegionsCommand(deps: CliDeps): Command {
         .option("--context-pages <n>", "extra pages scanned for recurring images", "12")
         .option("--no-classify", "skip the classifier (export unclassified candidates)")
         .option("--lines", "include each page's text lines with running-text/caption flags")
+        .option("--grid-candidates", "single-PDF mode: also propose grid candidates (text-heavy tables; preset switch gridTableCandidates)")
         .option("--overlay-dir <dir>", "single-PDF mode: write one overlay PNG per page")
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
         .action(async (pdfPath: string | undefined, opts: RegionsOptions) => {
             if (opts.pageList) {
+                if (opts.gridCandidates) {
+                    emitFailure(deps, opts, opts.pageList, undefined, {}, new Error("--grid-candidates is for single-PDF mode"));
+                    return;
+                }
                 await runBatch(deps, opts);
                 return;
             }
@@ -109,6 +115,7 @@ async function runSingle(deps: CliDeps, pdfPath: string, opts: RegionsOptions): 
             contextPages: Number(opts.contextPages ?? 12),
             classify: opts.classify !== false,
             includeLines: opts.lines === true,
+            ...(opts.gridCandidates ? { gridCandidates: true } : {}),
         });
         if (opts.overlayDir) await writeOverlays(deps, bytes, pdfPath, result, opts.overlayDir);
         if (opts.json) {

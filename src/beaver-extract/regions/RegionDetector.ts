@@ -13,18 +13,25 @@
 import type { RawLine, RawPageData } from "@beaver/agent-core/extract/types";
 
 import type { GraphicsSummary } from "../worker/graphicsSummary";
-import { findCandidates } from "./candidates";
-import { EMPTY_DOC_CONTEXT, candidateFeatures, type RegionDocContext } from "./features";
+import { findCandidates, type CandidateSource } from "./candidates";
+import { EMPTY_DOC_CONTEXT, candidateFeatures, gridFeatures, type RegionDocContext } from "./features";
 import { intersectionArea, overlapFrac, rectArea, type Rect } from "./geometry";
-import { assertCompatible, predictRegionClass, type RegionClass, type RegionModelWeights } from "./model";
+import { assertCompatible, predictRegionClass, usesGridFeatures, type RegionClass, type RegionModelWeights } from "./model";
 import { bodySize, lineNumberGutter, mergeRowFragments, pageLines, pagePrimitives, sourceLines, type RegionLine } from "./pageSignals";
 import { completeTableRows } from "./tableRows";
 
 export interface DetectedRegion {
     bbox: Rect;
     anchored: boolean;
+    /** The candidate source that proposed it (`candidates.ts`). */
+    source: CandidateSource;
     /** Feature vector in `REGION_FEATURES` order. */
     features: number[];
+    /**
+     * With grid candidates, or a model trained on the grid feature set: the
+     * `GRID_FEATURES`, which follow `features` in `REGION_GRID_FEATURES`.
+     */
+    gridFeatures?: number[];
     /** Present when a model was given. */
     probs?: Record<RegionClass, number>;
     /**
@@ -131,6 +138,8 @@ export interface DetectRegionsOptions {
      * takes them (`LINE_MARGIN`).
      */
     margin?: ReadonlySet<RawLine>;
+    /** Also propose grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
+    gridCandidates?: boolean;
 }
 
 export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts: DetectRegionsOptions): RegionDetection {
@@ -147,13 +156,20 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
     // no region takes them, and they are no column of a table.
     const gutter = lineNumberGutter(visual);
     const lines = visual.filter((l) => !gutter.has(l));
-    const found = findCandidates(lines, primitives, page.width, page.height, bs);
+    const gridModel = !!opts.model && usesGridFeatures(opts.model);
+    // Grid candidates and the grid features both read cells from the characters of the
+    // structured-text lines: the features are the same with or without grid candidates.
+    const found = findCandidates(lines, primitives, page.width, page.height, bs, {
+        ...(opts.gridCandidates ? { grid: true } : {}),
+        ...(opts.gridCandidates || gridModel ? { sources: sourceLines(page) } : {}),
+    });
     const doc = opts.doc ?? EMPTY_DOC_CONTEXT;
     const candidates = found.candidates.map((c): DetectedRegion => {
         const features = candidateFeatures(c, found, doc);
-        const region: DetectedRegion = { bbox: c.bbox, anchored: c.anchored, features };
+        const region: DetectedRegion = { bbox: c.bbox, anchored: c.anchored, source: c.source, features };
+        if (opts.gridCandidates || gridModel) region.gridFeatures = gridFeatures(c, found);
         if (opts.model) {
-            const probs = predictRegionClass(opts.model, features);
+            const probs = predictRegionClass(opts.model, gridModel ? [...features, ...region.gridFeatures!] : features);
             region.probs = probs;
             const best = opts.model.classes.reduce((a, b) => (probs[b] > probs[a] ? b : a));
             region.label = best !== "other" && probs[best] < REGION_MIN_PROB[best] ? "other" : best;
@@ -184,7 +200,8 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
                     (inMargin(l) ? LINE_MARGIN : 0),
         );
         const rules = primitives.filter((p) => p.kind === "hrule").map((p) => p.bbox);
-        const routes = routeLines(routed, flags, candidates, rules);
+        const takes = opts.gridCandidates ? found.candidates.map((c) => (c.memberLines ? new Set(c.memberLines) : undefined)) : undefined;
+        const routes = routeLines(routed, flags, candidates, rules, takes);
         const verticalRules = primitives.filter((p) => p.kind === "vrule").map((p) => p.bbox);
         if (opts.route) detection.routing = { lines: routed, flags, routes, rules, verticalRules };
         if (opts.includeLines) {
@@ -435,19 +452,36 @@ export function resolveOverlaps(regions: DetectedRegion[]): void {
  * Decorations take no text: what they overlap stays in prose, where margin
  * detection decides about it. Furniture, the document's margin text and
  * line-number gutters are never routed.
+ * A grid candidate become a table, or the table it became part of, takes the
+ * grid's lines (`takes`, by region), running text included: the cells of a
+ * text-heavy table.
  */
 export function routeLines(
     lines: readonly RegionLine[],
     flags: readonly number[],
     regions: DetectedRegion[],
     rules: readonly Rect[] = [],
+    takes?: readonly (ReadonlySet<RegionLine> | undefined)[],
 ): number[] {
+    // The smallest table holding the line among a grid's lines: the grid's own, or the
+    // table a grid became part of (`containedIn`).
+    const gridTable = (l: RegionLine): number => {
+        let best = -1;
+        regions.forEach((_, k) => {
+            if (!takes?.[k]?.has(l)) return;
+            let t = k;
+            for (let n = 0; regions[t].containedIn !== undefined && n < regions.length; n++) t = regions[t].containedIn!;
+            if (regions[t].label !== "table") return;
+            if (best < 0 || rectArea(regions[t].bbox) < rectArea(regions[best].bbox)) best = t;
+        });
+        return best;
+    };
     const routes = lines.map((l, i) => {
         if (flags[i] & (LINE_CAPTION | LINE_FURNITURE | LINE_GUTTER)) return -1;
         // Margin text of words reads as running text, but a continued table's repeated header
         // is such a line too: it goes to the region that holds it, for `keepMarginOut` to judge.
         const marginRow = (flags[i] & (LINE_RUNNING | LINE_MARGIN)) === (LINE_RUNNING | LINE_MARGIN);
-        if (flags[i] & LINE_RUNNING && !marginRow) return -1;
+        if (flags[i] & LINE_RUNNING && !marginRow) return takes ? gridTable(l) : -1;
         const cx = (l.bbox[0] + l.bbox[2]) / 2;
         const cy = (l.bbox[1] + l.bbox[3]) / 2;
         let best = -1;

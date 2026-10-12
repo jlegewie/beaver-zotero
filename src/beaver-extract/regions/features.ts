@@ -1,13 +1,19 @@
 /**
  * Candidate features for the region classifier.
  *
- * This is the only feature implementation: the research repo trains on vectors
- * exported by `beaver-extract regions` and ships weights back as
- * `regions/weights.ts`. Changing a feature's meaning or order requires bumping
- * `REGION_FEATURE_VERSION` (the model refuses mismatched weights) and retraining.
+ * This is the only feature implementation: the models repo trains on vectors
+ * exported by `beaver-extract items export --task regions-v2` and ships weights
+ * back as `regions/weights.ts`. Changing a feature's meaning or order requires
+ * bumping `REGION_FEATURE_VERSION` (the model refuses mismatched weights) and
+ * retraining.
+ *
+ * Two feature sets exist: `REGION_FEATURES` (version 5, the shipped model's)
+ * and `REGION_GRID_FEATURES` (version 6), which adds the row structure of a
+ * candidate's lines (`GRID_FEATURES`) for a model trained with grid candidates.
  */
 import type { Candidate, PageCandidates } from "./candidates";
 import { hgap, intersectionArea, overlapFrac, rectArea, vgap, type Rect } from "./geometry";
+import { rowStructure } from "./gridCandidates";
 import { NUMERIC_RE, isProse, type RegionLine } from "./pageSignals";
 import { spansColumn } from "./textCandidates";
 
@@ -32,6 +38,22 @@ export const REGION_FEATURES = [
 ] as const;
 
 export type RegionFeatureName = (typeof REGION_FEATURES)[number];
+
+export const REGION_GRID_FEATURE_VERSION = 6;
+
+/**
+ * Whether the candidate is a grid candidate, and the row structure of its lines
+ * (`rowStructure`), running text included: how many rows and column gutters they have, how many rows hold text in two
+ * or more columns, how full the emptiest column is and how many of its rows
+ * have text in another column too, and how many of the gaps between rows are
+ * bands crossing every column.
+ */
+export const GRID_FEATURES = [
+    "src_grid", "grid_rows", "grid_gutters", "grid_multi_rows", "grid_sparse_occupancy", "grid_anchored", "grid_breaks",
+] as const;
+
+/** Feature set version 6: `REGION_FEATURES`, then `GRID_FEATURES`. */
+export const REGION_GRID_FEATURES = [...REGION_FEATURES, ...GRID_FEATURES] as const;
 
 /** Document-level context: on how many pages each image (by data hash) is drawn. */
 export interface RegionDocContext {
@@ -148,8 +170,9 @@ export function candidateFeatures(
     const figDist = captionDistance(page.figureCaptions, bbox, bs);
     const tabDist = captionDistance(page.tableCaptions, bbox, bs);
 
-    // Text candidates describe their own lines (rotated text in its reading frame).
-    const horiz = c.source === "text" && c.lines ? c.lines : inside.filter((l) => !l.rot);
+    // Text and grid candidates describe their own lines (rotated or upside-down text in
+    // its reading frame).
+    const horiz = (c.source === "text" || c.source === "grid") && c.lines ? c.lines : inside.filter((l) => !l.rot);
     const sum = (f: (l: RegionLine) => number) => horiz.reduce((t, l) => t + f(l), 0);
     const ink = Math.max(1, sum((l) => l.inkChars));
     const words = Math.max(1, sum((l) => l.words));
@@ -232,4 +255,23 @@ export function candidateFeatures(
         fig_cap_below: captionAdjacent(page.figureCaptions, bbox, 1, bs),
     };
     return REGION_FEATURES.map((name) => values[name]);
+}
+
+/**
+ * `GRID_FEATURES` of a candidate, in that order. Text and grid candidates describe
+ * their own lines (rotated text in its reading frame); others the upright lines
+ * inside their box.
+ */
+export function gridFeatures(c: Candidate, page: PageCandidates): number[] {
+    const lines = c.lines ?? page.lines.filter((l) => !l.rot && overlapFrac(l.bbox, c.bbox) > 0.6);
+    const shape = rowStructure(lines, page.charsOf);
+    return [
+        c.source === "grid" ? 1 : 0,
+        Math.min(60, shape.rows),
+        Math.min(10, shape.gutters),
+        shape.multiRows,
+        shape.sparseOccupancy,
+        shape.anchored,
+        shape.breaks,
+    ];
 }
