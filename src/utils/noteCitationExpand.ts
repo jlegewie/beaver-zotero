@@ -433,10 +433,11 @@ function resolvePageFromStructuredResult(
  * citation's private metadata either way.
  *
  * Locators resolve against the PDF schema version their id scheme names (see
- * `pdfSchemaVersionForLocator`). The current version is read from the cache
- * only: on a miss the locator is reported as unresolved (and the citation
- * shows no page) rather than triggering a full extraction. A
- * producible non-current version is extracted on demand without the cache. Callers
+ * `pdfSchemaVersionForLocator`). The current version is read from the cache,
+ * and a local file is extracted on a miss; a remote-only file is never
+ * downloaded, so its locator is reported as unresolved (and the citation shows
+ * no page). A producible non-current version is extracted on demand without
+ * the cache. Callers
  * thread the returned `pages` map into `expandToRawHtml` and surface
  * `unresolved` as a save warning.
  * External-file links use the same cached page lookup, but retain their
@@ -539,14 +540,18 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
             if (!resultPromise) {
                 resultPromise = (async () => {
                     const { filePath, isRemoteOnly } = await attachmentCacheFilePath(attachmentItem);
-                    // The current version is a cache read; older versions are
-                    // extracted on demand, which a remote-only file can't be
-                    // without a download.
+                    // A local PDF is extracted when its result is not cached
+                    // (evicted, or read on another computer and served from
+                    // the backend's cache). Other documents are never run
+                    // through the PDF extractor, and a remote-only file is
+                    // never downloaded: the current version is a cache read,
+                    // older ones are unavailable.
                     if (isRemoteOnly && !isCurrentExtractionSchemaVersion('pdf', schemaVersion)) return null;
                     return structuredPdfResultForSchema({
                         source: { kind: 'zotero', item: attachmentItem },
                         filePath,
                         schemaVersion,
+                        extractOnMiss: !isRemoteOnly && isPdfDocument(attachmentItem),
                     });
                 })();
                 resultsByAttachment.set(resultKey, resultPromise);

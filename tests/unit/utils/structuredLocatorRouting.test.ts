@@ -129,6 +129,44 @@ describe('locator resolution by id scheme', () => {
         );
     });
 
+    it('extracts a local file whose current result is not cached', async () => {
+        getResult.mockResolvedValue(null);
+        vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
+            kind: 'ok',
+            cached: false,
+            result: currentResult(),
+            totalPages: 5,
+            resolvedAttachment: { libraryId: 1, zoteroKey: 'ATTACH12' },
+            contentType: 'application/pdf',
+        });
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
+
+        expect(resolved.unresolved).toEqual([]);
+        expect(Object.values(resolved.pages)).toEqual([{ label: 'i', page: 1 }]);
+        expect(extractAndCacheResolvedPdfDocument).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({ schemaVersion: '5', mode: 'structured' }),
+        );
+    });
+
+    it('never runs a non-PDF attachment through the PDF extractor', async () => {
+        getResult.mockResolvedValue(null);
+        attachment.attachmentContentType = 'application/epub+zip';
+        attachment.attachmentLinkMode = 0;
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="p3"/>');
+
+        expect(resolved.unresolved).toEqual(['id="1-ATTACH12" loc="p3"']);
+        expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
+    });
+
+    it('never extracts a remote-only file for the current version', async () => {
+        getResult.mockResolvedValue(null);
+        attachment.getFilePathAsync = vi.fn().mockResolvedValue(null);
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
+
+        expect(resolved.unresolved).toEqual(['id="1-ATTACH12" loc="s1.2"']);
+        expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
+    });
+
     it('reports an older locator as unresolved when its extraction fails', async () => {
         vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
             kind: 'timeout', phase: 'pdf_extract', timeoutSeconds: 40, pageCount: 5, resolvedAttachment: null,

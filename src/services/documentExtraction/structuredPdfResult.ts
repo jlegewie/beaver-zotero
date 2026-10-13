@@ -19,17 +19,21 @@ export function locatorSchemaVersion(locator: Locator, isPdf: boolean): string {
 /**
  * Structured result in one schema version, for resolving locators locally.
  *
- * The current version is read from the document cache only (a miss returns
- * `null`, never an extraction). A producible non-current PDF version is
- * extracted on demand without the cache. Any other version returns `null`.
+ * The current version is read from the document cache. A miss returns `null`
+ * unless `extractOnMiss` is set, in which case the file is extracted (and
+ * cached), as for a file whose cached result was evicted. A producible
+ * non-current PDF version is extracted on demand without the cache. Any other
+ * version returns `null`.
  */
 export async function structuredPdfResultForSchema(args: {
     source: ExtractionSource;
     /** Source file path, the document cache key for the current version. */
     filePath: string;
     schemaVersion: string;
+    /** Extract the current version on a cache miss. Needs a local PDF. */
+    extractOnMiss?: boolean;
 }): Promise<StructuredExtractResult | null> {
-    const { source, filePath, schemaVersion } = args;
+    const { source, filePath, schemaVersion, extractOnMiss = false } = args;
     const ref = source.kind === 'zotero' ? source.item : source.itemRef;
     if (isCurrentExtractionSchemaVersion('pdf', schemaVersion)) {
         const result = await Zotero.Beaver?.documentCache?.getResult(
@@ -37,9 +41,11 @@ export async function structuredPdfResultForSchema(args: {
             'structured',
             filePath,
         );
-        return result?.mode === 'structured' ? result : null;
+        if (result?.mode === 'structured') return result;
+        if (!extractOnMiss) return null;
+    } else if (!PRODUCIBLE_PDF_SCHEMA_VERSIONS.includes(schemaVersion)) {
+        return null;
     }
-    if (!PRODUCIBLE_PDF_SCHEMA_VERSIONS.includes(schemaVersion)) return null;
     // Imported lazily so note-citation code, which imports this module, loads
     // the extraction core only when a locator needs an on-demand extraction.
     const { extractAndCacheResolvedPdfDocument } = await import('../documentExtractionCore');
