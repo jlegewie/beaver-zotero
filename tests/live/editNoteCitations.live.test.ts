@@ -305,7 +305,9 @@ describe('edit_note execute — structural locator resolved to a page', () => {
         expect(readBack.error).toBeFalsy();
         const decoded = decodeURIComponent(readBack.saved_html);
         // A native page locator was stored (not dropped).
-        expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
+        expect(decoded).toMatch(/"locator":"\d+"/);
+        // No CSL label: Zotero then shows the standard "p." form.
+        expect(decoded).not.toContain('"label":');
     });
 
     it('re-reads the resolved sentence locator as a loc="pageN" tag', async () => {
@@ -347,7 +349,9 @@ describe('edit_note execute — structural locator resolved to a page', () => {
             { library_id: ref.library_id, zotero_key: ref.zotero_key },
         );
         const decoded = decodeURIComponent(readBack.saved_html);
-        expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
+        expect(decoded).toMatch(/"locator":"\d+"/);
+        // No CSL label: Zotero then shows the standard "p." form.
+        expect(decoded).not.toContain('"label":');
     });
 
     it('resolves a structural locator on a regular parent item via its child PDF', async () => {
@@ -372,7 +376,9 @@ describe('edit_note execute — structural locator resolved to a page', () => {
             { library_id: ref.library_id, zotero_key: ref.zotero_key },
         );
         const decoded = decodeURIComponent(readBack.saved_html);
-        expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
+        expect(decoded).toMatch(/"locator":"\d+"/);
+        // No CSL label: Zotero then shows the standard "p." form.
+        expect(decoded).not.toContain('"label":');
     });
 
     it('warns and drops the locator when a structural locator cannot be resolved', async () => {

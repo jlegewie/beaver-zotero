@@ -31,7 +31,6 @@ import {
     detectPartialSimplifiedTag,
     validateNewString,
 } from '../../../utils/editNoteValidation';
-import { preloadExternalFileCitations } from '../../../utils/externalFileCitation';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import {
     buildUnresolvedLocatorWarning,
@@ -64,11 +63,14 @@ import {
     rebuildDataCitationItems,
     stripDataCitationItems,
 } from '../../../utils/noteWrapper';
-import { preloadStandaloneAttachmentLinks } from '../../../utils/zoteroLinkCitation';
+import { maskRenderedCitationTags, unmaskNoteCitationTags } from '../../../utils/noteCitationMask';
 import { dismissNotePreviews } from '../../notePreviews';
 import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } from '../operationContext';
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { getExternalRefContext } from './noteCitationRendering';
+
+export { getExternalRefContext };
 
 /** Combine optional warning strings into a `warnings` array, or undefined when empty. */
 function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
@@ -107,7 +109,14 @@ export async function buildMarkdownRenderFields(
 
     try {
         if (!context?.renderMarkdown) return {};
-        const render = async (content: string) => simplifyNoteHtml(await context.renderMarkdown!(content), libraryId).simplified;
+        // The renderer leaves citations as the tags the model wrote, so the
+        // strategy expands them like any other edit (old_string tags resolve
+        // by `ref`, new ones are built from the model's page numbers). They
+        // are masked while the HTML is simplified.
+        const render = async (content: string) => {
+            const masked = maskRenderedCitationTags(await context.renderMarkdown!(content));
+            return unmaskNoteCitationTags(simplifyNoteHtml(masked.text, libraryId).simplified, masked);
+        };
 
         const renderedOldSimplified = (await render(oldString));
         let renderedNewSimplified: string;
@@ -147,20 +156,6 @@ async function findMarkdownRenderFallbackMatch(
         libraryId, context);
     if (!rendered.renderedOldSimplified) return null;
     return findMarkdownRenderMatch({ ...matchInput, ...rendered });
-}
-
-/** Preload citation labels and files, and snapshot external-work mappings. */
-export async function getExternalRefContext(content: string, context?: OperationContext): Promise<ExternalRefContext> {
-    const [{ files, warnings }] = await Promise.all([
-        preloadExternalFileCitations(content),
-        preloadStandaloneAttachmentLinks(content, libraryID => !checkLibraryExcluded(libraryID)),
-    ]);
-    return {
-        externalFiles: files,
-        externalFileWarnings: warnings,
-        externalRefs: context?.externalRefs ?? {},
-        externalItemMapping: context?.externalItemMapping ?? {},
-    };
 }
 
 /**
@@ -420,7 +415,9 @@ async function validateEditNoteAction(
     // 8. Simplify note (needed for both modes). Load every library the note
     //    and the edit cite first: simplification, prechecks and expansion
     //    resolve cited items synchronously.
-    await ensureCitedLibrariesLoaded([rawHtml, new_string, old_string], [resolvedLibraryId]);
+    await ensureCitedLibrariesLoaded([rawHtml, new_string, old_string], [resolvedLibraryId], {
+        externalItemMapping: request.operation?.externalItemMapping,
+    });
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
     const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
@@ -830,7 +827,9 @@ async function executeEditNoteAction(
 
     // Load every library the edit cites: expansion resolves cited items
     // synchronously.
-    await ensureCitedLibrariesLoaded([new_string, old_string], [resolvedLibraryId]);
+    await ensureCitedLibrariesLoaded([new_string, old_string], [resolvedLibraryId], {
+        externalItemMapping: request.operation?.externalItemMapping,
+    });
 
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.

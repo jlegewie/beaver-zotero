@@ -1179,7 +1179,9 @@ export async function handleCreateNote(args: any): Promise<any> {
         action_data: actionData,
     };
 
-    const validation = await validateCreateNoteAction(validateRequest);
+    // Validation renders the content to find its citations, which needs the
+    // same operation (and its render seam) that execution uses.
+    const validation = await validateCreateNoteAction({ ...validateRequest, operation });
     if (!validation.valid) {
         return mcpError(validation.error ?? 'Create note validation failed');
     }

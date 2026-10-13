@@ -262,7 +262,9 @@ Citation tags use the unified format `<citation id="libraryID-zoteroKey"/>`. Add
 | `library` | `string` | No | Target library name or ID. Omit to use the default user library. |
 | `collection` | `string` | No | Collection name or key for standalone notes. Ignored when `parent_id` is set. |
 
-**Response**: JSON with `note_id`, `parent_item_id`, `related_item_id`, `collection_key`, `note_content` (rendered simplified HTML), `warning`, and `citation_issues` containing `invalid_keys[]` and `errors[]`.
+**Response**: JSON with `note_id`, `parent_item_id`, `related_item_id`, `collection_key`, `note_content` (rendered simplified HTML), `warning`, and `citation_issues` containing `invalid_keys[]` and `errors[]`, which report non-fatal problems resolving cited items after the note is written.
+
+Every citation is checked before the note is written. A citation that cannot be stored (an unknown, malformed or excluded item ID) returns an MCP error naming it, and no note is created. Citation tags inside code examples are not checked.
 
 **Underlying handlers**: `validateCreateNoteAction` and `executeCreateNoteAction` from `src/services/agentDataProvider/actions/createNote.ts`.
 

@@ -3,8 +3,7 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import type { OperationContext } from '../../src/services/agentDataProvider/operationContext';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { store } from '../store';
-import { prepareCitationRenderContext } from '../utils/citationRenderContext';
-import { renderToHTML } from '../utils/citationRenderers';
+import { renderNoteMarkdownToHTML } from '../utils/noteMarkdownRender';
 
 /** Freeze manual note rendering inputs before queue admission and asynchronous reads. */
 export function captureNoteOperationContext(): OperationContext {
@@ -17,7 +16,6 @@ export function captureNoteOperationContext(): OperationContext {
         threadId: store.get(currentThreadIdAtom),
         externalRefs: renderContext.externalReferencesMap,
         externalItemMapping: renderContext.externalMapping,
-        renderMarkdown: async content => renderToHTML(content, 'markdown',
-            await prepareCitationRenderContext(content, renderContext)),
+        renderMarkdown: content => renderNoteMarkdownToHTML(content, renderContext),
     };
 }

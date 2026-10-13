@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { maskRenderedCitationTags } from '../../../src/utils/noteCitationMask';
 import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
 
 // Mock createCitationHTML before importing the module under test
@@ -629,6 +630,7 @@ describe('cross-library citations', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ libraryID: GROUP_LIBRARY_ID, key: 'JLIWC45M' }),
             '5',
+            undefined,
         );
     });
 
@@ -709,7 +711,8 @@ describe('expandToRawHtml', () => {
         const result = expandToRawHtml(input, metadata, 'old');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '99'
+            '99',
+            undefined
         );
         expect(result).toContain('data-citation=');
     });
@@ -721,8 +724,101 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'old');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '25'
+            '25',
+            undefined
         );
+    });
+
+    it('keeps the CSL label, prefix and suffix when an edit moves the locator', () => {
+        const { metadata } = makeMetadata();
+        const citationData = {
+            citationItems: [{
+                uris: ['http://zotero.org/users/1/items/EX1'],
+                locator: '3', label: 'chapter', prefix: 'see', suffix: 'emphasis added',
+            }],
+        };
+        metadata.elements.set('c_EX1_2', {
+            rawHtml: `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">(x)</span>`,
+            type: 'citation',
+            originalAttrs: { item_id: 'u-EX1', page: '3', pageConvention: 'label', cslLabel: 'chapter' },
+        });
+
+        expandToRawHtml('<citation id="1-EX1" loc="page4" ref="c_EX1_2"/>', metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'EX1' }),
+            '4',
+            { label: 'chapter', prefix: 'see', suffix: 'emphasis added' },
+        );
+    });
+
+    it('drops the stored CSL options when an edit swaps the cited item', () => {
+        const { metadata } = makeMetadata();
+        const citationData = { citationItems: [{ uris: ['http://zotero.org/users/1/items/EX1'], locator: '3', label: 'chapter' }] };
+        metadata.elements.set('c_EX1_2', {
+            rawHtml: `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">(x)</span>`,
+            type: 'citation',
+            originalAttrs: { item_id: 'u-EX1', page: '3', pageConvention: 'label', cslLabel: 'chapter' },
+        });
+
+        expandToRawHtml('<citation id="1-OTHER1" loc="page3" ref="c_EX1_2"/>', metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'OTHER1' }),
+            '3',
+            undefined,
+        );
+    });
+
+    it('expands a single-quoted external reference once masking has canonicalized it', () => {
+        const { metadata } = makeMetadata();
+        const [tag] = maskRenderedCitationTags(`Claim <citation external_id='W1' loc='page7'/>`).tags;
+
+        expandToRawHtml(tag, metadata, 'new', {
+            externalRefs: {},
+            externalItemMapping: { W1: { library_id: 1, zotero_key: 'MAPPED01' } },
+        });
+
+        expect(createCitationHTML).toHaveBeenCalledWith(expect.objectContaining({ key: 'MAPPED01' }), '7', undefined);
+    });
+
+    it('names a malformed citation id in the error', () => {
+        const { metadata } = makeMetadata();
+        expect(() => expandToRawHtml('<citation id="ABCD1234"/>', metadata, 'new'))
+            .toThrow('Invalid citation id "ABCD1234"');
+    });
+
+    it('refuses an edited compound citation instead of silently keeping it', () => {
+        const { metadata } = makeMetadata();
+        metadata.elements.get('c_K1+K2_0')!.originalItems = 'u-K1, u-K2';
+
+        expect(() => expandToRawHtml('<citation items="u-K1:page=5, u-K2" ref="c_K1+K2_0"/>', metadata, 'new'))
+            .toThrow('compound citation, which cannot be edited');
+        expect(() => expandToRawHtml('<citation id="1-K1" ref="c_K1+K2_0"/>', metadata, 'new'))
+            .toThrow('compound citation, which cannot be edited');
+    });
+
+    it('compares compound items by identity, so a legacy id for the same item is no change', () => {
+        const { metadata } = makeMetadata();
+        metadata.elements.get('c_K1+K2_0')!.originalItems = 'u-K1:page=5, u-K2';
+        const raw = rawCompoundCitation(['K1', 'K2']);
+
+        expect(expandToRawHtml('<citation items="1-K1:page=5, 1-K2" ref="c_K1+K2_0"/>', metadata, 'new')).toBe(raw);
+        expect(() => expandToRawHtml('<citation items="1-K1:page=6, 1-K2" ref="c_K1+K2_0"/>', metadata, 'new'))
+            .toThrow('compound citation, which cannot be edited');
+        expect(() => expandToRawHtml('<citation items="u-K2, u-K1:page=5" ref="c_K1+K2_0"/>', metadata, 'new'))
+            .toThrow('compound citation, which cannot be edited');
+    });
+
+    it('restores a compound citation left as read, including whitespace drift', () => {
+        const { metadata } = makeMetadata();
+        metadata.elements.get('c_K1+K2_0')!.originalItems = 'u-K1, u-K2';
+        const raw = rawCompoundCitation(['K1', 'K2']);
+
+        expect(expandToRawHtml('<citation items="u-K1,u-K2" ref="c_K1+K2_0"/>', metadata, 'new')).toBe(raw);
+        expect(expandToRawHtml('<citation ref="c_K1+K2_0"/>', metadata, 'new')).toBe(raw);
+        // old_string only locates text, so attribute drift there is tolerated.
+        expect(expandToRawHtml('<citation items="u-K1:page=5, u-K2" ref="c_K1+K2_0"/>', metadata, 'old')).toBe(raw);
     });
 
     it('rebuilds existing citation when page locator is removed', () => {
@@ -733,6 +829,7 @@ describe('expandToRawHtml', () => {
         // page is now undefined vs original "10" → attrs changed → rebuild
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
+            undefined,
             undefined
         );
     });
@@ -754,7 +851,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '9'
+            '9',
+            undefined
         );
     });
 
@@ -765,6 +863,7 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, {});
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
+            undefined,
             undefined
         );
     });
@@ -779,7 +878,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels as any, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '9'
+            '9',
+            undefined
         );
     });
 
@@ -791,7 +891,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '3'
+            '3',
+            undefined
         );
     });
 
@@ -802,7 +903,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
-            '9'
+            '9',
+            undefined
         );
     });
 
@@ -814,7 +916,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
-            '9'
+            '9',
+            undefined
         );
     });
 
@@ -824,6 +927,7 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, {});
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
+            undefined,
             undefined
         );
     });
@@ -855,6 +959,7 @@ describe('expandToRawHtml', () => {
         const result = expandToRawHtml(input, metadata, 'new');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEW1' }),
+            undefined,
             undefined
         );
         expect(result).toContain('data-citation=');
@@ -866,7 +971,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEW1' }),
-            '42'
+            '42',
+            undefined
         );
     });
 
@@ -1062,6 +1168,7 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
+            undefined,
             undefined
         );
     });
@@ -1072,7 +1179,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
-            '7'
+            '7',
+            undefined
         );
     });
 
@@ -1780,7 +1888,8 @@ describe('citation round-trips', () => {
         // Should have called createCitationHTML with the new page
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'PU1' }),
-            '99'
+            '99',
+            undefined
         );
         expect(expanded).toContain('data-citation=');
     });
@@ -1817,6 +1926,7 @@ describe('citation round-trips', () => {
         // New citation built via createCitationHTML
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'BRAND' }),
+            undefined,
             undefined
         );
     });
