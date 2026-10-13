@@ -321,13 +321,13 @@ graphics summary counts (`records`, `overflow`, `incomplete`) and:
   (`graphics`, `caption`, `text` or `grid`), features, class probabilities,
   label and `containedIn` after routing.
 
-With `--preset gridTableCandidates` the candidates include grid candidates
+Under schema 5 the candidates include grid candidates
 (`regions/gridCandidates.ts`: text-heavy tables, running text included) and
 each carries `gridFeatures` too; the manifest names them (`grid_features`), and
 `features` followed by `gridFeatures` is feature set `grid_feature_version`
-(`REGION_GRID_FEATURES`). `v5.regions` and `v5Route` are then the shipped
-weights' decisions over these candidates, which grid tables' running text
-follows: not the shipped extraction.
+(`REGION_GRID_FEATURES`). With `--preset gridTableCandidates=false` only the
+other sources propose candidates, and `v5.regions` and `v5Route` are the
+shipped weights' decisions over those: not the shipped extraction.
 
 Boxes are in the structured export's frame: points, top-left origin, the page
 as displayed (`/Rotate` applied); a page set sideways keeps that frame, with
@@ -349,8 +349,8 @@ decisions and reasons needs; `tableRowEvidence` (table rows read from row
 rules, fill bands and an anchor column before the text, on in schema 5):
 `tableRowEvidence=false` gives the text-only rows, for comparing table output
 on and off; and `gridTableCandidates` (grid candidates for text-heavy tables,
-off until a region model trained on them ships), for the region training
-export. The output is then no longer the schema version
+on in schema 5): `gridTableCandidates=false` gives the region pass without
+them, for comparing region output on and off. The output is then no longer the schema version
 it names; `items export` records
 the overrides in its manifest (`preset_overrides`) and resumes a directory
 only with the same ones.

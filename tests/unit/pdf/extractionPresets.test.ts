@@ -11,7 +11,7 @@ import {
 import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
 describe("PDF extraction presets", () => {
-    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, item passes, regions, page-number runs, exclusive column lines, line joins, note markers, learned boundaries and table row evidence off and ids document-wide for schema 4", () => {
+    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, item passes, regions, page-number runs, exclusive column lines, line joins, note markers, learned boundaries, table row evidence and grid table candidates off and ids document-wide for schema 4", () => {
         expect(pdfExtractionPreset("4")).toEqual({
             schemaVersion: "4",
             textRepair: false,
@@ -35,7 +35,7 @@ describe("PDF extraction presets", () => {
         });
     });
 
-    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions, page-number runs, exclusive column lines, line joins, note markers, learned boundaries and table row evidence on and ids page-scoped for schema 5", () => {
+    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions, page-number runs, exclusive column lines, line joins, note markers, learned boundaries, table row evidence and grid table candidates on and ids page-scoped for schema 5", () => {
         expect(pdfExtractionPreset("5")).toEqual({
             schemaVersion: "5",
             textRepair: true,
@@ -55,7 +55,7 @@ describe("PDF extraction presets", () => {
             noteMarkers: true,
             learnedBoundaries: true,
             tableRowEvidence: true,
-            gridTableCandidates: false,
+            gridTableCandidates: true,
         });
     });
 
@@ -86,10 +86,10 @@ describe("preset overrides", () => {
         expect(applyPresetOverrides(preset, undefined)).toBe(preset);
     });
 
-    it("turns grid table candidates on for a development run", () => {
+    it("turns grid table candidates off for a development run", () => {
         const preset = pdfExtractionPreset("5")!;
-        expect(applyPresetOverrides(preset, { gridTableCandidates: true }).gridTableCandidates).toBe(true);
-        expect(preset.gridTableCandidates).toBe(false);
+        expect(applyPresetOverrides(preset, { gridTableCandidates: false }).gridTableCandidates).toBe(false);
+        expect(preset.gridTableCandidates).toBe(true);
     });
 
     it("rejects switches that can't be overridden", () => {

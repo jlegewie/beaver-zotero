@@ -25,9 +25,10 @@
  *     `beaver-regions-v1`): per page the region pass's text pieces and drawing
  *     primitives and what the shipped detector did with them. With
  *     `--page-list` (JSONL rows with `doc_id` and `page_index`) only the listed
- *     documents run, and only the listed pages are written. With
- *     `--preset gridTableCandidates`, the candidates include the grid source
- *     and carry the grid features (manifest `grid_features`).
+ *     documents run, and only the listed pages are written. Under schema 5
+ *     the candidates include the grid source and carry the grid features
+ *     (manifest `grid_features`); `--preset gridTableCandidates=false` leaves
+ *     them out.
  *
  * List rows are JSONL with `doc_id` and `pdf_path`.
  */
