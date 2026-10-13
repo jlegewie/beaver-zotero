@@ -364,6 +364,30 @@ describe('note documents in every format', () => {
         expect(document).toContain(`<wp:extent cx="${128 * 9525}" cy="${96 * 9525}"/>`);
     });
 
+    it('spaces a citation after a link whose text ends in a space once', () => {
+        const linked = parseNoteDoc({ type: 'doc', content: [paragraph(
+            text('see this ', [{ type: 'link', attrs: { href: 'https://example.com' } }]),
+            { type: 'citation', attrs: { citation: { citationItems: [{ uris: ['u'] }] } } },
+        )] }, { liftTitle: false });
+        const citations = citationsFor(linked);
+        const { html } = writeHtml({ doc: linked, citations, options: { linkItems: false, bibliographyTitle: 'R', notesTitle: 'N' } });
+        expect(html).toContain('<a href="https://example.com">see this </a><span class="citation">');
+        const { markdown } = writeMarkdown({ doc: linked, citations, options: { linkItems: false, bibliographyTitle: 'R', frontMatter: null } });
+        expect(markdown).not.toMatch(/\)\s{2,}\(see/);
+    });
+
+    it('keeps the space after a bare address before a citation in LaTeX', () => {
+        const linked = parseNoteDoc({ type: 'doc', content: [paragraph(
+            text('https://example.com ', [{ type: 'link', attrs: { href: 'https://example.com' } }]),
+            { type: 'citation', attrs: { citation: { citationItems: [{ uris: ['u'] }] } } },
+        )] }, { liftTitle: false });
+        const { tex } = writeLatex({
+            doc: linked, citations: citationsFor(linked), keys: { 7: 'k' },
+            options: { citationPackage: 'biblatex', standalone: false, bibFileName: 'refs.bib', linkItems: false, bibliographyTitle: 'R', date: '' },
+        });
+        expect(tex).toContain('\\url{https://example.com} \\parencite');
+    });
+
     it('marks an image that could not be loaded instead of dropping it', async () => {
         const html = writeHtml({ doc, citations: citationsFor(doc), options: { linkItems: false, bibliographyTitle: 'R', notesTitle: 'N' } }).html;
         expect(html).toContain('<em>[Image not available]</em>');

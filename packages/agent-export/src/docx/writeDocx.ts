@@ -370,7 +370,7 @@ class DocxWriter {
                 }
                 case 'link':
                     out.push(...this.link(node.url, node.children, marks, definitions));
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'image': {
                     const image = this.image(node, marks, definitions);
@@ -818,7 +818,8 @@ class DocxWriter {
         const weights = columnWeights(node, columns);
         if (!weights) return null;
         const total = weights.reduce((sum, weight) => sum + weight, 0);
-        return weights.map(weight => Math.round((weight / total) * this.textWidthTwips()));
+        const text = this.textWidthTwips();
+        return weights.map(weight => Math.round((weight / total) * text));
     }
 
     // -- Document ------------------------------------------------------------

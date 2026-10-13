@@ -211,7 +211,7 @@ class HtmlWriter {
                 }
                 case 'link':
                     out += this.link(node.url, node.children, definitions);
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'image': {
                     const html = this.image(node, definitions);

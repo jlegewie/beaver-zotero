@@ -228,7 +228,7 @@ class MarkdownWriter {
                 }
                 case 'link':
                     out.push(...this.link(node.url, node.title, node.children, definitions));
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'image': {
                     const image = this.image(node);

@@ -15,7 +15,7 @@ export function trailingText(nodes: MdInline[]): string {
             continue;
         }
         if (node.type === 'break') return ' ';
-        if ('children' in node && node.type !== 'link') return trailingText(node.children);
+        if ('children' in node) return trailingText(node.children);
         return 'x';
     }
     return 'x';

@@ -311,7 +311,7 @@ class LatexWriter {
                 }
                 case 'link':
                     out += this.link(node.url, node.children, definitions, inCell);
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'image': {
                     const tex = this.image(node, definitions, inCell);
@@ -448,7 +448,9 @@ class LatexWriter {
         // across lines — unless encoding it would change the text it shows.
         if (children.length === 1 && children[0].type === 'text' && children[0].value.trim() === target
             && !/[\\{}^~\s]/.test(target)) {
-            return `\\url{${latexUrl(target)}}`;
+            // Space around the address stays outside it, separating what follows.
+            const [, leading, trailing] = /^(\s*)[\s\S]*?(\s*)$/.exec(children[0].value)!;
+            return `${leading}\\url{${latexUrl(target)}}${trailing}`;
         }
         this.linkDepth += 1;
         const content = this.inlines(children, definitions, inCell);
