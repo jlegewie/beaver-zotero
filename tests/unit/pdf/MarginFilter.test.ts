@@ -10,6 +10,7 @@ import { describe, it, expect, test } from "vitest";
 import {
     MarginFilter,
     getEffectiveRepeatThreshold,
+    parsePrefixedFolio,
 } from "../../../src/beaver-extract/MarginFilter";
 import {
     bboxFromXYWH,
@@ -2070,6 +2071,53 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
         const out = MarginFilter.identifyElementsToRemove(oneTextPerPage(["- 1 -", "-2-", "— 3 —"], "bottom"), 3, true);
         expect((out.pageNumbers ?? []).map((o) => o.value)).toEqual([1, 2, 3]);
         expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("reports prefixed folios at a row's end with their prefix", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "Cell Reports 40, 111280, August 23, 2022 e1", position: "bottom" },
+            { pageIndex: 1, text: "S2 | Nature | Supplement", position: "bottom" },
+            { pageIndex: 2, text: "Phys. Rev. B 96, 014105 (2017) 014105-3" },
+            { pageIndex: 3, text: "212:4 F. Trujillo-Romero" },
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect((out.pageNumbers ?? []).map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
+            [0, "e", 1], [1, "S", 2], [2, "014105-", 3], [3, "212:", 4],
+        ]);
+    });
+
+    it("does not read a year and month as a prefixed folio", () => {
+        for (const pad of [true, false]) {
+            const analysis = analysisOf([0, 1, 2].map((pageIndex) => ({
+                pageIndex,
+                text: `Issued: 2024-${pad ? "0" : ""}${pageIndex + 1}`,
+                position: "bottom" as const,
+            })));
+            const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+            expect((out.pageNumbers ?? []).filter((o) => o.prefix)).toEqual([]);
+        }
+        expect(parsePrefixedFolio("2024-3")).toBeNull();
+        expect(parsePrefixedFolio("1043-5")).toEqual({ value: 5, prefix: "1043-" });
+    });
+
+    it("reads a prefixed folio after a bar but not after a caption's word", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "Supplementary Information | S1", position: "bottom" },
+            { pageIndex: 1, text: "see Figure S2", position: "bottom" },
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect((out.pageNumbers ?? []).map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
+            [0, "S", 1],
+        ]);
+    });
+
+    it("splits a header's words at U+FFFD", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "x�ACKNOWLEDGMENTS" },
+            { pageIndex: 1, text: "-�2�-", position: "bottom" },
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(values(out)).toEqual([[0, 10, true], [1, 2, true]]);
     });
 
     it("reads letter-spaced digits with wider gaps as one number", () => {

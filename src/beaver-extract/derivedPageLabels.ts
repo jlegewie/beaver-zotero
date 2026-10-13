@@ -78,9 +78,15 @@ const RUN_EXTENSION_PAGES = 1;
 const FIRST_PAGE_EXTENSION_PAGES = 3;
 
 interface Run {
-    /** Script and offset, shared by every run of one numbering. */
+    /** Script, prefix and offset, shared by every run of one numbering. */
     key: string;
     roman: boolean;
+    /** Printed text before each number ("S" of "S12"); empty for most. */
+    prefix: string;
+    /** Digits each number is zero-padded to ("07"), or 0. */
+    padding: number;
+    /** Median box height of the numbering's folios, when their boxes are known. */
+    folioHeight?: number;
     /** `value - pageIndex` for every page of the run. */
     offset: number;
     /** Numbered pages, ascending. */
@@ -102,16 +108,23 @@ interface Run {
 export function derivePageLabels(
     observations: readonly PageNumberObservation[],
     pageCount: number,
+    pageSizes?: readonly (PageSize | undefined)[],
 ): Record<number, string> {
-    const { runs, numberedPages } = candidateRuns(observations, pageCount);
+    const { runs, numberedPages, removedNumbers } = candidateRuns(observations, pageCount);
     const accepted = selectRuns(runs);
     // A page that prints a number of another numbering is not unnumbered,
-    // even when that numbering is too short to be a run of its own.
-    const claimable = (pageIndex: number, run: Run) =>
+    // even when that numbering is too short to be a run of its own, nor one
+    // that prints a number just off the run's (`printsShiftedNumber`). Nor is
+    // a sheet whose size matches none of the run's numbered pages next to
+    // it (`neighbors`): a cover or notice a repository added to the work is
+    // not one of its printed pages.
+    const claimable = (pageIndex: number, run: Run, neighbors: readonly number[]) =>
         pageIndex >= 0
         && pageIndex < pageCount
         && !owner.has(pageIndex)
-        && [...(numberedPages.get(pageIndex) ?? [])].every((key) => key === run.key);
+        && [...(numberedPages.get(pageIndex) ?? [])].every((key) => key === run.key)
+        && !printsShiftedNumber(removedNumbers.get(pageIndex), run, pageIndex)
+        && neighbors.some((p) => sameSheetSize(pageSizes?.[pageIndex], pageSizes?.[p]));
 
     // A run labels every page it spans. Its numbered pages on both sides
     // outweigh a stray number on a gap page (an OCR misread, a fraction, a
@@ -136,7 +149,7 @@ export function derivePageLabels(
             const before = first - k;
             // A page before page 1 is not this numbering's; leave it free
             // for the numbering before (front matter's last page).
-            if (before + run.offset < 1 || !claimable(before, run)) break;
+            if (before + run.offset < 1 || !claimable(before, run, run.pages.slice(0, SIZE_NEIGHBORS))) break;
             owner.set(before, run);
         }
     }
@@ -145,7 +158,7 @@ export function derivePageLabels(
         const last = run.pages[run.pages.length - 1];
         for (let k = 1; k <= RUN_EXTENSION_PAGES; k++) {
             const after = last + k;
-            if (!claimable(after, run)) break;
+            if (!claimable(after, run, run.pages.slice(-SIZE_NEIGHBORS))) break;
             owner.set(after, run);
         }
     }
@@ -154,10 +167,43 @@ export function derivePageLabels(
     for (const [pageIndex, run] of owner) {
         const value = pageIndex + run.offset;
         if (value < 1) continue;
-        const label = run.roman ? toRoman(value, run.upperCase) : String(value);
+        const label = run.roman
+            ? toRoman(value, run.upperCase)
+            : run.prefix + String(value).padStart(run.padding, "0");
         if (label) labels[pageIndex] = label;
     }
     return labels;
+}
+
+/** A page's width and height, in points. */
+export interface PageSize {
+    width: number;
+    height: number;
+}
+
+/**
+ * Largest relative difference between the sides of two pages of one
+ * printed sequence. Scans of one book vary by a few percent; a repository's
+ * cover sheet (A4 or Letter before a book-sized article) differs more.
+ */
+const SHEET_SIZE_TOLERANCE = 0.03;
+
+/**
+ * Numbered pages at a run's end a page it extends to is compared with: the
+ * pages of a scanned book differ in size among themselves.
+ */
+const SIZE_NEIGHBORS = 3;
+
+/**
+ * Whether two pages have the same size, either way up (a table turned
+ * sideways is still a page of the work). Unknown sizes count as the same.
+ */
+function sameSheetSize(a: PageSize | undefined, b: PageSize | undefined): boolean {
+    if (!a || !b) return true;
+    const [aShort, aLong] = [Math.min(a.width, a.height), Math.max(a.width, a.height)];
+    const [bShort, bLong] = [Math.min(b.width, b.height), Math.max(b.width, b.height)];
+    const close = (x: number, y: number) => Math.abs(x - y) <= SHEET_SIZE_TOLERANCE * Math.max(x, y);
+    return close(aShort, bShort) && close(aLong, bLong);
 }
 
 /**
@@ -248,18 +294,38 @@ function withoutFurniture(
 function candidateRuns(
     allObservations: readonly PageNumberObservation[],
     pageCount: number,
-): { runs: Run[]; numberedPages: Map<number, Set<string>> } {
+): { runs: Run[]; numberedPages: Map<number, Set<string>>; removedNumbers: Map<number, PageNumberObservation[]> } {
     const observations = withoutFurniture(withoutSpacedDigits(allObservations), pageCount);
-    const groups = new Map<string, { roman: boolean; offset: number; pages: Set<number>; removedPages: Set<number>; finalPages: Set<number>; counterPages: Set<number>; upper: number; lower: number }>();
+    const removedNumbers = new Map<number, PageNumberObservation[]>();
+    for (const obs of observations) {
+        if (obs.edge) continue;
+        const removed = removedNumbers.get(obs.pageIndex);
+        if (removed) removed.push(obs);
+        else removedNumbers.set(obs.pageIndex, [obs]);
+    }
+    const groups = new Map<string, { roman: boolean; prefix: string; offset: number; pages: Set<number>; removedPages: Set<number>; finalPages: Set<number>; counterPages: Set<number>; upper: number; lower: number; paddedPages: Map<number, number>; unpaddedPages: Map<number, number>; heights: number[]; removedHeights: number[] }>();
     for (const obs of observations) {
         if (obs.pageIndex < 0 || obs.pageIndex >= pageCount || obs.value < 1) continue;
         const offset = obs.value - obs.pageIndex;
-        const key = `${obs.roman ? "r" : "a"}${offset}`;
+        const prefix = obs.prefix ?? "";
+        // An article number's page counter ("014105-3") starts at 1 within
+        // the file; a counter already past 1 on the file's first page is a
+        // volume and page ("92:1235"), whose folio is the page alone.
+        if (COMPOUND_PREFIX_RE.test(prefix) && offset > 1) continue;
+        const key = `${obs.roman ? "r" : "a"}${prefix}\u0000${offset}`;
         let group = groups.get(key);
         if (!group) {
-            group = { roman: obs.roman, offset, pages: new Set(), removedPages: new Set(), finalPages: new Set(), counterPages: new Set(), upper: 0, lower: 0 };
+            group = { roman: obs.roman, prefix, offset, pages: new Set(), removedPages: new Set(), finalPages: new Set(), counterPages: new Set(), upper: 0, lower: 0, paddedPages: new Map(), unpaddedPages: new Map(), heights: [], removedHeights: [] };
             groups.set(key, group);
         }
+        // One padding vote per page: a folio is often read more than once
+        // (margin removal, its row's word, its own line).
+        if (!obs.roman) {
+            const width = paddedWidth(obs);
+            if (width > 0) group.paddedPages.set(obs.pageIndex, Math.max(width, group.paddedPages.get(obs.pageIndex) ?? 0));
+            else group.unpaddedPages.set(obs.pageIndex, String(obs.value).length);
+        }
+        if (obs.bbox) (obs.edge ? group.heights : group.removedHeights).push(boxHeight(obs.bbox));
         group.pages.add(obs.pageIndex);
         if (printsLastPage(obs)) group.finalPages.add(obs.pageIndex);
         if (isPageCounter(obs.text)) group.counterPages.add(obs.pageIndex);
@@ -295,6 +361,11 @@ function candidateRuns(
                 runs.push({
                     key,
                     roman: group.roman,
+                    prefix: group.prefix,
+                    padding: padding(group.paddedPages, group.unpaddedPages),
+                    // An edge reading's box is its whole row's; a removed
+                    // number's box is the number's own.
+                    folioHeight: median(group.removedHeights.length > 0 ? group.removedHeights : group.heights) || undefined,
                     offset: group.offset,
                     pages: runPages,
                     weight: runPages.length
@@ -306,7 +377,87 @@ function candidateRuns(
             start = k;
         }
     }
-    return { runs, numberedPages };
+    return { runs, numberedPages, removedNumbers };
+}
+
+/**
+ * Largest difference between the number a run would give a page and a
+ * different number margin detection removed from it as a page number, for
+ * the page to count as numbered apart from the run.
+ */
+const SHIFTED_NUMBER_DISTANCE = 2;
+
+/**
+ * Largest ratio between the box heights of a shifted number and the run's
+ * folios for the number to count as one of its folios.
+ */
+const FOLIO_HEIGHT_RATIO = 1.5;
+
+/**
+ * Whether margin detection removed a number from the page that is close to,
+ * but not, the run's number for it: the page's own folio when a page was
+ * left out of or added to the file, so the run's offset no longer holds
+ * there. A number far from the run's is another numeral (a chapter number
+ * on an opening page) and does not count, nor does one set at another size
+ * than the run's folios (a display chapter numeral "1" on the opener of a
+ * book's first chapter). Without known boxes a close number counts.
+ */
+function printsShiftedNumber(
+    removed: readonly PageNumberObservation[] | undefined,
+    run: Run,
+    pageIndex: number,
+): boolean {
+    const expected = pageIndex + run.offset;
+    return (removed ?? []).some((obs) =>
+        obs.roman === run.roman
+        && (obs.prefix ?? "") === run.prefix
+        && obs.value !== expected
+        && Math.abs(obs.value - expected) <= SHIFTED_NUMBER_DISTANCE
+        && setLikeFolios(obs, run));
+}
+
+function setLikeFolios(obs: PageNumberObservation, run: Run): boolean {
+    if (!obs.bbox || !run.folioHeight) return true;
+    const height = boxHeight(obs.bbox);
+    return height <= run.folioHeight * FOLIO_HEIGHT_RATIO && height * FOLIO_HEIGHT_RATIO >= run.folioHeight;
+}
+
+function boxHeight(bbox: BoundingBox): number {
+    return Math.abs(bbox.b - bbox.t);
+}
+
+
+/** A compound folio's prefix: an article number and a separator. */
+const COMPOUND_PREFIX_RE = /\d[-–:]$/u;
+
+/** Digits an observation prints its number with when zero-padded ("07"), else 0. */
+function paddedWidth(obs: PageNumberObservation): number {
+    const text = obs.text.trim();
+    const digits = obs.prefix && text.startsWith(obs.prefix) ? text.slice(obs.prefix.length) : text;
+    if (digits.length < 2 || (digits[0] !== "0" && digits[0] !== "\uFF10")) return 0;
+    const ascii = normalizePageDigits(digits);
+    return /^0\d+$/u.test(ascii) ? ascii.length : 0;
+}
+
+/**
+ * Width a numbering pads its numbers to with zeros ("01", "02", …, "10"):
+ * the most common padded width, when pages printing a padded number
+ * outnumber those printing one shorter than it without padding. A page with
+ * a padded reading counts as padded. 0 when it does not pad.
+ */
+function padding(paddedPages: ReadonlyMap<number, number>, unpaddedPages: ReadonlyMap<number, number>): number {
+    const widths = new Map<number, number>();
+    for (const width of paddedPages.values()) widths.set(width, (widths.get(width) ?? 0) + 1);
+    let width = 0;
+    let count = 0;
+    for (const [w, n] of widths) {
+        if (n > count || (n === count && w > width)) [width, count] = [w, n];
+    }
+    let shorter = 0;
+    for (const [page, length] of unpaddedPages) {
+        if (!paddedPages.has(page) && length < width) shorter++;
+    }
+    return count > shorter ? width : 0;
 }
 
 /**
@@ -443,8 +594,16 @@ export function pageEdgeRowObservations(
                     placed(rowText.trim(), uprightRowBox);
                 }
             }
+            // A line read on its own: a prefixed folio only where the row
+            // reads it as well (not "S1" after a line "Figure").
+            let rowWords: Set<string> | undefined;
             for (const line of lines) {
-                if (parsePrintedPageNumber(line.text) && !isFootnoteMarker(line, pageLines)) {
+                const parsed = parsePrintedPageNumber(line.text);
+                if (parsed?.prefix) {
+                    rowWords ??= new Set(rowPageNumberWords(rowText));
+                    if (!rowWords.has(normalizePageDigits(line.text).trim())) continue;
+                }
+                if (parsed && !isFootnoteMarker(line, pageLines)) {
                     const text = line.text.trim();
                     texts.set(text, sourceBox(line.bbox));
                     placed(text, line.bbox);
@@ -470,6 +629,7 @@ export function pageEdgeRowObservations(
                     value: parsed.value,
                     text,
                     roman: parsed.roman,
+                    ...(parsed.prefix ? { prefix: parsed.prefix } : {}),
                     position,
                     edge: true,
                     bbox,

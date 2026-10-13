@@ -651,6 +651,7 @@ export function runExtractFromIndices(
                 ...pageEdgeRowObservations(analysisPages, undefined, opts.marginZone),
             ],
             pageCount,
+            Array.from({ length: pageCount }, (_, index) => analysisPageByIndex.get(index)),
         )
         : undefined;
 

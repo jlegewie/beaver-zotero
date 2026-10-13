@@ -790,6 +790,11 @@ export interface PageNumberObservation {
     text: string;
     /** A bare Roman numeral ("xiv", "IV") rather than an Arabic number. */
     roman: boolean;
+    /**
+     * Printed text before the number of a prefixed folio ("S" of "S12",
+     * "014105-" of "014105-3"), part of the page's label.
+     */
+    prefix?: string;
     position: MarginPosition;
     /**
      * Read from a header or footer line that margin detection did not remove

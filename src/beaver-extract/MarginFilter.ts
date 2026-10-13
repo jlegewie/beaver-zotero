@@ -281,6 +281,38 @@ const DASH_WRAPPED_RE = /^[-–—]\s*(\d{1,5})\s*[-–—]$/u;
 /** A number set with spaces between its digits ("2 1"). */
 const SPACED_DIGITS_RE = /^\d(?:\s+\d){1,4}$/u;
 
+/**
+ * A page number after one letter ("S12", "e3", "F358"). Not after a letter
+ * a scan's text layer reads for a digit (I, i, l, T, t for 1; O, o for 0):
+ * "I3" for 13, "T53" for 153.
+ */
+const LETTER_FOLIO_RE = /^([A-HJ-NP-SU-Za-hjkmnp-su-z])(\d{1,5})$/u;
+
+/**
+ * A page number after an article number and a hyphen or colon ("014105-3",
+ * "212:3"). Not after a point: "4.2" is as often a section number, and a
+ * table of contents lists them one after another.
+ */
+const COMPOUND_FOLIO_RE = /^(\d{1,7}[-–:])(\d{1,4})$/u;
+
+/**
+ * A year and month ("2024-01", "2024-1"), which a dated sheet prints, not a
+ * folio. An article number in that range with a counter up to 12 reads the
+ * same and is given up with it.
+ */
+const YEAR_MONTH_RE = /^(?:1[89]|20)\d{2}[-–](?:0?[1-9]|1[0-2])$/u;
+
+/**
+ * What separates the words of a header or footer row: white space, a bar
+ * ("Page | 3"), and U+FFFD, which a text layer gives for a glyph it cannot
+ * map to a character, most often the space between a folio and its
+ * running head ("-\uFFFD1\uFFFD-", "x\uFFFDACKNOWLEDGMENTS").
+ */
+const ROW_WORD_SEPARATOR_RE = /[\s|\uFFFD]+/u;
+
+/** A row whose last word follows a letter and a space, with no separator between. */
+const CAPTIONED_TAIL_RE = /\p{L}[\s\uFFFD]+[^\s|\uFFFD]+$/u;
+
 /** `text` with compatibility and common non-Latin digits folded to ASCII. */
 export function normalizePageDigits(text: string): string {
     return normalizeDigits(text);
@@ -300,16 +332,42 @@ export function isPageCounter(text: string): boolean {
 }
 
 /**
- * The page number `text` prints ("12", "Page 12", "xiv", "·12·"), or `null`
- * when the text is not page-number shaped. `roman` marks a bare Roman
- * numeral.
+ * The page number `text` prints ("12", "Page 12", "xiv", "·12·", "S12"),
+ * or `null` when the text is not page-number shaped. `roman` marks a bare
+ * Roman numeral, `prefix` the printed text before a prefixed folio's number
+ * (see `parsePrefixedFolio`).
  */
-export function parsePrintedPageNumber(text: string): { value: number; roman: boolean } | null {
+export function parsePrintedPageNumber(text: string): { value: number; roman: boolean; prefix?: string } | null {
     const dashed = parseDashWrapped(text);
     if (dashed !== null) return { value: dashed, roman: false };
+    const folio = parsePrefixedFolio(text);
+    if (folio) return { value: folio.value, roman: false, prefix: folio.prefix };
     if (!isPageNumberPattern(text)) return null;
     const value = parsePageNumber(text);
     return value === null ? null : { value, roman: isBareRoman(text) };
+}
+
+/**
+ * A folio whose number follows a fixed prefix, or `null`: a letter
+ * ("S12" in a supplement, "e3" on online-only pages, "F358") or an article
+ * number and a separator ("014105-3", "212:3"). Only the
+ * number advances with the pages; the prefix is part of the label. Read by
+ * label derivation only, like `parseDashWrapped`.
+ */
+export function parsePrefixedFolio(text: string): { value: number; prefix: string } | null {
+    // Longer than any folio either pattern accepts ("1234567-1234").
+    const trimmed = text.trim();
+    if (trimmed.length > 24) return null;
+    return prefixedFolioWord(normalizeDigits(trimmed).trim());
+}
+
+/** `parsePrefixedFolio` of a word whose digits are already ASCII. */
+function prefixedFolioWord(word: string): { value: number; prefix: string } | null {
+    const match = word.match(LETTER_FOLIO_RE)
+        ?? (YEAR_MONTH_RE.test(word) ? null : word.match(COMPOUND_FOLIO_RE));
+    if (!match) return null;
+    const value = parseInt(match[2], 10);
+    return value >= 1 ? { value, prefix: match[1] } : null;
 }
 
 /**
@@ -318,7 +376,9 @@ export function parsePrintedPageNumber(text: string): { value: number; roman: bo
  * it, so extracted text stays as it was.
  */
 function parseDashWrapped(text: string): number | null {
-    const match = normalizeDigits(text).trim().match(DASH_WRAPPED_RE);
+    const normalized = normalizeDigits(text);
+    const spaced = normalized.includes("\uFFFD") ? normalized.replace(/\uFFFD/gu, " ") : normalized;
+    const match = spaced.trim().match(DASH_WRAPPED_RE);
     return match ? parseInt(match[1], 10) : null;
 }
 
@@ -435,12 +495,29 @@ function spacedElementNumber(el: MarginElement): string | null {
 
 /**
  * Words of a header or footer row that may be its page number: its first
- * and last word when a bare number or Roman numeral ("644 R. Allen and A.
- * Vignoles", "Page | 3"). Digits come back ASCII. See `spacedRowNumber` for
- * letter-spaced numbers.
+ * and last word when a bare number, a Roman numeral or a prefixed folio
+ * ("644 R. Allen and A. Vignoles", "Page | 3", "Cell Reports 40 e2").
+ * Digits come back ASCII. See `spacedRowNumber` for letter-spaced numbers.
  */
 export function rowPageNumberWords(text: string): string[] {
-    return [...new Set(rowEndWords(text))].filter((word) => EDGE_PAGE_NUMBER_RE.test(word));
+    const words = rowWords(text);
+    if (words.length === 0) return [];
+    const ends = words.length === 1 ? [words[0]] : [words[0], words[words.length - 1]];
+    // A prefixed number that ends a row right after a word ("Figure S1",
+    // "Table A1", "the inductor L2") is a caption's or a formula's label; a
+    // folio ending a running foot follows a date or a separator
+    // ("Supplement | S1"). U+FFFD stands for a space here.
+    const last = words[words.length - 1];
+    const captioned = words.length > 1
+        && CAPTIONED_TAIL_RE.test(normalizeDigits(text).trim());
+    return [...new Set(ends)].filter((word) =>
+        EDGE_PAGE_NUMBER_RE.test(word)
+        || (prefixedFolioWord(word) !== null && !(captioned && word === last && word !== words[0])));
+}
+
+/** A row's words, digits ASCII. */
+function rowWords(text: string): string[] {
+    return normalizeDigits(text).trim().split(ROW_WORD_SEPARATOR_RE).filter(Boolean);
 }
 
 /**
@@ -448,7 +525,7 @@ export function rowPageNumberWords(text: string): string[] {
  * ASCII. The same word at both ends appears twice.
  */
 export function rowEndWords(text: string): string[] {
-    const words = normalizeDigits(text).trim().split(/[\s|]+/u).filter(Boolean);
+    const words = rowWords(text);
     if (words.length === 0) return [];
     return words.length === 1 ? [words[0]] : [words[0], words[words.length - 1]];
 }
@@ -486,7 +563,8 @@ function pageNumberObservations(
         }
     }
     const observe = (el: MarginElement, text: string, edge: boolean, spaced = false, boxes = [el.bbox]) => {
-        const value = parsePrintedPageNumber(text)?.value ?? parsePageNumber(text);
+        const printed = parsePrintedPageNumber(text);
+        const value = printed?.value ?? parsePageNumber(text);
         if (value === null) return;
         const key = `${el.pageIndex}\u0000${el.position}\u0000${text}`;
         let place = places.get(key);
@@ -510,6 +588,7 @@ function pageNumberObservations(
             value,
             text,
             roman: isBareRoman(text),
+            ...(printed?.prefix ? { prefix: printed.prefix } : {}),
             position: el.position,
             bbox: el.bbox,
             ...(edge ? { edge } : {}),

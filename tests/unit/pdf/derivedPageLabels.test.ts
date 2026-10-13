@@ -231,6 +231,113 @@ describe("derivePageLabels", () => {
         expect(labels[4]).toBe("5");
     });
 
+    it("labels a prefixed numbering with its prefix", () => {
+        // An article's pages 2817-2823, then online-only pages e1-e4: the
+        // article's numbering does not extend onto e1.
+        const ePages = [7, 8, 9, 10].map((p) => obs(p, `e${p - 6}`, { value: p - 6, prefix: "e" }));
+        const labels = derivePageLabels([...run(0, 6, 2817), ...ePages], 11);
+        expect(labels[6]).toBe("2823");
+        expect(labels[7]).toBe("e1");
+        expect(labels[10]).toBe("e4");
+    });
+
+    it("keeps an article number's folio prefix", () => {
+        const folios = [1, 2, 3, 4].map((p) => obs(p, `014105-${p + 1}`, { value: p + 1, prefix: "014105-" }));
+        expect(derivePageLabels(folios, 5)).toEqual({
+            0: "014105-1", 1: "014105-2", 2: "014105-3", 3: "014105-4", 4: "014105-5",
+        });
+    });
+
+    it("ignores an article-number folio whose counter does not start in the file", () => {
+        // A volume and page ("92:1235") steps with the pages too.
+        const folios = [0, 1, 2, 3].map((p) => obs(p, `92:${1235 + p}`, { value: 1235 + p, prefix: "92:" }));
+        expect(derivePageLabels(folios, 4)).toEqual({});
+    });
+
+    it("keeps zero-padded page numbers padded", () => {
+        const padded = Array.from({ length: 12 }, (_, p) => obs(p, String(p + 1).padStart(2, "0")));
+        const labels = derivePageLabels(padded.filter((o) => o.pageIndex !== 4), 12);
+        expect(labels[0]).toBe("01");
+        expect(labels[4]).toBe("05");
+        expect(labels[11]).toBe("12");
+    });
+
+    it("extends onto a chapter opener whose chapter numeral is set larger than the folios", () => {
+        // Folios 3–6 at indices 2–5; the opener at index 1 prints a display
+        // chapter numeral "1" that margin detection removed.
+        const box = (height: number) => bboxFromXYWH(300, 760, 12, height, "top-left");
+        const folios = [2, 3, 4, 5].map((p) => obs(p, p + 1, { bbox: box(9) }));
+        const chapter = obs(1, 1, { position: "top", bbox: box(40) });
+        const labels = derivePageLabels([chapter, ...folios], 6);
+        expect(labels[0]).toBe("1");
+        expect(labels[1]).toBe("2");
+    });
+
+    it("does not extend onto a page whose folio, set like the run's, is one off", () => {
+        const box = bboxFromXYWH(300, 760, 12, 9, "top-left");
+        const folios = [2, 3, 4, 5].map((p) => obs(p, p + 2, { bbox: box }));
+        const labels = derivePageLabels([obs(1, 2, { bbox: box }), ...folios], 6);
+        expect(labels[1]).toBeUndefined();
+    });
+
+    it("weighs zero padding by page, not by how many readings a page has", () => {
+        // A fullwidth "０１" is read three times (margin removal, the edge
+        // row's normalized word "01", its own line); a plain "4" twice.
+        const fullwidth = [0, 1, 2].flatMap((p) => {
+            const text = `０${String.fromCharCode(0xff11 + p)}`;
+            return [
+                obs(p, text, { value: p + 1 }),
+                obs(p, `0${p + 1}`, { value: p + 1, edge: true }),
+                obs(p, text, { value: p + 1, edge: true, position: "top" }),
+            ];
+        });
+        const plain = [3, 4, 5, 6].flatMap((p) => [obs(p, p + 1), obs(p, p + 1, { edge: true })]);
+        const labels = derivePageLabels([...fullwidth, ...plain], 7);
+        expect(labels[3]).toBe("4");
+        expect(labels[6]).toBe("7");
+    });
+
+    it("does not pad a numbering that pads only a stray number", () => {
+        const labels = derivePageLabels([...run(0, 5, 1), obs(6, "07"), ...run(7, 9, 8)], 10);
+        expect(labels[6]).toBe("7");
+    });
+
+    it("does not extend a run onto a sheet of another size", () => {
+        // A Letter-size download cover before a book-size article, and a
+        // landscape table page at its end.
+        const sizes = [
+            { width: 612, height: 792 },
+            ...Array.from({ length: 8 }, () => ({ width: 432, height: 648 })),
+            { width: 648, height: 432 },
+        ];
+        const labels = derivePageLabels(run(1, 8, 101), 10, sizes);
+        expect(labels[0]).toBeUndefined();
+        expect(labels[1]).toBe("101");
+        expect(labels[9]).toBe("109");
+    });
+
+    it("extends a run onto a page whose size matches one of its numbered pages nearby", () => {
+        // Scanned pages vary in size.
+        const sizes = [478, 498, 472, 486, 480].map((width) => ({ width, height: 800 }));
+        const labels = derivePageLabels(run(1, 4, 20), 5, sizes);
+        expect(labels[0]).toBe("19");
+    });
+
+    it("does not extend over a page that prints a number just off the run's", () => {
+        // Page 5 prints 43 under a removed page number, where the run that
+        // starts after it would give 44: a page is missing from the file.
+        const labels = derivePageLabels([...run(0, 4, 37), obs(5, 43), ...run(6, 9, 45)], 10);
+        expect(labels[4]).toBe("41");
+        expect(labels[5]).toBeUndefined();
+        expect(labels[6]).toBe("45");
+    });
+
+    it("still extends over a page whose removed number is far from the run's", () => {
+        // A chapter opening's large chapter number.
+        const labels = derivePageLabels([obs(1, 4, { position: "top" }), ...run(2, 9, 122)], 10);
+        expect(labels[1]).toBe("121");
+    });
+
     it("still extends over pages whose only numerals are lone noise", () => {
         // Page 1 is the article's unnumbered first page; its footer prints a year.
         const labels = derivePageLabels([obs(1, 2014), ...run(2, 9, 268)], 10);
@@ -302,6 +409,39 @@ describe("pageEdgeRowObservations", () => {
     it("reads page numbers set between dashes", () => {
         const pages = [page(0, [body(100), body(140), body(600), line("- 112 -", 290, 740)])];
         expect(pageEdgeRowObservations(pages).map((o) => o.value)).toContain(112);
+    });
+
+    it("reads prefixed folios and labels them with their prefix", () => {
+        const pages = [1, 2, 3].map((n, p) => page(p, [
+            body(100), body(140), body(600), line(`Cell Reports 40, August 23, 2022 e${n}`, 60, 740),
+        ]));
+        expect(derivePageLabels(pageEdgeRowObservations(pages), 3)).toEqual({ 0: "e1", 1: "e2", 2: "e3" });
+    });
+
+    it("does not read a caption's prefixed number as a folio", () => {
+        const pages = [1, 2, 3].map((n, p) => page(p, [
+            body(100), body(140), body(600), line("Figure", 60, 740), line(`S${n}`, 110, 740),
+        ]));
+        pages.push(page(3, [body(100), body(140), body(600), line("Table S4", 60, 740)]));
+        expect(pageEdgeRowObservations(pages).some((o) => o.prefix !== undefined)).toBe(false);
+    });
+
+    it("does not read a letter a scan gives for a digit as a prefix", () => {
+        // "I3" is a misread 13, "T53" a misread 153.
+        const pages = [
+            page(0, [body(100), body(140), body(600), line("I3", 290, 740)]),
+            page(1, [body(100), body(140), body(600), line("T53", 290, 740)]),
+        ];
+        expect(pageEdgeRowObservations(pages).some((o) => o.prefix !== undefined)).toBe(false);
+    });
+
+    it("splits row words at U+FFFD", () => {
+        const pages = [
+            page(0, [line("ACKNOWLEDGMENTS�xi", 60, 40), body(100), body(140), body(600)]),
+            page(1, [body(100), body(140), body(600), line("-�3�-", 290, 740)]),
+        ];
+        const found = pageEdgeRowObservations(pages).map((o) => [o.pageIndex, o.value]);
+        expect(found).toEqual(expect.arrayContaining([[0, 11], [1, 3]]));
     });
 
     it("counts a page number that equals a fixed numeral in its row", () => {
