@@ -23,10 +23,17 @@
  * - unless two or more of its columns are justified running text (the page's
  *   text columns): a label column (short lines on some rows only, each beside
  *   text in another column), or cells that are not running text side by side.
+ *
+ * Two kinds of grid propose less than they hold: a list of entries with their
+ * pages (a table of contents, an index) proposes nothing (`entryList`), and the
+ * rows of a grid end at the page's running heads and feet (`rowsWithin`). Either
+ * is still found as a grid, so that the other grids and candidates of the page
+ * are those found without these tests.
  */
+import { parsePageNumber } from "../MarginFilter";
 import { isBoldFont } from "../StyleAnalyzer";
 import { iou, unionRect, type Rect } from "./geometry";
-import { NOTE_CAPTION_RE, isSpaceChar, wideGaps, wordCounts, type Primitive, type RegionLine } from "./pageSignals";
+import { NOTE_CAPTION_RE, isSpaceChar, isTableCaption, wideGaps, wordCounts, type Primitive, type RegionLine } from "./pageSignals";
 import { extendOverRules } from "./textCandidates";
 
 /** Text on one row this many em apart is in separate columns. */
@@ -92,6 +99,41 @@ const NOTE_MARKER_RE = /^\s*(?:[*∗†‡§¶#]|\(?[a-z]\)|[a-z]\.\s)/u;
 const ABBREVIATIONS_RE = /^[^\s,;]{1,15},\s[^,;]{2,60};/u;
 /** A numbered heading ("3.2. Results", "B. Analysis", "IV. Discussion"). */
 const NUMBERED_HEADING_RE = /^(?:\d{1,2}(?:\.\d{1,2})*\.?|[A-Z]\.|[IVX]{1,4}\.)\s+\p{Lu}/u;
+/**
+ * A table continuing on another page says so on a line of its own: bracketed ("(Continued)",
+ * "[cont'd]") or naming the page ("continued on next page", "continued overleaf"). A bare
+ * "Continues" is a cell's value.
+ */
+const CONTINUED_RE =
+    /^(?:[([]\s*(?:continued|cont['’]?d\.?)\s*[)\]]|(?:continued|continues|cont['’]?d\.?)\s+(?:(?:on|to|from)\s+(?:the\s+)?(?:next|following|previous|preceding)\s+page|overleaf))\s*[.…:]*$/iu;
+/** A repeated header set over a table's columns is at most this many line heights from its rows. */
+const HEADER_GAP = 1;
+/** A running head or foot is at most this many lines (a title and its page number)... */
+const RUNNING_LINES = 2;
+/** ...of at most this many of a grid's cells (a title set with a wide space before its date). */
+const RUNNING_CELLS = 3;
+/** Dot leaders: a run of four or more dots (or three middle dots, two ellipses), spaced or not. */
+const LEADER_RE = /(?:\.\s?){4,}|(?:[·∙•]\s?){3,}|…{2,}/gu;
+/** `LEADER_RE`, for testing a text (no global state). */
+const LEADERS_RE = new RegExp(LEADER_RE.source, "u");
+/** A heading's number ("4", "9.3", "A.1", "IV."); one of a list's entries. */
+const SECTION_NUMBER_RE = /^(?:[1-9]\d?|[A-Z])(?:\.[1-9]\d?)*\.?$|^[IVXL]{1,6}\.?$/u;
+/** A column of page numbers' head ("Page", "p."), not a table's header. */
+const PAGE_HEADER_RE = /^(?:pages?|pp?\.?|pg\.?|seite|page\s+no\.?)$/iu;
+/** A list of entries refers to at least this many pages... */
+const ENTRY_PAGES = 3;
+/** ...in a column of page numbers: at least this share of its cells. */
+const PAGE_CELLS = 0.8;
+/** Page numbers differ: at least this share of them distinct. */
+const DISTINCT_PAGES = 0.5;
+/** Entries in order: at least this share of neighbouring entries... */
+const ENTRIES_ORDERED = 0.9;
+/** ...of at least this many, for entries ordered by name (an index). */
+const NAMED_ENTRIES = 6;
+/** The other columns of a list hold words or heading numbers: at most this share of their cells is anything else. */
+const ENTRY_VALUE_CELLS = 0.2;
+/** Dot leaders on at least this share of the rows set entries apart. */
+const LEADER_ROWS = 0.5;
 /** A line set this many points larger than its column's cells, at the median, is a heading... */
 const HEADING_SIZE = 0.5;
 /** ...and so is a numbered line of at most this many words. */
@@ -141,6 +183,12 @@ export interface GridGroup {
      * when it left any: a candidate that repeats it so repeats the grid.
      */
     reach?: Rect;
+    /**
+     * What the grid proposes when not all of it (`gridGroups`): nothing, or the rows
+     * short of the page's running headers and footers. A candidate that repeats the
+     * grid as found (`bbox`, `reach`) still repeats it, and takes these lines only.
+     */
+    proposes?: { bbox: Rect; lines: RegionLine[] } | null;
 }
 
 /** What a grid candidate looks like, for the region features (`rowStructure`). */
@@ -557,7 +605,9 @@ export function rowStructure(lines: readonly RegionLine[], charsOf?: CharsOf): G
  * (captions, figure text) cut gutters and never join, and a caption's row ends
  * every gutter (`captions`); `running` marks running text; `prims` give the
  * rules a block may extend over; `charsOf` gives the cells of a line; `margin`
- * holds the page's furniture (running heads and feet), which no block takes.
+ * holds the page's furniture (running heads and feet), which no block takes;
+ * `stops` the running heads and feet a grid's rows end at (`rowsWithin`).
+ * Grids that list entries (`entryList`) propose nothing (`GridGroup.proposes`).
  */
 export function gridGroups(
     lines: readonly RegionLine[],
@@ -568,6 +618,7 @@ export function gridGroups(
     bs: number,
     charsOf?: CharsOf,
     margin?: ReadonlySet<RegionLine>,
+    stops?: ReadonlySet<RegionLine>,
 ): GridGroup[] {
     const upright = lines.filter((l) => !l.rot && !l.skewed && l.inkChars > 0);
     if (upright.length < MIN_ROWS) return [];
@@ -579,6 +630,8 @@ export function gridGroups(
     const layout = layoutGutters(chains, rows, running);
     const out: GridGroup[] = [];
     const blocks: { first: number; last: number; x0: number; x1: number }[] = [];
+    // Lines of the grids that list entries (`entryList`).
+    const listed = new Set<RegionLine>();
     for (const chain of chains) {
         let first = chain.bordered[0];
         // The last row's cell may wrap on below the last row bordered on both sides: the
@@ -625,11 +678,12 @@ export function gridGroups(
         // apart twice over: cells starting together and rules between the rows (a table
         // of two wide columns of justified text). Paragraphs of two text columns may
         // start together by chance.
-        const accepted = layout.has(chain)
-            ? alignedStarts(shape.occupied, rows, first) && rowRules(shape, rows, first, last, hrules) >= MIN_ROW_RULES &&
-              evidence(shape, cuts.length, running, rows, first, last, hrules)
-            : evidence(shape, cuts.length, running, rows, first, last, hrules);
-        if (!accepted) continue;
+        const accepts = (shape: ReturnType<typeof blockShape>, first: number, last: number): boolean =>
+            layout.has(chain)
+                ? alignedStarts(shape.occupied, rows, first) && rowRules(shape, rows, first, last, hrules) >= MIN_ROW_RULES &&
+                  evidence(shape, cuts.length, running, rows, first, last, hrules)
+                : evidence(shape, cuts.length, running, rows, first, last, hrules);
+        if (!accepts(shape, first, last)) continue;
         const [start, end] = ownRows(rows, chain, first, last, cuts, x0, x1, running, margin);
         let reach: Rect | undefined;
         if (start > first || end < last) {
@@ -637,23 +691,192 @@ export function gridGroups(
             [first, last] = [start, end];
             shape = blockShape(rows, first, last, cuts, x0, x1);
         }
-        // At least two cells on each of `MIN_ROWS` rows, however MuPDF set them in lines.
-        const cells = shape.columns.flat(2);
-        if (cells.length < MIN_ROWS * 2) continue;
-        // The grid's lines: those whose every cell is in it. A line that also holds text
-        // the grid left out (prose beside it, set on one structured-text line) stays out,
-        // since taking the line would take that text too. The box is the cells'.
-        const kept = new Set(cells);
-        const partly = new Set<RegionLine>();
-        for (let r = first; r <= last; r++) for (const s of rows[r].segs) if (!kept.has(s)) partly.add(s.line);
-        const members = [...new Set(cells.map((s) => s.line))].filter((l) => !partly.has(l));
-        if (members.length < MIN_ROWS) continue;
-        const span = cellSpan(cells);
+        const grid = gridLines(rows, first, last, shape);
+        if (!grid) continue;
+        const span = cellSpan(grid.cells);
         blocks.push({ first, last, x0: span[0], x1: span[2] });
         const bbox = extendOverRules(span, prims, bs);
-        if (!out.some((g) => iou(g.bbox, bbox) >= DUPLICATE_IOU)) out.push({ bbox, lines: members, ...(reach ? { reach } : {}) });
+        if (out.some((g) => iou(g.bbox, bbox) >= DUPLICATE_IOU)) continue;
+        const group: GridGroup = { bbox, lines: grid.members, ...(reach ? { reach } : {}) };
+        out.push(group);
+        // A grid is found as above whatever it then proposes, so that every other grid and
+        // candidate is found as without these tests: a grid holding running headers or footers
+        // proposes only the rows short of them, and a list of entries nothing. The list test
+        // reads those rows: a running head's page number over a table's column is no page.
+        const [top, bottom] = rowsWithin(rows, first, last, grid.cells, cuts, stops);
+        const whole = top === first && bottom === last;
+        const cut = whole ? shape : top <= bottom ? blockShape(rows, top, bottom, cuts, x0, x1) : undefined;
+        const rest = whole ? grid : cut && accepts(cut, top, bottom) ? gridLines(rows, top, bottom, cut) : undefined;
+        if (cut && rest && !tableCaptioned(rows, top, bottom, captions) && entryList(cut)) {
+            group.proposes = null;
+            for (const l of rest.members) listed.add(l);
+            continue;
+        }
+        if (!whole) group.proposes = rest ? { bbox: extendOverRules(cellSpan(rest.cells), prims, bs), lines: rest.members } : null;
+    }
+    // Nor does a grid holding any of a list's lines.
+    if (listed.size) {
+        for (const g of out) if (g.proposes !== null && (g.proposes ?? g).lines.some((l) => listed.has(l))) g.proposes = null;
     }
     return out;
+}
+
+/**
+ * The cells and lines of a block's rows `first`..`last` (of `shape`): at least two
+ * cells on each of `MIN_ROWS` rows, however MuPDF set them in lines, and the lines
+ * whose every cell is in the block. A line that also holds text the block left out
+ * (prose beside it, set on one structured-text line) stays out, since taking the line
+ * would take that text too. Undefined when too few.
+ */
+function gridLines(rows: readonly Row[], first: number, last: number, shape: ReturnType<typeof blockShape>): { cells: Segment[]; members: RegionLine[] } | undefined {
+    const cells = shape.columns.flat(2);
+    if (cells.length < MIN_ROWS * 2) return undefined;
+    const kept = new Set(cells);
+    const partly = new Set<RegionLine>();
+    for (let r = first; r <= last; r++) for (const s of rows[r].segs) if (!kept.has(s)) partly.add(s.line);
+    const members = [...new Set(cells.map((s) => s.line))].filter((l) => !partly.has(l));
+    return members.length < MIN_ROWS ? undefined : { cells, members };
+}
+
+/**
+ * The rows of a block (`first`..`last`, with `cells`, columns cut at `cuts`) short of
+ * the page's running headers and footers: a row whose cells in the block include one
+ * of `stops`, or are one line that says the table continues (`CONTINUED_RE`), ends the
+ * block's rows on its side (the nearer end), itself included. They are page furniture,
+ * not a row. A running head is a line or two of words, with at most one number alone
+ * (its page number), set apart from the table. A row of stops is the table's own (its
+ * header or column numbers set in the margin band, repeated on each page of a long
+ * table) when it is more lines than `RUNNING_LINES` or cells than `RUNNING_CELLS`,
+ * holds several cells without letters, sits at the table's line spacing from its
+ * nearest row (`BREAK_GAP`), or, at most `HEADER_GAP` line heights from it, sets two
+ * or more cells over the table's columns, each starting, ending or centred with a
+ * cell of its column on another row, one of them inside the table's outer edges. A
+ * running head stands further off, whatever its cells line up with. Rows are judged
+ * from the table's body outward, each against the nearest row found to be the
+ * table's, so a header of two rows is one.
+ */
+function rowsWithin(
+    rows: readonly Row[],
+    first: number,
+    last: number,
+    cells: readonly Segment[],
+    cuts: readonly number[],
+    stops?: ReadonlySet<RegionLine>,
+): [number, number] {
+    const kept = new Set(cells);
+    const own = (r: number) => rows[r].segs.filter((s) => kept.has(s));
+    const continued = (r: number) => {
+        const segs = own(r);
+        return segs.length === 1 && CONTINUED_RE.test(segs[0].line.text.trim());
+    };
+    const stopped = (r: number) => own(r).filter((s) => stops?.has(s.line));
+    // Rows of stops that may be furniture, as their cells tell.
+    const candidates = new Set<number>();
+    for (let r = first; r <= last; r++) {
+        const segs = stopped(r);
+        if (!segs.length || segs.length > RUNNING_CELLS || new Set(segs.map((s) => s.line)).size > RUNNING_LINES) continue;
+        if (segs.filter((s) => !/\p{L}/u.test(s.text)).length <= 1) candidates.add(r);
+    }
+    const column = (s: Segment) => {
+        const cx = (s.x0 + s.x1) / 2;
+        let k = 0;
+        while (k < cuts.length && cx > cuts[k]) k++;
+        return k;
+    };
+    // Candidates found to be the table's own rows, judged from the table's body outward.
+    const accepted = new Set<number>();
+    // The table's own row next to row `r` toward the block's body: the nearest with cells of the
+    // block that says nothing of continuing and is no candidate, or one found to be the table's
+    // (the header row below a second one).
+    const neighbour = (r: number): number | undefined => {
+        const step = r - first <= last - r ? 1 : -1;
+        for (let q = r + step; q >= first && q <= last; q += step) {
+            if (own(q).length && !continued(q) && (!candidates.has(q) || accepted.has(q))) return q;
+        }
+        return undefined;
+    };
+    const tableRow = (r: number): boolean => {
+        const q = neighbour(r);
+        if (q === undefined) return false;
+        const [a, b] = q > r ? [rows[r], rows[q]] : [rows[q], rows[r]];
+        const gap = (b.y0 - a.y1) / Math.min(a.h, b.h);
+        if (gap <= BREAK_GAP) return true;
+        const segs = stopped(r);
+        if (segs.length < 2 || gap > HEADER_GAP) return false;
+        const others = [...kept].filter((t) => !stops?.has(t.line) && ![...candidates].some((c) => rows[c].segs.includes(t)));
+        // How a cell sits over its column: starting, ending or centred with one of its cells.
+        // A running head starts at the table's left edge and its page number ends at the right
+        // one; a header also meets a column inside (a start past the first, an end before the
+        // last, or a centre).
+        let inner = false;
+        const fits = segs.every((s) => {
+            const tol = WRAP_INDENT_EM * Math.max(1, s.line.size);
+            const k = column(s);
+            const column_ = others.filter((t) => column(t) === k);
+            const starts = column_.some((t) => Math.abs(t.x0 - s.x0) <= tol);
+            const ends = column_.some((t) => Math.abs(t.x1 - s.x1) <= tol);
+            const centred = column_.some((t) => Math.abs(t.x0 + t.x1 - s.x0 - s.x1) <= 2 * tol);
+            if ((starts && k > 0) || (ends && k < cuts.length) || (centred && !starts && !ends)) inner = true;
+            return starts || ends || centred;
+        });
+        return fits && inner;
+    };
+    // From the body outward on each side: the first row of furniture ends the block there.
+    const furniture = (r: number): boolean => {
+        if (continued(r)) return true;
+        if (!candidates.has(r)) return false;
+        if (!tableRow(r)) return true;
+        accepted.add(r);
+        return false;
+    };
+    let [top, bottom] = [first, last];
+    const middle = (first + last) / 2;
+    for (let r = Math.floor(middle); r >= first; r--) {
+        if (furniture(r)) {
+            top = r + 1;
+            break;
+        }
+    }
+    for (let r = Math.floor(middle) + 1; r <= last; r++) {
+        if (furniture(r)) {
+            bottom = r - 1;
+            break;
+        }
+    }
+    return [top, bottom];
+}
+
+/**
+ * Whether a table's caption ("Table 1. Sample size by method") stands over or under a
+ * block (rows `first`..`last`): its caption rows run on from the row next to the block,
+ * at most `ROW_GAP` line heights apart, and one of them is a table caption's. A list of
+ * tables has entries that read as captions too, but each leads to its page number
+ * (`pageEntry`).
+ */
+function tableCaptioned(rows: readonly Row[], first: number, last: number, captions: ReadonlySet<RegionLine>): boolean {
+    for (const [from, step] of [
+        [first, -1],
+        [last, 1],
+    ] as const) {
+        for (let r = from + step, prev = from; r >= 0 && r < rows.length && rows[r].caption; prev = r, r += step) {
+            const [a, b] = step < 0 ? [rows[r], rows[prev]] : [rows[prev], rows[r]];
+            if (b.y0 - a.y1 > ROW_GAP * Math.max(a.h, b.h)) break;
+            if (rows[r].lines.some((l) => captions.has(l) && isTableCaption(l.text)) && !pageEntry(rows[r])) return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Whether a row is an entry of a list of tables or figures: dot leaders, or a page
+ * number set apart from the title as a cell of its own at the row's end (a number
+ * within the title, "in Experiment 2", is none).
+ */
+function pageEntry(row: Row): boolean {
+    if (row.lines.some((l) => LEADERS_RE.test(l.text))) return true;
+    const segs = row.segs;
+    const end = segs[segs.length - 1];
+    return segs.length >= 2 && end.exact && pageRef(end.text.trim()) !== null;
 }
 
 /** The box of cells: their extents across, their lines' down. */
@@ -953,6 +1176,147 @@ function rowRules(shape: ReturnType<typeof blockShape>, rows: readonly Row[], fi
 
 function runningShare(segs: readonly Segment[], running: ReadonlySet<RegionLine>): number {
     return segs.length ? segs.filter((s) => running.has(s.line)).length / segs.length : 1;
+}
+
+/**
+ * Whether a block lists entries with the pages they are on (a table of contents, a
+ * list of tables or figures, an author index, a list of notes) rather than rows of
+ * a table. It does when:
+ * - its first or last column holds page numbers (`parsePageNumber`: "17", "p. 17",
+ *   "xii") in at least `PAGE_CELLS` of its cells, `ENTRY_PAGES` or more, under no
+ *   header other than "Page", not each one more than the last (rows numbered
+ *   1, 2, 3), and at least `DISTINCT_PAGES` of them distinct;
+ * - every other column holds words (titles, names, headings) or the numbers of
+ *   headings in order ("4", "9.3", "A.1"), with at most `ENTRY_VALUE_CELLS` of its
+ *   cells anything else, and one holds words;
+ * - and the entries are set out as a list: the pages increase down the block, or a
+ *   column of names is in alphabetical order, whole names compared (an index), or dot leaders lead to the
+ *   pages on at least `LEADER_ROWS` of its rows.
+ * A table whose last column holds small integers has a header row over it, or a
+ * second column of values (other numbers than headings'), or values that do not
+ * increase down the block, beside cells that are not in alphabetical order.
+ */
+function entryList(shape: ReturnType<typeof blockShape>): boolean {
+    const columns = shape.columns;
+    if (columns.length < 2) return false;
+    const n = columns[0]?.length ?? 0;
+    // A column's cells top to bottom (its text on a row, without leaders) and its rows with
+    // leaders, read on first use: most tables fail on their outer columns' first cells,
+    // before the text of their other cells is read.
+    const read: { cells: string[]; leaders: number[] }[] = [];
+    const column = (k: number) => {
+        if (!read[k]) {
+            const cells: string[] = [];
+            const leaders: number[] = [];
+            for (let i = 0; i < n; i++) {
+                if (!columns[k][i].length) continue;
+                const [cell, leader] = cellText(columns[k][i]);
+                if (leader) leaders.push(i);
+                if (cell) cells.push(cell);
+            }
+            read[k] = { cells, leaders };
+        }
+        return read[k];
+    };
+    for (const p of new Set([columns.length - 1, 0])) {
+        if (!leadsWithPage(columns[p], n)) continue;
+        const cells = column(p).cells;
+        const entries = pageRef(cells[0]) === null ? cells.slice(1) : cells;
+        const numbers = entries.map(pageRef).filter((v): v is number => v !== null);
+        if (numbers.length < ENTRY_PAGES || numbers.length < PAGE_CELLS * entries.length || numbers.every((v) => v >= 1000)) continue;
+        // Numbers that each step by one number the rows (1, 2, 3); a few values repeated
+        // (all 0, all 12) are a table's. Neither refers to pages.
+        if (numbers.every((v, i) => i === 0 || v === numbers[i - 1] + 1)) continue;
+        const distinct = new Set(numbers).size;
+        if (distinct < ENTRY_PAGES || distinct < DISTINCT_PAGES * numbers.length) continue;
+        const others = columns.flatMap((_, k) => (k !== p && column(k).cells.length ? [column(k).cells] : []));
+        if (!others.every(entryColumn) || !others.some((c) => c.filter(isWords).length >= ENTRY_PAGES)) continue;
+        // Names in order: whole labels, so that a first word they share ("The") orders nothing.
+        const named = others.some((c) => {
+            const keys = c.filter(isWords).map((t) => t.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim());
+            return new Set(keys).size >= NAMED_ENTRIES && orderedShare(keys, (a, b) => a.localeCompare(b)) >= ENTRIES_ORDERED;
+        });
+        const textRows = Array.from({ length: n }, (_, i) => columns.some((c) => c[i].length)).filter(Boolean).length;
+        const leaderRows = new Set(columns.flatMap((_, k) => column(k).leaders)).size;
+        if (orderedShare(numbers, (a, b) => a - b) >= ENTRIES_ORDERED || named || leaderRows >= LEADER_ROWS * textRows) return true;
+    }
+    return false;
+}
+
+/** A cell's text on a row (its segments'), without leaders, and whether it had any. */
+function cellText(segs: readonly Segment[]): [string, boolean] {
+    const raw = segs.map((s) => s.text).join(" ");
+    const cell = raw.replace(LEADER_RE, " ").trim();
+    return [cell, cell !== raw.trim()];
+}
+
+/**
+ * Whether a column's first cell with text is a page number, or its head ("Page") over
+ * one: no header of a table's column of values above it, nor under its first number.
+ */
+function leadsWithPage(column: readonly Segment[][], n: number): boolean {
+    let headed = false;
+    let page = false;
+    for (let i = 0; i < n; i++) {
+        if (!column[i].length) continue;
+        const [cell] = cellText(column[i]);
+        if (!cell) continue;
+        const ref = pageRef(cell) !== null;
+        // A header under the first number ("12" then "N") is a table's, the number above it a
+        // running head's page number that joined its rows.
+        if (page) return ref || PAGE_HEADER_RE.test(cell);
+        if (ref) page = true;
+        else if (headed || !PAGE_HEADER_RE.test(cell)) return false;
+        else headed = true;
+    }
+    return page;
+}
+
+/** The page a cell of a column of page numbers refers to, or null (an Arabic or lowercase Roman number). */
+function pageRef(text: string): number | null {
+    return /\d/u.test(text) || /^[ivxlc]+$/u.test(text) ? parsePageNumber(text) : null;
+}
+
+/** A cell of words: two or more letters, at least half its characters. */
+function isWords(text: string): boolean {
+    const letters = (text.match(/\p{L}/gu) ?? []).length;
+    return letters >= 2 && letters >= 0.5 * text.replace(/\s/gu, "").length;
+}
+
+/** A column of a list's entries beside its pages: words, or heading numbers in order. */
+function entryColumn(cells: readonly string[]): boolean {
+    const numbered = cells.filter((t) => !isWords(t) && SECTION_NUMBER_RE.test(t));
+    if (cells.length - numbered.length - cells.filter(isWords).length > ENTRY_VALUE_CELLS * cells.length) return false;
+    return numbered.length < 2 || orderedShare(numbered.map(sectionKey), compareSections) >= ENTRIES_ORDERED;
+}
+
+/** A heading number's parts, in order: numbers, Roman numerals, letters after them. */
+function sectionKey(text: string): number[] {
+    const roman: Record<string, number> = { I: 1, V: 5, X: 10, L: 50 };
+    return text
+        .replace(/\.$/u, "")
+        .split(".")
+        .map((part) => {
+            if (/^\d+$/u.test(part)) return Number(part);
+            if (/^[IVXL]+$/u.test(part)) {
+                let total = 0;
+                for (let i = 0; i < part.length; i++) total += roman[part[i]] < (roman[part[i + 1]] ?? 0) ? -roman[part[i]] : roman[part[i]];
+                return total;
+            }
+            return 1000 + part.charCodeAt(0);
+        });
+}
+
+function compareSections(a: readonly number[], b: readonly number[]): number {
+    for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];
+    return a.length - b.length;
+}
+
+/** Share of neighbouring values in order (equal ones included). */
+function orderedShare<T>(values: readonly T[], compare: (a: T, b: T) => number): number {
+    let up = 0;
+    for (let i = 1; i < values.length; i++) if (compare(values[i - 1], values[i]) <= 0) up++;
+    return values.length > 1 ? up / (values.length - 1) : 0;
 }
 
 /**

@@ -11,6 +11,7 @@ import {
     marginFilteredLines,
     numberedRunningLines,
     regionFurnitureLines,
+    runningMarginLines,
 } from "../../../src/beaver-extract/FilteredParagraphPipeline";
 import { buildPageAnalysisContext } from "../../../src/beaver-extract/PageAnalysisContext";
 import { MarginFilter } from "../../../src/beaver-extract/MarginFilter";
@@ -637,5 +638,43 @@ describe("region furniture", () => {
         expect([...bodyExtents.values()].map((b) => b.top)).toEqual([60]);
         const furniture = regionFurnitureLines(docPages[3], { ...ctx, pageRotation: 0, repeat: 3, bodyExtents });
         expect(texts(furniture)).toEqual(["Journal of Testing Studies"]);
+    });
+    it("finds running headers and footers set close to the body, but no repeated text within it", () => {
+        // A footer and its page number set under the lowest body line by less than a line
+        // height; a table's column header repeating in the top band, under the body's top on
+        // other pages; two numbers in the bottom band of a page.
+        const docPages = Array.from({ length: 6 }, (_, k) =>
+            makePage(k, [
+                makeLine("Journal of Testing Studies", 20, 80, 9),
+                ...(k % 2 ? [makeLine("Model", 64, 80, 9), makeLine("Estimate", 64, 200, 9)] : []),
+                bodyLine(`Body text of page ${k} goes on here with more words.`, k % 2 ? 300 : 60),
+                bodyLine(`The last line of body text on page ${k} has words.`, 726),
+                makeLine("Testing et al., Journal of Testing 2025", 742, 80, 9),
+                makeLine(`${k + 1} of 6`, 742, 500, 9),
+                ...(k === 3 ? [makeLine("12", 770, 200, 9), makeLine("14", 770, 260, 9)] : []),
+            ]),
+        );
+        const ctx = buildPageAnalysisContext({ pages: docPages, totalPageCount: docPages.length });
+        const bodyExtents = documentBodyExtents(docPages, ctx);
+        const opts = { ...ctx, pageRotation: 0 as const, repeat: 3, bodyExtents };
+        expect(texts(regionFurnitureLines(docPages[3], opts))).toEqual(["Journal of Testing Studies"]);
+        expect(texts(runningMarginLines(docPages[3], opts)).sort()).toEqual(["4 of 6", "Journal of Testing Studies", "Testing et al., Journal of Testing 2025"]);
+        expect(runningMarginLines(docPages[3], { ...opts, pageRotation: 90 }).size).toBe(0);
+    });
+
+    it("reads a running footer MuPDF set as fragments of one row as the margin analysis does", () => {
+        // "Testing et al., Journal of Testing 2025" as two adjacent lines, a word space apart.
+        const docPages = Array.from({ length: 6 }, (_, k) =>
+            makePage(k, [
+                bodyLine(`Body text of page ${k} goes on here with more words.`, 60),
+                bodyLine(`The last line of body text on page ${k} has words.`, 726),
+                makeLine("Testing et al.,", 742, 80, 9),
+                makeLine("Journal of Testing 2025", 742, 172, 9),
+            ]),
+        );
+        const ctx = buildPageAnalysisContext({ pages: docPages, totalPageCount: docPages.length });
+        expect(ctx.marginAnalysis.elements.get("bottom")!.filter((e) => e.pageIndex === 3).map((e) => e.text)).toContain("Testing et al., Journal of Testing 2025");
+        const opts = { ...ctx, pageRotation: 0 as const, repeat: 3, bodyExtents: documentBodyExtents(docPages, ctx) };
+        expect(texts(runningMarginLines(docPages[3], opts)).sort()).toEqual(["Journal of Testing 2025", "Testing et al.,"]);
     });
 });

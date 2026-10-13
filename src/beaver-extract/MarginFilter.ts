@@ -167,7 +167,11 @@ function isPageNumberPattern(text: string): boolean {
     return PAGE_NUMBER_PATTERNS.some((pattern) => pattern.test(cleaned));
 }
 
-function parsePageNumber(text: string): number | null {
+/**
+ * The page number a margin text gives ("12", "p. 12", "12 of 30", "xii", "第 12 页"),
+ * or null when it gives none.
+ */
+export function parsePageNumber(text: string): number | null {
     const cleaned = normalizeDigits(text).trim().toLowerCase();
     if (!cleaned) return null;
 
@@ -991,6 +995,60 @@ export function getEffectiveRepeatThreshold(
 // MarginFilter Class
 // ============================================================================
 
+/** A text of a page's margin zones, as the margin analysis collects it (`marginTexts`). */
+export interface MarginText {
+    text: string;
+    position: MarginPosition;
+    bbox: BoundingBox;
+    /** The page's lines it is made of. */
+    lines: RawLine[];
+    /** A page number at the start or end of a row, collected on its own too. */
+    rowEndNumber?: boolean;
+}
+
+/**
+ * The margin texts of a page's text rows (`collectTextRows`), in row order: each
+ * row in a margin zone (`positionOf`), with a page number at either end of a row
+ * of several lines also on its own; and the lines one by one of a row that spans
+ * two zones without reaching the content area. Rows and lines of justified prose
+ * (`prose`) are body text, not margin text.
+ */
+function marginTexts(
+    rows: readonly TextRow[],
+    positionOf: (bbox: BoundingBox) => MarginPosition | null,
+    prose: ReadonlySet<RawLine> | null,
+): MarginText[] {
+    const out: MarginText[] = [];
+    for (const row of rows) {
+        if (prose && row.lines.every(line => prose.has(line))) continue;
+        const position = positionOf(row.bbox);
+        if (position) {
+            out.push({ text: row.text, position, bbox: row.bbox, lines: row.lines });
+            // A page number set beside a running head that changes
+            // from page to page ("1 Introduction", "2 Methods") is
+            // only found by the page-number sequence, so a leading
+            // or trailing page number is also collected on its own
+            // (see `rowEndNumber`).
+            const ends = row.lines.length > 1
+                ? [row.lines[0], row.lines[row.lines.length - 1]]
+                : [];
+            for (const line of ends) {
+                const linePosition = positionOf(line.bbox);
+                if (linePosition && isPageNumberPattern(line.text.trim())) {
+                    out.push({ text: line.text.trim(), position: linePosition, bbox: line.bbox, lines: [line], rowEndNumber: true });
+                }
+            }
+            continue;
+        }
+        if (row.lines.length < 2 || !row.lines.every(line => positionOf(line.bbox))) continue;
+        for (const line of row.lines) {
+            if (prose?.has(line)) continue;
+            out.push({ text: line.text.trim(), position: positionOf(line.bbox)!, bbox: line.bbox, lines: [line] });
+        }
+    }
+    return out;
+}
+
 /**
  * MarginFilter class for handling margin-based content filtering.
  */
@@ -1063,6 +1121,19 @@ export class MarginFilter {
     }
 
     /**
+     * A page's margin texts as `collectMarginElements` reads them (`marginTexts`):
+     * its text rows (with `textRows`; otherwise every line is a row) in the margin
+     * zones, before the analysis sets justified prose and lone words aside.
+     */
+    static marginTexts(page: RawPageData, marginZone: MarginSettings, textRows: boolean = true): MarginText[] {
+        return marginTexts(
+            collectTextRows(page, textRows),
+            bbox => getMarginPosition(bbox, page.width, page.height, marginZone),
+            null,
+        );
+    }
+
+    /**
      * Smart filter: Collect all elements in margin zones for analysis.
      * With `textRows` off, every line is its own row (PDF schema 4).
      */
@@ -1128,32 +1199,8 @@ export class MarginFilter {
                 });
             };
             const rows = collectTextRows(page, textRows);
-            for (const row of rows) {
-                if (prose && row.lines.every(line => prose.has(line))) continue;
-                const position = positionOf(row.bbox);
-                if (position) {
-                    push(row.text, position, row.bbox, row.lines);
-                    // A page number set beside a running head that changes
-                    // from page to page ("1 Introduction", "2 Methods") is
-                    // only found by the page-number sequence, so a leading
-                    // or trailing page number is also collected on its own
-                    // (see `rowEndNumber`).
-                    const ends = row.lines.length > 1
-                        ? [row.lines[0], row.lines[row.lines.length - 1]]
-                        : [];
-                    for (const line of ends) {
-                        const linePosition = positionOf(line.bbox);
-                        if (linePosition && isPageNumberPattern(line.text.trim())) {
-                            push(line.text.trim(), linePosition, line.bbox, [line], true);
-                        }
-                    }
-                    continue;
-                }
-                if (row.lines.length < 2 || !row.lines.every(line => positionOf(line.bbox))) continue;
-                for (const line of row.lines) {
-                    if (prose?.has(line)) continue;
-                    push(line.text.trim(), positionOf(line.bbox)!, line.bbox, [line]);
-                }
+            for (const text of marginTexts(rows, positionOf, prose)) {
+                push(text.text, text.position, text.bbox, text.lines, text.rowEndNumber);
             }
             if (textRows) {
                 const leftNumerals = elements.get("left")!.filter(
