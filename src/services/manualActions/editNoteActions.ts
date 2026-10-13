@@ -636,6 +636,7 @@ export async function executeEditNoteAction(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
 
     // ── rewrite mode: replace entire note body ──
@@ -1296,6 +1297,7 @@ async function executeBatchSingleRewrite(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
 
     let expandedNew: string;

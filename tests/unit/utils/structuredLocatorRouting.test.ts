@@ -39,7 +39,7 @@ import {
     locatorSchemaVersion,
     structuredPdfResultForSchema,
 } from '../../../src/services/documentExtraction/structuredPdfResult';
-import { preloadStructuralLocatorPages } from '../../../src/utils/noteCitationExpand';
+import { buildUnresolvedLocatorWarning, preloadStructuralLocatorPages } from '../../../src/utils/noteCitationExpand';
 import { buildLocalCitationDataMapForContent } from '../../../react/utils/citationRenderContext';
 import { getCitationPreloadFilePath } from '../../../react/utils/pageLabels';
 import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
@@ -167,6 +167,16 @@ describe('locator resolution by id scheme', () => {
 
         expect(resolved.unresolved).toEqual(['id="1-ATTACH12" loc="s1.2"']);
         expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
+    });
+
+    it('reports a locator the extracted document does not contain as missing', async () => {
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s99.1"/>');
+
+        expect(resolved.unresolved).toEqual([]);
+        expect(resolved.missing).toEqual(['id="1-ATTACH12" loc="s99.1"']);
+        const warning = buildUnresolvedLocatorWarning(resolved.unresolved, resolved.unavailable, resolved.missing);
+        expect(warning).toContain('not in the cited document');
+        expect(warning).not.toContain('once the cited document');
     });
 
     it('reports an older locator as unresolved when its extraction fails', async () => {

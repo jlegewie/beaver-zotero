@@ -202,7 +202,9 @@ export async function preloadBatchLabels(edits: EditNoteBatchEditItem[]): Promis
     ]);
 
     const locatorWarnings: string[] = [];
-    const warning = buildUnresolvedLocatorWarning(structural.unresolved, structural.unavailable);
+    const warning = buildUnresolvedLocatorWarning(
+        structural.unresolved, structural.unavailable, structural.missing,
+    );
     if (warning) locatorWarnings.push(warning);
 
     return { pageLabels, resolvedLocatorPages: { ...structural.pages }, locatorWarnings };

@@ -129,6 +129,7 @@ export async function renderNoteMarkdown(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
     if (locatorWarning) warnings.push(locatorWarning);
 

@@ -28,10 +28,11 @@ import {
     translatePageNumberToLabel,
 } from './noteCitationExpand';
 import {
+    baseCitationKey,
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
-    requestedCitationKey,
+    type CitationRef,
     type Locator,
 } from '@beaver/agent-core/citations/citationGrammar';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
@@ -141,8 +142,13 @@ export function checkNewCitationItemsExist(
 // Duplicate Citation Check
 // =============================================================================
 
+/** Key of the item or work a citation cites, whatever its locator. */
+function citedWorkKey(ref: CitationRef): string {
+    return ref.kind === 'zotero' ? `zotero:${modelObjectIdFromReference(ref)}` : baseCitationKey(ref);
+}
+
 /**
- * Identity-and-locator key of a citation tag. A tag that names its citation
+ * Key of the item or work a citation tag cites. A tag that names its citation
  * only by `ref` takes the identity the stored citation was read with.
  */
 function citationTagKey(attrStr: string, metadata: SimplificationMetadata): string | null {
@@ -150,23 +156,20 @@ function citationTagKey(attrStr: string, metadata: SimplificationMetadata): stri
     let normalized = normalizeCitationTag(attrs);
     const stored = !normalized.ok && attrs.ref ? metadata.elements.get(attrs.ref)?.originalAttrs : undefined;
     if (stored) {
-        const loc = stored.loc ?? (stored.page ? `page${stored.page}` : '');
-        attrs = {
-            ...(stored.external_id ? { external_id: stored.external_id } : { id: stored.item_id }),
-            ...(loc ? { loc } : {}),
-        };
+        attrs = stored.external_id ? { external_id: stored.external_id } : { id: stored.item_id };
         normalized = normalizeCitationTag(attrs);
     }
-    return normalized.ok ? requestedCitationKey(normalized.ref) : null;
+    return normalized.ok ? citedWorkKey(normalized.ref) : null;
 }
 
 /**
  * When a new citation is inserted, check if the same item is already cited
  * elsewhere in the note. Returns a warning string or null.
  *
- * A citation that also appears in `oldString` (the text the edit replaces) is
- * being kept, not inserted, so it is not reported. Each one in `oldString`
- * excuses one in `newString`, used first by citations kept with their `ref`.
+ * A citation of an item that `oldString` (the text the edit replaces) also
+ * cites is being kept or moved to another locator, not inserted, so it is not
+ * reported. Each citation in `oldString` excuses one in `newString`, used first
+ * by citations kept with their `ref`.
  */
 export function checkDuplicateCitations(
     newString: string,
@@ -195,7 +198,7 @@ export function checkDuplicateCitations(
         if (extractAttr(attrStr, 'ref') !== undefined) continue;
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
         if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
-        if (useKept(requestedCitationKey(normalized.ref))) continue;
+        if (useKept(citedWorkKey(normalized.ref))) continue;
         const newItemId = modelObjectIdFromReference(normalized.ref);
         // Check if any existing citation references the same item
         for (const [existingId, stored] of metadata.elements) {

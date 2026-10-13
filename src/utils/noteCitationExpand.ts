@@ -125,6 +125,11 @@ export interface StructuralLocatorPreload {
      * version this plugin cannot produce, so they can never map to a page.
      */
     unavailable: string[];
+    /**
+     * Descriptions of locators that are not in the cited document's text
+     * extraction (a sentence or page past its end, a mistyped id).
+     */
+    missing: string[];
 }
 
 // =============================================================================
@@ -467,8 +472,9 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
     const pages: ResolvedLocatorPages = {};
     const unresolved: string[] = [];
     const unavailable: string[] = [];
+    const missing: string[] = [];
     const cache = Zotero.Beaver?.documentCache;
-    if (!cache) return { pages, unresolved, unavailable };
+    if (!cache) return { pages, unresolved, unavailable, missing };
     await ensureCitedLibrariesLoaded([str]);
 
     const seen = new Set<string>();
@@ -583,13 +589,13 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
             const result = await resultPromise;
             const resolved = result && resolvePageFromStructuredResult(result, loc, isStandaloneAttachment(item));
             if (resolved) pages[citationKey] = resolved;
-            else if (citesPdf) unresolved.push(describe);
+            else if (citesPdf) (result ? missing : unresolved).push(describe);
         } catch {
             if (citesPdf) unresolved.push(describe);
         }
     }
 
-    return { pages, unresolved, unavailable };
+    return { pages, unresolved, unavailable, missing };
 }
 
 /**
@@ -600,8 +606,9 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
 export function buildUnresolvedLocatorWarning(
     unresolved: string[],
     unavailable: string[] = [],
+    missing: string[] = [],
 ): string | null {
-    if (unresolved.length === 0 && unavailable.length === 0) return null;
+    if (unresolved.length === 0 && unavailable.length === 0 && missing.length === 0) return null;
     let warning = 'Zotero shows note citations with page numbers only.';
     if (unresolved.length > 0) {
         warning += ` These structural locators could not be mapped to a page, so their `
@@ -613,6 +620,11 @@ export function buildUnresolvedLocatorWarning(
             + `can't be loaded, so their citations show no page number: `
             + `${unavailable.join('; ')}. Re-read the cited pages and use the locators `
             + `shown there.`;
+    }
+    if (missing.length > 0) {
+        warning += ` These locators are not in the cited document, so their citations show `
+            + `no page number: ${missing.join('; ')}. Re-read the cited pages and use the `
+            + `locators shown there.`;
     }
     return warning;
 }

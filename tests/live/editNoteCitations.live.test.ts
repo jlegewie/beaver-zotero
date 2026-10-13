@@ -385,8 +385,9 @@ describe('edit_note execute — structural locator resolved to a page', () => {
     it('warns and drops the locator when a structural locator cannot be resolved', async () => {
         const ref = await seedNote('<p>Body to edit.</p>');
 
-        // A sentence index far beyond the document is not in the citation
-        // index, so it can't be mapped to a page (option A: drop + warn).
+        // A sentence index far beyond the document is not in its extraction,
+        // so the citation shows no page and the warning says the locator is
+        // not in the document.
         const res = await executeEditNote({
             library_id: ref.library_id,
             zotero_key: ref.zotero_key,
@@ -397,7 +398,7 @@ describe('edit_note execute — structural locator resolved to a page', () => {
         expect(res.success, res.error ?? '').toBe(true);
 
         const warnings = res.result_data?.warnings ?? [];
-        const locatorWarning = warnings.find((w) => /could not be mapped to a page/i.test(w));
+        const locatorWarning = warnings.find((w) => /not in the cited document/i.test(w));
         expect(locatorWarning).toBeTruthy();
         expect(locatorWarning).toContain('loc="s999999"');
 

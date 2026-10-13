@@ -2399,6 +2399,19 @@ describe('checkDuplicateCitations', () => {
             'Claim <citation id="u-DUP" loc="s5.6"/>.')).toContain('already cited');
     });
 
+    it('does not report a citation the edit moves to another locator', () => {
+        const metadata: SimplificationMetadata = {
+            elements: new Map([
+                ['c_DUP_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-DUP', loc: 's3.1' } }],
+            ]),
+        };
+        const old = 'Claim <citation id="u-DUP" loc="s3.1"/>.';
+        expect(checkDuplicateCitations('Claim <citation id="u-DUP" loc="s3.2"/>.', metadata, old)).toBeNull();
+        // Also when old_string names it by its ref alone, or by the legacy numeric id.
+        expect(checkDuplicateCitations('Claim <citation id="1-DUP" loc="s3.2"/>.', metadata,
+            'Claim <citation ref="c_DUP_0"/>.')).toBeNull();
+    });
+
     it('reports a new duplicate when the edit also keeps the original by its ref', () => {
         const metadata: SimplificationMetadata = {
             elements: new Map([

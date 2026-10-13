@@ -687,6 +687,7 @@ async function validateEditNoteAction(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
     if (locatorWarning) warnings.push(locatorWarning);
     if (operation === 'insert_after' || operation === 'insert_before') {
@@ -841,6 +842,7 @@ async function executeEditNoteAction(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
 
     // 4. Pre-seed page labels before the final note snapshot. The final
