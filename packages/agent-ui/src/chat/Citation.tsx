@@ -140,11 +140,31 @@ const Citation: React.FC<CitationProps> = (props) => {
     if (exportRendering) {
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
 
-        // External citations cannot be exported as proper Zotero citations
+        // External works not in the library: a host-native citation when the
+        // host can build one, otherwise a link to the work.
         if (isExternal && !mappedZoteroItem) {
             const externalReference = externalSourceId
                 ? externalReferenceMap[externalSourceId]
                 : undefined;
+            const exportedReference = externalSourceId && externalReference
+                ? getHost().documentExport?.renderExternalReferenceCitation?.({
+                    externalId: externalSourceId,
+                    reference: externalReference,
+                    requestedRef,
+                })
+                : null;
+            if (exportedReference?.kind === 'citation') {
+                return (
+                    <span
+                        className="citation"
+                        data-citation={exportedReference.citationData}
+                        dangerouslySetInnerHTML={{ __html: exportedReference.html }}
+                    />
+                );
+            }
+            if (exportedReference?.kind === 'html') {
+                return <span dangerouslySetInnerHTML={{ __html: exportedReference.html }} />;
+            }
             const label = citation
                 || (externalReference ? formatExternalReferenceLabel(externalReference) : '')
                 || externalSourceId

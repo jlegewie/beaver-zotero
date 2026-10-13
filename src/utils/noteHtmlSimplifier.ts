@@ -12,7 +12,7 @@
 
 import { stripBeaverEditFooter, stripBeaverCreatedFooter } from './noteEditFooter';
 import { escapeAttr, unescapeAttr } from './noteHtmlEntities';
-import { stripDataCitationItems, stripNoteWrapperDiv } from './noteWrapper';
+import { extractDataCitationItems, stripDataCitationItems, stripNoteWrapperDiv } from './noteWrapper';
 import { normalizeNoteHtml } from '../prosemirror/normalize';
 import {
     parseLinkCitationPageSuffix,
@@ -22,6 +22,7 @@ import {
 import { translatePageLabelToNumber } from './pageLabelTranslation';
 import { citationItemRefFromUri, extractItemKeyFromUri } from './zoteroUri';
 import { modelObjectId } from './libraryIdentity';
+import { readBeaverCitationMeta } from './noteCitationMeta';
 import type { PageLabels } from '../services/documentCache';
 
 export { normalizeNoteHtml };
@@ -37,16 +38,32 @@ export interface SimplificationResult {
 
 export interface SimplificationMetadata {
     elements: Map<string, StoredElement>;
+    /**
+     * Cited annotations and attachments recorded in Beaver's citation
+     * metadata, and whether each existed. The view names a child by its own id
+     * while it exists and falls back to the parent item otherwise, so a cached
+     * view is stale once any child's existence changes.
+     */
+    citedChildren?: Array<{ libraryID: number; key: string; exists: boolean }>;
 }
 
 export interface StoredElement {
     rawHtml: string;
     type: 'citation' | 'compound-citation' | 'annotation' | 'annotation-image' | 'image' | 'link';
     originalAttrs?: {
+        /** Model id the citation was shown with; empty for an external work. */
         item_id: string;
         page?: string;
         pageConvention?: 'number' | 'label';
         cslLabel?: string;
+        /**
+         * Locator token the citation was shown with, from its private
+         * metadata (empty when it was shown without one). Absent for a
+         * citation without metadata, which is shown with its page.
+         */
+        loc?: string;
+        /** External reference id of an embedded external work. */
+        external_id?: string;
     };
     isCompound?: boolean;
     /** The `items` attribute a compound citation was read as. */
@@ -114,6 +131,7 @@ export function getOrSimplify(
         cached
         && cached.contentHash === contentHash
         && cached.pageLabelsFingerprint === pageLabelsFingerprint
+        && !cached.metadata.citedChildren?.some(child => isMissingItem(child.libraryID, child.key) === child.exists)
     ) {
         return { simplified: cached.simplified, metadata: cached.metadata, isStale: false };
     }
@@ -174,6 +192,7 @@ export function simplifyNoteHtml(
 
     // Track occurrence counts for content-based IDs
     const citationKeyCounts = new Map<string, number>();
+    const elementId = uniqueElementIdFactory(metadata);
 
     // Strip Beaver footers before normalization so internal Beaver protocol
     // links never enter the agent-visible note body or citation-link pass.
@@ -188,7 +207,14 @@ export function simplifyNoteHtml(
     // across PM re-serializations (hex→rgb, style splitting, legacy elements, etc.).
     simplified = normalizeNoteHtml(simplified);
 
-    // 1. Strip data-citation-items from wrapper div
+    // 1. Strip data-citation-items from wrapper div, keeping the item data of
+    // works that are not library items to name them in the simplified view.
+    const cachedItemDataByUri = new Map<string, Record<string, unknown>>();
+    for (const entry of extractDataCitationItems(simplified) ?? []) {
+        for (const uri of entry?.uris ?? []) {
+            if (entry.itemData && !cachedItemDataByUri.has(uri)) cachedItemDataByUri.set(uri, entry.itemData);
+        }
+    }
     simplified = stripDataCitationItems(simplified);
 
     // 2. Replace annotation images (img with both data-attachment-key and data-annotation)
@@ -198,8 +224,8 @@ export function simplifyNoteHtml(
         (match, _allAttrs, attachmentKey, encodedAnnotation) => {
             try {
                 const annotationData = JSON.parse(decodeURIComponent(encodedAnnotation));
-                const annotationKey = annotationData.annotationKey || 'unknown';
-                const id = `ai_${annotationKey}`;
+                const annotationKey = annotationKeyOf(annotationData);
+                const id = elementId(`ai_${annotationKey ?? 'nokey'}`);
 
                 // Extract width/height from attrs
                 const widthMatch = match.match(/width="(\d+)"/);
@@ -212,7 +238,9 @@ export function simplifyNoteHtml(
                     type: 'annotation-image',
                 });
 
-                let tag = `<annotation-image id="${id}" key="${annotationKey}" attachment="${attachmentKey}"`;
+                let tag = `<annotation-image id="${id}"`;
+                if (annotationKey) tag += ` key="${annotationKey}"`;
+                tag += ` attachment="${attachmentKey}"`;
                 if (width) tag += ` width="${width}"`;
                 if (height) tag += ` height="${height}"`;
                 tag += ' />';
@@ -231,7 +259,7 @@ export function simplifyNoteHtml(
             if (match.includes('data-annotation=')) {
                 return match;
             }
-            const id = `i_${attachmentKey}`;
+            const id = elementId(`i_${attachmentKey}`);
 
             metadata.elements.set(id, {
                 rawHtml: match,
@@ -248,10 +276,10 @@ export function simplifyNoteHtml(
         (match, encodedAnnotation, innerText) => {
             try {
                 const annotationData = JSON.parse(decodeURIComponent(encodedAnnotation));
-                const annotationKey = annotationData.annotationKey || 'unknown';
+                const annotationKey = annotationKeyOf(annotationData);
                 const color = annotationData.color || '';
                 const pageLabel = annotationData.pageLabel || '';
-                const id = `a_${annotationKey}`;
+                const id = elementId(`a_${annotationKey ?? 'nokey'}`);
 
                 metadata.elements.set(id, {
                     rawHtml: match,
@@ -259,7 +287,8 @@ export function simplifyNoteHtml(
                     originalText: innerText,
                 });
 
-                let tag = `<annotation id="${id}" key="${annotationKey}"`;
+                let tag = `<annotation id="${id}"`;
+                if (annotationKey) tag += ` key="${annotationKey}"`;
                 if (color) tag += ` color="${color}"`;
                 if (pageLabel) tag += ` page="${pageLabel}"`;
                 tag += `>${innerText}</annotation>`;
@@ -302,8 +331,94 @@ export function simplifyNoteHtml(
                     const ci = citationItems[0];
                     const uri = ci.uris?.[0] || '';
                     const itemRef = citationItemRefFromUri(uri, libraryID);
+                    let meta = readBeaverCitationMeta(ci);
+                    // A cited annotation or attachment that no longer exists
+                    // reads back as the parent item and page the note shows.
+                    const childKey = meta?.ann ?? meta?.att;
+                    if (itemRef && childKey) {
+                        const exists = !isMissingItem(itemRef.libraryID, childKey);
+                        (metadata.citedChildren ??= []).push({ libraryID: itemRef.libraryID, key: childKey, exists });
+                        if (!exists) meta = undefined;
+                    }
+
+                    // An external work Beaver embedded reads back as the
+                    // external reference it was written from.
+                    if (meta?.ext && !itemRef) {
+                        const keyForCount = `ext_${meta.ext.replace(/[^\w.-]/g, '_')}`;
+                        const occurrence = citationKeyCounts.get(keyForCount) || 0;
+                        citationKeyCounts.set(keyForCount, occurrence + 1);
+                        const ref = `c_${keyForCount}_${occurrence}`;
+                        metadata.elements.set(ref, {
+                            rawHtml: match,
+                            type: 'citation',
+                            originalAttrs: { item_id: '', external_id: meta.ext, loc: meta.loc ?? '' },
+                        });
+                        // The work is not in the library, so the tag names it:
+                        // a short label and the URL the citation cites it by.
+                        let tag = `<citation external_id="${escapeAttr(meta.ext)}"`;
+                        if (meta.loc) tag += ` loc="${escapeAttr(meta.loc)}"`;
+                        tag += ` ref="${ref}"`;
+                        const workLabel = embeddedWorkLabel(meta.csl);
+                        if (workLabel) tag += ` label="${escapeAttr(workLabel)}"`;
+                        if (/^https?:\/\//i.test(uri)) tag += ` url="${escapeAttr(uri)}"`;
+                        tag += '/>';
+                        return tag;
+                    }
+
+                    // A work that is not a library item and carries no Beaver
+                    // metadata (cited from another library, or an embedded
+                    // work edited in Zotero's citation dialog) is shown by
+                    // name only. It can be kept, moved or removed, not edited.
+                    if (!itemRef && !meta?.ext) {
+                        const occurrence = citationKeyCounts.get('embedded') || 0;
+                        citationKeyCounts.set('embedded', occurrence + 1);
+                        const ref = `c_embedded_${occurrence}`;
+                        metadata.elements.set(ref, { rawHtml: match, type: 'citation' });
+                        const workLabel = embeddedWorkLabel(
+                            (ci.itemData as Record<string, unknown> | undefined) ?? cachedItemDataByUri.get(uri),
+                        ) || label.replace(/^\(|\)$/g, '');
+                        let tag = `<citation ref="${ref}"`;
+                        if (workLabel) tag += ` label="${escapeAttr(workLabel)}"`;
+                        if (/^https?:\/\//i.test(uri)) tag += ` url="${escapeAttr(uri)}"`;
+                        tag += '/>';
+                        return tag;
+                    }
+
                     const itemKey = itemRef?.key ?? 'unknown';
-                    const itemId = modelObjectId(itemRef?.libraryID ?? libraryID, itemKey);
+                    const itemLibraryID = itemRef?.libraryID ?? libraryID;
+                    // A citation of an annotation or attachment names its
+                    // parent item; the metadata says which child was cited.
+                    const citedKey = (itemRef && (meta?.ann ?? meta?.att)) || itemKey;
+                    const itemId = modelObjectId(itemLibraryID, citedKey);
+
+                    // Content-based ref with occurrence counter
+                    const occurrence = citationKeyCounts.get(citedKey) || 0;
+                    citationKeyCounts.set(citedKey, occurrence + 1);
+                    const ref = `c_${citedKey}_${occurrence}`;
+
+                    // The locator as Beaver wrote it, in the agent's own
+                    // convention; an annotation's page is the annotation's. A
+                    // citation whose metadata records no locator shows the
+                    // page it stores, as any other citation does.
+                    const hasMetaLocator = !!meta && (!!meta.ann || !!meta.loc || ci.locator == null || ci.locator === '');
+                    if (meta && itemRef && hasMetaLocator) {
+                        const loc = meta.ann ? '' : (meta.loc ?? '');
+                        metadata.elements.set(ref, {
+                            rawHtml: match,
+                            type: 'citation',
+                            originalAttrs: {
+                                item_id: itemId,
+                                loc,
+                                pageConvention: 'number',
+                                ...(ci.label !== undefined ? { cslLabel: ci.label } : {}),
+                            },
+                        });
+                        let tag = `<citation id="${itemId}"`;
+                        if (loc) tag += ` loc="${escapeAttr(loc)}"`;
+                        tag += ` ref="${ref}"/>`;
+                        return tag;
+                    }
+
                     const rawPage = ci.locator != null ? String(ci.locator) : '';
                     let page = rawPage;
                     let pageConvention: 'number' | 'label' | undefined = page ? 'label' : undefined;
@@ -315,12 +430,6 @@ export function simplifyNoteHtml(
                             pageConvention = 'number';
                         }
                     }
-
-                    // Content-based ref with occurrence counter
-                    const keyForCount = itemKey;
-                    const occurrence = citationKeyCounts.get(keyForCount) || 0;
-                    citationKeyCounts.set(keyForCount, occurrence + 1);
-                    const ref = `c_${itemKey}_${occurrence}`;
 
                     metadata.elements.set(ref, {
                         rawHtml: match,
@@ -500,6 +609,61 @@ export function simplifyNoteHtml(
     simplified = stripNoteWrapperDiv(simplified);
 
     return { simplified, metadata };
+}
+
+/**
+ * The annotation key a note highlight or annotation image names, if any.
+ * Highlights made by dragging a reader text selection into a note have none:
+ * they point at a position in the file, not at an annotation item.
+ */
+function annotationKeyOf(annotationData: any): string | undefined {
+    const key = annotationData?.annotationKey;
+    return typeof key === 'string' && /^[A-Za-z0-9]+$/.test(key) ? key : undefined;
+}
+
+/**
+ * A short label for an embedded work from its CSL data: "Smith et al. 2020,
+ * Title". Empty when the data names neither authors, year nor title.
+ */
+function embeddedWorkLabel(csl: Record<string, unknown> | undefined): string {
+    if (!csl) return '';
+    const authors = Array.isArray(csl.author) ? csl.author as Array<Record<string, unknown>> : [];
+    const first = authors[0];
+    const firstName = typeof first?.family === 'string' ? first.family
+        : typeof first?.literal === 'string' ? first.literal : '';
+    const author = firstName ? `${firstName}${authors.length > 1 ? ' et al.' : ''}` : '';
+    const issued = csl.issued as { 'date-parts'?: unknown[][] } | undefined;
+    const year = issued?.['date-parts']?.[0]?.[0];
+    const byline = [author, year != null ? String(year) : ''].filter(Boolean).join(' ');
+    const rawTitle = typeof csl.title === 'string' ? csl.title.replace(/\s+/g, ' ').trim() : '';
+    const title = rawTitle.length > 80 ? `${rawTitle.slice(0, 77).trimEnd()}...` : rawTitle;
+    return [byline, title].filter(Boolean).join(', ');
+}
+
+/**
+ * Whether an item is known not to exist. An item that cannot be looked up
+ * (its library is not loaded) is not reported missing.
+ */
+function isMissingItem(libraryID: number, key: string): boolean {
+    try {
+        return !Zotero.Items.getByLibraryAndKey(libraryID, key);
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Returns a function that makes element ids unique within one note: the first
+ * use of a base id is returned as is, later ones get `_2`, `_3`, …. Several
+ * highlights can share a base id (key-less highlights, or one annotation added
+ * to the note twice), and each needs its own entry in the metadata map.
+ */
+function uniqueElementIdFactory(metadata: SimplificationMetadata): (base: string) => string {
+    return (base: string) => {
+        let id = base;
+        for (let n = 2; metadata.elements.has(id); n++) id = `${base}_${n}`;
+        return id;
+    };
 }
 
 /**

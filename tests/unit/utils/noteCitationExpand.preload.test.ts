@@ -96,6 +96,48 @@ describe('preloadNotePageLabels', () => {
             + ` rel="noopener noreferrer nofollow">Report.pdf</a>${suffix})</p>`;
     }
 
+    function makeMetaCitation(key: string, beaver: Record<string, unknown>, locator = '100'): string {
+        const data = { citationItems: [{ uris: [`http://zotero.org/users/1/items/${key}`], locator, beaver }] };
+        return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(data))}">(A, p. ${locator})</span>`;
+    }
+
+    it('skips labels for a citation that reads back with the locator Beaver recorded', async () => {
+        const attachment = makeAttachment(42, 'ATTACH01');
+        const cache = { getMetadata: vi.fn() };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (_lib: number, key: string) =>
+            key === 'ATTACH01' ? attachment : null);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const html = makeMetaCitation('PARENT01', { v: 1, loc: 's5', att: 'ATTACH01' });
+        expect(await preloadNotePageLabels(html, 1)).toEqual({});
+        expect(cache.getMetadata).not.toHaveBeenCalled();
+    });
+
+    it('keys labels to the cited attachment when the metadata records no locator', async () => {
+        const attachment = makeAttachment(42, 'ATTACH01');
+        const cache = { getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 1: '100' } }) };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (_lib: number, key: string) =>
+            key === 'ATTACH01' ? attachment : null);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const html = makeMetaCitation('PARENT01', { v: 1, att: 'ATTACH01' });
+        expect(await preloadNotePageLabels(html, 1)).toEqual({ '1-ATTACH01': { 1: '100' } });
+    });
+
+    it('loads the parent item\'s labels when the recorded attachment is gone', async () => {
+        const attachment = makeAttachment(42, 'ATTACH02');
+        const parent = makeParent(41, 'PARENT01', 42);
+        const cache = { getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 1: '100' } }) };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (_lib: number, key: string) =>
+            key === 'PARENT01' ? parent : null);
+        (globalThis as any).Zotero.Items.getAsync = vi.fn(async () => [attachment]);
+        (globalThis as any).Zotero.Items.get = vi.fn(() => attachment);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const html = makeMetaCitation('PARENT01', { v: 1, loc: 's5', att: 'GONE0001' });
+        expect(await preloadNotePageLabels(html, 1)).toEqual({ '1-PARENT01': { 1: '100' } });
+    });
+
     it('seeds labels from a standalone attachment link, which carries no data-citation', async () => {
         const attachment = makeAttachment(42, 'ABCD1234');
         const cache = { getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 4: '3' } }) };

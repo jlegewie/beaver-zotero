@@ -5,6 +5,13 @@ import {
     translatePageNumberToLabel,
 } from '../../../src/utils/pageLabelTranslation';
 import { buildNoteCitation } from '../../../src/utils/zoteroUtils';
+import {
+    buildAnnotationNoteCitation,
+    buildExternalNoteCitation,
+    citesPrintedPages,
+    type BuiltNoteCitation,
+} from '../../../src/utils/noteCitationBuilders';
+import { buildBeaverCitationMeta, locatorToken } from '../../../src/utils/noteCitationMeta';
 import { formatExternalFileCitationHTML } from '../../../src/utils/externalFileCitation';
 import { getPageLabelsForItem } from './itemData';
 import { getPageLocator, isRecordIdRange } from '@beaver/agent-core/citations/citationGrammar';
@@ -18,7 +25,16 @@ import type {
     CitationExportRender,
     DocumentExportHost,
     ExternalFileCitationExportRequest,
+    ExternalReferenceCitationExportRequest,
 } from '@beaver/agent-ui/host/types';
+
+function citationRender({ citation, formatted }: BuiltNoteCitation): CitationExportRender {
+    return {
+        kind: 'citation',
+        html: formatted,
+        citationData: encodeURIComponent(JSON.stringify(citation)),
+    };
+}
 
 /**
  * Render a Zotero/library citation as CSL-formatted HTML for note export.
@@ -41,6 +57,10 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
     try {
         const item = Zotero.Items.getByLibraryAndKey(libraryID, effectiveItemKey);
         if (!item) return null;
+        if (item.isAnnotation?.() === true) {
+            const annotationCitation = buildAnnotationNoteCitation(item);
+            if (annotationCitation) return citationRender(annotationCitation);
+        }
         if (isLinkCitationItem(item)) {
             const labels = getPageLabelsForItem(item, pageLabelsByAttachmentId) ?? metadata?.page_labels;
             const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
@@ -68,15 +88,18 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
         // respects the isolated store populated by renderToHTML.
         const loadedLabels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
         const exportLabels = loadedLabels ?? metadata?.page_labels;
-        const locator = startPage
-            ? resolvePageLabelFromLabels(exportLabels, startPage)
-            : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, normalizePageLocator(requestedPage)) : undefined);
-        const { citation, formatted } = buildNoteCitation(item, locator);
-        return {
-            kind: 'citation',
-            html: formatted,
-            citationData: encodeURIComponent(JSON.stringify(citation)),
-        };
+        // Only a PDF page is a printed page; for other attachments the
+        // citation carries no page and the private metadata keeps the locator.
+        const locator = !citesPrintedPages(item)
+            ? undefined
+            : startPage
+                ? resolvePageLabelFromLabels(exportLabels, startPage)
+                : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, normalizePageLocator(requestedPage)) : undefined);
+        const meta = buildBeaverCitationMeta({
+            loc: locatorToken(requestedRef?.loc),
+            att: item.isAttachment() ? item.key : undefined,
+        });
+        return citationRender(buildNoteCitation(item, locator, {}, meta));
     } catch (e) {
         logger(`zoteroDocumentExport: Item not loaded for ${libraryID}/${effectiveItemKey}: ${e}`);
         return null;
@@ -107,8 +130,23 @@ function renderExternalFileCitation(request: ExternalFileCitationExportRequest):
     }
 }
 
+/**
+ * Render a citation of an external work (not in the library) as a native note
+ * citation of an embedded item, the form note writes use.
+ */
+function renderExternalReferenceCitation(request: ExternalReferenceCitationExportRequest): CitationExportRender | null {
+    try {
+        const loc = request.requestedRef?.kind === 'external' ? request.requestedRef.loc : undefined;
+        return citationRender(buildExternalNoteCitation(request.externalId, request.reference, loc));
+    } catch (e) {
+        logger(`zoteroDocumentExport: failed to cite external reference ${request.externalId}: ${e}`);
+        return null;
+    }
+}
+
 /** Zotero implementation of {@link DocumentExportHost}. */
 export const zoteroDocumentExport: DocumentExportHost = {
     renderCitation,
     renderExternalFileCitation,
+    renderExternalReferenceCitation,
 };

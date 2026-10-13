@@ -18,7 +18,14 @@ import {
     externalFileLocatorSuffix,
     type ExternalFileCitationData,
 } from './externalFileCitation';
-import { createCitationHTML, type NoteCitationItemOptions } from './zoteroUtils';
+import { createCitationHTML, noteCitationHTML, type NoteCitationItemOptions } from './zoteroUtils';
+import { buildBeaverCitationMeta, locatorToken, readBeaverCitationMeta } from './noteCitationMeta';
+import {
+    buildAnnotationNoteCitation,
+    buildExternalNoteCitation,
+    citesPrintedPages,
+    rebuildEmbeddedNoteCitation,
+} from './noteCitationBuilders';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
 import { getAttachmentFileStatus, checkLibraryExcluded } from '../services/agentDataProvider/utils';
 import { isRemoteFilePath, makeRemoteFilePath } from '../services/documentFileIdentity';
@@ -41,14 +48,11 @@ import type { ExternalReference } from '@beaver/agent-core/types/externalReferen
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import {
-    formatExternalReferenceLabel,
-    getExternalReferenceUrl,
-} from '@beaver/agent-core/citations/externalReferences';
-import {
     citationIndexCandidateIdsForLocator,
     getPageLocator,
     isRecordIdRange,
     normalizeCitationTag,
+    parseLoc,
     parseRawCitationAttributes,
     requestedCitationKey,
     type CitationRef,
@@ -350,7 +354,18 @@ export async function preloadNotePageLabels(
                 // own library keys (and loads) the labels.
                 const itemRef = citationItemRefFromUri(ci?.uris?.[0] || '', libraryID);
                 if (!itemRef || checkLibraryExcluded(itemRef.libraryID)) continue;
-                await loadLabels(itemRef.libraryID, itemRef.key);
+
+                // Mirror how the simplifier shows a citation with Beaver
+                // metadata: with the locator Beaver recorded (no labels
+                // needed), or with its stored page under the cited
+                // attachment's id, or as its parent when that child is gone.
+                const meta = citationItems.length === 1 ? readBeaverCitationMeta(ci) : undefined;
+                const childKey = meta?.ann ?? meta?.att;
+                const childExists = childKey
+                    ? !!(await Zotero.Items.getByLibraryAndKeyAsync(itemRef.libraryID, childKey).catch(() => null))
+                    : false;
+                if (meta && (!childKey || childExists) && (meta.ann || meta.loc)) continue;
+                await loadLabels(itemRef.libraryID, childExists && meta?.att ? meta.att : itemRef.key);
             }
         } catch {
             // Skip malformed citation metadata or attachments that can't load.
@@ -411,15 +426,16 @@ function resolvePageFromStructuredResult(
 
 /**
  * Resolve the page for every structural (non-page) citation locator in a
- * string, so expansion can store a page locator instead of dropping the
- * locator. Note citations only support page locators; a `loc="s4"` sentence
- * locator (and paragraph/heading/figure/… locators) is mapped to the page it
- * sits on via the structured extraction cache.
+ * string, so expansion can give the citation a page. Zotero shows note
+ * citations with page locators only; a `loc="s4"` sentence locator (and
+ * paragraph/heading/figure/… locators) is mapped to the page it sits on via
+ * the structured extraction cache. The locator itself is kept in the
+ * citation's private metadata either way.
  *
  * Locators resolve against the PDF schema version their id scheme names (see
  * `pdfSchemaVersionForLocator`). The current version is read from the cache
- * only: on a miss the locator is reported as unresolved (and the citation is
- * saved without a locator) rather than triggering a full extraction. A
+ * only: on a miss the locator is reported as unresolved (and the citation
+ * shows no page) rather than triggering a full extraction. A
  * producible non-current version is extracted on demand without the cache. Callers
  * thread the returned `pages` map into `expandToRawHtml` and surface
  * `unresolved` as a save warning.
@@ -559,15 +575,15 @@ export function buildUnresolvedLocatorWarning(
     unavailable: string[] = [],
 ): string | null {
     if (unresolved.length === 0 && unavailable.length === 0) return null;
-    let warning = 'Note citations only support page locators.';
+    let warning = 'Zotero shows note citations with page numbers only.';
     if (unresolved.length > 0) {
-        warning += ` These structural locators could not be mapped to a page and were `
-            + `saved without a locator: ${unresolved.join('; ')}. They map to a page once `
+        warning += ` These structural locators could not be mapped to a page, so their `
+            + `citations show no page number: ${unresolved.join('; ')}. They map to a page once `
             + `the cited document's text extraction is available.`;
     }
     if (unavailable.length > 0) {
         warning += ` These locators come from a version of the document's text that `
-            + `can't be loaded, so they were saved without a locator: `
+            + `can't be loaded, so their citations show no page number: `
             + `${unavailable.join('; ')}. Re-read the cited pages and use the locators `
             + `shown there.`;
     }
@@ -643,6 +659,8 @@ interface SimplifiedCitationAttrs {
      * so link citations can still navigate the reader to it.
      */
     navPage?: number;
+    /** The locator as written, recorded in the citation's private metadata. */
+    loc?: Locator;
 }
 
 /**
@@ -682,16 +700,39 @@ function parseSimplifiedCitationAttrs(
     }
     const item_id = modelObjectIdFromReference(normalized.ref);
     const { page, pageIsResolvedLabel, navPage } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
-    return { item_id, ...(page ? { page, pageIsResolvedLabel, navPage } : {}) };
+    return {
+        item_id,
+        ...(page ? { page, pageIsResolvedLabel, navPage } : {}),
+        ...(normalized.ref.loc ? { loc: normalized.ref.loc } : {}),
+    };
 }
 
-/** Check if citation attributes have changed */
+/** Comparable form of a locator: its kind and value, not its spelling. */
+function locatorKey(loc: Locator | undefined): string {
+    return loc ? `${loc.kind}:${loc.value}` : '';
+}
+
+/**
+ * Whether `loc` is the locator a citation was shown with, given the token from
+ * its private metadata (empty when it was shown without one).
+ */
+export function matchesStoredLocator(storedToken: string, loc: Locator | undefined): boolean {
+    return locatorKey(storedToken ? parseLoc(storedToken) : undefined) === locatorKey(loc);
+}
+
+/**
+ * Check if citation attributes have changed. A citation read back from its
+ * private metadata (`original.loc`) is compared by the locator it was shown
+ * with; any other by its page.
+ */
 function attrsChanged(
-    original: { item_id: string; page?: string } | undefined,
-    current: { item_id: string; page?: string }
+    original: { item_id: string; page?: string; loc?: string } | undefined,
+    current: { item_id: string; page?: string; loc?: Locator }
 ): boolean {
     if (!original) return true;
-    return original.item_id !== current.item_id || original.page !== current.page;
+    if (original.item_id !== current.item_id) return true;
+    if (original.loc !== undefined) return !matchesStoredLocator(original.loc, current.loc);
+    return original.page !== current.page;
 }
 
 /**
@@ -726,12 +767,17 @@ function resolvePageForCitation(
  * Build a citation or item link, preserving the source attribute in errors.
  * `citationOptions` carries CSL fields (label, prefix, …) of the citation being
  * rewritten, so moving a locator does not discard them.
+ *
+ * Native citations record what was cited in their private metadata (see
+ * `noteCitationMeta.ts`): the locator as written, and the attachment or
+ * annotation when the citation names its parent item.
  */
 function buildCitation({
     item_id,
     page,
     pageIsResolvedLabel,
     navPage,
+    loc,
     attrName = 'item_id',
     shouldTranslatePage = true,
     pageLabels,
@@ -758,6 +804,10 @@ function buildCitation({
     if (!item) {
         throw new Error(`${attrName === 'att_id' ? 'Attachment' : 'Item'} not found: ${item_id}`);
     }
+    if (item.isAnnotation?.() === true) {
+        const annotationCitation = buildAnnotationNoteCitation(item, citationOptions);
+        if (annotationCitation) return stripInlineItemDataFromDataCitations(noteCitationHTML(annotationCitation));
+    }
     if (isLinkCitationItem(item)) {
         // Item links can display full ranges; native CSL navigation needs a single page.
         const labels = pageLabels?.[item.id];
@@ -778,11 +828,35 @@ function buildCitation({
             ? { kind: 'page', value: displayPage, raw: `page${displayPage}` }
             : undefined, linkPage);
     }
+    // Only a PDF page is a printed page. For other attachments a page locator
+    // is left out of the CSL citation; the private metadata keeps it. A
+    // locator the citation labels otherwise (a chapter, …) is kept.
+    const isPageLocator = !citationOptions?.label || citationOptions.label === 'page';
     // Structural locators already resolve to final labels; do not translate twice.
-    const resolvedPage = pageIsResolvedLabel
-        ? page
-        : resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
-    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage, citationOptions));
+    const resolvedPage = isPageLocator && !citesPrintedPages(item)
+        ? undefined
+        : pageIsResolvedLabel
+            ? page
+            : resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
+    // A page locator kept in the convention it was read in is a printed label,
+    // not the physical page number the metadata records.
+    const recordLoc = loc && (loc.kind !== 'page' || shouldTranslatePage) ? locatorToken(loc) : undefined;
+    const meta = buildBeaverCitationMeta({
+        loc: recordLoc,
+        att: item.isAttachment() ? item.key : undefined,
+    });
+    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage, citationOptions, meta));
+}
+
+/** The first citation item of the native citation stored for a `ref`. */
+function storedCitationItem(rawHtml: string): unknown {
+    const match = rawHtml.match(/data-citation="([^"]*)"/);
+    if (!match) return undefined;
+    try {
+        return JSON.parse(decodeURIComponent(match[1]))?.citationItems?.[0];
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -842,11 +916,10 @@ function normalizeCompoundItems(items: string): string {
  * expander can resolve `<citation external_id="..."/>` (used by chat search
  * tools for non-Zotero works) into something a Zotero note can store.
  *
- * Two-tier fallback:
  *  1. If `externalItemMapping[external_id]` resolves to a Zotero item, the
- *     citation is rewritten as a normal item_id citation (best outcome).
- *  2. Otherwise, an inline `<a href="...">(Author Year)</a>` link is built
- *     from the matching `ExternalReference` metadata.
+ *     citation is rewritten as a normal item_id citation.
+ *  2. Otherwise the work is cited as an embedded item built from the matching
+ *     `ExternalReference` metadata (see `buildExternalNoteCitation`).
  *
  * If neither map has any data for the external_id, expansion throws with a
  * helpful message instead of silently dropping the citation.
@@ -859,31 +932,6 @@ export interface ExternalRefContext {
     externalRefs: Record<string, ExternalReference>;
     /** source_id → mapped Zotero item, or null if checked but not in library */
     externalItemMapping: Record<string, ZoteroItemReference | null>;
-}
-
-/**
- * Build an inline `<a>` link representing an external reference. Used as the
- * non-Zotero fallback for `<citation external_id="..."/>` so external works
- * still produce something useful in a saved Zotero note.
- *
- * Throws if the reference has no URL or DOI — in that case the model should
- * pick a different source rather than emit a useless bare label.
- */
-function buildExternalRefLinkHTML(ref: ExternalReference, page?: string): string {
-    const url = getExternalReferenceUrl(ref);
-    if (!url) {
-        throw new Error(
-            `Error: External reference "${ref.source_id ?? ''}" has no DOI or URL — `
-            + 'cannot embed it in a Zotero note. Omit the citation or pick a different source.'
-        );
-    }
-
-    let label = formatExternalReferenceLabel(ref) || url;
-    if (page) label += `, p. ${page}`;
-
-    // escapeAttr also escapes < > inside text — that's safe for the visible
-    // anchor text since the note editor renders the literal characters.
-    return `<a href="${escapeAttr(url)}" rel="noopener noreferrer">${escapeAttr(`(${label})`)}</a>`;
 }
 
 // =============================================================================
@@ -912,9 +960,46 @@ export function isCitationRefNotFoundError(error: unknown): boolean {
 }
 
 /**
+ * Cite an external work: as the library item it maps to when the user has it,
+ * otherwise as an embedded item built from the thread's reference metadata.
+ * Throws when the thread has neither.
+ */
+function buildExternalRefCitation(
+    externalId: string,
+    loc: Locator | undefined,
+    externalRefContext: ExternalRefContext | undefined,
+    pageLabels: PageLabelsByAttachmentId | undefined,
+    citationOptions?: NoteCitationItemOptions,
+): string {
+    const mappedItemRef = externalRefContext?.externalItemMapping?.[externalId];
+    if (mappedItemRef) {
+        return buildCitation({
+            item_id: modelObjectIdFromReference(mappedItemRef),
+            ...(loc?.kind === 'page' ? { page: loc.value } : {}),
+            loc,
+            pageLabels,
+        });
+    }
+    const externalRef = externalRefContext?.externalRefs?.[externalId];
+    if (externalRef) {
+        return stripInlineItemDataFromDataCitations(
+            noteCitationHTML(buildExternalNoteCitation(externalId, externalRef, loc, citationOptions)),
+        );
+    }
+    throw new Error(
+        `Error: Citation external_id="${externalId}" not found in this thread's `
+        + 'external reference cache. To cite a Zotero item use id="LIB-KEY", '
+        + 'or att_id="LIB-KEY" for a PDF attachment. external_id is only valid '
+        + 'for works returned by a search tool earlier in this thread.'
+    );
+}
+
+/**
  * Expand the `<citation …/>` tags in a string into note citation HTML: native
- * Zotero citations for library items, links for notes, annotations and
- * standalone attachments, and links or text for external works and files.
+ * Zotero citations for library items, annotations (cited as their parent item)
+ * and external works (cited as embedded items), links for notes and standalone
+ * attachments, and links or text for external files. Native citations carry
+ * Beaver's private metadata, so they read back as written.
  * This is the citation pass of {@link expandToRawHtml}; note creation runs it on
  * its own (with empty `metadata`) so new and edited notes store identical
  * citations.
@@ -976,6 +1061,27 @@ export function expandNoteCitationTags(
                             );
                         }
                         return stored.rawHtml;
+                    }
+                    // An embedded external work, read back as `external_id`.
+                    const storedExternalId = stored.originalAttrs?.external_id;
+                    if (storedExternalId && externalId && !itemId) {
+                        const loc = normalizedCitation.ok ? normalizedCitation.ref.loc : undefined;
+                        const unchanged = externalId === storedExternalId
+                            && matchesStoredLocator(stored.originalAttrs?.loc ?? '', loc);
+                        if (unchanged || context === 'old') return stored.rawHtml;
+                        const sameWork = externalId === storedExternalId;
+                        const citationOptions = sameWork ? storedCitationOptions(stored.rawHtml) : undefined;
+                        // Without the thread's data for the work, a new
+                        // locator is applied to the work the citation carries.
+                        const threadHasWork = !!(externalRefContext?.externalItemMapping?.[externalId]
+                            || externalRefContext?.externalRefs?.[externalId]);
+                        if (sameWork && !threadHasWork) {
+                            const rebuilt = rebuildEmbeddedNoteCitation(
+                                storedCitationItem(stored.rawHtml), loc, citationOptions,
+                            );
+                            if (rebuilt) return stripInlineItemDataFromDataCitations(noteCitationHTML(rebuilt));
+                        }
+                        return buildExternalRefCitation(externalId, loc, externalRefContext, pageLabels, citationOptions);
                     }
                     // Single citation — check if attributes changed (e.g., page locator updated)
                     if (itemId) {
@@ -1060,46 +1166,17 @@ export function expandNoteCitationTags(
                     pageLabels,
                     pageIsResolvedLabel,
                     navPage,
+                    loc: normalizedCitation.ok ? normalizedCitation.ref.loc : undefined,
                 });
             }
             if (normalizedCitation.ok && normalizedCitation.ref.kind === 'zotero') {
                 const attrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                 return buildCitation({ ...attrs, pageLabels });
             }
-            // external_id: chat-side external work ID (e.g. OpenAlex W-id). Two-tier
-            // fallback so the model's research effort isn't lost when it tries to
-            // cite an external source in a Zotero note.
+            // external_id: chat-side external work ID (e.g. OpenAlex W-id).
             if (externalId) {
-                const page = normalizedCitation.ok ? getPageLocator(normalizedCitation.ref) : extractAttr(attrStr, 'page');
-
-                // Tier 1: auto-resolve to Zotero item if the external work is in
-                // the library. Best outcome — produces a real Zotero citation.
-                const mappedItemRef = externalRefContext?.externalItemMapping?.[externalId];
-                if (mappedItemRef) {
-                    const itemIdStr = modelObjectIdFromReference(mappedItemRef);
-                    return buildCitation({
-                        item_id: itemIdStr,
-                        page,
-                        pageLabels,
-                        });
-                }
-
-                // Tier 2: emit an inline hyperlink from the ExternalReference
-                // metadata. Lossy compared to a Zotero citation, but matches what a
-                // user would type by hand for a non-library work.
-                const externalRef = externalRefContext?.externalRefs?.[externalId];
-                if (externalRef) {
-                    return buildExternalRefLinkHTML(externalRef, page);
-                }
-
-                // Tier 3: no data at all — give the model an actionable error
-                // instead of the generic missing identity message.
-                throw new Error(
-                    `Error: Citation external_id="${externalId}" not found in this thread's `
-                    + 'external reference cache. To cite a Zotero item use id="LIB-KEY", '
-                    + 'or att_id="LIB-KEY" for a PDF attachment. external_id is only valid '
-                    + 'for works returned by a search tool earlier in this thread.'
-                );
+                const loc = normalizedCitation.ok ? normalizedCitation.ref.loc : undefined;
+                return buildExternalRefCitation(externalId, loc, externalRefContext, pageLabels);
             }
             if (items) {
                 throw new Error(
@@ -1121,8 +1198,8 @@ export function expandNoteCitationTags(
  * @param externalRefContext - Optional. When provided, citations using
  *   `external_id` (chat-side external work IDs from search tools) are
  *   auto-resolved to a Zotero `item_id` if the work is in the library, or
- *   converted to an inline `<a>` link otherwise. When omitted, `external_id`
- *   citations throw the standard missing identity error.
+ *   cited as an embedded work otherwise. When omitted, new `external_id`
+ *   citations throw the missing-reference error.
  * @param pageLabels - Optional pre-resolved page-label map (attachment item ID
  *   → 0-based page index → label). Used to translate model-provided 1-based
  *   page numbers on NEW citations into display labels. Resolve it up-front via

@@ -146,6 +146,71 @@ describe('zoteroDocumentExport.renderCitation for native citations', () => {
     it('stores no locator when nothing is cited by page', () => {
         expect(citationItem({})).not.toHaveProperty('locator');
     });
+
+    it('records the requested locator in the private metadata', () => {
+        const ci = citationItem({ requestedRef: { loc: { kind: 'sentence', value: '5.6', raw: 's5.6' } }, pages: [5] });
+        expect(ci).toMatchObject({ locator: '5', beaver: { v: 1, loc: 's5.6' } });
+    });
+
+    it('cites an attachment as its parent and pins the attachment', () => {
+        const attachment = {
+            key: 'ATTACH01', parentID: 30, isAttachment: () => true, isRegularItem: () => false,
+            attachmentContentType: 'application/pdf', attachmentLinkMode: 0,
+        };
+        zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => attachment),
+            get: vi.fn(() => regular),
+        };
+        const ci = citationItem({ requestedRef: { loc: { kind: 'page', value: '3', raw: 'page3' } }, pages: [3] });
+        expect(ci).toMatchObject({
+            uris: ['http://zotero.org/users/1/items/ABCD1234'],
+            locator: '3',
+            beaver: { v: 1, loc: 'page3', att: 'ATTACH01' },
+        });
+    });
+
+    it('cites an annotation as its parent item at the annotation page', () => {
+        const annotation = { key: 'ANNOT001', parentID: 40, annotationPageLabel: '7', isAnnotation: () => true };
+        const attachment = { key: 'ATTACH01', parentID: 30 };
+        zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => annotation),
+            get: vi.fn((id: number) => (id === 40 ? attachment : regular)),
+        };
+        expect(citationItem({})).toMatchObject({
+            uris: ['http://zotero.org/users/1/items/ABCD1234'],
+            locator: '7',
+            beaver: { v: 1, ann: 'ANNOT001' },
+        });
+    });
+});
+
+describe('zoteroDocumentExport.renderExternalReferenceCitation', () => {
+    const zotero = (globalThis as any).Zotero;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        zotero.EditorInstanceUtilities = { formatCitation: vi.fn(() => '(<span class="citation-item">Smith, 2020</span>)') };
+    });
+
+    it('cites an external work as an embedded item', () => {
+        const result = zoteroDocumentExport.renderExternalReferenceCitation!({
+            externalId: 'W123',
+            reference: {
+                source: 'openalex', source_id: 'W123', title: 'A Study', authors: ['Jane Smith'], year: 2020,
+                identifiers: { doi: '10.1/xyz' }, library_items: [],
+            } as any,
+            requestedRef: { kind: 'external', external_id: 'W123', loc: { kind: 'page', value: '4', raw: 'page4' } },
+        });
+        if (result?.kind !== 'citation') throw new Error('expected a native citation');
+        const ci = JSON.parse(decodeURIComponent(result.citationData)).citationItems[0];
+        expect(ci).toMatchObject({
+            uris: ['https://doi.org/10.1/xyz'],
+            locator: '4',
+            itemData: expect.objectContaining({ title: 'A Study', DOI: '10.1/xyz' }),
+            beaver: { v: 1, loc: 'page4', ext: 'W123', src: 'openalex', csl: expect.objectContaining({ title: 'A Study' }) },
+        });
+        expect(result.html).toBe('(<span class="citation-item">Smith, 2020</span>)');
+    });
 });
 
 describe('zoteroDocumentExport.renderExternalFileCitation', () => {

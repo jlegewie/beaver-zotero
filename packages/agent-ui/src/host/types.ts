@@ -312,6 +312,19 @@ export interface ExternalFileCitationExportRequest {
     localPathsByExtKey: Record<string, string>;
 }
 
+/**
+ * What the host needs to render a citation of an external work (found by
+ * search, not in the user's library) as a host-native citation.
+ */
+export interface ExternalReferenceCitationExportRequest {
+    /** External reference id the model cited. */
+    externalId: string;
+    /** The work's metadata from the thread's external reference cache. */
+    reference: ExternalReference;
+    /** Identity as cited by the model, for its locator. */
+    requestedRef: CitationRef | null;
+}
+
 /** File formats a response can be exported to. */
 export type FileExportFormat = 'docx' | 'pdf' | 'markdown' | 'latex';
 
@@ -350,6 +363,12 @@ export interface DocumentExportHost {
      * external-file storage omit it.
      */
     renderExternalFileCitation?(request: ExternalFileCitationExportRequest): CitationExportRender | null;
+    /**
+     * Render a citation of an external work as a host-native citation. Returns
+     * null when the host cannot, in which case the render layer falls back to
+     * a link. Optional.
+     */
+    renderExternalReferenceCitation?(request: ExternalReferenceCitationExportRequest): CitationExportRender | null;
     /**
      * Export a response — the runs of its resume chain, in order — to a file
      * the user chooses, with citations formatted by the host. Interaction-time:

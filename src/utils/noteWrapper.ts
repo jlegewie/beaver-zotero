@@ -12,6 +12,8 @@
  *   - `rebuildDataCitationItems`  regenerate the cache from inline citations
  */
 
+import { readBeaverCitationMeta } from './noteCitationMeta';
+
 // =============================================================================
 // Wrapper Div
 // =============================================================================
@@ -91,6 +93,11 @@ export function extractDataCitationItems(html: string): Array<{ uris: string[]; 
     }
 }
 
+/** Whether a citation URI names a Zotero item (`…/items/<KEY>`). */
+function isZoteroItemUri(uri: string): boolean {
+    return /^https?:\/\/zotero\.org\/(?:users|groups)\/[^/]+(?:\/[^/]+)?\/items\/[A-Za-z0-9]+$/.test(uri);
+}
+
 /**
  * Rebuild the data-citation-items attribute on the wrapper div.
  *
@@ -140,8 +147,26 @@ export function rebuildDataCitationItems(
                         continue;
                     }
 
+                    // An embedded work (an external reference with no library
+                    // item) carries its data in Beaver's private metadata, or
+                    // inline (a note saved from a chat response).
+                    const embeddedItemData = isZoteroItemUri(uriKey)
+                        ? undefined
+                        : readBeaverCitationMeta(ci)?.csl
+                            ?? (ci.itemData && typeof ci.itemData === 'object' ? ci.itemData : undefined);
+                    if (embeddedItemData) {
+                        storedCitationItems.push({ uris: ci.uris, itemData: embeddedItemData });
+                        continue;
+                    }
+
                     // Fresh lookup for new citations not in the pre-edit cache.
-                    const itemInfo = (Zotero.URI as any).getURIItemLibraryKey(uriKey);
+                    // Zotero throws for a URI that is not a Zotero item URI.
+                    let itemInfo: { libraryID: number; key: string } | false = false;
+                    try {
+                        itemInfo = (Zotero.URI as any).getURIItemLibraryKey(uriKey);
+                    } catch {
+                        itemInfo = false;
+                    }
                     if (itemInfo) {
                         const item = Zotero.Items.getByLibraryAndKey(itemInfo.libraryID, itemInfo.key);
                         if (item) {

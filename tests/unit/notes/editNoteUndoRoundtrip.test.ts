@@ -1431,7 +1431,8 @@ describe('page locator normalization in apply-undo cycle', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'RANGECIT' }),
             '50',
-            undefined
+            undefined,
+            { v: 1, loc: 'page50-55' },
         );
         expect(item._getHtml()).toContain('RANGECIT');
 
@@ -1452,7 +1453,8 @@ describe('page locator normalization in apply-undo cycle', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'COMMACIT' }),
             '222',
-            undefined
+            undefined,
+            { v: 1, loc: 'page222, 237-238' },
         );
 
         const restored = await undoEdit(item, action);
@@ -1515,7 +1517,8 @@ describe('page locator normalization in apply-undo cycle', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'CITE1' }),
             '42',
-            undefined
+            undefined,
+            undefined,
         );
 
         // Undo should restore the PM-canonical version of the original note

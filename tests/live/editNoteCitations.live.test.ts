@@ -310,7 +310,7 @@ describe('edit_note execute — structural locator resolved to a page', () => {
         expect(decoded).not.toContain('"label":');
     });
 
-    it('re-reads the resolved sentence locator as a loc="pageN" tag', async () => {
+    it('re-reads the citation with the sentence locator it was written with', async () => {
         const ref = await seedNote('<p>Body to edit.</p>');
 
         const exec = await executeEditNote({
@@ -323,9 +323,10 @@ describe('edit_note execute — structural locator resolved to a page', () => {
         expect(exec.success, exec.error ?? '').toBe(true);
 
         const simplified = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
-        // The stored locator round-trips as a page locator, never a sentence one.
-        expect(simplified).toMatch(/loc="page\d+"/);
-        expect(simplified).not.toMatch(/loc="s\d+"/);
+        // The CSL citation shows the page; Beaver's private metadata keeps the
+        // sentence locator, so the citation reads back as it was written.
+        expect(simplified).toContain(`<citation id="${LIBRARY_PREFIX}-${NORMAL_PDF.zotero_key}" loc="s200"`);
+        expect(simplified).not.toMatch(/loc="page\d+"/);
     });
 
     it('resolves a structural locator on a legacy att_id citation', async () => {
