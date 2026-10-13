@@ -17,6 +17,7 @@
  *   character `ZOTERO_PREF_n` properties.
  */
 
+import { cslCitationNotes } from '../citations/citationNotes';
 import type { FormattedCluster } from '../types';
 
 const CSL_CITATION_SCHEMA = 'https://github.com/citation-style-language/schema/raw/master/csl-citation.json';
@@ -46,10 +47,7 @@ export function citationFieldJson(cluster: FormattedCluster, citationID: string)
             id: item.id,
             uris: item.uris,
             itemData: item.itemData,
-            ...(item.locator ? { locator: item.locator, label: item.label ?? 'page' } : {}),
-            ...(item.prefix ? { prefix: item.prefix } : {}),
-            ...(item.suffix ? { suffix: item.suffix } : {}),
-            ...(item.suppressAuthor ? { 'suppress-author': true } : {}),
+            ...cslCitationNotes(item),
         })),
         schema: CSL_CITATION_SCHEMA,
     };

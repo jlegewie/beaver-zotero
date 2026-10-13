@@ -16,8 +16,9 @@
 import type { MdBlock, MdFootnoteDefinition, MdImage, MdInline, MdRoot, MdTable, MdTableCell } from '../mdast';
 import { exportLinkTarget, isWebLink } from '../links';
 import { base64 } from '../note/base64';
-import { hasSpans, tableGrid } from '../note/tableGrid';
+import { hasSpans, isNoteTable, tableGrid } from '../note/tableGrid';
 import { trailingText } from '../note/inlineText';
+import { imageFallback } from '../note/images';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { parseCslHtml, type StyledSegment } from '../citations/inlineHtml';
 import { stringifyMarkdown } from '../parse/markdown';
@@ -277,8 +278,8 @@ class MarkdownWriter {
             return { type: 'image', url, alt: node.alt ?? '' };
         }
         if (isWebLink(node.url)) return { type: 'image', url: node.url.trim(), alt: node.alt ?? '' };
-        const text = node.alt || (node.assetId ? '[Image not available]' : '');
-        return text ? { type: 'emphasis', children: [{ type: 'text', value: text }] } : null;
+        const fallback = imageFallback(node, this.input.doc);
+        return fallback ? { type: 'emphasis', children: [{ type: 'text', value: fallback.text }] } : null;
     }
 
     private link(
@@ -470,7 +471,7 @@ class MarkdownWriter {
     }
 
     private table(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): MdTable {
-        if (node.children.some(row => row.children.some(cell => cell.blocks))) return this.noteTable(node, definitions);
+        if (isNoteTable(node)) return this.noteTable(node, definitions);
         const columns = Math.max(...node.children.map(row => row.children.length), 1);
         return {
             type: 'table',

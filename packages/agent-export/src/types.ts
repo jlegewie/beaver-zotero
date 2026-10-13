@@ -13,6 +13,7 @@
  */
 
 import type { Citation } from '@beaver/agent-core/types/citations';
+import type { CitationNotes } from './citations/citationNotes';
 import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
@@ -77,16 +78,10 @@ export interface ExportSource {
  * as the note stores it. `locator` is a printed page label (or a locator of
  * type `label`), never a physical page.
  */
-export interface NoteCitationItem {
+export interface NoteCitationItem extends CitationNotes {
     uris: string[];
     /** CSL-JSON stored with the citation (older notes keep it inline). */
     itemData?: Record<string, unknown>;
-    locator?: string;
-    /** CSL locator type; absent means page. */
-    label?: string;
-    prefix?: string;
-    suffix?: string;
-    suppressAuthor?: boolean;
 }
 
 /**
@@ -223,18 +218,13 @@ export type CitationTarget =
 // ---------------------------------------------------------------------------
 
 /** One cited item as it enters the citation processor and the Word field. */
-export interface FieldCitationItem {
+export interface FieldCitationItem extends CitationNotes {
     /** Processor id (library item id, or a string id for embedded items). */
     id: number | string;
     /** Zotero item URIs, or one stable URI per work for items without a library item. Never empty. */
     uris: string[];
     /** CSL-JSON of the item. */
     itemData: Record<string, unknown>;
-    locator?: string;
-    label?: string;
-    prefix?: string;
-    suffix?: string;
-    suppressAuthor?: boolean;
 }
 
 /** A cluster as formatted by the citation processor. */

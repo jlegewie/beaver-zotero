@@ -17,10 +17,13 @@
 
 import type { MdBlock, MdBlockLayout, MdFootnoteDefinition, MdImage, MdInline, MdTable, MdTableCell } from '../mdast';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
+import { citationNotes, type CitationNotes } from '../citations/citationNotes';
 import { exportLinkTarget } from '../links';
+import { hexDigits } from '../note/colors';
 import { trailingText } from '../note/inlineText';
+import { imageDisplayWidth, imageFallback, PIXELS_PER_INCH } from '../note/images';
 import { isPageLabel, locatorTerm } from '../note/locatorTerms';
-import { tableGrid } from '../note/tableGrid';
+import { columnWeights, isNoteTable, tableGrid } from '../note/tableGrid';
 import { paperSize } from '../page';
 import type { ExportDoc, ExportImage, ExportWarning, FormattedCitations, FormattedCluster, LatexExportOptions } from '../types';
 import { escapeLatex, escapeLatexCode, latexUrl } from './escape';
@@ -101,21 +104,13 @@ export function liftTags(source: string): string {
 const FOOTNOTE_BASE = '\\BeaverFootnoteBase';
 
 /** A cited work in a citation command. */
-interface CiteItem {
+interface CiteItem extends CitationNotes {
     key: string;
-    locator?: string;
-    /** CSL locator type; absent means page. */
-    label?: string;
-    prefix?: string;
-    suffix?: string;
-    suppressAuthor?: boolean;
 }
 
 /** Width of an image: its own width, but never wider than the line. */
 const IMAGE_WIDTH_MACRO = '\\providecommand{\\BeaverImageWidth}[1]{\\ifdim#1>\\linewidth\\linewidth\\else#1\\fi}';
 
-/** CSS pixels per inch: note images are sized in CSS pixels. */
-const PIXELS_PER_INCH = 96;
 
 /**
  * A highlight: lua-ul's `\highLight` or soul's `\hl`, whichever is loaded
@@ -421,7 +416,7 @@ class LatexWriter {
         }
         if (color) {
             this.packages.add('xcolor');
-            content = wrapCommand(`\\textcolor[HTML]{${color.replace(/^#/, '').toUpperCase()}}{`, content, '}');
+            content = wrapCommand(`\\textcolor[HTML]{${hexDigits(color)}}{`, content, '}');
         }
         return content;
     }
@@ -434,17 +429,14 @@ class LatexWriter {
     private image(node: MdImage, definitions: Map<string, MdFootnoteDefinition>, inCell: boolean): string {
         const asset = node.assetId ? this.input.images?.[node.assetId] : undefined;
         if (!asset?.path) {
-            if (node.assetId && this.input.doc.images?.[node.assetId]?.kind === 'remote' && node.url) {
-                return this.link(node.url, [{ type: 'text', value: node.alt || '[Image]' }], definitions, inCell);
-            }
-            const text = node.alt || (node.assetId ? '[Image not available]' : '');
-            return text ? `\\emph{${escapeLatex(text)}}` : '';
+            const fallback = imageFallback(node, this.input.doc);
+            if (!fallback) return '';
+            if (fallback.linkUrl) return this.link(fallback.linkUrl, [{ type: 'text', value: fallback.text }], definitions, inCell);
+            return `\\emph{${escapeLatex(fallback.text)}}`;
         }
         this.packages.add('graphicx');
         this.usesImageWidth = true;
-        // A size the host could not measure: the width of a typical figure.
-        const pixels = node.width ?? (node.height && asset.height ? (node.height * asset.width) / asset.height : asset.width || 480);
-        const inches = Math.max(0.1, pixels / PIXELS_PER_INCH);
+        const inches = Math.max(0.1, imageDisplayWidth(node, asset) / PIXELS_PER_INCH);
         // graphicx reads the path verbatim; the host names files without TeX specials.
         return `\\includegraphics[width=\\BeaverImageWidth{${inches.toFixed(2)}in}]{${asset.path}}`;
     }
@@ -624,13 +616,7 @@ class LatexWriter {
         for (const item of cluster.items) {
             const key = this.input.keys[String(item.id)];
             if (key) {
-                items.push({
-                    key,
-                    ...(item.locator ? { locator: item.locator, ...(item.label ? { label: item.label } : {}) } : {}),
-                    ...(item.prefix ? { prefix: item.prefix } : {}),
-                    ...(item.suffix ? { suffix: item.suffix } : {}),
-                    ...(item.suppressAuthor ? { suppressAuthor: true } : {}),
-                });
+                items.push({ key, ...citationNotes(item) });
             } else {
                 missing += 1;
             }
@@ -798,9 +784,7 @@ class LatexWriter {
     private noteTable(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): string {
         const grid = tableGrid(node);
         const columns = grid.columns;
-        const known = (node.colwidths ?? []).filter((width): width is number => !!width);
-        const fallback = known.length > 0 ? known.reduce((sum, width) => sum + width, 0) / known.length : 1;
-        const weights = Array.from({ length: columns }, (_, index) => node.colwidths?.[index] ?? fallback);
+        const weights = columnWeights(node, columns) ?? Array.from({ length: columns }, () => 1);
         const total = weights.reduce((sum, weight) => sum + weight, 0);
         // A share of the line, less the padding of the columns it covers.
         const width = (from: number, span: number) => {
@@ -828,7 +812,7 @@ class LatexWriter {
                 let content = this.cellContent(slot.cell, definitions);
                 if (slot.cell.background) {
                     this.packages.add('colortbl');
-                    content = `\\cellcolor[HTML]{${slot.cell.background.replace(/^#/, '').toUpperCase()}}${content}`;
+                    content = `\\cellcolor[HTML]{${hexDigits(slot.cell.background)}}${content}`;
                 }
                 cells.push(span > 1 ? `\\multicolumn{${span}}{${column(index, span)}}{${content}}` : content);
                 index += span - 1;
@@ -859,7 +843,7 @@ class LatexWriter {
     }
 
     private table(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): string {
-        if (node.children.some(row => row.children.some(cell => cell.blocks))) return this.noteTable(node, definitions);
+        if (isNoteTable(node)) return this.noteTable(node, definitions);
         const [header, ...body] = node.children;
         if (!header) return '';
         const columns = Math.max(...node.children.map(row => row.children.length), 1);
@@ -1014,7 +998,7 @@ class LatexWriter {
         return [
             ...(this.usesImageWidth ? [IMAGE_WIDTH_MACRO] : []),
             ...(this.packages.has('highlight') ? [HIGHLIGHT_MACRO] : []),
-            ...[...this.highlightColors].map(([color, name]) => `\\definecolor{${name}}{HTML}{${color.replace(/^#/, '').toUpperCase()}}`),
+            ...[...this.highlightColors].map(([color, name]) => `\\definecolor{${name}}{HTML}{${hexDigits(color)}}`),
         ];
     }
 

@@ -187,35 +187,31 @@ async function imageFolder(documentPath: string, suffix: string, create: boolean
     throw new Error('Could not find a folder name for the exported images.');
 }
 
-/** Images written next to a document, put in place together with it. */
-interface StagedImages {
-    /** The images with their paths relative to the document. */
-    images: Record<string, ExportImage>;
-    /** The image files. */
+/** Files written next to a document, put in place together with it. */
+interface StagedFiles {
+    /** The files, in the order given. */
     files: string[];
-    /** Put the images in place, keeping what they replace until `finish` or `restore`. */
+    /** Put the files in place, keeping what they replace until `finish` or `restore`. */
     commit(): Promise<void>;
-    /** The document is written: drop the replaced images. */
+    /** The document is written: drop the replaced files. */
     finish(): Promise<void>;
-    /** The export failed: put the replaced images back and remove the new ones. */
+    /** The export failed: put the replaced files back and remove the new ones. */
     restore(): Promise<void>;
 }
 
+const quietly = (operation: Promise<unknown>) => operation.catch((error: unknown) => logger(`InstanceExport: file: ${error}`, 1));
+
 /**
- * Stage a document's images as files next to it, each with its path relative
- * to the document. LaTeX gets the PNG rendering of SVG and GIF images. Files
- * are written under temporary names; `commit` swaps them in (keeping the
- * images an earlier export of the document wrote), so a failed export can
- * leave the earlier one as it was.
+ * Stage the files that go next to a document (its bibliography, its images)
+ * under temporary names. `commit` swaps them in, keeping what they replace,
+ * so a document that then fails to write leaves an earlier export as it was;
+ * `finish` runs `onFinish` once everything is in place.
  */
-async function stageImageFiles(
-    documentPath: string,
-    images: Record<string, ExportImage>,
-    format: 'latex' | 'markdown',
-): Promise<StagedImages> {
+async function stageFiles(
+    entries: Array<{ path: string; data: Uint8Array | string }>,
+    onFinish?: () => Promise<void>,
+): Promise<StagedFiles> {
     const staged: Array<{ temporary: string; path: string; backup: string; replaced: boolean; placed: boolean }> = [];
-    const out: Record<string, ExportImage> = {};
-    const quietly = (operation: Promise<unknown>) => operation.catch((error: unknown) => logger(`InstanceExport: image file: ${error}`, 1));
     const restore = async () => {
         for (const file of staged) {
             if (file.placed) await quietly(IOUtils.remove(file.path, { ignoreAbsent: true }));
@@ -223,50 +219,26 @@ async function stageImageFiles(
             await quietly(IOUtils.remove(file.temporary, { ignoreAbsent: true }));
         }
     };
-    const none = async () => {};
-    const suffix = format === 'latex' ? '-figures' : '_files';
-    /** Remove the images an earlier export of the document had and this one does not. */
-    const removeStale = async (folder: string | null) => {
-        if (!folder) return;
-        const current = new Set(staged.map(file => file.path));
-        const children = await IOUtils.getChildren(folder).catch(() => [] as string[]);
-        for (const child of children) {
-            if (/^image-\d+\.(?:png|jpg|gif|svg)$/.test(PathUtils.filename(child)) && !current.has(child)) {
-                await quietly(IOUtils.remove(child, { ignoreAbsent: true }));
-            }
-        }
-    };
-    if (Object.keys(images).length === 0) {
-        return { images, files: [], commit: none, finish: async () => removeStale(await imageFolder(documentPath, suffix, false)), restore: none };
-    }
-    const folder = await imageFolder(documentPath, suffix, true);
-    const folderName = PathUtils.filename(folder);
-    const extensions: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg' };
     try {
-        for (const [id, image] of Object.entries(images)) {
-            // LaTeX's graphics drivers read neither SVG nor GIF.
-            const usePng = format === 'latex' && (image.mime === 'image/svg+xml' || image.mime === 'image/gif');
-            const data = usePng ? image.png : image.data;
-            const extension = usePng ? 'png' : extensions[image.mime];
-            if (!data || !extension) continue;
-            const name = `${id}.${extension}`;
+        for (const entry of entries) {
+            const directory = PathUtils.parent(entry.path) ?? '';
+            const name = PathUtils.filename(entry.path);
             const file = {
-                temporary: PathUtils.join(folder, `.${name}.partial`),
-                path: PathUtils.join(folder, name),
-                backup: PathUtils.join(folder, `.${name}.previous`),
+                temporary: PathUtils.join(directory, `.${name}.partial`),
+                path: entry.path,
+                backup: PathUtils.join(directory, `.${name}.previous`),
                 replaced: false,
                 placed: false,
             };
             staged.push(file);
-            await IOUtils.write(file.temporary, data);
-            out[id] = { ...image, path: `${folderName}/${name}` };
+            if (typeof entry.data === 'string') await IOUtils.writeUTF8(file.temporary, entry.data);
+            else await IOUtils.write(file.temporary, entry.data);
         }
     } catch (error) {
         await restore();
         throw error;
     }
     return {
-        images: out,
         files: staged.map(file => file.path),
         commit: async () => {
             for (const file of staged) {
@@ -282,10 +254,51 @@ async function stageImageFiles(
             for (const file of staged) {
                 if (file.replaced) await quietly(IOUtils.remove(file.backup, { ignoreAbsent: true }));
             }
-            await removeStale(folder);
+            await onFinish?.();
         },
         restore,
     };
+}
+
+/**
+ * A document's images as files in its image folder, each with its path
+ * relative to the document. LaTeX gets the PNG rendering of SVG and GIF
+ * images. `removeStale` removes images an earlier export of the document had
+ * and this one does not (also when this one has none).
+ */
+async function imageFiles(
+    documentPath: string,
+    images: Record<string, ExportImage>,
+    format: 'latex' | 'markdown',
+): Promise<{ images: Record<string, ExportImage>; entries: Array<{ path: string; data: Uint8Array }>; removeStale: () => Promise<void> }> {
+    const suffix = format === 'latex' ? '-figures' : '_files';
+    const folder = Object.keys(images).length > 0
+        ? await imageFolder(documentPath, suffix, true)
+        : await imageFolder(documentPath, suffix, false);
+    const entries: Array<{ path: string; data: Uint8Array }> = [];
+    const out: Record<string, ExportImage> = {};
+    const extensions: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg' };
+    for (const [id, image] of folder ? Object.entries(images) : []) {
+        // LaTeX's graphics drivers read neither SVG nor GIF.
+        const usePng = format === 'latex' && (image.mime === 'image/svg+xml' || image.mime === 'image/gif');
+        const data = usePng ? image.png : image.data;
+        const extension = usePng ? 'png' : extensions[image.mime];
+        if (!data || !extension) continue;
+        const name = `${id}.${extension}`;
+        entries.push({ path: PathUtils.join(folder!, name), data });
+        out[id] = { ...image, path: `${PathUtils.filename(folder!)}/${name}` };
+    }
+    const removeStale = async () => {
+        if (!folder) return;
+        const current = new Set(entries.map(entry => entry.path));
+        const children = await IOUtils.getChildren(folder).catch(() => [] as string[]);
+        for (const child of children) {
+            if (/^image-\d+\.(?:png|jpg|gif|svg)$/.test(PathUtils.filename(child)) && !current.has(child)) {
+                await quietly(IOUtils.remove(child, { ignoreAbsent: true }));
+            }
+        }
+    };
+    return { images: out, entries, removeStale };
 }
 
 /** Citation state of a source with no Beaver citation tags (a Zotero note). */
@@ -367,22 +380,7 @@ export class InstanceExport {
             locale: request.locale,
             liveCitations,
         });
-        const bibliographyTitle = citations.styleClass === 'note' ? 'Bibliography' : 'References';
-        const written = await this.write(runtime, { ...request, provenance: request.source.provenance }, path, doc, citations, bibliographyTitle);
-        logger(`InstanceExport: wrote ${request.format} (${doc.clusters.length} citations) in ${Date.now() - started} ms`, 3);
-
-        return {
-            status: 'saved',
-            path,
-            files: written.files,
-            warnings: [...warnings, ...written.warnings],
-            stats: {
-                ...written.stats,
-                clusters: doc.clusters.length,
-                bibliographyEntries: citations.bibliography?.entries.length ?? 0,
-            },
-            ...(written.html !== undefined ? { html: written.html } : {}),
-        };
+        return this.writeResult(runtime, { ...request, provenance: request.source.provenance }, path, doc, citations, warnings, started);
     }
 
     /**
@@ -426,13 +424,16 @@ export class InstanceExport {
         const colors = request.colors ?? (request.format === 'docx' || request.format === 'pdf');
         const doc = runtime.parseNoteDoc(json, { colors });
         const liveCitations = request.format === 'docx' && (request.liveCitations ?? true);
-        const { citations, warnings } = await formatExportCitations(doc, EMPTY_SNAPSHOT, this.citationService(), {
-            styleId: request.styleId,
-            locale: request.locale,
-            liveCitations,
-            noteCitationItems: citationItems,
-        });
-        const { images, missing, remote } = await loadNoteImages(note, doc.images ?? {});
+        // Image files load and decode while the citations are formatted.
+        const [{ citations, warnings }, { images, missing, remote }] = await Promise.all([
+            formatExportCitations(doc, EMPTY_SNAPSHOT, this.citationService(), {
+                styleId: request.styleId,
+                locale: request.locale,
+                liveCitations,
+                noteCitationItems: citationItems,
+            }),
+            loadNoteImages(note, doc.images ?? {}),
+        ]);
         if (missing > 0) {
             warnings.push({
                 code: 'images_missing',
@@ -447,10 +448,22 @@ export class InstanceExport {
                 count: remote,
             });
         }
-        const bibliographyTitle = citations.styleClass === 'note' ? 'Bibliography' : 'References';
-        const written = await this.write(runtime, { ...request, images }, path, doc, citations, bibliographyTitle);
-        logger(`InstanceExport: wrote note as ${request.format} (${doc.clusters.length} citations) in ${Date.now() - started} ms`, 3);
+        return this.writeResult(runtime, { ...request, images }, path, doc, citations, warnings, started);
+    }
 
+    /** Write the document and report what was saved, with the warnings gathered so far. */
+    private async writeResult(
+        runtime: ExportRuntime,
+        settings: WriteSettings,
+        path: string,
+        doc: ExportDoc,
+        citations: FormattedCitations,
+        warnings: ExportWarning[],
+        started: number,
+    ): Promise<ExportResult> {
+        const bibliographyTitle = citations.styleClass === 'note' ? 'Bibliography' : 'References';
+        const written = await this.write(runtime, settings, path, doc, citations, bibliographyTitle);
+        logger(`InstanceExport: wrote ${settings.format} (${doc.clusters.length} citations) in ${Date.now() - started} ms`, 3);
         return {
             status: 'saved',
             path,
@@ -509,23 +522,24 @@ export class InstanceExport {
                         ...(threadId && runIds.length > 0 ? { source: `zotero://beaver/thread/${threadId}/run/${runIds[runIds.length - 1]}` } : {}),
                     }
                     : null;
-                const staged = request.images ? await stageImageFiles(path, request.images, 'markdown') : null;
+                const images = request.images ? await imageFiles(path, request.images, 'markdown') : null;
+                const result = runtime.writeMarkdown({
+                    doc,
+                    citations,
+                    options: { linkItems: request.linkItems ?? false, bibliographyTitle, frontMatter },
+                    images: images?.images,
+                });
+                const staged = await stageFiles(images?.entries ?? [], images?.removeStale);
                 try {
-                    const result = runtime.writeMarkdown({
-                        doc,
-                        citations,
-                        options: { linkItems: request.linkItems ?? false, bibliographyTitle, frontMatter },
-                        images: staged?.images,
-                    });
                     // Images first: the document is replaced only once they are in place.
-                    await staged?.commit();
+                    await staged.commit();
                     await IOUtils.writeUTF8(path, result.markdown);
-                    await staged?.finish();
-                    return { files: [path, ...(staged?.files ?? [])], warnings: result.warnings, stats: result.stats };
+                    await staged.finish();
                 } catch (error) {
-                    await staged?.restore();
+                    await staged.restore();
                     throw error;
                 }
+                return { files: [path, ...staged.files], warnings: result.warnings, stats: result.stats };
             }
             case 'latex': {
                 const citationPackage = request.citationPackage === 'natbib' ? 'natbib' : 'biblatex';
@@ -534,51 +548,38 @@ export class InstanceExport {
                     ? await buildBibliographyFile(cited, citationPackage === 'natbib' ? 'bibtex' : 'biblatex')
                     : null;
                 const bibPath = bibliography && Object.keys(bibliography.keys).length > 0 ? await bibliographyPath(path) : null;
-                const staged = request.images ? await stageImageFiles(path, request.images, 'latex') : null;
+                const images = request.images ? await imageFiles(path, request.images, 'latex') : null;
+                const result = runtime.writeLatex({
+                    doc,
+                    citations,
+                    images: images?.images,
+                    keys: bibliography?.keys ?? {},
+                    options: {
+                        citationPackage,
+                        standalone: request.standalone ?? true,
+                        bibFileName: bibPath ? PathUtils.filename(bibPath) : null,
+                        linkItems: request.linkItems ?? false,
+                        bibliographyTitle,
+                        date: longDate(citations.locale),
+                    },
+                });
+                const staged = await stageFiles([
+                    ...(bibPath && bibliography
+                        ? [{ path: bibPath, data: `${bibliographyHeader(PathUtils.filename(path))}\n\n${bibliography.bib}\n` }]
+                        : []),
+                    ...(images?.entries ?? []),
+                ], images?.removeStale);
                 try {
-                    const result = runtime.writeLatex({
-                        doc,
-                        citations,
-                        images: staged?.images,
-                        keys: bibliography?.keys ?? {},
-                        options: {
-                            citationPackage,
-                            standalone: request.standalone ?? true,
-                            bibFileName: bibPath ? PathUtils.filename(bibPath) : null,
-                            linkItems: request.linkItems ?? false,
-                            bibliographyTitle,
-                            date: longDate(citations.locale),
-                        },
-                    });
-                    const files = [path];
-                    // The bibliography first: a .tex file without it would not compile.
-                    let previousBib: string | null = null;
-                    if (bibPath && bibliography) {
-                        if (await IOUtils.exists(bibPath)) previousBib = await IOUtils.readUTF8(bibPath);
-                        await IOUtils.writeUTF8(bibPath, `${bibliographyHeader(PathUtils.filename(path))}\n\n${bibliography.bib}\n`);
-                        files.push(bibPath);
-                    }
-                    try {
-                        // Images first: the document is replaced only once they are in place.
-                        await staged?.commit();
-                        await IOUtils.writeUTF8(path, result.tex);
-                    } catch (error) {
-                        // The previous export's document still needs its bibliography;
-                        // a new bibliography without its document is of no use.
-                        if (bibPath && files.includes(bibPath)) {
-                            const restore = previousBib !== null
-                                ? IOUtils.writeUTF8(bibPath, previousBib)
-                                : IOUtils.remove(bibPath, { ignoreAbsent: true });
-                            await restore.catch((restoreError: unknown) => logger(`InstanceExport: could not restore ${bibPath}: ${restoreError}`, 1));
-                        }
-                        throw error;
-                    }
-                    await staged?.finish();
-                    return { files: [...files, ...(staged?.files ?? [])], warnings: result.warnings, stats: result.stats };
+                    // The bibliography and images first: the document is replaced only
+                    // once they are in place, and a failure puts the earlier ones back.
+                    await staged.commit();
+                    await IOUtils.writeUTF8(path, result.tex);
+                    await staged.finish();
                 } catch (error) {
-                    await staged?.restore();
+                    await staged.restore();
                     throw error;
                 }
+                return { files: [path, ...staged.files], warnings: result.warnings, stats: result.stats };
             }
             default: {
                 const liveCitations = request.liveCitations ?? true;

@@ -9,23 +9,15 @@
  */
 
 import { DOMParser as ProseMirrorDOMParser } from 'prosemirror-model';
+import type { PmNode } from '@beaver/agent-export/runtime';
 import { EditorState } from 'prosemirror-state';
 import { getDocument } from './dom';
 import { restoreLocalHref, shieldLocalHrefAttributes } from './normalize';
 import { schema } from './schema';
 import { preprocessHTML, schemaTransform } from './transformer';
 
-/** A ProseMirror node as JSON. */
-export interface NoteDocJson {
-    type: string;
-    attrs?: Record<string, unknown>;
-    content?: NoteDocJson[];
-    marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
-    text?: string;
-}
-
 export interface ParsedNoteHtml {
-    doc: NoteDocJson;
+    doc: PmNode;
     /** `data-*` attributes of the note's wrapper (`data-schema-version`, `data-citation-items`). */
     metadataAttributes: Record<string, string>;
 }
@@ -46,7 +38,7 @@ function decodeAttributeValue(value: string): string {
  * JSON. A shielded href is the attribute as written, so its character
  * references (`&amp;` between query parameters) were never decoded.
  */
-function restoreLinks(node: NoteDocJson): void {
+function restoreLinks(node: PmNode): void {
     for (const mark of node.marks ?? []) {
         if (mark.type === 'link' && typeof mark.attrs?.href === 'string') {
             const restored = restoreLocalHref(mark.attrs.href);
@@ -72,7 +64,7 @@ export function parseNoteHtml(html: string, prepare?: (container: HTMLElement) =
     let state = EditorState.create({ doc: ProseMirrorDOMParser.fromSchema(schema).parse(fragment) });
     const tr = schemaTransform(state);
     if (tr) state = state.apply(tr);
-    const json = state.doc.toJSON() as NoteDocJson;
+    const json = state.doc.toJSON() as PmNode;
     restoreLinks(json);
     return { doc: json, metadataAttributes };
 }

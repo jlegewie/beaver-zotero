@@ -29,6 +29,11 @@ const EDIT_FOOTER_REGEX = /<p><span style="color:[^"]*">Edited by Beaver[\s\S]*?
  * actually emit or that ProseMirror produces after round-tripping them.
  */
 const CREATED_FOOTER_PARAGRAPH_REGEX = /<p\b[^>]*>[\s\S]*?<\/p>/g;
+/**
+ * The visible text of a "Created by Beaver" paragraph, for code that reads a
+ * parsed note (the paragraph also links to `zotero://beaver/thread/…`).
+ */
+export const CREATED_FOOTER_TEXT_REGEX = /^\s*Created by Beaver\s*\u00b7\s*(?:Chat|Open Chat|Open Message)\s*$/;
 const CREATED_FOOTER_COLOR_SPAN_REGEX =
     /<span\b[^>]*style="[^"]*color:[^"]*"[^>]*>/;
 const CREATED_FOOTER_THREAD_LINK_REGEX =

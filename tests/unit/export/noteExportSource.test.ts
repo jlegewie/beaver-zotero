@@ -136,8 +136,9 @@ describe('readNoteForExport + parseNoteDoc', () => {
             { type: 'link', url: 'https://example.com', children: [{ type: 'text', value: 'web' }] },
             { type: 'text', value: ' ' },
             { type: 'link', url: 'zotero://select/library/items/SMITH001', children: [{ type: 'text', value: 'item' }] },
-            // A local file is only its name.
-            { type: 'text', value: ' file' },
+            { type: 'text', value: ' ' },
+            // Kept in the model; every writer writes a local file link as its text.
+            { type: 'link', url: 'file:///Users/me/secret.pdf', children: [{ type: 'text', value: 'file' }] },
         ]);
         expect(list).toMatchObject({ type: 'list', ordered: true, start: 3 });
         expect(table).toMatchObject({

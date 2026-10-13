@@ -333,6 +333,37 @@ describe('note documents in every format', () => {
         expect(html).toContain('<strong>bold text </strong><span class="citation">');
     });
 
+    it('writes local file and Beaver links as their text in every format', async () => {
+        const linked = parseNoteDoc({ type: 'doc', content: [paragraph(
+            text('file', [{ type: 'link', attrs: { href: 'file:///Users/me/secret.pdf' } }]),
+            text(' chat', [{ type: 'link', attrs: { href: 'zotero://beaver/thread/T1' } }]),
+        )] }, { liftTitle: false });
+        const citations = citationsFor(linked);
+        const latex = writeLatex({ doc: linked, citations, keys: {}, options: { citationPackage: 'biblatex', standalone: false, bibFileName: null, linkItems: true, bibliographyTitle: 'R', date: '' } }).tex;
+        const markdown = writeMarkdown({ doc: linked, citations, options: { linkItems: true, bibliographyTitle: 'R', frontMatter: null } }).markdown;
+        const html = writeHtml({ doc: linked, citations, options: { linkItems: true, bibliographyTitle: 'R', notesTitle: 'N' } }).html;
+        const zip = await JSZip.loadAsync((await writeDocx({ doc: linked, citations, options: { liveCitations: false, linkItems: true, bibliographyTitle: 'R' } })).bytes);
+        const docx = Object.values(zip.files).map(file => file.name).join(' ') + await zip.file('word/_rels/document.xml.rels')!.async('string');
+        for (const output of [latex, markdown, html, docx]) {
+            expect(output).not.toContain('secret.pdf');
+            expect(output).not.toContain('zotero://beaver');
+        }
+        expect(markdown).toContain('file chat');
+    });
+
+    it('sizes a height-only image of unknown natural size by the default shape in Word', async () => {
+        const sized = parseNoteDoc({ type: 'doc', content: [paragraph({ type: 'image', attrs: { attachmentKey: 'IMG00001', height: 96 } })] }, { liftTitle: false });
+        const { bytes } = await writeDocx({
+            doc: sized,
+            citations: citationsFor(sized),
+            options: { liveCitations: false, linkItems: false, bibliographyTitle: 'R' },
+            images: { 'image-1': { mime: 'image/png', data: PNG, width: 0, height: 0 } },
+        });
+        const document = await (await JSZip.loadAsync(bytes)).file('word/document.xml')!.async('string');
+        // 128 x 96 CSS px (4:3), not the 480 px default width: 9525 EMU per pixel.
+        expect(document).toContain(`<wp:extent cx="${128 * 9525}" cy="${96 * 9525}"/>`);
+    });
+
     it('marks an image that could not be loaded instead of dropping it', async () => {
         const html = writeHtml({ doc, citations: citationsFor(doc), options: { linkItems: false, bibliographyTitle: 'R', notesTitle: 'N' } }).html;
         expect(html).toContain('<em>[Image not available]</em>');

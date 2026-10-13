@@ -20,6 +20,8 @@ import type { MdBlock, MdBlockLayout, MdFootnoteDefinition, MdImage, MdInline, M
 import { exportLinkTarget } from '../links';
 import { base64 } from '../note/base64';
 import { trailingText } from '../note/inlineText';
+import { isNoteTable } from '../note/tableGrid';
+import { imageDisplayWidth, imageFallback } from '../note/images';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { decodeHtmlEntities } from '../citations/inlineHtml';
 import { paperSize } from '../page';
@@ -251,15 +253,12 @@ class HtmlWriter {
     private image(node: MdImage, definitions: Map<string, MdFootnoteDefinition>): string {
         const asset = node.assetId ? this.input.images?.[node.assetId] : undefined;
         if (!asset || !PAGE_IMAGE_TYPES.has(asset.mime)) {
-            if (node.assetId && this.input.doc.images?.[node.assetId]?.kind === 'remote' && node.url) {
-                return this.link(node.url, [{ type: 'text', value: node.alt || '[Image]' }], definitions);
-            }
-            const text = node.alt || (node.assetId ? '[Image not available]' : '');
-            return text ? `<em>${escapeHtml(text)}</em>` : '';
+            const fallback = imageFallback(node, this.input.doc);
+            if (!fallback) return '';
+            if (fallback.linkUrl) return this.link(fallback.linkUrl, [{ type: 'text', value: fallback.text }], definitions);
+            return `<em>${escapeHtml(fallback.text)}</em>`;
         }
-        // A size the host could not measure: the width of a typical figure.
-        const width = node.width ?? (node.height && asset.height ? (node.height * asset.width) / asset.height : asset.width || 480);
-        const style = `width:${Math.max(1, Math.round(width))}px;max-width:100%;height:auto`;
+        const style = `width:${Math.max(1, Math.round(imageDisplayWidth(node, asset)))}px;max-width:100%;height:auto`;
         this.embeddedImages += 1;
         return `<img class="note-image" src="data:${asset.mime};base64,${base64(asset.data)}" alt="${escapeHtml(node.alt ?? '')}" style="${style}">`;
     }
@@ -446,7 +445,7 @@ class HtmlWriter {
     }
 
     private table(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): string {
-        if (node.children.some(row => row.children.some(cell => cell.blocks))) return this.noteTable(node, definitions);
+        if (isNoteTable(node)) return this.noteTable(node, definitions);
         const columns = Math.max(...node.children.map(row => row.children.length), 1);
         const alignment = (index: number) => {
             const align = node.align?.[index];

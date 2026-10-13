@@ -47,3 +47,19 @@ export function tableGrid(table: MdTable): TableGrid {
 export function hasSpans(table: MdTable): boolean {
     return table.children.some(row => row.children.some(cell => span(cell.rowspan) > 1 || span(cell.colspan) > 1));
 }
+
+/** Whether a table is a Zotero note's (cells holding blocks) rather than a markdown table. */
+export function isNoteTable(table: MdTable): boolean {
+    return table.children.some(row => row.children.some(cell => cell.blocks));
+}
+
+/**
+ * Relative column widths from the note's column widths, a column without one
+ * taking the mean of the others; null when the note sets none.
+ */
+export function columnWeights(table: MdTable, columns: number): number[] | null {
+    const known = (table.colwidths ?? []).filter((width): width is number => !!width);
+    if (known.length === 0) return null;
+    const mean = known.reduce((sum, width) => sum + width, 0) / known.length;
+    return Array.from({ length: columns }, (_, index) => table.colwidths?.[index] || mean);
+}

@@ -3,18 +3,20 @@
  * and the item metadata it stores for its citations.
  *
  * Beaver's own provenance lines ("Created by Beaver", "Edited by Beaver",
- * wherever a note has them) are not part of its content and are left out. Each citation records what the note
- * shows for it, which the export falls back to for an item it cannot resolve.
+ * wherever a note has them) are not part of its content and are left out.
+ * Each citation records what the note shows for it, which the export falls
+ * back to for an item it cannot resolve.
  */
 
 import { restoreLocalHref } from '../../prosemirror/normalize';
-import { parseNoteHtml, type NoteDocJson } from '../../prosemirror/parseNote';
-import { stripBeaverEditFooter } from '../../utils/noteEditFooter';
+import type { PmNode } from '@beaver/agent-export/runtime';
+import { parseNoteHtml } from '../../prosemirror/parseNote';
+import { CREATED_FOOTER_TEXT_REGEX, stripBeaverEditFooter } from '../../utils/noteEditFooter';
 import type { NoteCitationCacheEntry } from './exportCitations';
 
 export interface NoteForExport {
     /** The note's ProseMirror document as JSON. */
-    doc: NoteDocJson;
+    doc: PmNode;
     /** Item metadata the note stores for its citations (`data-citation-items`). */
     citationItems: NoteCitationCacheEntry[];
 }
@@ -59,8 +61,6 @@ function recordCitationPreviews(container: HTMLElement): void {
     }
 }
 
-const BRANDING_TEXT = /^\s*Created by Beaver\s*·\s*Open (?:Message|Chat)\s*$/;
-
 /**
  * Remove Beaver's "Created by Beaver · Open Message" paragraphs, with the
  * rule that sets each off: a note saved from a chat carries one under its
@@ -69,7 +69,7 @@ const BRANDING_TEXT = /^\s*Created by Beaver\s*·\s*Open (?:Message|Chat)\s*$/;
  */
 function removeBeaverBranding(container: HTMLElement): void {
     for (const paragraph of Array.from(container.querySelectorAll('p')) as Element[]) {
-        if (!BRANDING_TEXT.test(paragraph.textContent ?? '')) continue;
+        if (!CREATED_FOOTER_TEXT_REGEX.test(paragraph.textContent ?? '')) continue;
         const links = Array.from(paragraph.querySelectorAll('a[href]')) as Element[];
         if (!links.some(link => restoreLocalHref(link.getAttribute('href') ?? '').startsWith('zotero://beaver/'))) continue;
         const next = paragraph.nextElementSibling;

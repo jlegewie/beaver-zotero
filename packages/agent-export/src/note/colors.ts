@@ -55,3 +55,8 @@ export function opaqueColor(value: string | null | undefined): string | null {
     }
     return null;
 }
+
+/** A `#rrggbb` color as the six uppercase hex digits Word and xcolor take. */
+export function hexDigits(color: string): string {
+    return color.replace(/^#/, '').toUpperCase();
+}

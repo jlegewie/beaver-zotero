@@ -44,7 +44,9 @@ import {
 } from 'docx';
 import type { MdBlock, MdBlockLayout, MdFootnoteDefinition, MdImage, MdInline, MdTable, MdTableCell } from '../mdast';
 import { exportLinkTarget } from '../links';
-import { tableGrid } from '../note/tableGrid';
+import { columnWeights, isNoteTable, tableGrid } from '../note/tableGrid';
+import { imageDisplayWidth, imageFallback, imageHeightRatio, PIXELS_PER_INCH } from '../note/images';
+import { hexDigits } from '../note/colors';
 import { trailingText } from '../note/inlineText';
 import { latexToOmml } from '../math/latexToOmml';
 import { activityLabelParts } from '../activity';
@@ -112,8 +114,6 @@ interface Marks {
     hyperlink?: boolean;
 }
 
-/** Hex color without its `#`, as Word writes it. */
-const wordColor = (color: string) => color.replace(/^#/, '').toUpperCase();
 
 const HEADINGS = [
     HeadingLevel.HEADING_1,
@@ -187,11 +187,11 @@ function textRun(text: string, marks: Marks = {}, extra: { break?: number } = {}
         ...(marks.subScript ? { subScript: true } : {}),
         ...(marks.smallCaps ? { smallCaps: true } : {}),
         ...(marks.underline
-            ? { underline: marks.underlineColor ? { type: UnderlineType.SINGLE, color: wordColor(marks.underlineColor) } : {} }
+            ? { underline: marks.underlineColor ? { type: UnderlineType.SINGLE, color: hexDigits(marks.underlineColor) } : {} }
             : {}),
         ...(marks.hyperlink ? { style: STYLE.hyperlink } : {}),
-        ...(marks.color ? { color: wordColor(marks.color) } : {}),
-        ...(marks.background && !marks.code ? { shading: { type: ShadingType.CLEAR, fill: wordColor(marks.background), color: 'auto' } } : {}),
+        ...(marks.color ? { color: hexDigits(marks.color) } : {}),
+        ...(marks.background && !marks.code ? { shading: { type: ShadingType.CLEAR, fill: hexDigits(marks.background), color: 'auto' } } : {}),
         ...(marks.code ? { font: theme.fonts.mono, shading: { type: ShadingType.CLEAR, fill: theme.colors.codeBackground, color: 'auto' } } : {}),
     });
 }
@@ -249,10 +249,6 @@ const WORD_IMAGE_TYPES: Record<string, 'png' | 'jpg' | 'gif' | 'bmp'> = {
     'image/bmp': 'bmp',
 };
 
-/** CSS pixels per inch: note images are sized in CSS pixels. */
-const PIXELS_PER_INCH = 96;
-/** Width of an image whose natural size is unknown, in CSS pixels. */
-const DEFAULT_IMAGE_WIDTH = 480;
 
 const ALIGNMENTS = {
     left: AlignmentType.LEFT,
@@ -440,11 +436,10 @@ class DocxWriter {
     private image(node: MdImage, marks: Marks, definitions: Map<string, MdFootnoteDefinition>): Child[] {
         const asset = node.assetId ? this.input.images?.[node.assetId] : undefined;
         if (!asset) {
-            if (node.assetId && this.input.doc.images?.[node.assetId]?.kind === 'remote' && node.url) {
-                return this.link(node.url, [{ type: 'text', value: node.alt || '[Image]' }], marks, definitions);
-            }
-            const text = node.alt || (node.assetId ? '[Image not available]' : '');
-            return text ? [textRun(text, { ...marks, italics: true })] : [];
+            const fallback = imageFallback(node, this.input.doc);
+            if (!fallback) return [];
+            if (fallback.linkUrl) return this.link(fallback.linkUrl, [{ type: 'text', value: fallback.text }], marks, definitions);
+            return [textRun(fallback.text, { ...marks, italics: true })];
         }
         const { width, height } = this.imageSize(node, asset);
         const transformation = { width, height };
@@ -460,11 +455,9 @@ class DocxWriter {
 
     /** Display size in pixels: the note's size, else the natural one, at most the width available. */
     private imageSize(node: MdImage, asset: ExportImage): { width: number; height: number } {
-        const ratio = asset.width > 0 && asset.height > 0 ? asset.height / asset.width : 0.75;
-        // A size the host could not measure: the width of a typical figure.
-        let width = node.width ?? (node.height ? node.height / ratio : asset.width || DEFAULT_IMAGE_WIDTH);
+        const ratio = imageHeightRatio(asset);
+        let width = imageDisplayWidth(node, asset);
         let height = node.height ?? width * ratio;
-        if (node.width && !node.height) height = node.width * ratio;
         const max = this.availableWidth();
         if (width > max) {
             height *= max / width;
@@ -475,10 +468,14 @@ class DocxWriter {
 
     /** Width available to an image in pixels: the text width, divided among table columns. */
     private availableWidth(): number {
-        const page = pageProperties(this.input.citations.locale, this.theme);
-        const textTwips = page.size.width - page.margin.left - page.margin.right;
-        const pixels = (textTwips / 1440) * PIXELS_PER_INCH;
+        const pixels = (this.textWidthTwips() / 1440) * PIXELS_PER_INCH;
         return this.tableColumns > 1 ? pixels / this.tableColumns - 12 : pixels;
+    }
+
+    /** Width of the text between the page margins, in twips. */
+    private textWidthTwips(): number {
+        const { size, margin } = pageProperties(this.input.citations.locale, this.theme);
+        return size.width - margin.left - margin.right;
     }
 
     private math(latex: string, display: boolean): Child {
@@ -596,15 +593,13 @@ class DocxWriter {
         for (const node of nodes) {
             const kind = node.type === 'code' ? 'code' : node.type === 'table' ? 'table' : 'other';
             switch (node.type) {
-                case 'paragraph': {
-                    const base = spacedBase();
+                case 'paragraph':
                     out.push(new Paragraph({
-                        ...base,
+                        ...spacedBase(),
                         ...this.layout(node, indent),
                         children: [...this.footnoteLead(), ...this.inlines(node.children, {}, definitions)],
                     }));
                     break;
-                }
                 case 'heading':
                     out.push(new Paragraph({
                         heading: HEADINGS[Math.min(Math.max(node.depth, 1), 6) - 1],
@@ -746,7 +741,7 @@ class DocxWriter {
     }
 
     private table(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): Table {
-        if (node.children.some(row => row.children.some(cell => cell.blocks))) return this.noteTable(node, definitions);
+        if (isNoteTable(node)) return this.noteTable(node, definitions);
         const columns = Math.max(...node.children.map(row => row.children.length), 1);
         const alignment = (index: number) => {
             const align = node.align?.[index];
@@ -794,7 +789,7 @@ class DocxWriter {
                 verticalAlign: VerticalAlign.TOP,
                 ...(cell.colspan && cell.colspan > 1 ? { columnSpan: cell.colspan } : {}),
                 ...(cell.rowspan && cell.rowspan > 1 ? { rowSpan: cell.rowspan } : {}),
-                ...(cell.background ? { shading: { type: ShadingType.CLEAR, fill: wordColor(cell.background), color: 'auto' } } : {}),
+                ...(cell.background ? { shading: { type: ShadingType.CLEAR, fill: hexDigits(cell.background), color: 'auto' } } : {}),
                 children: this.cellBlocks(cell, definitions),
             })),
         }));
@@ -820,15 +815,10 @@ class DocxWriter {
 
     /** Column widths in twips from the note's widths (proportional to the text width), or null. */
     private columnWidths(node: MdTable, columns: number): number[] | null {
-        const widths = node.colwidths;
-        if (!widths || !widths.some(width => width)) return null;
-        const known = widths.filter((width): width is number => !!width);
-        const fallback = known.reduce((sum, width) => sum + width, 0) / known.length;
-        const pixels = Array.from({ length: columns }, (_, index) => widths[index] ?? fallback);
-        const page = pageProperties(this.input.citations.locale, this.theme);
-        const text = page.size.width - page.margin.left - page.margin.right;
-        const total = pixels.reduce((sum, width) => sum + width, 0);
-        return pixels.map(width => Math.round((width / total) * text));
+        const weights = columnWeights(node, columns);
+        if (!weights) return null;
+        const total = weights.reduce((sum, weight) => sum + weight, 0);
+        return weights.map(weight => Math.round((weight / total) * this.textWidthTwips()));
     }
 
     // -- Document ------------------------------------------------------------

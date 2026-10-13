@@ -25,7 +25,7 @@ export function shieldLocalHrefAttributes(html: string): string {
     );
 }
 
-export function restoreLocalHrefAttributes(html: string): string {
+function restoreLocalHrefAttributes(html: string): string {
     return html.replace(
         new RegExp(`href="${LOCAL_HREF_SHIELD_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^"]*)"`, 'g'),
         (match, encodedHref) => {

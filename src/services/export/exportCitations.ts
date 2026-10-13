@@ -16,6 +16,7 @@ import {
     formatLocator,
     resolveCitationTarget,
 } from '@beaver/agent-export/citations/citationTargets';
+import { citationNotes, type CitationNotes } from '@beaver/agent-export/citations/citationNotes';
 import { externalReferenceToCsl } from '@beaver/agent-export/citations/externalCsl';
 import { cslHtmlToText } from '@beaver/agent-export/citations/inlineHtml';
 import { assignNotePlacements, renderedClusterOrder } from '@beaver/agent-export/citations/noteIndices';
@@ -37,16 +38,10 @@ import { getBestPDFAttachmentAsync } from '../../utils/zoteroItemHelpers';
 import type { CitationService, SequenceCitationItem } from '../CitationService';
 
 /** A cited work as the processor sees it. */
-type ProcessorItem = {
+type ProcessorItem = CitationNotes & {
     kind: 'processor';
     id: number | string;
     uris: string[];
-    locator?: string;
-    /** CSL locator type (page when absent). */
-    label?: string;
-    prefix?: string;
-    suffix?: string;
-    suppressAuthor?: boolean;
 };
 
 /** Item metadata a Zotero note stores for its citations (`data-citation-items`). */
@@ -204,12 +199,7 @@ class CitationResolver {
      * label as stored, never translated.
      */
     private async resolveNoteItem(note: NoteCitationItem, previewText: string | undefined): Promise<ResolvedItem | null> {
-        const notes = {
-            ...(note.locator ? { locator: note.locator, ...(note.label ? { label: note.label } : {}) } : {}),
-            ...(note.prefix ? { prefix: note.prefix } : {}),
-            ...(note.suffix ? { suffix: note.suffix } : {}),
-            ...(note.suppressAuthor ? { suppressAuthor: true } : {}),
-        };
+        const notes = citationNotes(note);
         try {
             const item = note.uris.length > 0 ? await itemFromURIs(note.uris) : null;
             if (item) {
@@ -363,10 +353,7 @@ export async function formatExportCitations(
         clusters: order.map(index => ({
             items: processorItems(index).map((item): SequenceCitationItem => ({
                 id: item.id,
-                ...(item.locator ? { locator: item.locator, label: item.label ?? 'page' } : {}),
-                ...(item.prefix ? { prefix: item.prefix } : {}),
-                ...(item.suffix ? { suffix: item.suffix } : {}),
-                ...(item.suppressAuthor ? { suppressAuthor: true } : {}),
+                ...citationNotes(item, { labelDefault: 'page' }),
             })),
             noteIndex: placements.get(index)?.noteIndex ?? 0,
         })),
@@ -381,10 +368,7 @@ export async function formatExportCitations(
             id: item.id,
             uris: item.uris,
             itemData: sequence.itemData[String(item.id)] ?? {},
-            ...(item.locator ? { locator: item.locator, label: item.label ?? 'page' } : {}),
-            ...(item.prefix ? { prefix: item.prefix } : {}),
-            ...(item.suffix ? { suffix: item.suffix } : {}),
-            ...(item.suppressAuthor ? { suppressAuthor: true } : {}),
+            ...citationNotes(item, { labelDefault: 'page' }),
         }));
         return {
             html,

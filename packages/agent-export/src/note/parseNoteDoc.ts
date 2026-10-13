@@ -13,8 +13,8 @@
  *   by whitespace form one cluster, as word processors cite;
  * - annotation highlights and underlines are their text, as the editor shows
  *   them (the citation after them is the visible one);
- * - links keep their target, except `file://` links (local paths) and links
- *   into Beaver itself, which become their text;
+ * - links keep their target; each writer decides which targets the export
+ *   keeps (`exportLinkTarget`: never local files or links into Beaver);
  * - the first heading becomes the document title, and the remaining headings
  *   move up so the highest is level 1; empty paragraphs are dropped.
  */
@@ -66,8 +66,6 @@ interface Item {
 
 /** Mark nesting order, outermost first. */
 const MARK_ORDER = ['link', 'textColor', 'backgroundColor', 'strong', 'em', 'underline', 'strike', 'subsup'];
-
-const SCHEME_PATTERN = /^([a-z][a-z0-9+.-]*):/i;
 
 function stringAttr(attrs: Record<string, unknown> | undefined, name: string): string | null {
     const value = attrs?.[name];
@@ -177,7 +175,7 @@ class NoteDocBuilder {
     readonly images: Record<string, NoteImageSource> = {};
     private imageCount = 0;
 
-    constructor(private readonly options: Required<ParseNoteDocOptions>) {}
+    constructor(private readonly options: { colors: boolean }) {}
 
     // -- Inline content ------------------------------------------------------
 
@@ -309,10 +307,9 @@ class NoteDocBuilder {
                 return background && background !== '#ffffff' ? [{ type: 'styled', background, children }] : children;
             }
             case 'link': {
+                // Which targets an export keeps is the writers' decision (`exportLinkTarget`).
                 const href = stringAttr(mark.attrs, 'href')?.trim() ?? '';
-                const scheme = SCHEME_PATTERN.exec(href)?.[1]?.toLowerCase();
-                // Local files are paths on this computer; Beaver links only work in Beaver.
-                if (!href || scheme === 'file' || /^zotero:\/\/beaver\//i.test(href)) return children;
+                if (!href) return children;
                 const title = stringAttr(mark.attrs, 'title');
                 return [{ type: 'link', url: href, ...(title ? { title } : {}), children }];
             }
@@ -532,7 +529,7 @@ function shiftHeadings(blocks: MdBlock[], by: number): MdBlock[] {
  * empty otherwise (the body then starts with the note's first line).
  */
 export function parseNoteDoc(json: PmNode, options: ParseNoteDocOptions = {}): ExportDoc {
-    const builder = new NoteDocBuilder({ colors: options.colors ?? true, liftTitle: options.liftTitle ?? true });
+    const builder = new NoteDocBuilder({ colors: options.colors ?? true });
     let blocks = builder.blocks(json.content ?? []);
     let title = '';
     if ((options.liftTitle ?? true) && blocks[0]?.type === 'heading') {
