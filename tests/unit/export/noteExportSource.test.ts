@@ -177,6 +177,12 @@ describe('readNoteForExport + parseNoteDoc', () => {
         expect(doc.sections[0].children).toEqual([{ type: 'paragraph', children: [{ type: 'text', value: 'Body' }] }]);
     });
 
+    it('leaves out the older footer that is only a "Created by Beaver" link', () => {
+        const html = '<div data-schema-version="10"><p>Body</p><p><span style="color: #aaa;"><a href="zotero://beaver/thread/T1">Created by Beaver</a></span></p></div>';
+        const doc = parseNoteDoc(readNoteForExport(html).doc, { liftTitle: false });
+        expect(doc.sections[0].children).toEqual([{ type: 'paragraph', children: [{ type: 'text', value: 'Body' }] }]);
+    });
+
     it('keeps a paragraph that only reads like the branding', () => {
         const html = '<div data-schema-version="10"><p>Created by Beaver · Open Message</p><hr><p>Body</p></div>';
         const doc = parseNoteDoc(readNoteForExport(html).doc, { liftTitle: false });
