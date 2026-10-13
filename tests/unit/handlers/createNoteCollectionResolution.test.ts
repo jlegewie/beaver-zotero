@@ -61,6 +61,12 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({ preloadNotePageLabels:
 vi.mock('../../../src/utils/noteEditorIO', () => ({ getLatestNoteHtml: vi.fn() }));
 vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({ getOrSimplify: vi.fn() }));
 vi.mock('../../../src/services/agentDataProvider/lookupZoteroReferences', () => ({ lookupZoteroReferences: vi.fn() }));
+vi.mock('../../../src/services/agentDataProvider/actions/noteCitationRendering', () => ({
+    INVALID_NOTE_CITATION_CODE: 'invalid_citation',
+    checkNoteMarkdownCitations: vi.fn(async () => ({ error: null, warnings: [] })),
+    renderNoteMarkdown: vi.fn(async (markdown: string, context: any) => ({ html: await context.renderMarkdown(markdown), warnings: [] })),
+    wrapNewNoteHtml: vi.fn((html: string) => html),
+}));
 
 import { validateCreateNoteAction } from '../../../src/services/agentDataProvider/actions/createNote';
 const personal = { id: 10, libraryID: 1, key: 'USER2345', name: 'Shared' };
@@ -169,4 +175,50 @@ it('saves the note unfiled when an approved membership was deleted', async () =>
     expect(result).toMatchObject({ success: true });
     expect(save).toHaveBeenCalledOnce();
     expect(addToCollection).not.toHaveBeenCalled();
+});
+
+import { checkNoteMarkdownCitations, renderNoteMarkdown } from '../../../src/services/agentDataProvider/actions/noteCitationRendering';
+
+describe('create_note citations', () => {
+    const deadline = () => ({ signal: new AbortController().signal, timeoutSeconds: 60, startTime: Date.now() });
+
+    it('rejects a citation the note could not store before approval', async () => {
+        vi.mocked(checkNoteMarkdownCitations).mockResolvedValueOnce({ error: 'Item not found: u-MISSING1', warnings: [] });
+
+        const result = await validate({ content: 'Claim <citation id="u-MISSING1"/>' });
+
+        expect(checkNoteMarkdownCitations).toHaveBeenCalledWith('Claim <citation id="u-MISSING1"/>', expect.anything());
+        expect(result).toMatchObject({ valid: false, error: 'Item not found: u-MISSING1', error_code: 'invalid_citation' });
+    });
+
+    it('passes citation warnings through validation', async () => {
+        vi.mocked(checkNoteMarkdownCitations).mockResolvedValueOnce({ error: null, warnings: ['file link unavailable'] });
+
+        expect(await validate({})).toMatchObject({ valid: true, warnings: ['file link unavailable'] });
+    });
+
+    it('fails without saving when a citation cannot be stored at execution', async () => {
+        const save = vi.fn();
+        (Zotero as any).Item = function () { return { setNote: vi.fn(), saveTx: save, addToCollection: vi.fn() }; };
+        vi.mocked(renderNoteMarkdown).mockRejectedValueOnce(
+            Object.assign(new Error('Cannot cite id="g12345-ITEM0001": library excluded'), { code: 'invalid_citation' }));
+        const prepared = await validate({});
+
+        const result = await executeCreateNoteAction({ request_id: 'r', action_data: prepared.normalized_action_data,
+            operation: { renderMarkdown: async (html: string) => html } } as any, deadline());
+
+        expect(result).toMatchObject({ success: false, error_code: 'invalid_citation' });
+        expect(save).not.toHaveBeenCalled();
+    });
+
+    it('reports citation warnings with the created note', async () => {
+        (Zotero as any).Item = function () { return { setNote: vi.fn(), saveTx: vi.fn(), addToCollection: vi.fn(), libraryID: 1, key: 'NOTEKEY1' }; };
+        vi.mocked(renderNoteMarkdown).mockResolvedValueOnce({ html: '<h1>Note</h1>', warnings: ['saved without a locator'] });
+        const prepared = await validate({});
+
+        const result = await executeCreateNoteAction({ request_id: 'r', action_data: prepared.normalized_action_data,
+            operation: { renderMarkdown: async (html: string) => html } } as any, deadline());
+
+        expect(result).toMatchObject({ success: true, result_data: { warnings: ['saved without a locator'] } });
+    });
 });

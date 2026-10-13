@@ -49,6 +49,8 @@ export interface StoredElement {
         cslLabel?: string;
     };
     isCompound?: boolean;
+    /** The `items` attribute a compound citation was read as. */
+    originalItems?: string;
     originalText?: string;
 }
 
@@ -364,6 +366,7 @@ export function simplifyNoteHtml(
                         rawHtml: match,
                         type: 'compound-citation',
                         isCompound: true,
+                        originalItems: itemsAttr,
                     });
 
                     let tag = `<citation items="${escapeAttr(itemsAttr)}"`;

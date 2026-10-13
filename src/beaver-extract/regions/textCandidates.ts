@@ -969,6 +969,11 @@ function splitAtNumbers(group: RegionLine[], eqNumbers: ReadonlySet<RegionLine>)
 function withRules(lines: readonly RegionLine[], prims: readonly Primitive[], bs: number): Rect {
     let bbox = lines[0].bbox;
     for (const l of lines) bbox = unionRect(bbox, l.bbox);
+    return extendOverRules(bbox, prims, bs);
+}
+
+/** A box extended over rules just above or below it (table top, header and bottom rules). */
+export function extendOverRules(bbox: Rect, prims: readonly Primitive[], bs: number): Rect {
     const reach = RULE_REACH * bs;
     let out = bbox;
     for (const p of prims) {

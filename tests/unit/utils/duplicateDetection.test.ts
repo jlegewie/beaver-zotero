@@ -148,14 +148,18 @@ describe('deduplicateItems', () => {
         // than against a wall-clock budget, which keeps the assertion about
         // complexity instead of machine speed. Measured at n=4000: ~30ms
         // separated vs ~255ms unseparated; without the split the two are equal.
+        // The cheap shape runs once untimed first (a cold first run carries the
+        // JIT warm-up), then each shape is timed twice, alternating, and its
+        // fastest run counts: a single run absorbs scheduler noise on a loaded
+        // CI runner.
         const size = 4000;
-        const timed = (items: Zotero.Item[]): number => {
-            const startedAt = Date.now();
+        const once = (items: Zotero.Item[]): number => {
+            const startedAt = performance.now();
             const deduplicated = deduplicateItems(items, 1);
             // Nothing collapses in either shape, so any drop means the
             // partition lost a real match rather than a wasted comparison.
             expect(deduplicated).toHaveLength(items.length);
-            return Date.now() - startedAt;
+            return performance.now() - startedAt;
         };
 
         // Distinct DOIs: the DOI rule settles every pair, so the split applies.
@@ -169,11 +173,16 @@ describe('deduplicateItems', () => {
             item({ id: index + 1, title: 'Editorial', date: String(1000 + index * 3) })
         );
 
-        const separatedMs = timed(separated);
-        const unseparatedMs = timed(unseparated);
+        once(separated);
+        let separatedMs = Infinity;
+        let unseparatedMs = Infinity;
+        for (let round = 0; round < 2; round++) {
+            separatedMs = Math.min(separatedMs, once(separated));
+            unseparatedMs = Math.min(unseparatedMs, once(unseparated));
+        }
 
         expect(separatedMs * 3).toBeLessThan(unseparatedMs);
-    });
+    }, 30_000);
 
     it('matches an exhaustive all-pairs scan on adversarial inputs', () => {
         // deduplicateItems buckets candidates by id/DOI/ISBN/title instead of

@@ -178,7 +178,7 @@ export async function itemsExport(
  * with the plugin's extraction settings. `pages` limits the pages written.
  */
 export async function regionsExport(
-    input: Pick<ExtractInput, "pdfData" | "schemaVersion"> & {
+    input: Pick<ExtractInput, "pdfData" | "schemaVersion" | "presetOverrides"> & {
         bboxPrecision?: number;
         pages?: number[];
     },
@@ -244,6 +244,8 @@ export interface DetectRegionsInput {
     classify?: boolean;
     /** Also return each page's text lines with routing flags. */
     includeLines?: boolean;
+    /** Also propose grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
+    gridCandidates?: boolean;
 }
 
 /** Region candidates per page with features and classes (debugging and training export). */
@@ -256,6 +258,7 @@ export async function detectRegions(input: DetectRegionsInput): Promise<RegionDe
             contextPages: input.contextPages,
             classify: input.classify,
             includeLines: input.includeLines,
+            gridCandidates: input.gridCandidates,
         }),
     );
     return reply.result;

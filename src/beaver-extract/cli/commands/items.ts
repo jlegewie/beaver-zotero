@@ -25,7 +25,10 @@
  *     `beaver-regions-v1`): per page the region pass's text pieces and drawing
  *     primitives and what the shipped detector did with them. With
  *     `--page-list` (JSONL rows with `doc_id` and `page_index`) only the listed
- *     documents run, and only the listed pages are written.
+ *     documents run, and only the listed pages are written. Under schema 5
+ *     the candidates include the grid source and carry the grid features
+ *     (manifest `grid_features`); `--preset gridTableCandidates=false` leaves
+ *     them out.
  *
  * List rows are JSONL with `doc_id` and `pdf_path`.
  */
@@ -49,7 +52,7 @@ import {
 import { ITEMS_EXPORT_FORMAT, ITEMS_EXPORT_TASKS } from "../../pipeline/itemsExport";
 import { REGIONS_EXPORT_TASK, regionsExportManifest } from "../../pipeline/regionsExport";
 import { CURRENT_PDF_EXTRACTION_PRESET } from "../../schema";
-import { pdfExtractionPreset } from "../../schema/presets";
+import { applyPresetOverrides, pdfExtractionPreset } from "../../schema/presets";
 import { PRESET_OPTION_HELP, parsePresetOverrides } from "../options";
 
 interface ExportOptions {
@@ -137,7 +140,6 @@ async function runExport(deps: CliDeps, opts: ExportOptions): Promise<void> {
     }
     const pageList = opts.pageList ? await readPageList(opts.pageList) : undefined;
     const presetOverrides = opts.preset ? parsePresetOverrides(opts.preset) : undefined;
-    if (presetOverrides && regions) throw new Error(`--preset is not supported for --task ${REGIONS_EXPORT_TASK}`);
     await mkdir(join(opts.out, "docs"), { recursive: true });
     await claimManifest(
         join(opts.out, "manifest.json"),
@@ -155,9 +157,10 @@ async function runExport(deps: CliDeps, opts: ExportOptions): Promise<void> {
                 dirty,
             }
             : {
-                ...regionsExportManifest(),
+                ...regionsExportManifest(applyPresetOverrides(pdfExtractionPreset(schemaVersion)!, presetOverrides).gridTableCandidates),
                 task: opts.task,
                 schema_version: schemaVersion,
+                ...(presetOverrides ? { preset_overrides: presetOverrides } : {}),
                 bbox_precision: bboxPrecision,
                 page_list_sha256: pageList?.sha256 ?? null,
                 commit,
@@ -183,7 +186,7 @@ async function runExport(deps: CliDeps, opts: ExportOptions): Promise<void> {
         try {
             const pdfData = await deps.loadPdf(row.pdf_path);
             result = regions
-                ? await deps.api.regionsExport({ pdfData, bboxPrecision, schemaVersion, ...(pages ? { pages } : {}) })
+                ? await deps.api.regionsExport({ pdfData, bboxPrecision, schemaVersion, ...(pages ? { pages } : {}), ...(presetOverrides ? { presetOverrides } : {}) })
                 : await deps.api.itemsExport({ pdfData, task: opts.task, bboxPrecision, schemaVersion, ...(presetOverrides ? { presetOverrides } : {}) });
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);

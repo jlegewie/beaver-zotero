@@ -15,7 +15,7 @@ vi.mock('../../../src/utils/zoteroDataLoading', async (importOriginal) => ({
 }));
 
 import { checkLibraryExcluded, getAttachmentFileStatus } from '../../../src/services/agentDataProvider/utils';
-import { ensureCitedLibrariesLoaded, preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
+import { ensureCitedLibrariesLoaded, preloadNotePageLabels, preloadPageLabelsForNewCitations } from '../../../src/utils/noteCitationExpand';
 import { ensureLibraryItemsLoaded } from '../../../src/utils/zoteroDataLoading';
 
 const mockGetAttachmentFileStatus = vi.mocked(getAttachmentFileStatus);
@@ -356,6 +356,46 @@ describe('preloadNotePageLabels', () => {
     });
 });
 
+describe('preloadPageLabelsForNewCitations', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        (globalThis as any).Zotero.Libraries.userLibraryID = 1;
+    });
+
+    function useAttachment(attachment: any, cache: any) {
+        (globalThis as any).Zotero.Items = { getByLibraryAndKeyAsync: vi.fn(async () => attachment) };
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+    }
+
+    it('uses cached labels of a remote-only attachment through its remote cache key', async () => {
+        const cache = { getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 4: 'iii' } }) };
+        useAttachment(makeRemoteOnlyAttachment(47, 'REMOTE01'), cache);
+
+        const labels = await preloadPageLabelsForNewCitations('<citation id="1-REMOTE01" loc="page5"/>');
+
+        expect(labels).toEqual({ 47: { 4: 'iii' } });
+        expect(cache.getMetadata).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: 'REMOTE01' }, 'remote:k:1-REMOTE01-v0');
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not extract (and so download) a remote-only attachment on a cache miss', async () => {
+        const cache = { getMetadata: vi.fn().mockResolvedValue(null) };
+        useAttachment(makeRemoteOnlyAttachment(48, 'REMOTE02'), cache);
+
+        expect(await preloadPageLabelsForNewCitations('<citation id="1-REMOTE02" loc="page5"/>')).toEqual({});
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('still extracts a local attachment on a cache miss', async () => {
+        const cache = { getMetadata: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ pageLabels: { 0: 'i' } }) };
+        const attachment = makeAttachment(49, 'LOCAL001');
+        useAttachment(attachment, cache);
+
+        expect(await preloadPageLabelsForNewCitations('<citation id="1-LOCAL001" loc="page1"/>')).toEqual({ 49: { 0: 'i' } });
+        expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(attachment, false);
+    });
+});
+
 describe('ensureCitedLibrariesLoaded', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -397,6 +437,26 @@ describe('ensureCitedLibrariesLoaded', () => {
         ]);
 
         expect(loadedLibraryIds()).toEqual([3, 4]);
+    });
+
+    it('loads the library an external reference maps to', async () => {
+        await ensureCitedLibrariesLoaded(['<citation external_id="W1"/> <citation external_id="W2"/>'], [], {
+            externalItemMapping: { W1: { library_id: 8, zotero_key: 'MAPPED01' }, W2: null },
+        });
+
+        expect(loadedLibraryIds()).toEqual([8]);
+    });
+
+    it('skips an excluded library an external reference maps to', async () => {
+        vi.mocked(checkLibraryExcluded).mockImplementation((id: number) =>
+            (id === 8 ? { message: 'Library excluded' } : null) as any);
+
+        await ensureCitedLibrariesLoaded(['<citation external_id="W1"/>'], [], {
+            externalItemMapping: { W1: { library_id: 8, zotero_key: 'MAPPED01' } },
+        });
+
+        expect(loadedLibraryIds()).toEqual([]);
+        vi.mocked(checkLibraryExcluded).mockReturnValue(null);
     });
 
     it('includes excluded libraries for render paths', async () => {

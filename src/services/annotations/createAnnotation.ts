@@ -618,7 +618,7 @@ export async function createPdfHighlightForItem(
     attachment: Zotero.Item,
     item: Pick<
         HighlightAnnotationItem,
-        "client_item_id" | "index" | "loc_raw" | "text" | "color" | "comment" | "title" | "page_locations" | "page_label"
+        "client_item_id" | "index" | "loc_raw" | "text" | "color" | "comment" | "page_locations" | "page_label"
     >,
     tags?: string[],
 ): Promise<CreatedAnnotationResult> {
@@ -632,7 +632,7 @@ export async function createPdfHighlightForItem(
         nextPageBoxes: next?.boxes ?? null,
         text: item.text ?? "",
         color: item.color,
-        comment: item.comment ?? item.title,
+        comment: item.comment ?? "",
         pageLabel,
         readingOrderOffset: first.reading_order_offset ?? null,
         tags,

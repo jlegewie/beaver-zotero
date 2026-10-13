@@ -11,7 +11,7 @@ import {
 import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
 describe("PDF extraction presets", () => {
-    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, item passes, regions, page-number runs, learned boundaries and derived page labels off and ids document-wide for schema 4", () => {
+    it("keeps text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, item passes, regions, page-number runs, exclusive column lines, line joins, note markers, learned boundaries, table row evidence, grid table candidates and derived page labels off and ids document-wide for schema 4", () => {
         expect(pdfExtractionPreset("4")).toEqual({
             schemaVersion: "4",
             textRepair: false,
@@ -26,12 +26,17 @@ describe("PDF extraction presets", () => {
             idScheme: "document",
             regions: false,
             pageNumberRuns: false,
+            exclusiveColumnLines: false,
+            lineJoins: false,
+            noteMarkers: false,
             learnedBoundaries: false,
+            tableRowEvidence: false,
+            gridTableCandidates: false,
             derivedPageLabels: false,
         });
     });
 
-    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions, page-number runs, learned boundaries and derived page labels on and ids page-scoped for schema 5", () => {
+    it("turns text repair, style runs, hanging-indent blocks, heading label filters, isolated headings, page body styles, caption labels, margin text rows, the item-type and reference passes, regions, page-number runs, exclusive column lines, line joins, note markers, learned boundaries, table row evidence, grid table candidates and derived page labels on and ids page-scoped for schema 5", () => {
         expect(pdfExtractionPreset("5")).toEqual({
             schemaVersion: "5",
             textRepair: true,
@@ -46,7 +51,12 @@ describe("PDF extraction presets", () => {
             idScheme: "page",
             regions: true,
             pageNumberRuns: true,
+            exclusiveColumnLines: true,
+            lineJoins: true,
+            noteMarkers: true,
             learnedBoundaries: true,
+            tableRowEvidence: true,
+            gridTableCandidates: true,
             derivedPageLabels: true,
         });
     });
@@ -76,6 +86,12 @@ describe("preset overrides", () => {
         expect(applyPresetOverrides(preset, { learnedBoundaries: false })).toEqual({ ...preset, learnedBoundaries: false });
         expect(preset.learnedBoundaries).toBe(true);
         expect(applyPresetOverrides(preset, undefined)).toBe(preset);
+    });
+
+    it("turns grid table candidates off for a development run", () => {
+        const preset = pdfExtractionPreset("5")!;
+        expect(applyPresetOverrides(preset, { gridTableCandidates: false }).gridTableCandidates).toBe(false);
+        expect(preset.gridTableCandidates).toBe(true);
     });
 
     it("rejects switches that can't be overridden", () => {

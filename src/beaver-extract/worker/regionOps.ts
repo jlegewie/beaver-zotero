@@ -79,6 +79,8 @@ export async function opDetectRegions(args: {
     classify?: boolean;
     /** Also return each page's text lines with routing flags (see `RegionDetection.lines`). */
     includeLines?: boolean;
+    /** Also propose grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
+    gridCandidates?: boolean;
 }): Promise<OpReply<RegionDetectionResult>> {
     const api = await ensureApi();
     if (!api.supportsGraphicsSummary) {
@@ -147,6 +149,9 @@ export async function opDetectRegions(args: {
                 doc: docContext,
                 model,
                 includeLines: args.includeLines,
+                gridCandidates: args.gridCandidates,
+                // The candidates are reported with their features.
+                allGridFeatures: true,
             });
             return {
                 pageIndex: i,

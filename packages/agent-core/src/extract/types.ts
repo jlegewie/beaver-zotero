@@ -536,8 +536,9 @@ export interface SentenceItem {
         bbox: BoundingBox;
     }>;
     /**
-     * Hint that this sentence is continued by the *next* sentence in reading
-     * order. Omitted means false.
+     * Hint that this sentence is continued by the *next* sentence of body text
+     * in reading order. Footnote items between the two (notes under a column
+     * that the sentence continues past) don't count. Omitted means false.
      */
     joinWithNext?: boolean;
 }
@@ -716,6 +717,22 @@ export interface MarginElement {
      * smaller than the text beside it. Not page-number evidence.
      */
     footnoteMarker?: boolean;
+    /**
+     * For a numeral in the left zone: body text rows between it and the
+     * numeral above it (or the top of the body, for a page's first numeral)
+     * that carry no numeral of their own. Manuscript line numbers number
+     * every row. Collected only with text rows on.
+     */
+    unnumberedRowsAbove?: number;
+    /** For a page's last numeral in the left zone: body text rows below it. */
+    unnumberedRowsBelow?: number;
+    /**
+     * A numeral of the header or footer zone that lies in the left zone too
+     * and continues the page's left-zone numbers by one: the line number of
+     * a body row that reaches into the header or footer zone. Read with the
+     * left zone's numerals for manuscript line numbering.
+     */
+    leftCorner?: boolean;
 }
 
 /**
@@ -726,6 +743,8 @@ export interface MarginAnalysis {
     elements: Map<MarginPosition, MarginElement[]>;
     /** Total elements found per zone */
     counts: Record<MarginPosition, number>;
+    /** Number of pages analysed, including pages with no margin elements. */
+    pageCount?: number;
 }
 
 /**

@@ -149,6 +149,27 @@ describe('locator resolution by id scheme', () => {
         expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
     });
 
+    it('resolves a remote-only attachment\'s current-version locator from the remote cache key', async () => {
+        attachment.getFilePathAsync.mockResolvedValue(null);
+
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
+
+        expect(resolved.unresolved).toEqual([]);
+        expect(resolved.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: 'i', page: 1 });
+        expect(getResult).toHaveBeenCalledExactlyOnceWith(
+            { libraryId: 1, zoteroKey: 'ATTACH12' }, 'structured', 'remote:k:1-ATTACH12-v0',
+        );
+    });
+
+    it('does not extract an older version of a remote-only attachment, which would download it', async () => {
+        attachment.getFilePathAsync.mockResolvedValue(null);
+
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s12"/>');
+
+        expect(resolved.unresolved).toEqual(['id="1-ATTACH12" loc="s12"']);
+        expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
+    });
+
     it('reads non-PDF attachments from the cache whatever the id scheme', async () => {
         attachment.attachmentContentType = 'application/epub+zip';
         await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s12"/>');

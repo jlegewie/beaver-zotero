@@ -20,6 +20,7 @@ import type {
     PageNumberObservation,
     TextStyle,
 } from "@beaver/agent-core/extract/types";
+import { bboxHeight } from "@beaver/agent-core/extract/types";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 
@@ -578,6 +579,142 @@ function pageNumberObservations(
 }
 
 /**
+ * Whether page numbers advance with the pages: most steps between the pages
+ * of `onePerPage` raise the value by at most two per page (one per page,
+ * every other page in an alternating zone, two pages per sheet in a two-up
+ * scan), plus one. The numbers a contents page or an index lists in its
+ * margin increase from page to page too, but by far more.
+ */
+function advancesWithPages(onePerPage: PageNumberEntry[]): boolean {
+    let steps = 0;
+    let paced = 0;
+    for (let i = 1; i < onePerPage.length; i++) {
+        const pages = onePerPage[i].el.pageIndex - onePerPage[i - 1].el.pageIndex;
+        const values = onePerPage[i].value - onePerPage[i - 1].value;
+        steps++;
+        if (values <= 2 * pages + 1) paced++;
+    }
+    return steps > 0 && paced >= 0.75 * steps;
+}
+
+/**
+ * The header and footer zone numerals of a page (`corner`, all in the left
+ * zone too) that continue its left-zone numerals (`left`) by one, above the
+ * first or below the last, read outward: manuscript line numbers of body
+ * rows that reach into the header or footer zone, which `getMarginPosition`
+ * reads before the left zone. Sets `leftCorner` on them and returns them.
+ */
+function markLeftCornerNumerals(left: MarginElement[], corner: MarginElement[]): MarginElement[] {
+    const numbered = (els: MarginElement[]): PageNumberEntry[] =>
+        els.flatMap((el) => {
+            const value = isPageNumberPattern(el.text) ? parsePageNumber(el.text) : null;
+            return value === null ? [] : [{ el, value }];
+        });
+    const leftEntries = numbered(left).sort((a, b) => a.el.bbox.t - b.el.bbox.t);
+    if (leftEntries.length === 0) return [];
+    const corners = numbered(corner);
+    const out: MarginElement[] = [];
+    let first = leftEntries[0];
+    for (const entry of corners.filter((c) => c.el.bbox.b <= first.el.bbox.t).sort((a, b) => b.el.bbox.t - a.el.bbox.t)) {
+        if (entry.value !== first.value - 1) break;
+        out.push(entry.el);
+        first = entry;
+    }
+    let last = leftEntries[leftEntries.length - 1];
+    for (const entry of corners.filter((c) => c.el.bbox.t >= last.el.bbox.b).sort((a, b) => a.el.bbox.t - b.el.bbox.t)) {
+        if (entry.value !== last.value + 1) break;
+        out.push(entry.el);
+        last = entry;
+    }
+    for (const el of out) el.leftCorner = true;
+    return out;
+}
+
+/**
+ * Set `unnumberedRowsAbove` on each of a page's left-zone `numerals` (the
+ * body text `rows` between it and the numeral above it, or above it for the
+ * first, that share a row with neither) and `unnumberedRowsBelow` on the
+ * last.
+ */
+function countUnnumberedRows(numerals: MarginElement[], rows: BoundingBox[]): void {
+    const sameRow = (a: BoundingBox, b: BoundingBox) =>
+        Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.5 * Math.min(bboxHeight(a), bboxHeight(b));
+    const centerY = (box: BoundingBox) => (box.t + box.b) / 2;
+    const unnumberedBetween = (above: BoundingBox | undefined, below: BoundingBox | undefined) =>
+        rows.filter((row) =>
+            (!above || (centerY(row) > centerY(above) && !sameRow(row, above))) &&
+            (!below || (centerY(row) < centerY(below) && !sameRow(row, below))),
+        ).length;
+    const sorted = [...numerals].sort((a, b) => a.bbox.t - b.bbox.t);
+    sorted.forEach((numeral, i) => {
+        numeral.unnumberedRowsAbove = unnumberedBetween(sorted[i - 1]?.bbox, numeral.bbox);
+    });
+    const last = sorted[sorted.length - 1];
+    if (last) last.unnumberedRowsBelow = unnumberedBetween(last.bbox, undefined);
+}
+
+/** Fewest numbers a page of manuscript line numbering holds (a title page has few rows). */
+const MIN_LINE_NUMBERS_PER_PAGE = 5;
+
+/** Fewest numbers the pages of manuscript line numbering hold on average: one per text row. */
+const MIN_LINE_NUMBERS_PER_PAGE_MEAN = 10;
+
+/** Most text rows without a line number, as a share of a page's line numbers. */
+const MAX_UNNUMBERED_ROW_SHARE = 0.25;
+
+/**
+ * Pages whose numbers in the left zone are manuscript line numbers: at least
+ * `MIN_LINE_NUMBERS_PER_PAGE` numbers stepping by one from top to bottom,
+ * the count going on from such a page just before, or rising past the last
+ * such page across pages between (not analysed, or without numbers). They
+ * increase across pages far faster than page numbers. Read for the left
+ * zone only: line numbers stand before the text rows they number, while a
+ * contents page sets its page references after its entries, at the right. A numbered list can step by
+ * one too, so the numbering must also cover at least half of the
+ * `analysedPages` pages, with `MIN_LINE_NUMBERS_PER_PAGE_MEAN` numbers per
+ * page on average, and few body text rows on the page without one: line
+ * numbers run down every text row of the manuscript, while a numbered list
+ * leaves the wrapped rows of its items and the prose around it unnumbered.
+ * Unnumbered rows above the numbers count except on the page the numbering
+ * starts on (a title page's front matter), and a few are allowed for
+ * (headings, display equations). Empty unless two pages qualify.
+ */
+function lineNumberingPages(entries: PageNumberEntry[], analysedPages: number): Set<number> {
+    const byPage = new Map<number, PageNumberEntry[]>();
+    for (const entry of entries) {
+        const list = byPage.get(entry.el.pageIndex) ?? [];
+        list.push(entry);
+        byPage.set(entry.el.pageIndex, list);
+    }
+    const pages = new Set<number>();
+    let numbers = 0;
+    let last: number | undefined;
+    let lastPage = -1;
+    for (const pageIndex of [...byPage.keys()].sort((a, b) => a - b)) {
+        const values = byPage.get(pageIndex)!.sort((a, b) => a.el.bbox.t - b.el.bbox.t).map((e) => e.value);
+        if (values.length < MIN_LINE_NUMBERS_PER_PAGE || values.some((v, i) => i > 0 && v !== values[i - 1] + 1)) continue;
+        // The count goes on from the page before; across pages the analysis
+        // skipped, it only goes up.
+        if (last !== undefined && (pageIndex === lastPage + 1 ? values[0] !== last + 1 : values[0] <= last)) continue;
+        const onPage = byPage.get(pageIndex)!;
+        // Without row evidence (text rows off), nothing reads as line numbers.
+        if (onPage[0].el.unnumberedRowsAbove === undefined) return new Set();
+        const unnumbered = onPage.reduce(
+            (sum, e, i) => sum + (i === 0 && last === undefined ? 0 : e.el.unnumberedRowsAbove ?? 0),
+            onPage[onPage.length - 1].el.unnumberedRowsBelow ?? 0,
+        );
+        if (unnumbered > MAX_UNNUMBERED_ROW_SHARE * values.length) continue;
+        pages.add(pageIndex);
+        numbers += values.length;
+        last = values[values.length - 1];
+        lastPage = pageIndex;
+    }
+    const lineNumbered = pages.size >= 2 && 2 * pages.size >= analysedPages &&
+        numbers >= MIN_LINE_NUMBERS_PER_PAGE_MEAN * pages.size;
+    return lineNumbered ? pages : new Set();
+}
+
+/**
  * Minimum pages a run of page numbers needs. Not relaxed for short documents:
  * a run is accepted without the rest of its zone's numerals agreeing.
  */
@@ -922,6 +1059,161 @@ function collectTextRows(page: RawPageData, joinLines: boolean): TextRow[] {
     });
 }
 
+/** Widest word space, in em, of a justified line MuPDF split word by word. */
+const JUSTIFIED_WORD_GAP_EM = 4;
+
+/** A lowercase word, with trailing punctuation: the bulk of a prose line. */
+const LOWERCASE_WORD_RE = /^[(“‘"']?\p{Ll}[\p{L}\p{M}'’-]*[.,;:!?)”’"']*$/u;
+
+/**
+ * A single lowercase word ("the", "and", "et"). In a header or footer zone,
+ * one that belongs to a paragraph block (`paragraphBlockLines`) is a word of
+ * a body row MuPDF split apart, not a running head; a lowercase running head
+ * ("nature") stands in a block of its own. Single letters (figure panel
+ * labels), words with capitals, digits or symbols (journal names, URLs) and
+ * vowelless strings (logo glyphs decoded as "ll") don't count.
+ */
+function isLoneLowercaseWord(text: string): boolean {
+    const word = text.trim();
+    if (word.length < 2 || word.includes(" ")) return false;
+    return /^\p{Ll}[\p{Ll}\p{M}'’-]*\p{Ll}[.,;:]?$/u.test(word)
+        && /[aeiouy]/u.test(word.normalize("NFD"));
+}
+
+/**
+ * Lines of the page's paragraphs: runs of at least three rows of one MuPDF
+ * block set at most two line heights apart. Running heads and footers, even
+ * with a page number or a second line, don't reach that, also when MuPDF puts
+ * them in a paragraph's block: a gap wider than that sets them apart.
+ */
+function paragraphBlockLines(page: RawPageData): Set<RawLine> {
+    const out = new Set<RawLine>();
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines || block.lines.length < 3) continue;
+        const lines = block.lines.filter(line => (line.text || "").trim() && line.bbox.b > line.bbox.t);
+        const sorted = [...lines].sort((a, b) => a.bbox.t - b.bbox.t);
+        let run: RawLine[] = [];
+        let rows = 0;
+        let rowTop = -Infinity;
+        let rowHeight = 0;
+        const endRun = () => {
+            if (rows >= 3) for (const line of run) out.add(line);
+            run = [];
+            rows = 0;
+        };
+        for (const line of sorted) {
+            const h = line.bbox.b - line.bbox.t;
+            if (line.bbox.t >= rowTop + 0.5 * rowHeight) {
+                // A new row more than two line heights below the last breaks the run.
+                if (rows > 0 && line.bbox.t - rowTop > 2 * Math.max(h, rowHeight)) endRun();
+                rows++;
+                rowTop = line.bbox.t;
+                rowHeight = h;
+            }
+            run.push(line);
+        }
+        endRun();
+    }
+    return out;
+}
+
+/**
+ * Rows of a page that are a justified prose line MuPDF split word by word,
+ * each as its lines left to right.
+ *
+ * A justified line stretches its word spaces, to one or two em when it holds
+ * few words, and some PDFs then come out of MuPDF with every word as a line
+ * of its own, too far apart for `collectTextRows` to join. Common words of
+ * such rows ("the", "and", "climate") recur in a margin zone across pages
+ * like a running head does and would be removed from the body text. A prose
+ * row is lines of one MuPDF block on one baseline, set in sizes within a
+ * quarter of each other and at most `JUSTIFIED_WORD_GAP_EM` apart, at least
+ * one gap wider than `collectTextRows` joins, holding at least three
+ * lowercase words. A running head set with wide word spaces looks the same
+ * on its page; it is told apart by recurring (see `proseRowLines`). Only
+ * blocks that reach a margin zone are read: other lines are never margin
+ * elements.
+ */
+function justifiedProseRows(page: RawPageData, marginZone: MarginSettings): RawLine[][] {
+    const rows: RawLine[][] = [];
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines || block.lines.length < 2) continue;
+        // Only lines in a margin zone are ever matched or removed.
+        if (!block.lines.some(line => getMarginPosition(line.bbox, page.width, page.height, marginZone))) continue;
+        const lines = block.lines.filter(line =>
+            (line.text || "").trim() && line.wmode !== 1 && (line.rotation ?? 0) === 0 && line.bbox.b > line.bbox.t,
+        );
+        const em = (line: RawLine) => line.font?.size > 0 ? line.font.size : 0.7 * (line.bbox.b - line.bbox.t);
+        const sameRow = (a: RawLine, b: RawLine) => {
+            const ha = a.bbox.b - a.bbox.t;
+            const hb = b.bbox.b - b.bbox.t;
+            const minH = Math.min(ha, hb);
+            if (Math.max(ha, hb) > 2 * minH) return false;
+            if (Math.min(a.bbox.b, b.bbox.b) - Math.max(a.bbox.t, b.bbox.t) < 0.5 * minH) return false;
+            const minEm = Math.min(em(a), em(b));
+            if (Math.max(em(a), em(b)) > 1.25 * minEm) return false;
+            const gap = b.bbox.l - a.bbox.r;
+            return gap <= JUSTIFIED_WORD_GAP_EM * minEm && gap >= -0.25 * minEm;
+        };
+        const used = new Set<RawLine>();
+        const byLeft = [...lines].sort((a, b) => a.bbox.l - b.bbox.l);
+        for (const start of byLeft) {
+            if (used.has(start)) continue;
+            const row = [start];
+            used.add(start);
+            for (const next of byLeft) {
+                if (!used.has(next) && sameRow(row[row.length - 1], next)) {
+                    row.push(next);
+                    used.add(next);
+                }
+            }
+            if (row.length < 2) continue;
+            const wide = row.some((line, k) => k > 0 && line.bbox.l - row[k - 1].bbox.r > 0.3 * Math.min(em(line), em(row[k - 1])));
+            if (!wide) continue;
+            const words = row.flatMap(line => line.text.trim().split(/\s+/u));
+            if (words.filter(word => LOWERCASE_WORD_RE.test(word)).length < 3) continue;
+            rows.push(row);
+        }
+    }
+    return rows;
+}
+
+/**
+ * A prose row's lines that are spared: short ones without digits, so a page
+ * number set beside the row is still found.
+ */
+function proseRowWords(row: RawLine[]): RawLine[] {
+    return row.filter(line => {
+        const text = line.text.trim();
+        return text.split(/\s+/u).length <= 3 && !/\p{N}/u.test(text);
+    });
+}
+
+/** A prose row's zone and text, digits aside: equal for a running head on every page. */
+function proseRowKey(page: RawPageData, row: RawLine[], marginZone: MarginSettings): string {
+    const position = getMarginPosition(unionBBox(row), page.width, page.height, marginZone) ?? "body";
+    return `${position}|${templateKey(joinRowText(row))}`;
+}
+
+/**
+ * Lines of a page's justified prose rows (`justifiedProseRows`) that are
+ * body text: words of the row that are not margin elements and are never
+ * removed (`proseRowWords`). A row `isRunningHead` says is a running head
+ * set with wide word spaces is left to the margin filter.
+ */
+function proseRowLines(
+    page: RawPageData,
+    marginZone: MarginSettings,
+    isRunningHead: (row: RawLine[]) => boolean = () => false,
+): Set<RawLine> {
+    const out = new Set<RawLine>();
+    for (const row of justifiedProseRows(page, marginZone)) {
+        if (isRunningHead(row)) continue;
+        for (const line of proseRowWords(row)) out.add(line);
+    }
+    return out;
+}
+
 /**
  * Most page-number-like lines a page may have in one margin zone for a
  * standalone one to support a page-number run found beside running heads.
@@ -1101,8 +1393,26 @@ export class MarginFilter {
         // One element per text row (see `collectTextRows`); `line` is the
         // row's first line. A row that spans two zones without reaching the
         // content area, such as a running head with its page number in the
-        // corner, contributes its lines one by one.
+        // corner, contributes its lines one by one. Words of a justified
+        // prose row are body text, not margin elements (see `proseRowLines`).
+        // A prose row whose text recurs in its zone on another page is a
+        // running head set with wide word spaces, not body text.
+        const proseRowPages = new Map<string, Set<number>>();
+        if (textRows) {
+            for (const page of pages) {
+                for (const row of justifiedProseRows(page, marginZone)) {
+                    const key = proseRowKey(page, row, marginZone);
+                    const seen = proseRowPages.get(key) ?? new Set<number>();
+                    seen.add(page.pageIndex);
+                    proseRowPages.set(key, seen);
+                }
+            }
+        }
         for (const page of pages) {
+            const prose = textRows
+                ? proseRowLines(page, marginZone, row => (proseRowPages.get(proseRowKey(page, row, marginZone))?.size ?? 0) >= 2)
+                : null;
+            const paragraphLines = textRows ? paragraphBlockLines(page) : null;
             const positionOf = (bbox: BoundingBox) =>
                 getMarginPosition(bbox, page.width, page.height, marginZone);
             let linesOfPage: RawLine[] | undefined;
@@ -1116,6 +1426,13 @@ export class MarginFilter {
                 lines: RawLine[],
                 rowEndNumber = false,
             ) => {
+                // A Roman page number ("iii", "iv") reads as a lone word but
+                // is still collected for the page-number sequence.
+                if (
+                    paragraphLines && (position === "top" || position === "bottom") &&
+                    isLoneLowercaseWord(text) && parseRoman(text.trim()) === null &&
+                    lines.every(line => paragraphLines.has(line))
+                ) return;
                 const footnoteMarker = isFootnoteMarker(lines[0], pageLines());
                 elements.get(position)!.push({
                     text,
@@ -1128,7 +1445,9 @@ export class MarginFilter {
                     ...(footnoteMarker ? { footnoteMarker } : {}),
                 });
             };
-            for (const row of collectTextRows(page, textRows)) {
+            const rows = collectTextRows(page, textRows);
+            for (const row of rows) {
+                if (prose && row.lines.every(line => prose.has(line))) continue;
                 const position = positionOf(row.bbox);
                 if (position) {
                     push(row.text, position, row.bbox, row.lines);
@@ -1150,8 +1469,24 @@ export class MarginFilter {
                 }
                 if (row.lines.length < 2 || !row.lines.every(line => positionOf(line.bbox))) continue;
                 for (const line of row.lines) {
+                    if (prose?.has(line)) continue;
                     push(line.text.trim(), positionOf(line.bbox)!, line.bbox, [line]);
                 }
+            }
+            if (textRows) {
+                const leftNumerals = elements.get("left")!.filter(
+                    el => el.pageIndex === page.pageIndex && isPageNumberPattern(el.text),
+                );
+                const cornerNumerals = markLeftCornerNumerals(
+                    leftNumerals,
+                    [...elements.get("top")!, ...elements.get("bottom")!].filter(
+                        el => el.pageIndex === page.pageIndex && el.bbox.r <= marginZone.left,
+                    ),
+                );
+                countUnnumberedRows(
+                    [...leftNumerals, ...cornerNumerals],
+                    rows.filter(row => !positionOf(row.bbox)).map(row => row.bbox),
+                );
             }
         }
 
@@ -1162,7 +1497,7 @@ export class MarginFilter {
             right: elements.get("right")!.length,
         };
 
-        return { elements, counts };
+        return { elements, counts, pageCount: pages.length };
     }
 
     /**
@@ -1176,7 +1511,9 @@ export class MarginFilter {
      * @param detectPageSequences - Whether to detect page number sequences
      * @param pageNumberRuns - Also detect runs of page numbers that advance
      *   with the page index in the header and footer zones (see
-     *   `constantOffsetRuns`). Off in the schema-4 preset.
+     *   `constantOffsetRuns`), and require a zone's increasing sequence to
+     *   advance with the pages (see `advancesWithPages`), marking only each
+     *   page's own number. Off in the schema-4 preset.
      * @returns Removal result with candidates and lookup structures
      */
     static identifyElementsToRemove(
@@ -1193,6 +1530,11 @@ export class MarginFilter {
         // sequence check reads this, so runs never change what it sees.
         const textsBeforeRuns = new Set<string>();
         const removalsByPage = new Map<number, Set<string>>();
+        // The pages the analysis read (or, for an analysis without the
+        // count, those with any margin element).
+        const analysedPages = analysis.pageCount ?? new Set(
+            [...analysis.elements.values()].flatMap((els) => els.map((el) => el.pageIndex)),
+        ).size;
 
         // Process each margin position
         for (const [position, positionElements] of analysis.elements) {
@@ -1393,6 +1735,23 @@ export class MarginFilter {
                     }
                 };
 
+                // Manuscript line numbers in the left zone, read from all
+                // of the zone's numerals (a footer's page numbers removed
+                // on other pages are line numbers here) and removed whole,
+                // on the pages they number. They do not feed
+                // `textsBeforeRuns`: other zones' page numbers are not
+                // line numbers.
+                if (pageNumberRuns && position === "left") {
+                    // With the numbers of rows in the header and footer
+                    // zones (`leftCorner`).
+                    const corners = [...(analysis.elements.get("top") ?? []), ...(analysis.elements.get("bottom") ?? [])]
+                        .filter((el) => el.leftCorner);
+                    for (const { entries } of pageNumberBuckets([...elements, ...corners], new Set())) {
+                        const lineNumbered = lineNumberingPages(entries, analysedPages);
+                        markPageNumbers(entries.filter(({ el }) => lineNumbered.has(el.pageIndex)), true);
+                    }
+                }
+
                 // Skip elements already covered by the repeat/templating
                 // pass — otherwise a co-located "Page K" family (already
                 // removed) and a "K of 13" family would interleave into
@@ -1412,17 +1771,27 @@ export class MarginFilter {
                     // Check if values form an increasing sequence (one per page)
                     const values = onePerPage.map((p) => p.value);
                     if (!isIncreasingSequence(values)) continue;
+                    // With page-number runs on (PDF schema 5), the values
+                    // must also advance with the pages, and only each
+                    // page's own number (or the next, on a two-up scan) is
+                    // marked: the other numbers in the zone are content,
+                    // such as a contents page's page references.
+                    if (pageNumberRuns && !advancesWithPages(onePerPage)) continue;
 
                     // These are page numbers - mark all bucket-local
                     // elements on the matched pages. Iterating the
                     // bucket (not the combined page-number elements)
                     // keeps cross-bucket text from being marked when a
                     // page legitimately carries both scripts.
-                    const matchedPageIndices = new Set(
-                        onePerPage.map((p) => p.el.pageIndex),
+                    const valueByPage = new Map(
+                        onePerPage.map((p) => [p.el.pageIndex, p.value]),
                     );
                     markPageNumbers(
-                        entries.filter(({ el }) => matchedPageIndices.has(el.pageIndex)),
+                        entries.filter(({ el, value }) => {
+                            const pageValue = valueByPage.get(el.pageIndex);
+                            if (pageValue === undefined) return false;
+                            return !pageNumberRuns || value === pageValue || value === pageValue + 1;
+                        }),
                         false,
                     );
 
@@ -1556,7 +1925,9 @@ export class MarginFilter {
      * header elsewhere — keep it.
      *
      * `textRows` must match the setting the removal result was computed
-     * with (see `collectMarginElements`).
+     * with (see `collectMarginElements`). `proseRows` spares the words of
+     * justified prose rows (see `proseRowLines`); the PDF schema 5 preset
+     * turns it on with `marginTextRows`.
      */
     static filterPageWithSmartRemoval(
         page: RawPageData,
@@ -1565,7 +1936,8 @@ export class MarginFilter {
         removalResult: MarginRemovalResult,
         bodyStyles?: TextStyle[],
         primaryBodyStyle?: TextStyle,
-        textRows: boolean = true
+        textRows: boolean = true,
+        proseRows: boolean = false,
     ): RawPageData {
         const pageRemovals = removalResult.removalsByPage.get(page.pageIndex);
         // Per-text reason lookup so the heading-spare can apply only to
@@ -1593,12 +1965,41 @@ export class MarginFilter {
         // or identifier candidate in the same zone is removed, by exact text
         // for one line and digits aside for a substantial run of several
         // that carries text (see `rowTemplateKey`).
+        //
+        // Words of a justified prose row are never removed (see
+        // `proseRowLines`): a common word at the edge of a body row may
+        // match a running head's text.
         const removedLines = new Set<RawLine>();
+        let pageRows: TextRow[] | undefined;
+        const rows = () => (pageRows ??= collectTextRows(page, textRows));
+        // A running head set with wide word spaces is a prose row on its page
+        // too: one whose lines are all removals here, page numbers aside, by
+        // their own text or that of the text row they joined ("journal of"
+        // of a head with mixed word spaces), is not spared. A body row holds
+        // lines no running head repeats.
+        let rowTexts: Map<RawLine, string> | undefined;
+        const removedHere = (line: RawLine) => {
+            if (pageRemovals!.has(normalizeText(line.text))) return true;
+            if (!rowTexts) {
+                rowTexts = new Map();
+                for (const row of rows()) for (const l of row.lines) rowTexts.set(l, normalizeText(row.text));
+            }
+            return pageRemovals!.has(rowTexts.get(line) ?? "");
+        };
+        const prose = textRows && proseRows
+            ? proseRowLines(page, marginZone, row => {
+                if (!pageRemovals || pageRemovals.size === 0) return false;
+                const lines = row.filter(line => !/\p{N}/u.test(line.text));
+                return lines.length > 0 && lines.every(removedHere);
+            })
+            : null;
         const inZone = (bbox: BoundingBox) =>
             getMarginPosition(bbox, page.width, page.height, marginZone) !== null;
         // A joined row is judged as a heading by its whole text, set in
         // heading-sized type throughout.
         const remove = (lines: RawLine[], reason: RemovalCandidate["reason"] | undefined) => {
+            if (prose) lines = lines.filter(line => !prose.has(line));
+            if (lines.length === 0) return;
             const text = lines.length > 1 ? joinRowText(lines) : null;
             if (
                 reason === "repeat"
@@ -1621,7 +2022,7 @@ export class MarginFilter {
             return true;
         };
         if ((pageRemovals && pageRemovals.size > 0) || endTexts.size > 0) {
-            for (const row of collectTextRows(page, textRows)) {
+            for (const row of rows()) {
                 const normalized = normalizeText(row.text);
                 if (pageRemovals?.has(normalized) && inZone(row.bbox)) {
                     remove(row.lines, reasonByText.get(normalized));

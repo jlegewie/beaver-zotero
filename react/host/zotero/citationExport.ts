@@ -1,8 +1,10 @@
 import {
     firstPageNumber,
     formatCitationPages,
+    normalizePageLocator,
     translatePageNumberToLabel,
 } from '../../../src/utils/pageLabelTranslation';
+import { buildNoteCitation } from '../../../src/utils/zoteroUtils';
 import { formatExternalFileCitationHTML } from '../../../src/utils/externalFileCitation';
 import { getPageLabelsForItem } from './itemData';
 import { getPageLocator, isRecordIdRange } from '@beaver/agent-core/citations/citationGrammar';
@@ -56,32 +58,24 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
                 ? { kind: 'page', value: page, raw: `page${page}` }
                 : undefined, navPage) };
         }
-        const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
-        const startPage = pages.length > 0 ? pages[0] : undefined;
-        // Fallback: use the requested page locator when metadata doesn't provide pages.
+        // Native citations store a single page label, the same rule note writes
+        // use: Zotero opens a citation by matching its locator exactly against
+        // the PDF's page labels, so a range would never navigate. Metadata pages
+        // are physical pages; a requested locator is a physical page too.
+        const startPage = pages.length > 0 ? Math.min(...pages) : undefined;
         const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
         // Labels come from the active render store (passed in) so note export
         // respects the isolated store populated by renderToHTML.
         const loadedLabels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
         const exportLabels = loadedLabels ?? metadata?.page_labels;
-        // Zotero note clicks use the CSL locator as a PDF page label. When labels
-        // are available, store the visible label for the physical page.
-        const navLocator = startPage
+        const locator = startPage
             ? resolvePageLabelFromLabels(exportLabels, startPage)
-            : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, requestedPage) : undefined);
-        const citationObj = {
-            citationItems: [{
-                uris: [Zotero.URI.getItemURI(item.parentItem || item)],
-                itemData: itemData,
-                locator: navLocator,
-            }],
-            properties: {},
-        };
-        const formatted = Zotero.EditorInstanceUtilities.formatCitation(citationObj);
+            : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, normalizePageLocator(requestedPage)) : undefined);
+        const { citation, formatted } = buildNoteCitation(item, locator);
         return {
             kind: 'citation',
             html: formatted,
-            citationData: encodeURIComponent(JSON.stringify(citationObj)),
+            citationData: encodeURIComponent(JSON.stringify(citation)),
         };
     } catch (e) {
         logger(`zoteroDocumentExport: Item not loaded for ${libraryID}/${effectiveItemKey}: ${e}`);

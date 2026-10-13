@@ -4,9 +4,9 @@ import { assertCompatible, predictRegionClass } from "../../../src/beaver-extrac
 import { REGION_MODEL } from "../../../src/beaver-extract/regions/weights";
 import parity from "./fixtures/regionModelParity.json";
 
-// The fixture is written together with `weights.ts` by the research repo's
-// `train_detector.py --write-parity`: sample feature vectors with the
-// probabilities the training code computed for them.
+// The fixture is written together with `weights.ts` by beaver-extract-models
+// (`bxm regions export`): sample feature vectors, grid candidates and others,
+// with the probabilities the training code computed for them.
 describe("shipped region model", () => {
     it("matches the feature set the detector computes", () => {
         expect(REGION_MODEL).not.toBeNull();

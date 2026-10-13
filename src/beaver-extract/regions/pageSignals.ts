@@ -149,6 +149,14 @@ export interface RegionLine {
      * one line meet.
      */
     gaps?: [number, number][];
+    /**
+     * Set when the piece's characters are its text's code points and run left to
+     * right (their left edges never decrease), so that `gaps` holds every gap between
+     * its inked characters in left-to-right order: the leftmost and the furthest right
+     * edge of its inked characters. Only for grid detection, which asks `pageLines`
+     * for it.
+     */
+    inkSpan?: [number, number];
 }
 
 const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/g;
@@ -161,7 +169,7 @@ const TEXT_CHAR_RE = /[\p{L}\p{N}]/u;
  * Whitespace-separated words (`RegionLine.words`) and words of at least three
  * letters (`RegionLine.alphaWords`); each two CJK characters count as one.
  */
-function wordCounts(text: string): { words: number; alphaWords: number } {
+export function wordCounts(text: string): { words: number; alphaWords: number } {
     const cjk = Math.floor((text.match(CJK_RE)?.length ?? 0) / 2);
     const tokens = text.split(/\s+/);
     let alpha = 0;
@@ -328,6 +336,15 @@ function charClass(c: string): number {
     return cls;
 }
 
+/**
+ * Whether `c` holds whitespace: `/\s/u.test(c)`, cached per character. (No
+ * whitespace character lies outside the BMP, so `/\s/` without the `u` flag
+ * matches the same strings.)
+ */
+export function isSpaceChar(c: string): boolean {
+    return (charClass(c) & CHAR_SPACE) !== 0;
+}
+
 /** Spans of chars [a, b) of a horizontal line that take limits (`RegionLine.limitSpans`). */
 function limitSpans(line: RawLineDetailed, chars: readonly string[], classes: Uint8Array, a: number, b: number, em: number): [number, number][] {
     const spans: [number, number][] = [];
@@ -382,16 +399,38 @@ function linePieces(line: RawLineDetailed, classes: Uint8Array, em: number): [nu
     return pieces;
 }
 
-/** Gaps of at least `min` between consecutive inked characters in [a, b) of a horizontal line. */
-function innerGaps(line: RawLineDetailed, classes: Uint8Array, a: number, b: number, min: number): [number, number][] {
+/**
+ * Gaps of at least `min` between consecutive inked characters in [a, b) of a horizontal line.
+ * With `ink`, also sets `ink.span` (`RegionLine.inkSpan`) when every character there is its
+ * code point of the text (`ink.chars`) and their left edges never decrease (a NaN fails).
+ */
+function innerGaps(
+    line: RawLineDetailed,
+    classes: Uint8Array,
+    a: number,
+    b: number,
+    min: number,
+    ink?: { chars: readonly string[]; span?: [number, number] },
+): [number, number][] {
     const gaps: [number, number][] = [];
     let prevRight = -Infinity;
+    // With `ink`: the inked characters' leftmost edge, the last character's, and whether they stay in order.
+    let left = Infinity;
+    let prevLeft = -Infinity;
+    let ordered = true;
     for (let i = a; i < b; i++) {
+        if (ink) {
+            const ch = line.chars[i];
+            if (!ch || ch.c !== ink.chars[i] || !(ch.bbox.l >= prevLeft)) ordered = false;
+            else prevLeft = ch.bbox.l;
+        }
         if (classAt(classes, i) & CHAR_SPACE) continue;
         const box = line.chars[i].bbox;
+        if (ink) left = Math.min(left, box.l);
         if (prevRight !== -Infinity && box.l - prevRight >= min) gaps.push([prevRight, box.l]);
         prevRight = Math.max(prevRight === -Infinity ? box.r : prevRight, box.r);
     }
+    if (ink && ordered && prevRight !== -Infinity) ink.span = [left, prevRight];
     return gaps;
 }
 
@@ -525,7 +564,12 @@ function pageTextFont(page: RawPageData): string | undefined {
     return best;
 }
 
-export function pageLines(page: RawPageData): RegionLine[] {
+/**
+ * The page's text lines, split into pieces at wide gaps. With `inkSpans`, upright
+ * pieces whose `gaps` are complete in left-to-right order also have their
+ * `inkSpan`.
+ */
+export function pageLines(page: RawPageData, inkSpans = false): RegionLine[] {
     const lines: RegionLine[] = [];
     const textFont = pageTextFont(page);
     let source = 0;
@@ -563,7 +607,8 @@ export function pageLines(page: RawPageData): RegionLine[] {
                 const m = rangeMath(chars, classes, runs, a, b, textFont, size);
                 const operators = !rot && detailed.chars?.length === chars.length ? limitSpans(detailed, chars, classes, a, b, Math.max(1, size)) : [];
                 const maxSize = m.maxSize || size;
-                const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, classes, a, b, WORD_GAP_EM * Math.max(1, size)) : [];
+                const ink: { chars: readonly string[]; span?: [number, number] } | undefined = inkSpans ? { chars } : undefined;
+                const gaps = !rot && detailed.chars?.length === chars.length ? innerGaps(detailed, classes, a, b, WORD_GAP_EM * Math.max(1, size), ink) : [];
                 const counts = wordCounts(text);
                 // Built field by field, optional fields in place: the same keys in the
                 // same order as a literal, without a temporary object per optional field.
@@ -586,6 +631,7 @@ export function pageLines(page: RawPageData): RegionLine[] {
                 out.pieces = pieces.length;
                 out.range = [a, b];
                 if (gaps.length) out.gaps = gaps;
+                if (ink?.span) out.inkSpan = ink.span;
                 lines.push(out);
             }
         }
@@ -995,4 +1041,106 @@ function overflowMarks(g: GraphicsSummary): Primitive[] {
         }
     }
     return out;
+}
+
+/** A fill whose channels all reach this value is white: no shading. */
+const FILL_WHITE_CHANNEL = 0xfa;
+/** Shapes at most this thick (points) are rules, at least `SEPARATOR_ASPECT` times longer than thick. */
+const SEPARATOR_THICKNESS = 2;
+const SEPARATOR_ASPECT = 4;
+
+/**
+ * The drawing a table's rows can be read from (`LineRouting.tableGraphics`), typed apart from the
+ * primitives' kinds so the region features keep their meaning.
+ */
+export interface TableGraphics {
+    /**
+     * Horizontal row separators: thin shapes of any length or colour (rules drawn one segment per
+     * cell, light rules, white rules on shading) and the top and bottom edges of shaded and
+     * stroked rectangles (fill bands, cell borders).
+     */
+    horizontal: Rect[];
+    /** The same for sideways tables: vertical thin shapes and the side edges of rectangles. */
+    vertical: Rect[];
+    /** Shaded rectangles (not white), light fills included: rows or cells set on a band. */
+    fills: Rect[];
+}
+
+/**
+ * Rules and fills of a page as row evidence for tables. A white shape (a rule, a stroked frame's
+ * edge) counts only where it lies on shading (a white rule between shaded rows); on the page it
+ * paints nothing.
+ */
+export function tableGraphics(prims: readonly Primitive[]): TableGraphics {
+    const white = (rgb: number) => rgb >= 0 && ((rgb >> 16) & 255) >= FILL_WHITE_CHANNEL && ((rgb >> 8) & 255) >= FILL_WHITE_CHANNEL && (rgb & 255) >= FILL_WHITE_CHANNEL;
+    const usable = (p: Primitive) => p.kind !== "bg" && p.kind !== "image" && p.kind !== "pixel" && !p.curve;
+    const thin = (p: Primitive) => {
+        const w = p.bbox[2] - p.bbox[0];
+        const h = p.bbox[3] - p.bbox[1];
+        return Math.min(w, h) <= SEPARATOR_THICKNESS && Math.max(w, h) >= SEPARATOR_ASPECT * Math.max(Math.min(w, h), 0.1);
+    };
+    const shaded = prims.filter((p) => usable(p) && p.rect && !p.stroked && !thin(p) && !white(p.rgb) && p.rgb >= 0);
+    const fills = shaded.map((p) => p.bbox);
+    // The stretches of a separator (a horizontal or vertical segment) that lie on shading: a white
+    // one is seen only there.
+    const onFill = (r: Rect): Rect[] => {
+        const horizontal = r[2] - r[0] >= r[3] - r[1];
+        const mid = horizontal ? (r[1] + r[3]) / 2 : (r[0] + r[2]) / 2;
+        const [lo, hi] = horizontal ? [r[0], r[2]] : [r[1], r[3]];
+        const spans = fills
+            .filter((f) => (horizontal ? f[1] <= mid && f[3] >= mid : f[0] <= mid && f[2] >= mid))
+            .map((f): [number, number] => (horizontal ? [Math.max(lo, f[0]), Math.min(hi, f[2])] : [Math.max(lo, f[1]), Math.min(hi, f[3])]))
+            .filter(([a, b]) => b > a)
+            .sort((u, v) => u[0] - v[0]);
+        const merged: [number, number][] = [];
+        for (const [a, b] of spans) {
+            const last = merged[merged.length - 1];
+            if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+            else merged.push([a, b]);
+        }
+        return merged.map(([a, b]): Rect => (horizontal ? [a, r[1], b, r[3]] : [r[0], a, r[2], b]));
+    };
+    // Where fills of one colour meet or overlap (a band painted as strips, a cell on a band of its
+    // colour), their edges divide nothing: an edge keeps only the stretches no fill of its colour
+    // continues across.
+    const exposed = (p: Primitive, side: 0 | 1 | 2 | 3): [number, number][] => {
+        const across = side % 2 === 1;
+        const [lo, hi] = across ? [p.bbox[0], p.bbox[2]] : [p.bbox[1], p.bbox[3]];
+        const shared = shaded
+            .filter((q) => {
+                if (q === p || q.rgb !== p.rgb) return false;
+                // `q` covers the far side of the edge: it meets it there or reaches across it.
+                const edge = p.bbox[side];
+                const [near, far] = across ? [q.bbox[1], q.bbox[3]] : [q.bbox[0], q.bbox[2]];
+                return side < 2 ? near < edge && far >= edge - 1 : far > edge && near <= edge + 1;
+            })
+            .map((q): [number, number] => (across ? [q.bbox[0], q.bbox[2]] : [q.bbox[1], q.bbox[3]]))
+            .sort((u, v) => u[0] - v[0]);
+        const out: [number, number][] = [];
+        let from = lo;
+        for (const [a, b] of shared) {
+            if (a > from) out.push([from, Math.min(a, hi)]);
+            from = Math.max(from, b);
+            if (from >= hi) break;
+        }
+        if (from < hi) out.push([from, hi]);
+        return out.filter(([a, b]) => b > a);
+    };
+    const horizontal: Rect[] = [];
+    const vertical: Rect[] = [];
+    for (const p of prims) {
+        if (!usable(p)) continue;
+        const [x0, y0, x1, y1] = p.bbox;
+        if (thin(p)) {
+            (x1 - x0 >= y1 - y0 ? horizontal : vertical).push(...(white(p.rgb) ? onFill(p.bbox) : [p.bbox]));
+        } else if (p.rect && (p.stroked || (!white(p.rgb) && p.rgb >= 0))) {
+            const edges = (side: 0 | 1 | 2 | 3): [number, number][] => (p.stroked ? [side % 2 ? [x0, x1] : [y0, y1]] : exposed(p, side));
+            const seen = (r: Rect) => (p.stroked && white(p.rgb) ? onFill(r) : [r]);
+            for (const [a, b] of edges(1)) horizontal.push(...seen([a, y0, b, y0]));
+            for (const [a, b] of edges(3)) horizontal.push(...seen([a, y1, b, y1]));
+            for (const [a, b] of edges(0)) vertical.push(...seen([x0, a, x0, b]));
+            for (const [a, b] of edges(2)) vertical.push(...seen([x1, a, x1, b]));
+        }
+    }
+    return { horizontal, vertical, fills };
 }

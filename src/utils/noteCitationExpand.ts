@@ -18,7 +18,7 @@ import {
     externalFileLocatorSuffix,
     type ExternalFileCitationData,
 } from './externalFileCitation';
-import { createCitationHTML } from './zoteroUtils';
+import { createCitationHTML, type NoteCitationItemOptions } from './zoteroUtils';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
 import { getAttachmentFileStatus, checkLibraryExcluded } from '../services/agentDataProvider/utils';
 import { isRemoteFilePath, makeRemoteFilePath } from '../services/documentFileIdentity';
@@ -62,10 +62,11 @@ import {
     locatorSchemaVersion,
     structuredPdfResultForSchema,
 } from '../services/documentExtraction/structuredPdfResult';
-import { producibleExtractionSchemaVersions } from '../services/documentExtraction/shared/extractionSchemaVersions';
+import { isCurrentExtractionSchemaVersion, producibleExtractionSchemaVersions } from '../services/documentExtraction/shared/extractionSchemaVersions';
 import {
     firstPageNumber,
     formatCitationPages,
+    normalizePageLocator,
     translatePageLabelToNumber,
     translatePageNumberToLabel,
 } from './pageLabelTranslation';
@@ -75,11 +76,12 @@ import { ensureLibraryItemsLoaded } from './zoteroDataLoading';
 import {
     modelObjectId,
     modelObjectIdFromReference,
+    resolveLibraryRef,
     resolveObjectId,
     UNRESOLVED_LIBRARY_ID,
 } from './libraryIdentity';
 
-export { translatePageNumberToLabel } from './pageLabelTranslation';
+export { normalizePageLocator, translatePageNumberToLabel } from './pageLabelTranslation';
 
 /** The page a structural locator was resolved to, for display and navigation. */
 export interface ResolvedLocatorPage {
@@ -130,12 +132,17 @@ export interface StructuralLocatorPreload {
  * Unavailable libraries are skipped. Excluded libraries are skipped too
  * (expansion rejects those citations) unless `includeExcluded` is set for
  * render paths, which must keep showing persisted history.
+ * `externalItemMapping` adds the library of every `external_id` citation that
+ * maps to a library item, since expansion cites that item instead.
  * Returns the ids of the libraries this call loaded.
  */
 export async function ensureCitedLibrariesLoaded(
     texts: (string | null | undefined)[],
     extraLibraryIds: (number | null | undefined)[] = [],
-    { includeExcluded = false }: { includeExcluded?: boolean } = {},
+    { includeExcluded = false, externalItemMapping }: {
+        includeExcluded?: boolean;
+        externalItemMapping?: Record<string, ZoteroItemReference | null>;
+    } = {},
 ): Promise<number[]> {
     const libraryIds = new Set<number>();
     const add = (libraryId: number | null | undefined) => {
@@ -153,6 +160,10 @@ export async function ensureCitedLibrariesLoaded(
             const attrs = parseRawCitationAttributes(match[1]);
             const normalized = normalizeCitationTag(attrs);
             if (normalized.ok && normalized.ref.kind === 'zotero') add(normalized.ref.library_id);
+            if (normalized.ok && normalized.ref.kind === 'external') {
+                const mapped = externalItemMapping?.[normalized.ref.external_id];
+                if (mapped) add(resolveLibraryRef(mapped));
+            }
             // Compound tags list their items as "id:page,id:page".
             for (const entry of attrs.items?.split(',') ?? []) {
                 add(resolveObjectId(entry.trim().split(':')[0])?.library_id);
@@ -181,6 +192,17 @@ export async function ensureCitedLibrariesLoaded(
 }
 
 /**
+ * The document-cache key for an attachment: its local file, or the remote key
+ * of a sync-backed attachment with no local copy. Remote-only documents are
+ * read from the cache only; preloads never download them.
+ */
+async function attachmentCacheFilePath(attachmentItem: any): Promise<{ filePath: string; isRemoteOnly: boolean }> {
+    const localFilePath = await attachmentItem.getFilePathAsync();
+    const filePath = localFilePath || makeRemoteFilePath(attachmentItem);
+    return { filePath, isRemoteOnly: !localFilePath || isRemoteFilePath(filePath) };
+}
+
+/**
  * Resolve page labels for citations in a string that carry page locators.
  *
  * Returns a `PageLabelsByAttachmentId` map (attachment item ID → 0-based page
@@ -190,6 +212,7 @@ export async function ensureCitedLibrariesLoaded(
  *
  * On a metadata cache miss a full extraction is run via
  * `getAttachmentFileStatus`; the freshly written labels are then read back.
+ * Remote-only attachments use cached labels only.
  */
 export async function preloadPageLabelsForNewCitations(str: string): Promise<PageLabelsByAttachmentId> {
     const labelsByAttachmentId: PageLabelsByAttachmentId = {};
@@ -228,13 +251,12 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
         seen.add(attachmentItem.id);
 
         try {
-            const filePath = await attachmentItem.getFilePathAsync();
-            if (!filePath) continue;
+            const { filePath, isRemoteOnly } = await attachmentCacheFilePath(attachmentItem);
             let record = await cache.getMetadata({
                 libraryId: attachmentItem.libraryID,
                 zoteroKey: attachmentItem.key,
             }, filePath);
-            if (!record) {
+            if (!record && !isRemoteOnly) {
                 // Cache miss — run a full extraction, then read labels back.
                 await getAttachmentFileStatus(attachmentItem, false);
                 record = await cache.getMetadata({
@@ -293,9 +315,7 @@ export async function preloadNotePageLabels(
                 : null;
             if (!attachmentItem) return;
 
-            const localFilePath = await attachmentItem.getFilePathAsync();
-            const filePath = localFilePath || makeRemoteFilePath(attachmentItem);
-            const isRemoteOnly = !localFilePath || isRemoteFilePath(filePath);
+            const { filePath, isRemoteOnly } = await attachmentCacheFilePath(attachmentItem);
             let record = await cache.getMetadata({
                 libraryId: attachmentItem.libraryID,
                 zoteroKey: attachmentItem.key,
@@ -502,8 +522,11 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
             let resultPromise = resultsByAttachment.get(resultKey);
             if (!resultPromise) {
                 resultPromise = (async () => {
-                    const filePath = await attachmentItem.getFilePathAsync();
-                    if (!filePath) return null;
+                    const { filePath, isRemoteOnly } = await attachmentCacheFilePath(attachmentItem);
+                    // The current version is a cache read; older versions are
+                    // extracted on demand, which a remote-only file can't be
+                    // without a download.
+                    if (isRemoteOnly && !isCurrentExtractionSchemaVersion('pdf', schemaVersion)) return null;
                     return structuredPdfResultForSchema({
                         source: { kind: 'zotero', item: attachmentItem },
                         filePath,
@@ -549,23 +572,6 @@ export function buildUnresolvedLocatorWarning(
             + `shown there.`;
     }
     return warning;
-}
-
-/**
- * Normalize a page locator to a single page number.
- *
- * LLM-generated citations sometimes contain page ranges ("241-243") or
- * comma-separated pages ("222, 237-238"). Zotero's "Go to Page" does an
- * exact string match against PDF page labels, so multi-page locators
- * silently fail to navigate. This extracts the first page number.
- *
- * Only applied to locators that contain range/list separators (-, –, ,).
- * Non-numeric locators like "§3.2", "xii", or "fn. 5" pass through unchanged.
- */
-export function normalizePageLocator(page: string): string {
-    if (!/[-–,]/.test(page)) return page;
-    const match = page.match(/^\s*(\d+)/);
-    return match ? match[1] : page;
 }
 
 // =============================================================================
@@ -668,6 +674,9 @@ function parseSimplifiedCitationAttrs(
     if (normalized.ok && normalized.ref.kind === 'external_file') {
         throw citationRefNotFoundError('External-file references are stored as links or plain text in notes. Copy the existing link or text from read_note into old_string.');
     }
+    if (!normalized.ok && normalized.reason === 'invalid_zotero_id') {
+        throw new Error(`Invalid citation id "${normalized.rawIdentity ?? ''}". Expected "libraryID-itemKey", as returned by search and read tools.`);
+    }
     if (!normalized.ok || normalized.ref.kind !== 'zotero') {
         throw new Error('Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
     }
@@ -713,7 +722,11 @@ function resolvePageForCitation(
     return resolved;
 }
 
-/** Build a citation or item link, preserving the source attribute in errors. */
+/**
+ * Build a citation or item link, preserving the source attribute in errors.
+ * `citationOptions` carries CSL fields (label, prefix, …) of the citation being
+ * rewritten, so moving a locator does not discard them.
+ */
 function buildCitation({
     item_id,
     page,
@@ -722,10 +735,12 @@ function buildCitation({
     attrName = 'item_id',
     shouldTranslatePage = true,
     pageLabels,
+    citationOptions,
 }: SimplifiedCitationAttrs & {
     attrName?: 'item_id' | 'att_id';
     shouldTranslatePage?: boolean;
     pageLabels?: PageLabelsByAttachmentId;
+    citationOptions?: NoteCitationItemOptions;
 }): string {
     const ref = resolveObjectId(item_id);
     if (!ref) {
@@ -767,7 +782,55 @@ function buildCitation({
     const resolvedPage = pageIsResolvedLabel
         ? page
         : resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
-    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
+    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage, citationOptions));
+}
+
+/**
+ * CSL options (label, prefix, …) of the single native citation stored for a
+ * `ref`, or undefined when it has none or is a link citation.
+ */
+function storedCitationOptions(rawHtml: string): NoteCitationItemOptions | undefined {
+    const match = rawHtml.match(/data-citation="([^"]*)"/);
+    if (!match) return undefined;
+    try {
+        const item = JSON.parse(decodeURIComponent(match[1]))?.citationItems?.[0];
+        if (!item || typeof item !== 'object') return undefined;
+        const options: NoteCitationItemOptions = {};
+        for (const field of ['label', 'prefix', 'suffix'] as const) {
+            if (typeof item[field] === 'string' && item[field]) options[field] = item[field];
+        }
+        if (item['suppress-author'] === true) options['suppress-author'] = true;
+        return Object.keys(options).length > 0 ? options : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Whether two model item ids (`u-KEY`, `1-KEY`, `g123-KEY`) name the same item. */
+function citesSameItem(a: string, b: string): boolean {
+    const left = resolveObjectId(a);
+    const right = resolveObjectId(b);
+    return !!left && !!right && left.library_id === right.library_id && left.zotero_key === right.zotero_key;
+}
+
+/**
+ * Comparable form of a compound citation's `items` attribute
+ * (`id:page=P, id, …`). Each id is resolved, so the legacy `1-KEY` and portable
+ * `u-KEY` forms of one item compare equal; locators and order still count,
+ * and whitespace does not.
+ */
+function normalizeCompoundItems(items: string): string {
+    return items.split(',').map((entry) => {
+        const compact = entry.replace(/\s+/g, '');
+        const separator = compact.indexOf(':');
+        const id = separator === -1 ? compact : compact.slice(0, separator);
+        const locator = separator === -1 ? '' : compact.slice(separator);
+        const ref = resolveObjectId(id);
+        // A library not on this device has no local id; its portable ref
+        // still tells two such libraries apart.
+        const library = ref && (ref.library_id !== UNRESOLVED_LIBRARY_ID ? ref.library_id : ref.library_ref);
+        return `${ref && library != null ? `${library}-${ref.zotero_key}` : id}${locator}`;
+    }).join(',');
 }
 
 // =============================================================================
@@ -849,23 +912,17 @@ export function isCitationRefNotFoundError(error: unknown): boolean {
 }
 
 /**
- * Expand simplified tags in a string back to their raw HTML equivalents.
- * Handles citations, annotations, images, and math dollar notation.
+ * Expand the `<citation …/>` tags in a string into note citation HTML: native
+ * Zotero citations for library items, links for notes, annotations and
+ * standalone attachments, and links or text for external works and files.
+ * This is the citation pass of {@link expandToRawHtml}; note creation runs it on
+ * its own (with empty `metadata`) so new and edited notes store identical
+ * citations.
  *
- * @param str - String containing simplified tags (from old_string or new_string)
- * @param metadata - The metadata map from simplification
- * @param context - 'old' for old_string, 'new' for new_string
- * @param externalRefContext - Optional. When provided, citations using
- *   `external_id` (chat-side external work IDs from search tools) are
- *   auto-resolved to a Zotero `item_id` if the work is in the library, or
- *   converted to an inline `<a>` link otherwise. When omitted, `external_id`
- *   citations throw the standard missing identity error.
- * @param pageLabels - Optional pre-resolved page-label map (attachment item ID
- *   → 0-based page index → label). Used to translate model-provided 1-based
- *   page numbers on NEW citations into display labels. Resolve it up-front via
- *   `preloadPageLabelsForNewCitations`.
+ * Throws on a citation that cannot be stored: an unknown or excluded item, an
+ * unknown `ref` in old_string, or a change to a compound citation.
  */
-export function expandToRawHtml(
+export function expandNoteCitationTags(
     str: string,
     metadata: SimplificationMetadata,
     context: 'old' | 'new',
@@ -873,8 +930,7 @@ export function expandToRawHtml(
     pageLabels?: PageLabelsByAttachmentId,
     resolvedLocatorPages?: ResolvedLocatorPages,
 ): string {
-    // Expand citations (all self-closing: <citation ... />)
-    str = str.replace(
+    return str.replace(
         noteCitationTagPattern(),
         (match, attrStr) => {
             const ref = extractAttr(attrStr, 'ref');
@@ -907,8 +963,18 @@ export function expandToRawHtml(
             if (ref) {
                 const stored = metadata.elements.get(ref);
                 if (stored) {
-                    // Compound citations are immutable — always return stored raw HTML
+                    // Compound citations are immutable. Leaving one as read is
+                    // fine; a changed one is refused rather than silently kept.
                     if (stored.isCompound) {
+                        const changedItems = items !== undefined && stored.originalItems !== undefined
+                            && normalizeCompoundItems(items) !== normalizeCompoundItems(stored.originalItems);
+                        if (context === 'new' && (changedItems || itemId || attId || externalId)) {
+                            throw new Error(
+                                `Error: Citation ref="${ref}" is a compound citation, which cannot be `
+                                + 'edited. Keep its tag exactly as read_note shows it, or remove the tag '
+                                + 'and insert individual <citation id="..."/> tags without a ref.'
+                            );
+                        }
                         return stored.rawHtml;
                     }
                     // Single citation — check if attributes changed (e.g., page locator updated)
@@ -921,7 +987,12 @@ export function expandToRawHtml(
                             const shouldTranslatePage = !original?.page
                                 || (original.pageConvention === 'number'
                                     && (original.cslLabel == null || original.cslLabel === 'page'));
-                            return buildCitation({ ...newAttrs, shouldTranslatePage, pageLabels });
+                            // Keep the citation's CSL label, prefix and suffix
+                            // while it still cites the same item.
+                            const citationOptions = original && citesSameItem(original.item_id, newAttrs.item_id)
+                                ? storedCitationOptions(stored.rawHtml)
+                                : undefined;
+                            return buildCitation({ ...newAttrs, shouldTranslatePage, pageLabels, citationOptions });
                         }
                     }
                     return stored.rawHtml; // exact original
@@ -1038,6 +1109,34 @@ export function expandToRawHtml(
             throw new Error('Error: Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
         }
     );
+}
+
+/**
+ * Expand simplified tags in a string back to their raw HTML equivalents.
+ * Handles citations, annotations, images, and math dollar notation.
+ *
+ * @param str - String containing simplified tags (from old_string or new_string)
+ * @param metadata - The metadata map from simplification
+ * @param context - 'old' for old_string, 'new' for new_string
+ * @param externalRefContext - Optional. When provided, citations using
+ *   `external_id` (chat-side external work IDs from search tools) are
+ *   auto-resolved to a Zotero `item_id` if the work is in the library, or
+ *   converted to an inline `<a>` link otherwise. When omitted, `external_id`
+ *   citations throw the standard missing identity error.
+ * @param pageLabels - Optional pre-resolved page-label map (attachment item ID
+ *   → 0-based page index → label). Used to translate model-provided 1-based
+ *   page numbers on NEW citations into display labels. Resolve it up-front via
+ *   `preloadPageLabelsForNewCitations`.
+ */
+export function expandToRawHtml(
+    str: string,
+    metadata: SimplificationMetadata,
+    context: 'old' | 'new',
+    externalRefContext?: ExternalRefContext,
+    pageLabels?: PageLabelsByAttachmentId,
+    resolvedLocatorPages?: ResolvedLocatorPages,
+): string {
+    str = expandNoteCitationTags(str, metadata, context, externalRefContext, pageLabels, resolvedLocatorPages);
 
     // Expand existing annotations (from map — must be unchanged)
     str = str.replace(

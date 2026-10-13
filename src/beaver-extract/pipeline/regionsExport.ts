@@ -14,7 +14,7 @@ import type { RawLine, RawLineDetailed } from "@beaver/agent-core/extract/types"
 import type { Rect } from "../schema";
 import { roundRect } from "../schema/bbox";
 import type { RegionDetection } from "../regions/RegionDetector";
-import { REGION_FEATURES, REGION_FEATURE_VERSION } from "../regions/features";
+import { GRID_FEATURES, REGION_FEATURES, REGION_FEATURE_VERSION, REGION_GRID_FEATURE_VERSION } from "../regions/features";
 import { pagePrimitives, sourceLines, type RegionLine } from "../regions/pageSignals";
 import { splitRegionItems, type RegionItemDraft } from "../regions/regionItems";
 import { REGION_MODEL } from "../regions/weights";
@@ -43,8 +43,13 @@ export const ROUTE_DROPPED = -2;
 const MONO_FONT_RE =
     /mono|courier|consol|menlo|typewriter|inconsolata|lucidaconsole|lucidasanstypewriter|andale|letter ?gothic|prestige|ocr-?[ab]\b|fixedsys|^(?:[A-Z]{6}\+)?(?:cmtt|sftt|lmtt|txtt|pcrr|ectt|tctt|rm-?lmtt|nimbusmon)/i;
 
-/** What `items export --task regions-v2` records once per export (the manifest). */
-export function regionsExportManifest(): Record<string, unknown> {
+/**
+ * What `items export --task regions-v2` records once per export (the manifest).
+ * With grid candidates (`PdfExtractionPreset.gridTableCandidates`), candidates
+ * also carry `gridFeatures`, named in `grid_features`; with `features` they make
+ * up feature set `grid_feature_version`.
+ */
+export function regionsExportManifest(gridCandidates = false): Record<string, unknown> {
     return {
         format: REGIONS_EXPORT_FORMAT,
         feature_set: null,
@@ -57,6 +62,7 @@ export function regionsExportManifest(): Record<string, unknown> {
             features: REGION_FEATURES,
             context_pages: DEFAULT_REGION_CONTEXT_PAGES,
         },
+        ...(gridCandidates ? { grid_candidates: true, grid_feature_version: REGION_GRID_FEATURE_VERSION, grid_features: GRID_FEATURES } : {}),
     };
 }
 
@@ -103,8 +109,12 @@ export type RegionsExportPrimitive = [string, number, number, number, number, nu
 export interface RegionsExportCandidate {
     bbox: Rect;
     anchored: boolean;
+    /** The candidate source: graphics, caption, text or grid (`regions/candidates.ts`). */
+    source: string;
     /** In `REGION_FEATURES` order (null for a non-finite value). */
     features: (number | null)[];
+    /** With grid candidates: in `GRID_FEATURES` order (null for a non-finite value). */
+    gridFeatures?: (number | null)[];
     probs?: Record<string, number>;
     label?: string;
     containedIn?: number;
@@ -216,7 +226,9 @@ export function regionsExportPage(pass: RegionPassPage, precision: number): Regi
             candidates: (detection?.candidates ?? []).map((c) => ({
                 bbox: box(c.bbox),
                 anchored: c.anchored,
+                source: c.source,
                 features: c.features.map((v) => (Number.isFinite(v) ? v : null)),
+                ...(c.gridFeatures ? { gridFeatures: c.gridFeatures.map((v) => (Number.isFinite(v) ? v : null)) } : {}),
                 ...(c.probs ? { probs: c.probs } : {}),
                 ...(c.label !== undefined ? { label: c.label } : {}),
                 ...(c.containedIn !== undefined ? { containedIn: c.containedIn } : {}),

@@ -13,18 +13,26 @@
 import type { RawLine, RawPageData } from "@beaver/agent-core/extract/types";
 
 import type { GraphicsSummary } from "../worker/graphicsSummary";
-import { findCandidates } from "./candidates";
-import { EMPTY_DOC_CONTEXT, candidateFeatures, type RegionDocContext } from "./features";
+import { findCandidates, type CandidateSource } from "./candidates";
+import { EMPTY_DOC_CONTEXT, GRID_FEATURES, candidateFeatures, gridFeatures, type RegionDocContext } from "./features";
 import { intersectionArea, overlapFrac, rectArea, type Rect } from "./geometry";
-import { assertCompatible, predictRegionClass, type RegionClass, type RegionModelWeights } from "./model";
-import { bodySize, lineNumberGutter, mergeRowFragments, pageLines, pagePrimitives, sourceLines, type RegionLine } from "./pageSignals";
+import { assertCompatible, predictRegionClass, readsGridFeatures, usesGridFeatures, type RegionClass, type RegionModelWeights } from "./model";
+import { bodySize, lineNumberGutter, mergeRowFragments, pageLines, pagePrimitives, sourceLines, tableGraphics, type RegionLine, type TableGraphics } from "./pageSignals";
 import { completeTableRows } from "./tableRows";
 
 export interface DetectedRegion {
     bbox: Rect;
     anchored: boolean;
+    /** The candidate source that proposed it (`candidates.ts`). */
+    source: CandidateSource;
     /** Feature vector in `REGION_FEATURES` order. */
     features: number[];
+    /**
+     * With grid candidates, or a model trained on the grid feature set: the
+     * `GRID_FEATURES`, which follow `features` in `REGION_GRID_FEATURES`. Without
+     * `DetectRegionsOptions.allGridFeatures`, only where the model reads them.
+     */
+    gridFeatures?: number[];
     /** Present when a model was given. */
     probs?: Record<RegionClass, number>;
     /**
@@ -116,6 +124,36 @@ export interface LineRouting {
     rules?: Rect[];
     /** The page's vertical rules (row separators of sideways tables). */
     verticalRules?: Rect[];
+    /** Rules and fills as row evidence for tables (`tableGraphics`), typed on first call. */
+    tableGraphics?: () => TableGraphics;
+    /** With grid candidates: undoes their part in tables that fail the emission gate (`GridFallback`). */
+    gridFallback?: GridFallback;
+}
+
+/**
+ * Grid candidates must never cost a table that the page emits without them. A
+ * table can take text because of them in three ways: it is a grid candidate's, a
+ * grid handed it running lines (`routeLines`' `takes`), or row completion merged a
+ * grid table into it. When such a table fails the emission gate (`regionItems.ts`,
+ * `readsAsTable`), the region pass releases it and reads the page again:
+ * - a grid table is withdrawn: overlaps are resolved as if it had never been
+ *   proposed, so the candidates it made "other" get their own labels back;
+ * - any other table keeps its label and its box before routing but takes no grid
+ *   lines, and the grid tables merged into it are withdrawn, as with grid
+ *   candidates off; it is gated again on its own lines.
+ * Released tables stay released; the rest of the page is routed as before.
+ */
+export interface GridFallback {
+    /** Whether table `k` takes text because of grid candidates (as routed last). */
+    involved(k: number): boolean;
+    /** The tables that take text because of grid candidates (as routed last). */
+    holders(): number[];
+    /**
+     * Releases `tables` and resolves overlaps and routes the page again, in place:
+     * the candidates' labels, boxes and `containedIn`, and `LineRouting.routes`.
+     * Returns what undoes it, routing the page as before.
+     */
+    release(tables: readonly number[]): () => void;
 }
 
 export interface DetectRegionsOptions {
@@ -131,12 +169,31 @@ export interface DetectRegionsOptions {
      * takes them (`LINE_MARGIN`).
      */
     margin?: ReadonlySet<RawLine>;
+    /** Also propose grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
+    gridCandidates?: boolean;
+    /**
+     * Compute every candidate's grid features (`DetectedRegion.gridFeatures`), also
+     * where the model never reads them: training exports and debugging. Otherwise
+     * they are computed only for candidates the model may read them for.
+     */
+    allGridFeatures?: boolean;
 }
 
 export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts: DetectRegionsOptions): RegionDetection {
     const start = performance.now();
     if (opts.model) assertCompatible(opts.model);
-    const all = pageLines(page);
+    const gridModel = !!opts.model && usesGridFeatures(opts.model);
+    // Grid features of a candidate are needed for the model when it may read them at
+    // the candidate's `src_grid`; without, the row passes the model `src_grid` and NaN.
+    const gridFeaturesFor = (source: CandidateSource): boolean =>
+        opts.allGridFeatures || !opts.model
+            ? !!opts.gridCandidates || gridModel
+            : gridModel && readsGridFeatures(opts.model, source === "grid" ? 1 : 0);
+    // Grid candidates and the grid features read cells from the characters of the
+    // structured-text lines (the features are the same with or without grid candidates),
+    // and take a line as one cell without them where its gaps tell (`RegionLine.inkSpan`).
+    const cells = !!opts.gridCandidates || gridFeaturesFor("text");
+    const all = pageLines(page, cells);
     // Skewed text has meaningless boxes: it neither forms nor shapes candidates.
     const pieces = all.filter((l) => !l.skewed);
     const skewed = all.filter((l) => l.skewed);
@@ -147,19 +204,36 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
     // no region takes them, and they are no column of a table.
     const gutter = lineNumberGutter(visual);
     const lines = visual.filter((l) => !gutter.has(l));
-    const found = findCandidates(lines, primitives, page.width, page.height, bs);
+    const numbered = cells || opts.margin?.size ? sourceLines(page) : undefined;
+    // Furniture is words (a running head) or carries a page number; a symbol, a
+    // variable or a panel letter repeating in the margin band is content.
+    const inMargin = (l: RegionLine) =>
+        !!opts.margin?.size &&
+        (l.parts ?? [l]).every((p) => opts.margin!.has(numbered![p.source - 1])) &&
+        ((l.text.match(/\p{L}/gu) ?? []).length >= MARGIN_MIN_LETTERS || /\d/u.test(l.text));
+    const found = findCandidates(lines, primitives, page.width, page.height, bs, {
+        ...(opts.gridCandidates ? { grid: true, margin: new Set(lines.filter(inMargin)) } : {}),
+        ...(cells ? { sources: numbered } : {}),
+    });
     const doc = opts.doc ?? EMPTY_DOC_CONTEXT;
     const candidates = found.candidates.map((c): DetectedRegion => {
         const features = candidateFeatures(c, found, doc);
-        const region: DetectedRegion = { bbox: c.bbox, anchored: c.anchored, features };
+        const region: DetectedRegion = { bbox: c.bbox, anchored: c.anchored, source: c.source, features };
+        if (gridFeaturesFor(c.source)) region.gridFeatures = gridFeatures(c, found);
         if (opts.model) {
-            const probs = predictRegionClass(opts.model, features);
+            // Grid features not computed are `src_grid` followed by values the model never reads.
+            const grid = gridModel ? (region.gridFeatures ?? GRID_FEATURES.map((_, i) => (i > 0 ? NaN : c.source === "grid" ? 1 : 0))) : [];
+            const probs = predictRegionClass(opts.model, gridModel ? [...features, ...grid] : features);
             region.probs = probs;
             const best = opts.model.classes.reduce((a, b) => (probs[b] > probs[a] ? b : a));
             region.label = best !== "other" && probs[best] < REGION_MIN_PROB[best] ? "other" : best;
         }
         return region;
     });
+    // Labels before overlap resolution and boxes before row completion grows them, for the
+    // grid fallback to resolve and route the page again.
+    const labels = opts.gridCandidates && opts.model && opts.route ? candidates.map((c) => c.label) : undefined;
+    const boxes = labels ? candidates.map((c) => c.bbox) : undefined;
     if (opts.model) resolveOverlaps(candidates);
     const ms = performance.now() - start;
     const detection: RegionDetection = { pageIndex: opts.pageIndex, scanned: found.scanned, bodySize: bs, candidates, ms };
@@ -167,13 +241,6 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
         const furniture = (l: RegionLine) =>
             l.bbox[2] - l.bbox[0] >= FURNITURE_SPAN * page.width && l.bbox[3] - l.bbox[1] >= FURNITURE_SPAN * page.height;
         const routed = [...lines, ...gutter, ...skewed];
-        const numbered = opts.margin?.size ? sourceLines(page) : undefined;
-        // Furniture is words (a running head) or carries a page number; a symbol, a
-        // variable or a panel letter repeating in the margin band is content.
-        const inMargin = (l: RegionLine) =>
-            !!numbered &&
-            (l.parts ?? [l]).every((p) => opts.margin!.has(numbered[p.source - 1])) &&
-            ((l.text.match(/\p{L}/gu) ?? []).length >= MARGIN_MIN_LETTERS || /\d/u.test(l.text));
         const flags = routed.map((l) =>
             l.skewed
                 ? LINE_SKEWED | (furniture(l) ? LINE_FURNITURE : 0)
@@ -184,9 +251,15 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
                     (inMargin(l) ? LINE_MARGIN : 0),
         );
         const rules = primitives.filter((p) => p.kind === "hrule").map((p) => p.bbox);
-        const routes = routeLines(routed, flags, candidates, rules);
+        const takes = opts.gridCandidates ? found.candidates.map((c) => (c.memberLines ? new Set(c.memberLines) : undefined)) : undefined;
+        const handed = labels ? routed.map(() => -1) : undefined;
+        const routes = routeLines(routed, flags, candidates, rules, takes, handed ? { handed } : undefined);
         const verticalRules = primitives.filter((p) => p.kind === "vrule").map((p) => p.bbox);
-        if (opts.route) detection.routing = { lines: routed, flags, routes, rules, verticalRules };
+        if (opts.route) {
+            let typed: TableGraphics | undefined;
+            detection.routing = { lines: routed, flags, routes, rules, verticalRules, tableGraphics: () => (typed ??= tableGraphics(primitives)) };
+            if (labels && boxes && takes && handed) detection.routing.gridFallback = gridFallback(candidates, labels, boxes, detection.routing, takes, handed);
+        }
         if (opts.includeLines) {
             detection.lines = routed.map((l, i) => [
                 ...l.bbox.map((v) => Math.round(v * 10) / 10),
@@ -423,6 +496,71 @@ export function resolveOverlaps(regions: DetectedRegion[]): void {
 }
 
 /**
+ * The `GridFallback` of a page routed with grid candidates: `labels` are the
+ * candidates' labels before overlap resolution, `boxes` their boxes before routing
+ * (row completion grows a table over the fragments it merges, grid tables
+ * included), `takes` the grid lines each would take as a table, `handed` the
+ * tables they went to (as `routeLines` fills it).
+ */
+export function gridFallback(
+    regions: DetectedRegion[],
+    labels: readonly (RegionClass | undefined)[],
+    boxes: readonly Rect[],
+    routing: LineRouting,
+    takes: readonly (ReadonlySet<RegionLine> | undefined)[],
+    handed: number[],
+): GridFallback {
+    let initial = [...labels];
+    let withheld = new Set<number>();
+    // Grid lines that ended in table `k`, by the table they went to (`k`, or a table that
+    // row completion merged into it, such as a grid table).
+    const handedTo = (k: number) => new Set(handed.filter((t, i) => t >= 0 && routing.routes[i] === k));
+    const involved = (k: number) => regions[k].source === "grid" || handedTo(k).size > 0;
+    const withdraw = (k: number) => {
+        if (regions[k].source === "grid") initial[k] = "other";
+        else withheld.add(k);
+    };
+    const route = () => {
+        regions.forEach((r, i) => {
+            r.label = initial[i];
+            r.bbox = boxes[i];
+            delete r.containedIn;
+        });
+        resolveOverlaps(regions);
+        handed.fill(-1);
+        routing.routes = routeLines(routing.lines, routing.flags, regions, routing.rules, takes, { withheld, handed });
+    };
+    return {
+        involved,
+        holders: () => regions.flatMap((r, k) => (r.label === "table" && involved(k) ? [k] : [])),
+        release(tables) {
+            const [before, held] = [[...initial], new Set(withheld)];
+            for (const k of tables) {
+                // Another table also gives up the grid tables row completion merged into it.
+                if (regions[k].source !== "grid") for (const t of handedTo(k)) withdraw(t);
+                withdraw(k);
+            }
+            route();
+            return () => {
+                [initial, withheld] = [before, held];
+                route();
+            };
+        },
+    };
+}
+
+/** How grid lines are handed to tables in `routeLines`. */
+export interface GridRouting {
+    /** Tables that take no grid lines (`GridFallback.release`). */
+    withheld?: ReadonlySet<number>;
+    /**
+     * Filled per line: the table a grid handed it to, or the grid table it went to (before
+     * row completion merges tables), or -1.
+     */
+    handed?: number[];
+}
+
+/**
  * Where each line goes once regions leave the prose stream: the index of the
  * smallest classified region containing the line's centre, or -1 for prose.
  * Running text and captions stay in prose — a region absorbs only the text that
@@ -435,19 +573,43 @@ export function resolveOverlaps(regions: DetectedRegion[]): void {
  * Decorations take no text: what they overlap stays in prose, where margin
  * detection decides about it. Furniture, the document's margin text and
  * line-number gutters are never routed.
+ * A grid candidate become a table, or the table it became part of, takes the
+ * grid's lines (`takes`, by region), running text included: the cells of a
+ * text-heavy table. Another source's table takes only those inside its box: a
+ * grid that repeats it, or sits in it, does not grow it.
  */
 export function routeLines(
     lines: readonly RegionLine[],
     flags: readonly number[],
     regions: DetectedRegion[],
     rules: readonly Rect[] = [],
+    takes?: readonly (ReadonlySet<RegionLine> | undefined)[],
+    grid: GridRouting = {},
 ): number[] {
+    // The smallest table holding the line among a grid's lines: the grid's own, or the
+    // table a grid became part of (`containedIn`).
+    const gridTable = (l: RegionLine, i: number): number => {
+        const cx = (l.bbox[0] + l.bbox[2]) / 2;
+        const cy = (l.bbox[1] + l.bbox[3]) / 2;
+        let best = -1;
+        regions.forEach((_, k) => {
+            if (!takes?.[k]?.has(l)) return;
+            let t = k;
+            for (let n = 0; regions[t].containedIn !== undefined && n < regions.length; n++) t = regions[t].containedIn!;
+            if (regions[t].label !== "table" || grid.withheld?.has(t)) return;
+            const b = regions[t].bbox;
+            if (regions[t].source !== "grid" && (cx < b[0] || cx > b[2] || cy < b[1] || cy > b[3])) return;
+            if (best < 0 || rectArea(regions[t].bbox) < rectArea(regions[best].bbox)) best = t;
+        });
+        if (grid.handed) grid.handed[i] = best;
+        return best;
+    };
     const routes = lines.map((l, i) => {
         if (flags[i] & (LINE_CAPTION | LINE_FURNITURE | LINE_GUTTER)) return -1;
         // Margin text of words reads as running text, but a continued table's repeated header
         // is such a line too: it goes to the region that holds it, for `keepMarginOut` to judge.
         const marginRow = (flags[i] & (LINE_RUNNING | LINE_MARGIN)) === (LINE_RUNNING | LINE_MARGIN);
-        if (flags[i] & LINE_RUNNING && !marginRow) return -1;
+        if (flags[i] & LINE_RUNNING && !marginRow) return takes ? gridTable(l, i) : -1;
         const cx = (l.bbox[0] + l.bbox[2]) / 2;
         const cy = (l.bbox[1] + l.bbox[3]) / 2;
         let best = -1;
@@ -467,6 +629,10 @@ export function routeLines(
     keepMarginOut(lines, flags, regions, routes);
     keepParagraphTails(lines, flags, regions, routes);
     attachEquationNumbers(lines, flags, regions, routes);
+    // A grid table's own lines are grid lines too, wherever row completion merges them.
+    if (grid.handed) routes.forEach((k, i) => {
+        if (k >= 0 && grid.handed![i] < 0 && regions[k].source === "grid") grid.handed![i] = k;
+    });
     const tables = regions.flatMap((r, index) => (r.label === "table" ? [{ index, bbox: r.bbox }] : []));
     if (tables.length) {
         // Skewed lines have no rows to share, and margin text is no part of the body;

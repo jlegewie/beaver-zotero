@@ -4,6 +4,7 @@ import {
     assertModelFeatures,
     binaryProbability,
     binaryScore,
+    columnsRead,
     decodeBase64,
     modelProbabilities,
     modelScores,
@@ -118,6 +119,46 @@ describe("model runtime: bxm-trees-packed-v1", () => {
         }
         expect(() => decodeBase64("AA-A")).toThrow(/character/);
         expect(() => decodeBase64("AAAAA")).toThrow(/length/);
+    });
+});
+
+describe("model runtime: columns a model reads", () => {
+    const b64 = (a: Uint8Array | Int16Array | Float64Array) => Buffer.from(a.buffer, a.byteOffset, a.byteLength).toString("base64");
+    // One tree in both forms: `a` at the root, a leaf left of it (NaN goes left), a
+    // split on `c` right of it. The packed form pads the left leaf with a split on `a`.
+    const v1: TreeModel = {
+        format: "bxm-trees-v1",
+        features: ["a", "b", "c"],
+        classes: [0, 1],
+        baseline: [0],
+        trees: [{ score: 0, feature: [0, -1, 2, -1, -1], threshold: [0.5, 0, 1, 0, 0], left: [1, 0, 3, 0, 0], right: [2, 0, 4, 0, 0], value: [0, -1, 0, 1, 2], missing_left: [1, 0, 0, 0, 0] }],
+    };
+    const packed: PackedTreeModel = {
+        format: "bxm-trees-packed-v1",
+        features: v1.features,
+        classes: v1.classes,
+        baseline: v1.baseline,
+        depth: 2,
+        trees: 1,
+        score: b64(new Uint8Array([0])),
+        feature: b64(new Int16Array([0, 0, 2])),
+        threshold: b64(new Float64Array([0.5, 0, 1])),
+        missingLeft: b64(new Uint8Array([1, 0, 0])),
+        value: b64(new Float64Array([-1, -1, 1, 2])),
+    };
+
+    it("follows a fixed column down the branch its value takes, alike in both tree forms", () => {
+        for (const model of [v1, packed]) {
+            expect([...columnsRead(model, new Map([[0, 0]]))].sort()).toEqual([0]);
+            expect([...columnsRead(model, new Map([[0, NaN]]))].sort()).toEqual([0]);
+            expect([...columnsRead(model, new Map([[0, 1]]))].sort()).toEqual([0, 2]);
+            expect([...columnsRead(model, new Map())].sort()).toEqual([0, 2]);
+        }
+    });
+
+    it("reads every column of a logistic model", () => {
+        const logistic: LogisticModel = { format: "bxm-logistic-v1", features: ["a", "b"], classes: [0, 1], mean: [0, 0], scale: [1, 1], coef: [[1, 0]], intercept: [0] };
+        expect([...columnsRead(logistic, new Map([[0, 0]]))].sort()).toEqual([0, 1]);
     });
 });
 

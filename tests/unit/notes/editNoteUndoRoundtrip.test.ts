@@ -19,6 +19,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
+// The save-stabilization and editor-refresh loops poll with real delays; the
+// note HTML here changes synchronously, so the waits only cost wall time.
+vi.mock('../../../src/utils/systemTimers', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/utils/systemTimers')>()),
+    systemDelay: () => Promise.resolve(),
+}));
+
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     createCitationHTML: vi.fn(
         (item: any, page?: string) => {
@@ -1423,7 +1430,8 @@ describe('page locator normalization in apply-undo cycle', () => {
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'RANGECIT' }),
-            '50'
+            '50',
+            undefined
         );
         expect(item._getHtml()).toContain('RANGECIT');
 
@@ -1443,7 +1451,8 @@ describe('page locator normalization in apply-undo cycle', () => {
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'COMMACIT' }),
-            '222'
+            '222',
+            undefined
         );
 
         const restored = await undoEdit(item, action);
@@ -1505,7 +1514,8 @@ describe('page locator normalization in apply-undo cycle', () => {
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'CITE1' }),
-            '42'
+            '42',
+            undefined
         );
 
         // Undo should restore the PM-canonical version of the original note

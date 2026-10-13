@@ -12,7 +12,7 @@ import { detectColumns } from "../../../src/beaver-extract/ColumnDetector";
 import { inverseRotateBBox } from "../../../src/beaver-extract/PageRotationNormalizer";
 import type { Rect } from "../../../src/beaver-extract/regions/geometry";
 import type { RegionClass } from "../../../src/beaver-extract/regions/model";
-import { mergeRowFragments, pageLines } from "../../../src/beaver-extract/regions/pageSignals";
+import { mergeRowFragments, pageLines, tableGraphics, type Primitive, type TableGraphics } from "../../../src/beaver-extract/regions/pageSignals";
 import {
     LINE_FURNITURE,
     LINE_RUNNING,
@@ -1524,6 +1524,306 @@ function draft(kind: RegionItemDraft["kind"], box: Rect, rows: string[][] = []):
     return { kind, region: 0, bbox, rows: rows.map((r) => r.map((text) => ({ text, bbox }))) };
 }
 
+describe("regionItemsForPage table row evidence", () => {
+    const none: TableGraphics = { horizontal: [], vertical: [], fills: [] };
+    /** Rows of one table region over the page, read with the drawing `graphics` as row evidence (or not). */
+    const rows = (p: RawPageDataDetailed, graphics: TableGraphics = none, evidence = true) => {
+        const d = detection(p, [["table", [60, 60, 560, 700]]]);
+        d.routing!.rules = [];
+        d.routing!.verticalRules = [];
+        d.routing!.tableGraphics = () => graphics;
+        return rowTexts(regionItemsForPage(p, d, undefined, { tableRowEvidence: evidence }).items[0]);
+    };
+    const rules = (...ys: number[]): TableGraphics => ({ ...none, horizontal: ys.map((y): Rect => [70, y, 522, y + 0.5]) });
+
+    it("reads each band between rules across the table as one row, whatever its cells' text", () => {
+        const p = page([
+            line(100, [[72, 160, "Category"], [200, 300, "Measure"], [400, 460, "Source"]]),
+            line(120, [[72, 160, "Knowledge"], [200, 330, "Drug effects"], [400, 460, "Survey"]]),
+            line(132, [[200, 330, "Media influences"]]),
+            line(152, [[72, 160, "Skills"], [200, 330, "Refusal skills"], [400, 460, "Interview"]]),
+            line(164, [[200, 330, "Coping skills"]]),
+            line(184, [[72, 160, "Safety"], [200, 330, "Drinking and driving"], [400, 460, "Survey"]]),
+        ]);
+        expect(rows(p, rules(116, 148, 180))).toEqual([
+            "Category | Measure | Source",
+            "Knowledge | Drug effects Media influences | Survey",
+            "Skills | Refusal skills Coping skills | Interview",
+            "Safety | Drinking and driving | Survey",
+        ]);
+        // Without the switch, the text alone keeps the capitalised lines apart.
+        expect(rows(p, rules(116, 148, 180), false)).toHaveLength(6);
+    });
+
+    it("keeps records ruled together as a group apart: a column of values, or new row labels", () => {
+        const p = page([
+            line(100, [[72, 160, "Sensor"], [200, 300, "Parameter"], [400, 460, "Value"]]),
+            line(120, [[72, 160, "Sensor A"], [200, 300, "Range"], [400, 460, "12.5"]]),
+            line(132, [[200, 300, "Accuracy"], [400, 460, "0.25"]]),
+            line(152, [[72, 160, "Sensor B"], [200, 300, "Range"], [400, 460, "10.0"]]),
+            line(164, [[200, 300, "Accuracy"], [400, 460, "0.50"]]),
+            line(184, [[72, 160, "Sensor C"], [200, 300, "Range"], [400, 460, "8.0"]]),
+        ]);
+        expect(rows(p, rules(116, 148, 180))).toHaveLength(6);
+        // Statistics under their values are no second value.
+        const stats = page([
+            line(100, [[72, 160, "Variable"], [300, 340, "(1)"], [420, 460, "(2)"]]),
+            line(120, [[300, 340, "0.25***"], [420, 460, "0.19**"]]),
+            line(126, [[72, 160, "Age"]]),
+            line(132, [[300, 340, "(0.04)"], [420, 460, "(0.06)"]]),
+            line(152, [[300, 340, "1.10"], [420, 460, "0.98"]]),
+            line(158, [[72, 160, "Income"]]),
+            line(164, [[300, 340, "(0.21)"], [420, 460, "(0.30)"]]),
+            line(184, [[72, 160, "Constant"], [300, 340, "3.1"], [420, 460, "2.9"]]),
+        ]);
+        expect(rows(stats, rules(116, 148, 180))).toEqual([
+            "Variable | (1) | (2)",
+            "Age | 0.25*** (0.04) | 0.19** (0.06)",
+            "Income | 1.10 (0.21) | 0.98 (0.30)",
+            "Constant | 3.1 | 2.9",
+        ]);
+    });
+
+    it("never takes a rule under headers spanning some columns for a row rule", () => {
+        const p = page([
+            line(100, [[72, 160, "Validity/"], [300, 520, "Research phase"]]),
+            line(112, [[72, 160, "reliability"]]),
+            line(124, [[72, 160, "criterion"], [300, 380, "Design"], [440, 520, "Analysis"]]),
+            line(144, [[72, 160, "Construct"], [300, 380, "Framework"], [440, 520, "Triangulation"]]),
+        ]);
+        // The rule under "Research phase" leaves the first column open.
+        const partial: TableGraphics = { ...none, horizontal: [[290, 118, 522, 118.5]] };
+        expect(rows(p, partial)).toEqual(rows(p, none));
+    });
+
+    it("joins lines without a cell in an anchor column to the row above", () => {
+        // The reference column has one line per row; band lists wrap, starting each line anew.
+        const p = page([
+            line(100, [[72, 117, "Satellite"], [250, 275, "Bands"], [470, 490, "Ref."]]),
+            line(115, [[72, 117, "Landsat 7"], [250, 305, "MS 8; Pan 1"], [470, 495, "[111]"]]),
+            line(127, [[250, 295, "Thermal 2"]]),
+            line(142, [[72, 102, "SPOT 5"], [250, 305, "MS 4; Pan 2"], [470, 495, "[112]"]]),
+            line(154, [[250, 280, "SWIR 1"]]),
+            line(169, [[72, 122, "Sentinel 2"], [250, 275, "MS 13"], [470, 495, "[118]"]]),
+        ]);
+        expect(rows(p)).toEqual([
+            "Satellite | Bands | Ref.",
+            "Landsat 7 | MS 8; Pan 1 Thermal 2 | [111]",
+            "SPOT 5 | MS 4; Pan 2 SWIR 1 | [112]",
+            "Sentinel 2 | MS 13 | [118]",
+        ]);
+        // Two columns with a cell on (nearly) every line make each line a record: authors and
+        // their journals listed beside a keyword that labels a group of them.
+        const grouped = page([
+            line(100, [[72, 107, "Keyword"], [250, 285, "Authors"], [450, 485, "Journal"]]),
+            line(115, [[72, 112, "Big data"], [250, 345, "Clough and Wu, 2022"], [450, 535, "Management Review"]]),
+            line(127, [[250, 350, "Walrave et al., 2018"], [450, 505, "Forecasting"]]),
+            line(139, [[250, 365, "Mollenkopf et al., 2021"], [450, 540, "Service Management"]]),
+            line(154, [[72, 122, "Innovation"], [250, 325, "Oh et al., 2016"], [450, 510, "Technovation"]]),
+            line(166, [[250, 335, "Ben Letaifa, 2014"], [450, 545, "Management Decision"]]),
+        ]);
+        expect(rows(grouped)).toHaveLength(6);
+    });
+
+    it("keeps a section heading, a line of values and a new label out of the row above", () => {
+        const p = page([
+            line(100, [[72, 260, "Measure"], [300, 340, "Before"], [420, 460, "After"]]),
+            line(112, [[72, 260, "Clinical remission, No."], [300, 340, "N/A"], [420, 460, "25"]]),
+            line(124, [[72, 260, "Steroid-free remission, No. (weaning)"], [300, 340, "N/A"], [420, 460, "6"]]),
+            // A heading of the next section, capitalised after a full label.
+            line(136, [[72, 260, "Laboratory biomarkers, median"]]),
+            line(148, [[72, 260, "Albumin, g/dL"], [300, 340, "3.7"], [420, 460, "3.7"]]),
+            // Values on a line of their own are a record's, not a wrapped cell.
+            line(160, [[72, 260, "Hemoglobin, g/dL"], [300, 340, "10.7"]]),
+            line(172, [[420, 460, "11.6"]]),
+        ]);
+        expect(rows(p)).toEqual(rows(p, none, false));
+    });
+
+    it("joins the cells of a line that each go on with the cell above, though one holds no words", () => {
+        const p = page([
+            line(100, [[72, 160, "Trial"], [200, 330, "Design"], [400, 520, "False-negative rate"]]),
+            line(112, [[72, 160, "Heil et al.,"], [200, 330, "Ultrasound- or"], [400, 520, "26% (95% CI,"]]),
+            line(124, [[72, 160, "2016 [25]"], [200, 330, "mammography-guided"], [400, 520, "14–38%)"]]),
+            line(136, [[72, 160, "Lee et al.,"], [200, 330, "Ultrasound-guided"], [400, 520, "31% (95% CI,"]]),
+            line(148, [[72, 160, "2020 [23]"], [200, 330, "biopsy"], [400, 520, "14–70%)"]]),
+        ]);
+        expect(rows(p)).toEqual([
+            "Trial | Design | False-negative rate",
+            "Heil et al., 2016 [25] | Ultrasound- or mammography-guided | 26% (95% CI, 14–38%)",
+            "Lee et al., 2020 [23] | Ultrasound-guided biopsy | 31% (95% CI, 14–70%)",
+        ]);
+    });
+
+    it("reads a spanning header and the headings under it as two header rows", () => {
+        const p = page([
+            line(100, [[250, 420, "Mixed effects model"]]),
+            line(112, [[72, 160, "Covariate"], [250, 320, "Coefficient"], [360, 420, "P"]]),
+            line(132, [[72, 160, "Age"], [250, 320, "0.12"], [360, 420, "0.03"]]),
+            line(144, [[72, 160, "Income"], [250, 320, "0.40"], [360, 420, "0.01"]]),
+            line(156, [[72, 160, "Education"], [250, 320, "0.22"], [360, 420, "0.20"]]),
+        ]);
+        expect(rows(p).slice(0, 2)).toEqual(["Mixed effects model", "Covariate | Coefficient | P"]);
+        // Above a rule under the header, the text's reading takes the column header as one row.
+        const ruled = page([...p.blocks[0].lines!.slice(0, 2), line(128, [[72, 160, "Age"], [250, 320, "0.12"], [360, 420, "0.03"]]), ...p.blocks[0].lines!.slice(3)]);
+        const d = detection(ruled, [["table", [60, 60, 560, 700]]]);
+        d.routing!.rules = [[70, 125, 422, 125.5]];
+        d.routing!.tableGraphics = () => ({ ...none, horizontal: [[70, 125, 422, 125.5]] });
+        expect(rowTexts(regionItemsForPage(ruled, d).items[0])[0]).toBe("Mixed effects model | Covariate | Coefficient | P");
+        expect(rowTexts(regionItemsForPage(ruled, d, undefined, { tableRowEvidence: true }).items[0]).slice(0, 2)).toEqual(["Mixed effects model", "Covariate | Coefficient | P"]);
+    });
+
+    it("reads the lines above the first record as a header of one row per column", () => {
+        const p = page([
+            line(100, [[200, 280, "Annual emission"], [330, 410, "Annual GDP"], [460, 540, "Emission"]]),
+            line(110, [[200, 280, "reduction (%)"], [330, 410, "change (%)"], [460, 540, "after 30 years"]]),
+            line(120, [[200, 280, "(1)"], [330, 410, "(2)"], [460, 540, "(3)"]]),
+            line(136, [[72, 160, "Scenario A"], [200, 280, "12.1"], [330, 410, "-0.4"], [460, 540, "30.2"]]),
+            line(148, [[72, 160, "Scenario B"], [200, 280, "15.3"], [330, 410, "-0.9"], [460, 540, "35.0"]]),
+            line(160, [[72, 160, "Scenario C"], [200, 280, "18.0"], [330, 410, "-1.2"], [460, 540, "41.7"]]),
+        ]);
+        expect(rows(p).slice(0, 2)).toEqual([
+            "Annual emission reduction (%) (1) | Annual GDP change (%) (2) | Emission after 30 years (3)",
+            "Scenario A | 12.1 | -0.4 | 30.2",
+        ]);
+    });
+
+    it("never repeats text when a rule under the first lines cuts through a wrapped row", () => {
+        const p = page([
+            line(100, [[200, 300, "Measure"], [350, 450, "Source"], [480, 540, "Notes"]]),
+            line(112, [[72, 160, "Knowledge of"], [200, 300, "Drug effects"], [350, 450, "Survey"], [480, 540, "None"]]),
+            line(124, [[72, 160, "drug use"]]),
+            line(138, [[72, 160, "Skills"], [200, 300, "Refusal"], [350, 450, "Interview"], [480, 540, "None"]]),
+            line(150, [[72, 160, "Safety"], [200, 300, "Driving"], [350, 450, "Survey"], [480, 540, "None"]]),
+            line(162, [[72, 160, "Support"], [200, 300, "Peers"], [350, 450, "Interview"], [480, 540, "None"]]),
+        ]);
+        // A light rule between a record's wrapped label lines.
+        const words = rows(p, rules(119)).join(" ").split(/[\s|]+/).filter(Boolean);
+        for (const word of ["Measure", "Knowledge", "drug", "Survey"]) expect(words.filter((w) => w === word).length, word).toBeLessThanOrEqual(word === "Survey" ? 2 : 1);
+    });
+
+    it("never takes text records ruled off as a group for the column header", () => {
+        const p = page([
+            line(100, [[72, 160, "Knowledge"], [200, 330, "Drug effects"], [400, 460, "Survey"]]),
+            line(112, [[72, 160, "Skills"], [200, 330, "Refusal skills"], [400, 460, "Interview"]]),
+            line(132, [[72, 160, "Safety"], [200, 330, "Drinking and driving"], [400, 460, "Survey"]]),
+            line(144, [[72, 160, "Support"], [200, 330, "Peer networks"], [400, 460, "Interview"]]),
+            line(156, [[72, 160, "Leisure"], [200, 330, "Organized sports"], [400, 460, "Survey"]]),
+            line(168, [[72, 160, "Work"], [200, 330, "Paid jobs"], [400, 460, "Interview"]]),
+        ]);
+        expect(rows(p, rules(124)).slice(0, 2)).toEqual(["Knowledge | Drug effects | Survey", "Skills | Refusal skills | Interview"]);
+    });
+
+    it("never reads leading lines of values as a column header", () => {
+        // A table continued from the page before: its first records have no row labels.
+        const p = page([
+            line(100, [[200, 280, "1.23"], [330, 410, "4.56"]]),
+            line(110, [[200, 280, "2.34"], [330, 410, "5.67"]]),
+            line(124, [[72, 160, "Scenario A"], [200, 280, "12.1"], [330, 410, "-0.4"]]),
+            line(136, [[72, 160, "Scenario B"], [200, 280, "15.3"], [330, 410, "-0.9"]]),
+            line(148, [[72, 160, "Scenario C"], [200, 280, "18.0"], [330, 410, "-1.2"]]),
+        ]);
+        expect(rows(p).slice(0, 2)).toEqual(rows(p, none, false).slice(0, 2));
+    });
+
+    it("leaves records centred on their labels to the text's reading", () => {
+        const record = (y: number, n: string, a: string, b: string) => [
+            line(y, [[150, 280, a]]),
+            line(y + 8, [[72, 90, n], [350, 390, "4.10"], [460, 490, "A"]]),
+            line(y + 16, [[150, 280, b]]),
+        ];
+        const p = page([
+            line(100, [[150, 200, "Criterion"], [350, 390, "Rating"], [460, 490, "Group"]]),
+            ...record(114, "1", "Readiness of the logistics", "for digital transformation."),
+            ...record(146, "2", "Provision of human capital", "for digital transformation."),
+            line(178, [[72, 90, "3"], [150, 220, "Level of crime"], [350, 390, "3.87"], [460, 490, "B"]]),
+            line(194, [[72, 90, "4"], [150, 230, "Quality of roads"], [350, 390, "3.80"], [460, 490, "B"]]),
+        ]);
+        expect(rows(p)).toEqual(rows(p, none, false));
+    });
+
+    it("keeps the first record out of the header when a rule under it, not the headings, ends the header", () => {
+        // A blank heading over the label column: the line under the headings is the first record.
+        const p = page([
+            line(100, [[200, 330, "Measure"], [400, 460, "Source"]]),
+            line(116, [[72, 160, "Knowledge"], [200, 330, "Drug effects"], [400, 460, "Survey"]]),
+            line(136, [[72, 160, "Skills"], [200, 330, "Refusal skills"], [400, 460, "Interview"]]),
+            line(148, [[72, 160, "Safety"], [200, 330, "Drinking and driving"], [400, 460, "Survey"]]),
+            line(160, [[72, 160, "Support"], [200, 330, "Peer networks"], [400, 460, "Interview"]]),
+            line(172, [[72, 160, "Leisure"], [200, 330, "Organized sports"], [400, 460, "Survey"]]),
+        ]);
+        expect(rows(p, rules(130)).slice(0, 2)).toEqual(["Measure | Source", "Knowledge | Drug effects | Survey"]);
+    });
+
+    it("decides which tables are emitted as without the switch", () => {
+        // A one-column listing with lines left in the prose stays prose either way.
+        const p = page([
+            line(100, [[72, 300, "first entry of the list"]]),
+            line(112, [[72, 540, PROSE]]),
+            line(124, [[72, 300, "second entry of the list"]]),
+        ]);
+        const d = detection(p, [["table", [60, 60, 560, 700]]], (t) => t === PROSE);
+        d.routing!.tableGraphics = () => rules(110, 122);
+        const on = regionItemsForPage(p, d, undefined, { tableRowEvidence: true });
+        const off = regionItemsForPage(p, d);
+        expect(on.items.length).toBe(off.items.length);
+        expect(allText(on.page)).toEqual(allText(off.page));
+    });
+});
+
+describe("tableGraphics", () => {
+    const prim = (bbox: Rect, kind: Primitive["kind"], rgb: number, stroked = false): Primitive => ({ bbox, kind, rgb, curve: false, stroked, rect: true, imageHash: 0 });
+
+    it("types rules of any length and colour, band edges and light fills as row evidence", () => {
+        const g = tableGraphics([
+            prim([70, 100, 90, 100.5], "glyph", 0), // a short rule segment of one cell
+            prim([70, 120, 500, 120.4], "white", 0xffffff), // a white rule on a white page: nothing
+            prim([70, 130, 500, 142], "white", 0xf2f2f2), // light shading, typed white for the features
+            prim([70, 150, 500, 150.4], "white", 0xffffff), // a white rule on that shading
+            prim([70, 145, 500, 160], "mark", 0xcccccc),
+        ]);
+        expect(g.fills).toEqual([
+            [70, 130, 500, 142],
+            [70, 145, 500, 160],
+        ]);
+        expect(g.horizontal).toContainEqual([70, 100, 90, 100.5]);
+        expect(g.horizontal).not.toContainEqual([70, 120, 500, 120.4]);
+        expect(g.horizontal).toContainEqual([70, 150, 500, 150.4]);
+        expect(g.horizontal).toContainEqual([70, 130, 500, 130]);
+    });
+
+    it("keeps a white rule only where it crosses shading", () => {
+        const g = tableGraphics([prim([300, 90, 500, 150], "mark", 0xdddddd), prim([70, 120, 500, 120.4], "white", 0xffffff)]);
+        expect(g.horizontal).toContainEqual([300, 120, 500, 120.4]);
+        expect(g.horizontal).not.toContainEqual([70, 120, 500, 120.4]);
+    });
+
+    it("drops a white frame on the page but keeps one on shading", () => {
+        const frame = prim([70, 100, 500, 140], "mark", 0xffffff, true);
+        expect(tableGraphics([frame]).horizontal).toEqual([]);
+        const shaded = tableGraphics([prim([60, 90, 510, 150], "mark", 0xdddddd), frame]);
+        expect(shaded.horizontal).toContainEqual([70, 100, 500, 100]);
+    });
+
+    it("drops the edges where strips of one shading meet", () => {
+        const g = tableGraphics([prim([70, 100, 500, 112], "mark", 0xbbbbbb), prim([70, 112, 500, 124], "mark", 0xbbbbbb)]);
+        expect(g.horizontal).toEqual([
+            [70, 100, 500, 100],
+            [70, 124, 500, 124],
+        ]);
+        // Only where they meet: the rest of a partly shared edge still divides.
+        const partly = tableGraphics([prim([70, 94, 472, 116], "mark", 0xbbbbbb), prim([70, 116, 90, 135], "mark", 0xbbbbbb)]);
+        expect(partly.horizontal).toContainEqual([90, 116, 472, 116]);
+        expect(partly.horizontal).not.toContainEqual([70, 116, 472, 116]);
+        // A cell shaded in its band's colour draws no edge inside the band.
+        const inside = tableGraphics([prim([70, 90, 472, 190], "mark", 0xbbbbbb), prim([70, 116, 472, 127], "mark", 0xbbbbbb)]);
+        expect(inside.horizontal).toEqual([
+            [70, 90, 472, 90],
+            [70, 190, 472, 190],
+        ]);
+    });
+});
+
 describe("placeRegionItems", () => {
     // Two columns: left 72–290, right 320–540.
     const left = [textItem(0, [72, 80, 290, 200], ["A1.", "A2."]), textItem(1, [72, 400, 290, 500], ["B1."])];
@@ -1585,6 +1885,17 @@ describe("placeRegionItems", () => {
         const lower = draft("formula", [80, 115, 380, 160], [["y = 2"]]);
         const stacked = placeRegionItems(0, [caption], [lower, upper]);
         expect(stacked.items.map((i) => i.text)).toEqual(["x = 1", "y = 2", "Figure 1."]);
+    });
+
+    it("never separates a sentence from its continuation past the column's footnotes", () => {
+        // The left column ends mid-sentence above its footnote; the sentence
+        // goes on at the top of the right column, under a figure.
+        const body = textItem(0, [72, 80, 290, 600], ["Starts here and"], true);
+        const note = { ...textItem(1, [72, 650, 290, 700], ["1 A note."]), kind: "footnote" } as DocItem;
+        const items = [body, note, textItem(2, [320, 450, 540, 520], ["goes on here."])];
+        const fig = draft("picture", [320, 80, 540, 400]);
+        const out = placeRegionItems(0, items, [fig]);
+        expect(out.items.map((i) => i.kind)).toEqual(["text", "footnote", "text", "picture"]);
     });
 
     it("never separates a sentence from its continuation in the next item", () => {

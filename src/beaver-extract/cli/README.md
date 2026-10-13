@@ -317,8 +317,17 @@ graphics summary counts (`records`, `overflow`, `incomplete`) and:
   images are dropped before typing, as in detection).
 - `v5.regions`: the emitted region items (kind, public box, candidate), the
   structured export's region items in detection order (column detection's
-  splits applied); `v5.candidates`: the candidates with their
-  features, class probabilities, label and `containedIn` after routing.
+  splits applied); `v5.candidates`: the candidates with their `source`
+  (`graphics`, `caption`, `text` or `grid`), features, class probabilities,
+  label and `containedIn` after routing.
+
+Under schema 5 the candidates include grid candidates
+(`regions/gridCandidates.ts`: text-heavy tables, running text included) and
+each carries `gridFeatures` too; the manifest names them (`grid_features`), and
+`features` followed by `gridFeatures` is feature set `grid_feature_version`
+(`REGION_GRID_FEATURES`). With `--preset gridTableCandidates=false` only the
+other sources propose candidates, and `v5.regions` and `v5Route` are the
+shipped weights' decisions over those: not the shipped extraction.
 
 Boxes are in the structured export's frame: points, top-left origin, the page
 as displayed (`/Rotate` applied); a page set sideways keeps that frame, with
@@ -332,11 +341,16 @@ stage 2).
 
 `extract`, `profile`, `fixture evaluate` and `items export` take
 `--preset <switches>` to compare a preset switch against its schema's
-setting: comma-separated `name` or `name=true|false`. The only overridable
-switch is `learnedBoundaries` (item boundaries from the learned boundary model,
-on in schema 5): `learnedBoundaries=false` gives the paragraph detector's
+setting: comma-separated `name` or `name=true|false`. The overridable
+switches are `learnedBoundaries` (item boundaries from the learned boundary
+model, on in schema 5): `learnedBoundaries=false` gives the paragraph detector's
 heuristic boundaries, which a boundary training export with the heuristic's
-decisions and reasons needs. The output is then no longer the schema version
+decisions and reasons needs; `tableRowEvidence` (table rows read from row
+rules, fill bands and an anchor column before the text, on in schema 5):
+`tableRowEvidence=false` gives the text-only rows, for comparing table output
+on and off; and `gridTableCandidates` (grid candidates for text-heavy tables,
+on in schema 5): `gridTableCandidates=false` gives the region pass without
+them, for comparing region output on and off. The output is then no longer the schema version
 it names; `items export` records
 the overrides in its manifest (`preset_overrides`) and resumes a directory
 only with the same ones.
