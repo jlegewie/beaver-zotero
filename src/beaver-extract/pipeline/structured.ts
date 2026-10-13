@@ -23,7 +23,7 @@
 
 import { getEffectiveRepeatThreshold } from "../MarginFilter";
 import { logColumnDetection, type ColumnDetectionResult } from "../ColumnDetector";
-import { documentBodyExtents, regionFurnitureLines } from "../FilteredParagraphPipeline";
+import { documentBodyExtents, regionFurnitureLines, runningMarginLines } from "../FilteredParagraphPipeline";
 import { detectDominantTextOrientation, rotateBBox, type RotationAngle } from "../PageRotationNormalizer";
 import type { BoundaryCapture, ParagraphDetectionSettings } from "../ParagraphDetector";
 import type { SentenceSplitter } from "../SentenceMapper";
@@ -306,8 +306,19 @@ export function segmentPages(
                 repeat: runningRepeat,
                 bodyExtents,
             });
+            // Grid candidates end their rows at running headers and footers.
+            const running = ctx.gridCandidates
+                ? runningMarginLines(detailed, {
+                      marginAnalysis,
+                      marginZone: opts.marginZone,
+                      marginTextRows: opts.marginTextRows,
+                      pageRotation: rotation,
+                      repeat: runningRepeat,
+                      bodyExtents,
+                  })
+                : undefined;
             const graphics = pageCache!.graphicsFor(i);
-            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings, ctx.gridCandidates ?? false, !!ctx.regionObserver);
+            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings, ctx.gridCandidates ?? false, !!ctx.regionObserver, running);
             const regions = pass.result;
             if (regions.page !== detailed) {
                 // The target without absorbed lines replaces the walked page, so
@@ -533,6 +544,7 @@ function pageRegions(
     settings: RegionItemSettings | undefined,
     gridCandidates: boolean,
     allGridFeatures: boolean,
+    running?: ReadonlySet<RawLine>,
 ): Pick<RegionPassPage, "doc" | "detection" | "result" | "error"> {
     if (!graphics || !REGION_MODEL) {
         throw new Error(`Region detection needs a graphics summary and a model (page ${page.pageIndex})`);
@@ -548,6 +560,7 @@ function pageRegions(
             margin,
             gridCandidates,
             allGridFeatures,
+            ...(running ? { running } : {}),
         });
         return { doc, detection, result: regionItemsForPage(page, detection, vocabulary, settings) };
     } catch (err) {

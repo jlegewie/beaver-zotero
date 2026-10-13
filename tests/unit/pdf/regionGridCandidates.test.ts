@@ -766,3 +766,203 @@ describe("grid candidates and the emission gate", () => {
         expect(rest.blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text))).toEqual(sentences);
     });
 });
+
+describe("grid candidates that list entries", () => {
+    /** Rows of cells at the given left edges, `PITCH` + 5 apart from `y`; each cell 6 points a character wide, at most 300. */
+    const rowsOf = (cells: [number, string][][], y = 100): Spec[] =>
+        cells.flatMap((row, r) =>
+            row.map(([x, text]): Spec => ({ box: [x, y + r * (PITCH + 5), Math.min(x + 300, x + 6 * text.length), y + r * (PITCH + 5) + LINE], text })),
+        );
+    const found = (specs: Spec[]) => gridGroups(pageLines(page(specs)), new Set(), new Set(), new Set(), [], BS);
+    const TITLES = ["Prologue", "The Roots of the Field", "Neural Networks", "Looking and Seeing", "Learning to Play", "Words and Meaning", "On Understanding", "Notes"];
+
+    it("proposes nothing for a table of contents, whose pages increase down it", () => {
+        const contents = rowsOf(TITLES.map((t, i) => [[72, t], [500, `p. ${3 + 14 * i}`]]));
+        const groups = found(contents);
+        expect(groups).toHaveLength(1);
+        expect(groups[0].proposes).toBeNull();
+        expect(grids(contents)).toEqual([]);
+        // Numbered entries, and a column of pages without "p." under the head "Page".
+        const numbered = rowsOf([
+            [[72, "Chapter"], [500, "Page"]],
+            ...TITLES.map((t, i): [number, string][] => [[72, `${i + 1}`], [96, t], [500, String(3 + 14 * i)]]),
+        ]);
+        expect(found(numbered).map((g) => g.proposes)).toEqual([null]);
+    });
+
+    it("proposes nothing for a list of figures with dot leaders, nor for an index ordered by name", () => {
+        const figures = rowsOf(TITLES.map((t, i) => [[72, `${t} . . . . . . . . . .`], [500, String([12, 4, 30, 8, 22, 17, 40, 2][i])]]));
+        expect(found(figures).map((g) => g.proposes)).toEqual([null]);
+        const names = ["Adams Ruth", "Baker John", "Chen Wei", "Diaz Ana", "Evans Tom", "Fischer Lea", "Garcia Luis", "Hall Amy"];
+        const index = rowsOf(names.map((n, i) => [[72, n], [220, TITLES[i]], [500, String([67, 50, 82, 27, 14, 84, 9, 33][i])]]));
+        expect(found(index).map((g) => g.proposes)).toEqual([null]);
+    });
+
+    it("keeps a table whose last column holds small integers", () => {
+        const counts = [12, 4, 30, 8, 22, 17, 40, 2];
+        const LABELS = ["Survey", "Interview", "Archive", "Fieldwork", "Diary study", "Focus group", "Panel", "Case study"];
+        // Values that do not increase down the table, beside labels in no order.
+        const unordered = rowsOf(LABELS.map((t, i) => [[72, t], [500, String(counts[i])]]));
+        expect(found(unordered).map((g) => g.proposes)).toEqual([undefined]);
+        expect(grids(unordered)).toHaveLength(1);
+        // Increasing values under a header row.
+        const headed = rowsOf([[[72, "Method"], [500, "N"]], ...LABELS.map((t, i): [number, string][] => [[72, t], [500, String(2 + 5 * i)]])]);
+        expect(found(headed).map((g) => g.proposes)).toEqual([undefined]);
+        // Rows numbered one by one beside quotations.
+        const numberedRows = rowsOf(TITLES.map((t, i) => [[72, String(i + 1)], [96, `${t} was what the participant said`]]));
+        expect(found(numberedRows).map((g) => g.proposes)).toEqual([undefined]);
+        // A constant value beside descriptions: no pages, however ordered.
+        const DESCRIPTIONS = LABELS.map((t) => `${t} of the households in the sample`);
+        const constant = rowsOf(DESCRIPTIONS.map((t) => [[72, t], [500, "12"]]));
+        expect(found(constant).map((g) => g.proposes)).toEqual([undefined]);
+        // Descriptions sharing their first word, in no order beyond it, beside unordered values.
+        const shared = rowsOf(["share", "count", "mean", "rate", "total", "level", "index", "ratio"].map((w, i) => [[72, `The ${w} of the households`], [500, String(counts[i])]]));
+        expect(found(shared).map((g) => g.proposes)).toEqual([undefined]);
+        // Increasing counts under a table's caption.
+        const captioned: Spec[] = [
+            { box: [72, 76, 260, 76 + LINE], text: "Table 1. Sample size by method" },
+            ...rowsOf(LABELS.map((t, i) => [[72, `${t} of the households in the sample`], [500, String(10 + 7 * i)]])),
+        ];
+        const captionLines = pageLines(page(captioned));
+        const captionSet = new Set(captionLines.filter((l) => l.text.startsWith("Table 1.")));
+        expect(gridGroups(captionLines, captionSet, captionSet, new Set(), [], BS).map((g) => g.proposes)).toEqual([undefined]);
+        // A caption whose title ends with a number.
+        const numberedTitle = pageLines(page([{ box: [72, 76, 356, 76 + LINE], text: "Table 1. Sample size by method in Experiment 2" }, ...captioned.slice(1)]));
+        const numberedSet = new Set(numberedTitle.filter((l) => l.text.startsWith("Table 1.")));
+        expect(gridGroups(numberedTitle, numberedSet, numberedSet, new Set(), [], BS).map((g) => g.proposes)).toEqual([undefined]);
+        // A list of tables whose entries read as captions, each ending with its page.
+        const listed: Spec[] = [
+            { box: [72, 76, 198, 76 + LINE], text: "Table 1. Sample sizes" },
+            { box: [500, 76, 506, 76 + LINE], text: "3" },
+            ...rowsOf(TITLES.map((t, i) => [[72, `Table ${i + 2}. ${t}`], [500, String(5 + 4 * i)]])),
+        ];
+        const listedLines = pageLines(page(listed));
+        const entrySet = new Set(listedLines.filter((l) => l.text === "Table 1. Sample sizes"));
+        expect(gridGroups(listedLines, entrySet, entrySet, new Set(), [], BS).map((g) => g.proposes)).toEqual([null]);
+        // A headed table of increasing counts under a running head whose page number sits over
+        // the counts: judged on its rows short of the head, or by the header under that number.
+        const headedRows = [
+            ...rowsOf([[[72, "Journal of Testing Studies"], [500, "7"]]], 16),
+            ...rowsOf([[[72, "Method"], [500, "N"]], ...LABELS.map((t, i): [number, string][] => [[72, `${t} of the households`], [500, String(10 + 7 * i)]])], 40),
+        ];
+        const headedLines = pageLines(page(headedRows));
+        const running = new Set(headedLines.filter((l) => l.text === "Journal of Testing Studies" || (l.text === "7" && l.bbox[1] < 30)));
+        const withStops = gridGroups(headedLines, new Set(), new Set(), new Set(), [], BS, undefined, undefined, running);
+        expect(withStops).toHaveLength(1);
+        expect(withStops[0].proposes?.lines.map((l) => l.text)).toEqual(expect.arrayContaining(["Method", "N", "17"]));
+        expect(found(headedRows).map((g) => g.proposes)).not.toContain(null);
+        // Increasing values in the last of two columns of values.
+        const values = rowsOf(LABELS.map((t, i) => [[72, t], [300, (0.12 + 0.31 * (i % 3)).toFixed(2)], [500, String(2 + 5 * i)]]));
+        expect(found(values).map((g) => g.proposes)).toEqual([undefined]);
+    });
+});
+
+describe("grid candidates and running headers and footers", () => {
+    const LABELS = ["Survey", "Interview", "Archive", "Fieldwork", "Diary study", "Focus group"];
+    /** A running head, then six rows of a label and two values, then a "continued" line and a running foot. */
+    const specs: Spec[] = [
+        { box: [72, 40, 300, 40 + LINE], text: "Journal of Testing Studies 12 (2025)" },
+        { box: [500, 40, 512, 40 + LINE], text: "7" },
+        ...LABELS.flatMap((label, r): Spec[] => [
+            { box: [72, 70 + r * PITCH, 140, 70 + r * PITCH + LINE], text: label },
+            { box: [300, 70 + r * PITCH, 324, 70 + r * PITCH + LINE], text: (0.1 * r + 0.12).toFixed(2) },
+            { box: [480, 70 + r * PITCH, 512, 70 + r * PITCH + LINE], text: String(10 + ((r * 7) % 13)) },
+        ]),
+        { box: [72, 70 + 6 * PITCH, 190, 70 + 6 * PITCH + LINE], text: "(Continued)" },
+    ];
+    const lines = pageLines(page(specs));
+    const head = (l: { text: string }) => l.text.startsWith("Journal") || l.text === "7";
+    const groups = (lines: ReturnType<typeof pageLines>, stops: Set<(typeof lines)[number]>) => gridGroups(lines, new Set(), new Set(), new Set(), [], BS, undefined, undefined, stops);
+    /** The lines the page's candidates take from its grids. */
+    const taken = (lines: ReturnType<typeof pageLines>, stops: Set<(typeof lines)[number]>) =>
+        findCandidates(lines, [], W, H, BS, { grid: true, stops }).candidates.flatMap((c) => c.memberLines ?? []).map((l) => l.text);
+
+    it("ends a grid's rows at the page's running head and at a line saying the table continues", () => {
+        const [whole] = groups(lines, new Set());
+        expect(whole.lines.some(head)).toBe(true);
+        expect(whole.lines.map((l) => l.text)).toContain("(Continued)");
+        // Without stops, only the line saying the table continues ends its rows.
+        expect(whole.proposes!.lines.some(head)).toBe(true);
+        expect(whole.proposes!.lines.map((l) => l.text)).not.toContain("(Continued)");
+        expect(taken(lines, new Set())).toContain("7");
+        const found = groups(lines, new Set(lines.filter(head)));
+        expect(found).toHaveLength(1);
+        // Found as without the stops, it proposes the rows between them.
+        expect(found[0].bbox).toEqual(whole.bbox);
+        const texts = found[0].proposes!.lines.map((l) => l.text);
+        expect(texts).toContain("Survey");
+        expect(texts).toContain("Focus group");
+        expect(texts.some((t) => t.startsWith("Journal") || t === "7" || t === "(Continued)")).toBe(false);
+        expect(found[0].proposes!.bbox[1]).toBeCloseTo(70);
+        // A head whose cells happen to line up with the table's columns, set apart from its rows.
+        const aligned = pageLines(page([{ box: [300, 40, 400, 40 + LINE], text: "Journal of Testing" }, { box: [500, 40, 512, 40 + LINE], text: "7" }, ...specs.slice(2)]));
+        const [apart] = groups(aligned, new Set(aligned.filter((l) => l.text === "Journal of Testing" || l.text === "7")));
+        expect(apart.lines.map((l) => l.text)).toContain("Journal of Testing");
+        expect(apart.proposes!.lines.map((l) => l.text)).not.toContain("Journal of Testing");
+        const kept = taken(lines, new Set(lines.filter(head)));
+        expect(kept).toContain("Survey");
+        expect(kept.some((t) => t.startsWith("Journal") || t === "7" || t === "(Continued)")).toBe(false);
+    });
+
+    it("describes and classifies a grid cut short of a running head as the grid as found", () => {
+        const table = definitions(72, 180, 540, 130, 6);
+        const header: Spec[] = [
+            { box: [72, 104, 152, 104 + LINE], text: "J Test 12 (2025)" },
+            { box: [500, 104, 512, 104 + LINE], text: "7" },
+        ];
+        const cutLines = pageLines(page([...header, ...table.specs]));
+        const stops = new Set(cutLines.filter((l) => l.text === "J Test 12 (2025)" || l.text === "7"));
+        const found = (s?: Set<(typeof cutLines)[number]>) => findCandidates(cutLines, [], W, H, BS, { grid: true, ...(s ? { stops: s } : {}) });
+        const [whole] = found().candidates.filter((c) => c.source === "grid");
+        expect(whole.bbox[1]).toBeCloseTo(104);
+        const withStops = found(stops);
+        const [cut] = withStops.candidates.filter((c) => c.source === "grid");
+        expect(cut.bbox[1]).toBeCloseTo(130);
+        expect(cut.memberLines!.map((l) => l.text)).not.toContain("7");
+        expect(cut.found!.bbox).toEqual(whole.bbox);
+        expect(candidateFeatures(cut.found!, withStops, EMPTY_DOC_CONTEXT)).toEqual(candidateFeatures(whole, found(), EMPTY_DOC_CONTEXT));
+    });
+
+    it("keeps a row of several numbers alone, a table's column numbers set in the margin band", () => {
+        const numbers = [72, 300, 480].map((x, k): Spec => ({ box: [x, 40, x + 18, 40 + LINE], text: `(${k + 1})` }));
+        const numbered = pageLines(page([...numbers, ...specs.slice(2)]));
+        const [found] = groups(numbered, new Set(numbered.filter((l) => /^\(\d\)$/u.test(l.text))));
+        expect(found.lines.map((l) => l.text)).toContain("(2)");
+        // The line saying the table continues still ends its rows.
+        expect(found.proposes!.lines.map((l) => l.text)).toContain("(2)");
+        expect(found.proposes!.lines.map((l) => l.text)).not.toContain("(Continued)");
+        // Nor does a continued table's header of two cells set over its columns, at its rows' spacing.
+        const twoHeader = [
+            { box: [72, 64, 120, 64 + LINE] as Rect, text: "Variable" },
+            { box: [300, 64, 360, 64 + LINE] as Rect, text: "Definition" },
+        ];
+        const definitions = LABELS.flatMap((label, r): Spec[] => [
+            { box: [72, 80 + r * PITCH, 140, 80 + r * PITCH + LINE], text: label },
+            { box: [300, 80 + r * PITCH, 420, 80 + r * PITCH + LINE], text: `the ${label.toLowerCase()} measure` },
+        ]);
+        const continued = pageLines(page([...twoHeader, ...definitions]));
+        const [withHeader] = groups(continued, new Set(continued.filter((l) => l.text === "Variable" || l.text === "Definition")));
+        expect((withHeader.proposes ?? withHeader).lines.map((l) => l.text)).toEqual(expect.arrayContaining(["Variable", "Definition"]));
+        // Nor when it stands a little further off, as over a rule, its cells over the columns.
+        const ruled = pageLines(page([...twoHeader, ...definitions.map((d) => ({ ...d, box: [d.box[0], d.box[1] + 4, d.box[2], d.box[3] + 4] as Rect }))]));
+        const [overRule] = groups(ruled, new Set(ruled.filter((l) => l.text === "Variable" || l.text === "Definition")));
+        expect((overRule.proposes ?? overRule).lines.map((l) => l.text)).toEqual(expect.arrayContaining(["Variable", "Definition"]));
+        // Nor a header of two rows, each at the rows' spacing from the next.
+        const twoRows = pageLines(page([
+            { box: [72, 54, 120, 54 + LINE], text: "Variable" },
+            { box: [300, 54, 380, 54 + LINE], text: "Description" },
+            { box: [72, 67, 120, 67 + LINE], text: "(name)" },
+            { box: [300, 67, 360, 67 + LINE], text: "(text)" },
+            ...definitions,
+        ]));
+        const headerTexts = ["Variable", "Description", "(name)", "(text)"];
+        const [stacked] = groups(twoRows, new Set(twoRows.filter((l) => headerTexts.includes(l.text))));
+        expect((stacked.proposes ?? stacked).lines.map((l) => l.text)).toEqual(expect.arrayContaining(headerTexts));
+        // Nor does a header of words in every column, repeated on each page of a long table.
+        const header = ["Method", "Mean", "Count"].map((t, k): Spec => ({ box: [[72, 300, 480][k], 40, [72, 300, 480][k] + 30, 40 + LINE], text: t }));
+        const headed = pageLines(page([...header, ...specs.slice(2)]));
+        const [table] = groups(headed, new Set(headed.filter((l) => ["Method", "Mean", "Count"].includes(l.text))));
+        expect(table.proposes!.lines.map((l) => l.text)).toContain("Mean");
+    });
+});
+
