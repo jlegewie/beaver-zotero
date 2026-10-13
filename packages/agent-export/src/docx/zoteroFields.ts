@@ -47,6 +47,9 @@ export function citationFieldJson(cluster: FormattedCluster, citationID: string)
             uris: item.uris,
             itemData: item.itemData,
             ...(item.locator ? { locator: item.locator, label: item.label ?? 'page' } : {}),
+            ...(item.prefix ? { prefix: item.prefix } : {}),
+            ...(item.suffix ? { suffix: item.suffix } : {}),
+            ...(item.suppressAuthor ? { 'suppress-author': true } : {}),
         })),
         schema: CSL_CITATION_SCHEMA,
     };

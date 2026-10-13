@@ -21,6 +21,9 @@ export type SequenceCitationItem = {
     id: number | string;
     locator?: string;
     label?: string;
+    prefix?: string;
+    suffix?: string;
+    suppressAuthor?: boolean;
 };
 
 export type CitationSequenceRequest = {
@@ -272,6 +275,9 @@ export class CitationService {
             citationItems: cluster.items.map(item => ({
                 id: item.id,
                 ...(item.locator ? { locator: item.locator, label: item.label ?? "page" } : {}),
+                ...(item.prefix ? { prefix: item.prefix } : {}),
+                ...(item.suffix ? { suffix: item.suffix } : {}),
+                ...(item.suppressAuthor ? { "suppress-author": true } : {}),
             })),
             properties: { noteIndex: cluster.noteIndex },
         }));

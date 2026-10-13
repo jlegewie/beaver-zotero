@@ -34,3 +34,40 @@ export async function handleTestExportHttpRequest(request: any): Promise<any> {
     }
     return Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/export', request);
 }
+
+/**
+ * Dev-only `/beaver/test/export-note`: export a Zotero note to a file without
+ * the save dialog. Request: `{ path, note: { key, libraryRef? | libraryID? }
+ * | html (with title?), format?, styleId?, locale?, liveCitations?,
+ * linkItems?, colors?, includeHtml?, frontMatter?, citationPackage?,
+ * standalone? }`. `html` exports the given note HTML, so tests need no note
+ * in the library.
+ */
+export async function handleTestExportNoteHttpRequest(request: any): Promise<any> {
+    if (typeof request?.path !== 'string' || !request.path) {
+        return { error: 'path is required' };
+    }
+    if (!request.note && typeof request.html !== 'string') {
+        return { error: 'note or html is required' };
+    }
+    try {
+        return await Zotero.Beaver.exporter.exportNote({
+            note: request.note,
+            html: request.html,
+            title: request.title,
+            format: request.format ?? 'docx',
+            path: request.path,
+            styleId: request.styleId,
+            locale: request.locale,
+            liveCitations: request.liveCitations,
+            linkItems: request.linkItems,
+            colors: request.colors,
+            includeHtml: request.includeHtml,
+            frontMatter: request.frontMatter,
+            citationPackage: request.citationPackage,
+            standalone: request.standalone,
+        });
+    } catch (error: any) {
+        return { error: typeof error?.code === 'string' ? error.code : 'export_failed', message: String(error?.message ?? error) };
+    }
+}

@@ -9,11 +9,15 @@
  * window).
  */
 
-import type { ExportDoc, ExportSource, ExportWarning, FormattedCitations, LatexCitationPackage } from '@beaver/agent-export/types';
+import type { ExportDoc, ExportImage, ExportSource, ExportWarning, FormattedCitations, LatexCitationPackage } from '@beaver/agent-export/types';
 import type { WriteDocxResult, WriteHtmlResult, WriteLatexResult, WriteMarkdownResult } from '@beaver/agent-export/runtime';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { loadExportRuntime, type ExportRuntime } from './exportRuntime';
 import { formatExportCitations } from './exportCitations';
+import { loadNoteImages } from './noteImages';
+import { readNoteForExport } from './noteExportSource';
+import { resolveLibraryRef } from '../../utils/libraryIdentity';
+import { getLatestNoteHtml } from '../../utils/noteEditorIO';
 import { printHtmlToPdf } from './printPdf';
 import { BIB_FILE_MARKER, buildBibliographyFile } from './bibliographyFile';
 import { CitationService } from '../CitationService';
@@ -44,6 +48,24 @@ export interface ExportRequest {
     path?: string;
     /** Return the HTML a PDF was printed from (development endpoints). */
     includeHtml?: boolean;
+}
+
+/**
+ * Export of a Zotero note (`addon.exporter.exportNote`): the note as it is
+ * now, whoever wrote it. Format options are those of `ExportRequest`.
+ */
+export interface NoteExportRequest extends Omit<ExportRequest, 'source'> {
+    /** The note: its key and library (`libraryRef` preferred, or a local `libraryID`; default the user library). */
+    note?: { key: string; libraryRef?: string; libraryID?: number };
+    /** Development: export this note HTML instead of a note in the library. */
+    html?: string;
+    /** Title (file name) for `html`. */
+    title?: string;
+    /**
+     * Keep text colors, highlights and cell backgrounds (default: on for
+     * Word and PDF, off for LaTeX, where they need extra packages).
+     */
+    colors?: boolean;
 }
 
 type WriterStats = WriteDocxResult['stats'] | WriteHtmlResult['stats'] | WriteMarkdownResult['stats'] | WriteLatexResult['stats'];
@@ -127,6 +149,148 @@ export async function bibliographyPath(texPath: string): Promise<string> {
     throw new Error('Could not find a name for the bibliography file.');
 }
 
+/** What a write needs besides the document: the request's format options and the source's extras. */
+type WriteSettings = Omit<ExportRequest, 'source'> & {
+    provenance?: ExportSource['provenance'];
+    /** Images of a note document, by asset id. */
+    images?: Record<string, ExportImage>;
+};
+
+/** Names the document a folder of exported images belongs to, so a later export of it may write there again. */
+const IMAGE_FOLDER_MARKER = '.beaver-export';
+
+/**
+ * A folder for a document's images, next to it and named after it
+ * (`<name>-figures`, or `<name>_files` for Markdown), in characters LaTeX
+ * reads in a path. An existing folder is reused only when an export of the
+ * same document made it; otherwise the next free numbered name is used.
+ * Without `create`, only an existing folder of the document is returned.
+ */
+async function imageFolder(documentPath: string, suffix: string, create: true): Promise<string>;
+async function imageFolder(documentPath: string, suffix: string, create: false): Promise<string | null>;
+async function imageFolder(documentPath: string, suffix: string, create: boolean): Promise<string | null> {
+    const directory = PathUtils.parent(documentPath) ?? '';
+    const owner = `Images of ${PathUtils.filename(documentPath)}, exported by Beaver.`;
+    const base = `${PathUtils.filename(documentPath).replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'export'}${suffix}`;
+    for (let index = 1; index < 1000; index++) {
+        const folder = PathUtils.join(directory, index === 1 ? base : `${base}-${index}`);
+        const marker = PathUtils.join(folder, IMAGE_FOLDER_MARKER);
+        if (!await IOUtils.exists(folder)) {
+            if (!create) return null;
+            await IOUtils.makeDirectory(folder, { createAncestors: false });
+            await IOUtils.writeUTF8(marker, `${owner}\n`);
+            return folder;
+        }
+        const content = await IOUtils.readUTF8(marker).catch(() => '');
+        if (content.trim() === owner) return folder;
+    }
+    throw new Error('Could not find a folder name for the exported images.');
+}
+
+/** Images written next to a document, put in place together with it. */
+interface StagedImages {
+    /** The images with their paths relative to the document. */
+    images: Record<string, ExportImage>;
+    /** The image files. */
+    files: string[];
+    /** Put the images in place, keeping what they replace until `finish` or `restore`. */
+    commit(): Promise<void>;
+    /** The document is written: drop the replaced images. */
+    finish(): Promise<void>;
+    /** The export failed: put the replaced images back and remove the new ones. */
+    restore(): Promise<void>;
+}
+
+/**
+ * Stage a document's images as files next to it, each with its path relative
+ * to the document. LaTeX gets the PNG rendering of SVG and GIF images. Files
+ * are written under temporary names; `commit` swaps them in (keeping the
+ * images an earlier export of the document wrote), so a failed export can
+ * leave the earlier one as it was.
+ */
+async function stageImageFiles(
+    documentPath: string,
+    images: Record<string, ExportImage>,
+    format: 'latex' | 'markdown',
+): Promise<StagedImages> {
+    const staged: Array<{ temporary: string; path: string; backup: string; replaced: boolean; placed: boolean }> = [];
+    const out: Record<string, ExportImage> = {};
+    const quietly = (operation: Promise<unknown>) => operation.catch((error: unknown) => logger(`InstanceExport: image file: ${error}`, 1));
+    const restore = async () => {
+        for (const file of staged) {
+            if (file.placed) await quietly(IOUtils.remove(file.path, { ignoreAbsent: true }));
+            if (file.replaced) await quietly(IOUtils.move(file.backup, file.path, { noOverwrite: false }));
+            await quietly(IOUtils.remove(file.temporary, { ignoreAbsent: true }));
+        }
+    };
+    const none = async () => {};
+    const suffix = format === 'latex' ? '-figures' : '_files';
+    /** Remove the images an earlier export of the document had and this one does not. */
+    const removeStale = async (folder: string | null) => {
+        if (!folder) return;
+        const current = new Set(staged.map(file => file.path));
+        const children = await IOUtils.getChildren(folder).catch(() => [] as string[]);
+        for (const child of children) {
+            if (/^image-\d+\.(?:png|jpg|gif|svg)$/.test(PathUtils.filename(child)) && !current.has(child)) {
+                await quietly(IOUtils.remove(child, { ignoreAbsent: true }));
+            }
+        }
+    };
+    if (Object.keys(images).length === 0) {
+        return { images, files: [], commit: none, finish: async () => removeStale(await imageFolder(documentPath, suffix, false)), restore: none };
+    }
+    const folder = await imageFolder(documentPath, suffix, true);
+    const folderName = PathUtils.filename(folder);
+    const extensions: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg' };
+    try {
+        for (const [id, image] of Object.entries(images)) {
+            // LaTeX's graphics drivers read neither SVG nor GIF.
+            const usePng = format === 'latex' && (image.mime === 'image/svg+xml' || image.mime === 'image/gif');
+            const data = usePng ? image.png : image.data;
+            const extension = usePng ? 'png' : extensions[image.mime];
+            if (!data || !extension) continue;
+            const name = `${id}.${extension}`;
+            const file = {
+                temporary: PathUtils.join(folder, `.${name}.partial`),
+                path: PathUtils.join(folder, name),
+                backup: PathUtils.join(folder, `.${name}.previous`),
+                replaced: false,
+                placed: false,
+            };
+            staged.push(file);
+            await IOUtils.write(file.temporary, data);
+            out[id] = { ...image, path: `${folderName}/${name}` };
+        }
+    } catch (error) {
+        await restore();
+        throw error;
+    }
+    return {
+        images: out,
+        files: staged.map(file => file.path),
+        commit: async () => {
+            for (const file of staged) {
+                if (await IOUtils.exists(file.path)) {
+                    await IOUtils.move(file.path, file.backup, { noOverwrite: false });
+                    file.replaced = true;
+                }
+                await IOUtils.move(file.temporary, file.path, { noOverwrite: false });
+                file.placed = true;
+            }
+        },
+        finish: async () => {
+            for (const file of staged) {
+                if (file.replaced) await quietly(IOUtils.remove(file.backup, { ignoreAbsent: true }));
+            }
+            await removeStale(folder);
+        },
+        restore,
+    };
+}
+
+/** Citation state of a source with no Beaver citation tags (a Zotero note). */
+const EMPTY_SNAPSHOT = { citationsByKey: {}, externalReferences: {}, externalItemMapping: {}, pageLabelsByAttachmentId: {} };
+
 /** Today's date, written out in the citation locale (`October 5, 2026`). */
 function longDate(locale: string): string {
     try {
@@ -141,20 +305,22 @@ export class InstanceExport {
     private ownCitationService: CitationService | null = null;
     /** The save dialog is not modal across windows; one export asks at a time. */
     private choosingPath = false;
+    /** Writes in progress by destination: exports to one path write one after another. */
+    private readonly writing = new Map<string, Promise<unknown>>();
 
     private getRuntime(): ExportRuntime {
         this.runtime ??= loadExportRuntime();
         return this.runtime;
     }
 
-    private async choosePath(request: ExportRequest, windowId: string | undefined): Promise<string | null> {
-        const format = FORMATS[request.format];
+    private async choosePath(exportFormat: ExportFormat, title: string, windowId: string | undefined): Promise<string | null> {
+        const format = FORMATS[exportFormat];
         const runtime = Zotero.Beaver?.runtime?.resolveWindow(windowId);
         if (!runtime) throw windowUnavailable();
         const { FilePicker } = ChromeUtils.importESModule('chrome://zotero/content/modules/filePicker.mjs');
         const picker = new FilePicker();
         picker.init(runtime.hostWindow, 'Export', picker.modeSave);
-        picker.defaultString = exportFileName(request.source.title, format.extension);
+        picker.defaultString = exportFileName(title, format.extension);
         picker.defaultExtension = format.extension;
         picker.appendFilter(format.filterTitle, `*.${format.extension}`);
         const result = await picker.show();
@@ -164,27 +330,32 @@ export class InstanceExport {
         return picker.file as string;
     }
 
+    /** The citation service; an export started before startup assigned the shared one uses its own (the sequence API keeps no state). */
+    private citationService(): Pick<CitationService, 'formatCitationSequence' | 'resolveStyle'> {
+        return Zotero.Beaver?.citationService
+            ?? (this.ownCitationService ??= new CitationService({ log: (message: string) => logger(message, 4) }));
+    }
+
+    /** `path`, or where the user chooses to save (null when canceled). */
+    private async outputPath(format: ExportFormat, title: string, path: string | undefined, windowId: string | undefined): Promise<string | null> {
+        if (path) return path;
+        if (this.choosingPath) throw new Error('An export is already waiting for a file name.');
+        this.choosingPath = true;
+        try {
+            return await this.choosePath(format, title, windowId);
+        } finally {
+            this.choosingPath = false;
+        }
+    }
+
     /**
      * Export a source to a file. Asks where to save unless `request.path` is
      * given; `windowId` is the requesting window, which parents the dialog.
      */
     async run(request: ExportRequest, context: { windowId?: string } = {}): Promise<ExportResult> {
         if (!FORMATS[request.format]) throw new Error(`Unsupported export format: ${request.format}`);
-        // The sequence API keeps no state between calls, so an export started
-        // before startup has assigned the shared service uses its own.
-        const citationService = Zotero.Beaver?.citationService
-            ?? (this.ownCitationService ??= new CitationService({ log: (message: string) => logger(message, 4) }));
-
-        if (!request.path && this.choosingPath) throw new Error('An export is already waiting for a file name.');
-        let path = request.path ?? null;
-        if (!path) {
-            this.choosingPath = true;
-            try {
-                path = await this.choosePath(request, context.windowId);
-            } finally {
-                this.choosingPath = false;
-            }
-        }
+        const citationService = this.citationService();
+        const path = await this.outputPath(request.format, request.source.title, request.path, context.windowId);
         if (!path) return { status: 'canceled' };
 
         const started = Date.now();
@@ -197,7 +368,7 @@ export class InstanceExport {
             liveCitations,
         });
         const bibliographyTitle = citations.styleClass === 'note' ? 'Bibliography' : 'References';
-        const written = await this.write(runtime, request, path, doc, citations, bibliographyTitle);
+        const written = await this.write(runtime, { ...request, provenance: request.source.provenance }, path, doc, citations, bibliographyTitle);
         logger(`InstanceExport: wrote ${request.format} (${doc.clusters.length} citations) in ${Date.now() - started} ms`, 3);
 
         return {
@@ -214,10 +385,105 @@ export class InstanceExport {
         };
     }
 
-    /** Write the document in the requested format at `path`. */
-    private async write(
+    /**
+     * Export a Zotero note as it is now: its content as the note editor shows
+     * it, and its citations as stored (live Zotero citations in Word). Asks
+     * where to save unless `request.path` is given; `windowId` is the
+     * requesting window, which parents the dialog.
+     */
+    async exportNote(request: NoteExportRequest, context: { windowId?: string } = {}): Promise<ExportResult> {
+        if (!FORMATS[request.format]) throw new Error(`Unsupported export format: ${request.format}`);
+        let note: Zotero.Item | null = null;
+        let html: string;
+        let title: string;
+        if (request.note) {
+            // Without a library, the note is in the user's own library.
+            const libraryID = request.note.libraryRef || request.note.libraryID
+                ? resolveLibraryRef({ library_ref: request.note.libraryRef, library_id: request.note.libraryID ?? 0 })
+                : Zotero.Libraries.userLibraryID;
+            const item = libraryID ? await Zotero.Items.getByLibraryAndKeyAsync(libraryID, request.note.key) : null;
+            if (!item || !(item as Zotero.Item).isNote()) {
+                throw Object.assign(new Error('The note could not be found.'), { code: 'note_not_found' });
+            }
+            note = item as Zotero.Item;
+            await note.loadAllData();
+            // An open editor may hold edits Zotero has not saved yet.
+            html = getLatestNoteHtml(note);
+            title = note.getNoteTitle() || 'Note';
+        } else if (typeof request.html === 'string') {
+            html = request.html;
+            title = request.title?.trim() || 'Note';
+        } else {
+            throw new Error('A note or note HTML is required.');
+        }
+
+        const path = await this.outputPath(request.format, title, request.path, context.windowId);
+        if (!path) return { status: 'canceled' };
+
+        const started = Date.now();
+        const runtime = this.getRuntime();
+        const { doc: json, citationItems } = readNoteForExport(html);
+        const colors = request.colors ?? (request.format === 'docx' || request.format === 'pdf');
+        const doc = runtime.parseNoteDoc(json, { colors });
+        const liveCitations = request.format === 'docx' && (request.liveCitations ?? true);
+        const { citations, warnings } = await formatExportCitations(doc, EMPTY_SNAPSHOT, this.citationService(), {
+            styleId: request.styleId,
+            locale: request.locale,
+            liveCitations,
+            noteCitationItems: citationItems,
+        });
+        const { images, missing, remote } = await loadNoteImages(note, doc.images ?? {});
+        if (missing > 0) {
+            warnings.push({
+                code: 'images_missing',
+                message: `${missing} image${missing === 1 ? '' : 's'} could not be loaded and ${missing === 1 ? 'was' : 'were'} left out.`,
+                count: missing,
+            });
+        }
+        if (remote > 0) {
+            warnings.push({
+                code: 'images_linked',
+                message: `${remote} image${remote === 1 ? '' : 's'} on the web ${remote === 1 ? 'is' : 'are'} linked, not included.`,
+                count: remote,
+            });
+        }
+        const bibliographyTitle = citations.styleClass === 'note' ? 'Bibliography' : 'References';
+        const written = await this.write(runtime, { ...request, images }, path, doc, citations, bibliographyTitle);
+        logger(`InstanceExport: wrote note as ${request.format} (${doc.clusters.length} citations) in ${Date.now() - started} ms`, 3);
+
+        return {
+            status: 'saved',
+            path,
+            files: written.files,
+            warnings: [...warnings, ...written.warnings],
+            stats: {
+                ...written.stats,
+                clusters: doc.clusters.length,
+                bibliographyEntries: citations.bibliography?.entries.length ?? 0,
+            },
+            ...(written.html !== undefined ? { html: written.html } : {}),
+        };
+    }
+
+    /**
+     * Write the document in the requested format at `path`, after any other
+     * write to the same path (their image and bibliography files would collide).
+     */
+    private write(...args: Parameters<InstanceExport['writeFiles']>): Promise<WrittenExport> {
+        const path = args[2];
+        const previous = this.writing.get(path) ?? Promise.resolve();
+        const next = previous.catch(() => {}).then(() => this.writeFiles(...args));
+        this.writing.set(path, next);
+        const release = () => {
+            if (this.writing.get(path) === next) this.writing.delete(path);
+        };
+        next.then(release, release);
+        return next;
+    }
+
+    private async writeFiles(
         runtime: ExportRuntime,
-        request: ExportRequest,
+        request: WriteSettings,
         path: string,
         doc: ExportDoc,
         citations: FormattedCitations,
@@ -229,25 +495,37 @@ export class InstanceExport {
                     doc,
                     citations,
                     options: { linkItems: request.linkItems ?? false, bibliographyTitle, notesTitle: 'Notes' },
+                    images: request.images,
                 });
                 await printHtmlToPdf(result.html, path, { title: doc.title.trim() || 'Beaver export', page: result.page });
                 return { files: [path], warnings: result.warnings, stats: result.stats, ...(request.includeHtml ? { html: result.html } : {}) };
             }
             case 'markdown': {
-                const { threadId, runIds } = request.source.provenance;
+                const threadId = request.provenance?.threadId;
+                const runIds = request.provenance?.runIds ?? [];
                 const frontMatter = request.frontMatter
                     ? {
                         date: new Date().toISOString().slice(0, 10),
                         ...(threadId && runIds.length > 0 ? { source: `zotero://beaver/thread/${threadId}/run/${runIds[runIds.length - 1]}` } : {}),
                     }
                     : null;
-                const result = runtime.writeMarkdown({
-                    doc,
-                    citations,
-                    options: { linkItems: request.linkItems ?? false, bibliographyTitle, frontMatter },
-                });
-                await IOUtils.writeUTF8(path, result.markdown);
-                return { files: [path], warnings: [], stats: result.stats };
+                const staged = request.images ? await stageImageFiles(path, request.images, 'markdown') : null;
+                try {
+                    const result = runtime.writeMarkdown({
+                        doc,
+                        citations,
+                        options: { linkItems: request.linkItems ?? false, bibliographyTitle, frontMatter },
+                        images: staged?.images,
+                    });
+                    // Images first: the document is replaced only once they are in place.
+                    await staged?.commit();
+                    await IOUtils.writeUTF8(path, result.markdown);
+                    await staged?.finish();
+                    return { files: [path, ...(staged?.files ?? [])], warnings: result.warnings, stats: result.stats };
+                } catch (error) {
+                    await staged?.restore();
+                    throw error;
+                }
             }
             case 'latex': {
                 const citationPackage = request.citationPackage === 'natbib' ? 'natbib' : 'biblatex';
@@ -256,41 +534,51 @@ export class InstanceExport {
                     ? await buildBibliographyFile(cited, citationPackage === 'natbib' ? 'bibtex' : 'biblatex')
                     : null;
                 const bibPath = bibliography && Object.keys(bibliography.keys).length > 0 ? await bibliographyPath(path) : null;
-                const result = runtime.writeLatex({
-                    doc,
-                    citations,
-                    keys: bibliography?.keys ?? {},
-                    options: {
-                        citationPackage,
-                        standalone: request.standalone ?? true,
-                        bibFileName: bibPath ? PathUtils.filename(bibPath) : null,
-                        linkItems: request.linkItems ?? false,
-                        bibliographyTitle,
-                        date: longDate(citations.locale),
-                    },
-                });
-                const files = [path];
-                // The bibliography first: a .tex file without it would not compile.
-                let previousBib: string | null = null;
-                if (bibPath && bibliography) {
-                    if (await IOUtils.exists(bibPath)) previousBib = await IOUtils.readUTF8(bibPath);
-                    await IOUtils.writeUTF8(bibPath, `${bibliographyHeader(PathUtils.filename(path))}\n\n${bibliography.bib}\n`);
-                    files.push(bibPath);
-                }
+                const staged = request.images ? await stageImageFiles(path, request.images, 'latex') : null;
                 try {
-                    await IOUtils.writeUTF8(path, result.tex);
-                } catch (error) {
-                    // The previous export's document still needs its bibliography;
-                    // a new bibliography without its document is of no use.
-                    if (bibPath && files.includes(bibPath)) {
-                        const restore = previousBib !== null
-                            ? IOUtils.writeUTF8(bibPath, previousBib)
-                            : IOUtils.remove(bibPath, { ignoreAbsent: true });
-                        await restore.catch((restoreError: unknown) => logger(`InstanceExport: could not restore ${bibPath}: ${restoreError}`, 1));
+                    const result = runtime.writeLatex({
+                        doc,
+                        citations,
+                        images: staged?.images,
+                        keys: bibliography?.keys ?? {},
+                        options: {
+                            citationPackage,
+                            standalone: request.standalone ?? true,
+                            bibFileName: bibPath ? PathUtils.filename(bibPath) : null,
+                            linkItems: request.linkItems ?? false,
+                            bibliographyTitle,
+                            date: longDate(citations.locale),
+                        },
+                    });
+                    const files = [path];
+                    // The bibliography first: a .tex file without it would not compile.
+                    let previousBib: string | null = null;
+                    if (bibPath && bibliography) {
+                        if (await IOUtils.exists(bibPath)) previousBib = await IOUtils.readUTF8(bibPath);
+                        await IOUtils.writeUTF8(bibPath, `${bibliographyHeader(PathUtils.filename(path))}\n\n${bibliography.bib}\n`);
+                        files.push(bibPath);
                     }
+                    try {
+                        // Images first: the document is replaced only once they are in place.
+                        await staged?.commit();
+                        await IOUtils.writeUTF8(path, result.tex);
+                    } catch (error) {
+                        // The previous export's document still needs its bibliography;
+                        // a new bibliography without its document is of no use.
+                        if (bibPath && files.includes(bibPath)) {
+                            const restore = previousBib !== null
+                                ? IOUtils.writeUTF8(bibPath, previousBib)
+                                : IOUtils.remove(bibPath, { ignoreAbsent: true });
+                            await restore.catch((restoreError: unknown) => logger(`InstanceExport: could not restore ${bibPath}: ${restoreError}`, 1));
+                        }
+                        throw error;
+                    }
+                    await staged?.finish();
+                    return { files: [...files, ...(staged?.files ?? [])], warnings: result.warnings, stats: result.stats };
+                } catch (error) {
+                    await staged?.restore();
                     throw error;
                 }
-                return { files, warnings: result.warnings, stats: result.stats };
             }
             default: {
                 const liveCitations = request.liveCitations ?? true;
@@ -298,6 +586,7 @@ export class InstanceExport {
                     doc,
                     citations,
                     options: { liveCitations, linkItems: request.linkItems ?? true, bibliographyTitle },
+                    images: request.images,
                 });
                 await IOUtils.write(path, result.bytes);
                 return { files: [path], warnings: result.warnings, stats: result.stats };

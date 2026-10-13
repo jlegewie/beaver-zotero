@@ -223,6 +223,11 @@ thead { display: table-header-group; }
 tr { break-inside: avoid; }
 th, td { padding: 2pt 5pt; vertical-align: top; text-align: left; }
 thead th { border-bottom: 0.5pt solid ${colors.text}; }
+/* Zotero note tables: cells hold paragraphs and lists, so they get a grid. */
+table.note-table th, table.note-table td { border: 0.5pt solid ${colors.rule}; }
+table.note-table td > :first-child, table.note-table th > :first-child { margin-top: 0; }
+table.note-table td > :last-child, table.note-table th > :last-child { margin-bottom: 0; }
+.note-image { break-inside: avoid; }
 .keep { break-inside: avoid; }
 .math-display { margin: ${spacing.blockBefore}pt 0 ${spacing.paragraphAfter}pt; text-align: center; break-inside: avoid; }
 .math-source { background: none; padding: 0; }

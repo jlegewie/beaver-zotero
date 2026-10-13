@@ -8,20 +8,23 @@
  * numbered note, collected with the markdown footnotes into an endnotes
  * section before the bibliography (print has no CSS footnotes).
  *
- * The page loads nothing: no scripts, no remote resources (images are written
- * as their alt text), and a content security policy that forbids both.
+ * The page loads nothing: no scripts, no remote resources, and a content
+ * security policy that forbids both. Images of Zotero notes are embedded as
+ * data URIs; any other image is written as its alt text.
  */
 
 import katex from 'katex';
 import { KATEX_MACROS, katexSource } from '../math/latexToOmml';
 import { activityLabelParts } from '../activity';
-import { itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identity/itemLinks';
-import type { MdBlock, MdFootnoteDefinition, MdInline, MdTable } from '../mdast';
+import type { MdBlock, MdBlockLayout, MdFootnoteDefinition, MdImage, MdInline, MdTable } from '../mdast';
+import { exportLinkTarget } from '../links';
+import { base64 } from '../note/base64';
+import { trailingText } from '../note/inlineText';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { decodeHtmlEntities } from '../citations/inlineHtml';
 import { paperSize } from '../page';
-import type { ExportDoc, ExportWarning, FormattedCitations, FormattedCluster, HtmlExportOptions } from '../types';
-import { escapeHtml, isWebLink, keepUrlStartsTogether, sanitizeCslHtml } from './escape';
+import type { ExportDoc, ExportImage, ExportWarning, FormattedCitations, FormattedCluster, HtmlExportOptions } from '../types';
+import { escapeHtml, keepUrlStartsTogether, sanitizeCslHtml } from './escape';
 import { HTML_THEME, stylesheet, type HtmlTheme } from './theme';
 
 export interface WriteHtmlInput {
@@ -30,6 +33,8 @@ export interface WriteHtmlInput {
     options: HtmlExportOptions;
     /** Formatting; defaults to `HTML_THEME`. */
     theme?: HtmlTheme;
+    /** Images of the document by asset id (Zotero notes). */
+    images?: Record<string, ExportImage>;
 }
 
 /** Page setup the printer applies (paper size and page numbers are not CSS). */
@@ -52,6 +57,19 @@ export interface WriteHtmlResult {
  * are its only resource.
  */
 const CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'";
+/** With embedded images, which load from their own data URIs and nowhere else. */
+const CONTENT_SECURITY_POLICY_IMAGES = `${CONTENT_SECURITY_POLICY}; img-src data:`;
+
+/** Image types a page shows from a data URI. */
+const PAGE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/svg+xml', 'image/webp', 'image/bmp']);
+
+/** Inline style of a note block's layout, as an attribute string (with its leading space). */
+function layoutAttributes(node: MdBlockLayout): string {
+    const styles: string[] = [];
+    if (node.align && node.align !== 'left') styles.push(`text-align:${node.align}`);
+    if (node.indent) styles.push(`margin-inline-start:${node.indent * 2}em`);
+    return (styles.length > 0 ? ` style="${styles.join(';')}"` : '') + (node.dir === 'rtl' ? ' dir="rtl"' : '');
+}
 
 /** Typographic double quotes for a plain label (`"query"` → “query”). */
 function curlyQuotes(text: string): string {
@@ -109,6 +127,8 @@ class HtmlWriter {
     private insideNote = false;
     /** Depth of open links; anchors cannot nest. */
     private linkDepth = 0;
+    /** Images embedded as data URIs. */
+    private embeddedImages = 0;
 
     constructor(private readonly input: WriteHtmlInput) {
         this.theme = input.theme ?? HTML_THEME;
@@ -140,16 +160,39 @@ class HtmlWriter {
                 }
                 case 'emphasis':
                     out += `<em>${this.inlines(node.children, definitions)}</em>`;
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'strong':
                     out += `<strong>${this.inlines(node.children, definitions)}</strong>`;
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'delete':
                     out += `<del>${this.inlines(node.children, definitions)}</del>`;
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
+                case 'underline': {
+                    const style = node.color ? ` style="text-decoration-color:${escapeHtml(node.color)}"` : '';
+                    out += `<u${style}>${this.inlines(node.children, definitions)}</u>`;
+                    lastText = trailingText(node.children);
+                    break;
+                }
+                case 'subscript':
+                case 'superscript': {
+                    const tag = node.type === 'subscript' ? 'sub' : 'sup';
+                    out += `<${tag}>${this.inlines(node.children, definitions)}</${tag}>`;
+                    lastText = trailingText(node.children);
+                    break;
+                }
+                case 'styled': {
+                    const styles = [
+                        ...(node.color ? [`color:${node.color}`] : []),
+                        ...(node.background ? [`background-color:${node.background}`] : []),
+                    ];
+                    const content = this.inlines(node.children, definitions);
+                    out += styles.length > 0 ? `<span style="${escapeHtml(styles.join(';'))}">${content}</span>` : content;
+                    lastText = trailingText(node.children);
+                    break;
+                }
                 case 'inlineCode':
                     out += `<code>${escapeHtml(node.value)}</code>`;
                     lastText = node.value;
@@ -168,12 +211,14 @@ class HtmlWriter {
                     out += this.link(node.url, node.children, definitions);
                     lastText = 'x';
                     break;
-                case 'image':
-                    if (node.alt) {
-                        out += `<em>${escapeHtml(node.alt)}</em>`;
-                        lastText = node.alt;
+                case 'image': {
+                    const html = this.image(node, definitions);
+                    if (html) {
+                        out += html;
+                        lastText = 'x';
                     }
                     break;
+                }
                 case 'inlineMath':
                     out += this.math(node.value, false);
                     lastText = 'x';
@@ -198,13 +243,29 @@ class HtmlWriter {
         return out;
     }
 
-    private link(url: string, children: MdInline[], definitions: Map<string, MdFootnoteDefinition>): string {
-        let target: string | null = null;
-        if (parseItemLinkHref(url)) {
-            target = this.input.options.linkItems ? itemLinkExportHref(url) : null;
-        } else if (isWebLink(url)) {
-            target = url.trim();
+    /**
+     * An image: embedded as a data URI when the host loaded it, at the note's
+     * size and never wider than the page; otherwise its alt text, a link to an
+     * image on the web (never loaded), or a placeholder.
+     */
+    private image(node: MdImage, definitions: Map<string, MdFootnoteDefinition>): string {
+        const asset = node.assetId ? this.input.images?.[node.assetId] : undefined;
+        if (!asset || !PAGE_IMAGE_TYPES.has(asset.mime)) {
+            if (node.assetId && this.input.doc.images?.[node.assetId]?.kind === 'remote' && node.url) {
+                return this.link(node.url, [{ type: 'text', value: node.alt || '[Image]' }], definitions);
+            }
+            const text = node.alt || (node.assetId ? '[Image not available]' : '');
+            return text ? `<em>${escapeHtml(text)}</em>` : '';
         }
+        // A size the host could not measure: the width of a typical figure.
+        const width = node.width ?? (node.height && asset.height ? (node.height * asset.width) / asset.height : asset.width || 480);
+        const style = `width:${Math.max(1, Math.round(width))}px;max-width:100%;height:auto`;
+        this.embeddedImages += 1;
+        return `<img class="note-image" src="data:${asset.mime};base64,${base64(asset.data)}" alt="${escapeHtml(node.alt ?? '')}" style="${style}">`;
+    }
+
+    private link(url: string, children: MdInline[], definitions: Map<string, MdFootnoteDefinition>): string {
+        const target = exportLinkTarget(url, this.input.options.linkItems);
         if (!target || this.linkDepth > 0) return this.inlines(children, definitions);
         this.linkDepth += 1;
         const content = this.inlines(children, definitions);
@@ -292,11 +353,11 @@ class HtmlWriter {
         for (const node of nodes) {
             switch (node.type) {
                 case 'paragraph':
-                    out.push({ html: `<p>${this.inlines(node.children, definitions)}</p>\n`, kind: 'text' });
+                    out.push({ html: `<p${layoutAttributes(node)}>${this.inlines(node.children, definitions)}</p>\n`, kind: 'text' });
                     break;
                 case 'heading': {
                     const level = Math.min(Math.max(node.depth, 1), 6);
-                    out.push({ html: `<h${level}>${this.inlines(node.children, definitions)}</h${level}>\n`, kind: 'heading' });
+                    out.push({ html: `<h${level}${layoutAttributes(node)}>${this.inlines(node.children, definitions)}</h${level}>\n`, kind: 'heading' });
                     break;
                 }
                 case 'thematicBreak':
@@ -346,7 +407,7 @@ class HtmlWriter {
             const [first, ...rest] = item.children;
             let content: string;
             if (first?.type === 'paragraph') {
-                content = `<p>${checkbox}${this.inlines(first.children, definitions)}</p>\n${this.blocks(rest, definitions)}`;
+                content = `<p${layoutAttributes(first)}>${checkbox}${this.inlines(first.children, definitions)}</p>\n${this.blocks(rest, definitions)}`;
             } else {
                 content = `${checkbox ? `<p>${checkbox}</p>\n` : ''}${this.blocks(item.children, definitions)}`;
             }
@@ -355,7 +416,37 @@ class HtmlWriter {
         return `${out}</${tag}>\n`;
     }
 
+    /**
+     * A Zotero note's table: cells hold blocks, may span rows and columns and
+     * carry a background; a first row of header cells is the table head.
+     */
+    private noteTable(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): string {
+        const widths = node.colwidths;
+        const colgroup = widths && widths.some(width => width)
+            ? `<colgroup>${widths.map(width => (width ? `<col style="width:${Math.round(width)}px">` : '<col>')).join('')}</colgroup>\n`
+            : '';
+        const row = (cells: MdTable['children'][number]['children']) => `<tr>${cells.map(cell => {
+            const tag = cell.header ? 'th' : 'td';
+            const attributes = (cell.colspan && cell.colspan > 1 ? ` colspan="${cell.colspan}"` : '')
+                + (cell.rowspan && cell.rowspan > 1 ? ` rowspan="${cell.rowspan}"` : '')
+                + (cell.background ? ` style="background-color:${escapeHtml(cell.background)}"` : '');
+            const content = cell.blocks ? this.blocks(cell.blocks, definitions) : this.inlines(cell.children, definitions);
+            return `<${tag}${attributes}>${content}</${tag}>`;
+        }).join('')}</tr>`;
+        const [first, ...rest] = node.children;
+        if (!first) return '';
+        // A cell cannot span from the head into the body: a header row with
+        // such a cell stays in the body.
+        const hasHead = node.headerRow !== false && !first.children.some(cell => (cell.rowspan ?? 1) > 1);
+        const head = hasHead ? `<thead>${row(first.children)}</thead>\n` : '';
+        const body = hasHead ? rest : node.children;
+        return `<table class="note-table">\n${colgroup}${head}`
+            + (body.length > 0 ? `<tbody>\n${body.map(bodyRow => row(bodyRow.children)).join('\n')}\n</tbody>\n` : '')
+            + '</table>\n';
+    }
+
     private table(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): string {
+        if (node.children.some(row => row.children.some(cell => cell.blocks))) return this.noteTable(node, definitions);
         const columns = Math.max(...node.children.map(row => row.children.length), 1);
         const alignment = (index: number) => {
             const align = node.align?.[index];
@@ -443,7 +534,7 @@ class HtmlWriter {
             `<html lang="${escapeHtml(citations.locale || 'en')}">`,
             '<head>',
             '<meta charset="utf-8">',
-            `<meta http-equiv="Content-Security-Policy" content="${CONTENT_SECURITY_POLICY}">`,
+            `<meta http-equiv="Content-Security-Policy" content="${this.embeddedImages > 0 ? CONTENT_SECURITY_POLICY_IMAGES : CONTENT_SECURITY_POLICY}">`,
             `<title>${escapeHtml(doc.title.trim() || 'Beaver export')}</title>`,
             `<style>\n${stylesheet(this.theme, citations.bibliography?.layout ?? null)}\n</style>`,
             '</head>',

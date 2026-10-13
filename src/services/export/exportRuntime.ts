@@ -44,7 +44,7 @@ export function loadExportRuntime(): ExportRuntime {
     // across plugin updates and reloads.
     Services.scriptloader.loadSubScriptWithOptions(RUNTIME_SCRIPT, { target: scope, ignoreCache: true });
     const runtime = scope[RUNTIME_GLOBAL] as ExportRuntime | undefined;
-    if (!runtime?.parseExportSource || !runtime.writeDocx || !runtime.writeHtml || !runtime.writeMarkdown || !runtime.writeLatex) {
+    if (!runtime?.parseExportSource || !runtime.parseNoteDoc || !runtime.writeDocx || !runtime.writeHtml || !runtime.writeMarkdown || !runtime.writeLatex) {
         throw new Error('The export runtime did not load');
     }
     // The runtime's agent-core copy has its own identity registry; without

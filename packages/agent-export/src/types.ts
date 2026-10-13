@@ -72,7 +72,27 @@ export interface ExportSource {
 // Parsed document
 // ---------------------------------------------------------------------------
 
-/** One `<citation/>` tag as written. */
+/**
+ * One cited item of a Zotero note citation (`span.citation[data-citation]`),
+ * as the note stores it. `locator` is a printed page label (or a locator of
+ * type `label`), never a physical page.
+ */
+export interface NoteCitationItem {
+    uris: string[];
+    /** CSL-JSON stored with the citation (older notes keep it inline). */
+    itemData?: Record<string, unknown>;
+    locator?: string;
+    /** CSL locator type; absent means page. */
+    label?: string;
+    prefix?: string;
+    suffix?: string;
+    suppressAuthor?: boolean;
+}
+
+/**
+ * One citation in the source: a `<citation/>` tag of Beaver output, or one
+ * item of a Zotero note citation (`note`, with `ref` null).
+ */
 export interface CitationOccurrence {
     /** Parsed identity, or null when the tag names nothing usable. */
     ref: CitationRef | null;
@@ -82,6 +102,15 @@ export interface CitationOccurrence {
     invalidKey?: string;
     /** The tag as written. */
     rawTag: string;
+    /** The cited item of a Zotero note citation. */
+    note?: NoteCitationItem;
+    /** What the note shows for this item, used when it cannot be resolved. */
+    previewText?: string;
+    /**
+     * What the note shows for the whole citation, when it does not show its
+     * items separately: written once for the items that cannot be resolved.
+     */
+    groupPreview?: string;
 }
 
 /**
@@ -109,11 +138,36 @@ export interface ExportSection {
     scope: number;
 }
 
+/** Where an image of a Zotero note comes from; the host loads it. */
+export type NoteImageSource =
+    /** A child attachment of the note (inserted images, image annotations). */
+    | { kind: 'attachment'; key: string }
+    /** Image data in the note itself. */
+    | { kind: 'data'; src: string }
+    /** An image on the web (older notes); never fetched. */
+    | { kind: 'remote'; url: string };
+
 /** Format-neutral document model. */
 export interface ExportDoc {
     title: string;
     sections: ExportSection[];
     clusters: CitationCluster[];
+    /** Images of a Zotero note by asset id (`MdImage.assetId`). */
+    images?: Record<string, NoteImageSource>;
+}
+
+/** An image the host loaded for the writers. */
+export interface ExportImage {
+    /** `image/png`, `image/jpeg`, `image/gif` or `image/svg+xml`. */
+    mime: string;
+    data: Uint8Array;
+    /** Natural size in CSS pixels. */
+    width: number;
+    height: number;
+    /** PNG rendering of an SVG or GIF image (Word needs one for SVG; LaTeX reads neither format). */
+    png?: Uint8Array;
+    /** Path of the image file relative to the exported document (LaTeX, Markdown). */
+    path?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +232,9 @@ export interface FieldCitationItem {
     itemData: Record<string, unknown>;
     locator?: string;
     label?: string;
+    prefix?: string;
+    suffix?: string;
+    suppressAuthor?: boolean;
 }
 
 /** A cluster as formatted by the citation processor. */
@@ -285,7 +342,7 @@ export interface LatexExportOptions {
 
 /** A non-fatal problem worth telling the user about. */
 export interface ExportWarning {
-    code: 'unresolved_citations' | 'math_as_text' | 'style_unavailable' | 'citations_as_text';
+    code: 'unresolved_citations' | 'math_as_text' | 'style_unavailable' | 'citations_as_text' | 'images_missing' | 'images_linked' | 'formatting_simplified';
     message: string;
     count?: number;
 }
