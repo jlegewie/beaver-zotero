@@ -18,7 +18,7 @@ import {
 import { GRID_CLUSTER_MIN, clusterRects, gridCluster } from "../../../src/beaver-extract/regions/cluster";
 import { EMPTY_DOC_CONTEXT, REGION_FEATURES, REGION_FEATURE_VERSION, candidateFeatures } from "../../../src/beaver-extract/regions/features";
 import type { Rect } from "../../../src/beaver-extract/regions/geometry";
-import { assertCompatible, predictRegionClass, type RegionModelWeights } from "../../../src/beaver-extract/regions/model";
+import { assertCompatible, predictRegionClass, type RegionClass, type RegionModelWeights } from "../../../src/beaver-extract/regions/model";
 import {
     NOTE_CAPTION_RE,
     isFigureCaption,
@@ -906,5 +906,11 @@ describe("region model", () => {
         expect(() => assertCompatible(model())).not.toThrow();
         expect(() => assertCompatible(model({ featureVersion: REGION_FEATURE_VERSION - 1 }))).toThrow();
         expect(() => assertCompatible(model({ features: [...REGION_FEATURES].reverse() }))).toThrow();
+    });
+
+    it("rejects weights whose classes are not distinct region classes", () => {
+        expect(() => assertCompatible(model({ classes: [0, 1, 2] as unknown as RegionClass[] }))).toThrow(/region classes/);
+        expect(() => assertCompatible(model({ classes: ["other", "figure", "decoration"] as unknown as RegionClass[] }))).toThrow(/region classes/);
+        expect(() => assertCompatible(model({ classes: ["other", "picture", "picture"] }))).toThrow(/region classes/);
     });
 });
