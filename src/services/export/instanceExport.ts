@@ -57,7 +57,11 @@ export interface ExportRequest {
 export interface NoteExportRequest extends Omit<ExportRequest, 'source'> {
     /** The note: its key and library (`libraryRef` preferred, or a local `libraryID`; default the user library). */
     note?: { key: string; libraryRef?: string; libraryID?: number };
-    /** Development: export this note HTML instead of a note in the library. */
+    /**
+     * The note's content as one editor shows it (with `note`; by default, the
+     * latest content of any open editor). Without `note`, development
+     * endpoints export this HTML with no note in the library.
+     */
     html?: string;
     /** Title (file name) for `html`. */
     title?: string;
@@ -97,6 +101,14 @@ interface WrittenExport {
     warnings: ExportWarning[];
     stats: WriterStats;
     html?: string;
+}
+
+/** Who asked for an export: the window that parents the save dialog. */
+export interface ExportContext {
+    /** A Beaver window runtime id. */
+    windowId?: string;
+    /** A window with no Beaver runtime (such as a note window); takes precedence over `windowId`. */
+    window?: Window;
 }
 
 function windowUnavailable(): Error {
@@ -326,13 +338,13 @@ export class InstanceExport {
         return this.runtime;
     }
 
-    private async choosePath(exportFormat: ExportFormat, title: string, windowId: string | undefined): Promise<string | null> {
+    private async choosePath(exportFormat: ExportFormat, title: string, context: ExportContext): Promise<string | null> {
         const format = FORMATS[exportFormat];
-        const runtime = Zotero.Beaver?.runtime?.resolveWindow(windowId);
-        if (!runtime) throw windowUnavailable();
+        const parent = context.window ?? Zotero.Beaver?.runtime?.resolveWindow(context.windowId)?.hostWindow;
+        if (!parent || parent.closed) throw windowUnavailable();
         const { FilePicker } = ChromeUtils.importESModule('chrome://zotero/content/modules/filePicker.mjs');
         const picker = new FilePicker();
-        picker.init(runtime.hostWindow, 'Export', picker.modeSave);
+        picker.init(parent, 'Export', picker.modeSave);
         picker.defaultString = exportFileName(title, format.extension);
         picker.defaultExtension = format.extension;
         picker.appendFilter(format.filterTitle, `*.${format.extension}`);
@@ -350,12 +362,12 @@ export class InstanceExport {
     }
 
     /** `path`, or where the user chooses to save (null when canceled). */
-    private async outputPath(format: ExportFormat, title: string, path: string | undefined, windowId: string | undefined): Promise<string | null> {
+    private async outputPath(format: ExportFormat, title: string, path: string | undefined, context: ExportContext): Promise<string | null> {
         if (path) return path;
         if (this.choosingPath) throw new Error('An export is already waiting for a file name.');
         this.choosingPath = true;
         try {
-            return await this.choosePath(format, title, windowId);
+            return await this.choosePath(format, title, context);
         } finally {
             this.choosingPath = false;
         }
@@ -363,12 +375,12 @@ export class InstanceExport {
 
     /**
      * Export a source to a file. Asks where to save unless `request.path` is
-     * given; `windowId` is the requesting window, which parents the dialog.
+     * given; the requesting window parents the dialog.
      */
-    async run(request: ExportRequest, context: { windowId?: string } = {}): Promise<ExportResult> {
+    async run(request: ExportRequest, context: ExportContext = {}): Promise<ExportResult> {
         if (!FORMATS[request.format]) throw new Error(`Unsupported export format: ${request.format}`);
         const citationService = this.citationService();
-        const path = await this.outputPath(request.format, request.source.title, request.path, context.windowId);
+        const path = await this.outputPath(request.format, request.source.title, request.path, context);
         if (!path) return { status: 'canceled' };
 
         const started = Date.now();
@@ -386,10 +398,10 @@ export class InstanceExport {
     /**
      * Export a Zotero note as it is now: its content as the note editor shows
      * it, and its citations as stored (live Zotero citations in Word). Asks
-     * where to save unless `request.path` is given; `windowId` is the
-     * requesting window, which parents the dialog.
+     * where to save unless `request.path` is given; the requesting window
+     * parents the dialog.
      */
-    async exportNote(request: NoteExportRequest, context: { windowId?: string } = {}): Promise<ExportResult> {
+    async exportNote(request: NoteExportRequest, context: ExportContext = {}): Promise<ExportResult> {
         if (!FORMATS[request.format]) throw new Error(`Unsupported export format: ${request.format}`);
         let note: Zotero.Item | null = null;
         let html: string;
@@ -406,7 +418,7 @@ export class InstanceExport {
             note = item as Zotero.Item;
             await note.loadAllData();
             // An open editor may hold edits Zotero has not saved yet.
-            html = getLatestNoteHtml(note);
+            html = typeof request.html === 'string' ? request.html : getLatestNoteHtml(note);
             title = note.getNoteTitle() || 'Note';
         } else if (typeof request.html === 'string') {
             html = request.html;
@@ -415,7 +427,7 @@ export class InstanceExport {
             throw new Error('A note or note HTML is required.');
         }
 
-        const path = await this.outputPath(request.format, title, request.path, context.windowId);
+        const path = await this.outputPath(request.format, title, request.path, context);
         if (!path) return { status: 'canceled' };
 
         const started = Date.now();

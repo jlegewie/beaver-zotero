@@ -117,6 +117,7 @@ vi.mock('../../src/services/documentCache', () => ({
 vi.mock('../../src/utils/configurePDFForBeaver', () => ({ configurePDFForBeaver: vi.fn() }));
 vi.mock('../../src/modules/readerIntegration', () => ({ initReaderIntegration: vi.fn(), cleanupReaderIntegration: vi.fn() }));
 vi.mock('../../src/modules/readerToolbarMenu', () => ({ initReaderToolbarMenu: vi.fn(), cleanupReaderToolbarMenu: vi.fn() }));
+vi.mock('../../src/modules/noteEditorExportMenu', () => ({ initNoteEditorExportMenu: vi.fn(), cleanupNoteEditorExportMenu: vi.fn() }));
 vi.mock('../../src/services/artifacts/view/readerTableView', () => ({
     initReaderTableViews: vi.fn(), cleanupReaderTableViews: vi.fn(), cleanupReaderTableViewsForWindow: vi.fn(),
 }));

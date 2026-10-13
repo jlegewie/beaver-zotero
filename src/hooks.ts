@@ -8,6 +8,7 @@ import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUp
 import { disposeMuPDFWorker } from "./beaver-extract";
 import { cleanupReaderIntegration, initReaderIntegration } from "./modules/readerIntegration";
 import { cleanupReaderToolbarMenu, initReaderToolbarMenu } from "./modules/readerToolbarMenu";
+import { cleanupNoteEditorExportMenu, initNoteEditorExportMenu } from "./modules/noteEditorExportMenu";
 import { cleanupContextMenus, initContextMenus } from "./modules/zoteroContextMenu";
 import {
     registerTablesApi,
@@ -398,6 +399,9 @@ async function onStartup() {
         // -------- Register reader toolbar dropdown menu --------
         await initReaderToolbarMenu();
 
+        // -------- "Export with Beaver" in the note editor's More menu --------
+        initNoteEditorExportMenu();
+
         // -------- Enhance stored tables opened in the reader --------
         // The reader is the only surface a stored table has, so every way of
         // opening one — double-click, `zotero://open`, the item pane — arrives
@@ -738,8 +742,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         cleanupReaderTableViews();
         cleanupTableItemPane();
 
-        // 13. Unregister reader toolbar menu
+        // 13. Unregister reader toolbar menu and the note editor export entry
         cleanupReaderToolbarMenu();
+        cleanupNoteEditorExportMenu();
 
         // 14. Unregister protocol handler
         unregisterBeaverProtocolHandler();
@@ -1022,6 +1027,7 @@ async function disposePlugin(): Promise<void> {
         cleanupReaderTableViews();
         cleanupTableItemPane();
         cleanupReaderToolbarMenu();
+        cleanupNoteEditorExportMenu();
         unregisterBeaverProtocolHandler();
 
         ztoolkit.unregisterAll();

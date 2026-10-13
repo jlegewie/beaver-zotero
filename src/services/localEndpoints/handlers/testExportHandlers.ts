@@ -40,8 +40,9 @@ export async function handleTestExportHttpRequest(request: any): Promise<any> {
  * the save dialog. Request: `{ path, note: { key, libraryRef? | libraryID? }
  * | html (with title?), format?, styleId?, locale?, liveCitations?,
  * linkItems?, colors?, includeHtml?, frontMatter?, citationPackage?,
- * standalone? }`. `html` exports the given note HTML, so tests need no note
- * in the library.
+ * standalone? }`. `html` alone exports the given note HTML, so tests need no
+ * note in the library; with `note`, it stands in for the note's content as an
+ * editor shows it.
  */
 export async function handleTestExportNoteHttpRequest(request: any): Promise<any> {
     if (typeof request?.path !== 'string' || !request.path) {
