@@ -22,7 +22,7 @@ import {
 import { translatePageLabelToNumber } from './pageLabelTranslation';
 import { citationItemRefFromUri, extractItemKeyFromUri } from './zoteroUri';
 import { modelObjectId } from './libraryIdentity';
-import { readBeaverCitationMeta } from './noteCitationMeta';
+import { citationReadback, isItemKey, readBeaverCitationMeta } from './noteCitationMeta';
 import type { PageLabels } from '../services/documentCache';
 
 export { normalizeNoteHtml };
@@ -190,8 +190,13 @@ export function simplifyNoteHtml(
 ): SimplificationResult {
     const metadata: SimplificationMetadata = { elements: new Map() };
 
-    // Track occurrence counts for content-based IDs
+    // Content-based citation refs, numbered by occurrence: c_<key>_<n>.
     const citationKeyCounts = new Map<string, number>();
+    const nextRef = (key: string): string => {
+        const occurrence = citationKeyCounts.get(key) || 0;
+        citationKeyCounts.set(key, occurrence + 1);
+        return `c_${key}_${occurrence}`;
+    };
     const elementId = uniqueElementIdFactory(metadata);
 
     // Strip Beaver footers before normalization so internal Beaver protocol
@@ -331,90 +336,71 @@ export function simplifyNoteHtml(
                     const ci = citationItems[0];
                     const uri = ci.uris?.[0] || '';
                     const itemRef = citationItemRefFromUri(uri, libraryID);
-                    let meta = readBeaverCitationMeta(ci);
-                    // A cited annotation or attachment that no longer exists
-                    // reads back as the parent item and page the note shows.
-                    const childKey = meta?.ann ?? meta?.att;
-                    if (itemRef && childKey) {
-                        const exists = !isMissingItem(itemRef.libraryID, childKey);
-                        (metadata.citedChildren ??= []).push({ libraryID: itemRef.libraryID, key: childKey, exists });
-                        if (!exists) meta = undefined;
-                    }
 
-                    // An external work Beaver embedded reads back as the
-                    // external reference it was written from.
-                    if (meta?.ext && !itemRef) {
-                        const keyForCount = `ext_${meta.ext.replace(/[^\w.-]/g, '_')}`;
-                        const occurrence = citationKeyCounts.get(keyForCount) || 0;
-                        citationKeyCounts.set(keyForCount, occurrence + 1);
-                        const ref = `c_${keyForCount}_${occurrence}`;
-                        metadata.elements.set(ref, {
-                            rawHtml: match,
-                            type: 'citation',
-                            originalAttrs: { item_id: '', external_id: meta.ext, loc: meta.loc ?? '' },
-                        });
-                        // The work is not in the library, so the tag names it:
-                        // a short label and the URL the citation cites it by.
-                        let tag = `<citation external_id="${escapeAttr(meta.ext)}"`;
-                        if (meta.loc) tag += ` loc="${escapeAttr(meta.loc)}"`;
-                        tag += ` ref="${ref}"`;
-                        const workLabel = embeddedWorkLabel(meta.csl);
-                        if (workLabel) tag += ` label="${escapeAttr(workLabel)}"`;
-                        if (/^https?:\/\//i.test(uri)) tag += ` url="${escapeAttr(uri)}"`;
-                        tag += '/>';
-                        return tag;
-                    }
+                    if (!itemRef) {
+                        // An external work Beaver embedded reads back as the
+                        // external reference it was written from. The work is
+                        // not in the library, so the tag names it: a short
+                        // label and the URL the citation cites it by.
+                        const meta = readBeaverCitationMeta(ci);
+                        if (meta?.ext) {
+                            const ref = nextRef(`ext_${meta.ext.replace(/[^\w.-]/g, '_')}`);
+                            metadata.elements.set(ref, {
+                                rawHtml: match,
+                                type: 'citation',
+                                originalAttrs: { item_id: '', external_id: meta.ext, loc: meta.loc ?? '' },
+                            });
+                            let tag = `<citation external_id="${escapeAttr(meta.ext)}"`;
+                            if (meta.loc) tag += ` loc="${escapeAttr(meta.loc)}"`;
+                            tag += ` ref="${ref}"`;
+                            const workLabel = embeddedWorkLabel(meta.csl);
+                            if (workLabel) tag += ` label="${escapeAttr(workLabel)}"`;
+                            return `${tag}${urlAttr(uri)}/>`;
+                        }
 
-                    // A work that is not a library item and carries no Beaver
-                    // metadata (cited from another library, or an embedded
-                    // work edited in Zotero's citation dialog) is shown by
-                    // name only. It can be kept, moved or removed, not edited.
-                    if (!itemRef && !meta?.ext) {
-                        const occurrence = citationKeyCounts.get('embedded') || 0;
-                        citationKeyCounts.set('embedded', occurrence + 1);
-                        const ref = `c_embedded_${occurrence}`;
+                        // Any other work that is not a library item (cited from
+                        // another library, or an embedded work edited in
+                        // Zotero's citation dialog) is shown by name only. It
+                        // can be kept, moved or removed, not edited.
+                        const ref = nextRef('embedded');
                         metadata.elements.set(ref, { rawHtml: match, type: 'citation' });
                         const workLabel = embeddedWorkLabel(
                             (ci.itemData as Record<string, unknown> | undefined) ?? cachedItemDataByUri.get(uri),
                         ) || label.replace(/^\(|\)$/g, '');
                         let tag = `<citation ref="${ref}"`;
                         if (workLabel) tag += ` label="${escapeAttr(workLabel)}"`;
-                        if (/^https?:\/\//i.test(uri)) tag += ` url="${escapeAttr(uri)}"`;
-                        tag += '/>';
-                        return tag;
+                        return `${tag}${urlAttr(uri)}/>`;
                     }
 
-                    const itemKey = itemRef?.key ?? 'unknown';
-                    const itemLibraryID = itemRef?.libraryID ?? libraryID;
+                    // Beaver's metadata says what was cited. A cited annotation
+                    // or attachment that no longer exists reads back as the
+                    // parent item and page the note shows; whether each child
+                    // existed is recorded so a cached view can be invalidated.
+                    const readback = citationReadback(ci, (key) => {
+                        const exists = !isMissingItem(itemRef.libraryID, key);
+                        (metadata.citedChildren ??= []).push({ libraryID: itemRef.libraryID, key, exists });
+                        return exists;
+                    });
                     // A citation of an annotation or attachment names its
                     // parent item; the metadata says which child was cited.
-                    const citedKey = (itemRef && (meta?.ann ?? meta?.att)) || itemKey;
-                    const itemId = modelObjectId(itemLibraryID, citedKey);
+                    const citedKey = readback?.childKey ?? itemRef.key;
+                    const itemId = modelObjectId(itemRef.libraryID, citedKey);
+                    const ref = nextRef(citedKey);
 
-                    // Content-based ref with occurrence counter
-                    const occurrence = citationKeyCounts.get(citedKey) || 0;
-                    citationKeyCounts.set(citedKey, occurrence + 1);
-                    const ref = `c_${citedKey}_${occurrence}`;
-
-                    // The locator as Beaver wrote it, in the agent's own
-                    // convention; an annotation's page is the annotation's. A
-                    // citation whose metadata records no locator shows the
-                    // page it stores, as any other citation does.
-                    const hasMetaLocator = !!meta && (!!meta.ann || !!meta.loc || ci.locator == null || ci.locator === '');
-                    if (meta && itemRef && hasMetaLocator) {
-                        const loc = meta.ann ? '' : (meta.loc ?? '');
+                    // The locator as Beaver wrote it, in the agent's own convention.
+                    if (readback && readback.loc !== null) {
                         metadata.elements.set(ref, {
                             rawHtml: match,
                             type: 'citation',
                             originalAttrs: {
                                 item_id: itemId,
-                                loc,
+                                loc: readback.loc,
                                 pageConvention: 'number',
                                 ...(ci.label !== undefined ? { cslLabel: ci.label } : {}),
                             },
                         });
                         let tag = `<citation id="${itemId}"`;
-                        if (loc) tag += ` loc="${escapeAttr(loc)}"`;
+                        if (readback.loc) tag += ` loc="${escapeAttr(readback.loc)}"`;
                         tag += ` ref="${ref}"/>`;
                         return tag;
                     }
@@ -452,11 +438,7 @@ export function simplifyNoteHtml(
                         const uri = ci.uris?.[0] || '';
                         return extractItemKeyFromUri(uri) || 'unknown';
                     });
-                    const compoundKey = keys.join('+');
-
-                    const occurrence = citationKeyCounts.get(compoundKey) || 0;
-                    citationKeyCounts.set(compoundKey, occurrence + 1);
-                    const ref = `c_${compoundKey}_${occurrence}`;
+                    const ref = nextRef(keys.join('+'));
 
                     // Build items attribute: "LIB-KEY1:page=P1, LIB-KEY2:page=P2"
                     const itemsAttr = citationItems.map((ci: any) => {
@@ -525,9 +507,7 @@ export function simplifyNoteHtml(
                 const wrapped = !!openParen && !!closeParen && (!suffix || suffixPage !== null);
 
                 const itemId = modelObjectId(parsed.libraryId, parsed.itemKey);
-                const occurrence = citationKeyCounts.get(parsed.itemKey) || 0;
-                citationKeyCounts.set(parsed.itemKey, occurrence + 1);
-                const ref = `c_${parsed.itemKey}_${occurrence}`;
+                const ref = nextRef(parsed.itemKey);
 
                 // The stored locator is a display label. Show the agent physical
                 // page numbers where labels are known, as native citations do.
@@ -618,7 +598,12 @@ export function simplifyNoteHtml(
  */
 function annotationKeyOf(annotationData: any): string | undefined {
     const key = annotationData?.annotationKey;
-    return typeof key === 'string' && /^[A-Za-z0-9]+$/.test(key) ? key : undefined;
+    return isItemKey(key) ? key : undefined;
+}
+
+/** A `url` attribute naming a web URI a citation cites its work by, or nothing. */
+function urlAttr(uri: string): string {
+    return /^https?:\/\//i.test(uri) ? ` url="${escapeAttr(uri)}"` : '';
 }
 
 /**

@@ -89,6 +89,39 @@ describe('rebuildDataCitationItems with embedded works', () => {
         ]);
     });
 
+    it('caches an embedded work whose URI ends like a Zotero item URI', () => {
+        const uri = 'https://doi.org/10.1234/items/ABCD1234';
+        const html = `<div data-schema-version="9"><p>${citationSpan({
+            uris: [uri],
+            beaver: { v: 1, ext: 'W7', csl: { title: 'DOI Work' } },
+        })}</p></div>`;
+        expect(extractDataCitationItems(rebuildDataCitationItems(html, []))).toEqual([
+            { uris: [uri], itemData: { title: 'DOI Work' } },
+        ]);
+    });
+
+    it('still caches the other items of a citation when one lookup fails', () => {
+        const zotero = (globalThis as any).Zotero;
+        zotero.URI.getURIItemLibraryKey = vi.fn((uri: string) => {
+            if (uri.endsWith('/BROKEN01')) throw new Error(`Could not parse object URI ${uri}`);
+            return { libraryID: 1, key: uri.slice(-8) };
+        });
+        zotero.Items = { ...zotero.Items, getByLibraryAndKey: vi.fn((_lib: number, key: string) => ({ key })) };
+        zotero.Utilities = { ...zotero.Utilities, Item: { itemToCSLJSON: vi.fn((item: any) => ({ title: item.key })) } };
+        const data = encodeURIComponent(JSON.stringify({
+            citationItems: [
+                { uris: ['http://zotero.org/users/1/items/BROKEN01'] },
+                { uris: ['http://zotero.org/users/1/items/GOODITEM'] },
+            ],
+            properties: {},
+        }));
+        const html = `<div data-schema-version="9"><p><span class="citation" data-citation="${data}">(X)</span></p></div>`;
+
+        expect(extractDataCitationItems(rebuildDataCitationItems(html, []))).toEqual([
+            { uris: ['http://zotero.org/users/1/items/GOODITEM'], itemData: { title: 'GOODITEM' } },
+        ]);
+    });
+
     it('skips a work it has no data for instead of failing', () => {
         const html = `<div data-schema-version="9"><p>${citationSpan({ uris: ['https://doi.org/10.1/none'] })}</p></div>`;
         expect(extractDataCitationItems(rebuildDataCitationItems(html))).toBeNull();

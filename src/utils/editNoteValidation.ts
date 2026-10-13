@@ -310,6 +310,15 @@ function addParentCitationRefReplacement(
 }
 
 /**
+ * A citation tag with ` ref="..."` added before its self-closing `/>`, keeping
+ * every existing attribute verbatim. extractAttr's word-boundary guard needs
+ * the attribute preceded by a non-word character, so a space always precedes.
+ */
+function citationTagWithRef(attrStr: string, ref: string): string {
+    return `<citation ${attrStr.replace(/\s+$/, '')} ref="${ref}"/>`;
+}
+
+/**
  * Enrich no-ref citations in `old_string` with the `ref` attribute from the
  * metadata map.
  *
@@ -352,49 +361,30 @@ export function enrichOldStringCitationRefs(
         const unifiedId = extractAttr(attrStr, 'id');
         const resolvedUnifiedId = unifiedId ? resolveUnifiedIdForOldString(unifiedId) : {};
         const rawItemId = explicitItemId || resolvedUnifiedId.itemId;
-        // Normalize to the portable id `simplifyNoteHtml` stores in
-        // `originalAttrs.item_id` so a legacy numeric id written by the model
-        // still matches — `normalized.ref` covers `item_id`/`id` identity
-        // attributes (see `firstZoteroIdentity`'s priority order).
-        const itemId = rawItemId && normalized.ok && normalized.ref.kind === 'zotero'
+        const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id') || resolvedUnifiedId.attId;
+        // The portable id `simplifyNoteHtml` stores in `originalAttrs.item_id`,
+        // so a legacy numeric id written by the model still matches —
+        // `normalized.ref` covers every identity attribute (see
+        // `firstZoteroIdentity`'s priority order).
+        const citedId = normalized.ok && normalized.ref.kind === 'zotero'
             ? modelObjectIdFromReference(normalized.ref)
-            : rawItemId;
-        const unifiedAttId = resolvedUnifiedId.attId;
+            : undefined;
+        const itemId = rawItemId ? citedId ?? rawItemId : undefined;
+
         // A citation of an attachment that Beaver's metadata records reads
         // back with the attachment's own id, whichever attribute names it.
-        const namesAttachment = !!resolvedUnifiedId.attId
-            || extractAttr(attrStr, 'att_id') !== undefined
-            || extractAttr(attrStr, 'attachment_id') !== undefined;
-        const attachmentRef = namesAttachment && normalized.ok && normalized.ref.kind === 'zotero'
-            ? findUniqueCitationRef(metadata, modelObjectIdFromReference(normalized.ref), page, loc)
-            : null;
-        if (attachmentRef) {
-            const trimmedAttrs = attrStr.replace(/\s+$/, '');
+        const directRef = (attId && citedId ? findUniqueCitationRef(metadata, citedId, page, loc) : null)
+            ?? (itemId ? findUniqueCitationRef(metadata, itemId, page, loc) : null);
+        if (directRef) {
             replacements.push({
                 start: m.index,
                 end: m.index + m[0].length,
-                replacement: `<citation ${trimmedAttrs} ref="${attachmentRef}"/>`,
+                replacement: citationTagWithRef(attrStr, directRef),
             });
             continue;
         }
-        if (itemId) {
-            const candidateRef = findUniqueCitationRef(metadata, itemId, page, loc);
-            if (candidateRef === null) continue;
+        if (itemId) continue;
 
-            // Inject ` ref="..."` before the self-closing `/>`, preserving all
-            // existing attributes verbatim. extractAttr's word-boundary guard
-            // requires the attribute to be preceded by a non-word character,
-            // so we always prepend a space.
-            const trimmedAttrs = attrStr.replace(/\s+$/, '');
-            replacements.push({
-                start: m.index,
-                end: m.index + m[0].length,
-                replacement: `<citation ${trimmedAttrs} ref="${candidateRef}"/>`,
-            });
-            continue;
-        }
-
-        const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id') || unifiedAttId;
         if (attId) {
             addParentCitationRefReplacement(replacements, metadata, m, attrStr, attId, page, pageLabels, loc);
             continue;

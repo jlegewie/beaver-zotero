@@ -675,14 +675,23 @@ describe('cross-library citations', () => {
         expect(simplified).toContain('<citation id="u-MINE0001" ref="c_MINE0001_0"/>');
     });
 
-    it.each([
-        ['a group not on this computer', 'http://zotero.org/groups/111/items/FOREIGN1'],
-        ['an unparseable URI', 'https://example.org/library/items/FOREIGN1'],
-    ])('falls back to the note\'s library for %s', (_label, uri) => {
-        const html = wrap(`<p>${rawCitationForUris([uri])}</p>`);
+    it('falls back to the note\'s library for a group not on this computer', () => {
+        const html = wrap(`<p>${rawCitationForUris(['http://zotero.org/groups/111/items/FOREIGN1'])}</p>`);
         const { simplified } = simplifyNoteHtml(html, GROUP_LIBRARY_ID);
 
         expect(simplified).toContain('<citation id="g6073928-FOREIGN1" ref="c_FOREIGN1_0"/>');
+    });
+
+    it.each([
+        'https://example.org/library/items/FOREIGN1',
+        // Zotero writes and parses item URIs only with the http prefix.
+        'https://zotero.org/groups/111/items/FOREIGN1',
+    ])('never reads %s as a library item', (uri) => {
+        const html = wrap(`<p>${rawCitationForUris([uri])}</p>`);
+        const { simplified } = simplifyNoteHtml(html, GROUP_LIBRARY_ID);
+
+        expect(simplified).toContain(`<citation ref="c_embedded_0" url="${uri}"/>`);
+        expect(simplified).not.toContain('id="');
     });
 });
 
@@ -4318,6 +4327,15 @@ describe('Beaver citation metadata', () => {
         // And back once the attachment is available again (e.g. after a sync).
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((_lib: number, key: string) => ({ key, libraryID: 1 }));
         expect(getOrSimplify('child-note', html, 1).simplified).toContain('id="u-GONE0002" loc="s5.6"');
+    });
+
+    it('reads an embedded work whose DOI ends like a Zotero item URI as the work', () => {
+        const uri = 'https://doi.org/10.1234/items/ABCD1234';
+        const citation = { citationItems: [{ uris: [uri], beaver: { v: 1, ext: 'W7', csl: { title: 'DOI Work' } } }], properties: {} };
+        const span = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citation))}">(DOI Work)</span>`;
+        const { simplified } = simplifyNoteHtml(wrap(`<p>${span}</p>`), 1);
+        expect(simplified).toContain(`<citation external_id="W7" ref="c_ext_W7_0" label="DOI Work" url="${uri}"/>`);
+        expect(simplified).not.toContain('u-ABCD1234');
     });
 
     it('ignores metadata of another version', () => {

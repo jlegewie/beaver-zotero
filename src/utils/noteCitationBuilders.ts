@@ -55,6 +55,25 @@ export function buildAnnotationNoteCitation(
     return buildNoteCitation(parent, pageLabel, options, buildBeaverCitationMeta({ ann: annotation.key }));
 }
 
+/** An external work, as an embedded citation names and describes it. */
+interface EmbeddedWork {
+    uri: string;
+    csl: Record<string, unknown>;
+    ext: string;
+    src?: string;
+}
+
+/** Native citation of an embedded work, at a locator. */
+function embeddedWorkCitation(
+    work: EmbeddedWork,
+    loc: Locator | undefined,
+    options?: NoteCitationItemOptions,
+): BuiltNoteCitation {
+    const page = loc?.kind === 'page' ? normalizePageLocator(loc.value) : undefined;
+    const meta = buildBeaverCitationMeta({ loc: locatorToken(loc), ext: work.ext, src: work.src, csl: work.csl });
+    return buildEmbeddedNoteCitation(work.uri, work.csl, page, options, meta);
+}
+
 /**
  * Cite an external work (found by search, not in the library) as a native
  * citation of an embedded item: a stable URI that never resolves to a library
@@ -71,15 +90,8 @@ export function buildExternalNoteCitation(
     options?: NoteCitationItemOptions,
 ): BuiltNoteCitation {
     const uri = externalReferenceUri(externalId, reference);
-    const itemData = externalReferenceToCsl(reference, uri);
-    const page = loc?.kind === 'page' ? normalizePageLocator(loc.value) : undefined;
-    const meta = buildBeaverCitationMeta({
-        loc: locatorToken(loc),
-        ext: externalId,
-        src: reference.source,
-        csl: itemData,
-    });
-    return buildEmbeddedNoteCitation(uri, itemData, page, options, meta);
+    const work = { uri, csl: externalReferenceToCsl(reference, uri), ext: externalId, src: reference.source };
+    return embeddedWorkCitation(work, loc, options);
 }
 
 /**
@@ -96,12 +108,5 @@ export function rebuildEmbeddedNoteCitation(
     const meta = readBeaverCitationMeta(citationItem);
     const uri = (citationItem as { uris?: unknown[] } | null)?.uris?.[0];
     if (!meta?.ext || !meta.csl || typeof uri !== 'string' || !uri) return null;
-    const page = loc?.kind === 'page' ? normalizePageLocator(loc.value) : undefined;
-    const rebuiltMeta = buildBeaverCitationMeta({
-        loc: locatorToken(loc),
-        ext: meta.ext,
-        src: meta.src,
-        csl: meta.csl,
-    });
-    return buildEmbeddedNoteCitation(uri, meta.csl, page, options, rebuiltMeta);
+    return embeddedWorkCitation({ uri, csl: meta.csl, ext: meta.ext, src: meta.src }, loc, options);
 }

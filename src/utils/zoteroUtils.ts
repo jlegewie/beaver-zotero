@@ -595,9 +595,14 @@ export function createCitationHTML(
     return noteCitationHTML(buildNoteCitation(item, locator, options, meta));
 }
 
+/** A note citation payload encoded as the `data-citation` attribute value. */
+export function encodeNoteCitationData(citation: NoteCitationData): string {
+    return encodeURIComponent(JSON.stringify(citation));
+}
+
 /** The `span.citation` HTML for a built note citation. */
 export function noteCitationHTML({ citation, formatted }: { citation: NoteCitationData; formatted: string }): string {
-    return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citation))}">${formatted}</span>`;
+    return `<span class="citation" data-citation="${encodeNoteCitationData(citation)}">${formatted}</span>`;
 }
 
 // These helpers live in React-free modules so they are usable from the

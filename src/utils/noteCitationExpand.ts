@@ -19,7 +19,14 @@ import {
     type ExternalFileCitationData,
 } from './externalFileCitation';
 import { createCitationHTML, noteCitationHTML, type NoteCitationItemOptions } from './zoteroUtils';
-import { buildBeaverCitationMeta, locatorToken, readBeaverCitationMeta } from './noteCitationMeta';
+import {
+    buildBeaverCitationMeta,
+    citationReadback,
+    citedChildKey,
+    locatorToken,
+    readBeaverCitationMeta,
+    type CitationReadback,
+} from './noteCitationMeta';
 import {
     buildAnnotationNoteCitation,
     buildExternalNoteCitation,
@@ -355,17 +362,20 @@ export async function preloadNotePageLabels(
                 const itemRef = citationItemRefFromUri(ci?.uris?.[0] || '', libraryID);
                 if (!itemRef || checkLibraryExcluded(itemRef.libraryID)) continue;
 
-                // Mirror how the simplifier shows a citation with Beaver
-                // metadata: with the locator Beaver recorded (no labels
-                // needed), or with its stored page under the cited
-                // attachment's id, or as its parent when that child is gone.
-                const meta = citationItems.length === 1 ? readBeaverCitationMeta(ci) : undefined;
-                const childKey = meta?.ann ?? meta?.att;
-                const childExists = childKey
-                    ? !!(await Zotero.Items.getByLibraryAndKeyAsync(itemRef.libraryID, childKey).catch(() => null))
-                    : false;
-                if (meta && (!childKey || childExists) && (meta.ann || meta.loc)) continue;
-                await loadLabels(itemRef.libraryID, childExists && meta?.att ? meta.att : itemRef.key);
+                // A single citation with Beaver metadata reads back as the
+                // simplifier shows it: with the locator Beaver recorded (no
+                // labels needed), or with its stored page under the id of the
+                // cited child or the item.
+                let readback: CitationReadback | null = null;
+                if (citationItems.length === 1) {
+                    const childKey = citedChildKey(readBeaverCitationMeta(ci));
+                    const childExists = childKey
+                        ? !!(await Zotero.Items.getByLibraryAndKeyAsync(itemRef.libraryID, childKey).catch(() => null))
+                        : false;
+                    readback = citationReadback(ci, () => childExists);
+                }
+                if (readback && readback.loc !== null) continue;
+                await loadLabels(itemRef.libraryID, readback?.childKey ?? itemRef.key);
             }
         } catch {
             // Skip malformed citation metadata or attachments that can't load.
@@ -837,12 +847,13 @@ function buildCitation({
     // is left out of the CSL citation; the private metadata keeps it. A
     // locator the citation labels otherwise (a chapter, …) is kept.
     const isPageLocator = !citationOptions?.label || citationOptions.label === 'page';
-    // Structural locators already resolve to final labels; do not translate twice.
-    const resolvedPage = isPageLocator && !citesPrintedPages(item)
-        ? undefined
-        : pageIsResolvedLabel
+    let resolvedPage: string | undefined;
+    if (!isPageLocator || citesPrintedPages(item)) {
+        // Structural locators already resolve to final labels; do not translate twice.
+        resolvedPage = pageIsResolvedLabel
             ? page
             : resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
+    }
     // A page locator kept in the convention it was read in is a printed label,
     // not the physical page number the metadata records.
     const recordLoc = loc && (loc.kind !== 'page' || shouldTranslatePage) ? locatorToken(loc) : undefined;
@@ -853,7 +864,10 @@ function buildCitation({
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage, citationOptions, meta));
 }
 
-/** The first citation item of the native citation stored for a `ref`. */
+/**
+ * The first citation item of the native citation stored for a `ref`, or
+ * undefined for a link citation.
+ */
 function storedCitationItem(rawHtml: string): unknown {
     const match = rawHtml.match(/data-citation="([^"]*)"/);
     if (!match) return undefined;
@@ -865,24 +879,19 @@ function storedCitationItem(rawHtml: string): unknown {
 }
 
 /**
- * CSL options (label, prefix, …) of the single native citation stored for a
- * `ref`, or undefined when it has none or is a link citation.
+ * CSL options (label, prefix, …) of a stored citation item (see
+ * {@link storedCitationItem}), or undefined when it has none.
  */
-function storedCitationOptions(rawHtml: string): NoteCitationItemOptions | undefined {
-    const match = rawHtml.match(/data-citation="([^"]*)"/);
-    if (!match) return undefined;
-    try {
-        const item = JSON.parse(decodeURIComponent(match[1]))?.citationItems?.[0];
-        if (!item || typeof item !== 'object') return undefined;
-        const options: NoteCitationItemOptions = {};
-        for (const field of ['label', 'prefix', 'suffix'] as const) {
-            if (typeof item[field] === 'string' && item[field]) options[field] = item[field];
-        }
-        if (item['suppress-author'] === true) options['suppress-author'] = true;
-        return Object.keys(options).length > 0 ? options : undefined;
-    } catch {
-        return undefined;
+function storedCitationOptions(citationItem: unknown): NoteCitationItemOptions | undefined {
+    if (!citationItem || typeof citationItem !== 'object') return undefined;
+    const item = citationItem as Record<string, unknown>;
+    const options: NoteCitationItemOptions = {};
+    for (const field of ['label', 'prefix', 'suffix'] as const) {
+        const value = item[field];
+        if (typeof value === 'string' && value) options[field] = value;
     }
+    if (item['suppress-author'] === true) options['suppress-author'] = true;
+    return Object.keys(options).length > 0 ? options : undefined;
 }
 
 /** Whether two model item ids (`u-KEY`, `1-KEY`, `g123-KEY`) name the same item. */
@@ -1071,19 +1080,17 @@ export function expandNoteCitationTags(
                     const storedExternalId = stored.originalAttrs?.external_id;
                     if (storedExternalId && externalId && !itemId) {
                         const loc = normalizedCitation.ok ? normalizedCitation.ref.loc : undefined;
-                        const unchanged = externalId === storedExternalId
-                            && matchesStoredLocator(stored.originalAttrs?.loc ?? '', loc);
-                        if (unchanged || context === 'old') return stored.rawHtml;
                         const sameWork = externalId === storedExternalId;
-                        const citationOptions = sameWork ? storedCitationOptions(stored.rawHtml) : undefined;
+                        const unchanged = sameWork && matchesStoredLocator(stored.originalAttrs?.loc ?? '', loc);
+                        if (unchanged || context === 'old') return stored.rawHtml;
+                        const storedItem = sameWork ? storedCitationItem(stored.rawHtml) : undefined;
+                        const citationOptions = storedCitationOptions(storedItem);
                         // Without the thread's data for the work, a new
                         // locator is applied to the work the citation carries.
                         const threadHasWork = !!(externalRefContext?.externalItemMapping?.[externalId]
                             || externalRefContext?.externalRefs?.[externalId]);
-                        if (sameWork && !threadHasWork) {
-                            const rebuilt = rebuildEmbeddedNoteCitation(
-                                storedCitationItem(stored.rawHtml), loc, citationOptions,
-                            );
+                        if (storedItem && !threadHasWork) {
+                            const rebuilt = rebuildEmbeddedNoteCitation(storedItem, loc, citationOptions);
                             if (rebuilt) return stripInlineItemDataFromDataCitations(noteCitationHTML(rebuilt));
                         }
                         return buildExternalRefCitation(externalId, loc, externalRefContext, pageLabels, citationOptions);
@@ -1101,7 +1108,7 @@ export function expandNoteCitationTags(
                             // Keep the citation's CSL label, prefix and suffix
                             // while it still cites the same item.
                             const citationOptions = original && citesSameItem(original.item_id, newAttrs.item_id)
-                                ? storedCitationOptions(stored.rawHtml)
+                                ? storedCitationOptions(storedCitationItem(stored.rawHtml))
                                 : undefined;
                             return buildCitation({ ...newAttrs, shouldTranslatePage, pageLabels, citationOptions });
                         }

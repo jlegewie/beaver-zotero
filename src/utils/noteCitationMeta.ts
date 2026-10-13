@@ -57,7 +57,10 @@ export interface BeaverCitationMeta {
     csl?: Record<string, unknown>;
 }
 
-const ITEM_KEY = /^[A-Za-z0-9]+$/;
+/** Whether a value has the shape of a Zotero item key. */
+export function isItemKey(value: unknown): value is string {
+    return typeof value === 'string' && /^[A-Za-z0-9]+$/.test(value);
+}
 
 /**
  * The token to record for a locator: as written, except that a page locator
@@ -102,8 +105,8 @@ export function readBeaverCitationMeta(citationItem: unknown): BeaverCitationMet
  * nothing to record. Malformed item keys are dropped.
  */
 export function buildBeaverCitationMeta(fields: Omit<BeaverCitationMeta, 'v'>): BeaverCitationMeta | undefined {
-    const att = fields.att && ITEM_KEY.test(fields.att) ? fields.att : undefined;
-    const ann = fields.ann && ITEM_KEY.test(fields.ann) ? fields.ann : undefined;
+    const att = isItemKey(fields.att) ? fields.att : undefined;
+    const ann = isItemKey(fields.ann) ? fields.ann : undefined;
     const ext = fields.ext || undefined;
     const meta: BeaverCitationMeta = {
         v: BEAVER_CITATION_META_VERSION,
@@ -116,3 +119,44 @@ export function buildBeaverCitationMeta(fields: Omit<BeaverCitationMeta, 'v'>): 
     };
     return Object.keys(meta).length > 1 ? meta : undefined;
 }
+
+/** How a citation with Beaver metadata reads back; see {@link citationReadback}. */
+export interface CitationReadback {
+    /** The cited annotation or attachment, when the citation names its parent. */
+    childKey?: string;
+    /**
+     * Locator token the citation reads back with (empty for none), or null when
+     * it reads back with the page it stores, as a citation without metadata.
+     */
+    loc: string | null;
+}
+
+/** Key of the annotation or attachment Beaver's metadata says was cited. */
+export function citedChildKey(meta: BeaverCitationMeta | undefined): string | undefined {
+    return meta?.ann ?? meta?.att;
+}
+
+/**
+ * How a single native citation item reads back from Beaver's metadata, or null
+ * when it reads back as a citation without metadata: it has none, or the
+ * annotation or attachment it records no longer exists (`childExists`).
+ *
+ * An annotation citation reads back without a locator (its page is the
+ * annotation's), and others with the locator Beaver recorded. A citation whose
+ * metadata records only the attachment reads back with the page it stores.
+ */
+export function citationReadback(
+    citationItem: unknown,
+    childExists: (key: string) => boolean,
+): CitationReadback | null {
+    const meta = readBeaverCitationMeta(citationItem);
+    if (!meta) return null;
+    const childKey = citedChildKey(meta);
+    if (childKey && !childExists(childKey)) return null;
+    if (meta.ann) return { childKey, loc: '' };
+    const locator = (citationItem as { locator?: unknown }).locator;
+    const storesPage = locator != null && locator !== '';
+    if (meta.loc || !storesPage) return { childKey, loc: meta.loc ?? '' };
+    return { childKey, loc: null };
+}
+

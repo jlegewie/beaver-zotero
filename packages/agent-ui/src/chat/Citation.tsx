@@ -14,6 +14,7 @@ import {
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
+import type { CitationExportRender } from '../host/types';
 import { useCitationViewModel } from './useCitationViewModel';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
 import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons';
@@ -57,6 +58,24 @@ interface CitationProps {
     // Rendering options
     exportRendering?: boolean;
     children?: React.ReactNode;
+}
+
+/**
+ * Wrap a host-rendered export citation: raw HTML, or a native citation span
+ * carrying its serialized payload. Both hold HTML, e.g.
+ * "(<span class="citation-item">Author, 2024</span>)".
+ */
+function renderExportedCitation(exported: CitationExportRender): React.ReactElement {
+    if (exported.kind === 'html') {
+        return <span dangerouslySetInnerHTML={{ __html: exported.html }} />;
+    }
+    return (
+        <span
+            className="citation"
+            data-citation={exported.citationData}
+            dangerouslySetInnerHTML={{ __html: exported.html }}
+        />
+    );
 }
 
 const Citation: React.FC<CitationProps> = (props) => {
@@ -153,18 +172,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                     requestedRef,
                 })
                 : null;
-            if (exportedReference?.kind === 'citation') {
-                return (
-                    <span
-                        className="citation"
-                        data-citation={exportedReference.citationData}
-                        dangerouslySetInnerHTML={{ __html: exportedReference.html }}
-                    />
-                );
-            }
-            if (exportedReference?.kind === 'html') {
-                return <span dangerouslySetInnerHTML={{ __html: exportedReference.html }} />;
-            }
+            if (exportedReference) return renderExportedCitation(exportedReference);
             const label = citation
                 || (externalReference ? formatExternalReferenceLabel(externalReference) : '')
                 || externalSourceId
@@ -219,19 +227,7 @@ const Citation: React.FC<CitationProps> = (props) => {
             metadata: citationMetadata,
             pageLabelsByAttachmentId: labelsByAttachmentId,
         });
-        if (!exported) return null;
-        if (exported.kind === 'html') {
-            return <span dangerouslySetInnerHTML={{ __html: exported.html }} />;
-        }
-        // Use dangerouslySetInnerHTML because the formatted citation is HTML
-        // (e.g., "(<span class="citation-item">Author, 2024</span>)").
-        return (
-            <span
-                className="citation"
-                data-citation={exported.citationData}
-                dangerouslySetInnerHTML={{ __html: exported.html }}
-            />
-        );
+        return exported ? renderExportedCitation(exported) : null;
     }
 
     // Determine the CSS class based on citation type and state

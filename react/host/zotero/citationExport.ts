@@ -4,7 +4,7 @@ import {
     normalizePageLocator,
     translatePageNumberToLabel,
 } from '../../../src/utils/pageLabelTranslation';
-import { buildNoteCitation } from '../../../src/utils/zoteroUtils';
+import { buildNoteCitation, encodeNoteCitationData } from '../../../src/utils/zoteroUtils';
 import {
     buildAnnotationNoteCitation,
     buildExternalNoteCitation,
@@ -29,11 +29,7 @@ import type {
 } from '@beaver/agent-ui/host/types';
 
 function citationRender({ citation, formatted }: BuiltNoteCitation): CitationExportRender {
-    return {
-        kind: 'citation',
-        html: formatted,
-        citationData: encodeURIComponent(JSON.stringify(citation)),
-    };
+    return { kind: 'citation', html: formatted, citationData: encodeNoteCitationData(citation) };
 }
 
 /**
@@ -90,11 +86,12 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
         const exportLabels = loadedLabels ?? metadata?.page_labels;
         // Only a PDF page is a printed page; for other attachments the
         // citation carries no page and the private metadata keeps the locator.
-        const locator = !citesPrintedPages(item)
-            ? undefined
-            : startPage
+        let locator: string | undefined;
+        if (citesPrintedPages(item)) {
+            locator = startPage
                 ? resolvePageLabelFromLabels(exportLabels, startPage)
                 : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, normalizePageLocator(requestedPage)) : undefined);
+        }
         const meta = buildBeaverCitationMeta({
             loc: locatorToken(requestedRef?.loc),
             att: item.isAttachment() ? item.key : undefined,
