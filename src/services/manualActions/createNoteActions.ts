@@ -9,7 +9,8 @@ import type { OperationContext } from '../agentDataProvider/operationContext';
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../utils/libraryIdentity';
-import { getBeaverNoteFooterHTML, wrapWithSchemaVersion } from '../../utils/noteProvenance';
+import { getBeaverNoteFooterHTML } from '../../utils/noteProvenance';
+import { renderNoteMarkdown, wrapNewNoteHtml } from '../agentDataProvider/actions/noteCitationRendering';
 import { resolveCreateNoteParent } from '../agentDataProvider/actions/resolveCreateNoteParent';
 import { getCollectionByIdOrName } from '../agentDataProvider/utils';
 
@@ -122,7 +123,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
     }
 
     const markdownContent = `<h1>${title}</h1>\n\n${content}`;
-    let htmlContent = await context.renderMarkdown!(markdownContent.trim());
+    let htmlContent = (await renderNoteMarkdown(markdownContent.trim(), context)).html;
 
     // Add Beaver footer with thread/run link
     const threadId = context.threadId;
@@ -169,7 +170,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
     if (parentKey) {
         zoteroNote.parentKey = parentKey;
     }
-    zoteroNote.setNote(wrapWithSchemaVersion(htmlContent));
+    zoteroNote.setNote(wrapNewNoteHtml(htmlContent));
 
     if (relatedItem) {
         try {

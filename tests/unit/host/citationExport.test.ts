@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../react/host/zotero/itemData', () => ({
     getPageLabelsForItem: vi.fn(() => null),
@@ -19,7 +19,7 @@ vi.mock('../../../src/utils/zoteroLinkCitation', () => ({
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { buildZoteroCitationLinkHTML } from '../../../src/utils/zoteroLinkCitation';
+import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
 import { zoteroDocumentExport } from '../../../react/host/zotero/citationExport';
 
 function citationRequest(overrides: Record<string, unknown> = {}) {
@@ -105,6 +105,46 @@ describe('zoteroDocumentExport.renderCitation', () => {
         zoteroDocumentExport.renderCitation(citationRequest());
 
         expect(Zotero.Items.getByLibraryAndKey).toHaveBeenCalledWith(7, 'ABCD1234');
+    });
+});
+
+describe('zoteroDocumentExport.renderCitation for native citations', () => {
+    const zotero = (globalThis as any).Zotero;
+    const regular = { key: 'ABCD1234', isAttachment: () => false, isRegularItem: () => true };
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(isLinkCitationItem).mockReturnValue(false);
+        zotero.Libraries = { userLibraryID: 1 };
+        zotero.Items = { getByLibraryAndKey: vi.fn(() => regular) };
+        zotero.URI = { getItemURI: (i: any) => `http://zotero.org/users/1/items/${i.key}` };
+        zotero.Utilities = { ...zotero.Utilities, Item: { itemToCSLJSON: () => ({ title: 'T' }) } };
+        zotero.EditorInstanceUtilities = { formatCitation: vi.fn(() => '(<span class="citation-item">Smith, 2020</span>)') };
+    });
+
+    afterEach(() => {
+        vi.mocked(isLinkCitationItem).mockReturnValue(true);
+    });
+
+    function citationItem(request: Record<string, unknown>) {
+        const result = zoteroDocumentExport.renderCitation(citationRequest(request));
+        if (result?.kind !== 'citation') throw new Error('expected a native citation');
+        return JSON.parse(decodeURIComponent(result.citationData)).citationItems[0];
+    }
+
+    it('stores the first page of a requested range, so the citation navigates', () => {
+        const ci = citationItem({ requestedRef: { loc: { kind: 'page', value: '12-14', raw: 'page12-14' } } });
+
+        expect(ci.locator).toBe('12');
+        expect(ci).not.toHaveProperty('label');
+    });
+
+    it('stores the first metadata page', () => {
+        expect(citationItem({ pages: [7, 5, 6] }).locator).toBe('5');
+    });
+
+    it('stores no locator when nothing is cited by page', () => {
+        expect(citationItem({})).not.toHaveProperty('locator');
     });
 });
 

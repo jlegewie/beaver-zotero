@@ -655,6 +655,7 @@ describe('edit + undo roundtrip', () => {
         // The new citation should have been built
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEWKEY' }),
+            undefined,
             undefined
         );
 
@@ -1981,7 +1982,8 @@ describe('page locator normalization in citation expansion', () => {
         // createCitationHTML should have been called with the normalized single page
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEWITEM' }),
-            '222'
+            '222',
+            undefined
         );
         expect(expanded).toContain('data-citation=');
     });
@@ -1995,7 +1997,8 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'LEGACYITEM' }),
-            '222'
+            '222',
+            undefined
         );
     });
 
@@ -2008,7 +2011,8 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'RANGEITEM' }),
-            '100'
+            '100',
+            undefined
         );
     });
 
@@ -2021,7 +2025,8 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'SINGLEITEM' }),
-            '42'
+            '42',
+            undefined
         );
     });
 
@@ -2034,7 +2039,8 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'SECITEM' }),
-            '§3.2'
+            '§3.2',
+            undefined
         );
     });
 
@@ -2053,7 +2059,8 @@ describe('page locator normalization in citation expansion', () => {
         // Should have been called with normalized page
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'PGCHG' }),
-            '10'
+            '10',
+            undefined
         );
         expect(expanded).toContain('data-citation=');
     });
@@ -2096,7 +2103,8 @@ describe('page locator normalization in citation expansion', () => {
         // Verify normalization happened
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEWCIT' }),
-            '50' // normalized from "50-55"
+            '50', // normalized from "50-55"
+            undefined
         );
 
         // Apply the edit
@@ -2154,7 +2162,8 @@ describe('page locator normalization in citation expansion', () => {
         // createCitationHTML should have been called with normalized page
         expect(createCitationHTML).toHaveBeenCalledWith(
             mockAttItem,
-            '30' // normalized from "30-35"
+            '30', // normalized from "30-35"
+            undefined
         );
     });
 });
@@ -2197,7 +2206,7 @@ describe('Page label translation during citation expansion', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "352"
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352', undefined);
     });
 
     it('translates to same value for sequential labels (identity case)', () => {
@@ -2225,7 +2234,7 @@ describe('Page label translation during citation expansion', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "15" (identity)
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', undefined);
     });
 
     it('passes through page when no labels are cached', () => {
@@ -2250,7 +2259,7 @@ describe('Page label translation during citation expansion', () => {
         const input = '<citation att_id="1-GHI789" page="15"/>';
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', undefined);
     });
 
     it('preserves existing citation rawHtml when not edited', () => {
@@ -2295,7 +2304,7 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'ii');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'ii', undefined);
     });
 
     it('does not translate unchanged cold-cache label when only the citation target changes', () => {
@@ -2322,7 +2331,7 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '100');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '100', undefined);
     });
 
     it('does not translate numeric non-page locators on edited existing citations', () => {
@@ -2358,7 +2367,8 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/loc="page3"/, 'loc="page4"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '4');
+        // The locator moves; the citation keeps its non-page CSL label.
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '4', { label: 'chapter' });
     });
 
     it('restores unchanged label-backed citations verbatim when labels are supplied', () => {
@@ -2408,7 +2418,7 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/loc="page14"/, 'loc="page15"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xv');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xv', undefined);
     });
 });
 

@@ -72,6 +72,23 @@ export function translatePageLabelToNumber(
 }
 
 /**
+ * Normalize a page locator to a single page number.
+ *
+ * LLM-generated citations sometimes contain page ranges ("241-243") or
+ * comma-separated pages ("222, 237-238"). Zotero's "Go to Page" does an
+ * exact string match against PDF page labels, so multi-page locators
+ * silently fail to navigate. This extracts the first page number.
+ *
+ * Only applied to locators that contain range/list separators (-, –, ,).
+ * Non-numeric locators like "§3.2", "xii", or "fn. 5" pass through unchanged.
+ */
+export function normalizePageLocator(page: string): string {
+    if (!/[-–,]/.test(page)) return page;
+    const match = page.match(/^\s*(\d+)/);
+    return match ? match[1] : page;
+}
+
+/**
  * First physical 1-based page in a page locator ("12", "12-15", "3, 7"), or
  * undefined when the locator is not a physical page number ("xii", "§3.2").
  *

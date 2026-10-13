@@ -18,13 +18,14 @@ import {
 import { preloadNotePageLabels } from '../../../utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../utils/noteEditorIO';
 import { getOrSimplify } from '../../../utils/noteHtmlSimplifier';
-import { getBeaverNoteFooterHTML, wrapWithSchemaVersion } from '../../../utils/noteProvenance';
+import { getBeaverNoteFooterHTML } from '../../../utils/noteProvenance';
 import { TimingAccumulator } from '../../../utils/timing';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { checkAborted, TimeoutContext } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getCollectionByIdOrName, getDeferredToolPreference, getLibraryByIdOrName } from '../utils';
 import { extractCitationReferences } from './extractCitationReferences';
+import { checkNoteMarkdownCitations, INVALID_NOTE_CITATION_CODE, renderNoteMarkdown, wrapNewNoteHtml } from './noteCitationRendering';
 import { resolveCreateNoteParent } from './resolveCreateNoteParent';
 
 
@@ -80,6 +81,8 @@ interface CreateNoteResultData {
     note_content?: string;
     cited_items_data?: CitedItemsData;
     warning?: string;
+    /** Non-fatal citation notes (locators saved without a page, file links unavailable). */
+    warnings?: string[];
     related_item_key?: string;
 }
 
@@ -460,6 +463,22 @@ async function validateCreateNoteAction(
         });
     }
 
+    // Every citation must be storable: the write expands each one and fails
+    // on the first it cannot store, so report that before approval.
+    const citationCheck = await ta.track('citation_check_ms', () =>
+        checkNoteMarkdownCitations(content, request.operation));
+    if (citationCheck.error) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: citationCheck.error,
+            error_code: INVALID_NOTE_CITATION_CODE,
+            preference: 'always_ask',
+            timing: buildTiming(),
+        };
+    }
+
     // Get user preference
     const preference = getDeferredToolPreference('create_note', undefined, request.operation);
 
@@ -502,6 +521,7 @@ async function validateCreateNoteAction(
             tags: tagsInput,
         },
         normalized_action_data: normalizedActionData,
+        ...(citationCheck.warnings.length > 0 ? { warnings: citationCheck.warnings } : {}),
         preference,
         timing: buildTiming(),
     };
@@ -594,11 +614,9 @@ async function executeCreateNoteAction(
 
     try {
         const markdownContent = `<h1>${title}</h1>\n\n${content}`;
-        if (!request.operation?.renderMarkdown) {
-            throw Object.assign(new Error('Note rendering is unavailable'), { code: 'capability_unavailable' });
-        }
         const renderStart = Date.now();
-        let htmlContent = await request.operation.renderMarkdown(markdownContent.trim());
+        const rendered = await renderNoteMarkdown(markdownContent.trim(), request.operation);
+        let htmlContent = rendered.html;
         ta.record('render_html_ms', Date.now() - renderStart);
 
         // Add Beaver footer with thread/run link
@@ -619,7 +637,7 @@ async function executeCreateNoteAction(
         if (parentKey) {
             zoteroNote.parentKey = parentKey;
         }
-        zoteroNote.setNote(wrapWithSchemaVersion(htmlContent));
+        zoteroNote.setNote(wrapNewNoteHtml(htmlContent));
 
         // Resolve the related item (standalone-fallback target) up front so we
         // can attach the forward relation before the initial save.
@@ -745,6 +763,7 @@ async function executeCreateNoteAction(
             ...(appliedTags.length > 0 ? { tags: appliedTags } : {}),
             ...(noteContent ? { note_content: noteContent } : {}),
             ...(warning ? { warning } : {}),
+            ...(rendered.warnings.length > 0 ? { warnings: rendered.warnings } : {}),
             ...(relatedItemKey ? { related_item_key: relatedItemKey } : {}),
         };
 
