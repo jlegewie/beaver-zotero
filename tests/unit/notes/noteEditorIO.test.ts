@@ -25,6 +25,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
 }));
 
 import {
+    getEditorNoteHtml,
     getLatestNoteHtml,
     getLiveNoteHtmlCandidates,
     getNoteHtmlForRead,
@@ -333,4 +334,34 @@ it('rejects a detached iframe even if nodes in its old document remain connected
         frameElement: { isConnected: false },
         document: { querySelector: () => ({ isConnected: true }) },
     } })).toBe(false);
+});
+
+// =============================================================================
+// getEditorNoteHtml
+// =============================================================================
+
+describe('getEditorNoteHtml', () => {
+    it('returns the content of the given editor, not the preferred one', () => {
+        const background = makeInstance({ html: '<p>background</p>', itemId: 1 });
+        const selected = makeInstance({ html: '<p>selected tab</p>', itemId: 1, tabId: 'tab-1' });
+        setEditors([selected, background], 'tab-1');
+        expect(getLatestNoteHtml(makeItem())).toBe('<p>selected tab</p>');
+        expect(getEditorNoteHtml(makeItem(), background._iframeWindow)).toBe('<p>background</p>');
+    });
+
+    it('returns null for an editor that is not authoritative for the note', () => {
+        const preview = makeInstance({ html: '<p>preview</p>', itemId: 1, disabled: true });
+        const closed = makeInstance({ html: '<p>closed</p>', itemId: 1, connected: false });
+        const otherNote = makeInstance({ html: '<p>other</p>', itemId: 2 });
+        setEditors([preview, closed, otherNote]);
+        expect(getEditorNoteHtml(makeItem(), preview._iframeWindow)).toBeNull();
+        expect(getEditorNoteHtml(makeItem(), closed._iframeWindow)).toBeNull();
+        expect(getEditorNoteHtml(makeItem(), otherNote._iframeWindow)).toBeNull();
+    });
+
+    it('returns null for a window with no editor instance', () => {
+        setEditors([makeInstance({ html: '<p>x</p>', itemId: 1 })]);
+        expect(getEditorNoteHtml(makeItem(), {} as Window)).toBeNull();
+        expect(getEditorNoteHtml(makeItem(), null)).toBeNull();
+    });
 });
