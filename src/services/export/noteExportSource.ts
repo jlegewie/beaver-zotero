@@ -62,6 +62,28 @@ function recordCitationPreviews(container: HTMLElement): void {
 }
 
 /**
+ * The text color Beaver writes its footers in (`#aaa`, `rgb(170, 170, 170)`
+ * once the editor has saved the note): the `color` declaration itself, not
+ * `background-color`.
+ */
+const FOOTER_GRAY_STYLE = /(?:^|;)\s*color\s*:\s*(?:#aaa(?:aaa)?\b|rgb\(\s*170\s*,\s*170\s*,\s*170\s*\))/i;
+
+/**
+ * Whether a paragraph is Beaver's "Created by Beaver" line: its text, and
+ * either its link back to the chat or — for footers whose link an earlier
+ * normalization dropped — the full "Created by Beaver · Open Message" text in
+ * the footer's gray.
+ */
+function isBeaverBranding(paragraph: Element): boolean {
+    const text = paragraph.textContent ?? '';
+    if (!CREATED_FOOTER_TEXT_REGEX.test(text)) return false;
+    const links = Array.from(paragraph.querySelectorAll('a[href]')) as Element[];
+    if (links.some(link => restoreLocalHref(link.getAttribute('href') ?? '').startsWith('zotero://beaver/'))) return true;
+    const styled = Array.from(paragraph.querySelectorAll('[style]')) as Element[];
+    return text.includes('\u00b7') && styled.some(element => FOOTER_GRAY_STYLE.test(element.getAttribute('style') ?? ''));
+}
+
+/**
  * Remove Beaver's "Created by Beaver · Open Message" paragraphs, with the
  * rule that sets each off: a note saved from a chat carries one under its
  * title and one at its end, and a note the agent created one at its end.
@@ -69,9 +91,7 @@ function recordCitationPreviews(container: HTMLElement): void {
  */
 function removeBeaverBranding(container: HTMLElement): void {
     for (const paragraph of Array.from(container.querySelectorAll('p')) as Element[]) {
-        if (!CREATED_FOOTER_TEXT_REGEX.test(paragraph.textContent ?? '')) continue;
-        const links = Array.from(paragraph.querySelectorAll('a[href]')) as Element[];
-        if (!links.some(link => restoreLocalHref(link.getAttribute('href') ?? '').startsWith('zotero://beaver/'))) continue;
+        if (!isBeaverBranding(paragraph)) continue;
         const next = paragraph.nextElementSibling;
         const previous = paragraph.previousElementSibling;
         if (next?.tagName.toLowerCase() === 'hr') next.remove();

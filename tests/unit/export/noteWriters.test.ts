@@ -124,6 +124,14 @@ describe('note documents in every format', () => {
         const { tex, warnings } = write('biblatex');
         expect(tex).toContain('\\parencite*[see][chap.~3 emphasis added]{smith2020}');
         expect(write('natbib').tex).toContain('\\citeyearpar[see][chap.~3 emphasis added]{smith2020}');
+        // A "]" in a note is braced on its own (natbib strips braces around the whole argument).
+        const bracketed = { ...citationsFor(doc) };
+        bracketed.clusters = bracketed.clusters.map(cluster => ({ ...cluster, items: cluster.items.map(item => ({ ...item, label: undefined, locator: '7', prefix: undefined, suffix: '[trans.]', suppressAuthor: false })) }));
+        const natbib = writeLatex({
+            doc, citations: bracketed, keys: { 7: 'smith2020' },
+            options: { citationPackage: 'natbib', standalone: false, bibFileName: 'refs.bib', linkItems: false, bibliographyTitle: 'References', date: '' },
+        }).tex;
+        expect(natbib).toContain('\\citep[p.~7 [trans.{]}]{smith2020}');
         expect(tex).toContain('\\includegraphics[width=\\BeaverImageWidth{3.13in}]{notes-figures/image-1.png}');
         expect(tex).toContain('\\providecommand{\\BeaverImageWidth}');
         expect(tex).toContain('H\\textsubscript{2}O \\uline{under} \\textcolor[HTML]{FF2020}{red} \\BeaverHighlight{BeaverHighlight1}{marked}');
@@ -151,6 +159,13 @@ describe('note documents in every format', () => {
         expect(write({ locator: '12', label: 'page' })).toContain('\\parencite[12]{k}');
         expect(write({ locator: '12-14', suffix: 'n. 3' })).toContain('\\parencite[\\ppno~12--14 n. 3]{k}');
         expect(write({ prefix: 'cf.' })).toContain('\\parencite[cf.][]{k}');
+        // Zotero suffixes usually start with punctuation, which follows the locator directly.
+        expect(write({ locator: '3', label: 'chapter', suffix: ', emphasis added' })).toContain('\\parencite[chap.~3, emphasis added]{k}');
+        expect(write({ locator: '5', suffix: ', n. 3' })).toContain('\\parencite[\\pno~5, n. 3]{k}');
+        // As citeproc: a space before a suffix starting with a letter, "&", "(" or "[", not a digit.
+        expect(write({ locator: '6', suffix: '(emphasis added)' })).toContain('\\parencite[\\pno~6 (emphasis added)]{k}');
+        expect(write({ locator: '6', suffix: '2' })).toContain('\\parencite[\\pno~62]{k}');
+        expect(write({ locator: '6', suffix: 'și nota 3' })).toContain('\\parencite[\\pno~6 și nota 3]{k}');
     });
 
     it('keeps a cluster that leaves out one of several authors: natbib per work, biblatex as text', () => {
@@ -386,6 +401,22 @@ describe('note documents in every format', () => {
             options: { citationPackage: 'biblatex', standalone: false, bibFileName: 'refs.bib', linkItems: false, bibliographyTitle: 'R', date: '' },
         });
         expect(tex).toContain('\\url{https://example.com} \\parencite');
+    });
+
+    it('spaces an unresolved citation once in Word with a note style', async () => {
+        const unresolved = parseNoteDoc({ type: 'doc', content: [paragraph(
+            text('Unresolvable '),
+            { type: 'citation', attrs: { citation: { citationItems: [{ uris: ['u'] }] } } },
+        )] }, { liftTitle: false });
+        const base = citationsFor(unresolved);
+        const citations = {
+            ...base,
+            styleClass: 'note' as const,
+            clusters: [{ html: '', plain: '', noteIndex: 0, items: [], fallbackTexts: ['(Ghost Author, 2001)'] }],
+        };
+        const { bytes } = await writeDocx({ doc: unresolved, citations, options: { liveCitations: false, linkItems: false, bibliographyTitle: 'R' } });
+        const document = await (await JSZip.loadAsync(bytes)).file('word/document.xml')!.async('string');
+        expect(document.replace(/<[^>]+>/g, '')).toContain('Unresolvable (Ghost Author, 2001)');
     });
 
     it('marks an image that could not be loaded instead of dropping it', async () => {

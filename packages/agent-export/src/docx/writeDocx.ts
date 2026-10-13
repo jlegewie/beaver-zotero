@@ -540,8 +540,9 @@ class DocxWriter {
                 runs.push(...result);
             }
         }
+        // Spacing before the cluster itself comes from the surrounding text.
         for (const text of cluster.fallbackTexts) {
-            const separator = runs.length > 0 || this.isNoteStyle ? ' ' : '';
+            const separator = runs.length > 0 ? ' ' : '';
             runs.push(textRun(`${separator}${text}`, marks));
         }
         return runs;

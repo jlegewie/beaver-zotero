@@ -108,6 +108,13 @@ interface CiteItem extends CitationNotes {
     key: string;
 }
 
+/**
+ * Suffixes set off from the locator by a space, as citeproc writes them
+ * (`checkSuffixSpacePrepend`): those starting with a letter of an alphabetic
+ * script, `&`, `(` or `[`. Others (", emphasis added") follow it directly.
+ */
+const SUFFIX_SPACED = /^[&([a-zA-Z\u00c0-\u017f\u0218-\u021b\u0370-\u03ff\u0400-\u052f\u0590-\u05d4\u05d6-\u05ff\u0600-\u06ff\u0e01-\u0e5b\u1f00-\u1fff\u200c-\u200e\u202a-\u202e]/;
+
 /** Width of an image: its own width, but never wider than the line. */
 const IMAGE_WIDTH_MACRO = '\\providecommand{\\BeaverImageWidth}[1]{\\ifdim#1>\\linewidth\\linewidth\\else#1\\fi}';
 
@@ -135,7 +142,8 @@ function curlyQuotes(text: string): string {
 
 /** An optional argument; braces protect a `]` in its value. */
 function optional(value: string): string {
-    return value.includes(']') ? `[{${value}}]` : `[${value}]`;
+    // Each `]` braced on its own: natbib strips braces around the whole argument.
+    return `[${value.replace(/]/g, '{]}')}]`;
 }
 
 /** A page locator for LaTeX: escaped, with ranges as en dashes. */
@@ -557,7 +565,7 @@ class LatexWriter {
                 post = locatorTex(item.locator);
             }
         }
-        if (item.suffix) post = post ? `${post} ${escapeLatex(item.suffix)}` : escapeLatex(item.suffix);
+        if (item.suffix) post = post ? `${post}${SUFFIX_SPACED.test(item.suffix) ? ' ' : ''}${escapeLatex(item.suffix)}` : escapeLatex(item.suffix);
         return post;
     }
 

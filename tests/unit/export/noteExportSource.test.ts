@@ -183,6 +183,22 @@ describe('readNoteForExport + parseNoteDoc', () => {
         expect(doc.sections[0].children).toEqual([{ type: 'paragraph', children: [{ type: 'text', value: 'Body' }] }]);
     });
 
+    it('leaves out a footer whose link was lost, recognized by its text and gray', () => {
+        const html = '<div data-schema-version="10"><p>Body</p>'
+            + '<p><strong><span style="color: rgb(170, 170, 170);">Created by Beaver</span></strong><span style="color: rgb(170, 170, 170);"> · Open Message</span></p></div>';
+        const doc = parseNoteDoc(readNoteForExport(html).doc, { liftTitle: false });
+        expect(doc.sections[0].children).toEqual([{ type: 'paragraph', children: [{ type: 'text', value: 'Body' }] }]);
+    });
+
+    it('keeps "Created by Beaver" text without a link in other colors (gray background included) or without the rest of the footer', () => {
+        const html = '<div data-schema-version="10">'
+            + '<p><span style="color: #ff2020;">Created by Beaver · Open Message</span></p>'
+            + '<p><span style="color: #aaa;">Created by Beaver</span></p>'
+            + '<p><span style="color: #ff2020; background-color: #aaa;">Created by Beaver · Open Message</span></p></div>';
+        const doc = parseNoteDoc(readNoteForExport(html).doc, { liftTitle: false });
+        expect(doc.sections[0].children).toHaveLength(3);
+    });
+
     it('keeps a paragraph that only reads like the branding', () => {
         const html = '<div data-schema-version="10"><p>Created by Beaver · Open Message</p><hr><p>Body</p></div>';
         const doc = parseNoteDoc(readNoteForExport(html).doc, { liftTitle: false });
