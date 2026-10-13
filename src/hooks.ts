@@ -399,7 +399,7 @@ async function onStartup() {
         // -------- Register reader toolbar dropdown menu --------
         await initReaderToolbarMenu();
 
-        // -------- "Export with Beaver…" in the note editor's More menu --------
+        // -------- "Export with Beaver" in the note editor's More menu --------
         initNoteEditorExportMenu();
 
         // -------- Enhance stored tables opened in the reader --------

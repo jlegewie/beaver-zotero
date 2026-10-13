@@ -1,13 +1,13 @@
 /**
- * "Export with Beaver…" in the More menu of Zotero's note editor.
+ * "Export with Beaver" in the More menu of Zotero's note editor.
  *
  * The note editor's toolbar is a React app inside an iframe and has no plugin
  * API, so the entry is added to the More dropdown's DOM each time it opens.
  * Every window gets capture listeners; an interaction with a note editor's
  * More dropdown is followed, once React has rendered the popup, by adding the
- * entry. Choosing it opens a native popup of export formats where the
- * dropdown was. Nothing in Zotero is patched: if the dropdown's markup
- * changes, the entry is simply absent.
+ * entry. Choosing it opens a native popup of export formats beside the entry,
+ * as a submenu, while the dropdown stays open. Nothing in Zotero is patched:
+ * if the dropdown's markup changes, the entry is simply absent.
  *
  * Lives in the esbuild bundle — must NOT import from react/store or Jotai.
  */
@@ -19,6 +19,10 @@ import { getEditorNoteHtml } from '../utils/noteEditorIO';
 const NOTE_EDITOR_URL = 'resource://zotero/note-editor/editor.html';
 const ENTRY_CLASS = 'beaver-note-export';
 const SEPARATOR_CLASS = 'beaver-note-export-separator';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Padding of the dropdown and of a native menu: the submenu's first item lines up with the entry. */
+const MENU_PADDING = 5;
 
 /**
  * Events that can open the More dropdown: a mouse press, a key press on the
@@ -107,7 +111,21 @@ function keepInside(popup: HTMLElement): void {
     if (Number.isFinite(left)) popup.style.left = `${left - overflow}px`;
 }
 
-/** Add "Export with Beaver…" to an open More dropdown that lacks it. */
+/** A chevron at the end of the entry, as on a submenu item. */
+function createChevron(doc: Document): Element {
+    const svg = doc.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('style', 'margin-inline-start: auto; padding-inline-start: 12px; box-sizing: content-box;');
+    const path = doc.createElementNS(SVG_NS, 'path');
+    path.setAttribute('fill', 'currentColor');
+    path.setAttribute('d', 'M6.2 3.5 10.7 8l-4.5 4.5-.7-.7L9.3 8 5.5 4.2z');
+    svg.append(path);
+    return svg;
+}
+
+/** Add "Export with Beaver" to an open More dropdown that lacks it. */
 function addEntry(dropdown: Element): void {
     const popup = dropdown.querySelector(':scope > .popup');
     if (!popup || popup.querySelector(`.${ENTRY_CLASS}`)) return;
@@ -118,11 +136,15 @@ function addEntry(dropdown: Element): void {
     separator.className = `separator ${SEPARATOR_CLASS}`;
     const button = doc.createElement('button');
     button.className = `option ${ENTRY_CLASS}`;
-    button.textContent = 'Export with Beaver\u2026';
-    // The dropdown closes itself on any click in its popup.
-    button.addEventListener('click', () => {
-        const anchor = dropdown.querySelector(':scope > .toolbar-button') ?? dropdown;
-        openFormatMenu(doc, anchor);
+    button.setAttribute('aria-haspopup', 'menu');
+    const label = doc.createElement('span');
+    label.textContent = 'Export with Beaver';
+    button.append(label, createChevron(doc));
+    button.addEventListener('click', (event: Event) => {
+        // The dropdown closes on any click in its popup, which React handles
+        // at its root; a submenu keeps it open.
+        event.stopPropagation();
+        openFormatMenu(dropdown, popup as HTMLElement, button);
     });
     placeLast(popup, separator, button);
 
@@ -142,8 +164,21 @@ function addEntry(dropdown: Element): void {
 // Format menu
 // ---------------------------------------------------------------------------
 
-/** Open the export formats under the More button, right-aligned like the dropdown. */
-function openFormatMenu(doc: Document, anchor: Element): void {
+/** Close the More dropdown if it is still open, as its own button does. */
+function closeDropdown(dropdown: Element): void {
+    const toggle = dropdown.querySelector(':scope > .toolbar-button');
+    const view = dropdown.ownerDocument.defaultView;
+    if (!toggle || !view || !dropdown.querySelector(':scope > .popup')) return;
+    toggle.dispatchEvent(new view.MouseEvent('mousedown', { bubbles: true, button: 0 }));
+}
+
+/**
+ * Open the export formats beside the entry, like a submenu (on the other side
+ * when there is no room). The entry stays highlighted while they are open;
+ * closing them closes the dropdown too.
+ */
+function openFormatMenu(dropdown: Element, dropdownPopup: HTMLElement, entry: HTMLElement): void {
+    const doc = dropdown.ownerDocument;
     const editor = noteEditorOf(doc);
     const frame = (doc.defaultView as any)?.browsingContext?.embedderElement as Element | null;
     const win = editor?.ownerDocument?.defaultView as Window | null;
@@ -154,7 +189,10 @@ function openFormatMenu(doc: Document, anchor: Element): void {
     // On the root: a popup cannot open inside a hidden element.
     xulDoc.documentElement.appendChild(popup);
     popup.addEventListener('popuphidden', (event: Event) => {
-        if (event.target === popup) popup.remove();
+        if (event.target !== popup) return;
+        popup.remove();
+        entry.style.removeProperty('background-color');
+        closeDropdown(dropdown);
     });
     for (const { format, name } of FORMATS) {
         const menuitem = xulDoc.createXULElement('menuitem');
@@ -168,22 +206,25 @@ function openFormatMenu(doc: Document, anchor: Element): void {
         popup.appendChild(menuitem);
     }
 
-    const anchorRect = anchor.getBoundingClientRect();
+    // The dropdown's hover color, kept while the submenu is open.
+    entry.style.setProperty('background-color', 'var(--fill-quinary)');
+
+    // Horizontally the dropdown's edges, vertically the entry, raised by the
+    // menu's padding so the first format lines up with it.
+    const popupRect = dropdownPopup.getBoundingClientRect();
+    const entryRect = entry.getBoundingClientRect();
     const frameRect = frame.getBoundingClientRect();
     const rect = (win as any).windowUtils.toScreenRectInCSSUnits(
-        frameRect.x + anchorRect.left,
-        frameRect.y + anchorRect.top,
-        anchorRect.width,
-        anchorRect.height,
+        frameRect.x + popupRect.left,
+        frameRect.y + entryRect.top - MENU_PADDING,
+        popupRect.width,
+        entryRect.height,
     );
-    // Opened after the click that closes the dropdown has finished.
-    win.setTimeout(() => {
-        if (typeof popup.openPopupAtScreenRect === 'function') {
-            popup.openPopupAtScreenRect('after_end', rect.x, rect.y, rect.width, rect.height, false, false);
-        } else {
-            popup.openPopupAtScreen(rect.x, rect.y + rect.height, false);
-        }
-    }, 0);
+    if (typeof popup.openPopupAtScreenRect === 'function') {
+        popup.openPopupAtScreenRect('end_before', rect.x, rect.y, rect.width, rect.height, false, false);
+    } else {
+        popup.openPopupAtScreen(rect.x + rect.width, rect.y, false);
+    }
 }
 
 /** Export the note, asking where to save, and say how it went. */
