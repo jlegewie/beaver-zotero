@@ -1,3 +1,4 @@
+import { cslCitationNotes, type CitationNotes } from "@beaver/agent-export/citations/citationNotes";
 import { getPref } from "../utils/prefs";
 
 const DEFAULT_STYLE_ID = "http://www.zotero.org/styles/chicago-author-date";
@@ -16,11 +17,9 @@ export type Citation = {
 }
 
 /** One item of a citation cluster in a sequence. */
-export type SequenceCitationItem = {
+export type SequenceCitationItem = CitationNotes & {
     /** Library item id, or a key of `embeddedItems`. */
     id: number | string;
-    locator?: string;
-    label?: string;
 };
 
 export type CitationSequenceRequest = {
@@ -271,7 +270,7 @@ export class CitationService {
             citationID: `c${index}`,
             citationItems: cluster.items.map(item => ({
                 id: item.id,
-                ...(item.locator ? { locator: item.locator, label: item.label ?? "page" } : {}),
+                ...cslCitationNotes(item),
             })),
             properties: { noteIndex: cluster.noteIndex },
         }));

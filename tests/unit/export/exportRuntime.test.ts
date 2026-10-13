@@ -10,6 +10,7 @@ import { loadExportRuntime } from '../../../src/services/export/exportRuntime';
 function fakeRuntime() {
     return {
         parseExportSource: vi.fn(),
+        parseNoteDoc: vi.fn(),
         writeDocx: vi.fn(),
         writeHtml: vi.fn(),
         writeMarkdown: vi.fn(),
