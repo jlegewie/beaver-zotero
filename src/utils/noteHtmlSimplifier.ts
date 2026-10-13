@@ -20,7 +20,7 @@ import {
     zoteroLinkCitationPattern,
 } from './zoteroLinkCitation';
 import { translatePageLabelToNumber } from './pageLabelTranslation';
-import { citationItemRefFromUri, extractItemKeyFromUri } from './zoteroUri';
+import { citationItemRefFromUri } from './zoteroUri';
 import { modelObjectId } from './libraryIdentity';
 import { citationReadback, isItemKey, readBeaverCitationMeta } from './noteCitationMeta';
 import type { PageLabels } from '../services/documentCache';
@@ -433,17 +433,14 @@ export function simplifyNoteHtml(
                     tag += ` ref="${ref}"/>`;
                     return tag;
                 } else {
-                    // Compound citation (multiple items)
-                    const keys = citationItems.map((ci: any) => {
-                        const uri = ci.uris?.[0] || '';
-                        return extractItemKeyFromUri(uri) || 'unknown';
-                    });
-                    const ref = nextRef(keys.join('+'));
+                    // Compound citation (multiple items). The ref and the
+                    // items attribute name each item the same way.
+                    const itemRefs = citationItems.map((ci: any) => citationItemRefFromUri(ci.uris?.[0] || '', libraryID));
+                    const ref = nextRef(itemRefs.map((itemRef: { key: string } | null) => itemRef?.key ?? 'unknown').join('+'));
 
                     // Build items attribute: "LIB-KEY1:page=P1, LIB-KEY2:page=P2"
-                    const itemsAttr = citationItems.map((ci: any) => {
-                        const uri = ci.uris?.[0] || '';
-                        const itemRef = citationItemRefFromUri(uri, libraryID);
+                    const itemsAttr = citationItems.map((ci: any, i: number) => {
+                        const itemRef = itemRefs[i];
                         const itemId = modelObjectId(itemRef?.libraryID ?? libraryID, itemRef?.key ?? 'unknown');
                         let page = ci.locator != null ? String(ci.locator) : '';
                         const pageLabels = pageLabelsByItemId?.[itemId];

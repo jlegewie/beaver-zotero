@@ -159,4 +159,3 @@ export function citationReadback(
     if (meta.loc || !storesPage) return { childKey, loc: meta.loc ?? '' };
     return { childKey, loc: null };
 }
-

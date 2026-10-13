@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     buildBeaverCitationMeta,
+    citationReadback,
     locatorToken,
     readBeaverCitationMeta,
 } from '../../../src/utils/noteCitationMeta';
@@ -41,6 +42,41 @@ describe('buildBeaverCitationMeta', () => {
     it('keeps a source only together with an external id', () => {
         expect(buildBeaverCitationMeta({ src: 'openalex' })).toBeUndefined();
         expect(buildBeaverCitationMeta({ ext: 'W1', src: 'openalex' })).toEqual({ v: 1, ext: 'W1', src: 'openalex' });
+    });
+});
+
+describe('citationReadback', () => {
+    const exists = () => true;
+
+    it('reads a citation without metadata as an ordinary citation', () => {
+        expect(citationReadback({ uris: [], locator: '5' }, exists)).toBeNull();
+    });
+
+    it('falls back to an ordinary citation when the cited child is gone', () => {
+        const childExists = vi.fn(() => false);
+        const item = { locator: '5', beaver: { v: 1, loc: 's5.6', att: 'ATTACH01' } };
+        expect(citationReadback(item, childExists)).toBeNull();
+        expect(childExists).toHaveBeenCalledWith('ATTACH01');
+    });
+
+    it('reads an annotation citation without a locator, whatever page it stores', () => {
+        expect(citationReadback({ locator: '7', beaver: { v: 1, ann: 'ANNOT001' } }, exists))
+            .toEqual({ childKey: 'ANNOT001', loc: '' });
+    });
+
+    it('reads a citation with the locator Beaver recorded', () => {
+        expect(citationReadback({ locator: '5', beaver: { v: 1, loc: 's5.6', att: 'ATTACH01' } }, exists))
+            .toEqual({ childKey: 'ATTACH01', loc: 's5.6' });
+        expect(citationReadback({ beaver: { v: 1, loc: 's5.6' } }, exists))
+            .toEqual({ childKey: undefined, loc: 's5.6' });
+    });
+
+    it('reads a citation recording only its attachment with the page it stores', () => {
+        expect(citationReadback({ locator: '100', beaver: { v: 1, att: 'ATTACH01' } }, exists))
+            .toEqual({ childKey: 'ATTACH01', loc: null });
+        // With no stored page there is nothing to show either way.
+        expect(citationReadback({ locator: '', beaver: { v: 1, att: 'ATTACH01' } }, exists))
+            .toEqual({ childKey: 'ATTACH01', loc: '' });
     });
 });
 

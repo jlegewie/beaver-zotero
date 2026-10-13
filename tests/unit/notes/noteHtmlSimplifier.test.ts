@@ -675,6 +675,13 @@ describe('cross-library citations', () => {
         expect(simplified).toContain('<citation id="u-MINE0001" ref="c_MINE0001_0"/>');
     });
 
+    it('names an embedded work in a multi-item citation the same way in its ref and items', () => {
+        const html = wrap(`<p>${rawCitationForUris([userUri('KEY1'), 'https://doi.org/10.1234/items/ABCD1234'])}</p>`);
+        const { simplified } = simplifyNoteHtml(html, GROUP_LIBRARY_ID);
+
+        expect(simplified).toContain('<citation items="u-KEY1, g6073928-unknown" ref="c_KEY1+unknown_0"/>');
+    });
+
     it('falls back to the note\'s library for a group not on this computer', () => {
         const html = wrap(`<p>${rawCitationForUris(['http://zotero.org/groups/111/items/FOREIGN1'])}</p>`);
         const { simplified } = simplifyNoteHtml(html, GROUP_LIBRARY_ID);

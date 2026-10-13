@@ -113,6 +113,17 @@ describe('preloadNotePageLabels', () => {
         expect(cache.getMetadata).not.toHaveBeenCalled();
     });
 
+    it('skips labels for an annotation citation, which reads back without a locator', async () => {
+        const cache = { getMetadata: vi.fn() };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (_lib: number, key: string) =>
+            key === 'ANNOT001' ? { key } : null);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const html = makeMetaCitation('PARENT01', { v: 1, ann: 'ANNOT001' }, '7');
+        expect(await preloadNotePageLabels(html, 1)).toEqual({});
+        expect(cache.getMetadata).not.toHaveBeenCalled();
+    });
+
     it('keys labels to the cited attachment when the metadata records no locator', async () => {
         const attachment = makeAttachment(42, 'ATTACH01');
         const cache = { getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 1: '100' } }) };
