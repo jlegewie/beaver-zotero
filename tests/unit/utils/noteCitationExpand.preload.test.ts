@@ -139,8 +139,9 @@ describe('preloadNotePageLabels', () => {
         const attachment = makeAttachment(42, 'ATTACH02');
         const parent = makeParent(41, 'PARENT01', 42);
         const cache = { getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 1: '100' } }) };
-        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (_lib: number, key: string) =>
-            key === 'PARENT01' ? parent : null);
+        // Zotero answers an unknown key with a plain `false`, not a promise.
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn((_lib: number, key: string) =>
+            key === 'PARENT01' ? Promise.resolve(parent) : false);
         (globalThis as any).Zotero.Items.getAsync = vi.fn(async () => [attachment]);
         (globalThis as any).Zotero.Items.get = vi.fn(() => attachment);
         (globalThis as any).Zotero.Beaver = { documentCache: cache };

@@ -148,13 +148,15 @@ describe('locator resolution by id scheme', () => {
         );
     });
 
-    it('never runs a non-PDF attachment through the PDF extractor', async () => {
+    it('never runs a non-PDF attachment through the PDF extractor, nor warns about its page', async () => {
         getResult.mockResolvedValue(null);
         attachment.attachmentContentType = 'application/epub+zip';
         attachment.attachmentLinkMode = 0;
         const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="p3"/>');
 
-        expect(resolved.unresolved).toEqual(['id="1-ATTACH12" loc="p3"']);
+        // An EPUB citation shows no page, so an unmapped locator is no loss.
+        expect(resolved.unresolved).toEqual([]);
+        expect(resolved.pages).toEqual({});
         expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
     });
 

@@ -1451,6 +1451,32 @@ describe('expandToRawHtml', () => {
         // Another chat has no data for the work; the citation carries it.
         const movedElsewhere = expandToRawHtml(tag.replace('page4', 'page9'), metadata, 'new');
         expect(decodeCitation(movedElsewhere).citationItems[0]).toEqual(decodeCitation(moved).citationItems[0]);
+
+        // So does a new citation of the work, written without a ref.
+        const citedAgain = expandToRawHtml('<citation external_id="W1975284160" loc="page9"/>', metadata, 'new');
+        expect(decodeCitation(citedAgain).citationItems[0]).toEqual(decodeCitation(moved).citationItems[0]);
+
+        // And old_string may name the citation without its ref.
+        expect(enrichOldStringCitationRefs('See <citation external_id="W1975284160" loc="page4"/>.', metadata))
+            .toBe('See <citation external_id="W1975284160" loc="page4" ref="c_ext_W1975284160_0"/>.');
+        expect(enrichOldStringCitationRefs('<citation external_id="W1975284160" loc="page5"/>', metadata)).toBeNull();
+    });
+
+    it('rebuilds a moved external citation from its own data, not another citation of the work', () => {
+        const embedded = (uri: string, title: string) => {
+            const data = { citationItems: [{ uris: [uri], locator: '4', beaver: { v: 1, loc: 'page4', ext: 'W42', csl: { title } } }], properties: {} };
+            return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(data))}">(${title})</span>`;
+        };
+        const html = wrap(`<p>${embedded('https://openalex.org/W42', 'First')}</p><p>${embedded('https://doi.org/10.1/w42', 'Second')}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const second = simplified.match(/<citation [^>]*ref="c_ext_W42_1"[^>]*\/>/)![0];
+
+        const moved = expandToRawHtml(second.replace('page4', 'page9'), metadata, 'new');
+        expect(decodeCitation(moved).citationItems[0]).toMatchObject({
+            uris: ['https://doi.org/10.1/w42'],
+            locator: '9',
+            beaver: { loc: 'page9', ext: 'W42', csl: { title: 'Second' } },
+        });
     });
 
     it('external_id without a DOI is cited under its source URI', () => {
@@ -2355,6 +2381,38 @@ describe('checkDuplicateCitations', () => {
         const result = checkDuplicateCitations(newStr, metadata);
         expect(result).toContain('already cited');
         expect(result).toContain('c_DUP_0');
+    });
+
+    it('does not report a citation the edit keeps from its old_string', () => {
+        const metadata: SimplificationMetadata = {
+            elements: new Map([
+                ['c_DUP_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-DUP', loc: 's5.6' } }],
+            ]),
+        };
+        const newStr = 'Revised claim <citation id="u-DUP" loc="s5.6"/>.';
+        // Matched without a ref, or after enrichment added one.
+        expect(checkDuplicateCitations(newStr, metadata, 'Claim <citation id="u-DUP" loc="s5.6"/>.')).toBeNull();
+        expect(checkDuplicateCitations(newStr, metadata, 'Claim <citation id="u-DUP" loc="s5.6" ref="c_DUP_0"/>.'))
+            .toBeNull();
+        // A second, new citation of the same item is still reported.
+        expect(checkDuplicateCitations(`${newStr} Again <citation id="u-DUP" loc="s5.6"/>`, metadata,
+            'Claim <citation id="u-DUP" loc="s5.6"/>.')).toContain('already cited');
+    });
+
+    it('reports a new duplicate when the edit also keeps the original by its ref', () => {
+        const metadata: SimplificationMetadata = {
+            elements: new Map([
+                ['c_DUP_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-DUP', loc: 's5.6' } }],
+            ]),
+        };
+        const old = 'Claim <citation id="u-DUP" loc="s5.6" ref="c_DUP_0"/>.';
+        const added = ' Again <citation id="u-DUP" loc="s5.6"/>.';
+        expect(checkDuplicateCitations(`${old}${added}`, metadata, old)).toContain('already cited');
+        // Also when the kept citation is named by its ref alone.
+        expect(checkDuplicateCitations(`Claim <citation ref="c_DUP_0"/>.${added}`, metadata, old))
+            .toContain('already cited');
+        expect(checkDuplicateCitations(`${old}${added}`, metadata, 'Claim <citation ref="c_DUP_0"/>.'))
+            .toContain('already cited');
     });
 });
 

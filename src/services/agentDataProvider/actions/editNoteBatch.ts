@@ -804,7 +804,7 @@ async function executeEditNoteBatchAction(
     // Warnings: per-edit duplicate-citation + batch locator warnings.
     const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
     for (const edit of edits) {
-        const dup = checkDuplicateCitations(edit.new_string, metadata);
+        const dup = checkDuplicateCitations(edit.new_string, metadata, edit.old_string);
         if (dup) warnings.push(dup);
     }
 

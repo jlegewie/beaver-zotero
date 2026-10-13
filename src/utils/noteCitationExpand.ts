@@ -287,6 +287,18 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
 }
 
 /**
+ * Whether an item exists, loading it if needed. Zotero returns a plain `false`
+ * (not a promise) for a key it does not know, and the lookup can throw.
+ */
+async function itemExists(libraryID: number, key: string): Promise<boolean> {
+    try {
+        return !!(await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key));
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Load cached page labels for citations already stored in a raw Zotero note,
  * both native ones and the plain links used for standalone attachments.
  *
@@ -369,9 +381,7 @@ export async function preloadNotePageLabels(
                 let readback: CitationReadback | null = null;
                 if (citationItems.length === 1) {
                     const childKey = citedChildKey(readBeaverCitationMeta(ci));
-                    const childExists = childKey
-                        ? !!(await Zotero.Items.getByLibraryAndKeyAsync(itemRef.libraryID, childKey).catch(() => null))
-                        : false;
+                    const childExists = childKey ? await itemExists(itemRef.libraryID, childKey) : false;
                     readback = citationReadback(ci, () => childExists);
                 }
                 if (readback && readback.loc !== null) continue;
@@ -530,6 +540,9 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
         if (checkLibraryExcluded(normalized.ref.library_id)) continue;
 
         const describe = `id="${modelObjectIdFromReference(normalized.ref)}" loc="${loc.raw}"`;
+        // Only a PDF citation shows a page, so only there is a locator that
+        // could not be mapped to one worth a warning.
+        let citesPdf = true;
         try {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(normalized.ref.library_id, normalized.ref.zotero_key);
             // Use the async helper so a regular parent item's child attachments
@@ -539,8 +552,9 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
                 ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
                 : null;
             if (!attachmentItem) { unresolved.push(describe); continue; }
+            citesPdf = isPdfDocument(attachmentItem);
 
-            const schemaVersion = locatorSchemaVersion(loc, isPdfDocument(attachmentItem));
+            const schemaVersion = locatorSchemaVersion(loc, citesPdf);
             if (!producibleExtractionSchemaVersions('pdf').includes(schemaVersion)) {
                 unavailable.push(describe);
                 continue;
@@ -561,19 +575,17 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
                         source: { kind: 'zotero', item: attachmentItem },
                         filePath,
                         schemaVersion,
-                        extractOnMiss: !isRemoteOnly && isPdfDocument(attachmentItem),
+                        extractOnMiss: !isRemoteOnly && citesPdf,
                     });
                 })();
                 resultsByAttachment.set(resultKey, resultPromise);
             }
             const result = await resultPromise;
-            if (!result) { unresolved.push(describe); continue; }
-
-            const resolved = resolvePageFromStructuredResult(result, loc, isStandaloneAttachment(item));
-            if (resolved == null) { unresolved.push(describe); continue; }
-            pages[citationKey] = resolved;
+            const resolved = result && resolvePageFromStructuredResult(result, loc, isStandaloneAttachment(item));
+            if (resolved) pages[citationKey] = resolved;
+            else if (citesPdf) unresolved.push(describe);
         } catch {
-            unresolved.push(describe);
+            if (citesPdf) unresolved.push(describe);
         }
     }
 
@@ -975,15 +987,20 @@ export function isCitationRefNotFoundError(error: unknown): boolean {
 
 /**
  * Cite an external work: as the library item it maps to when the user has it,
- * otherwise as an embedded item built from the thread's reference metadata.
- * Throws when the thread has neither.
+ * otherwise as an embedded item built from the thread's reference metadata,
+ * or from a citation of the work the note already holds (which carries its
+ * data), so a note can be edited from any chat. `ownCitation` is the stored
+ * citation being rewritten, whose data is preferred over that of other
+ * citations of the work. Throws when none has it.
  */
 function buildExternalRefCitation(
     externalId: string,
     loc: Locator | undefined,
     externalRefContext: ExternalRefContext | undefined,
     pageLabels: PageLabelsByAttachmentId | undefined,
+    metadata: SimplificationMetadata,
     citationOptions?: NoteCitationItemOptions,
+    ownCitation?: string,
 ): string {
     const mappedItemRef = externalRefContext?.externalItemMapping?.[externalId];
     if (mappedItemRef) {
@@ -1000,11 +1017,18 @@ function buildExternalRefCitation(
             noteCitationHTML(buildExternalNoteCitation(externalId, externalRef, loc, citationOptions)),
         );
     }
+    const sameWork = [...metadata.elements.values()]
+        .filter(stored => stored.originalAttrs?.external_id === externalId)
+        .map(stored => stored.rawHtml);
+    for (const rawHtml of ownCitation ? [ownCitation, ...sameWork] : sameWork) {
+        const rebuilt = rebuildEmbeddedNoteCitation(storedCitationItem(rawHtml), loc, citationOptions);
+        if (rebuilt) return stripInlineItemDataFromDataCitations(noteCitationHTML(rebuilt));
+    }
     throw new Error(
         `Error: Citation external_id="${externalId}" not found in this thread's `
-        + 'external reference cache. To cite a Zotero item use id="LIB-KEY", '
+        + 'external reference cache or in the note. To cite a Zotero item use id="LIB-KEY", '
         + 'or att_id="LIB-KEY" for a PDF attachment. external_id is only valid '
-        + 'for works returned by a search tool earlier in this thread.'
+        + 'for works returned by a search tool earlier in this thread or already cited in the note.'
     );
 }
 
@@ -1083,17 +1107,13 @@ export function expandNoteCitationTags(
                         const sameWork = externalId === storedExternalId;
                         const unchanged = sameWork && matchesStoredLocator(stored.originalAttrs?.loc ?? '', loc);
                         if (unchanged || context === 'old') return stored.rawHtml;
-                        const storedItem = sameWork ? storedCitationItem(stored.rawHtml) : undefined;
-                        const citationOptions = storedCitationOptions(storedItem);
-                        // Without the thread's data for the work, a new
-                        // locator is applied to the work the citation carries.
-                        const threadHasWork = !!(externalRefContext?.externalItemMapping?.[externalId]
-                            || externalRefContext?.externalRefs?.[externalId]);
-                        if (storedItem && !threadHasWork) {
-                            const rebuilt = rebuildEmbeddedNoteCitation(storedItem, loc, citationOptions);
-                            if (rebuilt) return stripInlineItemDataFromDataCitations(noteCitationHTML(rebuilt));
-                        }
-                        return buildExternalRefCitation(externalId, loc, externalRefContext, pageLabels, citationOptions);
+                        const citationOptions = sameWork
+                            ? storedCitationOptions(storedCitationItem(stored.rawHtml))
+                            : undefined;
+                        return buildExternalRefCitation(
+                            externalId, loc, externalRefContext, pageLabels, metadata, citationOptions,
+                            sameWork ? stored.rawHtml : undefined,
+                        );
                     }
                     // Single citation — check if attributes changed (e.g., page locator updated)
                     if (itemId) {
@@ -1188,7 +1208,7 @@ export function expandNoteCitationTags(
             // external_id: chat-side external work ID (e.g. OpenAlex W-id).
             if (externalId) {
                 const loc = normalizedCitation.ok ? normalizedCitation.ref.loc : undefined;
-                return buildExternalRefCitation(externalId, loc, externalRefContext, pageLabels);
+                return buildExternalRefCitation(externalId, loc, externalRefContext, pageLabels, metadata);
             }
             if (items) {
                 throw new Error(

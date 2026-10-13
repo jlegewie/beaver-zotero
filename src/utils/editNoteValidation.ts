@@ -31,6 +31,7 @@ import {
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
+    requestedCitationKey,
     type Locator,
 } from '@beaver/agent-core/citations/citationGrammar';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
@@ -141,21 +142,60 @@ export function checkNewCitationItemsExist(
 // =============================================================================
 
 /**
+ * Identity-and-locator key of a citation tag. A tag that names its citation
+ * only by `ref` takes the identity the stored citation was read with.
+ */
+function citationTagKey(attrStr: string, metadata: SimplificationMetadata): string | null {
+    let attrs = parseRawCitationAttributes(attrStr);
+    let normalized = normalizeCitationTag(attrs);
+    const stored = !normalized.ok && attrs.ref ? metadata.elements.get(attrs.ref)?.originalAttrs : undefined;
+    if (stored) {
+        const loc = stored.loc ?? (stored.page ? `page${stored.page}` : '');
+        attrs = {
+            ...(stored.external_id ? { external_id: stored.external_id } : { id: stored.item_id }),
+            ...(loc ? { loc } : {}),
+        };
+        normalized = normalizeCitationTag(attrs);
+    }
+    return normalized.ok ? requestedCitationKey(normalized.ref) : null;
+}
+
+/**
  * When a new citation is inserted, check if the same item is already cited
  * elsewhere in the note. Returns a warning string or null.
+ *
+ * A citation that also appears in `oldString` (the text the edit replaces) is
+ * being kept, not inserted, so it is not reported. Each one in `oldString`
+ * excuses one in `newString`, used first by citations kept with their `ref`.
  */
 export function checkDuplicateCitations(
     newString: string,
-    metadata: SimplificationMetadata
+    metadata: SimplificationMetadata,
+    oldString?: string,
 ): string | null {
-    // Find new citations (item_id without ref) in new_string
-    const newCitationRegex = /<citation\s+(?![^>]*\bref=)([^>]*?)\/>/g;
-    let match;
-    const warnings: string[] = [];
+    const kept = new Map<string, number>();
+    for (const match of (oldString ?? '').matchAll(noteCitationTagPattern())) {
+        const key = citationTagKey(match[1] ?? '', metadata);
+        if (key) kept.set(key, (kept.get(key) ?? 0) + 1);
+    }
+    const useKept = (key: string | null): boolean => {
+        const count = key ? kept.get(key) ?? 0 : 0;
+        if (count > 0) kept.set(key!, count - 1);
+        return count > 0;
+    };
 
-    while ((match = newCitationRegex.exec(newString)) !== null) {
-        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1]));
+    const newTags = [...newString.matchAll(noteCitationTagPattern())].map(match => match[1] ?? '');
+    for (const attrStr of newTags) {
+        if (extractAttr(attrStr, 'ref') !== undefined) useKept(citationTagKey(attrStr, metadata));
+    }
+
+    const warnings: string[] = [];
+    // New citations: tags without a ref.
+    for (const attrStr of newTags) {
+        if (extractAttr(attrStr, 'ref') !== undefined) continue;
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
         if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        if (useKept(requestedCitationKey(normalized.ref))) continue;
         const newItemId = modelObjectIdFromReference(normalized.ref);
         // Check if any existing citation references the same item
         for (const [existingId, stored] of metadata.elements) {
@@ -206,6 +246,21 @@ function findUniqueCitationRef(
         if (candidateCount > 1) return null;
     }
     return candidateCount === 1 ? candidateRef : null;
+}
+
+/**
+ * Find the unique ref of an embedded external work's citation by its external
+ * id and the locator it was shown with, or `null` when zero or several match.
+ */
+function findUniqueExternalCitationRef(
+    metadata: SimplificationMetadata,
+    externalId: string,
+    loc: Locator | undefined,
+): string | null {
+    const refs = [...metadata.elements].filter(([, el]) => el.type === 'citation'
+        && el.originalAttrs?.external_id === externalId
+        && matchesStoredLocator(el.originalAttrs.loc ?? '', loc));
+    return refs.length === 1 ? refs[0][0] : null;
 }
 
 /**
@@ -356,6 +411,19 @@ export function enrichOldStringCitationRefs(
         const page = normalized.ok
             ? getPageLocator(normalized.ref)
             : extractAttr(attrStr, 'page') || undefined;
+
+        // An embedded external work, matched by its id and locator.
+        if (normalized.ok && normalized.ref.kind === 'external') {
+            const externalRef = findUniqueExternalCitationRef(metadata, normalized.ref.external_id, loc);
+            if (externalRef) {
+                replacements.push({
+                    start: m.index,
+                    end: m.index + m[0].length,
+                    replacement: citationTagWithRef(attrStr, externalRef),
+                });
+            }
+            continue;
+        }
 
         const explicitItemId = extractAttr(attrStr, 'item_id');
         const unifiedId = extractAttr(attrStr, 'id');
