@@ -69,6 +69,7 @@ export function configurePDFForBeaver(options: ConfigurePDFForBeaverOptions = {}
         maxQueuedOperations: 32,
         createWorker: url => Zotero.Beaver.documents!.createWorker(url),
         createClient: name => Zotero.Beaver.documents!.createClient(name),
+        getCompiledWasm: urls => Zotero.Beaver.documents?.getCompiledWasm(urls) ?? null,
         onWorkerStartFailure: options.onWorkerStartFailure,
         timers: getRealmSafeTimers(),
         workerClientSlots: {

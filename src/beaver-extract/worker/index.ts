@@ -31,7 +31,12 @@ import {
 import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
 import { getCachedLibMuPdf } from "./apiCache";
-import { isWorkerConfigured, setWorkerUrls, type WorkerUrls } from "./config";
+import {
+    isWorkerConfigured,
+    setWorkerCompiledWasm,
+    setWorkerUrls,
+    type WorkerUrls,
+} from "./config";
 import { setPDFLogger } from "../logging";
 import { ERROR_CODES, postLog } from "./errors";
 import { isFatalWasmError, isHeapExhaustionError } from "../wasmFatal";
@@ -129,6 +134,8 @@ interface IncomingOpMessage {
 interface IncomingConfigureMessage {
     kind: "configure";
     urls: WorkerUrls;
+    /** Precompiled WASM modules shared by the host (optional). */
+    compiledWasm?: unknown;
 }
 
 type IncomingMessage = IncomingOpMessage | IncomingConfigureMessage;
@@ -159,6 +166,7 @@ workerSelf.onmessage = (event: MessageEvent) => {
         const cfg = data as IncomingConfigureMessage;
         if (cfg.urls && typeof cfg.urls === "object") {
             setWorkerUrls(cfg.urls);
+            setWorkerCompiledWasm(cfg.compiledWasm);
             workerSelf.postMessage({ kind: "configured" });
         }
         return;
@@ -240,6 +248,13 @@ workerSelf.onmessage = (event: MessageEvent) => {
             });
         }
     });
+};
+
+// A message that cannot be deserialized here (for example a configure frame
+// whose compiled WASM modules this platform cannot receive) never reaches
+// `onmessage`. Report it so the client can resend configure without them.
+workerSelf.onmessageerror = () => {
+    workerSelf.postMessage({ kind: "messageerror" });
 };
 
 workerSelf.postMessage({ kind: "ready" });

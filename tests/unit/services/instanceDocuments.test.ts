@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const execute = vi.hoisted(() => vi.fn());
 vi.mock("../../../src/beaver-extract/MuPDFWorkerClient", () => ({
     MuPDFWorkerClient: class {},
@@ -89,5 +89,63 @@ describe("InstanceDocuments", () => {
             service.extractAndCacheDocument({ libraryId: 1 } as any),
         ).rejects.toMatchObject({ code: "DOCUMENT_ACCESS_REVOKED" });
         expect(listeners.size).toBe(0);
+    });
+
+    describe("getCompiledWasm", () => {
+        const urls = {
+            mupdfWasmFactoryUrl: "chrome://test/mupdf.mjs",
+            mupdfWasmBinaryUrl: "chrome://test/mupdf.wasm",
+            sentencexWasmFactoryUrl: "chrome://test/sentencex.js",
+            sentencexWasmBinaryUrl: "chrome://test/sentencex.wasm",
+        };
+        const wasm = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+        let fetchMock: ReturnType<typeof vi.fn>;
+        beforeEach(() => {
+            fetchMock = vi.fn(async () => ({
+                ok: true,
+                status: 200,
+                arrayBuffer: async () => wasm.slice().buffer,
+            }));
+            vi.stubGlobal("fetch", fetchMock);
+        });
+        afterEach(() => {
+            vi.unstubAllGlobals();
+        });
+
+        it("compiles both modules once and then returns them synchronously", async () => {
+            const service = new InstanceDocuments();
+            const first = service.getCompiledWasm(urls);
+            expect(first).toBeInstanceOf(Promise);
+            expect(service.getCompiledWasm(urls)).toBe(first);
+            const compiled = await first;
+            expect(compiled?.mupdf).toBeInstanceOf(WebAssembly.Module);
+            expect(compiled?.sentencex).toBeInstanceOf(WebAssembly.Module);
+            expect(service.getCompiledWasm(urls)).toBe(compiled);
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+            expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+                urls.mupdfWasmBinaryUrl,
+                urls.sentencexWasmBinaryUrl,
+            ]);
+        });
+
+        it("returns null after a failed compile without retrying", async () => {
+            fetchMock.mockImplementation(async () => ({
+                ok: false,
+                status: 404,
+                arrayBuffer: async () => new ArrayBuffer(0),
+            }));
+            const service = new InstanceDocuments();
+            await expect(service.getCompiledWasm(urls)).resolves.toBeNull();
+            expect(service.getCompiledWasm(urls)).toBeNull();
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        });
+
+        it("releases the modules on dispose and offers none afterwards", async () => {
+            const service = new InstanceDocuments();
+            const pending = service.getCompiledWasm(urls);
+            service.dispose();
+            await expect(pending).resolves.toBeNull();
+            expect(service.getCompiledWasm(urls)).toBeNull();
+        });
     });
 });
