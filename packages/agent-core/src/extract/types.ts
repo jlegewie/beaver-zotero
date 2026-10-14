@@ -806,6 +806,12 @@ export interface PageNumberObservation {
     /** Read from letter-spaced digits ("3 8" for 38). */
     spaced?: boolean;
     /**
+     * An Arabic number, no larger than the page's position, opening a top or
+     * bottom row whose other text no other page prints at its edges ("2
+     * Methods"): a numbered heading's row rather than a running head's.
+     */
+    headingRow?: boolean;
+    /**
      * Box of the element, line or row the number was read from, in MuPDF's
      * page frame. A word of a longer line has the whole line's box.
      */

@@ -425,6 +425,26 @@ describe("pageEdgeRowObservations", () => {
         expect(found.some(([, value]) => value === 12 || value === 2021)).toBe(false);
     });
 
+    it("does not read numbered section headings as page numbers", () => {
+        const pages = ["1 Introduction", "2 Methods", "3 Results"].map((heading, p) => page(p, [
+            line(heading, 60, 100), body(140), body(600), body(700),
+        ]));
+        expect(derivePageLabels(pageEdgeRowObservations(pages), 3)).toEqual({});
+    });
+
+    it("still reads running heads that open with their folio", () => {
+        // Verso heads repeat the authors, recto heads the title.
+        const heads = ["644 R. Allen and A. Vignoles", "School segregation 645", "646 R. Allen and A. Vignoles"];
+        const pages = heads.map((head, p) => page(p, [line(head, 60, 40), body(100), body(140), body(600), body(700)]));
+        expect(derivePageLabels(pageEdgeRowObservations(pages), 3)).toEqual({ 0: "644", 1: "645", 2: "646" });
+    });
+
+    it("reads alternating running heads of a two-page document", () => {
+        const heads = ["644 R. Allen and A. Vignoles", "645 School segregation"];
+        const pages = heads.map((head, p) => page(p, [line(head, 60, 40), body(100), body(140), body(600), body(700)]));
+        expect(derivePageLabels(pageEdgeRowObservations(pages), 2)).toEqual({ 0: "644", 1: "645" });
+    });
+
     it("joins letter-spaced digits in a row", () => {
         const pages = [page(0, [line("2", 500, 40), line("1", 507, 40), body(100), body(140), body(600), body(700)])];
         expect(pageEdgeRowObservations(pages).map((o) => o.value)).toContain(21);

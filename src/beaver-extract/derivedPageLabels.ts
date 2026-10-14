@@ -328,7 +328,7 @@ function candidateRuns(
         if (folios) folios.push(obs);
         else folioNumbers.set(obs.pageIndex, [obs]);
     }
-    const groups = new Map<string, { roman: boolean; prefix: string; offset: number; pages: Set<number>; removedPages: Set<number>; finalPages: Set<number>; counterPages: Set<number>; upper: number; lower: number; paddedPages: Map<number, number>; unpaddedPages: Map<number, number>; heights: number[]; removedHeights: number[] }>();
+    const groups = new Map<string, { roman: boolean; prefix: string; offset: number; pages: Set<number>; removedPages: Set<number>; finalPages: Set<number>; counterPages: Set<number>; upper: number; lower: number; paddedPages: Map<number, number>; unpaddedPages: Map<number, number>; heights: number[]; removedHeights: number[]; folioEvidence: number }>();
     for (const obs of observations) {
         if (obs.pageIndex < 0 || obs.pageIndex >= pageCount || obs.value < 1) continue;
         const offset = obs.value - obs.pageIndex;
@@ -340,7 +340,7 @@ function candidateRuns(
         const key = `${obs.roman ? "r" : "a"}${prefix}\u0000${offset}`;
         let group = groups.get(key);
         if (!group) {
-            group = { roman: obs.roman, prefix, offset, pages: new Set(), removedPages: new Set(), finalPages: new Set(), counterPages: new Set(), upper: 0, lower: 0, paddedPages: new Map(), unpaddedPages: new Map(), heights: [], removedHeights: [] };
+            group = { roman: obs.roman, prefix, offset, pages: new Set(), removedPages: new Set(), finalPages: new Set(), counterPages: new Set(), upper: 0, lower: 0, paddedPages: new Map(), unpaddedPages: new Map(), heights: [], removedHeights: [], folioEvidence: 0 };
             groups.set(key, group);
         }
         // One padding vote per page: a folio is often read more than once
@@ -350,6 +350,7 @@ function candidateRuns(
             if (width > 0) group.paddedPages.set(obs.pageIndex, Math.max(width, group.paddedPages.get(obs.pageIndex) ?? 0));
             else group.unpaddedPages.set(obs.pageIndex, String(obs.value).length);
         }
+        if (!obs.headingRow) group.folioEvidence++;
         if (obs.bbox) (obs.edge ? group.heights : group.removedHeights).push(boxHeight(obs.bbox));
         group.pages.add(obs.pageIndex);
         if (printsLastPage(obs)) group.finalPages.add(obs.pageIndex);
@@ -365,6 +366,9 @@ function candidateRuns(
     const runs: Run[] = [];
     const numberedPages = new Map<number, Set<string>>();
     for (const [key, group] of groups) {
+        // Numbers read only from rows no other page repeats (numbered
+        // headings) are no numbering of the pages.
+        if (group.folioEvidence === 0) continue;
         const pages = Array.from(group.pages).sort((a, b) => a - b);
         pages.forEach((page, k) => {
             const near = (k > 0 && page - pages[k - 1] <= MAX_RUN_GAP)
@@ -555,6 +559,10 @@ export function pageEdgeRowObservations(
     marginZone: MarginSettings = DEFAULT_MARGIN_ZONE,
 ): PageNumberObservation[] {
     const observations: PageNumberObservation[] = [];
+    // The text of the row each observation was read from, without digits,
+    // and the pages whose edge rows print each such text.
+    const rowTextOf = new Map<PageNumberObservation, string>();
+    const pagesByRowText = new Map<string, Set<number>>();
     for (const page of pages) {
         const rotation = detectDominantTextOrientation(page, marginZone);
         const rows = textRows(rotateRawPage(page, rotation).page);
@@ -568,12 +576,20 @@ export function pageEdgeRowObservations(
         // The page's body em, which a large title does not stretch.
         const em = median(pageLines.map(emOf));
         const pageObservations: PageNumberObservation[] = [];
+        const pageRowTexts = new Map<PageNumberObservation, string>();
         const picked = new Map<number, "top" | "bottom">();
         rows.slice(-edgeRows).forEach((_, k) => picked.set(rows.length - 1 - k, "bottom"));
         rows.slice(0, edgeRows).forEach((_, k) => picked.set(k, "top"));
         for (const [rowIndex, position] of picked) {
             const lines = rows[rowIndex];
             const rowText = lines.map((line) => line.text).join(" ");
+            const otherText = rowTextKey(rowText);
+            if (otherText) {
+                const seen = pagesByRowText.get(otherText);
+                if (seen) seen.add(page.pageIndex);
+                else pagesByRowText.set(otherText, new Set([page.pageIndex]));
+            }
+            const rowStart = pageObservations.length;
             const uprightRowBox = unionBox(lines);
             const rowBox = sourceBox(uprightRowBox);
             const spaced = spacedRowNumber(
@@ -666,13 +682,45 @@ export function pageEdgeRowObservations(
                     bbox,
                 });
             }
+            // A numbered heading opens its row with an Arabic number and a
+            // title ("2 Methods"), and counts sections from the document's
+            // start, so its number is at most the page's position: a folio
+            // of an article or excerpt ("644 R. Allen …") runs ahead of it.
+            // Folios at a row's end, Roman folios and bare numbers read as
+            // they are.
+            if (otherText) {
+                const firstWord = rowEndWords(rowText)[0];
+                for (const obs of pageObservations.slice(rowStart)) {
+                    if (
+                        !obs.roman
+                        && !obs.spaced
+                        && obs.value <= page.pageIndex + 1
+                        && normalizePageDigits(obs.text).trim() === firstWord
+                    ) {
+                        pageRowTexts.set(obs, otherText);
+                    }
+                }
+            }
         }
         for (const obs of pageObservations) {
             const n = distinctPlaces(pagePlaces.get(`${obs.position}\u0000${obs.text}`) ?? [], em);
-            observations.push(n > 1 ? { ...obs, occurrences: n } : obs);
+            const counted = n > 1 ? { ...obs, occurrences: n } : obs;
+            const rowText = pageRowTexts.get(obs);
+            if (rowText) rowTextOf.set(counted, rowText);
+            observations.push(counted);
         }
     }
-    return observations;
+    // A running head's text recurs on other pages (an author line and a
+    // title, alternating; "Page … of …"); a numbered heading's is its own.
+    return observations.map((obs) => {
+        const rowText = rowTextOf.get(obs);
+        return rowText && (pagesByRowText.get(rowText)?.size ?? 0) < 2 ? { ...obs, headingRow: true } : obs;
+    });
+}
+
+/** A row's text without its digits and marks, lowercased: "" for a bare number. */
+function rowTextKey(rowText: string): string {
+    return rowText.toLowerCase().replace(/[^\p{L}]+/gu, " ").trim();
 }
 
 /** A page's text lines grouped into rows, top to bottom, each left to right. */
