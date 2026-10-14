@@ -490,6 +490,14 @@ describe("pageEdgeRowObservations", () => {
         expect(first?.bbox).toMatchObject({ l: 30, r: 36 });
     });
 
+    it("does not extend over a page whose dash-wrapped folio is one off", () => {
+        // Page 4 is missing from the file: the page after "- 3 -" prints "- 5 -".
+        const pages = [1, 2, 3, 5].map((n, p) => page(p, [body(100), body(140), body(600), line(`- ${n} -`, 290, 740)]));
+        const labels = derivePageLabels(pageEdgeRowObservations(pages), 4);
+        expect(labels[2]).toBe("3");
+        expect(labels[3]).toBeUndefined();
+    });
+
     it("reads page numbers set between dashes", () => {
         const pages = [page(0, [body(100), body(140), body(600), line("- 112 -", 290, 740)])];
         expect(pageEdgeRowObservations(pages).map((o) => o.value)).toContain(112);

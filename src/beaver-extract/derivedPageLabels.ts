@@ -35,6 +35,7 @@ import {
     isFootnoteMarker,
     distinctPlaces,
     emOf,
+    isDashWrappedFolio,
     isPageCounter,
     isScatteredRow,
     normalizePageDigits,
@@ -346,12 +347,13 @@ function candidateRuns(
 ): { runs: Run[]; numberedPages: Map<number, Set<string>>; folioNumbers: Map<number, PageNumberObservation[]>; lastPages: Map<string, Set<number>> } {
     const observations = withoutFurniture(withoutSpacedDigits(withHeadingRows(allObservations)), pageCount);
     // Numbers a page prints as its folio, for `printsShiftedNumber`: those
-    // margin detection removed, and prefixed folios ("S5"), which are only
-    // read from header and footer rows. Other numbers of those rows are not
-    // evidence enough: a contents page's entries end its rows too.
+    // margin detection removed, and prefixed ("S5") and dash-wrapped
+    // ("- 5 -") folios, which are only read from header and footer rows.
+    // Other numbers of those rows are not evidence enough: a contents page's
+    // entries end its rows too.
     const folioNumbers = new Map<number, PageNumberObservation[]>();
     for (const obs of observations) {
-        if (obs.edge && !obs.prefix) continue;
+        if (obs.edge && !obs.prefix && !isDashWrappedFolio(obs.text)) continue;
         const folios = folioNumbers.get(obs.pageIndex);
         if (folios) folios.push(obs);
         else folioNumbers.set(obs.pageIndex, [obs]);

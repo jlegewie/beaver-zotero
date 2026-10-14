@@ -375,6 +375,11 @@ function prefixedFolioWord(word: string): { value: number; prefix: string } | nu
  * as a page number by label derivation only: margin removal does not use
  * it, so extracted text stays as it was.
  */
+/** Whether `text` is a number between dashes ("- 5 -"), a folio's own form. */
+export function isDashWrappedFolio(text: string): boolean {
+    return parseDashWrapped(text) !== null;
+}
+
 function parseDashWrapped(text: string): number | null {
     const normalized = normalizeDigits(text);
     const spaced = normalized.includes("\uFFFD") ? normalized.replace(/\uFFFD/gu, " ") : normalized;
