@@ -24,6 +24,7 @@ import {
     Footer,
     FootnoteReferenceRun,
     HeadingLevel,
+    ImageRun,
     ImportedXmlComponent,
     LineRuleType,
     Packer,
@@ -36,11 +37,17 @@ import {
     TableRow,
     TabStopType,
     TextRun,
+    UnderlineType,
+    VerticalAlign,
     WidthType,
     type ParagraphChild,
 } from 'docx';
-import { itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identity/itemLinks';
-import type { MdBlock, MdFootnoteDefinition, MdInline, MdTable } from '../mdast';
+import type { MdBlock, MdBlockLayout, MdFootnoteDefinition, MdImage, MdInline, MdTable, MdTableCell } from '../mdast';
+import { exportLinkTarget } from '../links';
+import { columnWeights, isNoteTable, tableGrid } from '../note/tableGrid';
+import { imageDisplayWidth, imageFallback, imageHeightRatio, PIXELS_PER_INCH } from '../note/images';
+import { hexDigits } from '../note/colors';
+import { trailingText } from '../note/inlineText';
 import { latexToOmml } from '../math/latexToOmml';
 import { activityLabelParts } from '../activity';
 import { escapeXml, parseXml, stripInvalidXmlChars, type XmlNode } from '../math/xml';
@@ -64,6 +71,7 @@ import {
 import type {
     DocxExportOptions,
     ExportDoc,
+    ExportImage,
     ExportWarning,
     FormattedCitations,
     FormattedCluster,
@@ -75,6 +83,8 @@ export interface WriteDocxInput {
     options: DocxExportOptions;
     /** Formatting; defaults to `DOCX_THEME`. */
     theme?: DocxTheme;
+    /** Images of the document by asset id (Zotero notes). */
+    images?: Record<string, ExportImage>;
 }
 
 export interface WriteDocxResult {
@@ -95,8 +105,15 @@ interface Marks {
     subScript?: boolean;
     smallCaps?: boolean;
     underline?: boolean;
+    /** Color of the underline (`#rrggbb`). */
+    underlineColor?: string;
+    /** Text color (`#rrggbb`). */
+    color?: string;
+    /** Background color (`#rrggbb`). */
+    background?: string;
     hyperlink?: boolean;
 }
+
 
 const HEADINGS = [
     HeadingLevel.HEADING_1,
@@ -169,10 +186,20 @@ function textRun(text: string, marks: Marks = {}, extra: { break?: number } = {}
         ...(marks.superScript ? { superScript: true } : {}),
         ...(marks.subScript ? { subScript: true } : {}),
         ...(marks.smallCaps ? { smallCaps: true } : {}),
-        ...(marks.underline ? { underline: {} } : {}),
+        ...(marks.underline
+            ? { underline: marks.underlineColor ? { type: UnderlineType.SINGLE, color: hexDigits(marks.underlineColor) } : {} }
+            : {}),
         ...(marks.hyperlink ? { style: STYLE.hyperlink } : {}),
+        ...(marks.color ? { color: hexDigits(marks.color) } : {}),
+        ...(marks.background && !marks.code ? { shading: { type: ShadingType.CLEAR, fill: hexDigits(marks.background), color: 'auto' } } : {}),
         ...(marks.code ? { font: theme.fonts.mono, shading: { type: ShadingType.CLEAR, fill: theme.colors.codeBackground, color: 'auto' } } : {}),
     });
+}
+
+/** A block with its inline content bold (header cells). */
+function emboldened(block: MdBlock): MdBlock {
+    if (block.type === 'paragraph' || block.type === 'heading') return { ...block, children: [{ type: 'strong', children: block.children }] };
+    return block;
 }
 
 /** Hidden bookmark on a markdown footnote's first reference mark. */
@@ -214,9 +241,24 @@ function inlineHtmlText(html: string): { text: string; lineBreak: boolean } {
     return { text: html.replace(/<[^>]*>/g, ''), lineBreak: false };
 }
 
-function isWebLink(url: string): boolean {
-    return /^(https?:|mailto:)/i.test(url);
-}
+/** Image types Word embeds directly. */
+const WORD_IMAGE_TYPES: Record<string, 'png' | 'jpg' | 'gif' | 'bmp'> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/gif': 'gif',
+    'image/bmp': 'bmp',
+};
+
+
+const ALIGNMENTS = {
+    left: AlignmentType.LEFT,
+    right: AlignmentType.RIGHT,
+    center: AlignmentType.CENTER,
+    justify: AlignmentType.JUSTIFIED,
+} as const;
+
+/** One step of a note's indentation, in twips (half an inch, Word's default). */
+const INDENT_STEP = 720;
 
 class DocxWriter {
     private readonly footnotes: Record<string, { children: Paragraph[] }> = {};
@@ -235,6 +277,8 @@ class DocxWriter {
     private readonly theme: DocxTheme;
     /** Footnote currently being written, so citations inside it stay inline. */
     private insideFootnote: number | null = null;
+    /** Columns of the table being written (1 outside tables), to size images. */
+    private tableColumns = 1;
 
     constructor(private readonly input: WriteDocxInput) {
         this.theme = input.theme ?? DOCX_THEME;
@@ -275,15 +319,36 @@ class DocxWriter {
                 }
                 case 'emphasis':
                     out.push(...this.inlines(node.children, { ...marks, italics: true }, definitions));
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'strong':
                     out.push(...this.inlines(node.children, { ...marks, bold: true }, definitions));
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'delete':
                     out.push(...this.inlines(node.children, { ...marks, strike: true }, definitions));
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
+                    break;
+                case 'underline':
+                    out.push(...this.inlines(node.children, { ...marks, underline: true, ...(node.color ? { underlineColor: node.color } : {}) }, definitions));
+                    lastText = trailingText(node.children);
+                    break;
+                case 'subscript':
+                case 'superscript':
+                    out.push(...this.inlines(node.children, {
+                        ...marks,
+                        subScript: node.type === 'subscript',
+                        superScript: node.type === 'superscript',
+                    }, definitions));
+                    lastText = trailingText(node.children);
+                    break;
+                case 'styled':
+                    out.push(...this.inlines(node.children, {
+                        ...marks,
+                        ...(node.color ? { color: node.color } : {}),
+                        ...(node.background ? { background: node.background } : {}),
+                    }, definitions));
+                    lastText = trailingText(node.children);
                     break;
                 case 'inlineCode':
                     out.push(textRun(node.value, { ...marks, code: true }, {}, this.theme));
@@ -305,11 +370,16 @@ class DocxWriter {
                 }
                 case 'link':
                     out.push(...this.link(node.url, node.children, marks, definitions));
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
-                case 'image':
-                    if (node.alt) emitText(node.alt, { ...marks, italics: true });
+                case 'image': {
+                    const image = this.image(node, marks, definitions);
+                    if (image.length > 0) {
+                        out.push(...image);
+                        lastText = 'x';
+                    }
                     break;
+                }
                 case 'inlineMath':
                     out.push(this.math(node.value, false));
                     lastText = 'x';
@@ -332,13 +402,7 @@ class DocxWriter {
     }
 
     private link(url: string, children: MdInline[], marks: Marks, definitions: Map<string, MdFootnoteDefinition>): Child[] {
-        const itemLink = parseItemLinkHref(url);
-        let target: string | null = null;
-        if (itemLink) {
-            target = this.input.options.linkItems ? itemLinkExportHref(url) : null;
-        } else if (isWebLink(url)) {
-            target = url;
-        }
+        const target = exportLinkTarget(url, this.input.options.linkItems);
         if (!target) return this.inlines(children, marks, definitions);
         // A hyperlink holds only text runs; equations, footnote marks and
         // citation fields inside the link text are kept, between link parts.
@@ -362,6 +426,56 @@ class DocxWriter {
         }
         flush();
         return out;
+    }
+
+    /**
+     * An image: embedded when the host loaded it, scaled to the space it has;
+     * otherwise its alt text, or a placeholder naming what is missing. An image
+     * on the web is never fetched: it becomes a link to it.
+     */
+    private image(node: MdImage, marks: Marks, definitions: Map<string, MdFootnoteDefinition>): Child[] {
+        const asset = node.assetId ? this.input.images?.[node.assetId] : undefined;
+        if (!asset) {
+            const fallback = imageFallback(node, this.input.doc);
+            if (!fallback) return [];
+            if (fallback.linkUrl) return this.link(fallback.linkUrl, [{ type: 'text', value: fallback.text }], marks, definitions);
+            return [textRun(fallback.text, { ...marks, italics: true })];
+        }
+        const { width, height } = this.imageSize(node, asset);
+        const transformation = { width, height };
+        const altText = node.alt ? { altText: { name: node.alt, description: node.alt } } : {};
+        if (asset.mime === 'image/svg+xml') {
+            if (!asset.png) return [textRun(node.alt || '[Image]', { ...marks, italics: true })];
+            return [new ImageRun({ type: 'svg', data: asset.data, fallback: { type: 'png', data: asset.png }, transformation, ...altText })];
+        }
+        const type = WORD_IMAGE_TYPES[asset.mime];
+        if (!type) return [textRun(node.alt || '[Image]', { ...marks, italics: true })];
+        return [new ImageRun({ type, data: asset.data, transformation, ...altText })];
+    }
+
+    /** Display size in pixels: the note's size, else the natural one, at most the width available. */
+    private imageSize(node: MdImage, asset: ExportImage): { width: number; height: number } {
+        const ratio = imageHeightRatio(asset);
+        let width = imageDisplayWidth(node, asset);
+        let height = node.height ?? width * ratio;
+        const max = this.availableWidth();
+        if (width > max) {
+            height *= max / width;
+            width = max;
+        }
+        return { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) };
+    }
+
+    /** Width available to an image in pixels: the text width, divided among table columns. */
+    private availableWidth(): number {
+        const pixels = (this.textWidthTwips() / 1440) * PIXELS_PER_INCH;
+        return this.tableColumns > 1 ? pixels / this.tableColumns - 12 : pixels;
+    }
+
+    /** Width of the text between the page margins, in twips. */
+    private textWidthTwips(): number {
+        const { size, margin } = pageProperties(this.input.citations.locale, this.theme);
+        return size.width - margin.left - margin.right;
     }
 
     private math(latex: string, display: boolean): Child {
@@ -426,8 +540,9 @@ class DocxWriter {
                 runs.push(...result);
             }
         }
+        // Spacing before the cluster itself comes from the surrounding text.
         for (const text of cluster.fallbackTexts) {
-            const separator = runs.length > 0 || this.isNoteStyle ? ' ' : '';
+            const separator = runs.length > 0 ? ' ' : '';
             runs.push(textRun(`${separator}${text}`, marks));
         }
         return runs;
@@ -451,7 +566,7 @@ class DocxWriter {
 
     private blocks(
         nodes: MdBlock[],
-        context: { depth: number; quote: number },
+        context: { depth: number; quote: number; table?: boolean },
         definitions: Map<string, MdFootnoteDefinition>,
         /** Space owed by a list or table just before these blocks. */
         leadingGap = 0,
@@ -460,7 +575,7 @@ class DocxWriter {
         // Inside a list item, blocks align with the item's text; quotes indent further.
         const indent = listContinuationIndent(context.depth, this.theme) + quoteIndent(context.quote, this.theme);
         const paragraphBase = {
-            style: this.insideFootnote !== null ? STYLE.footnoteText : context.quote > 0 ? STYLE.quote : STYLE.body,
+            style: this.insideFootnote !== null ? STYLE.footnoteText : context.quote > 0 ? STYLE.quote : context.table ? STYLE.tableText : STYLE.body,
             ...(indent > 0 ? { indent: { left: indent, ...(context.quote > 0 ? { right: quoteIndent(1, this.theme) } : {}) } } : {}),
         };
         // A list's items and a table end without a paragraph's space after; the
@@ -482,12 +597,14 @@ class DocxWriter {
                 case 'paragraph':
                     out.push(new Paragraph({
                         ...spacedBase(),
+                        ...this.layout(node, indent),
                         children: [...this.footnoteLead(), ...this.inlines(node.children, {}, definitions)],
                     }));
                     break;
                 case 'heading':
                     out.push(new Paragraph({
                         heading: HEADINGS[Math.min(Math.max(node.depth, 1), 6) - 1],
+                        ...this.layout(node, indent),
                         children: this.inlines(node.children, {}, definitions),
                     }));
                     break;
@@ -533,6 +650,18 @@ class DocxWriter {
             }
             previous = kind;
         }
+        return out;
+    }
+
+    /**
+     * Paragraph properties of a note's layout: alignment, indentation (added
+     * to the indentation the block already has) and direction.
+     */
+    private layout(node: MdBlockLayout, baseIndent: number): Record<string, unknown> {
+        const out: Record<string, unknown> = {};
+        if (node.align && node.align !== 'left') out.alignment = ALIGNMENTS[node.align];
+        if (node.indent) out.indent = { left: baseIndent + node.indent * INDENT_STEP };
+        if (node.dir === 'rtl') out.bidirectional = true;
         return out;
     }
 
@@ -582,6 +711,8 @@ class DocxWriter {
                 if (first && child.type === 'paragraph') {
                     out.push(new Paragraph({
                         style: context.quote > 0 ? STYLE.quote : STYLE.listParagraph,
+                        // The list places the item; a note's alignment and direction still apply.
+                        ...this.layout({ align: child.align, dir: child.dir }, 0),
                         numbering,
                         children: [...checkbox, ...this.inlines(child.children, {}, definitions)],
                     }));
@@ -611,6 +742,7 @@ class DocxWriter {
     }
 
     private table(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): Table {
+        if (isNoteTable(node)) return this.noteTable(node, definitions);
         const columns = Math.max(...node.children.map(row => row.children.length), 1);
         const alignment = (index: number) => {
             const align = node.align?.[index];
@@ -637,6 +769,58 @@ class DocxWriter {
                 }),
             })),
         });
+    }
+
+    /**
+     * A Zotero note's table: cells hold blocks and may span rows and columns
+     * (Word continues a cell spanning rows into the rows below), header cells
+     * are bold, and a first row of header cells repeats on every page.
+     */
+    private noteTable(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): Table {
+        const grid = tableGrid(node);
+        const borders = tableBorders(this.theme);
+        const previousColumns = this.tableColumns;
+        this.tableColumns = grid.columns;
+        const widths = this.columnWidths(node, grid.columns);
+        const rows = node.children.map((row, rowIndex) => new TableRow({
+            tableHeader: rowIndex === 0 && node.headerRow !== false,
+            children: row.children.map(cell => new TableCell({
+                ...(rowIndex === 0 && node.headerRow !== false ? { borders: { bottom: borders.headerBottom } } : {}),
+                margins: borders.cellMargins,
+                verticalAlign: VerticalAlign.TOP,
+                ...(cell.colspan && cell.colspan > 1 ? { columnSpan: cell.colspan } : {}),
+                ...(cell.rowspan && cell.rowspan > 1 ? { rowSpan: cell.rowspan } : {}),
+                ...(cell.background ? { shading: { type: ShadingType.CLEAR, fill: hexDigits(cell.background), color: 'auto' } } : {}),
+                children: this.cellBlocks(cell, definitions),
+            })),
+        }));
+        this.tableColumns = previousColumns;
+        return new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: borders.table,
+            ...(widths ? { columnWidths: widths } : {}),
+            rows,
+        });
+    }
+
+    /** A cell's content as table-text paragraphs; header cells bold. */
+    private cellBlocks(cell: MdTableCell, definitions: Map<string, MdFootnoteDefinition>): Block[] {
+        const blocks = cell.blocks ?? [{ type: 'paragraph', children: cell.children }];
+        const written = this.blocks(blocks.map(block => (cell.header ? emboldened(block) : block)), { depth: 0, quote: 0, table: true }, definitions);
+        // Word requires a cell to end with a paragraph.
+        if (written.length === 0 || !(written[written.length - 1] instanceof Paragraph)) {
+            written.push(new Paragraph({ style: STYLE.tableText, children: [] }));
+        }
+        return written;
+    }
+
+    /** Column widths in twips from the note's widths (proportional to the text width), or null. */
+    private columnWidths(node: MdTable, columns: number): number[] | null {
+        const weights = columnWeights(node, columns);
+        if (!weights) return null;
+        const total = weights.reduce((sum, weight) => sum + weight, 0);
+        const text = this.textWidthTwips();
+        return weights.map(weight => Math.round((weight / total) * text));
     }
 
     // -- Document ------------------------------------------------------------

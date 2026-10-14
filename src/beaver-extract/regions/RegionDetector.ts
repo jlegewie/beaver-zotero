@@ -13,7 +13,7 @@
 import type { RawLine, RawPageData } from "@beaver/agent-core/extract/types";
 
 import type { GraphicsSummary } from "../worker/graphicsSummary";
-import { findCandidates, type CandidateSource } from "./candidates";
+import { findCandidates, type CandidateSource, type FindCandidatesOptions } from "./candidates";
 import { EMPTY_DOC_CONTEXT, GRID_FEATURES, candidateFeatures, gridFeatures, type RegionDocContext } from "./features";
 import { intersectionArea, overlapFrac, rectArea, type Rect } from "./geometry";
 import { assertCompatible, predictRegionClass, readsGridFeatures, usesGridFeatures, type RegionClass, type RegionModelWeights } from "./model";
@@ -169,6 +169,12 @@ export interface DetectRegionsOptions {
      * takes them (`LINE_MARGIN`).
      */
     margin?: ReadonlySet<RawLine>;
+    /**
+     * With grid candidates: lines of the page that are running headers and footers
+     * (`runningMarginLines`), whether or not `margin` holds them. No grid's rows reach
+     * past one (`FindCandidatesOptions.stops`).
+     */
+    running?: ReadonlySet<RawLine>;
     /** Also propose grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
     gridCandidates?: boolean;
     /**
@@ -207,19 +213,28 @@ export function detectRegions(page: RawPageData, graphics: GraphicsSummary, opts
     const numbered = cells || opts.margin?.size ? sourceLines(page) : undefined;
     // Furniture is words (a running head) or carries a page number; a symbol, a
     // variable or a panel letter repeating in the margin band is content.
-    const inMargin = (l: RegionLine) =>
-        !!opts.margin?.size &&
-        (l.parts ?? [l]).every((p) => opts.margin!.has(numbered![p.source - 1])) &&
-        ((l.text.match(/\p{L}/gu) ?? []).length >= MARGIN_MIN_LETTERS || /\d/u.test(l.text));
+    const furnitureText = (l: RegionLine) => (l.text.match(/\p{L}/gu) ?? []).length >= MARGIN_MIN_LETTERS || /\d/u.test(l.text);
+    const within = (set: ReadonlySet<RawLine> | undefined, l: RegionLine) =>
+        !!set?.size && (l.parts ?? [l]).every((p) => set.has(numbered![p.source - 1])) && furnitureText(l);
+    const inMargin = (l: RegionLine) => within(opts.margin, l);
+    let gridOptions: FindCandidatesOptions = {};
+    if (opts.gridCandidates) {
+        const margin = new Set(lines.filter(inMargin));
+        // A grid's rows end at the page's furniture and running headers and footers.
+        const stops = new Set(lines.filter((l) => margin.has(l) || within(opts.running, l)));
+        gridOptions = { grid: true, margin, stops };
+    }
     const found = findCandidates(lines, primitives, page.width, page.height, bs, {
-        ...(opts.gridCandidates ? { grid: true, margin: new Set(lines.filter(inMargin)) } : {}),
+        ...gridOptions,
         ...(cells ? { sources: numbered } : {}),
     });
     const doc = opts.doc ?? EMPTY_DOC_CONTEXT;
     const candidates = found.candidates.map((c): DetectedRegion => {
-        const features = candidateFeatures(c, found, doc);
+        // A grid cut short of running heads and feet is described as the grid as found.
+        const described = c.found ?? c;
+        const features = candidateFeatures(described, found, doc);
         const region: DetectedRegion = { bbox: c.bbox, anchored: c.anchored, source: c.source, features };
-        if (gridFeaturesFor(c.source)) region.gridFeatures = gridFeatures(c, found);
+        if (gridFeaturesFor(c.source)) region.gridFeatures = gridFeatures(described, found);
         if (opts.model) {
             // Grid features not computed are `src_grid` followed by values the model never reads.
             const grid = gridModel ? (region.gridFeatures ?? GRID_FEATURES.map((_, i) => (i > 0 ? NaN : c.source === "grid" ? 1 : 0))) : [];

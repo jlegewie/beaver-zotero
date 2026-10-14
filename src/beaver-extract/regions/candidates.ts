@@ -57,6 +57,11 @@ export interface FindCandidatesOptions {
     sources?: readonly RawLine[];
     /** The page's furniture (running heads and feet, page numbers): no grid candidate takes it. */
     margin?: ReadonlySet<RegionLine>;
+    /**
+     * Lines no grid's rows reach past (`gridGroups`): the page's furniture and its
+     * running headers and footers, flagged as furniture or not.
+     */
+    stops?: ReadonlySet<RegionLine>;
 }
 
 export interface Candidate {
@@ -80,6 +85,12 @@ export interface Candidate {
     memberLines?: readonly RegionLine[];
     /** Text and grid candidates built from rotated (landscape) text. */
     rotated?: boolean;
+    /**
+     * A grid candidate cut short of the page's running heads and feet
+     * (`GridGroup.proposes`): the grid as found, which it is described and classified
+     * as. It keeps its own box and lines for routing and emission.
+     */
+    found?: Candidate;
 }
 
 export interface PageCandidates {
@@ -317,6 +328,9 @@ export function findCandidates(
     for (const { source, frameLines, toFrame } of frames) frameLines.forEach((t, i) => inFrame.set(t, { line: source[i], toFrame }));
     const charsOf = options.sources ? lineChars(options.sources, (l) => inFrame.get(l)) : undefined;
     if (options.grid) {
+        // Grids in the order found, by their box as found (a grid that proposes less, or
+        // nothing, is matched as it was found), with the candidate each proposed.
+        const grids: { bbox: Rect; candidate?: Candidate }[] = [];
         // Grid candidates come last, so that the other sources' candidates keep their order.
         const addGrids = (
             groupLines: readonly RegionLine[],
@@ -327,22 +341,33 @@ export function findCandidates(
             toPageLine: (l: RegionLine) => RegionLine,
             rotated: boolean,
         ) => {
-            for (const g of gridGroups(groupLines, figureText, groupCaptions, groupRunning, prims, bs, charsOf, options.margin)) {
+            for (const g of gridGroups(groupLines, figureText, groupCaptions, groupRunning, prims, bs, charsOf, options.margin, options.stops)) {
                 const bbox = toPage(g.bbox);
-                const memberLines = g.lines.map(toPageLine);
+                const proposal = g.proposes === undefined ? g : g.proposes;
+                const memberLines = proposal?.lines.map(toPageLine) ?? [];
                 // A candidate the grid repeats (a ruled table's graphics), with or without the rows
-                // past its own cells, takes the grid's lines.
+                // past its own cells, takes the grid's lines: another source's candidate, or a grid
+                // found before it.
                 const reach = g.reach && toPage(g.reach);
-                const same = candidates.find((c) => iou(c.bbox, bbox) >= GRID_DUPLICATE_IOU || (!!reach && iou(c.bbox, reach) >= GRID_DUPLICATE_IOU));
-                if (same) {
-                    same.memberLines = [...new Set([...(same.memberLines ?? []), ...memberLines])];
+                const repeats = (b: Rect) => iou(b, bbox) >= GRID_DUPLICATE_IOU || (!!reach && iou(b, reach) >= GRID_DUPLICATE_IOU);
+                const other = candidates.find((c) => c.source !== "grid" && repeats(c.bbox));
+                const grid = other ? undefined : grids.find((f) => repeats(f.bbox));
+                if (other || grid) {
+                    const same = other ?? grid!.candidate;
+                    if (same && memberLines.length) same.memberLines = [...new Set([...(same.memberLines ?? []), ...memberLines])];
                     continue;
                 }
-                const members: number[] = [];
-                rects.forEach((r, i) => {
-                    if (overlapFrac(r, bbox) >= 0.5) members.push(i);
-                });
-                candidates.push({ bbox, members, anchored: false, source: "grid", lines: g.lines, memberLines, rotated });
+                if (!proposal) {
+                    grids.push({ bbox });
+                    continue;
+                }
+                const membersOf = (box: Rect) => rects.flatMap((r, i) => (overlapFrac(r, box) >= 0.5 ? [i] : []));
+                const whole: Candidate = { bbox, members: membersOf(bbox), anchored: false, source: "grid", lines: g.lines, memberLines: proposal === g ? memberLines : g.lines.map(toPageLine), rotated };
+                // A grid cut short is no more of a table than the grid as found: it is classified as that.
+                const candidate: Candidate =
+                    proposal === g ? whole : { ...whole, bbox: toPage(proposal.bbox), members: membersOf(toPage(proposal.bbox)), lines: proposal.lines, memberLines, found: whole };
+                candidates.push(candidate);
+                grids.push({ bbox, candidate });
             }
         };
         // Text set upside down (`RegionLine.turned`) reads right to left and bottom to top:

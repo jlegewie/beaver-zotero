@@ -16,6 +16,7 @@ import {
     formatLocator,
     resolveCitationTarget,
 } from '@beaver/agent-export/citations/citationTargets';
+import { citationNotes, type CitationNotes } from '@beaver/agent-export/citations/citationNotes';
 import { externalReferenceToCsl, externalReferenceUri } from '@beaver/agent-export/citations/externalCsl';
 import { cslHtmlToText } from '@beaver/agent-export/citations/inlineHtml';
 import { assignNotePlacements, renderedClusterOrder } from '@beaver/agent-export/citations/noteIndices';
@@ -28,6 +29,7 @@ import type {
     FormattedCitations,
     FormattedCluster,
     LocatorSpec,
+    NoteCitationItem,
 } from '@beaver/agent-export/types';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveLibraryRef } from '../../utils/libraryIdentity';
@@ -35,12 +37,14 @@ import { getBestPDFAttachmentAsync } from '../../utils/zoteroItemHelpers';
 import type { CitationService, SequenceCitationItem } from '../CitationService';
 
 /** A cited work as the processor sees it. */
-type ProcessorItem = {
+type ProcessorItem = CitationNotes & {
     kind: 'processor';
     id: number | string;
     uris: string[];
-    locator?: string;
 };
+
+/** Item metadata a Zotero note stores for its citations (`data-citation-items`). */
+export type NoteCitationCacheEntry = { uris: string[]; itemData: Record<string, unknown> };
 
 /** A citation kept as text. */
 type TextItem = { kind: 'text'; text: string; unresolved: boolean };
@@ -51,6 +55,8 @@ export interface FormatExportCitationsOptions {
     styleId?: string;
     locale?: string;
     liveCitations: boolean;
+    /** The exported note's stored item metadata, for citations of items no longer in the library. */
+    noteCitationItems?: NoteCitationCacheEntry[];
 }
 
 export interface FormatExportCitationsResult {
@@ -60,6 +66,44 @@ export interface FormatExportCitationsResult {
 
 function fallbackText(name: string, locator?: string): string {
     return `(${name}${locator ? `, p. ${locator}` : ''})`;
+}
+
+/** A short stable hash (FNV-1a), to name an embedded work by its identity. */
+function stableHash(text: string): string {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < text.length; index++) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+}
+
+/**
+ * The library item a note citation names: by URI, skipping items in the
+ * trash and following merges, as Zotero's note editor does.
+ */
+async function itemFromURIs(uris: string[]): Promise<Zotero.Item | null> {
+    const editorInstance = (Zotero as any).EditorInstance;
+    if (typeof editorInstance?.getItemFromURIs === 'function') {
+        return (await editorInstance.getItemFromURIs(uris)) || null;
+    }
+    for (const uri of uris) {
+        try {
+            const item = await Zotero.URI.getURIItem(uri);
+            if (item && !item.deleted) return item as Zotero.Item;
+        } catch {
+            // Not a Zotero URI.
+        }
+    }
+    return null;
+}
+
+/** Same work cited with the same notes, so the two are one citation. */
+function sameNotes(a: ProcessorItem, b: ProcessorItem): boolean {
+    return (a.label ?? 'page') === (b.label ?? 'page')
+        && a.prefix === b.prefix
+        && a.suffix === b.suffix
+        && !!a.suppressAuthor === !!b.suppressAuthor;
 }
 
 /** Combine two page locators of one work, without repeating pages. */
@@ -98,11 +142,17 @@ async function attachmentPageLabels(
 
 class CitationResolver {
     readonly embeddedItems: Record<string, Record<string, unknown>> = {};
+    /** Processor id of each embedded note work, by every URI it was cited with. */
+    private readonly embeddedIdByUri = new Map<string, string>();
     unresolved = 0;
 
-    constructor(private readonly snapshot: CitationSnapshot) {}
+    constructor(
+        private readonly snapshot: CitationSnapshot,
+        private readonly noteCitationItems: NoteCitationCacheEntry[] = [],
+    ) {}
 
     async resolve(occurrence: CitationOccurrence): Promise<ResolvedItem | null> {
+        if (occurrence.note) return this.resolveNoteItem(occurrence.note, occurrence.previewText ?? occurrence.groupPreview);
         const target = resolveCitationTarget(occurrence, this.snapshot);
         switch (target.kind) {
             case 'zotero':
@@ -124,6 +174,44 @@ class CitationResolver {
             default:
                 return this.unresolvedText(target.displayName);
         }
+    }
+
+    /**
+     * A cited item of a Zotero note: the library item its URIs name (current
+     * metadata), else the metadata the note stores for it (the citation stays
+     * a citation when the item was deleted or is in a library this computer
+     * no longer has), else what the note shows for it. The locator is a page
+     * label as stored, never translated.
+     */
+    private async resolveNoteItem(note: NoteCitationItem, previewText: string | undefined): Promise<ResolvedItem | null> {
+        const notes = citationNotes(note);
+        try {
+            const item = note.uris.length > 0 ? await itemFromURIs(note.uris) : null;
+            if (item) {
+                const top = await citableItem(item);
+                await top.loadAllData();
+                if (!top.isNote()) {
+                    const uri = Zotero.URI.getItemURI(top);
+                    return { kind: 'processor', id: top.id, uris: [uri, ...note.uris.filter(other => other !== uri)], ...notes };
+                }
+            }
+        } catch (error) {
+            logger(`exportCitations: could not resolve note citation ${note.uris.join(' ')}: ${error}`, 2);
+        }
+        const stored = this.noteCitationItems.find(entry => entry.uris.some(uri => note.uris.includes(uri)));
+        const itemData = note.itemData ?? stored?.itemData;
+        if (itemData) {
+            // A work cited under several URIs (merged items) is one work: the
+            // citation's URIs and those its stored metadata lists are aliases.
+            const aliases = [...new Set([...note.uris, ...(stored?.uris ?? [])])];
+            let id = aliases.map(uri => this.embeddedIdByUri.get(uri)).find(Boolean);
+            id ??= `note-embedded-${stableHash(aliases[0] ?? JSON.stringify(itemData))}`;
+            for (const uri of aliases) this.embeddedIdByUri.set(uri, id);
+            this.embeddedItems[id] ??= { ...itemData };
+            return { kind: 'processor', id, uris: note.uris.length > 0 ? note.uris : [`urn:beaver:embedded:${id}`], ...notes };
+        }
+        this.unresolved += 1;
+        return previewText ? { kind: 'text', text: previewText, unresolved: true } : null;
     }
 
     private unresolvedText(displayName: string | undefined, locator?: string): TextItem | null {
@@ -192,17 +280,36 @@ export async function formatExportCitations(
 ): Promise<FormatExportCitationsResult> {
     // Zotero loads styles lazily; nothing guarantees they are loaded yet.
     if (!Zotero.Styles.initialized()) await Zotero.Styles.init();
-    const resolver = new CitationResolver(snapshot);
+    // Metadata a note keeps inline on one citation serves every citation of
+    // the work, as the note editor pools it into the note's stored metadata.
+    const noteCitationItems = [
+        ...(options.noteCitationItems ?? []),
+        ...doc.clusters.flatMap(cluster => cluster.items.flatMap(occurrence =>
+            (occurrence.note?.itemData ? [{ uris: occurrence.note.uris, itemData: occurrence.note.itemData }] : []))),
+    ];
+    const resolver = new CitationResolver(snapshot, noteCitationItems);
     const resolved: ResolvedItem[][] = [];
     for (const cluster of doc.clusters) {
+        const results: Array<{ occurrence: CitationOccurrence; item: ResolvedItem | null }> = [];
+        for (const occurrence of cluster.items) results.push({ occurrence, item: await resolver.resolve(occurrence) });
+        // A note citation that shows its items only together: when any of
+        // them cannot be resolved, the whole citation is written as the note
+        // shows it, rather than its resolved works twice or the others not at all.
+        const shownWhole = new Set(results
+            .filter(result => result.occurrence.groupPreview && result.item?.kind !== 'processor')
+            .map(result => result.occurrence.groupPreview!));
         const items: ResolvedItem[] = [];
-        for (const occurrence of cluster.items) {
-            const item = await resolver.resolve(occurrence);
+        for (const result of results) {
+            const group = result.occurrence.groupPreview;
+            const item: ResolvedItem | null = group && shownWhole.has(group)
+                ? { kind: 'text', text: group, unresolved: true }
+                : result.item;
             if (!item) continue;
+            if (item.kind === 'text' && items.some(other => other.kind === 'text' && other.text === item.text)) continue;
             // The same work cited twice in one cluster is one citation, with
             // its pages combined ("2012, 3, 8" rather than "2012, 3; 2012, 8").
             const same = item.kind === 'processor'
-                ? items.find((other): other is ProcessorItem => other.kind === 'processor' && other.id === item.id)
+                ? items.find((other): other is ProcessorItem => other.kind === 'processor' && other.id === item.id && sameNotes(other, item))
                 : undefined;
             if (same && item.kind === 'processor') {
                 same.locator = mergeLocators(same.locator, item.locator);
@@ -231,7 +338,7 @@ export async function formatExportCitations(
         clusters: order.map(index => ({
             items: processorItems(index).map((item): SequenceCitationItem => ({
                 id: item.id,
-                ...(item.locator ? { locator: item.locator, label: 'page' } : {}),
+                ...citationNotes(item, { labelDefault: 'page' }),
             })),
             noteIndex: placements.get(index)?.noteIndex ?? 0,
         })),
@@ -246,7 +353,7 @@ export async function formatExportCitations(
             id: item.id,
             uris: item.uris,
             itemData: sequence.itemData[String(item.id)] ?? {},
-            ...(item.locator ? { locator: item.locator, label: 'page' } : {}),
+            ...citationNotes(item, { labelDefault: 'page' }),
         }));
         return {
             html,

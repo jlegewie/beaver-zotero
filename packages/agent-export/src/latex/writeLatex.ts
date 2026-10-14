@@ -15,11 +15,17 @@
  * A body-only export counts from the footnote number where it is inserted.
  */
 
-import { itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identity/itemLinks';
-import type { MdBlock, MdFootnoteDefinition, MdInline, MdTable } from '../mdast';
+import type { MdBlock, MdBlockLayout, MdFootnoteDefinition, MdImage, MdInline, MdTable, MdTableCell } from '../mdast';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
+import { citationNotes, type CitationNotes } from '../citations/citationNotes';
+import { exportLinkTarget } from '../links';
+import { hexDigits } from '../note/colors';
+import { trailingText } from '../note/inlineText';
+import { imageDisplayWidth, imageFallback, PIXELS_PER_INCH } from '../note/images';
+import { isPageLabel, locatorTerm } from '../note/locatorTerms';
+import { columnWeights, isNoteTable, tableGrid } from '../note/tableGrid';
 import { paperSize } from '../page';
-import type { ExportDoc, ExportWarning, FormattedCitations, FormattedCluster, LatexExportOptions } from '../types';
+import type { ExportDoc, ExportImage, ExportWarning, FormattedCitations, FormattedCluster, LatexExportOptions } from '../types';
 import { escapeLatex, escapeLatexCode, latexUrl } from './escape';
 
 export interface WriteLatexInput {
@@ -28,6 +34,8 @@ export interface WriteLatexInput {
     /** Citation key of each cited work, by processor id (as a string). */
     keys: Record<string, string>;
     options: LatexExportOptions;
+    /** Images of the document by asset id (Zotero notes), each with its file's path next to the document. */
+    images?: Record<string, ExportImage>;
 }
 
 export interface WriteLatexResult {
@@ -96,9 +104,35 @@ export function liftTags(source: string): string {
 const FOOTNOTE_BASE = '\\BeaverFootnoteBase';
 
 /** A cited work in a citation command. */
-interface CiteItem {
+interface CiteItem extends CitationNotes {
     key: string;
-    locator?: string;
+}
+
+/**
+ * Suffixes set off from the locator by a space, as citeproc writes them
+ * (`checkSuffixSpacePrepend`): those starting with a letter of an alphabetic
+ * script, `&`, `(` or `[`. Others (", emphasis added") follow it directly.
+ */
+const SUFFIX_SPACED = /^[&([a-zA-Z\u00c0-\u017f\u0218-\u021b\u0370-\u03ff\u0400-\u052f\u0590-\u05d4\u05d6-\u05ff\u0600-\u06ff\u0e01-\u0e5b\u1f00-\u1fff\u200c-\u200e\u202a-\u202e]/;
+
+/** Width of an image: its own width, but never wider than the line. */
+const IMAGE_WIDTH_MACRO = '\\providecommand{\\BeaverImageWidth}[1]{\\ifdim#1>\\linewidth\\linewidth\\else#1\\fi}';
+
+
+/**
+ * A highlight: lua-ul's `\highLight` or soul's `\hl`, whichever is loaded
+ * (the standalone preamble picks by engine), else the text unhighlighted.
+ */
+const HIGHLIGHT_MACRO = '\\providecommand{\\BeaverHighlight}[2]{\\ifdefined\\highLight\\highLight[#1]{#2}\\else\\ifdefined\\hl{\\sethlcolor{#1}\\hl{#2}}\\else#2\\fi\\fi}';
+
+/**
+ * `open` + content + `close`, with the content's leading and trailing
+ * whitespace outside: some commands drop a space at their start (xcolor's
+ * `\textcolor`), and a space inside a mark reads as marked.
+ */
+function wrapCommand(open: string, content: string, close: string): string {
+    const [, leading, core, trailing] = /^(\s*)([\s\S]*?)(\s*)$/.exec(content)!;
+    return core ? `${leading}${open}${core}${close}${trailing}` : content;
 }
 
 /** Typographic double quotes for a plain label (`"query"` → “query”). */
@@ -106,13 +140,10 @@ function curlyQuotes(text: string): string {
     return text.replace(/"([^"]*)"/g, '\u201c$1\u201d');
 }
 
-function isWebLink(url: string): boolean {
-    return /^(https?:|mailto:)/i.test(url.trim());
-}
-
 /** An optional argument; braces protect a `]` in its value. */
 function optional(value: string): string {
-    return value.includes(']') ? `[{${value}}]` : `[${value}]`;
+    // Each `]` braced on its own: natbib strips braces around the whole argument.
+    return `[${value.replace(/]/g, '{]}')}]`;
 }
 
 /** A page locator for LaTeX: escaped, with ranges as en dashes. */
@@ -158,6 +189,8 @@ export function wrappingColumns(widths: number[]): boolean[] {
 interface BlockContext {
     /** Writing the argument of a command (a footnote): no `verbatim`, no tables. */
     inArgument: boolean;
+    /** Writing a note table's cell, where a table inside is written as lines of text. */
+    inTableCell?: boolean;
     itemize: number;
     enumerate: number;
     /** Heading depth that maps to `\section`, and the level it starts at. */
@@ -193,6 +226,15 @@ class LatexWriter {
     private hasCitations = false;
     /** Body-only output numbers footnotes from the insertion point. */
     private usesFootnoteBase = false;
+    /** Highlight colors by `#rrggbb`, each defined once as a named color. */
+    private readonly highlightColors = new Map<string, string>();
+    private usesImageWidth = false;
+    /** Paragraphs set right to left, which this output does not support. */
+    private rightToLeft = 0;
+    /** Clusters written as text because no citation command can express them. */
+    private citationsWithoutCommand = 0;
+    /** Tables inside table cells, written as lines of text. */
+    private flattenedTables = 0;
 
     constructor(private readonly input: WriteLatexInput) {
         this.isNoteStyle = input.citations.styleClass === 'note';
@@ -229,15 +271,31 @@ class LatexWriter {
                 }
                 case 'emphasis':
                     out += `\\emph{${this.inlines(node.children, definitions, inCell)}}`;
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'strong':
                     out += `\\textbf{${this.inlines(node.children, definitions, inCell)}}`;
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
                 case 'delete':
                     out += this.strikethrough(node.children, definitions, inCell, lastText);
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
+                    break;
+                case 'underline':
+                    out += this.strikethrough(node.children, definitions, inCell, lastText, 'uline');
+                    lastText = trailingText(node.children);
+                    break;
+                case 'subscript':
+                    out += wrapCommand('\\textsubscript{', this.inlines(node.children, definitions, inCell), '}');
+                    lastText = trailingText(node.children);
+                    break;
+                case 'superscript':
+                    out += wrapCommand('\\textsuperscript{', this.inlines(node.children, definitions, inCell), '}');
+                    lastText = trailingText(node.children);
+                    break;
+                case 'styled':
+                    out += this.styled(node.color ?? null, node.background ?? null, node.children, definitions, inCell);
+                    lastText = trailingText(node.children);
                     break;
                 case 'inlineCode':
                     out += `\\texttt{${escapeLatexCode(node.value)}}`;
@@ -261,14 +319,16 @@ class LatexWriter {
                 }
                 case 'link':
                     out += this.link(node.url, node.children, definitions, inCell);
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
-                case 'image':
-                    if (node.alt) {
-                        out += `\\emph{${escapeLatex(node.alt)}}`;
-                        lastText = node.alt;
+                case 'image': {
+                    const tex = this.image(node, definitions, inCell);
+                    if (tex) {
+                        out += tex;
+                        lastText = 'x';
                     }
                     break;
+                }
                 case 'inlineMath':
                     out += `\\(${this.mathSource(node.value)}\\)`;
                     lastText = 'x';
@@ -294,11 +354,18 @@ class LatexWriter {
     }
 
     /**
-     * Struck-through text. ulem's `\\sout` breaks on a footnote inside it (and
-     * citation commands may make one), so struck runs are written around
-     * them, and content holding them is written unstruck.
+     * Struck-through (or, with `uline`, underlined) text. ulem's commands
+     * break on a footnote inside them (and citation commands may make one), so
+     * marked runs are written around them, and content holding them is
+     * written unmarked.
      */
-    private strikethrough(children: MdInline[], definitions: Map<string, MdFootnoteDefinition>, inCell: boolean, before: string): string {
+    private strikethrough(
+        children: MdInline[],
+        definitions: Map<string, MdFootnoteDefinition>,
+        inCell: boolean,
+        before: string,
+        command: 'sout' | 'uline' = 'sout',
+    ): string {
         this.packages.add('ulem');
         let out = '';
         let lastText = before;
@@ -311,7 +378,9 @@ class LatexWriter {
                 run[run.length - 1] = { ...last, value: last.value.replace(/\s+$/, '') };
             }
             const text = this.inlines(run, definitions, inCell, lastText);
-            out += text.trim() ? `\\sout{${text}}` : text;
+            // An underline keeps edge spaces outside (they would read as underlined).
+            if (!text.trim()) out += text;
+            else out += command === 'uline' ? wrapCommand('\\uline{', text, '}') : `\\sout{${text}}`;
             if (text) lastText = text;
             run = [];
         };
@@ -328,19 +397,68 @@ class LatexWriter {
         return out;
     }
 
-    private link(url: string, children: MdInline[], definitions: Map<string, MdFootnoteDefinition>, inCell: boolean): string {
-        let target: string | null = null;
-        if (parseItemLinkHref(url)) {
-            target = this.input.options.linkItems ? itemLinkExportHref(url) : null;
-        } else if (isWebLink(url)) {
-            target = url.trim();
+    /**
+     * Colored text: `\textcolor` for the text color; a background with soul's
+     * `\hl`, which only takes plain text (other content keeps no background
+     * rather than breaking the document).
+     */
+    private styled(
+        color: string | null,
+        background: string | null,
+        children: MdInline[],
+        definitions: Map<string, MdFootnoteDefinition>,
+        inCell: boolean,
+    ): string {
+        let content = this.inlines(children, definitions, inCell);
+        // The highlight packages take plain text only, not the commands
+        // escaping writes for symbols and special characters.
+        if (background && content.trim() && children.every(child => child.type === 'text') && !content.includes('\\')) {
+            this.packages.add('xcolor');
+            this.packages.add('highlight');
+            let name = this.highlightColors.get(background);
+            if (!name) {
+                name = `BeaverHighlight${this.highlightColors.size + 1}`;
+                this.highlightColors.set(background, name);
+            }
+            content = wrapCommand(`\\BeaverHighlight{${name}}{`, content, '}');
         }
+        if (color) {
+            this.packages.add('xcolor');
+            content = wrapCommand(`\\textcolor[HTML]{${hexDigits(color)}}{`, content, '}');
+        }
+        return content;
+    }
+
+    /**
+     * An image: `\includegraphics` of its file next to the document, at the
+     * note's width and at most the line width; otherwise a link to an image on
+     * the web (never fetched), its alt text or a placeholder.
+     */
+    private image(node: MdImage, definitions: Map<string, MdFootnoteDefinition>, inCell: boolean): string {
+        const asset = node.assetId ? this.input.images?.[node.assetId] : undefined;
+        if (!asset?.path) {
+            const fallback = imageFallback(node, this.input.doc);
+            if (!fallback) return '';
+            if (fallback.linkUrl) return this.link(fallback.linkUrl, [{ type: 'text', value: fallback.text }], definitions, inCell);
+            return `\\emph{${escapeLatex(fallback.text)}}`;
+        }
+        this.packages.add('graphicx');
+        this.usesImageWidth = true;
+        const inches = Math.max(0.1, imageDisplayWidth(node, asset) / PIXELS_PER_INCH);
+        // graphicx reads the path verbatim; the host names files without TeX specials.
+        return `\\includegraphics[width=\\BeaverImageWidth{${inches.toFixed(2)}in}]{${asset.path}}`;
+    }
+
+    private link(url: string, children: MdInline[], definitions: Map<string, MdFootnoteDefinition>, inCell: boolean): string {
+        const target = exportLinkTarget(url, this.input.options.linkItems);
         if (!target || this.linkDepth > 0) return this.inlines(children, definitions, inCell);
         // A bare address is written with `\url`, which breaks long addresses
         // across lines — unless encoding it would change the text it shows.
         if (children.length === 1 && children[0].type === 'text' && children[0].value.trim() === target
             && !/[\\{}^~\s]/.test(target)) {
-            return `\\url{${latexUrl(target)}}`;
+            // Space around the address stays outside it, separating what follows.
+            const [, leading, trailing] = /^(\s*)[\s\S]*?(\s*)$/.exec(children[0].value)!;
+            return `${leading}\\url{${latexUrl(target)}}${trailing}`;
         }
         this.linkDepth += 1;
         const content = this.inlines(children, definitions, inCell);
@@ -428,22 +546,75 @@ class LatexWriter {
     }
 
     /**
+     * The postnote of a cited work: its locator, then its suffix. biblatex
+     * adds "p." to a bare page number itself; natbib needs it written; other
+     * locator types carry their term (`chap.~3`).
+     */
+    private postnote(item: CiteItem): string {
+        let post = '';
+        if (item.locator) {
+            if (!isPageLabel(item.label)) {
+                const term = locatorTerm(item.label!);
+                post = `${term ? `${escapeLatex(term)}~` : ''}${locatorTex(item.locator)}`;
+            } else if (!this.biblatex) {
+                post = this.natbibPostnote(item.locator);
+            } else if (item.suffix) {
+                // Followed by text, the postnote is no longer a bare page number.
+                post = `${/[-,]/.test(item.locator) ? '\\ppno' : '\\pno'}~${locatorTex(item.locator)}`;
+            } else {
+                post = locatorTex(item.locator);
+            }
+        }
+        if (item.suffix) post = post ? `${post}${SUFFIX_SPACED.test(item.suffix) ? ' ' : ''}${escapeLatex(item.suffix)}` : escapeLatex(item.suffix);
+        return post;
+    }
+
+    /**
+     * Whether a cited work is written without its author. Numeric and label
+     * styles name no authors, so there is nothing to leave out (a year-only
+     * command would replace the number).
+     */
+    private leavesOutAuthor(item: CiteItem): boolean {
+        const format = this.input.citations.citationFormat;
+        return !!item.suppressAuthor && format !== 'numeric' && format !== 'label';
+    }
+
+    /** Optional arguments of a cited work: `[pre][post]`, `[post]` or none. */
+    private notes(item: CiteItem): string {
+        const post = this.postnote(item);
+        if (item.prefix) return `${optional(escapeLatex(item.prefix))}${optional(post)}`;
+        return post ? optional(post) : '';
+    }
+
+    /**
      * The citation command for a cluster. `command` is the biblatex command
      * (`parencite`, `autocite`, `cite`); natbib clusters are parenthetical,
-     * or bare (`\citealp`) when `bare` (the caller adds the note).
+     * or bare (`\citealp`) when `bare` (the caller adds the note). A single
+     * work cited without its author uses the starred biblatex command or
+     * natbib's `\citeyearpar`.
      */
     private citeCommand(items: CiteItem[], command: string, bare = false): string {
-        const located = items.some(item => item.locator);
+        const annotated = items.some(item => this.notes(item));
+        const withoutAuthor = items.length === 1 && this.leavesOutAuthor(items[0]);
         if (this.biblatex) {
-            if (!located) return `\\${command}{${items.map(item => item.key).join(',')}}`;
-            if (items.length === 1) return `\\${command}${optional(locatorTex(items[0].locator!))}{${items[0].key}}`;
-            return `\\${command}s${items.map(item => `${item.locator ? optional(locatorTex(item.locator)) : ''}{${item.key}}`).join('')}`;
+            const single = withoutAuthor && command !== 'footcitetext' ? `${command}*` : command;
+            if (!annotated) return `\\${single}{${items.map(item => item.key).join(',')}}`;
+            if (items.length === 1) return `\\${single}${this.notes(items[0])}{${items[0].key}}`;
+            return `\\${command}s${items.map(item => `${this.notes(item)}{${item.key}}`).join('')}`;
         }
         if (bare) {
-            return items.map(item => `\\citealp${item.locator ? optional(this.natbibPostnote(item.locator)) : ''}{${item.key}}`).join('; ');
+            return items.map(item => {
+                if (!this.leavesOutAuthor(item)) return `\\citealp${this.notes(item)}{${item.key}}`;
+                // natbib's \citeyear drops a prenote; it goes before the year as text.
+                const post = this.postnote(item);
+                return `${item.prefix ? `${escapeLatex(item.prefix)} ` : ''}\\citeyear${post ? optional(post) : ''}{${item.key}}`;
+            }).join('; ');
         }
-        if (!located) return `\\citep{${items.map(item => item.key).join(',')}}`;
-        if (items.length === 1) return `\\citep${optional(this.natbibPostnote(items[0].locator!))}{${items[0].key}}`;
+        if (withoutAuthor) return `\\citeyearpar${this.notes(items[0])}{${items[0].key}}`;
+        // Works cited with and without their authors, each on its own.
+        if (items.some(item => this.leavesOutAuthor(item))) return `\\citetext{${this.citeCommand(items, command, true)}}`;
+        if (!annotated) return `\\citep{${items.map(item => item.key).join(',')}}`;
+        if (items.length === 1) return `\\citep${this.notes(items[0])}{${items[0].key}}`;
         return `\\citetext{${this.citeCommand(items, command, true)}}`;
     }
 
@@ -454,15 +625,23 @@ class LatexWriter {
         let missing = 0;
         for (const item of cluster.items) {
             const key = this.input.keys[String(item.id)];
-            if (key) items.push({ key, ...(item.locator ? { locator: item.locator } : {}) });
-            else missing += 1;
+            if (key) {
+                items.push({ key, ...citationNotes(item) });
+            } else {
+                missing += 1;
+            }
         }
         let out = '';
         // A cluster with a work that has no key is kept as its formatted
-        // text, so no cited work silently disappears.
-        const asText = missing > 0 && !!cluster.plain;
+        // text, so no cited work silently disappears. So is a cluster that
+        // leaves out an author where biblatex cannot: in a multi-citation
+        // command, or in a footnote (`\footcite` has no starred form). natbib
+        // writes each work on its own.
+        const unwritable = this.biblatex && items.some(item => this.leavesOutAuthor(item)) && (items.length > 1 || this.isNoteStyle);
+        const asText = (missing > 0 || unwritable) && !!cluster.plain;
         if (items.length > 0 || asText) {
-            if (asText) this.citationsAsText += 1;
+            if (asText && missing > 0) this.citationsAsText += 1;
+            else if (asText) this.citationsWithoutCommand += 1;
             else this.citationCount += 1;
             if (items.length > 0) this.hasCitations = true;
             if (!this.createsNote(clusterIndex)) {
@@ -501,8 +680,14 @@ class LatexWriter {
 
     private block(node: MdBlock, definitions: Map<string, MdFootnoteDefinition>, context: BlockContext): string {
         switch (node.type) {
-            case 'paragraph':
-                return this.inlines(node.children, definitions).trim();
+            case 'paragraph': {
+                const content = this.inlines(node.children, definitions).trim();
+                // An image alone in its paragraph is centered, as a figure would be.
+                if (!context.inArgument && content && node.children.length === 1 && node.children[0].type === 'image') {
+                    return `\\begin{center}\n${content}\n\\end{center}`;
+                }
+                return this.layout(node, content, context);
+            }
             case 'heading': {
                 const content = this.inlines(node.children, definitions).trim();
                 if (context.inArgument) return `\\textbf{${content}}`;
@@ -528,6 +713,13 @@ class LatexWriter {
             case 'math':
                 return this.displayMath(node.value);
             case 'table':
+                // A table inside a table cell: one line per row, cells separated by bars.
+                if (context.inTableCell && !this.insideNote) {
+                    this.flattenedTables += 1;
+                    return node.children
+                        .map(row => row.children.map(inner => this.cellContent(inner, definitions)).join(' \\textbar{} '))
+                        .join(' \\par\n');
+                }
                 // Notes hold text, not tables (the note numbering skips them too).
                 return context.inArgument || this.insideNote ? '' : this.table(node, definitions);
             default:
@@ -535,6 +727,23 @@ class LatexWriter {
                 // footnote definitions are written where they are referenced.
                 return '';
         }
+    }
+
+    /**
+     * A paragraph with a note's layout: centered or right-aligned text in its
+     * environment, indentation as a left skip. Right-to-left text is written
+     * as is and counted for a warning: it needs a bidi setup this output does
+     * not make.
+     */
+    private layout(node: MdBlockLayout, content: string, context: BlockContext): string {
+        if (!content) return content;
+        if (node.dir === 'rtl') this.rightToLeft += 1;
+        if (context.inArgument) return content;
+        let out = content;
+        if (node.align === 'center') out = `\\begin{center}\n${out}\n\\end{center}`;
+        else if (node.align === 'right') out = `\\begin{flushright}\n${out}\n\\end{flushright}`;
+        if (node.indent) out = `\\begingroup\\leftskip=${node.indent * 2}em\\relax\n${out}\\par\\endgroup`;
+        return out;
     }
 
     private list(
@@ -575,7 +784,76 @@ class LatexWriter {
         return `${out}\\end{${environment}}`;
     }
 
+    /**
+     * A Zotero note's table: paragraph columns (cells hold paragraphs and
+     * lists) sized from the note's column widths, `\multicolumn` for cells
+     * spanning columns, and a cell spanning rows written in its first row (the
+     * rows below stay empty there). Cell backgrounds use `\cellcolor`. A first
+     * row of header cells repeats on every page.
+     */
+    private noteTable(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): string {
+        const grid = tableGrid(node);
+        const columns = grid.columns;
+        const weights = columnWeights(node, columns) ?? Array.from({ length: columns }, () => 1);
+        const total = weights.reduce((sum, weight) => sum + weight, 0);
+        // A share of the line, less the padding of the columns it covers.
+        const width = (from: number, span: number) => {
+            const share = weights.slice(from, from + span).reduce((sum, weight) => sum + weight, 0) / total;
+            const padding = 2 * columns * share - 2 * (span - 1);
+            return `\\dimexpr ${share.toFixed(4)}\\linewidth-${Math.max(padding, 0).toFixed(4)}\\tabcolsep\\relax`;
+        };
+        const column = (from: number, span: number) => `>{\\raggedright\\arraybackslash}p{${width(from, span)}}`;
+        this.packages.add('array');
+        this.packages.add('booktabs');
+        this.packages.add('longtable');
+
+        const notes: TableNote[] = [];
+        this.tableNotes = notes;
+        const lines: string[] = [];
+        grid.rows.forEach((slots, rowIndex) => {
+            const cells: string[] = [];
+            for (let index = 0; index < columns; index++) {
+                const slot = slots[index];
+                if (!slot || !slot.origin) {
+                    cells.push('');
+                    continue;
+                }
+                const span = Math.min(Math.max(1, slot.cell.colspan ?? 1), columns - index);
+                let content = this.cellContent(slot.cell, definitions);
+                if (slot.cell.background) {
+                    this.packages.add('colortbl');
+                    content = `\\cellcolor[HTML]{${hexDigits(slot.cell.background)}}${content}`;
+                }
+                cells.push(span > 1 ? `\\multicolumn{${span}}{${column(index, span)}}{${content}}` : content);
+                index += span - 1;
+            }
+            lines.push(`${cells.join(' & ')} \\\\`);
+            // The header row repeats on every page.
+            if (rowIndex === 0 && node.headerRow !== false && grid.rows.length > 1) lines.push('\\midrule', '\\endhead');
+        });
+        this.tableNotes = null;
+        const spec = Array.from({ length: columns }, (_, index) => column(index, 1)).join('');
+        let out = `\\begin{longtable}[l]{@{}${spec}@{}}\n\\toprule\n${lines.join('\n')}\n\\bottomrule\n\\end{longtable}`;
+        out += notes.map(note => `\n\\setcounter{footnote}{${this.noteNumber(note.id)}}${note.command}`).join('');
+        return out;
+    }
+
+    /** A note table cell's blocks as paragraph-column content; header cells bold. */
+    private cellContent(cell: MdTableCell, definitions: Map<string, MdFootnoteDefinition>): string {
+        const blocks = cell.blocks ?? [{ type: 'paragraph', children: cell.children }];
+        // As in a command argument: no verbatim and no sectioning; tables inside are flattened.
+        const context: BlockContext = { inArgument: true, inTableCell: true, itemize: 0, enumerate: 0, headingBase: 1, headingOffset: 0 };
+        const parts = blocks.map(block => {
+            if (block.type === 'list') return this.list(block.ordered ?? false, block.start ?? 1, block.children, definitions, context);
+            if (block.type === 'math') return this.displayMath(block.value);
+            const content = this.block(block, definitions, context);
+            return cell.header && content && (block.type === 'paragraph' || block.type === 'heading') ? `\\textbf{${content}}` : content;
+        }).filter(Boolean);
+        return parts.join(' \\par\n');
+    }
+
     private table(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): string {
+        if (isNoteTable(node)) return this.noteTable(node, definitions);
         const [header, ...body] = node.children;
         if (!header) return '';
         const columns = Math.max(...node.children.map(row => row.children.length), 1);
@@ -710,15 +988,28 @@ class LatexWriter {
     /** Packages the body uses, in load order. */
     private packageLines(): string[] {
         const lines: string[] = [];
-        for (const pkg of ['booktabs', 'longtable', 'xltabular', 'ulem', 'fvextra', 'mathtools', 'cancel', 'centernot', 'xcolor', 'bm', 'mathrsfs']) {
+        // Cell colors come from xcolor's table support (colortbl).
+        if (this.packages.has('colortbl')) this.packages.add('xcolor');
+        for (const pkg of ['array', 'booktabs', 'longtable', 'xltabular', 'ulem', 'fvextra', 'mathtools', 'cancel', 'centernot', 'xcolor', 'graphicx', 'bm', 'mathrsfs']) {
             if (!this.packages.has(pkg)) continue;
-            lines.push(pkg === 'ulem' ? '\\usepackage[normalem]{ulem}' : `\\usepackage{${pkg}}`);
+            if (pkg === 'ulem') lines.push('\\usepackage[normalem]{ulem}');
+            else if (pkg === 'xcolor' && this.packages.has('colortbl')) lines.push('\\usepackage[table]{xcolor}');
+            else lines.push(`\\usepackage{${pkg}}`);
         }
         return lines;
     }
 
     private shorthandLines(): string[] {
         return [...this.shorthands].sort().map(name => `\\providecommand{\\${name}}{${MATH_SHORTHANDS[name]}}`);
+    }
+
+    /** Definitions the body's commands need: the image width cap and highlight colors. */
+    private definitionLines(): string[] {
+        return [
+            ...(this.usesImageWidth ? [IMAGE_WIDTH_MACRO] : []),
+            ...(this.packages.has('highlight') ? [HIGHLIGHT_MACRO] : []),
+            ...[...this.highlightColors].map(([color, name]) => `\\definecolor{${name}}{HTML}{${hexDigits(color)}}`),
+        ];
     }
 
     private standalone(body: string): string {
@@ -760,7 +1051,10 @@ class LatexWriter {
         } else if (bib) {
             lines.push(`\\usepackage[${this.natbibSetup().options}]{natbib}`);
         }
-        lines.push('\\usepackage[hidelinks]{hyperref}', ...this.shorthandLines());
+        // Highlights: lua-ul under LuaLaTeX, soul under pdfLaTeX (soul loses
+        // non-ASCII text under the Unicode engines); XeLaTeX writes them unhighlighted.
+        if (this.packages.has('highlight')) lines.push('\\ifLuaTeX\\usepackage{luacolor,lua-ul}\\fi', '\\ifPDFTeX\\usepackage{soul}\\fi');
+        lines.push('\\usepackage[hidelinks]{hyperref}', ...this.shorthandLines(), ...this.definitionLines());
         if (title) {
             lines.push(`\\title{${escapeLatex(title)}}`, '\\author{}', `\\date{${escapeLatex(options.date)}}`);
         }
@@ -780,7 +1074,11 @@ class LatexWriter {
     private bodyOnly(body: string): string {
         const { options } = this.input;
         const bib = this.hasCitations ? options.bibFileName : null;
-        const packages = ['amsmath', 'amssymb', 'hyperref', ...this.packageLines().map(line => /\{([^}]+)\}$/.exec(line)![1])];
+        // Options are named where the body depends on them (`xcolor` with `table` for cell colors).
+        const packages = ['amsmath', 'amssymb', 'hyperref', ...this.packageLines().map(line => {
+            const [, options, name] = /^\\usepackage(?:\[([^\]]*)\])?\{([^}]+)\}$/.exec(line)!;
+            return options && name === 'xcolor' ? `${name} (option ${options})` : name;
+        }), ...(this.packages.has('highlight') ? ['lua-ul and luacolor (LuaLaTeX) or soul (pdfLaTeX) for highlights'] : [])];
         const lines = [
             '% Exported by Beaver: document body, to include in a LaTeX document.',
             `% Uses the packages ${packages.join(', ')}.`,
@@ -798,6 +1096,8 @@ class LatexWriter {
         const shorthands = this.shorthandLines();
         if (shorthands.length > 0) lines.push('% Equations use these shorthands:', ...shorthands.map(line => `%   ${line}`));
         lines.push('');
+        // Definitions the body uses, provided here so the body compiles as it is.
+        lines.push(...this.definitionLines());
         if (this.usesFootnoteBase) lines.push(`\\edef${FOOTNOTE_BASE}{\\number\\value{footnote}}`);
         lines.push(body, '');
         return lines.join('\n');
@@ -816,6 +1116,27 @@ class LatexWriter {
                 code: 'citations_as_text',
                 message: `${this.citationsAsText} citation${this.citationsAsText === 1 ? '' : 's'} could not be given a citation key and ${this.citationsAsText === 1 ? 'was' : 'were'} written as text.`,
                 count: this.citationsAsText,
+            });
+        }
+        if (this.citationsWithoutCommand > 0) {
+            warnings.push({
+                code: 'citations_as_text',
+                message: `${this.citationsWithoutCommand} citation${this.citationsWithoutCommand === 1 ? '' : 's'} leaving out an author ${this.citationsWithoutCommand === 1 ? 'was' : 'were'} written as text: biblatex has no command for ${this.citationsWithoutCommand === 1 ? 'it' : 'them'} here.`,
+                count: this.citationsWithoutCommand,
+            });
+        }
+        if (this.flattenedTables > 0) {
+            warnings.push({
+                code: 'formatting_simplified',
+                message: `${this.flattenedTables} table${this.flattenedTables === 1 ? '' : 's'} inside a table cell ${this.flattenedTables === 1 ? 'was' : 'were'} written as lines of text.`,
+                count: this.flattenedTables,
+            });
+        }
+        if (this.rightToLeft > 0) {
+            warnings.push({
+                code: 'formatting_simplified',
+                message: `${this.rightToLeft} right-to-left paragraph${this.rightToLeft === 1 ? ' was' : 's were'} written left to right; set up bidi (polyglossia or babel) to typeset ${this.rightToLeft === 1 ? 'it' : 'them'}.`,
+                count: this.rightToLeft,
             });
         }
         return {

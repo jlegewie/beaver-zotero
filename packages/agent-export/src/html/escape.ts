@@ -8,6 +8,7 @@
  */
 
 import { decodeHtmlEntities } from '../citations/inlineHtml';
+import { isWebLink } from '../links';
 
 /** Escape text for HTML content and double-quoted attribute values. */
 export function escapeHtml(text: string): string {
@@ -34,11 +35,6 @@ export function keepUrlStartsTogether(html: string): string {
         if (preDepth > 0) return part;
         return part.replace(/\bhttps?:\/\/[^\s/<]+\/?/gi, start => `<span class="url-start">${start}</span>`);
     }).join('');
-}
-
-/** Whether a URL may be a link target in an exported document. */
-export function isWebLink(url: string): boolean {
-    return /^(https?:|mailto:)/i.test(url.trim());
 }
 
 /** CSS a CSL processor sets on `<span>`, by property, with the values kept. */

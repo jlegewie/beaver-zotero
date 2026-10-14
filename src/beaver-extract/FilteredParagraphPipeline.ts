@@ -605,6 +605,86 @@ function numberedRunningKeys(analysis: MarginAnalysis, repeat: number): Numbered
     return keys;
 }
 
+/** Per document: the margin texts repeated in each band (`repeatedRunningKeys`). */
+const repeatedRunningKeysCache = new WeakMap<MarginAnalysis, Map<number, NumberedRunningKeys>>();
+
+/**
+ * Margin texts of a document repeated exactly in a band (spaces dropped, case folded)
+ * on at least `repeat` pages of `analysis`, per band: the text half of the index whose
+ * numbered half `numberedRunningKeys` builds.
+ */
+function repeatedRunningKeys(analysis: MarginAnalysis, repeat: number): NumberedRunningKeys {
+    let byRepeat = repeatedRunningKeysCache.get(analysis);
+    if (!byRepeat) repeatedRunningKeysCache.set(analysis, (byRepeat = new Map()));
+    const cached = byRepeat.get(repeat);
+    if (cached) return cached;
+    const keys: NumberedRunningKeys = { top: new Set(), bottom: new Set() };
+    for (const position of ["top", "bottom"] as const) {
+        const pages = new Map<string, Set<number>>();
+        for (const el of analysis.elements.get(position) ?? []) {
+            const key = el.text.toLowerCase().replace(/\s+/gu, "");
+            if (!key) continue;
+            const seen = pages.get(key);
+            if (seen) seen.add(el.pageIndex);
+            else pages.set(key, new Set([el.pageIndex]));
+        }
+        for (const [key, seen] of pages) if (seen.size >= repeat) keys[position].add(key);
+    }
+    byRepeat.set(repeat, keys);
+    return keys;
+}
+
+/**
+ * Running headers and footers a table's rows end at (`FindCandidatesOptions.stops`):
+ * the lines of margin texts in the top or bottom margin zone, read as the margin
+ * analysis reads them (`MarginFilter.marginTexts`: the text rows MuPDF's fragments
+ * make up), whose text repeats there on at least `repeat` pages of the document,
+ * exactly (`repeatedRunningKeys`) or with its numbers changing as the page does
+ * (`numberedRunningLines`), set above the document's body text or below it on pages
+ * of this page's size (`documentBodyExtents`). Unlike `regionFurnitureLines` they need
+ * not stand a line height clear of the body: a footer set close under the lowest body
+ * line is one still, while a continued table's header that repeats in the margin zone
+ * sits within the body's extent. As there, several bare numbers in a band are a
+ * table's, and pages read in another orientation have none.
+ */
+export function runningMarginLines(
+    page: RawPageData,
+    ctx: {
+        marginAnalysis: MarginAnalysis;
+        marginZone?: MarginSettings;
+        /** Must match the setting `marginAnalysis` was collected with. */
+        marginTextRows?: boolean;
+        pageRotation: RotationAngle;
+        repeat: number;
+        bodyExtents: ReadonlyMap<string, { top: number; bottom: number }>;
+    },
+): Set<RawLine> {
+    const running = new Set<RawLine>();
+    const body = ctx.bodyExtents.get(pageSizeKey(page));
+    if (!body || ctx.pageRotation !== 0) return running;
+    const exact = repeatedRunningKeys(ctx.marginAnalysis, ctx.repeat);
+    const numbered = numberedRunningKeys(ctx.marginAnalysis, ctx.repeat);
+    const zone = ctx.marginZone ?? DEFAULT_MARGIN_ZONE;
+    // Only lines reaching into the top or bottom zone: a line within a zone joins a row only
+    // with lines its height overlaps, so the rows within a zone are those of the whole page.
+    const band = (line: RawLine) => line.bbox.t < zone.top || line.bbox.b > page.height - zone.bottom;
+    const lines = page.blocks.flatMap((b) => (b.type === "text" ? (b.lines ?? []).filter(band) : []));
+    const bandPage: RawPageData = { ...page, blocks: lines.length ? [{ type: "text", bbox: lines[0].bbox, lines }] : [] };
+    const texts = MarginFilter.marginTexts(bandPage, zone, ctx.marginTextRows ?? true);
+    for (const position of ["top", "bottom"] as const) {
+        if (!exact[position].size && !numbered[position].size) continue;
+        const found = texts.filter((t) => {
+            const text = t.text.trim();
+            if (!text || t.position !== position) return false;
+            if (position === "top" ? t.bbox.b > body.top : t.bbox.t < body.bottom) return false;
+            return exact[position].has(text.toLowerCase().replace(/\s+/gu, "")) || numbered[position].has(runningLineShape(text).key);
+        });
+        const numbers = found.filter((t) => /^\d+$/u.test(t.text.trim()));
+        for (const t of found) if (numbers.length <= 1 || !numbers.includes(t)) for (const line of t.lines) running.add(line);
+    }
+    return running;
+}
+
 /** A line of body text holds at least this many words. */
 const BODY_LINE_WORDS = 4;
 

@@ -1,7 +1,7 @@
 import { handleDuplicatesRequest } from '../duplicates/discovery';
 import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCacheHandlers';
 import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
-import { handleTestExportHttpRequest } from './handlers/testExportHandlers';
+import { handleTestExportHttpRequest, handleTestExportNoteHttpRequest } from './handlers/testExportHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
 import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
 import {
@@ -1213,6 +1213,8 @@ export function registerEndpoints(): (() => void) | undefined {
         // File export without the save dialog: a given source, or a response of
         // a window's open thread.
         endpoints['/beaver/test/export'] = createEndpoint(handleTestExportHttpRequest);
+        // Export of a Zotero note (or given note HTML) without the save dialog.
+        endpoints['/beaver/test/export-note'] = createEndpoint(handleTestExportNoteHttpRequest);
     }
 
     const releases = Object.entries(endpoints).map(([path, handler]) =>

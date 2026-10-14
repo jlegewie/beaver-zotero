@@ -6,6 +6,8 @@
  */
 
 export { parseExportSource } from './parse/parseExportDoc';
+export { parseNoteDoc } from './note/parseNoteDoc';
+export type { ParseNoteDocOptions, PmMark, PmNode } from './note/parseNoteDoc';
 // This bundle carries its own copy of agent-core, so the host registers its
 // library identity resolvers here too (legacy `<libraryID>-KEY` citations).
 export { setLibraryRefResolver, setObjectIdResolver } from '@beaver/agent-core/identity/libraryRef';

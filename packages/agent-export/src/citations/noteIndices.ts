@@ -75,6 +75,10 @@ function walkRendered(doc: ExportDoc, walk: RenderedWalk): void {
                 case 'strong':
                 case 'delete':
                 case 'link':
+                case 'underline':
+                case 'subscript':
+                case 'superscript':
+                case 'styled':
                     visitInlines(node.children, definitions, insideFootnote);
                     break;
                 default:
@@ -100,7 +104,10 @@ function walkRendered(doc: ExportDoc, walk: RenderedWalk): void {
                     // Writers do not put tables in footnotes.
                     if (insideFootnote) break;
                     for (const row of block.children) {
-                        for (const cell of row.children) visitInlines(cell.children, definitions, insideFootnote);
+                        for (const cell of row.children) {
+                            if (cell.blocks) visitBlocks(cell.blocks, definitions, insideFootnote);
+                            else visitInlines(cell.children, definitions, insideFootnote);
+                        }
                     }
                     break;
                 default:

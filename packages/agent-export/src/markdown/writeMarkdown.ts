@@ -13,21 +13,31 @@
  * from item metadata comes out as the same text.
  */
 
-import { itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identity/itemLinks';
-import type { MdBlock, MdFootnoteDefinition, MdInline, MdRoot, MdTable } from '../mdast';
+import type { MdBlock, MdFootnoteDefinition, MdImage, MdInline, MdRoot, MdTable, MdTableCell } from '../mdast';
+import { exportLinkTarget, isWebLink } from '../links';
+import { base64 } from '../note/base64';
+import { hasSpans, isNoteTable, tableGrid } from '../note/tableGrid';
+import { trailingText } from '../note/inlineText';
+import { imageFallback } from '../note/images';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { parseCslHtml, type StyledSegment } from '../citations/inlineHtml';
 import { stringifyMarkdown } from '../parse/markdown';
-import type { ExportDoc, FormattedCitations, FormattedCluster, MarkdownExportOptions } from '../types';
+import type { ExportDoc, ExportImage, ExportWarning, FormattedCitations, FormattedCluster, MarkdownExportOptions } from '../types';
 
 export interface WriteMarkdownInput {
     doc: ExportDoc;
     citations: FormattedCitations;
     options: MarkdownExportOptions;
+    /**
+     * Images of the document by asset id (Zotero notes): linked by their
+     * `path` next to the document, or embedded as data URIs without one.
+     */
+    images?: Record<string, ExportImage>;
 }
 
 export interface WriteMarkdownResult {
     markdown: string;
+    warnings: ExportWarning[];
     stats: { citations: number; footnotes: number; equations: number };
 }
 
@@ -41,10 +51,6 @@ function inlineHtml(html: string): MdInline | null {
     if (/^<br\s*\/?>$/i.test(html.trim())) return { type: 'break' };
     const text = html.replace(/<[^>]*>/g, '');
     return text ? { type: 'text', value: text } : null;
-}
-
-function isWebLink(url: string): boolean {
-    return /^(https?:|mailto:)/i.test(url.trim());
 }
 
 function escapeHtmlText(text: string): string {
@@ -83,6 +89,46 @@ export function segmentsToInlines(segments: StyledSegment[], options: { links: b
     return out;
 }
 
+/**
+ * Marked inline content with the spaces at its edges moved outside the mark:
+ * `wrap` builds the marked node(s) from the inner content.
+ */
+function outsideEdgeSpace(children: MdInline[], wrap: (children: MdInline[]) => MdInline | MdInline[]): MdInline[] {
+    const inner = [...children];
+    let leading = '';
+    let trailing = '';
+    const first = inner[0];
+    if (first?.type === 'text') {
+        leading = /^\s*/.exec(first.value)![0];
+        const value = first.value.slice(leading.length);
+        if (value) inner[0] = { ...first, value };
+        else inner.shift();
+    }
+    const last = inner[inner.length - 1];
+    if (last?.type === 'text') {
+        trailing = /\s*$/.exec(last.value)![0];
+        const value = last.value.slice(0, last.value.length - trailing.length);
+        if (value) inner[inner.length - 1] = { ...last, value };
+        else inner.pop();
+    }
+    if (inner.length === 0) return children;
+    const wrapped = wrap(inner);
+    return [
+        ...(leading ? [{ type: 'text' as const, value: leading }] : []),
+        ...(Array.isArray(wrapped) ? wrapped : [wrapped]),
+        ...(trailing ? [{ type: 'text' as const, value: trailing }] : []),
+    ];
+}
+
+/** Line breaks as `<br>`, the only line break a GFM table cell keeps. */
+function breaksAsHtml(nodes: MdInline[]): MdInline[] {
+    return nodes.map((node): MdInline => {
+        if (node.type === 'break') return { type: 'html', value: '<br>' };
+        if ('children' in node) return { ...node, children: breaksAsHtml(node.children) } as MdInline;
+        return node;
+    });
+}
+
 /** Inline nodes of a bibliography entry or note, without layout whitespace at its edges. */
 function trimInlines(nodes: MdInline[]): MdInline[] {
     const out = [...nodes];
@@ -109,6 +155,8 @@ class MarkdownWriter {
     private insideNote = false;
     /** Depth of open links; links cannot nest. */
     private linkDepth = 0;
+    /** Tables whose spans or block content Markdown could not keep. */
+    private simplifiedTables = 0;
 
     constructor(private readonly input: WriteMarkdownInput) {
         this.isNoteStyle = input.citations.styleClass === 'note';
@@ -142,9 +190,26 @@ class MarkdownWriter {
                 case 'emphasis':
                 case 'strong':
                 case 'delete':
-                    out.push({ type: node.type, children: this.inlines(node.children, definitions) });
-                    lastText = 'x';
+                    // Markdown marks cannot start or end with a space (`~~struck ~~` is not struck).
+                    out.push(...outsideEdgeSpace(this.inlines(node.children, definitions), children => ({ type: node.type, children })));
+                    lastText = trailingText(node.children);
                     break;
+                // Markdown has no underline or colors: their text stays.
+                case 'underline':
+                case 'styled':
+                    out.push(...this.inlines(node.children, definitions));
+                    lastText = trailingText(node.children);
+                    break;
+                // Sub- and superscripts carry meaning (H₂O, 10⁵): inline HTML.
+                case 'subscript':
+                case 'superscript': {
+                    const tag = node.type === 'subscript' ? 'sub' : 'sup';
+                    out.push(...outsideEdgeSpace(this.inlines(node.children, definitions), children => [
+                        { type: 'html', value: `<${tag}>` }, ...children, { type: 'html', value: `</${tag}>` },
+                    ]));
+                    lastText = trailingText(node.children);
+                    break;
+                }
                 case 'inlineCode':
                     out.push({ type: 'inlineCode', value: node.value });
                     lastText = node.value;
@@ -163,17 +228,16 @@ class MarkdownWriter {
                 }
                 case 'link':
                     out.push(...this.link(node.url, node.title, node.children, definitions));
-                    lastText = 'x';
+                    lastText = trailingText(node.children);
                     break;
-                case 'image':
-                    if (isWebLink(node.url)) {
-                        out.push({ type: 'image', url: node.url.trim(), alt: node.alt ?? '' });
+                case 'image': {
+                    const image = this.image(node);
+                    if (image) {
+                        out.push(image);
                         lastText = 'x';
-                    } else if (node.alt) {
-                        out.push({ type: 'emphasis', children: [{ type: 'text', value: node.alt }] });
-                        lastText = node.alt;
                     }
                     break;
+                }
                 case 'inlineMath':
                     this.equations += 1;
                     out.push({ type: 'inlineMath', value: node.value });
@@ -202,18 +266,29 @@ class MarkdownWriter {
         return out;
     }
 
+    /**
+     * An image: a note image by its file next to the document (or as a data
+     * URI when the host gave no file), a web image by its address, otherwise
+     * its alt text or a placeholder.
+     */
+    private image(node: MdImage): MdInline | null {
+        const asset = node.assetId ? this.input.images?.[node.assetId] : undefined;
+        if (asset) {
+            const url = asset.path ?? `data:${asset.mime};base64,${base64(asset.data)}`;
+            return { type: 'image', url, alt: node.alt ?? '' };
+        }
+        if (isWebLink(node.url)) return { type: 'image', url: node.url.trim(), alt: node.alt ?? '' };
+        const fallback = imageFallback(node, this.input.doc);
+        return fallback ? { type: 'emphasis', children: [{ type: 'text', value: fallback.text }] } : null;
+    }
+
     private link(
         url: string,
         title: string | null | undefined,
         children: MdInline[],
         definitions: Map<string, MdFootnoteDefinition>,
     ): MdInline[] {
-        let target: string | null = null;
-        if (parseItemLinkHref(url)) {
-            target = this.input.options.linkItems ? itemLinkExportHref(url) : null;
-        } else if (isWebLink(url)) {
-            target = url.trim();
-        }
+        const target = exportLinkTarget(url, this.input.options.linkItems);
         if (!target || this.linkDepth > 0) return this.inlines(children, definitions);
         this.linkDepth += 1;
         const content = this.inlines(children, definitions);
@@ -317,7 +392,86 @@ class MarkdownWriter {
         return out;
     }
 
+    /**
+     * A Zotero note's table in GFM, which has a header row, inline cells and no
+     * spans: a table without header cells uses its first row as the header,
+     * blocks in a cell are joined with line breaks (list items as bullets),
+     * and a spanning cell's content goes to its first position.
+     */
+    private noteTable(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): MdTable {
+        const grid = tableGrid(node);
+        const flattened = node.children.some(row => row.children.some(cell => (cell.blocks?.length ?? 0) > 1
+            || cell.blocks?.some(block => block.type !== 'paragraph')));
+        if (flattened || hasSpans(node)) this.simplifiedTables += 1;
+        return {
+            type: 'table',
+            align: Array.from({ length: grid.columns }, () => null),
+            children: grid.rows.map(row => ({
+                type: 'tableRow',
+                children: row.map(slot => ({
+                    type: 'tableCell',
+                    children: slot?.origin ? this.cellInlines(slot.cell, definitions) : [],
+                })),
+            })),
+        };
+    }
+
+    /** A note table cell's blocks as one line of inline content. */
+    private cellInlines(cell: MdTableCell, definitions: Map<string, MdFootnoteDefinition>): MdInline[] {
+        const out: MdInline[] = [];
+        const lineBreak = () => {
+            if (out.length > 0) out.push({ type: 'html', value: '<br>' });
+        };
+        const visit = (blocks: MdBlock[], bullet: string) => {
+            for (const block of blocks) {
+                switch (block.type) {
+                    case 'paragraph':
+                    case 'heading': {
+                        lineBreak();
+                        if (bullet) out.push({ type: 'text', value: bullet });
+                        const content = this.inlines(block.children, definitions);
+                        out.push(...(block.type === 'heading' || cell.header ? [{ type: 'strong' as const, children: content }] : content));
+                        bullet = '';
+                        break;
+                    }
+                    case 'list':
+                        block.children.forEach((item, index) => visit(item.children, block.ordered ? `${(block.start ?? 1) + index}. ` : '• '));
+                        break;
+                    case 'blockquote':
+                        visit(block.children, bullet);
+                        break;
+                    case 'code':
+                        block.value.split('\n').forEach(line => {
+                            lineBreak();
+                            out.push({ type: 'inlineCode', value: line });
+                        });
+                        break;
+                    case 'math':
+                        lineBreak();
+                        this.equations += 1;
+                        out.push({ type: 'inlineMath', value: block.value.trim() });
+                        break;
+                    case 'table':
+                        for (const row of block.children) {
+                            lineBreak();
+                            row.children.forEach((inner, index) => {
+                                if (index > 0) out.push({ type: 'text', value: ' | ' });
+                                out.push(...this.cellInlines(inner, definitions));
+                            });
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+        };
+        visit(cell.blocks ?? [{ type: 'paragraph', children: cell.children }], '');
+        // GFM writes a line break in a table cell as a space.
+        return breaksAsHtml(out);
+    }
+
     private table(node: MdTable, definitions: Map<string, MdFootnoteDefinition>): MdTable {
+        if (isNoteTable(node)) return this.noteTable(node, definitions);
         const columns = Math.max(...node.children.map(row => row.children.length), 1);
         return {
             type: 'table',
@@ -406,8 +560,17 @@ class MarkdownWriter {
     }
 
     result(markdown: string): WriteMarkdownResult {
+        const warnings: ExportWarning[] = [];
+        if (this.simplifiedTables > 0) {
+            warnings.push({
+                code: 'formatting_simplified',
+                message: `${this.simplifiedTables} table${this.simplifiedTables === 1 ? '' : 's'} had merged cells or lists that Markdown tables cannot show; ${this.simplifiedTables === 1 ? 'it was' : 'they were'} simplified.`,
+                count: this.simplifiedTables,
+            });
+        }
         return {
             markdown,
+            warnings,
             stats: { citations: this.citationCount, footnotes: this.noteCount, equations: this.equations },
         };
     }
