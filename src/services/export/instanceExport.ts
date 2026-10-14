@@ -21,7 +21,9 @@ import { getLatestNoteHtml } from '../../utils/noteEditorIO';
 import { printHtmlToPdf } from './printPdf';
 import { BIB_FILE_MARKER, buildBibliographyFile } from './bibliographyFile';
 import { CitationService } from '../CitationService';
-import { exportErrorCode, exportWarningCodes, noteOriginFromHtml, reportExport, type ExportReport, type ExportSurface } from './exportTelemetry';
+import { exportErrorCode, exportWarningCodes, noteOriginFromHtml, type ExportReport, type ExportSurface } from './exportTelemetry';
+// Usage telemetry is disabled
+// import { reportExport } from './exportTelemetry';
 
 export type ExportFormat = 'docx' | 'pdf' | 'markdown' | 'latex';
 
@@ -425,6 +427,7 @@ export class InstanceExport {
     /**
      * Run an export and report it for usage telemetry once it is saved or has
      * failed. Exports to a given path (development endpoints) are not reported.
+     * Sending the report is currently disabled.
      */
     private async reported(
         request: Pick<ExportRequest, 'format' | 'path'>,
@@ -436,14 +439,17 @@ export class InstanceExport {
         const started = Date.now();
         const send = (fields: Pick<ExportReport, 'outcome'> & Partial<ExportReport>) => {
             if (request.path) return;
-            reportExport({
+            const event: ExportReport = {
                 ...report,
                 ...fields,
                 kind,
                 format: request.format,
                 ...(context.surface ? { surface: context.surface } : {}),
                 duration_ms: Date.now() - started,
-            });
+            };
+            // Usage telemetry is disabled; the report is built but not sent.
+            // reportExport(event);
+            return event;
         };
         let result: ExportResult;
         try {

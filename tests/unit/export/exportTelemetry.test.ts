@@ -67,7 +67,8 @@ describe('telemetry labels', () => {
     });
 });
 
-describe('InstanceExport usage reports', () => {
+// Sending usage reports is disabled in `InstanceExport` for now.
+describe.skip('InstanceExport usage reports', () => {
     const saved: ExportResult = {
         status: 'saved',
         path: '/out/Doc.docx',
