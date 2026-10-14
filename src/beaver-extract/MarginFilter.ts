@@ -426,14 +426,17 @@ export function isFootnoteMarker(line: RawLine, pageLines: readonly RawLine[]): 
     if (!/^\d+$/u.test(text)) return false;
     const size = line.font?.size ?? 0;
     if (!(size > 0)) return false;
+    // Position and size first: the letter test is the costly one, and few
+    // lines of a page start beside the numeral.
     return pageLines.some(other => {
-        if (other === line || !(other.font?.size > 0) || !/\p{L}/u.test(other.text)) return false;
+        if (other === line || other.bbox.t >= line.bbox.b || line.bbox.t >= other.bbox.b) return false;
         const gap = other.bbox.l - line.bbox.r;
+        const otherSize = other.font?.size;
         return gap >= -0.25 * size
-            && gap <= other.font.size
-            && other.bbox.t < line.bbox.b
-            && line.bbox.t < other.bbox.b
-            && size <= FOOTNOTE_MARKER_SIZE_RATIO * other.font.size;
+            && otherSize > 0
+            && gap <= otherSize
+            && size <= FOOTNOTE_MARKER_SIZE_RATIO * otherSize
+            && /\p{L}/u.test(other.text);
     });
 }
 
