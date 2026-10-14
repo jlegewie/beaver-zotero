@@ -1270,6 +1270,15 @@ export interface ColumnContinuationOptions {
 const INSERT_KINDS: ReadonlySet<DocItem["kind"]> = new Set(["footnote", "caption", "table", "picture"]);
 
 /**
+ * A text item too short to be the running text a figure interrupts: an axis
+ * label, table cell, legend entry or margin line number left as `text`.
+ */
+function isTextFragment(item: DocItem): boolean {
+    const text = item.text.trim();
+    return text.length < 40 && text.split(/\s+/).length < 5;
+}
+
+/**
  * Set `SentenceItem.joinWithNext = true` on the last sentence of each text
  * item whose successor (in reading order) begins a sentence that continues
  * the previous one across a column boundary.
@@ -1291,7 +1300,9 @@ const INSERT_KINDS: ReadonlySet<DocItem["kind"]> = new Set(["footnote", "caption
  * With `skipInserts`, the item that continues a text item is the next one
  * that is not a footnote, caption, table or figure: on a two-column page with
  * notes or a captioned figure under the first column, the column's last
- * paragraph goes on in the second column after them.
+ * paragraph goes on in the second column after them. Past a caption, table or
+ * figure, the item must be more than a fragment of a few words: figure and
+ * table text left as `text` sits just before the caption.
  *
  * @internal Public surface is `extractPageSentences`; this helper is
  * exported for direct unit testing.
@@ -1309,8 +1320,10 @@ export function annotateColumnContinuations(
         // Inserts set apart from the columns of text (a caption under a
         // figure, a column's notes) can be blocks of their own.
         const insertColumns = new Set<number>();
+        let skipsFigure = false;
         while (skipInserts && j < items.length - 1 && INSERT_KINDS.has(items[j].kind)) {
             for (let c = items[j].columnIndex; c <= endColumn(j); c++) insertColumns.add(c);
+            if (items[j].kind !== "footnote") skipsFigure = true;
             j++;
         }
         const next = items[j];
@@ -1332,6 +1345,9 @@ export function annotateColumnContinuations(
         while (column < next.columnIndex && insertColumns.has(column)) column++;
         if (column !== next.columnIndex) continue;
         if (degradedItems.has(cur.id) || degradedItems.has(next.id)) continue;
+        // Text left over from a figure or table sits just before its caption;
+        // the sentence the figure interrupts is a paragraph of running text.
+        if (skipsFigure && isTextFragment(cur)) continue;
         const firstSentence = nextSentences[0];
         if (!firstSentence) continue;
 

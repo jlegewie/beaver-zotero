@@ -603,6 +603,22 @@ describe("annotateColumnContinuations past inserts (PDF schema 5)", () => {
         expect(caption.kind === "caption" && caption.sentences![0].joinWithNext).toBeUndefined();
     });
 
+    it("does not join figure text left as a text item to the body past its caption", () => {
+        // A figure label above the caption is the last text item of the column.
+        const label = makeParagraph(0, [makeSentence("Number at risk")], { idx: 0 });
+        const caption = insert("caption", "Figure 2. Survival by group.", 1);
+        const right = makeParagraph(1, [makeSentence("pp 9–10).")], { idx: 2 });
+        annotateColumnContinuations([label, caption, right], simpleRegexSentenceSplit, new Set(), { skipInserts: true });
+        expect(label.kind === "text" && label.sentences![0].joinWithNext).toBeUndefined();
+
+        // Past footnotes alone, a short item still joins.
+        const short = makeParagraph(0, [makeSentence("It follows that")], { idx: 0 });
+        const note = footnote("1 See the appendix.", 1);
+        const after = makeParagraph(1, [makeSentence("the bound holds.")], { idx: 2 });
+        annotateColumnContinuations([short, note, after], simpleRegexSentenceSplit, new Set(), { skipInserts: true });
+        expect(short.kind === "text" && short.sentences![0].joinWithNext).toBe(true);
+    });
+
     it("reads past columns that only the inserts take up", () => {
         // The caption under the left column is a block of its own, so the
         // right column is the block after it.
