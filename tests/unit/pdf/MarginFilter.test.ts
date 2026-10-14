@@ -11,6 +11,7 @@ import {
     MarginFilter,
     getEffectiveRepeatThreshold,
     isPageCounter,
+    normalizeDigits,
     pageNumberObservations,
     parseCounter,
     parsePrefixedFolio,
@@ -2189,6 +2190,20 @@ describe("pageNumberObservations — margin numerals that may be printed page nu
         }));
         const analysis = MarginFilter.collectMarginElements(pages, { left: 60, top: 80, right: 60, bottom: 80 });
         expect(observe(analysis, pages)).toEqual([]);
+    });
+});
+
+describe("normalizeDigits", () => {
+    it("returns ASCII text as it is", () => {
+        const text = "Page 12 of 30 | S1 - 7 -";
+        expect(normalizeDigits(text)).toBe(text);
+    });
+
+    it("folds compatibility and non-Latin digits to ASCII", () => {
+        expect(normalizeDigits("\uFF11\uFF12")).toBe("12");
+        expect(normalizeDigits("\u0663\u0664")).toBe("34");
+        expect(normalizeDigits("Seite \u0967\u0968")).toBe("Seite 12");
+        expect(normalizeDigits("p. \u00B2")).toBe("p. 2");
     });
 });
 

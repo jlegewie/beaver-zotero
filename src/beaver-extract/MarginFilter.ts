@@ -151,7 +151,11 @@ const DIGIT_ZERO_BASES = [
     0x0E50, // Thai
 ];
 
+const NON_ASCII_RE = /\P{ASCII}/u;
+
 export function normalizeDigits(text: string): string {
+    // NFKC leaves ASCII as it is, and every digit mapped below is non-ASCII.
+    if (!NON_ASCII_RE.test(text)) return text;
     const nfkc = text.normalize("NFKC");
     return nfkc.replace(/[٠-٩۰-۹०-९০-৯๐-๙]/g,
         (ch) => {

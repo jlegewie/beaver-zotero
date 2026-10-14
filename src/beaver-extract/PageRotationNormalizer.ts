@@ -122,6 +122,9 @@ export function detectDominantTextOrientation(
     marginZone: MarginSettings,
     options: DetectOptions = {},
 ): RotationAngle {
+    // Only a rotated line votes for another orientation, so a page without
+    // one stays upright.
+    if (!hasRotatedLine(page)) return 0;
     const opts = { ...DEFAULT_DETECT_OPTIONS, ...options };
     const pageW = page.width;
     const pageH = page.height;
@@ -175,6 +178,16 @@ export function detectDominantTextOrientation(
     }
 
     return dominant;
+}
+
+function hasRotatedLine(page: RawPageData): boolean {
+    for (const block of page.blocks) {
+        if (block.type !== "text") continue;
+        for (const line of block.lines ?? []) {
+            if ((line.rotation ?? 0) !== 0) return true;
+        }
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------

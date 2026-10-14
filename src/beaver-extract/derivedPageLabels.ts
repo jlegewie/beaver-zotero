@@ -640,8 +640,10 @@ export function pageEdgeRowObservations(
             inverseRotateBBox(box, rotation, page.width, page.height);
         // Where the page prints each candidate, per position and text.
         const pagePlaces = new Map<string, BoundingBox[]>();
-        // The page's body em, which a large title does not stretch.
-        const em = median(pageLines.map(emOf));
+        // The page's body em, which a large title does not stretch. Only
+        // needed to tell places apart, so computed on first use.
+        let pageEm: number | undefined;
+        const em = () => pageEm ??= median(pageLines.map(emOf));
         const pageObservations: PageNumberObservation[] = [];
         const pageRowTexts = new Map<PageNumberObservation, string>();
         const picked = new Map<number, "top" | "bottom">();
@@ -695,7 +697,7 @@ export function pageEdgeRowObservations(
                     const line = word === ends[0] ? firstLine : lastLine;
                     texts.set(word, sourceBox(line.bbox));
                     ems.set(word, emOf(line));
-                    if (bothEnds) placed(word, ...rowEndBoxes(uprightRowBox, em));
+                    if (bothEnds) placed(word, ...rowEndBoxes(uprightRowBox, em()));
                     else placed(word, line.bbox);
                 }
                 // The whole row first: a counter split into lines ("Page 3",
@@ -772,7 +774,9 @@ export function pageEdgeRowObservations(
             }
         }
         for (const obs of pageObservations) {
-            const n = distinctPlaces(pagePlaces.get(`${obs.position}\u0000${obs.text}`) ?? [], em);
+            // One box or none is that many places, whatever the em.
+            const boxes = pagePlaces.get(`${obs.position}\u0000${obs.text}`) ?? [];
+            const n = boxes.length > 1 ? distinctPlaces(boxes, em()) : boxes.length;
             const counted = n > 1 ? { ...obs, occurrences: n } : obs;
             const rowText = pageRowTexts.get(obs);
             if (rowText) rowTextOf.set(counted, rowText);
@@ -792,23 +796,29 @@ function rowTextKey(rowText: string): string {
     return rowText.toLowerCase().replace(/[^\p{L}]+/gu, " ").trim();
 }
 
-/** A page's text lines grouped into rows, top to bottom, each left to right. */
+/**
+ * A page's text lines grouped into rows, top to bottom, each left to right.
+ * A line joins the current row when its center is within tolerance of the
+ * row's first line (its anchor).
+ */
 function textRows(page: RawPageData): RawLine[][] {
-    const lines: RawLine[] = [];
+    const entries: { line: RawLine; center: number; height: number }[] = [];
     for (const block of page.blocks) {
         if (block.type !== "text" || !block.lines) continue;
-        for (const line of block.lines) if (line.text.trim()) lines.push(line);
+        for (const line of block.lines) {
+            if (line.text.trim()) entries.push({ line, center: center(line), height: height(line) });
+        }
     }
-    lines.sort((a, b) => center(a) - center(b));
+    entries.sort((a, b) => a.center - b.center);
     const rows: RawLine[][] = [];
-    for (const line of lines) {
-        const row = rows[rows.length - 1];
-        const anchor = row?.[0];
-        const tolerance = anchor
-            ? Math.max(2, 0.5 * Math.min(height(anchor), height(line)))
-            : 0;
-        if (anchor && Math.abs(center(line) - center(anchor)) <= tolerance) row.push(line);
-        else rows.push([line]);
+    let anchor: (typeof entries)[number] | undefined;
+    for (const entry of entries) {
+        if (anchor && Math.abs(entry.center - anchor.center) <= Math.max(2, 0.5 * Math.min(anchor.height, entry.height))) {
+            rows[rows.length - 1].push(entry.line);
+        } else {
+            rows.push([entry.line]);
+            anchor = entry;
+        }
     }
     for (const row of rows) row.sort((a, b) => a.bbox.l - b.bbox.l);
     return rows;
