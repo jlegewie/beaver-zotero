@@ -1102,7 +1102,7 @@ export function extractPageSentences(
         degradedItems,
         {
             endColumns: draftItems.map((item) => item.endColumnIndex ?? item.columnIndex),
-            skipFootnotes: options.paragraphSettings?.noteMarkers ?? false,
+            skipInserts: options.paragraphSettings?.noteMarkers ?? false,
         },
     );
 
@@ -1256,10 +1256,26 @@ export interface ColumnContinuationOptions {
      */
     endColumns?: readonly number[];
     /**
-     * The item that continues a text item is the next one that is not a
-     * footnote (`ParagraphDetectionSettings.noteMarkers`).
+     * The item that continues a text item is the next one that is not an
+     * insert: a footnote, caption, table or figure
+     * (`ParagraphDetectionSettings.noteMarkers`).
      */
-    skipFootnotes?: boolean;
+    skipInserts?: boolean;
+}
+
+/**
+ * Items printed apart from the running text: a sentence goes on past them to
+ * its continuation (`SentenceItem.joinWithNext`).
+ */
+const INSERT_KINDS: ReadonlySet<DocItem["kind"]> = new Set(["footnote", "caption", "table", "picture"]);
+
+/**
+ * A text item too short to be the running text a figure interrupts: an axis
+ * label, table cell, legend entry or margin line number left as `text`.
+ */
+function isTextFragment(item: DocItem): boolean {
+    const text = item.text.trim();
+    return text.length < 40 && text.split(/\s+/).length < 5;
 }
 
 /**
@@ -1268,7 +1284,8 @@ export interface ColumnContinuationOptions {
  * the previous one across a column boundary.
  *
  * Conservative: requires strictly consecutive columns (`col` → `col + 1`,
- * from the column the item ends in: `endColumns`),
+ * from the column the item ends in: `endColumns`; columns that only skipped
+ * inserts take up don't count),
  * both sides text items, last sentence non-terminated, first sentence
  * lowercase-starting, and the splitter must agree the combined text is one
  * sentence. Only sets the flag — never writes `false` (omitted ≡ false per
@@ -1280,10 +1297,12 @@ export interface ColumnContinuationOptions {
  * caller's flat view shares SentenceItem object identity with
  * `items[i].sentences`, the flag is observable through both.
  *
- * With `skipFootnotes`, the item that continues a text item is the next one
- * that is not a footnote: on a two-column page with notes under the first
- * column, the column's last paragraph goes on in the second column after
- * the notes.
+ * With `skipInserts`, the item that continues a text item is the next one
+ * that is not a footnote, caption, table or figure: on a two-column page with
+ * notes or a captioned figure under the first column, the column's last
+ * paragraph goes on in the second column after them. Past a caption, table or
+ * figure, the item must be more than a fragment of a few words: figure and
+ * table text left as `text` sits just before the caption.
  *
  * @internal Public surface is `extractPageSentences`; this helper is
  * exported for direct unit testing.
@@ -1292,12 +1311,21 @@ export function annotateColumnContinuations(
     items: DocItem[],
     splitter: SentenceSplitter,
     degradedItems: ReadonlySet<string>,
-    { endColumns, skipFootnotes = false }: ColumnContinuationOptions = {},
+    { endColumns, skipInserts = false }: ColumnContinuationOptions = {},
 ): void {
+    const endColumn = (k: number) => endColumns?.[k] ?? items[k].columnIndex;
     for (let i = 0; i < items.length - 1; i++) {
         const cur = items[i];
         let j = i + 1;
-        while (skipFootnotes && j < items.length - 1 && items[j].kind === "footnote") j++;
+        // Inserts set apart from the columns of text (a caption under a
+        // figure, a column's notes) can be blocks of their own.
+        const insertColumns = new Set<number>();
+        let skipsFigure = false;
+        while (skipInserts && j < items.length - 1 && INSERT_KINDS.has(items[j].kind)) {
+            for (let c = items[j].columnIndex; c <= endColumn(j); c++) insertColumns.add(c);
+            if (items[j].kind !== "footnote") skipsFigure = true;
+            j++;
+        }
         const next = items[j];
         const curSentences = cur.kind === "text" ? cur.sentences ?? [] : [];
         const nextSentences = next.kind === "text" ? next.sentences ?? [] : [];
@@ -1312,8 +1340,14 @@ export function annotateColumnContinuations(
         if (cur.kind !== "text" || next.kind !== "text") {
             continue;
         }
-        if (next.columnIndex !== (endColumns?.[i] ?? cur.columnIndex) + 1) continue;
+        // The next column, or the first after the ones its inserts take up.
+        let column = endColumn(i) + 1;
+        while (column < next.columnIndex && insertColumns.has(column)) column++;
+        if (column !== next.columnIndex) continue;
         if (degradedItems.has(cur.id) || degradedItems.has(next.id)) continue;
+        // Text left over from a figure or table sits just before its caption;
+        // the sentence the figure interrupts is a paragraph of running text.
+        if (skipsFigure && isTextFragment(cur)) continue;
         const firstSentence = nextSentences[0];
         if (!firstSentence) continue;
 
