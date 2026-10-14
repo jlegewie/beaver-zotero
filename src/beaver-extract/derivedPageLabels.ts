@@ -228,6 +228,34 @@ function sameSheetSize(a: PageSize | undefined, b: PageSize | undefined): boolea
 }
 
 /**
+ * `observations` with every reading of a numbered heading's number marked
+ * `headingRow`: margin detection reads the number of a heading inside its
+ * zone as well, without the edge rows' view of the whole document. A
+ * reading counts as the heading's when it is the same number on the same
+ * line (its box overlaps the heading's vertically); a folio printed in
+ * another row of the page keeps counting.
+ */
+function withHeadingRows(observations: readonly PageNumberObservation[]): readonly PageNumberObservation[] {
+    const headings = observations.filter((obs) => obs.headingRow && !obs.roman && obs.bbox);
+    if (headings.length === 0) return observations;
+    const onHeadingLine = (obs: PageNumberObservation) => headings.some((heading) =>
+        heading.pageIndex === obs.pageIndex
+        && heading.position === obs.position
+        && heading.value === obs.value
+        && sameLine(heading.bbox!, obs.bbox!));
+    return observations.map((obs) =>
+        !obs.headingRow && !obs.roman && obs.bbox && onHeadingLine(obs) ? { ...obs, headingRow: true } : obs);
+}
+
+/** Whether two boxes share a line: they overlap vertically by half the lower one's height. */
+function sameLine(a: BoundingBox, b: BoundingBox): boolean {
+    const [aTop, aBottom] = [Math.min(a.t, a.b), Math.max(a.t, a.b)];
+    const [bTop, bBottom] = [Math.min(b.t, b.b), Math.max(b.t, b.b)];
+    const overlap = Math.min(aBottom, bBottom) - Math.max(aTop, bTop);
+    return overlap > 0 && overlap * 2 >= Math.min(aBottom - aTop, bBottom - bTop);
+}
+
+/**
  * Observations without the single digits of a letter-spaced number: "3 8"
  * also yields "3" and "8" alone, and its last digit steps with the page
  * index until it wraps. A digit is one of the number's own pieces when its
@@ -316,7 +344,7 @@ function candidateRuns(
     allObservations: readonly PageNumberObservation[],
     pageCount: number,
 ): { runs: Run[]; numberedPages: Map<number, Set<string>>; folioNumbers: Map<number, PageNumberObservation[]>; lastPages: Map<string, Set<number>> } {
-    const observations = withoutFurniture(withoutSpacedDigits(allObservations), pageCount);
+    const observations = withoutFurniture(withoutSpacedDigits(withHeadingRows(allObservations)), pageCount);
     // Numbers a page prints as its folio, for `printsShiftedNumber`: those
     // margin detection removed, and prefixed folios ("S5"), which are only
     // read from header and footer rows. Other numbers of those rows are not

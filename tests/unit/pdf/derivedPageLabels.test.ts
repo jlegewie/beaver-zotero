@@ -439,6 +439,30 @@ describe("pageEdgeRowObservations", () => {
         expect(derivePageLabels(pageEdgeRowObservations(pages), 3)).toEqual({ 0: "644", 1: "645", 2: "646" });
     });
 
+    it("discounts margin detection's reading of a numbered heading too", () => {
+        // A heading inside the top margin zone is also read by margin
+        // detection, which has no view of whether its row text repeats.
+        const pages = ["1 Introduction", "2 Methods", "3 Results"].map((heading, p) => page(p, [
+            line(heading, 60, 40), body(100), body(140), body(600), body(700),
+        ]));
+        const margin = ["1 Introduction", "2 Methods", "3 Results"].map((heading, p) => (
+            obs(p, p + 1, { position: "top", edge: true, bbox: line(heading, 60, 40).bbox })
+        ));
+        expect(derivePageLabels([...margin, ...pageEdgeRowObservations(pages)], 3)).toEqual({});
+    });
+
+    it("keeps a folio printed in its own row above an equal section number", () => {
+        const headings = ["1 Introduction", "2 Methods", "3 Results"];
+        const pages = headings.map((heading, p) => page(p, [
+            line(String(p + 1), 520, 20), line(heading, 60, 40), body(100), body(140), body(600), body(700),
+        ]));
+        const margin = headings.flatMap((heading, p) => [
+            obs(p, p + 1, { position: "top", bbox: line(String(p + 1), 520, 20).bbox }),
+            obs(p, p + 1, { position: "top", edge: true, bbox: line(heading, 60, 40).bbox }),
+        ]);
+        expect(derivePageLabels([...margin, ...pageEdgeRowObservations(pages)], 3)).toEqual({ 0: "1", 1: "2", 2: "3" });
+    });
+
     it("reads alternating running heads of a two-page document", () => {
         const heads = ["644 R. Allen and A. Vignoles", "645 School segregation"];
         const pages = heads.map((head, p) => page(p, [line(head, 60, 40), body(100), body(140), body(600), body(700)]));
