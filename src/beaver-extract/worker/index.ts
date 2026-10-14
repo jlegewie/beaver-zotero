@@ -32,6 +32,7 @@ import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
 import { getCachedLibMuPdf } from "./apiCache";
 import {
+    getWorkerCompiledWasm,
     isWorkerConfigured,
     setWorkerCompiledWasm,
     setWorkerUrls,
@@ -167,7 +168,12 @@ workerSelf.onmessage = (event: MessageEvent) => {
         if (cfg.urls && typeof cfg.urls === "object") {
             setWorkerUrls(cfg.urls);
             setWorkerCompiledWasm(cfg.compiledWasm);
-            workerSelf.postMessage({ kind: "configured" });
+            // Report whether usable modules arrived, so the client's stats
+            // reflect what the worker will instantiate.
+            workerSelf.postMessage({
+                kind: "configured",
+                compiledWasm: getWorkerCompiledWasm().mupdf !== undefined,
+            });
         }
         return;
     }

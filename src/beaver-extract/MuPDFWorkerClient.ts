@@ -366,6 +366,8 @@ interface WorkerLogMessage {
 
 interface WorkerLifecycleMessage {
     kind: "ready" | "configured" | "messageerror";
+    /** On `configured`: whether the worker kept usable compiled modules. */
+    compiledWasm?: boolean;
 }
 
 type WorkerReply =
@@ -1520,7 +1522,8 @@ export class MuPDFWorkerClient {
         }
         if (lifecycle.kind === "configured") {
             if (this.startup?.worker === worker) {
-                this.compiledWasmShared = this.startup.compiledWasm !== null;
+                this.compiledWasmShared = this.startup.compiledWasm !== null
+                    && lifecycle.compiledWasm === true;
                 this.startup.resolve();
                 // The worker completed its handshake — the slot is healthy
                 // again, so clear the consecutive start-failure streak.

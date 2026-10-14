@@ -338,6 +338,24 @@ describe('MuPDFWorkerClient compiled WASM', () => {
         }
     });
 
+    it('reports not shared when the worker drops the modules it was sent', async () => {
+        withCompiledWasm(() => compiledModules());
+        MockWorker.dropNextConfigureAck = true;
+        const client = new MuPDFWorkerClient();
+        try {
+            const op = client.getPageCount(new Uint8Array([1]));
+            const worker = MockWorker.instances[0];
+            expect(worker.configureMessages[0]).toHaveProperty('compiledWasm');
+            worker.onmessage?.({ data: { kind: 'configured', compiledWasm: false } });
+            await vi.waitFor(() => expect(worker.posted).toHaveLength(1));
+            worker.replyToLast({ ok: true, result: { count: 1 } });
+            await expect(op).resolves.toBe(1);
+            expect(client.getStats().compiledWasmShared).toBe(false);
+        } finally {
+            client.dispose();
+        }
+    });
+
     it('holds configure, and the call, until an asynchronous compile resolves', async () => {
         const compiled = compiledModules();
         let resolve!: (value: PDFCompiledWasm | null) => void;

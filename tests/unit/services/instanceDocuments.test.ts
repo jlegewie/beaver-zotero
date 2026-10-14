@@ -128,16 +128,33 @@ describe("InstanceDocuments", () => {
             ]);
         });
 
-        it("returns null after a failed compile without retrying", async () => {
-            fetchMock.mockImplementation(async () => ({
-                ok: false,
-                status: 404,
-                arrayBuffer: async () => new ArrayBuffer(0),
-            }));
-            const service = new InstanceDocuments();
-            await expect(service.getCompiledWasm(urls)).resolves.toBeNull();
-            expect(service.getCompiledWasm(urls)).toBeNull();
-            expect(fetchMock).toHaveBeenCalledTimes(2);
+        it("returns null for a minute after a failed compile, then tries again", async () => {
+            vi.useFakeTimers({ toFake: ["Date"] });
+            try {
+                fetchMock.mockImplementation(async () => ({
+                    ok: false,
+                    status: 404,
+                    arrayBuffer: async () => new ArrayBuffer(0),
+                }));
+                const service = new InstanceDocuments();
+                await expect(service.getCompiledWasm(urls)).resolves.toBeNull();
+                expect(service.getCompiledWasm(urls)).toBeNull();
+                expect(fetchMock).toHaveBeenCalledTimes(2);
+
+                fetchMock.mockImplementation(async () => ({
+                    ok: true,
+                    status: 200,
+                    arrayBuffer: async () => wasm.slice().buffer,
+                }));
+                vi.advanceTimersByTime(59_999);
+                expect(service.getCompiledWasm(urls)).toBeNull();
+                vi.advanceTimersByTime(1);
+                const compiled = await service.getCompiledWasm(urls);
+                expect(compiled?.mupdf).toBeInstanceOf(WebAssembly.Module);
+                expect(fetchMock).toHaveBeenCalledTimes(4);
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         it("releases the modules on dispose and offers none afterwards", async () => {
