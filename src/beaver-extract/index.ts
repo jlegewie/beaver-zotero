@@ -138,12 +138,7 @@ export type {
     FilteredParagraphContext,
     FilteredParagraphResult,
 } from "./FilteredParagraphPipeline";
-export type {
-    SentenceSplitterConfig,
-    WorkerSentenceDebugOptions,
-    SentenceTrace,
-    SentenceTraceResult,
-} from "./sentenceTypes";
+export type { SentenceSplitterConfig } from "./sentenceTypes";
 
 /**
  * BeaverExtractor - High-level API for extracting text from PDFs.

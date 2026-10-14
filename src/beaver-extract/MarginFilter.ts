@@ -23,6 +23,7 @@ import type { PageNumberObservation } from "./derivedPageLabels";
 import { bboxHeight } from "@beaver/agent-core/extract/types";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "./schema/presets";
 
 // ============================================================================
 // Page Number Detection — multilingual prefixes, anchored parser
@@ -1538,7 +1539,11 @@ export class MarginFilter {
      * its text rows (with `textRows`; otherwise every line is a row) in the margin
      * zones, before the analysis sets justified prose and lone words aside.
      */
-    static marginTexts(page: RawPageData, marginZone: MarginSettings, textRows: boolean = true): MarginText[] {
+    static marginTexts(
+        page: RawPageData,
+        marginZone: MarginSettings,
+        textRows: boolean = CURRENT_PDF_EXTRACTION_PRESET.marginTextRows,
+    ): MarginText[] {
         return marginTexts(
             collectTextRows(page, textRows),
             bbox => getMarginPosition(bbox, page.width, page.height, marginZone),
@@ -1549,11 +1554,12 @@ export class MarginFilter {
     /**
      * Smart filter: Collect all elements in margin zones for analysis.
      * With `textRows` off, every line is its own row (PDF schema 4).
+     * Defaults to the current schema's `marginTextRows`.
      */
     static collectMarginElements(
         pages: RawPageData[],
         marginZone: MarginSettings,
-        textRows: boolean = true
+        textRows: boolean = CURRENT_PDF_EXTRACTION_PRESET.marginTextRows,
     ): MarginAnalysis {
         const elements = new Map<MarginPosition, MarginElement[]>([
             ["top", []],
@@ -1655,7 +1661,8 @@ export class MarginFilter {
      *   with the page index in the header and footer zones (see
      *   `constantOffsetRuns`), and require a zone's increasing sequence to
      *   advance with the pages (see `advancesWithPages`), marking only each
-     *   page's own number. Off in the schema-4 preset.
+     *   page's own number. Off in the schema-4 preset; defaults to the
+     *   current schema's preset.
      * @returns Removal result with candidates and lookup structures
      */
     static identifyElementsToRemove(
@@ -1664,7 +1671,7 @@ export class MarginFilter {
             | number
             | { topBottom: number; leftRight: number } = 3,
         detectPageSequences: boolean = true,
-        pageNumberRuns: boolean = true,
+        pageNumberRuns: boolean = CURRENT_PDF_EXTRACTION_PRESET.pageNumberRuns,
     ): MarginRemovalResult {
         const candidates: RemovalCandidate[] = [];
         const textsToRemove = new Set<string>();
@@ -2063,8 +2070,8 @@ export class MarginFilter {
      *
      * `textRows` must match the setting the removal result was computed
      * with (see `collectMarginElements`). `proseRows` spares the words of
-     * justified prose rows (see `proseRowLines`); the PDF schema 5 preset
-     * turns it on with `marginTextRows`.
+     * justified prose rows (see `proseRowLines`). Both follow the preset's
+     * `marginTextRows`; they default to the current schema's.
      */
     static filterPageWithSmartRemoval(
         page: RawPageData,
@@ -2073,8 +2080,8 @@ export class MarginFilter {
         removalResult: MarginRemovalResult,
         bodyStyles?: TextStyle[],
         primaryBodyStyle?: TextStyle,
-        textRows: boolean = true,
-        proseRows: boolean = false,
+        textRows: boolean = CURRENT_PDF_EXTRACTION_PRESET.marginTextRows,
+        proseRows: boolean = textRows,
     ): RawPageData {
         const pageRemovals = removalResult.removalsByPage.get(page.pageIndex);
         // Per-text reason lookup so the heading-spare can apply only to

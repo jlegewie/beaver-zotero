@@ -21,6 +21,7 @@ import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import { crossesDivider, fillZoneFor, type ColumnDetectionOptions, type Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { joinLineTexts } from "./lineJoins";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "./schema/presets";
 import { START_SIGNALS, START_VETOES, type StartTrace } from "./boundaries/rules";
 import {
     boundaryLine,
@@ -59,49 +60,47 @@ export interface ParagraphDetectionSettings {
     maxHeaderLength?: number;
     /** Whether to remove hyphenation when joining lines (default: true) */
     removeHyphenation?: boolean;
+    // The switches below are set from the PDF schema preset
+    // (`presetParagraphSettings`); omitted, they follow the current schema's.
     /**
      * Read hanging-indent blocks (reference lists, footnotes, lists whose
      * wrapped lines sit at an inner edge) as entries with continuations; see
-     * `detectHangingRoles` (default: false). Also starts a new item at the
-     * next number of a numbered list (`isNextNumberedEntry`). Enabled by the
-     * PDF schema preset.
+     * `detectHangingRoles`. Also starts a new item at the next number of a
+     * numbered list (`isNextNumberedEntry`).
      */
     hangingIndentBlocks?: boolean;
     /**
      * Whether heading detection demotes run-in label items ("Keywords: …",
      * "Received: …", a structured-abstract label followed by prose), display
      * equations, bare web addresses and supplementary / extended-data figure
-     * and table captions (default: true).
-     * PDF schema 4 turns it off so its document-wide ids keep resolving.
+     * and table captions.
      */
     headingLabelFilters?: boolean;
     /**
      * Treat a run of at most `ISOLATED_HEADING_LINES` heading-styled lines as
      * an isolated heading: its gaps are section spacing, left out of a short
      * column's leading, and two same-style headings stacked a paragraph gap
-     * apart are separate headings (default: false). Enabled by the PDF schema
-     * preset.
+     * apart are separate headings.
      */
     isolatedHeadings?: boolean;
     /**
      * A page whose text is mostly set in a style other than the document's
      * body styles (an appended or cover page in another face) adds that style
      * to the page's body styles (`pageBodyStyle`), so its lines are not
-     * headings (default: false). Enabled by the PDF schema preset.
+     * headings.
      */
     pageBodyStyles?: boolean;
     /**
      * Line detection gives each raw line to one column only, so a line inside
      * two overlapping column boxes is not read twice
-     * (`LineDetectionOptions.exclusiveColumns`; default: false). Enabled by
-     * the PDF schema preset.
+     * (`LineDetectionOptions.exclusiveColumns`).
      */
     exclusiveColumnLines?: boolean;
     /**
      * Join an item's lines with `joinLineTexts` (see `lineJoins.ts`): line-end
      * hyphens decided from the document's spelling and the word's shape,
      * URLs, DOIs, number ranges and CJK text joined without a space, soft
-     * hyphens removed (default: false). Enabled by the PDF schema preset.
+     * hyphens removed.
      */
     lineJoins?: boolean;
     /**
@@ -114,17 +113,15 @@ export interface ParagraphDetectionSettings {
      * off from its text, a raised marker glued to a word in body text is
      * dropped, and a body sentence continues past footnotes into the next
      * column (see `ParagraphTextOptions.noteMarkers`,
-     * `annotateColumnContinuations`; default: false). Enabled by the PDF
-     * schema preset.
+     * `annotateColumnContinuations`).
      */
     noteMarkers?: boolean;
     /**
      * Decide where items start with the learned boundary model
      * (`boundaries/model.ts`) instead of `startNewItem`, and continue an
      * item across a cut between stacked blocks of one printed column
-     * (`detectLearnedItems`; default: false). Applies only to pages whose
-     * lines carry glyph metrics (`hasGlyphMetrics`); others keep
-     * `startNewItem`. Enabled by the PDF schema preset.
+     * (`detectLearnedItems`). Applies only to pages whose lines carry glyph
+     * metrics (`hasGlyphMetrics`); others keep `startNewItem`.
      */
     learnedBoundaries?: boolean;
 }
@@ -139,15 +136,16 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
     minHeaderLength: 3,
     maxHeaderLength: 200,
     removeHyphenation: true,
-    hangingIndentBlocks: false,
-    headingLabelFilters: true,
-    isolatedHeadings: false,
-    pageBodyStyles: false,
-    exclusiveColumnLines: false,
-    lineJoins: false,
+    // Schema switches follow the current schema's preset.
+    hangingIndentBlocks: CURRENT_PDF_EXTRACTION_PRESET.hangingIndentBlocks,
+    headingLabelFilters: CURRENT_PDF_EXTRACTION_PRESET.headingLabelFilters,
+    isolatedHeadings: CURRENT_PDF_EXTRACTION_PRESET.isolatedHeadings,
+    pageBodyStyles: CURRENT_PDF_EXTRACTION_PRESET.pageBodyStyles,
+    exclusiveColumnLines: CURRENT_PDF_EXTRACTION_PRESET.exclusiveColumnLines,
+    lineJoins: CURRENT_PDF_EXTRACTION_PRESET.lineJoins,
     lineJoinVocabulary: new Set<string>(),
-    noteMarkers: false,
-    learnedBoundaries: false,
+    noteMarkers: CURRENT_PDF_EXTRACTION_PRESET.noteMarkers,
+    learnedBoundaries: CURRENT_PDF_EXTRACTION_PRESET.learnedBoundaries,
 };
 
 /**
@@ -792,7 +790,7 @@ export function joinItemLines(
     settings: Pick<ParagraphDetectionSettings, "lineJoins" | "removeHyphenation" | "lineJoinVocabulary">,
 ): string {
     const removeHyphenation = settings.removeHyphenation ?? DEFAULT_SETTINGS.removeHyphenation;
-    if (!settings.lineJoins || !removeHyphenation) {
+    if (!(settings.lineJoins ?? DEFAULT_SETTINGS.lineJoins) || !removeHyphenation) {
         return joinLines(lines.map(l => l.text), removeHyphenation);
     }
     // A line keeps the space the PDF set after its last word.

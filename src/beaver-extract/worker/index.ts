@@ -56,7 +56,6 @@ import {
     opExtract,
     opExtractSerialized,
     opExtractRawPageDetailed,
-    opExtractSentenceDebug,
     opGetMetadata,
     opGetPageCount,
     opRenderPages,
@@ -117,8 +116,6 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opAnalyzeOCRNeeds(a as Parameters<typeof opAnalyzeOCRNeeds>[0]);
         case "search":
             return await opSearch(a as Parameters<typeof opSearch>[0]);
-        case "extractSentenceDebug":
-            return await opExtractSentenceDebug(a as Parameters<typeof opExtractSentenceDebug>[0]);
         case "analyzeLayout":
             return await opAnalyzeLayout(a as Parameters<typeof opAnalyzeLayout>[0]);
         default:

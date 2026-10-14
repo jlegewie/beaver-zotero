@@ -17,6 +17,7 @@ import type {
     RawPageDataDetailed,
     StyleProfile,
 } from "@beaver/agent-core/extract/types";
+import type { PdfExtractionPreset } from "../schema/presets";
 import { postLog } from "../worker/errors";
 import { isRecoverablePageError } from "../wasmFatal";
 import { extractRawPageDetailedFromDoc, extractRawPageFromDoc } from "../worker/docHelpers";
@@ -28,8 +29,11 @@ import { buildCompoundVocabulary } from "../worker/sentenceExtraction";
 export type ResolvedExtractionSettings = Required<Omit<ExtractionSettings, "pages" | "minTextPerPage">> &
     ExtractionSettings;
 
+/** Preset switches that change what a page walk produces. */
+export type PageWalkPreset = Pick<PdfExtractionPreset, "textRepair" | "styleRuns" | "regions">;
+
 /**
- * Per-`opExtract` page-walk cache.
+ * Per-op page-walk cache.
  *
  * The OCR gate (`DocumentAnalyzer`) samples a spread of pages across the
  * document, and the extraction pipeline then walks every target/analysis
@@ -55,9 +59,13 @@ export type ResolvedExtractionSettings = Required<Omit<ExtractionSettings, "page
  *  - `getPlain`    — JSON-walk pages for the markdown engines and the
  *                    markdown-mode gate.
  *  - `getDetailed` — per-char detailed-walk pages for structured
- *                    extraction and the structured-mode gate. With `regions`,
- *                    the walk also records font runs and the page's graphics
- *                    summary (`graphicsFor`) for region detection.
+ *                    extraction and the structured-mode gate. With the
+ *                    preset's `regions`, the walk also records font runs and
+ *                    the page's graphics summary (`graphicsFor`) for region
+ *                    detection.
+ *
+ * Every walk applies the preset's text repair; detailed walks record style
+ * runs with its `styleRuns`.
  */
 export class PageWalkCache {
     private readonly plain = new Map<number, RawPageData>();
@@ -66,13 +74,9 @@ export class PageWalkCache {
 
     constructor(
         private readonly doc: DocumentLike,
-        private readonly fontApi: FontApi | undefined,
-        /** Text repair of the op's schema preset; applies to every walk. */
-        private readonly textRepair: boolean,
-        /** Whether detailed walks record per-glyph style runs. */
-        private readonly styleRuns: boolean,
-        /** Region detection of the op's schema preset (structured mode). */
-        readonly regions = false,
+        /** WASM font helpers; detailed walks need them for line fonts. */
+        readonly fontApi: FontApi | undefined,
+        readonly preset: PageWalkPreset,
     ) {}
 
     getPlain(pageIndex: number, includeImages: boolean): RawPageData {
@@ -80,7 +84,7 @@ export class PageWalkCache {
         if (!page) {
             page = extractRawPageFromDoc(this.doc, pageIndex, {
                 includeImages,
-                textRepair: this.textRepair,
+                textRepair: this.preset.textRepair,
             });
             this.plain.set(pageIndex, page);
         }
@@ -95,10 +99,10 @@ export class PageWalkCache {
                 pageIndex,
                 includeImages,
                 this.fontApi,
-                this.textRepair,
+                this.preset.textRepair,
                 {
-                    styleRuns: this.styleRuns,
-                    ...(this.regions
+                    styleRuns: this.preset.styleRuns,
+                    ...(this.preset.regions
                         ? { onGraphics: (g: GraphicsSummary) => this.graphics.set(pageIndex, g), fontSpans: true }
                         : {}),
                 },
@@ -108,10 +112,24 @@ export class PageWalkCache {
         return page;
     }
 
-    /** Graphics summary of a page walked by `getDetailed` (with `regions`). */
+    /** Graphics summary of a page walked by `getDetailed` (with the preset's `regions`). */
     graphicsFor(pageIndex: number): GraphicsSummary | undefined {
         return this.graphics.get(pageIndex);
     }
+}
+
+/** Inputs of the document study (`buildAnalysisFromDoc`, `analyzeDocument`). */
+export interface DocumentStudyInput {
+    pageCache: PageWalkCache;
+    /** The schema preset; its margin switches shape the analysis. */
+    preset: PdfExtractionPreset;
+    opts: ExtractionSettings;
+    /** The caller's `repeatThreshold` before defaults (`getEffectiveRepeatThreshold`). */
+    requestedRepeatThreshold: number | undefined;
+    /** Pages of the cross-page analysis (`resolveAnalysisPages`). */
+    analysisIndices: number[];
+    /** The document's page count. */
+    pageCount: number;
 }
 
 /** Cross-page analysis of the analysis window (`buildAnalysisFromDoc`). */
@@ -134,7 +152,7 @@ export interface DocumentAnalysisContext {
 }
 
 /**
- * Shared analysis-context prefix for `runExtractFromIndices` and
+ * Shared analysis-context prefix for `runExtraction` and
  * `opAnalyzeLayout`. Walks the analysis-window pages once and runs the
  * cross-page `buildPageAnalysisContext` (StyleAnalyzer + MarginFilter)
  * over them.
@@ -152,20 +170,15 @@ export interface DocumentAnalysisContext {
  * `preWalked` lets the structured branch reuse target-page detailed
  * walks (which carry every field a JSON walk produces — line bbox,
  * font, page dims — with the WASM font helpers wired up). Indices in
- * the map are NOT re-walked; everything else gets a JSON walk as
- * before. This is what eliminates the redundant per-target JSON walk
+ * the map are NOT re-walked; everything else gets a JSON walk from
+ * `pageCache`. This is what eliminates the redundant per-target JSON walk
  * for structured mode when `analysisWindow=0`.
  */
 export function buildAnalysisFromDoc(
-    doc: DocumentLike,
-    opts: ExtractionSettings,
-    requestedRepeatThreshold: number | undefined,
-    analysisIndices: number[],
-    pageCount: number,
+    input: DocumentStudyInput,
     preWalked?: Map<number, RawPageData>,
-    pageCache?: PageWalkCache,
-    pageNumberRuns = true,
 ): DocumentAnalysisContext {
+    const { pageCache, preset, opts, requestedRepeatThreshold, analysisIndices, pageCount } = input;
     const tWalkStart = performance.now();
     const analysisPages: RawPageData[] = [];
     for (const i of analysisIndices) {
@@ -175,11 +188,7 @@ export function buildAnalysisFromDoc(
             continue;
         }
         try {
-            analysisPages.push(
-                pageCache
-                    ? pageCache.getPlain(i, false)
-                    : extractRawPageFromDoc(doc, i),
-            );
+            analysisPages.push(pageCache.getPlain(i, false));
         } catch (err) {
             // A malformed page tree can fail to resolve individual leaves.
             // Skip the bad page and keep going so one unresolvable page
@@ -207,8 +216,8 @@ export function buildAnalysisFromDoc(
         marginZone: opts.marginZone,
         repeatThreshold: requestedRepeatThreshold,
         detectPageSequences: opts.detectPageSequences,
-        marginTextRows: opts.marginTextRows,
-        pageNumberRuns,
+        marginTextRows: preset.marginTextRows,
+        pageNumberRuns: preset.pageNumberRuns,
     });
     const analysisMs = performance.now() - tAnalysisStart;
     StyleAnalyzer.logStyleProfile(styleProfile);

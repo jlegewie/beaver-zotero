@@ -41,11 +41,7 @@ import type {
     SerializedBeaverExtractResult,
     StructuredExtractWithDebugResult,
 } from "./schema";
-import type {
-    SentenceTraceResult,
-    SentenceSplitterConfig,
-    WorkerSentenceDebugOptions,
-} from "./sentenceTypes";
+import type { SentenceSplitterConfig } from "./sentenceTypes";
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 
 const DEFAULT_IDLE_TIMEOUT_MS_HOT = 5 * 60 * 1000;
@@ -2249,47 +2245,6 @@ export class MuPDFWorkerClient {
             options,
             maxPageCount: args?.maxPageCount,
         }, { signal });
-    }
-
-    /**
-     * Single-page sentence-bbox extraction with pipeline intermediates.
-     * Debug-only — production sentence-level extraction goes through
-     * `extract({ mode: "structured" })` which returns the same
-     * `InternalExtractionResult` shape with `pages[i].sentences` populated.
-     *
-     * Powers the dev visualizer / fixture capture / extract-trace
-     * endpoints. Returns `SentenceTraceResult = { result, trace }`
-     * with `result` being the production sentence result and `trace`
-     * carrying all pipeline intermediates (analysis-window indices, raw
-     * doc, detailed page, font-bridged `pagesForFilter`, margin
-     * analysis/removal, filtered-paragraph result).
-     *
-     * The splitter is described by a serializable `splitterConfig`
-     * (sentencex with language, or simple regex). The worker resolves
-     * the actual splitter function via its own `resolveSplitter`,
-     * including the sentencex→simple fallback on init failure.
-     *
-     * `options` is restricted to `WorkerSentenceDebugOptions`: no
-     * function-valued `splitter` (not structurally cloneable) and no
-     * `precomputed` (the worker always runs the full filtered-paragraph
-     * pipeline).
-     *
-     * **Map/Set boundary.** `trace.marginAnalysis`, `trace.marginRemoval`,
-     * and `trace.filteredResult.styleProfile` carry `Map`/`Set` fields.
-     * `postMessage` preserves them via structured clone, but
-     * `JSON.stringify` does NOT — flatten before writing HTTP responses.
-     */
-    async extractSentenceDebug(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndex: number,
-        options?: WorkerSentenceDebugOptions,
-    ): Promise<SentenceTraceResult> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<SentenceTraceResult>(
-            "extractSentenceDebug",
-            { pdfData: bytes, pageIndex, options },
-        );
     }
 
     /** Force WASM init in the worker. Useful for tests and pre-warm. */

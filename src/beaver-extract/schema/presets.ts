@@ -1,5 +1,7 @@
 import { SCHEMA_VERSION } from "@beaver/agent-core/extract/schema";
 import type { ExtractIdScheme } from "@beaver/agent-core/extract/ids";
+import type { ParagraphDetectionSettings } from "../ParagraphDetector";
+import type { RegionItemSettings } from "../regions/regionItems";
 
 /**
  * Extraction switches selected by PDF schema version. Anything that changes
@@ -53,8 +55,9 @@ export interface PdfExtractionPreset {
      */
     captionLabels: boolean;
     /**
-     * Smart margin removal matches text rows rather than single MuPDF lines
-     * (`ExtractionSettings.marginTextRows`).
+     * Smart margin removal matches text rows rather than single MuPDF lines,
+     * and keeps the words of justified prose rows on the page being filtered
+     * (`MarginFilter.collectMarginElements`, `filterPageWithSmartRemoval`).
      */
     marginTextRows: boolean;
     /**
@@ -142,6 +145,34 @@ const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */
 export function pdfExtractionPreset(schemaVersion: string): PdfExtractionPreset | undefined {
     return PDF_EXTRACTION_PRESETS[schemaVersion];
+}
+
+/**
+ * Paragraph detection settings with the preset's switches applied. The caller
+ * may override `hangingIndentBlocks`; `headingLabelFilters`,
+ * `isolatedHeadings`, `pageBodyStyles`, `exclusiveColumnLines`, `lineJoins`,
+ * `noteMarkers` and `learnedBoundaries` always follow the preset.
+ */
+export function presetParagraphSettings(
+    preset: PdfExtractionPreset,
+    settings?: ParagraphDetectionSettings,
+): ParagraphDetectionSettings {
+    return {
+        hangingIndentBlocks: preset.hangingIndentBlocks,
+        ...settings,
+        headingLabelFilters: preset.headingLabelFilters,
+        isolatedHeadings: preset.isolatedHeadings,
+        pageBodyStyles: preset.pageBodyStyles,
+        exclusiveColumnLines: preset.exclusiveColumnLines,
+        lineJoins: preset.lineJoins,
+        noteMarkers: preset.noteMarkers,
+        learnedBoundaries: preset.learnedBoundaries,
+    };
+}
+
+/** Settings of the region pass's items (`regionItemsForPage`) for the preset. */
+export function presetRegionSettings(preset: PdfExtractionPreset): RegionItemSettings {
+    return { tableRowEvidence: preset.tableRowEvidence };
 }
 
 /**
