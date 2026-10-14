@@ -3,6 +3,7 @@ import type { CreatorJSON } from "@beaver/agent-core/types/agentActions/base";
 import { safeAttachmentFilename } from "./attachmentFiles";
 import { getItemDisplayName as getDisplayNameFromItem } from "./itemDisplayName";
 import { UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
+import type { BeaverCitationMeta } from "./noteCitationMeta";
 
 
 /**
@@ -500,6 +501,8 @@ export interface NoteCitationData {
         uris: string[];
         itemData: Record<string, unknown>;
         locator?: string;
+        /** Beaver's private metadata; see `noteCitationMeta.ts`. */
+        beaver?: BeaverCitationMeta;
     }>;
     properties: Record<string, unknown>;
 }
@@ -510,18 +513,22 @@ export interface NoteCitationData {
  * library citation Beaver writes into a note.
  *
  * - An attachment cites its parent; a standalone attachment, a note or an
- *   annotation cannot be a native citation (callers write a link instead).
+ *   annotation cannot be a native citation (callers cite an annotation's
+ *   parent item, or write a link).
  * - `locator` must already be the single page label to store. Zotero opens a
  *   citation by matching its locator exactly against the PDF's page labels,
  *   so a range would display but never navigate.
  * - `label` is omitted unless `options` preserves one: Zotero prints a label
  *   verbatim ("page 12"), while no label renders the standard "p. 12", the
  *   form Zotero itself writes for citations added from annotations.
+ * - `meta` is Beaver's private record of what was cited (see
+ *   `noteCitationMeta.ts`), stored on the citation item.
  */
 export function buildNoteCitation(
     item: Zotero.Item,
     locator?: string,
     options: NoteCitationItemOptions = {},
+    meta?: BeaverCitationMeta,
 ): { citation: NoteCitationData; formatted: string } {
     let itemToCite = item;
     if (item.isAttachment()) {
@@ -537,15 +544,38 @@ export function buildNoteCitation(
         throw new Error('Item is not a regular item and cannot be cited');
     }
 
+    return buildEmbeddedNoteCitation(
+        Zotero.URI.getItemURI(itemToCite),
+        Zotero.Utilities.Item.itemToCSLJSON(itemToCite),
+        locator,
+        options,
+        meta,
+    );
+}
+
+/**
+ * Build a note citation of a work named by `uri` and described by `itemData`
+ * (CSL-JSON). {@link buildNoteCitation} uses it for library items; a work that
+ * is not in the library is cited the same way under a URI that never resolves
+ * to an item, and Zotero formats it from the embedded `itemData`.
+ */
+export function buildEmbeddedNoteCitation(
+    uri: string,
+    itemData: Record<string, unknown>,
+    locator?: string,
+    options: NoteCitationItemOptions = {},
+    meta?: BeaverCitationMeta,
+): { citation: NoteCitationData; formatted: string } {
     const citation: NoteCitationData = {
         citationItems: [{
-            uris: [Zotero.URI.getItemURI(itemToCite)],
-            itemData: Zotero.Utilities.Item.itemToCSLJSON(itemToCite),
+            uris: [uri],
+            itemData,
             ...(locator ? { locator } : {}),
             ...(locator && options.label ? { label: options.label } : {}),
             ...(options.prefix ? { prefix: options.prefix } : {}),
             ...(options.suffix ? { suffix: options.suffix } : {}),
             ...(options['suppress-author'] ? { 'suppress-author': true } : {}),
+            ...(meta ? { beaver: meta } : {}),
         }],
         properties: {},
     };
@@ -560,9 +590,19 @@ export function createCitationHTML(
     item: Zotero.Item,
     locator?: string,
     options?: NoteCitationItemOptions,
+    meta?: BeaverCitationMeta,
 ): string {
-    const { citation, formatted } = buildNoteCitation(item, locator, options);
-    return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citation))}">${formatted}</span>`;
+    return noteCitationHTML(buildNoteCitation(item, locator, options, meta));
+}
+
+/** A note citation payload encoded as the `data-citation` attribute value. */
+export function encodeNoteCitationData(citation: NoteCitationData): string {
+    return encodeURIComponent(JSON.stringify(citation));
+}
+
+/** The `span.citation` HTML for a built note citation. */
+export function noteCitationHTML({ citation, formatted }: { citation: NoteCitationData; formatted: string }): string {
+    return `<span class="citation" data-citation="${encodeNoteCitationData(citation)}">${formatted}</span>`;
 }
 
 // These helpers live in React-free modules so they are usable from the

@@ -3,25 +3,41 @@ import { maskRenderedCitationTags } from '../../../src/utils/noteCitationMask';
 import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
 
 // Mock createCitationHTML before importing the module under test
-vi.mock('../../../src/utils/zoteroUtils', () => ({
-    createCitationHTML: vi.fn(
-        (item: any, page?: string) =>
-            `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
-                citationItems: [{
-                    uris: [`http://zotero.org/users/1/items/${item.key}`],
-                    itemData: {
-                        id: `http://zotero.org/users/1/items/${item.key}`,
-                        type: 'article-journal',
-                        author: [{ family: 'Mock', given: 'Author' }],
-                        issued: { 'date-parts': [['2024']] },
-                    },
-                    locator: page || '',
-                }],
-                properties: {},
-            }))}"><span class="citation-item">${item.getField?.('title') || 'Mock Title'}${page ? ', p. ' + page : ''}</span></span>`
-    ),
-    getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
-}));
+vi.mock('../../../src/utils/zoteroUtils', () => {
+    const embedded = (uri: string, itemData: any, page?: string, _options?: any, meta?: any) => ({
+        citation: {
+            citationItems: [{ uris: [uri], itemData, ...(page ? { locator: page } : {}), ...(meta ? { beaver: meta } : {}) }],
+            properties: {},
+        },
+        formatted: `(<span class="citation-item">${itemData?.title ?? 'Embedded'}${page ? ', p. ' + page : ''}</span>)`,
+    });
+    const noteCitationHTML = ({ citation, formatted }: any) =>
+        `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citation))}">${formatted}</span>`;
+    return {
+        createCitationHTML: vi.fn(
+            (item: any, page?: string, _options?: any, meta?: any) =>
+                `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
+                    citationItems: [{
+                        uris: [`http://zotero.org/users/1/items/${item.key}`],
+                        itemData: {
+                            id: `http://zotero.org/users/1/items/${item.key}`,
+                            type: 'article-journal',
+                            author: [{ family: 'Mock', given: 'Author' }],
+                            issued: { 'date-parts': [['2024']] },
+                        },
+                        locator: page || '',
+                        ...(meta ? { beaver: meta } : {}),
+                    }],
+                    properties: {},
+                }))}"><span class="citation-item">${item.getField?.('title') || 'Mock Title'}${page ? ', p. ' + page : ''}</span></span>`
+        ),
+        buildEmbeddedNoteCitation: vi.fn(embedded),
+        buildNoteCitation: vi.fn((item: any, page?: string, options?: any, meta?: any) =>
+            embedded(`http://zotero.org/users/1/items/${item.key}`, { title: item.getField?.('title') || 'Mock Title' }, page, options, meta)),
+        noteCitationHTML: vi.fn(noteCitationHTML),
+        getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
+    };
+});
 
 vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
@@ -78,12 +94,19 @@ import {
     stripNoteWrapperDiv,
     rebuildDataCitationItems,
 } from '../../../src/utils/noteWrapper';
-import { createCitationHTML } from '../../../src/utils/zoteroUtils';
+import { buildEmbeddedNoteCitation, buildNoteCitation, createCitationHTML } from '../../../src/utils/zoteroUtils';
 
 
 // =============================================================================
 // Helpers
 // =============================================================================
+
+/** Decode the `data-citation` payload of the first citation span in `html`. */
+function decodeCitation(html: string): any {
+    const match = html.match(/data-citation="([^"]*)"/);
+    if (!match) throw new Error(`no citation in ${html}`);
+    return JSON.parse(decodeURIComponent(match[1]));
+}
 
 /** Build a minimal Zotero note wrapper */
 function wrap(inner: string, extraAttrs = ''): string {
@@ -631,6 +654,7 @@ describe('cross-library citations', () => {
             expect.objectContaining({ libraryID: GROUP_LIBRARY_ID, key: 'JLIWC45M' }),
             '5',
             undefined,
+            undefined,
         );
     });
 
@@ -651,14 +675,30 @@ describe('cross-library citations', () => {
         expect(simplified).toContain('<citation id="u-MINE0001" ref="c_MINE0001_0"/>');
     });
 
-    it.each([
-        ['a group not on this computer', 'http://zotero.org/groups/111/items/FOREIGN1'],
-        ['an unparseable URI', 'https://example.org/library/items/FOREIGN1'],
-    ])('falls back to the note\'s library for %s', (_label, uri) => {
-        const html = wrap(`<p>${rawCitationForUris([uri])}</p>`);
+    it('names an embedded work in a multi-item citation the same way in its ref and items', () => {
+        const html = wrap(`<p>${rawCitationForUris([userUri('KEY1'), 'https://doi.org/10.1234/items/ABCD1234'])}</p>`);
+        const { simplified } = simplifyNoteHtml(html, GROUP_LIBRARY_ID);
+
+        expect(simplified).toContain('<citation items="u-KEY1, g6073928-unknown" ref="c_KEY1+unknown_0"/>');
+    });
+
+    it('falls back to the note\'s library for a group not on this computer', () => {
+        const html = wrap(`<p>${rawCitationForUris(['http://zotero.org/groups/111/items/FOREIGN1'])}</p>`);
         const { simplified } = simplifyNoteHtml(html, GROUP_LIBRARY_ID);
 
         expect(simplified).toContain('<citation id="g6073928-FOREIGN1" ref="c_FOREIGN1_0"/>');
+    });
+
+    it.each([
+        'https://example.org/library/items/FOREIGN1',
+        // Zotero writes and parses item URIs only with the http prefix.
+        'https://zotero.org/groups/111/items/FOREIGN1',
+    ])('never reads %s as a library item', (uri) => {
+        const html = wrap(`<p>${rawCitationForUris([uri])}</p>`);
+        const { simplified } = simplifyNoteHtml(html, GROUP_LIBRARY_ID);
+
+        expect(simplified).toContain(`<citation ref="c_embedded_0" url="${uri}"/>`);
+        expect(simplified).not.toContain('id="');
     });
 });
 
@@ -712,7 +752,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
             '99',
-            undefined
+            undefined,
+            { v: 1, loc: 'page99' },
         );
         expect(result).toContain('data-citation=');
     });
@@ -725,7 +766,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
             '25',
-            undefined
+            undefined,
+            undefined,
         );
     });
 
@@ -749,6 +791,7 @@ describe('expandToRawHtml', () => {
             expect.objectContaining({ key: 'EX1' }),
             '4',
             { label: 'chapter', prefix: 'see', suffix: 'emphasis added' },
+            undefined,
         );
     });
 
@@ -767,6 +810,7 @@ describe('expandToRawHtml', () => {
             expect.objectContaining({ key: 'OTHER1' }),
             '3',
             undefined,
+            undefined,
         );
     });
 
@@ -779,7 +823,7 @@ describe('expandToRawHtml', () => {
             externalItemMapping: { W1: { library_id: 1, zotero_key: 'MAPPED01' } },
         });
 
-        expect(createCitationHTML).toHaveBeenCalledWith(expect.objectContaining({ key: 'MAPPED01' }), '7', undefined);
+        expect(createCitationHTML).toHaveBeenCalledWith(expect.objectContaining({ key: 'MAPPED01' }), '7', undefined, { v: 1, loc: 'page7' });
     });
 
     it('names a malformed citation id in the error', () => {
@@ -830,7 +874,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
             undefined,
-            undefined
+            undefined,
+            undefined,
         );
     });
 
@@ -852,7 +897,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
             '9',
-            undefined
+            undefined,
+            { v: 1, loc: 's4' },
         );
     });
 
@@ -864,7 +910,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
             undefined,
-            undefined
+            undefined,
+            { v: 1, loc: 's4' },
         );
     });
 
@@ -879,7 +926,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
             '9',
-            undefined
+            undefined,
+            { v: 1, loc: 's4' },
         );
     });
 
@@ -892,7 +940,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
             '3',
-            undefined
+            undefined,
+            { v: 1, loc: 's4' },
         );
     });
 
@@ -904,7 +953,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
             '9',
-            undefined
+            undefined,
+            { v: 1, loc: 's4' },
         );
     });
 
@@ -917,7 +967,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
             '9',
-            undefined
+            undefined,
+            { v: 1, loc: 's4' },
         );
     });
 
@@ -928,7 +979,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
             undefined,
-            undefined
+            undefined,
+            { v: 1, loc: 's4' },
         );
     });
 
@@ -960,7 +1012,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEW1' }),
             undefined,
-            undefined
+            undefined,
+            undefined,
         );
         expect(result).toContain('data-citation=');
     });
@@ -972,7 +1025,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEW1' }),
             '42',
-            undefined
+            undefined,
+            { v: 1, loc: 'page42' },
         );
     });
 
@@ -1169,7 +1223,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
             undefined,
-            undefined
+            undefined,
+            undefined,
         );
     });
 
@@ -1180,7 +1235,8 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
             '7',
-            undefined
+            undefined,
+            { v: 1, loc: 'page7' },
         );
     });
 
@@ -1263,10 +1319,10 @@ describe('expandToRawHtml', () => {
     //
     // `external_id` is the chat-side citation format used by search tools
     // (OpenAlex, Semantic Scholar) for works that may not be in the user's
-    // Zotero library. The simplifier-level fallback has three tiers:
-    //   1. Auto-resolve to a Zotero `item_id` if `externalItemMapping` has a hit
-    //   2. Build an inline `<a>` link from `externalRefs` metadata
-    //   3. Throw a helpful error when neither map has data for the id
+    // Zotero library. Expansion:
+    //   1. Auto-resolves to a Zotero `item_id` if `externalItemMapping` has a hit
+    //   2. Otherwise cites the work as an embedded item built from `externalRefs`
+    //   3. Throws a helpful error when neither map has data for the id
 
     it('external_id auto-resolves to item_id citation when in mapping', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
@@ -1292,7 +1348,7 @@ describe('expandToRawHtml', () => {
         expect((globalThis as any).Zotero.Items.getByLibraryAndKey).toHaveBeenCalledWith(1, 'MAPPED1');
     });
 
-    it('external_id falls back to <a> link with DOI URL', () => {
+    it('external_id without a library item becomes a native citation of an embedded work', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation external_id="W1975284160"/>';
         const externalRefContext = {
@@ -1310,15 +1366,120 @@ describe('expandToRawHtml', () => {
             externalItemMapping: {},
         };
         const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
-        expect(result).toBe(
-            '<a href="https://doi.org/10.1234/lib.2020.001" rel="noopener noreferrer">'
-            + '(Smith et al., 2020)</a>'
+        const uri = 'https://doi.org/10.1234/lib.2020.001';
+        const csl = expect.objectContaining({ title: 'Lithium-ion battery cathodes', DOI: '10.1234/lib.2020.001' });
+        expect(buildEmbeddedNoteCitation).toHaveBeenCalledWith(
+            uri,
+            csl,
+            undefined,
+            undefined,
+            { v: 1, ext: 'W1975284160', src: 'openalex', csl },
         );
-        // Should NOT call createCitationHTML — this is a link, not a Zotero citation
+        const citation = decodeCitation(result);
+        expect(citation.citationItems[0].uris).toEqual([uri]);
+        expect(citation.citationItems[0].beaver).toEqual({ v: 1, ext: 'W1975284160', src: 'openalex', csl });
+        // Zotero's own item data slot stays empty; the note's cache holds it.
+        expect(citation.citationItems[0].itemData).toBeUndefined();
         expect(createCitationHTML).not.toHaveBeenCalled();
     });
 
-    it('external_id falls back to publication_url when no DOI', () => {
+    it('stores an embedded work in the rebuilt citation cache', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const externalRefContext = {
+            externalRefs: {
+                W1975284160: {
+                    source: 'openalex' as const,
+                    source_id: 'W1975284160',
+                    title: 'Lithium-ion battery cathodes',
+                    authors: ['Smith, John', 'Doe, Jane', 'Roe, Mary'],
+                    year: 2020,
+                    identifiers: { doi: '10.1234/lib.2020.001' },
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        const html = wrap(`<p>${expandToRawHtml('<citation external_id="W1975284160"/>', metadata, 'new', externalRefContext)}</p>`);
+        const cache = extractDataCitationItems(rebuildDataCitationItems(html));
+        expect(cache).toEqual([{
+            uris: ['https://doi.org/10.1234/lib.2020.001'],
+            itemData: expect.objectContaining({ title: 'Lithium-ion battery cathodes' }),
+        }]);
+    });
+
+    it('reads an embedded work back as external_id and keeps it byte for byte', () => {
+        const externalRefContext = {
+            externalRefs: {
+                W1975284160: {
+                    source: 'openalex' as const,
+                    source_id: 'W1975284160',
+                    title: 'Lithium-ion battery cathodes',
+                    authors: ['Smith, John', 'Doe, Jane', 'Roe, Mary'],
+                    year: 2020,
+                    identifiers: { doi: '10.1234/lib.2020.001' },
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        const raw = expandToRawHtml(
+            '<citation external_id="W1975284160" loc="page4"/>', { elements: new Map() }, 'new', externalRefContext,
+        );
+        const note = rebuildDataCitationItems(wrap(`<p>See ${raw}.</p>`));
+        const { simplified, metadata } = simplifyNoteHtml(note, 1);
+        const tag = '<citation external_id="W1975284160" loc="page4" ref="c_ext_W1975284160_0"'
+            + ' label="Smith et al. 2020, Lithium-ion battery cathodes" url="https://doi.org/10.1234/lib.2020.001"/>';
+        expect(simplified.trim()).toBe(`<p>See ${tag}.</p>`);
+        const stored = metadata.elements.get('c_ext_W1975284160_0')!.rawHtml;
+        expect(decodeCitation(stored)).toEqual(decodeCitation(raw));
+        expect(expandToRawHtml(tag, metadata, 'old')).toBe(stored);
+        expect(expandToRawHtml(tag, metadata, 'new')).toBe(stored);
+
+        // Moving the locator rebuilds the citation from the thread's metadata.
+        const moved = expandToRawHtml(tag.replace('page4', 'page9'), metadata, 'new', externalRefContext);
+        expect(decodeCitation(moved).citationItems[0]).toMatchObject({
+            locator: '9',
+            beaver: { v: 1, loc: 'page9', ext: 'W1975284160' },
+        });
+        // The cache is rebuilt from the citation alone, e.g. after an undo
+        // that restores a citation the current note no longer caches.
+        const restored = rebuildDataCitationItems(wrap(`<p>${moved}</p>`), []);
+        expect(extractDataCitationItems(restored)).toEqual([{
+            uris: ['https://doi.org/10.1234/lib.2020.001'],
+            itemData: expect.objectContaining({ title: 'Lithium-ion battery cathodes' }),
+        }]);
+        // Another chat has no data for the work; the citation carries it.
+        const movedElsewhere = expandToRawHtml(tag.replace('page4', 'page9'), metadata, 'new');
+        expect(decodeCitation(movedElsewhere).citationItems[0]).toEqual(decodeCitation(moved).citationItems[0]);
+
+        // So does a new citation of the work, written without a ref.
+        const citedAgain = expandToRawHtml('<citation external_id="W1975284160" loc="page9"/>', metadata, 'new');
+        expect(decodeCitation(citedAgain).citationItems[0]).toEqual(decodeCitation(moved).citationItems[0]);
+
+        // And old_string may name the citation without its ref.
+        expect(enrichOldStringCitationRefs('See <citation external_id="W1975284160" loc="page4"/>.', metadata))
+            .toBe('See <citation external_id="W1975284160" loc="page4" ref="c_ext_W1975284160_0"/>.');
+        expect(enrichOldStringCitationRefs('<citation external_id="W1975284160" loc="page5"/>', metadata)).toBeNull();
+    });
+
+    it('rebuilds a moved external citation from its own data, not another citation of the work', () => {
+        const embedded = (uri: string, title: string) => {
+            const data = { citationItems: [{ uris: [uri], locator: '4', beaver: { v: 1, loc: 'page4', ext: 'W42', csl: { title } } }], properties: {} };
+            return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(data))}">(${title})</span>`;
+        };
+        const html = wrap(`<p>${embedded('https://openalex.org/W42', 'First')}</p><p>${embedded('https://doi.org/10.1/w42', 'Second')}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const second = simplified.match(/<citation [^>]*ref="c_ext_W42_1"[^>]*\/>/)![0];
+
+        const moved = expandToRawHtml(second.replace('page4', 'page9'), metadata, 'new');
+        expect(decodeCitation(moved).citationItems[0]).toMatchObject({
+            uris: ['https://doi.org/10.1/w42'],
+            locator: '9',
+            beaver: { loc: 'page9', ext: 'W42', csl: { title: 'Second' } },
+        });
+    });
+
+    it('external_id without a DOI is cited under its source URI', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation external_id="W1"/>';
         const externalRefContext = {
@@ -1336,34 +1497,10 @@ describe('expandToRawHtml', () => {
             externalItemMapping: {},
         };
         const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
-        expect(result).toBe(
-            '<a href="https://example.org/paper/123" rel="noopener noreferrer">'
-            + '(Singleton, 2019)</a>'
-        );
+        expect(decodeCitation(result).citationItems[0].uris).toEqual(['https://openalex.org/W1']);
     });
 
-    it('external_id falls back to open_access_url when no DOI or publication_url', () => {
-        const metadata: SimplificationMetadata = { elements: new Map() };
-        const input = '<citation external_id="W2"/>';
-        const externalRefContext = {
-            externalRefs: {
-                W2: {
-                    source: 'openalex' as const,
-                    source_id: 'W2',
-                    authors: ['Brown, Bob'],
-                    year: 2024,
-                    open_access_url: 'https://oa.example.org/pdf/2.pdf',
-                    library_items: [],
-                },
-            },
-            externalItemMapping: {},
-        };
-        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
-        expect(result).toContain('href="https://oa.example.org/pdf/2.pdf"');
-        expect(result).toContain('(Brown, 2024)');
-    });
-
-    it('external_id link includes page suffix when page attribute is present', () => {
+    it('external_id keeps a page locator', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation external_id="W3" page="42"/>';
         const externalRefContext = {
@@ -1380,30 +1517,13 @@ describe('expandToRawHtml', () => {
             externalItemMapping: {},
         };
         const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
-        expect(result).toContain('(Zhang, 2023, p. 42)');
+        expect(decodeCitation(result).citationItems[0]).toMatchObject({
+            locator: '42',
+            beaver: { v: 1, loc: 'page42', ext: 'W3', src: 'openalex' },
+        });
     });
 
-    it('external_id falls back to title when authors are missing', () => {
-        const metadata: SimplificationMetadata = { elements: new Map() };
-        const input = '<citation external_id="W4"/>';
-        const externalRefContext = {
-            externalRefs: {
-                W4: {
-                    source: 'openalex' as const,
-                    source_id: 'W4',
-                    title: 'A Mystery Paper With No Authors',
-                    identifiers: { doi: '10.1/mystery' },
-                    library_items: [],
-                },
-            },
-            externalItemMapping: {},
-        };
-        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
-        // No authors and no year → label falls back to title
-        expect(result).toContain('(A Mystery Paper With No Authors)');
-    });
-
-    it('external_id throws when reference has no DOI or URL', () => {
+    it('external_id with no DOI or URL is still cited', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation external_id="W5"/>';
         const externalRefContext = {
@@ -1419,8 +1539,8 @@ describe('expandToRawHtml', () => {
             },
             externalItemMapping: {},
         };
-        expect(() => expandToRawHtml(input, metadata, 'new', externalRefContext))
-            .toThrow(/no DOI or URL/);
+        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
+        expect(decodeCitation(result).citationItems[0].uris).toEqual(['https://openalex.org/W5']);
     });
 
     it('external_id throws helpful error when not in any mapping', () => {
@@ -1463,29 +1583,6 @@ describe('expandToRawHtml', () => {
             .toThrow(/old_string/);
     });
 
-    it('external_id link escapes special characters in href and label', () => {
-        const metadata: SimplificationMetadata = { elements: new Map() };
-        const input = '<citation external_id="W8"/>';
-        const externalRefContext = {
-            externalRefs: {
-                W8: {
-                    source: 'openalex' as const,
-                    source_id: 'W8',
-                    authors: ['Smith & Jones'],
-                    year: 2022,
-                    publication_url: 'https://example.org/path?a=1&b=2',
-                    library_items: [],
-                },
-            },
-            externalItemMapping: {},
-        };
-        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
-        // Ampersand in href must be entity-escaped
-        expect(result).toContain('href="https://example.org/path?a=1&amp;b=2"');
-        // Ampersand in label text must also be entity-escaped
-        expect(result).toContain('(Jones, 2022)'); // last name extracted from "Smith & Jones"
-    });
-
     it('external_id mixed with item_id citations expands both correctly', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input =
@@ -1505,11 +1602,10 @@ describe('expandToRawHtml', () => {
             externalItemMapping: {},
         };
         const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
-        // First (item_id) becomes a real citation
-        expect(result).toContain('data-citation=');
-        // Second (external_id) becomes an inline link
-        expect(result).toContain('https://doi.org/10.1/mix');
-        expect(result).toContain('(Tester, 2024)');
+        // Both become native citations: the item, and the work as an embedded item.
+        expect(createCitationHTML).toHaveBeenCalledTimes(1);
+        expect(result.match(/data-citation=/g)).toHaveLength(2);
+        expect(result).toContain(encodeURIComponent('https://doi.org/10.1/mix'));
     });
 
     // ---- extractAttr word-boundary correctness ----
@@ -1889,7 +1985,8 @@ describe('citation round-trips', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'PU1' }),
             '99',
-            undefined
+            undefined,
+            undefined,
         );
         expect(expanded).toContain('data-citation=');
     });
@@ -1927,7 +2024,8 @@ describe('citation round-trips', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'BRAND' }),
             undefined,
-            undefined
+            undefined,
+            undefined,
         );
     });
 });
@@ -2283,6 +2381,51 @@ describe('checkDuplicateCitations', () => {
         const result = checkDuplicateCitations(newStr, metadata);
         expect(result).toContain('already cited');
         expect(result).toContain('c_DUP_0');
+    });
+
+    it('does not report a citation the edit keeps from its old_string', () => {
+        const metadata: SimplificationMetadata = {
+            elements: new Map([
+                ['c_DUP_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-DUP', loc: 's5.6' } }],
+            ]),
+        };
+        const newStr = 'Revised claim <citation id="u-DUP" loc="s5.6"/>.';
+        // Matched without a ref, or after enrichment added one.
+        expect(checkDuplicateCitations(newStr, metadata, 'Claim <citation id="u-DUP" loc="s5.6"/>.')).toBeNull();
+        expect(checkDuplicateCitations(newStr, metadata, 'Claim <citation id="u-DUP" loc="s5.6" ref="c_DUP_0"/>.'))
+            .toBeNull();
+        // A second, new citation of the same item is still reported.
+        expect(checkDuplicateCitations(`${newStr} Again <citation id="u-DUP" loc="s5.6"/>`, metadata,
+            'Claim <citation id="u-DUP" loc="s5.6"/>.')).toContain('already cited');
+    });
+
+    it('does not report a citation the edit moves to another locator', () => {
+        const metadata: SimplificationMetadata = {
+            elements: new Map([
+                ['c_DUP_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-DUP', loc: 's3.1' } }],
+            ]),
+        };
+        const old = 'Claim <citation id="u-DUP" loc="s3.1"/>.';
+        expect(checkDuplicateCitations('Claim <citation id="u-DUP" loc="s3.2"/>.', metadata, old)).toBeNull();
+        // Also when old_string names it by its ref alone, or by the legacy numeric id.
+        expect(checkDuplicateCitations('Claim <citation id="1-DUP" loc="s3.2"/>.', metadata,
+            'Claim <citation ref="c_DUP_0"/>.')).toBeNull();
+    });
+
+    it('reports a new duplicate when the edit also keeps the original by its ref', () => {
+        const metadata: SimplificationMetadata = {
+            elements: new Map([
+                ['c_DUP_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-DUP', loc: 's5.6' } }],
+            ]),
+        };
+        const old = 'Claim <citation id="u-DUP" loc="s5.6" ref="c_DUP_0"/>.';
+        const added = ' Again <citation id="u-DUP" loc="s5.6"/>.';
+        expect(checkDuplicateCitations(`${old}${added}`, metadata, old)).toContain('already cited');
+        // Also when the kept citation is named by its ref alone.
+        expect(checkDuplicateCitations(`Claim <citation ref="c_DUP_0"/>.${added}`, metadata, old))
+            .toContain('already cited');
+        expect(checkDuplicateCitations(`${old}${added}`, metadata, 'Claim <citation ref="c_DUP_0"/>.'))
+            .toContain('already cited');
     });
 });
 
@@ -4094,14 +4237,14 @@ describe('buildUnresolvedLocatorWarning', () => {
         ]);
         expect(warning).toContain('id="1-AAA" loc="s4"');
         expect(warning).toContain('id="2-BBB" loc="p7"');
-        expect(warning).toMatch(/only support page locators/i);
+        expect(warning).toMatch(/page numbers only/i);
         expect(warning).not.toMatch(/can't be loaded/);
     });
 
     it('tells the model to re-read pages for locators that can never resolve', () => {
         const warning = buildUnresolvedLocatorWarning(['id="1-AAA" loc="s4"'], ['id="1-AAA" loc="s5.6"']);
         expect(warning).toContain('extraction is available');
-        expect(warning).toContain('can\'t be loaded, so they were saved without a locator: id="1-AAA" loc="s5.6"');
+        expect(warning).toContain('can\'t be loaded, so their citations show no page number: id="1-AAA" loc="s5.6"');
         expect(warning).toContain('Re-read the cited pages');
         expect(buildUnresolvedLocatorWarning([], ['id="1-AAA" loc="s5.6"'])).not.toContain('extraction is available');
     });
@@ -4128,3 +4271,255 @@ describe('detectPartialSimplifiedTag — citation attributes', () => {
         expect(detectPartialSimplifiedTag(anchor)).toBeNull();
     });
 });
+
+
+// =============================================================================
+// Key-less highlights
+// =============================================================================
+
+describe('highlights without an annotation key', () => {
+    /** A highlight as Zotero writes it for a reader text selection: no key, no color. */
+    function keylessHighlight(text: string, pageIndex: number): string {
+        const data = {
+            attachmentURI: 'http://zotero.org/users/1/items/ATTACH01',
+            pageLabel: String(pageIndex + 1),
+            position: { pageIndex, rects: [[10, 10, 100, 20]] },
+        };
+        return `<span class="highlight" data-annotation="${encodeURIComponent(JSON.stringify(data))}">“${text}”</span>`;
+    }
+
+    it('gives each highlight its own id, so each one round-trips', () => {
+        const first = keylessHighlight('first quote', 0);
+        const second = keylessHighlight('second quote', 1);
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${first}</p><p>${second}</p>`), 1);
+        const tags = simplified.match(/<annotation\b[^>]*>[^<]*<\/annotation>/g)!;
+
+        expect(tags).toEqual([
+            '<annotation id="a_nokey" page="1">“first quote”</annotation>',
+            '<annotation id="a_nokey_2" page="2">“second quote”</annotation>',
+        ]);
+        expect(expandToRawHtml(tags[0], metadata, 'old')).toBe(metadata.elements.get('a_nokey')!.rawHtml);
+        expect(expandToRawHtml(tags[1], metadata, 'old')).toBe(metadata.elements.get('a_nokey_2')!.rawHtml);
+        expect(metadata.elements.get('a_nokey')!.rawHtml).toContain('first quote');
+    });
+
+    it('keeps two highlights of the same annotation apart', () => {
+        const html = wrap(`<p>${rawAnnotation('SAME1', 'one')}</p><p>${rawAnnotation('SAME1', 'two')}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('<annotation id="a_SAME1" key="SAME1"');
+        expect(simplified).toContain('<annotation id="a_SAME1_2" key="SAME1"');
+        expect(metadata.elements.get('a_SAME1')!.originalText).toBe('one');
+        expect(metadata.elements.get('a_SAME1_2')!.originalText).toBe('two');
+    });
+});
+
+// =============================================================================
+// Beaver citation metadata
+// =============================================================================
+
+describe('Beaver citation metadata', () => {
+    /** A native citation span carrying Beaver's private metadata. */
+    function metaCitation(key: string, locator: string | undefined, beaver: Record<string, unknown>): string {
+        const citation = {
+            citationItems: [{
+                uris: [`http://zotero.org/users/1/items/${key}`],
+                ...(locator ? { locator } : {}),
+                beaver,
+            }],
+            properties: {},
+        };
+        return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citation))}">`
+            + `(<span class="citation-item">Author, 2024, p. ${locator ?? ''}</span>)</span>`;
+    }
+
+    it('reads a citation back as the attachment and locator Beaver wrote', () => {
+        const raw = metaCitation('PARENT1', '12', { v: 1, loc: 's5.6-s5.9', att: 'ATTACH01' });
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>Claim ${raw}.</p>`), 1);
+        const tag = '<citation id="u-ATTACH01" loc="s5.6-s5.9" ref="c_ATTACH01_0"/>';
+
+        expect(simplified.trim()).toBe(`<p>Claim ${tag}.</p>`);
+        const stored = metadata.elements.get('c_ATTACH01_0')!.rawHtml;
+        expect(expandToRawHtml(tag, metadata, 'old')).toBe(stored);
+        expect(expandToRawHtml(tag, metadata, 'new')).toBe(stored);
+        expect(createCitationHTML).not.toHaveBeenCalled();
+    });
+
+    it('reads a citation of a deleted attachment back as the parent item and page', () => {
+        const raw = metaCitation('PARENT1', '12', { v: 1, loc: 's5.6', att: 'GONE0001' });
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((_lib: number, key: string) =>
+            key === 'GONE0001' ? null : { key, libraryID: 1 });
+        const { simplified } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
+        expect(simplified).toContain('<citation id="u-PARENT1" loc="page12" ref="c_PARENT1_0"/>');
+    });
+
+    it('shows the stored page of a citation whose metadata records only the attachment', () => {
+        const raw = metaCitation('PARENT1', '100', { v: 1, att: 'ATTACH01' });
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
+        const tag = '<citation id="u-ATTACH01" loc="page100" ref="c_ATTACH01_0"/>';
+        expect(simplified).toContain(tag);
+        expect(expandToRawHtml(tag, metadata, 'new')).toBe(metadata.elements.get('c_ATTACH01_0')!.rawHtml);
+    });
+
+    it('translates the stored page of an attachment-only citation with its labels', () => {
+        const raw = metaCitation('PARENT1', '100', { v: 1, att: 'ATTACH01' });
+        const { simplified } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1, { 'u-ATTACH01': { 1: '100' } });
+        expect(simplified).toContain('<citation id="u-ATTACH01" loc="page2" ref="c_ATTACH01_0"/>');
+    });
+
+    it('adds the ref to a legacy att_id tag in old_string', () => {
+        const raw = metaCitation('PARENT1', '5', { v: 1, loc: 'page5', att: 'ATTACH01' });
+        const { metadata } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
+        expect(enrichOldStringCitationRefs('<citation att_id="1-ATTACH01" page="5"/>', metadata))
+            .toBe('<citation att_id="1-ATTACH01" page="5" ref="c_ATTACH01_0"/>');
+    });
+
+    it('names a cited work that is neither a library item nor carries Beaver metadata', () => {
+        const uri = 'https://doi.org/10.1/edited';
+        const citation = { citationItems: [{ uris: [uri], locator: '4' }], properties: {} };
+        const span = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citation))}">(Doe, 2019, p. 4)</span>`;
+        const cache = [{ uris: [uri], itemData: { title: 'Edited Work', author: [{ family: 'Doe' }], issued: { 'date-parts': [[2019]] } } }];
+        const html = `<div data-schema-version="9" data-citation-items="${encodeURIComponent(JSON.stringify(cache))}"><p>${span}</p></div>`;
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const tag = '<citation ref="c_embedded_0" label="Doe 2019, Edited Work" url="https://doi.org/10.1/edited"/>';
+
+        expect(simplified).toContain(tag);
+        expect(simplified).not.toContain('unknown');
+        const stored = metadata.elements.get('c_embedded_0')!.rawHtml;
+        expect(expandToRawHtml(tag, metadata, 'old')).toBe(stored);
+        expect(expandToRawHtml(tag, metadata, 'new')).toBe(stored);
+    });
+
+    it('re-simplifies a cached note once a cited attachment is gone', () => {
+        const raw = metaCitation('PARENT1', '12', { v: 1, loc: 's5.6', att: 'GONE0002' });
+        const html = wrap(`<p>${raw}</p>`);
+        invalidateSimplificationCache('child-note');
+        expect(getOrSimplify('child-note', html, 1).simplified).toContain('id="u-GONE0002"');
+
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((_lib: number, key: string) =>
+            key === 'GONE0002' ? null : { key, libraryID: 1 });
+        const again = getOrSimplify('child-note', html, 1);
+        expect(again.simplified).toContain('<citation id="u-PARENT1" loc="page12" ref="c_PARENT1_0"/>');
+        expect(again.isStale).toBe(true);
+
+        // And back once the attachment is available again (e.g. after a sync).
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((_lib: number, key: string) => ({ key, libraryID: 1 }));
+        expect(getOrSimplify('child-note', html, 1).simplified).toContain('id="u-GONE0002" loc="s5.6"');
+    });
+
+    it('reads an embedded work whose DOI ends like a Zotero item URI as the work', () => {
+        const uri = 'https://doi.org/10.1234/items/ABCD1234';
+        const citation = { citationItems: [{ uris: [uri], beaver: { v: 1, ext: 'W7', csl: { title: 'DOI Work' } } }], properties: {} };
+        const span = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citation))}">(DOI Work)</span>`;
+        const { simplified } = simplifyNoteHtml(wrap(`<p>${span}</p>`), 1);
+        expect(simplified).toContain(`<citation external_id="W7" ref="c_ext_W7_0" label="DOI Work" url="${uri}"/>`);
+        expect(simplified).not.toContain('u-ABCD1234');
+    });
+
+    it('ignores metadata of another version', () => {
+        const raw = metaCitation('PARENT1', '12', { v: 2, loc: 's5.6' });
+        const { simplified } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
+        expect(simplified).toContain('<citation id="u-PARENT1" loc="page12" ref="c_PARENT1_0"/>');
+    });
+
+    it('rebuilds the citation when its locator changes', () => {
+        const raw = metaCitation('PARENT1', '12', { v: 1, loc: 's5.6' });
+        const { metadata } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
+        const edited = '<citation id="u-PARENT1" loc="s7.1" ref="c_PARENT1_0"/>';
+        const resolvedLocatorPages = { 'zotero:u-PARENT1:s7.1': { label: '7', page: 7 } };
+
+        expandToRawHtml(edited, metadata, 'new', undefined, undefined, resolvedLocatorPages);
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'PARENT1' }), '7', undefined, { v: 1, loc: 's7.1' },
+        );
+    });
+
+    it('keeps a citation whose locator is only spelled differently', () => {
+        const raw = metaCitation('PARENT1', '12', { v: 1, loc: 'page12' });
+        const { metadata } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
+        const stored = metadata.elements.get('c_PARENT1_0')!.rawHtml;
+        expect(expandToRawHtml('<citation id="u-PARENT1" page="12" ref="c_PARENT1_0"/>', metadata, 'new'))
+            .toBe(stored);
+    });
+
+    it('cites an annotation as its parent item, at the annotation page', () => {
+        const parent = { id: 30, key: 'PARENT1', libraryID: 1, isRegularItem: () => true, isAttachment: () => false, getField: () => 'Parent' };
+        const attachment = { id: 40, key: 'ATTACH01', libraryID: 1, parentID: 30, isAttachment: () => true };
+        const annotation = {
+            id: 50, key: 'ANNOT001', libraryID: 1, parentID: 40, annotationPageLabel: '7',
+            isAnnotation: () => true, isAttachment: () => false, isNote: () => false, isRegularItem: () => false,
+        };
+        const zotero = (globalThis as any).Zotero;
+        zotero.Items.getByLibraryAndKey = vi.fn((_lib: number, key: string) =>
+            ({ ANNOT001: annotation, PARENT1: parent } as any)[key] ?? null);
+        zotero.Items.get = vi.fn((id: number) => ({ 30: parent, 40: attachment } as any)[id] ?? null);
+
+        const raw = expandToRawHtml('<citation id="1-ANNOT001"/>', { elements: new Map() }, 'new');
+        expect(buildNoteCitation).toHaveBeenCalledWith(parent, '7', undefined, { v: 1, ann: 'ANNOT001' });
+        expect(decodeCitation(raw).citationItems[0]).toMatchObject({
+            uris: ['http://zotero.org/users/1/items/PARENT1'],
+            locator: '7',
+            beaver: { v: 1, ann: 'ANNOT001' },
+        });
+        expect(decodeCitation(raw).citationItems[0].itemData).toBeUndefined();
+
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
+        const tag = '<citation id="u-ANNOT001" ref="c_ANNOT001_0"/>';
+        expect(simplified.trim()).toBe(`<p>${tag}</p>`);
+        expect(expandToRawHtml(tag, metadata, 'new')).toBe(metadata.elements.get('c_ANNOT001_0')!.rawHtml);
+    });
+
+    it('adds the ref to an old_string citation by the locator it was shown with', () => {
+        const raw = metaCitation('PARENT1', '12', { v: 1, loc: 's5.6', att: 'ATTACH01' });
+        const { metadata } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
+
+        expect(enrichOldStringCitationRefs('<citation id="u-ATTACH01" loc="s5.6"/>', metadata))
+            .toBe('<citation id="u-ATTACH01" loc="s5.6" ref="c_ATTACH01_0"/>');
+        expect(enrichOldStringCitationRefs('<citation id="u-ATTACH01" loc="s5.7"/>', metadata)).toBeNull();
+    });
+
+    it('does not match a structural locator to a citation shown without one', () => {
+        const { metadata } = simplifyNoteHtml(wrap(`<p>${rawCitation('PLAIN1')}</p>`), 1);
+        expect(enrichOldStringCitationRefs('<citation id="u-PLAIN1" loc="s5.6"/>', metadata)).toBeNull();
+        expect(enrichOldStringCitationRefs('<citation id="u-PLAIN1"/>', metadata))
+            .toBe('<citation id="u-PLAIN1" ref="c_PLAIN1_0"/>');
+    });
+
+    it('gives a citation of an EPUB no page, but keeps the locator', () => {
+        const epub = {
+            id: 60, key: 'EPUB0001', libraryID: 1, isAttachment: () => true,
+            attachmentContentType: 'application/epub+zip', attachmentLinkMode: 0,
+        };
+        const book = {
+            id: 61, key: 'BOOK0001', libraryID: 1, isAttachment: () => false, isRegularItem: () => true,
+            getAttachments: () => [60], getField: () => 'Book',
+        };
+        const zotero = (globalThis as any).Zotero;
+        zotero.Items.getByLibraryAndKey = vi.fn(() => book);
+        zotero.Items.get = vi.fn((id: number) => (id === 60 ? epub : null));
+
+        expandToRawHtml('<citation id="1-BOOK0001" loc="page3"/>', { elements: new Map() }, 'new');
+        expect(createCitationHTML).toHaveBeenCalledWith(book, undefined, undefined, { v: 1, loc: 'page3' });
+    });
+
+    it('keeps a chapter locator on an item whose only attachment is an EPUB', () => {
+        const epub = {
+            id: 60, key: 'EPUB0001', libraryID: 1, isAttachment: () => true,
+            attachmentContentType: 'application/epub+zip', attachmentLinkMode: 0,
+        };
+        const book = {
+            id: 61, key: 'BOOK0001', libraryID: 1, isAttachment: () => false, isRegularItem: () => true,
+            getAttachments: () => [60], getField: () => 'Book',
+        };
+        const zotero = (globalThis as any).Zotero;
+        zotero.Items.getByLibraryAndKey = vi.fn(() => book);
+        zotero.Items.get = vi.fn((id: number) => (id === 60 ? epub : null));
+        const raw = rawCitationWithCSLLabel('BOOK0001', 1, '3', 'chapter');
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
+        const edited = simplified.match(/<citation [^>]*\/>/)![0].replace('loc="page3"', 'loc="page4"');
+
+        expandToRawHtml(edited, metadata, 'new');
+        expect(createCitationHTML).toHaveBeenCalledWith(book, '4', { label: 'chapter' }, undefined);
+    });
+});
+

@@ -391,7 +391,7 @@ const CREATE_NOTE_TOOL = {
         'Content supports `<citation>` tags: use `<citation id="libraryID-zoteroKey"/>`, optionally with page locators such as `loc="page5"` or `loc="page5-page6"`. ' +
         'Use the 1-based page numbers from `read_attachment` `<pageN>` tags (physical page index, not printed labels). ' +
         'Only use citation IDs returned by this session\'s tool results; never construct or guess IDs. ' +
-        'Copy page locators verbatim from `read_note` when editing existing notes; omit `loc` for metadata-only citations. ' +
+        'Copy citation tags and their locators verbatim from `read_note` when reusing them; omit `loc` for metadata-only citations. ' +
         'Do not use legacy citation attributes such as `item_id`, `att_id`, `page`, or `sid`.',
     inputSchema: {
         type: 'object' as const,

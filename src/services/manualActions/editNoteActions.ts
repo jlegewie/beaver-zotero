@@ -636,6 +636,7 @@ export async function executeEditNoteAction(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
 
     // ── rewrite mode: replace entire note body ──
@@ -693,7 +694,7 @@ export async function executeEditNoteAction(
         clearNoteEditorSelection(library_id, zotero_key);
         invalidateSimplificationCache(noteId);
 
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
         const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         return {
@@ -762,7 +763,7 @@ export async function executeEditNoteAction(
         clearNoteEditorSelection(library_id, zotero_key);
         invalidateSimplificationCache(noteId);
 
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
         const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         const result: EditNoteResultData = {
@@ -965,7 +966,7 @@ export async function executeEditNoteAction(
     invalidateSimplificationCache(noteId);
 
     // 15. Check for duplicate citation warnings
-    const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+    const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
     const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
     const result: EditNoteResultData = {
@@ -1296,6 +1297,7 @@ async function executeBatchSingleRewrite(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
 
     let expandedNew: string;
@@ -1543,7 +1545,7 @@ export async function executeEditNoteBatchAction(
     // 8. Warnings: per-edit duplicate-citation + batch locator warnings.
     const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
     for (const edit of edits) {
-        const dup = checkDuplicateCitations(edit.new_string, metadata);
+        const dup = checkDuplicateCitations(edit.new_string, metadata, edit.old_string);
         if (dup) warnings.push(dup);
     }
 

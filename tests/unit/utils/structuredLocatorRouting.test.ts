@@ -39,7 +39,7 @@ import {
     locatorSchemaVersion,
     structuredPdfResultForSchema,
 } from '../../../src/services/documentExtraction/structuredPdfResult';
-import { preloadStructuralLocatorPages } from '../../../src/utils/noteCitationExpand';
+import { buildUnresolvedLocatorWarning, preloadStructuralLocatorPages } from '../../../src/utils/noteCitationExpand';
 import { buildLocalCitationDataMapForContent } from '../../../react/utils/citationRenderContext';
 import { getCitationPreloadFilePath } from '../../../react/utils/pageLabels';
 import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
@@ -127,6 +127,56 @@ describe('locator resolution by id scheme', () => {
         expect(extractAndCacheResolvedPdfDocument).toHaveBeenCalledExactlyOnceWith(
             expect.objectContaining({ schemaVersion: '4', mode: 'structured', source: { kind: 'zotero', item: attachment } }),
         );
+    });
+
+    it('extracts a local file whose current result is not cached', async () => {
+        getResult.mockResolvedValue(null);
+        vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
+            kind: 'ok',
+            cached: false,
+            result: currentResult(),
+            totalPages: 5,
+            resolvedAttachment: { libraryId: 1, zoteroKey: 'ATTACH12' },
+            contentType: 'application/pdf',
+        });
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
+
+        expect(resolved.unresolved).toEqual([]);
+        expect(Object.values(resolved.pages)).toEqual([{ label: 'i', page: 1 }]);
+        expect(extractAndCacheResolvedPdfDocument).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({ schemaVersion: '5', mode: 'structured' }),
+        );
+    });
+
+    it('never runs a non-PDF attachment through the PDF extractor, nor warns about its page', async () => {
+        getResult.mockResolvedValue(null);
+        attachment.attachmentContentType = 'application/epub+zip';
+        attachment.attachmentLinkMode = 0;
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="p3"/>');
+
+        // An EPUB citation shows no page, so an unmapped locator is no loss.
+        expect(resolved.unresolved).toEqual([]);
+        expect(resolved.pages).toEqual({});
+        expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
+    });
+
+    it('never extracts a remote-only file for the current version', async () => {
+        getResult.mockResolvedValue(null);
+        attachment.getFilePathAsync = vi.fn().mockResolvedValue(null);
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
+
+        expect(resolved.unresolved).toEqual(['id="1-ATTACH12" loc="s1.2"']);
+        expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
+    });
+
+    it('reports a locator the extracted document does not contain as missing', async () => {
+        const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s99.1"/>');
+
+        expect(resolved.unresolved).toEqual([]);
+        expect(resolved.missing).toEqual(['id="1-ATTACH12" loc="s99.1"']);
+        const warning = buildUnresolvedLocatorWarning(resolved.unresolved, resolved.unavailable, resolved.missing);
+        expect(warning).toContain('not in the cited document');
+        expect(warning).not.toContain('once the cited document');
     });
 
     it('reports an older locator as unresolved when its extraction fails', async () => {

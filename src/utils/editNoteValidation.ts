@@ -18,17 +18,22 @@
 
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import { noteCitationTagPattern } from './noteCitationTags';
+import { escapeAttr } from './noteHtmlEntities';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import {
     extractAttr,
     isCitationRefNotFoundError,
+    matchesStoredLocator,
     normalizePageLocator,
     translatePageNumberToLabel,
 } from './noteCitationExpand';
 import {
+    baseCitationKey,
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
+    type CitationRef,
+    type Locator,
 } from '@beaver/agent-core/citations/citationGrammar';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import { modelObjectId, modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
@@ -137,22 +142,63 @@ export function checkNewCitationItemsExist(
 // Duplicate Citation Check
 // =============================================================================
 
+/** Key of the item or work a citation cites, whatever its locator. */
+function citedWorkKey(ref: CitationRef): string {
+    return ref.kind === 'zotero' ? `zotero:${modelObjectIdFromReference(ref)}` : baseCitationKey(ref);
+}
+
+/**
+ * Key of the item or work a citation tag cites. A tag that names its citation
+ * only by `ref` takes the identity the stored citation was read with.
+ */
+function citationTagKey(attrStr: string, metadata: SimplificationMetadata): string | null {
+    let attrs = parseRawCitationAttributes(attrStr);
+    let normalized = normalizeCitationTag(attrs);
+    const stored = !normalized.ok && attrs.ref ? metadata.elements.get(attrs.ref)?.originalAttrs : undefined;
+    if (stored) {
+        attrs = stored.external_id ? { external_id: stored.external_id } : { id: stored.item_id };
+        normalized = normalizeCitationTag(attrs);
+    }
+    return normalized.ok ? citedWorkKey(normalized.ref) : null;
+}
+
 /**
  * When a new citation is inserted, check if the same item is already cited
  * elsewhere in the note. Returns a warning string or null.
+ *
+ * A citation of an item that `oldString` (the text the edit replaces) also
+ * cites is being kept or moved to another locator, not inserted, so it is not
+ * reported. Each citation in `oldString` excuses one in `newString`, used first
+ * by citations kept with their `ref`.
  */
 export function checkDuplicateCitations(
     newString: string,
-    metadata: SimplificationMetadata
+    metadata: SimplificationMetadata,
+    oldString?: string,
 ): string | null {
-    // Find new citations (item_id without ref) in new_string
-    const newCitationRegex = /<citation\s+(?![^>]*\bref=)([^>]*?)\/>/g;
-    let match;
-    const warnings: string[] = [];
+    const kept = new Map<string, number>();
+    for (const match of (oldString ?? '').matchAll(noteCitationTagPattern())) {
+        const key = citationTagKey(match[1] ?? '', metadata);
+        if (key) kept.set(key, (kept.get(key) ?? 0) + 1);
+    }
+    const useKept = (key: string | null): boolean => {
+        const count = key ? kept.get(key) ?? 0 : 0;
+        if (count > 0) kept.set(key!, count - 1);
+        return count > 0;
+    };
 
-    while ((match = newCitationRegex.exec(newString)) !== null) {
-        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1]));
+    const newTags = [...newString.matchAll(noteCitationTagPattern())].map(match => match[1] ?? '');
+    for (const attrStr of newTags) {
+        if (extractAttr(attrStr, 'ref') !== undefined) useKept(citationTagKey(attrStr, metadata));
+    }
+
+    const warnings: string[] = [];
+    // New citations: tags without a ref.
+    for (const attrStr of newTags) {
+        if (extractAttr(attrStr, 'ref') !== undefined) continue;
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
         if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        if (useKept(citedWorkKey(normalized.ref))) continue;
         const newItemId = modelObjectIdFromReference(normalized.ref);
         // Check if any existing citation references the same item
         for (const [existingId, stored] of metadata.elements) {
@@ -174,26 +220,50 @@ export function checkDuplicateCitations(
 
 /**
  * Find the unique ref in `metadata.elements` for a citation identified by
- * `item_id` + optional `page`. Returns `null` if zero or multiple entries
- * match (caller should skip enrichment and let the validator error path run).
+ * `item_id` + optional `page`. A citation read back from Beaver's private
+ * metadata is matched by the locator it was shown with (`loc`) instead.
+ * Returns `null` if zero or multiple entries match (caller should skip
+ * enrichment and let the validator error path run).
  */
 function findUniqueCitationRef(
     metadata: SimplificationMetadata,
     itemId: string,
     page: string | undefined,
+    loc?: Locator,
 ): string | null {
     let candidateRef: string | null = null;
     let candidateCount = 0;
     for (const [ref, el] of metadata.elements) {
         if (el.type !== 'citation') continue;
         if (el.originalAttrs?.item_id !== itemId) continue;
-        const storedPage = el.originalAttrs.page || undefined;
-        if (storedPage !== page) continue;
+        if (el.originalAttrs.loc !== undefined) {
+            if (!matchesStoredLocator(el.originalAttrs.loc, loc)) continue;
+        } else {
+            // Other citations are shown with page locators only.
+            if (loc && loc.kind !== 'page') continue;
+            const storedPage = el.originalAttrs.page || undefined;
+            if (storedPage !== page) continue;
+        }
         candidateRef = ref;
         candidateCount++;
         if (candidateCount > 1) return null;
     }
     return candidateCount === 1 ? candidateRef : null;
+}
+
+/**
+ * Find the unique ref of an embedded external work's citation by its external
+ * id and the locator it was shown with, or `null` when zero or several match.
+ */
+function findUniqueExternalCitationRef(
+    metadata: SimplificationMetadata,
+    externalId: string,
+    loc: Locator | undefined,
+): string | null {
+    const refs = [...metadata.elements].filter(([, el]) => el.type === 'citation'
+        && el.originalAttrs?.external_id === externalId
+        && matchesStoredLocator(el.originalAttrs.loc ?? '', loc));
+    return refs.length === 1 ? refs[0][0] : null;
 }
 
 /**
@@ -265,6 +335,7 @@ function addParentCitationRefReplacement(
     attId: string,
     page: string | undefined,
     pageLabels?: PageLabelsByAttachmentId,
+    loc?: Locator,
 ): boolean {
     const resolved = resolveAttIdToParent(attId);
     if (!resolved) return false;
@@ -274,22 +345,35 @@ function addParentCitationRefReplacement(
     // so compare both translated and raw page locators before giving up.
     const translatedPage = translateAttIdPageLocator(attachmentItem, page, pageLabels);
     let matchedPage = translatedPage;
-    let candidateRef = findUniqueCitationRef(metadata, parentItemId, translatedPage);
+    let candidateRef = findUniqueCitationRef(metadata, parentItemId, translatedPage, loc);
     if (candidateRef === null && translatedPage !== page) {
-        candidateRef = findUniqueCitationRef(metadata, parentItemId, page);
+        candidateRef = findUniqueCitationRef(metadata, parentItemId, page, loc);
         if (candidateRef !== null) matchedPage = page;
     }
     if (candidateRef === null) return false;
 
-    const finalPageAttr = matchedPage !== undefined
-        ? ` page="${matchedPage}"`
-        : '';
+    // A citation read from Beaver's metadata keeps the locator it was shown with.
+    const storedLoc = metadata.elements.get(candidateRef)?.originalAttrs?.loc;
+    const finalPageAttr = storedLoc !== undefined
+        ? (storedLoc ? ` loc="${escapeAttr(storedLoc)}"` : '')
+        : matchedPage !== undefined
+            ? ` page="${matchedPage}"`
+            : '';
     replacements.push({
         start: match.index,
         end: match.index + match[0].length,
         replacement: `<citation item_id="${parentItemId}"${finalPageAttr} ref="${candidateRef}"/>`,
     });
     return true;
+}
+
+/**
+ * A citation tag with ` ref="..."` added before its self-closing `/>`, keeping
+ * every existing attribute verbatim. extractAttr's word-boundary guard needs
+ * the attribute preceded by a non-word character, so a space always precedes.
+ */
+function citationTagWithRef(attrStr: string, ref: string): string {
+    return `<citation ${attrStr.replace(/\s+$/, '')} ref="${ref}"/>`;
 }
 
 /**
@@ -326,43 +410,54 @@ export function enrichOldStringCitationRefs(
         if (extractAttr(attrStr, 'ref') !== undefined) continue;
 
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
-        if (normalized.ok && normalized.ref.loc && !getPageLocator(normalized.ref)) continue;
+        const loc = normalized.ok ? normalized.ref.loc : undefined;
         const page = normalized.ok
             ? getPageLocator(normalized.ref)
             : extractAttr(attrStr, 'page') || undefined;
+
+        // An embedded external work, matched by its id and locator.
+        if (normalized.ok && normalized.ref.kind === 'external') {
+            const externalRef = findUniqueExternalCitationRef(metadata, normalized.ref.external_id, loc);
+            if (externalRef) {
+                replacements.push({
+                    start: m.index,
+                    end: m.index + m[0].length,
+                    replacement: citationTagWithRef(attrStr, externalRef),
+                });
+            }
+            continue;
+        }
 
         const explicitItemId = extractAttr(attrStr, 'item_id');
         const unifiedId = extractAttr(attrStr, 'id');
         const resolvedUnifiedId = unifiedId ? resolveUnifiedIdForOldString(unifiedId) : {};
         const rawItemId = explicitItemId || resolvedUnifiedId.itemId;
-        // Normalize to the portable id `simplifyNoteHtml` stores in
-        // `originalAttrs.item_id` so a legacy numeric id written by the model
-        // still matches — `normalized.ref` covers `item_id`/`id` identity
-        // attributes (see `firstZoteroIdentity`'s priority order).
-        const itemId = rawItemId && normalized.ok && normalized.ref.kind === 'zotero'
+        const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id') || resolvedUnifiedId.attId;
+        // The portable id `simplifyNoteHtml` stores in `originalAttrs.item_id`,
+        // so a legacy numeric id written by the model still matches —
+        // `normalized.ref` covers every identity attribute (see
+        // `firstZoteroIdentity`'s priority order).
+        const citedId = normalized.ok && normalized.ref.kind === 'zotero'
             ? modelObjectIdFromReference(normalized.ref)
-            : rawItemId;
-        const unifiedAttId = resolvedUnifiedId.attId;
-        if (itemId) {
-            const candidateRef = findUniqueCitationRef(metadata, itemId, page);
-            if (candidateRef === null) continue;
+            : undefined;
+        const itemId = rawItemId ? citedId ?? rawItemId : undefined;
 
-            // Inject ` ref="..."` before the self-closing `/>`, preserving all
-            // existing attributes verbatim. extractAttr's word-boundary guard
-            // requires the attribute to be preceded by a non-word character,
-            // so we always prepend a space.
-            const trimmedAttrs = attrStr.replace(/\s+$/, '');
+        // A citation of an attachment that Beaver's metadata records reads
+        // back with the attachment's own id, whichever attribute names it.
+        const directRef = (attId && citedId ? findUniqueCitationRef(metadata, citedId, page, loc) : null)
+            ?? (itemId ? findUniqueCitationRef(metadata, itemId, page, loc) : null);
+        if (directRef) {
             replacements.push({
                 start: m.index,
                 end: m.index + m[0].length,
-                replacement: `<citation ${trimmedAttrs} ref="${candidateRef}"/>`,
+                replacement: citationTagWithRef(attrStr, directRef),
             });
             continue;
         }
+        if (itemId) continue;
 
-        const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id') || unifiedAttId;
         if (attId) {
-            addParentCitationRefReplacement(replacements, metadata, m, attrStr, attId, page, pageLabels);
+            addParentCitationRefReplacement(replacements, metadata, m, attrStr, attId, page, pageLabels, loc);
             continue;
         }
     }

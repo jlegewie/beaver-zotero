@@ -202,7 +202,9 @@ export async function preloadBatchLabels(edits: EditNoteBatchEditItem[]): Promis
     ]);
 
     const locatorWarnings: string[] = [];
-    const warning = buildUnresolvedLocatorWarning(structural.unresolved, structural.unavailable);
+    const warning = buildUnresolvedLocatorWarning(
+        structural.unresolved, structural.unavailable, structural.missing,
+    );
     if (warning) locatorWarnings.push(warning);
 
     return { pageLabels, resolvedLocatorPages: { ...structural.pages }, locatorWarnings };
@@ -804,7 +806,7 @@ async function executeEditNoteBatchAction(
     // Warnings: per-edit duplicate-citation + batch locator warnings.
     const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
     for (const edit of edits) {
-        const dup = checkDuplicateCitations(edit.new_string, metadata);
+        const dup = checkDuplicateCitations(edit.new_string, metadata, edit.old_string);
         if (dup) warnings.push(dup);
     }
 

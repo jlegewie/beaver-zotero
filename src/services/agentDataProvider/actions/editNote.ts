@@ -687,6 +687,7 @@ async function validateEditNoteAction(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
     if (locatorWarning) warnings.push(locatorWarning);
     if (operation === 'insert_after' || operation === 'insert_before') {
@@ -841,6 +842,7 @@ async function executeEditNoteAction(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
 
     // 4. Pre-seed page labels before the final note snapshot. The final
@@ -939,7 +941,7 @@ async function executeEditNoteAction(
         invalidateSimplificationCache(noteId);
 
         // Check for duplicate citation warnings
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
         const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         return {
@@ -1034,7 +1036,7 @@ async function executeEditNoteAction(
         clearNoteEditorSelection(resolvedLibraryId, zotero_key);
         invalidateSimplificationCache(noteId);
 
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
         const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
         const undoData = {
             undo_new_html: expandedNew,
@@ -1320,7 +1322,7 @@ async function executeEditNoteAction(
     invalidateSimplificationCache(noteId);
 
     // 17. Check for duplicate citation warnings
-    const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+    const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
     const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
     // 18. Wait for ProseMirror to normalize the note and update undo data.

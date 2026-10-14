@@ -17,7 +17,7 @@ import {
     resolveCitationTarget,
 } from '@beaver/agent-export/citations/citationTargets';
 import { citationNotes, type CitationNotes } from '@beaver/agent-export/citations/citationNotes';
-import { externalReferenceToCsl } from '@beaver/agent-export/citations/externalCsl';
+import { externalReferenceToCsl, externalReferenceUri } from '@beaver/agent-export/citations/externalCsl';
 import { cslHtmlToText } from '@beaver/agent-export/citations/inlineHtml';
 import { assignNotePlacements, renderedClusterOrder } from '@beaver/agent-export/citations/noteIndices';
 import type {
@@ -32,7 +32,6 @@ import type {
     NoteCitationItem,
 } from '@beaver/agent-export/types';
 import { logger } from '@beaver/agent-core/platform/logger';
-import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { resolveLibraryRef } from '../../utils/libraryIdentity';
 import { getBestPDFAttachmentAsync } from '../../utils/zoteroItemHelpers';
 import type { CitationService, SequenceCitationItem } from '../CitationService';
@@ -63,20 +62,6 @@ export interface FormatExportCitationsOptions {
 export interface FormatExportCitationsResult {
     citations: FormattedCitations;
     warnings: ExportWarning[];
-}
-
-/**
- * A stable URI for an external work. Zotero keys embedded items by URI on
- * refresh; with no URI every citation of the work becomes a separate item
- * (disambiguated as 2018a/2018b, numbered twice). The URI never resolves to a
- * library item, so Zotero keeps using the embedded `itemData`.
- */
-export function externalReferenceUri(externalId: string, reference: ExternalReference): string {
-    const doi = reference.identifiers?.doi;
-    if (doi) return `https://doi.org/${doi}`;
-    if (reference.source === 'openalex') return `https://openalex.org/${encodeURIComponent(externalId)}`;
-    if (reference.source === 'semantic_scholar') return `https://www.semanticscholar.org/paper/${encodeURIComponent(externalId)}`;
-    return `urn:beaver:external:${encodeURIComponent(externalId)}`;
 }
 
 function fallbackText(name: string, locator?: string): string {

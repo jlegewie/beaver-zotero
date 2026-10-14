@@ -82,3 +82,17 @@ export function externalReferenceToCsl(ref: ExternalReference, id: string): Reco
     if (url && !ids.doi) csl.URL = url;
     return csl;
 }
+
+/**
+ * A stable URI for an external work. Zotero keys embedded items by URI on
+ * refresh; with no URI every citation of the work becomes a separate item
+ * (disambiguated as 2018a/2018b, numbered twice). The URI never resolves to a
+ * library item, so Zotero keeps using the embedded `itemData`.
+ */
+export function externalReferenceUri(externalId: string, reference: ExternalReference): string {
+    const doi = reference.identifiers?.doi;
+    if (doi) return `https://doi.org/${doi}`;
+    if (reference.source === 'openalex') return `https://openalex.org/${encodeURIComponent(externalId)}`;
+    if (reference.source === 'semantic_scholar') return `https://www.semanticscholar.org/paper/${encodeURIComponent(externalId)}`;
+    return `urn:beaver:external:${encodeURIComponent(externalId)}`;
+}
