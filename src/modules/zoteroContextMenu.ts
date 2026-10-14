@@ -29,6 +29,7 @@ import { ALL_BUILTIN_ACTIONS } from '../../react/types/builtinActions';
 import { getPref } from '../utils/prefs';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { agentItemFilter, isAgentSupportedItem } from '../utils/agentItemSupport';
+import { exportNoteWithProgress, NOTE_EXPORT_FORMATS } from './noteExportCommand';
 import config from '../../package.json';
 
 // ---------------------------------------------------------------------------
@@ -138,6 +139,7 @@ function hasEligibleItems(action: Action, c: SelectionComposition): boolean {
 
 const ITEM_MENU_ID = 'beaver-item-context-menu';
 const COLLECTION_MENU_ID = 'beaver-collection-context-menu';
+const NOTE_EXPORT_MENU_ID = 'beaver-note-export-menu';
 const PLUGIN_ID = config.config.addonID;
 
 // Store the namespaced keys returned by MenuManager.registerMenu().
@@ -146,6 +148,7 @@ const PLUGIN_ID = config.config.addonID;
 // unregisterMenu() requires that namespaced key, not the raw menuID.
 let registeredItemKey: string | null = null;
 let registeredCollectionKey: string | null = null;
+let registeredNoteExportKey: string | null = null;
 let prefObserverSymbol: symbol | null = null;
 
 // ---------------------------------------------------------------------------
@@ -277,6 +280,10 @@ function unregisterMenus(): void {
         try { MenuManager.unregisterMenu(registeredCollectionKey); } catch (_e) { /* ignore */ }
         registeredCollectionKey = null;
     }
+    if (registeredNoteExportKey) {
+        try { MenuManager.unregisterMenu(registeredNoteExportKey); } catch (_e) { /* ignore */ }
+        registeredNoteExportKey = null;
+    }
 }
 
 function registerMenus(): void {
@@ -351,7 +358,43 @@ function registerMenus(): void {
     });
     if (collectionKey) registeredCollectionKey = collectionKey;
 
+    // --- Note export (any note, whoever wrote it) ---
+    const noteExportKey = MenuManager.registerMenu({
+        menuID: NOTE_EXPORT_MENU_ID,
+        pluginID: PLUGIN_ID,
+        target: 'main/library/item',
+        menus: [{
+            menuType: 'submenu' as const,
+            l10nID: 'beaver-note-export-submenu',
+            onShowing: safeOnShowing('note-export-submenu', (_event: any, context: any) => {
+                context.setVisible(singleSelectedNote(context) !== null);
+            }),
+            menus: NOTE_EXPORT_FORMATS.map(({ format, name }) => ({
+                menuType: 'menuitem' as const,
+                l10nID: 'beaver-note-export-format',
+                l10nArgs: JSON.stringify({ format: name }),
+                onCommand: (event: any, context: any) => {
+                    const note = singleSelectedNote(context);
+                    const win = event?.target?.ownerDocument?.defaultView ?? context?.window;
+                    if (note && win) void exportNoteWithProgress(note, null, format, name, win, 'item_menu');
+                },
+            })),
+        }],
+    });
+    if (noteExportKey) registeredNoteExportKey = noteExportKey;
+
     ztoolkit.log(`zoteroContextMenu: Registered menus (${itemActions.length} item actions, ${collectionActions.length} collection actions)`);
+}
+
+/** The selected note when the selection is exactly one note. */
+function singleSelectedNote(context: any): Zotero.Item | null {
+    const items: any[] = context?.items ?? [];
+    if (items.length !== 1) return null;
+    try {
+        return items[0]?.isNote?.() ? items[0] : null;
+    } catch {
+        return null;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -531,7 +574,9 @@ function removeStaleMenuDOM(): void {
         for (const win of Zotero.getMainWindows()) {
             if (!win?.document || win.closed) continue;
 
-            const selector = `.${CUSTOM_MENU_CLASS}[data-l10n-id^="beaver-context-menu-"]`;
+            const selector = ['beaver-context-menu-', 'beaver-note-export-']
+                .map((prefix) => `.${CUSTOM_MENU_CLASS}[data-l10n-id^="${prefix}"]`)
+                .join(', ');
             for (const popupId of ['zotero-itemmenu', 'zotero-collectionmenu']) {
                 const popup = win.document.getElementById(popupId);
                 if (!popup) continue;

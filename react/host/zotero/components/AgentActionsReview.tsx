@@ -12,7 +12,7 @@ import { importActionReference } from '../../../utils/importItemDisplay';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
 import ArtifactsList from './reviewChanges/ArtifactsList';
 import ChangesCard from './reviewChanges/ChangesCard';
-import { useArtifactRows, useChangesRows } from './reviewChanges/useRunActionRows';
+import { useArtifactRows, useChangesRows, useEditedNoteArtifacts } from './reviewChanges/useRunActionRows';
 import { useTableArtifactRows } from './reviewChanges/useTableArtifactRows';
 
 interface AgentActionsReviewProps {
@@ -27,7 +27,9 @@ interface AgentActionsReviewProps {
  * several runs, but is still one answer and therefore gets one review block.
  *
  * The three are disjoint by construction, so an answer's work is never
- * reported twice. Most answers show exactly one of them.
+ * reported twice, with one exception: a note the answer edited is both a
+ * deliverable (its artifact row, to open or export) and a set of changes (in
+ * the changes card, to review or undo). Most answers show exactly one of them.
  */
 export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
@@ -35,6 +37,7 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) 
     const runIds = React.useMemo(() => runs.map((run) => run.id), [runs]);
     const changesRows = useChangesRows(runIds);
     const artifactRows = useArtifactRows(runIds);
+    const editedNotes = useEditedNoteArtifacts(runIds);
     const tableRows = useTableArtifactRows(runs);
     const lastRun = runs[runs.length - 1];
 
@@ -72,7 +75,13 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) 
 
     // The three displays are independent: each renders whenever the answer has
     // something for it, and an answer commonly has something for only one.
-    if (!hasCreateItems && !showChangesCard && artifactRows.length === 0 && tableRows.length === 0) {
+    if (
+        !hasCreateItems
+        && !showChangesCard
+        && artifactRows.length === 0
+        && editedNotes.length === 0
+        && tableRows.length === 0
+    ) {
         return null;
     }
 
@@ -80,7 +89,7 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) 
         <div className="px-4 display-flex flex-col gap-2">
             {/* What the answer made comes first: it is the most likely thing to be
                 opened, and the answer above it has just finished describing it. */}
-            <ArtifactsList rows={artifactRows} tableRows={tableRows} />
+            <ArtifactsList rows={artifactRows} tableRows={tableRows} editedNotes={editedNotes} />
             {createItemActionsByRun.map(({ runId, actions }) => (
                 <CreateItemAgentActionDisplay
                     key={runId}

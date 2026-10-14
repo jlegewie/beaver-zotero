@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import type { TableArtifact } from '@beaver/agent-core/run-state/tableResults';
-import { getReviewRowKey, type ReviewRow } from '../reviewChangeRows';
+import { getReviewRowKey, noteIdentityKey, type NoteEditSummary, type ReviewRow } from '../reviewChangeRows';
 import { ReviewActionRow } from './ReviewActionRow';
+import { EditedNoteArtifactRow } from './EditedNoteArtifactRow';
 import { TableArtifactRow } from './TableArtifactRow';
 import Button from '@beaver/agent-ui/primitives/Button';
 
@@ -17,15 +18,18 @@ interface ArtifactsListProps {
     rows: ReviewRow[];
     /** From `useTableArtifactRows`: the tables the answer wrote. */
     tableRows?: TableArtifact[];
+    /** From `useEditedNoteArtifacts`: the notes the answer edited without creating them. */
+    editedNotes?: NoteEditSummary[];
 }
 
 type ArtifactEntry =
     | { kind: 'action'; key: string; row: ReviewRow }
+    | { kind: 'editedNote'; key: string; summary: NoteEditSummary }
     | { kind: 'table'; key: string; row: TableArtifact };
 
 /**
- * What a terminal run produced for the user to open — the notes and tables it
- * wrote.
+ * What a terminal run produced for the user to open — the notes it wrote or
+ * edited, one row per note, and the tables it wrote.
  *
  * Sits at the bottom of the run so a note is reachable from where the answer
  * ends, however long the answer is, and whatever else the run did. That is the
@@ -39,13 +43,19 @@ type ArtifactEntry =
  * artifact therefore looks like a single bordered row, which is what a run that
  * wrote one note should look like; the frame is the list's, not a card's.
  */
-export const ArtifactsList: React.FC<ArtifactsListProps> = ({ rows, tableRows = [] }) => {
+export const ArtifactsList: React.FC<ArtifactsListProps> = ({ rows, tableRows = [], editedNotes = [] }) => {
     const [showAllRows, setShowAllRows] = useState(false);
 
     // Notes first, then tables: the note rows carry apply/undo state the user
     // may still have to settle, and a table is already written when it appears.
+    // Created notes lead the edited ones, as the answer's own writing.
     const entries: ArtifactEntry[] = [
         ...rows.map((row): ArtifactEntry => ({ kind: 'action', key: getReviewRowKey(row), row })),
+        ...editedNotes.map((summary): ArtifactEntry => ({
+            kind: 'editedNote',
+            key: `note:${noteIdentityKey(summary.note)}`,
+            summary,
+        })),
         ...tableRows.map((row): ArtifactEntry => ({
             kind: 'table',
             key: `table:${row.runId}:${row.toolcallId}`,
@@ -64,9 +74,13 @@ export const ArtifactsList: React.FC<ArtifactsListProps> = ({ rows, tableRows = 
         <div className="border-card rounded-card bg-senary overflow-hidden display-flex flex-col min-w-0">
             {visibleEntries.map((entry, idx) => (
                 <div key={entry.key} className={idx > 0 ? 'border-top-quinary' : undefined}>
-                    {entry.kind === 'action'
-                        ? <ReviewActionRow row={entry.row} inGroup />
-                        : <TableArtifactRow row={entry.row} />}
+                    {entry.kind === 'action' ? (
+                        <ReviewActionRow row={entry.row} inGroup />
+                    ) : entry.kind === 'editedNote' ? (
+                        <EditedNoteArtifactRow summary={entry.summary} />
+                    ) : (
+                        <TableArtifactRow row={entry.row} />
+                    )}
                 </div>
             ))}
 

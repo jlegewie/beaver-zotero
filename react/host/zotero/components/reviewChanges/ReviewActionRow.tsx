@@ -1,6 +1,6 @@
 import { useSurfaceWindow } from '../../../../runtime/SurfaceWindowContext';
 import React, { useCallback, useState } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
     agentActionItemTitlesAtom,
     getAgentActionItemTitleKey,
@@ -50,6 +50,7 @@ import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { DownloadIcon } from '@beaver/agent-ui/icons';
 import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 import { exportNoteToFile, openExportedFile, revealExportedFile } from '../../fileExport';
+import { countPendingNoteEdits } from './useRunActionRows';
 import { exportWithFeedback, fileExportFormatMenuItems } from '../../../../utils/fileExportFeedback';
 import { addPopupMessageAtom } from '../../../../utils/popupMessageUtils';
 
@@ -217,21 +218,29 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const isNoteArtifact = row.actionType === 'create_note';
     const [isExporting, setIsExporting] = useState(false);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
+    const jotaiStore = useStore();
 
     const handleExportNote = useCallback(async (format: FileExportFormat) => {
         if (isExporting) return;
         setIsExporting(true);
         try {
+            const note = getExportNoteTarget(row);
             await exportWithFeedback(
                 format,
-                () => exportNoteToFile({ runId, toolCallId: row.toolcallId, format, note: getExportNoteTarget(row) }),
+                () => exportNoteToFile({
+                    format,
+                    surface: 'run_artifacts',
+                    note,
+                    createdBy: { runId, toolCallId: row.toolcallId },
+                    pendingChanges: note ? countPendingNoteEdits(jotaiStore, note) : 0,
+                }),
                 addPopupMessage,
                 { reveal: revealExportedFile, open: openExportedFile },
             );
         } finally {
             setIsExporting(false);
         }
-    }, [isExporting, runId, row, addPopupMessage]);
+    }, [isExporting, runId, row, addPopupMessage, jotaiStore]);
 
     const handleReveal = useCallback(async () => {
         if (!revealReference) return;
