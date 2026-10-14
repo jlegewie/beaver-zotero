@@ -515,9 +515,10 @@ export interface NoteCitationData {
  * - An attachment cites its parent; a standalone attachment, a note or an
  *   annotation cannot be a native citation (callers cite an annotation's
  *   parent item, or write a link).
- * - `locator` must already be the single page label to store. Zotero opens a
- *   citation by matching its locator exactly against the PDF's page labels,
- *   so a range would display but never navigate.
+ * - `locator` must already be the page label(s) to store. A range or list is
+ *   kept when the citation claims those pages, although Zotero's "Go to Page"
+ *   matches the locator exactly against the PDF's page labels and so only
+ *   navigates for a single page.
  * - `label` is omitted unless `options` preserves one: Zotero prints a label
  *   verbatim ("page 12"), while no label renders the standard "p. 12", the
  *   form Zotero itself writes for citations added from annotations.

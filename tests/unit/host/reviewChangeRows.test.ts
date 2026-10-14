@@ -5,6 +5,7 @@ import {
     buildReviewRowsForRunChain,
     getChangesCardHeading,
     hasPendingReviewRows,
+    getExportNoteTarget,
     getOpenNoteTarget,
     isArtifactAction,
     isBulkApplicable,
@@ -648,6 +649,28 @@ describe('getChangesCardHeading zero-target actions', () => {
 
         expect(hasPendingReviewRows(rows)).toBe(true);
         expect(getChangesCardHeading(rows).trail).toBe('1 pending, 1 applied');
+    });
+});
+
+describe('getExportNoteTarget', () => {
+    const noteRow = (overrides: Partial<AgentAction>) =>
+        buildReviewRows([action({ action_type: 'create_note', ...overrides })], { include: 'artifacts' })[0];
+    const result_data = { library_id: 1, library_ref: 'user', zotero_key: 'NOTE1' };
+
+    it('exports the note of an applied action', () => {
+        expect(getExportNoteTarget(noteRow({ status: 'applied', result_data } as Partial<AgentAction>)))
+            .toEqual({ library_id: 1, library_ref: 'user', zotero_key: 'NOTE1' });
+    });
+
+    it('exports the note of an action whose undo failed, which may still exist', () => {
+        expect(getExportNoteTarget(noteRow({ status: 'error', result_data } as Partial<AgentAction>)))
+            .toEqual({ library_id: 1, library_ref: 'user', zotero_key: 'NOTE1' });
+    });
+
+    it('has no note before it is created, after an undo, or after a failed write', () => {
+        expect(getExportNoteTarget(noteRow({ status: 'pending' }))).toBeNull();
+        expect(getExportNoteTarget(noteRow({ status: 'undone', result_data } as Partial<AgentAction>))).toBeNull();
+        expect(getExportNoteTarget(noteRow({ status: 'error' }))).toBeNull();
     });
 });
 

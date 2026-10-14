@@ -77,9 +77,24 @@ export interface OpenNoteTarget {
  * note yet, and an undone one has had it deleted.
  */
 export function getOpenNoteTarget(row: ReviewRow): OpenNoteTarget | null {
+    return createdNoteTarget(row, action => action.status === 'applied');
+}
+
+/**
+ * The note a row's Export reads, or null when the row has no note in the
+ * library: an applied action's note, or the note of an action whose undo
+ * failed (it keeps its result, and the note may still exist). The exporter
+ * reports a note that no longer exists.
+ */
+export function getExportNoteTarget(row: ReviewRow): OpenNoteTarget | null {
+    return createdNoteTarget(row, action => action.status === 'applied'
+        || (action.status === 'error' && action.result_data != null));
+}
+
+function createdNoteTarget(row: ReviewRow, hasNote: (action: AgentAction) => boolean): OpenNoteTarget | null {
     if (row.actions.length !== 1) return null;
     const [action] = row.actions;
-    if (changeTypeKey(action) !== 'create_note' || action.status !== 'applied') return null;
+    if (changeTypeKey(action) !== 'create_note' || !hasNote(action)) return null;
 
     const result = action.result_data as Record<string, any> | undefined;
     if (!result?.zotero_key) return null;

@@ -77,7 +77,7 @@ import { isCurrentExtractionSchemaVersion, producibleExtractionSchemaVersions } 
 import {
     firstPageNumber,
     formatCitationPages,
-    normalizePageLocator,
+    normalizePageRange,
     translatePageLabelToNumber,
     translatePageNumberToLabel,
 } from './pageLabelTranslation';
@@ -92,7 +92,7 @@ import {
     UNRESOLVED_LIBRARY_ID,
 } from './libraryIdentity';
 
-export { normalizePageLocator, translatePageNumberToLabel } from './pageLabelTranslation';
+export { translatePageNumberToLabel } from './pageLabelTranslation';
 
 /** The page a structural locator was resolved to, for display and navigation. */
 export interface ResolvedLocatorPage {
@@ -788,7 +788,8 @@ function resolvePageForCitation(
     pageLabels?: PageLabelsByAttachmentId,
 ): string | undefined {
     if (!page) return undefined;
-    let resolved = normalizePageLocator(page);
+    // A range or list the model wrote is kept: the citation claims those pages.
+    let resolved = normalizePageRange(page);
     if (shouldTranslate && resolved) {
         if (item.isAttachment()) {
             resolved = translatePageNumberToLabel(pageLabels?.[item.id] ?? null, resolved);
@@ -848,7 +849,6 @@ function buildCitation({
         if (annotationCitation) return stripInlineItemDataFromDataCitations(noteCitationHTML(annotationCitation));
     }
     if (isLinkCitationItem(item)) {
-        // Item links can display full ranges; native CSL navigation needs a single page.
         const labels = pageLabels?.[item.id];
         // `page` is a physical page number from the model, but a page already
         // resolved from a structural locator — or read back from a note, where

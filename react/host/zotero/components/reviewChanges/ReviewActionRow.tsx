@@ -25,7 +25,7 @@ import {
     getAgentActionToolIcon,
 } from '../agentActionViewHelpers';
 import { ActionPreview } from '../ActionPreview';
-import { getOpenNoteTarget, type ReviewRow } from '../reviewChangeRows';
+import { getExportNoteTarget, getOpenNoteTarget, type ReviewRow } from '../reviewChangeRows';
 import {
     TickIcon,
     CancelIcon,
@@ -212,7 +212,8 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         else notifyReferenceUnavailable('item', 'library_unavailable');
     }, [openNoteTarget]);
 
-    // A note row is an artifact: exported as the agent wrote it, with its citations.
+    // A note row is an artifact: exported as the note is now in Zotero, with its
+    // citations, or as the agent wrote it when the note is not in the library.
     const isNoteArtifact = row.actionType === 'create_note';
     const [isExporting, setIsExporting] = useState(false);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
@@ -223,14 +224,14 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         try {
             await exportWithFeedback(
                 format,
-                () => exportNoteToFile({ runId, toolCallId: row.toolcallId, format }),
+                () => exportNoteToFile({ runId, toolCallId: row.toolcallId, format, note: getExportNoteTarget(row) }),
                 addPopupMessage,
                 { reveal: revealExportedFile, open: openExportedFile },
             );
         } finally {
             setIsExporting(false);
         }
-    }, [isExporting, runId, row.toolcallId, addPopupMessage]);
+    }, [isExporting, runId, row, addPopupMessage]);
 
     const handleReveal = useCallback(async () => {
         if (!revealReference) return;
