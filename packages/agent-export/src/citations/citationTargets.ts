@@ -186,11 +186,16 @@ export function formatLocator(spec: LocatorSpec, labels?: Record<number, string>
             ? `${printedFirst}-${printedLast}`
             : printedFirst ?? printedLast;
     }
+    // A page list with any printed label cites printed labels only: an
+    // unlabelled page is left out rather than shown as a physical number that
+    // reads as a printed one ("12, 12").
+    const printedPages = pages.filter(page => pageLabels?.[page - 1]?.trim());
+    const listed = printedPages.length > 0 ? printedPages : pages;
     const ranges: string[] = [];
-    for (let i = 0; i < pages.length; i++) {
-        const start = pages[i];
+    for (let i = 0; i < listed.length; i++) {
+        const start = listed[i];
         let end = start;
-        while (pages[i + 1] === end + 1 && consecutiveLabels(labelOf(end), labelOf(end + 1))) end = pages[++i];
+        while (listed[i + 1] === end + 1 && consecutiveLabels(labelOf(end), labelOf(end + 1))) end = listed[++i];
         ranges.push(start === end ? labelOf(start)! : `${labelOf(start)}-${labelOf(end)}`);
     }
     return ranges.join(', ');

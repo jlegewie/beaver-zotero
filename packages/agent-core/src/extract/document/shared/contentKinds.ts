@@ -74,7 +74,7 @@ export type CachedDocumentMetadata =
         /**
          * Page numbers printed on the pages, from full structured extraction.
          * Absent: not known (written before this field, or by a path that does
-         * not derive labels). `null`: derivation ran and found none.
+         * not derive labels). `null`: the full extraction has none.
          */
         derivedPageLabels?: DocumentCachePageLabels | null;
         pages: (PageGeometry | null)[] | null;

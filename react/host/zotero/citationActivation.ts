@@ -1,7 +1,6 @@
 import { getContextWindow } from '../../runtime/windowRuntime';
 import { AttachmentFileUnavailableError, openNote, openReader } from '../../runtime/navigation';
 import { store } from '../../store';
-import { pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import {
     isExternalReferenceDetailsDialogVisibleAtom,
@@ -27,8 +26,7 @@ import {
 } from '../../utils/citationNavigation';
 import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
 import { navigateToSnapshotCitation } from '../../utils/snapshotVisualizer/snapshotCitationNavigation';
-import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
-import { getPageLabelsForItem } from './itemData';
+import { getZoteroLocatorPageLabels } from '../../../src/services/documentExtraction/pageLabels';
 import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
 import { getPref } from '../../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -378,11 +376,16 @@ export async function activateCitation(activation: CitationActivation): Promise<
 
         // Handle the three scenarios
         if (boundingBoxData.length > 0) {
-            const loadedPageLabels = getPageLabelsForItem(pdfItem, store.get(pageLabelsByAttachmentIdAtom));
-            const highlightLocations = boundingBoxData.map(({ page, bboxes, pageLabel }) => ({
+            // Highlights shown in Zotero's reader carry the labels the PDF
+            // declares, like the annotations Beaver creates, never the
+            // citation's printed labels: the reader derives labels for new
+            // annotations from nearby ones. Without a declared label the
+            // highlight shows the physical page.
+            const locatorLabels = await getZoteroLocatorPageLabels(pdfItem);
+            const highlightLocations = boundingBoxData.map(({ page, bboxes }) => ({
                 pageIndex: page - 1,
                 boxes: bboxes,
-                pageLabel: pageLabel ?? resolvePageLabelFromLabels(loadedPageLabels, page),
+                pageLabel: locatorLabels?.[page - 1] ?? String(page),
             }));
 
             if (useTemporaryCitationAnnotations) {

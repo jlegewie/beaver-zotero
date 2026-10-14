@@ -52,6 +52,22 @@ function citationLocationsFromEntries(entries: CitationIndexEntry[]): PartLocati
     return [...byPage.values()];
 }
 
+/** Printed labels per document, resolved once however many tags cite it. */
+const printedLabelsByResult = new WeakMap<StructuredExtractResult, Record<number, string>>();
+
+function printedLabelsOf(result: StructuredExtractResult): Record<number, string> {
+    let labels = printedLabelsByResult.get(result);
+    if (!labels) {
+        labels = resolvePrintedPageLabels({
+            pageCount: result.document.pageCount,
+            derived: result.document.derivedPageLabels,
+            embedded: result.document.pageLabels,
+        });
+        printedLabelsByResult.set(result, labels);
+    }
+    return labels;
+}
+
 /**
  * Labels of the pages the entries sit on. Locator labels come from the index
  * (the labels the PDF declares); printed labels from the document's derived
@@ -62,13 +78,7 @@ function pageLabelsFromEntries(
     result: StructuredExtractResult,
     namespace: PageLabelNamespace,
 ): Record<number, string> | undefined {
-    const printed = namespace === 'printed'
-        ? resolvePrintedPageLabels({
-            pageCount: result.document.pageCount,
-            derived: result.document.derivedPageLabels,
-            embedded: result.document.pageLabels,
-        })
-        : null;
+    const printed = namespace === 'printed' ? printedLabelsOf(result) : null;
     const labels: Record<number, string> = {};
     for (const entry of entries) {
         if (!Number.isInteger(entry.pageIndex)) continue;
@@ -404,14 +414,19 @@ export async function prepareCitationRenderContext(
             .map(({ metadata }) => metadata)
             .filter((metadata): metadata is Citation => !!metadata),
     )];
-    const [contentPageLabels, structuredCitationDataMap, externalFiles, resolvedPageLabels] = await Promise.all([
-        preloadPageLabelsForContent(content, pageLabels),
+    // The citation preload runs after the content preload: a cache miss
+    // analyzes the PDF once, and the second preload reads the record it wrote.
+    const pageLabelsPromise = preloadPageLabelsForContent(content, pageLabels)
+        .then(async (contentPageLabels) => ({
+            ...(await preloadPageLabelsForCitations(citedMetadata, pageLabels)),
+            ...contentPageLabels,
+        }));
+    const [pageLabelsByAttachmentId, structuredCitationDataMap, externalFiles] = await Promise.all([
+        pageLabelsPromise,
         buildLocalCitationDataMapForContent(content, pageLabels),
         resolveExternalFileCitations(content),
-        preloadPageLabelsForCitations(citedMetadata, pageLabels),
         preloadStandaloneAttachmentLinks(content),
     ]);
-    const pageLabelsByAttachmentId = { ...resolvedPageLabels, ...contentPageLabels };
 
     const localCitationDataMap = {
         ...structuredCitationDataMap,

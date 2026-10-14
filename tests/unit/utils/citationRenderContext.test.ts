@@ -150,6 +150,20 @@ describe('citation render context', () => {
         expect(context?.pageLabelsByAttachmentId).toEqual({ 77: { 4: '1' } });
     });
 
+    it('preloads resolved-target labels only after the content preload settles', async () => {
+        let resolveContent!: (labels: Record<number, Record<number, string>>) => void;
+        mockPreloadPageLabelsForContent.mockReturnValue(new Promise(resolve => { resolveContent = resolve; }));
+
+        const pending = prepareCitationRenderContext('Claim <citation id="1-ATTACH01" loc="page6"/>', {});
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(preloadPageLabelsForCitations).not.toHaveBeenCalled();
+
+        resolveContent({ 42: { 5: '6' } });
+        const context = await pending;
+        expect(preloadPageLabelsForCitations).toHaveBeenCalledTimes(1);
+        expect(context?.pageLabelsByAttachmentId).toEqual({ 42: { 5: '6' } });
+    });
+
     it('resolves a cited standalone attachment file so link rendering knows it is reachable', async () => {
         // Note creation renders citations synchronously; a standalone
         // attachment link only opens the file when this preload has confirmed

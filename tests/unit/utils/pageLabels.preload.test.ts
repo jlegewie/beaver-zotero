@@ -426,7 +426,21 @@ describe('preloadPageLabelsForCitations', () => {
         expect(labels).toEqual({});
     });
 
-    it('returns labels after running extraction on a local cache miss', async () => {
+    it('skips the PDF analysis on a printed-label cache miss, which could not record printed labels', async () => {
+        const item = makeItem(56, 'LOCAL03');
+        const cache = { getMetadata: vi.fn().mockResolvedValue(null) };
+        (globalThis as any).Zotero.Items = { ...itemLookups(() => item) };
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadPageLabelsForCitations([
+            { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'LOCAL03' }, pages: [1] },
+        ]);
+
+        expect(labels).toEqual({});
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('returns locator labels after analyzing the PDF on a local cache miss', async () => {
         const item = makeItem(53, 'LOCAL01');
         const cache = {
             getMetadata: vi.fn()
@@ -441,10 +455,10 @@ describe('preloadPageLabelsForCitations', () => {
 
         const labels = await preloadPageLabelsForCitations([
             { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'LOCAL01' }, pages: [1] },
-        ]);
+        ], 'locator');
 
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item, false);
-        expect(labels).toEqual({ 53: { 0: 'i' } });
+        expect(labels).toEqual({ 53: { 0: '1' } });
     });
 
     it('preloads parent-item citation metadata against the selected PDF attachment', async () => {
@@ -470,9 +484,9 @@ describe('preloadPageLabelsForCitations', () => {
 
         const labels = await preloadPageLabelsForCitations([
             { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'PARENT03' }, pages: [3] },
-        ]);
+        ], 'locator');
 
-        expect(labels).toEqual({ 78: { 2: '3' } });
+        expect(labels).toEqual({ 78: { 2: '9' } });
         expect(cache.getMetadata).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: 'ATTACH02' }, '/storage/ATTACH02/test.pdf');
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(attachment, false);
         expect(parent.getFilePathAsync).not.toHaveBeenCalled();
@@ -505,10 +519,10 @@ describe('preloadPageLabelsForCitations', () => {
                     zotero_key: 'LOCAL02',
                 },
             },
-        ]);
+        ], 'locator');
 
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item, false);
-        expect(labels).toEqual({ 55: { 3: '4' } });
+        expect(labels).toEqual({ 55: { 3: '9' } });
     });
 
     it('does not treat paragraph locators as page-label preload signals', async () => {

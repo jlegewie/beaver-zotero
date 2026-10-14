@@ -128,7 +128,7 @@ interface CacheMetadataInput {
     pageLabels: PageLabels | Record<number, string> | null;
     /**
      * Printed page numbers from full structured extraction; `null` when
-     * derivation found none, absent when the write does not know (a
+     * that extraction has none, absent when the write does not know (a
      * metadata-only preflight keeps the value already stored for the source).
      */
     derivedPageLabels?: PageLabels | Record<number, string> | null;
@@ -480,6 +480,9 @@ export class DocumentCache {
                 && mode === 'structured'
                 && pdfExtractionPreset(metadata.extractionSchemaVersion)?.derivedPageLabels
             ) {
+                // A prefix that does not tell leaves the record unknown, so a
+                // later read scans again; documents whose label maps exceed
+                // the prefix are rare enough to accept that.
                 derivedPageLabels = derivedPageLabelsFromSerializedResult(jsonBytes);
                 this.backfillDerivedPageLabels(metadata, derivedPageLabels);
             }
@@ -2000,7 +2003,7 @@ export class DocumentCache {
         return sameSource ? { ...metadata, derivedPageLabels: existing.derivedPageLabels } : metadata;
     }
 
-    /** Derived labels with string keys; an empty map means none were found. */
+    /** Derived labels with string keys; an empty map means the extraction has none. */
     private normalizeDerivedPageLabels(labels: PageLabels | Record<number, string> | null): PageLabels | null {
         const normalized = this.normalizePageLabels(labels);
         return normalized && Object.keys(normalized).length > 0 ? normalized : null;

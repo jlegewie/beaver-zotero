@@ -11,8 +11,10 @@ import { pdfExtractionPreset } from "../schema/presets";
 
 /**
  * Derived page labels as document-cache metadata records them: the map when
- * derivation found labels, `null` when it ran and found none, `undefined` when
- * the result never derives them (markdown mode, or a schema without it).
+ * the result has labels, `null` when its schema derives labels but it has none
+ * (derivation found none, or was skipped because not every page was analyzed;
+ * either way the payload holds nothing to recover), `undefined` when the
+ * result never derives them (markdown mode, or a schema without it).
  */
 export function derivedPageLabelsForCache(
     result: BeaverExtractResult,

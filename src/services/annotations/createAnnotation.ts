@@ -166,6 +166,28 @@ export function resolvedAnnotationPageLabel(
     return firstNonBlankPageLabel(...candidates) ?? String(pageIndex + 1);
 }
 
+/**
+ * The label a Beaver-written PDF annotation on `pageIndex` stores: the label
+ * the PDF declares for the page when the document cache knows it, else the
+ * label the request carried. Zotero shows annotation labels as its own and
+ * derives new annotations' labels from them, so they come from the Zotero
+ * locator namespace, never from printed labels. `null` leaves the physical
+ * page to the placement builders.
+ */
+export async function pdfAnnotationPageLabel(
+    attachment: Zotero.Item,
+    pageIndex: number,
+    requested: string | null | undefined,
+): Promise<string | null> {
+    let declared: string | undefined;
+    try {
+        declared = (await getZoteroLocatorPageLabels(attachment))?.[pageIndex];
+    } catch {
+        declared = undefined;
+    }
+    return firstNonBlankPageLabel(declared, requested);
+}
+
 /** Coerce `value` to a non-negative integer ≤ `max`. NaN/Infinity/null/negatives become 0. */
 function clampNonNegativeInt(value: unknown, max: number): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
@@ -626,7 +648,11 @@ export async function createPdfHighlightForItem(
     const { first, next } = highlightPageSpan(item.page_locations ?? []);
     // The item-level label, when present, is the first page's label, which is
     // the page the annotation lives on.
-    const pageLabel = first.page_label ?? item.page_label ?? null;
+    const pageLabel = await pdfAnnotationPageLabel(
+        attachment,
+        first.page_idx,
+        first.page_label ?? item.page_label ?? null,
+    );
     const ref = await createHighlightAnnotation(attachment, {
         pageIndex: first.page_idx,
         boxes: first.boxes ?? [],
@@ -673,10 +699,11 @@ export async function createNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    const filePath = await attachment.getFilePathAsync();
-    const locatorLabels = filePath ? await getZoteroLocatorPageLabels(attachment, filePath) : null;
-    const pageLabel = firstNonBlankPageLabel(input.pageLabel)
-        ?? locatorLabels?.[input.notePosition.page_index];
+    const pageLabel = await pdfAnnotationPageLabel(
+        attachment,
+        input.notePosition.page_index,
+        input.pageLabel,
+    );
     applyAnnotationPlacement(item, buildNotePlacement({ ...input, pageLabel }, geometry));
     await saveBeaverAnnotation(attachment, item, input.tags);
 

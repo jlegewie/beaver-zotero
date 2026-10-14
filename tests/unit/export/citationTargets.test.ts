@@ -150,6 +150,14 @@ describe('formatLocator', () => {
         expect(formatLocator(spec, { 4: 'xii', 6: '1' })).toBe('xii');
     });
 
+    it('lists only printed pages when some cited pages have printed labels', () => {
+        const spec = { pages: [11, 12], labels: null, inclusiveRange: false, labelsOnly: false };
+        // Physical page 12 has no printed label; "12, 12" would mix numberings.
+        expect(formatLocator(spec, { 10: '12' })).toBe('12');
+        expect(formatLocator({ ...spec, pages: [12, 13] }, { 11: '12' })).toBe('12');
+        expect(formatLocator(spec)).toBe('11-12');
+    });
+
     it('keeps spans and runs of prefixed labels that share a prefix', () => {
         const span = { pages: [5, 7], labels: null, inclusiveRange: true, labelsOnly: false };
         expect(formatLocator(span, { 4: 'S12', 6: 'S14' })).toBe('S12-S14');

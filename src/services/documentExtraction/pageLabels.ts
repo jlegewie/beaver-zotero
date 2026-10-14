@@ -108,15 +108,6 @@ async function cachedMetadataForAttachment(
         .catch(() => null);
 }
 
-/** Printed labels of an attachment, from the document cache. */
-export async function getPrintedPageLabels(
-    attachment: Zotero.Item,
-    filePath?: string | null,
-): Promise<PageLabels | null> {
-    const path = filePath || (await attachment.getFilePathAsync()) || makeRemoteFilePath(attachment);
-    return loadPageLabelsForMetadata(await cachedMetadataForAttachment(attachment, path), 'printed', path);
-}
-
 /** Zotero locator labels of an attachment, from the document cache. */
 export async function getZoteroLocatorPageLabels(
     attachment: Zotero.Item,

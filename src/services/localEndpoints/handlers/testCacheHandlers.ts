@@ -103,8 +103,8 @@ export async function handleTestCacheInvalidateHttpRequest(request: any) {
  * attachment file, so the seeded record is treated as fresh by `getMetadata`.
  *
  * Request: `{ library_id, zotero_key, page_labels: { "0": "iii", ... }, derived_page_labels?, page_count? }`.
- * `derived_page_labels` seeds the printed labels (a map, or `null` for "derived
- * and found none"); omitted, the stored value for the same source is kept.
+ * `derived_page_labels` seeds the printed labels (a map, or `null` for "the
+ * extraction has none"); omitted, the stored value for the same source is kept.
  */
 export async function handleTestCacheSeedPageLabelsHttpRequest(request: any) {
     const { library_id, zotero_key, page_labels, derived_page_labels, page_count } = request as {

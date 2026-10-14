@@ -109,8 +109,11 @@ export function translatePageNumberToLabelFromLabels(
  *
  * For each referenced attachment:
  * 1. Try the metadata cache (DB -> memory) via `getMetadata`.
- * 2. On local cache miss, run full extraction via `getAttachmentFileStatus`.
- *    On remote-only cache miss, skip rather than downloading during render.
+ * 2. On a local cache miss for locator labels, analyze the PDF via
+ *    `getAttachmentFileStatus` (reads the file: its declared labels and OCR
+ *    needs), which caches the labels it declares. Printed labels come only
+ *    from a full extraction, so a printed-label miss is skipped. A
+ *    remote-only miss is skipped rather than downloading during render.
  */
 export async function preloadPageLabelsForContent(
     content: string,
@@ -152,10 +155,11 @@ export async function preloadPageLabelsForContent(
             }
 
             // Do not download remote-only PDFs just to preload labels. A later
-            // explicit content request will populate the cache if needed.
-            if (preloadPath.isRemoteOnly) continue;
+            // explicit content request will populate the cache if needed. The
+            // analysis below records no printed labels, so it is skipped for them.
+            if (preloadPath.isRemoteOnly || namespace === 'printed') continue;
 
-            // Local cache miss → run full extraction, then read labels back.
+            // Local cache miss → analyze the PDF, then read its labels back.
             await getAttachmentFileStatus(preloadItem, false);
             const refreshed = await cache.getMetadata({
                 libraryId: preloadItem.libraryID,
@@ -172,9 +176,10 @@ export async function preloadPageLabelsForContent(
 
 /**
  * Pre-load page labels of one namespace (printed by default) for the given
- * citation metadata records, keyed by the attachment each citation resolved to. Used when citation metadata is available directly
- * (e.g., on run completion or thread load) so the rendering path can resolve
- * page labels synchronously.
+ * citation metadata records, keyed by the attachment each citation resolved
+ * to. Used when citation metadata is available directly (e.g., on run
+ * completion or thread load) so the rendering path can resolve page labels
+ * synchronously. Cache misses are handled as in `preloadPageLabelsForContent`.
  *
  * Returns populated page labels keyed by attachment item ID. Empty label maps
  * are omitted because renderers fall back to raw page numbers.
@@ -239,7 +244,7 @@ export async function preloadPageLabelsForCitations(
                 continue;
             }
 
-            if (preloadPath.isRemoteOnly) continue;
+            if (preloadPath.isRemoteOnly || namespace === 'printed') continue;
 
             await getAttachmentFileStatus(preloadItem, false);
             const refreshed = await cache.getMetadata({

@@ -314,3 +314,20 @@ describe("prepareRelocation", () => {
         expect(getPageGeometryForAttachment).toHaveBeenCalledWith(attachment, 4);
     });
 });
+
+describe("prepareRelocation page labels", () => {
+    it("writes the label the PDF declares rather than the destination's label", async () => {
+        const getMetadata = vi.fn(async () => ({ pageLabels: { "4": "iv" }, derivedPageLabels: { "4": "1205" } }));
+        (globalThis as any).Zotero = { debug: vi.fn(), Beaver: { documentCache: { getMetadata } } };
+        const pdf = { ...attachment, getFilePathAsync: vi.fn(async () => "/storage/ATT00001/file.pdf") };
+
+        const highlight = await prepareRelocation(pdf, "highlight", pdfRelocation({ page_label: "1205" }));
+        const note = await prepareRelocation(pdf, "note", pdfRelocation({ page_label: "1205" }));
+
+        expect(highlight.pageLabel).toBe("iv");
+        expect(note.pageLabel).toBe("iv");
+        expect(getMetadata).toHaveBeenCalledWith(
+            { libraryId: 1, zoteroKey: "ATT00001" }, "/storage/ATT00001/file.pdf",
+        );
+    });
+});

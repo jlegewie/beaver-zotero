@@ -23,8 +23,6 @@ export interface PageLabelSources {
      * spurious labels on covers and download sheets without improving recall.
      */
     embedded?: Record<string, string> | Record<number, string> | null;
-    /** The parent item's `pages` field. Not used yet. */
-    itemPages?: string | null;
 }
 
 /** Printed label per 0-based page index; pages without one are absent. */

@@ -8,6 +8,7 @@ import {
     buildHighlightPlacement,
     buildNotePlacement,
     getPageGeometryForAttachment,
+    pdfAnnotationPageLabel,
     HighlightPageSpanError,
     highlightPageSpan,
     prepareEpubAnnotationTarget,
@@ -127,7 +128,11 @@ export async function prepareRelocation(
                     boxes: toBoundingBoxes(first),
                     nextPageBoxes: next ? toBoundingBoxes(next) : null,
                     text: relocation.text,
-                    pageLabel: first.page_label ?? relocation.page_label,
+                    pageLabel: await pdfAnnotationPageLabel(
+                        attachment,
+                        first.page_idx,
+                        first.page_label ?? relocation.page_label,
+                    ),
                     readingOrderOffset:
                         first.reading_order_offset ??
                         relocation.reading_order_offset,
@@ -155,7 +160,11 @@ export async function prepareRelocation(
         return buildNotePlacement(
             {
                 notePosition: relocation.note_position,
-                pageLabel: relocation.page_label,
+                pageLabel: await pdfAnnotationPageLabel(
+                    attachment,
+                    relocation.note_position.page_index,
+                    relocation.page_label,
+                ),
                 readingOrderOffset: relocation.reading_order_offset,
             },
             geometry,
