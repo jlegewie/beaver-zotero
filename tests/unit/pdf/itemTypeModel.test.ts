@@ -48,9 +48,9 @@ describe("item-type model parity with the training pipeline", () => {
         expect(() => assertItemTypeModel(ITEM_TYPE_MODEL)).not.toThrow();
     });
 
-    it("emits captions as text, furniture as margin and headings as section headers", () => {
+    it("emits captions as captions, furniture as margin and headings as section headers", () => {
         expect(ITEM_TYPE_MODEL.publicKind).toEqual({
-            caption: "text",
+            caption: "caption",
             footnote: "footnote",
             furniture: "margin",
             heading: "section_header",

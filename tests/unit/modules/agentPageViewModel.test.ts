@@ -70,6 +70,44 @@ describe('buildAgentViewPage', () => {
         expect(view.counts).toMatchObject({ tables: 1, tableRows: 2, sentences: 0 });
     });
 
+    it('shows a caption as a citable element whose sentences are nested inside it', () => {
+        const view = buildAgentViewPage(page([
+            {
+                ...base,
+                id: 'p4.1',
+                kind: 'text',
+                order: 0,
+                text: 'Body.',
+                sentences: [{ id: 's4.1', order: 0, text: 'Body.', bboxes: [[10, 10, 40, 20]] }],
+            },
+            {
+                ...base,
+                id: 'caption4.1',
+                kind: 'caption',
+                order: 1,
+                text: 'Figure 1. Wages. Source: CPS.',
+                sentences: [
+                    { id: 's4.2', order: 0, text: 'Figure 1. Wages.', bboxes: [[10, 30, 50, 40]] },
+                    { id: 's4.3', order: 1, text: 'Source: CPS.', bboxes: [[60, 30, 90, 40]] },
+                ],
+            },
+            { ...base, id: 'caption4.2', kind: 'caption', order: 2, text: 'Table 1.' },
+        ]));
+
+        expect(view.boxes.map((box) => [box.kind, box.id, box.shade])).toEqual([
+            ['sentence', 's4.1', 0],
+            ['caption', 'caption4.1', 0],
+            ['sentence', 's4.2', 1],
+            ['sentence', 's4.3', 0],
+            ['caption', 'caption4.2', 0],
+        ]);
+        expect(view.boxes[1].text).toBe(
+            '<caption4.1>\n  <s4.2>Figure 1. Wages.</s4.2>\n  <s4.3>Source: CPS.</s4.3>\n</caption4.1>',
+        );
+        expect(view.boxes[4].text).toBe('<caption4.2>Table 1.</caption4.2>');
+        expect(view.counts).toMatchObject({ captions: 2, sentences: 3, items: 0 });
+    });
+
     it('shows figures, equations and unsplit items as one tagged element', () => {
         const view = buildAgentViewPage(page([
             { ...base, id: 'heading4.1', kind: 'section_header', order: 0, text: 'Results', level: 1 },

@@ -23,7 +23,7 @@ import type { RegionItemKind } from "../regions/regionItems";
  * `margin` items (page furniture an item pass found) leave the reading order:
  * they become internal margin items, like the margin filter's.
  */
-export type DraftItemKind = "text" | "section_header" | "reference" | "footnote" | "margin";
+export type DraftItemKind = "text" | "section_header" | "caption" | "reference" | "footnote" | "margin";
 
 export interface DraftItem {
     kind: DraftItemKind;

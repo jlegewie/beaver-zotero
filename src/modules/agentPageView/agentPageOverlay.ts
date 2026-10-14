@@ -52,6 +52,7 @@ const LEGENDS: Record<AgentViewMode, { kind: AgentViewBoxKind; label: string }[]
         { kind: 'item', label: 'Whole item (heading, unsplit text)' },
         { kind: 'table', label: 'Table' },
         { kind: 'table_row', label: 'Table row (one sentence)' },
+        { kind: 'caption', label: 'Caption (sentences inside)' },
         { kind: 'figure', label: 'Figure (label text only)' },
         { kind: 'equation', label: 'Equation' },
     ],
@@ -70,6 +71,7 @@ const STYLESHEET = `
     border-radius: 1px;
 }
 .${PREFIX}-box[data-kind="table"] { border: 2px solid rgba(0, 122, 255, 0.9); background: rgba(0, 122, 255, 0.04); }
+.${PREFIX}-box[data-kind="caption"] { border: 2px dotted rgba(90, 200, 250, 0.95); }
 .${PREFIX}-box[data-kind="figure"] { border: 2px solid rgba(175, 82, 222, 0.9); background: rgba(175, 82, 222, 0.06); }
 .${PREFIX}-box[data-kind="equation"] { border: 2px solid rgba(255, 149, 0, 0.95); background: rgba(255, 149, 0, 0.08); }
 .${PREFIX}-box[data-kind="item"] { border: 1px dashed rgba(36, 160, 70, 0.95); background: rgba(52, 199, 89, 0.12); }
@@ -92,6 +94,7 @@ const STYLESHEET = `
     opacity: 0.9;
 }
 .${PREFIX}-chip[data-kind="table"] { background: rgb(0, 122, 255); }
+.${PREFIX}-chip[data-kind="caption"] { background: rgb(0, 140, 190); }
 .${PREFIX}-chip[data-kind="figure"] { background: rgb(175, 82, 222); }
 .${PREFIX}-chip[data-kind="equation"] { background: rgb(230, 130, 0); }
 .${PREFIX}-chip[data-kind="item"] { background: rgb(36, 160, 70); }

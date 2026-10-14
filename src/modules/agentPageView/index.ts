@@ -91,6 +91,7 @@ function summarizeItems(counts: AgentViewPageCounts, pageCount: number): string 
         `${counts.sentences} sentences`,
         `${counts.items} whole items`,
         `${counts.tables} tables (${counts.tableRows} rows)`,
+        `${counts.captions} captions`,
         `${counts.figures} figures`,
         `${counts.equations} equations`,
     ];
