@@ -110,7 +110,7 @@ export function derivePageLabels(
     pageCount: number,
     pageSizes?: readonly (PageSize | undefined)[],
 ): Record<number, string> {
-    const { runs, numberedPages, folioNumbers } = candidateRuns(observations, pageCount);
+    const { runs, numberedPages, folioNumbers, lastPages } = candidateRuns(observations, pageCount);
     const accepted = selectRuns(runs);
     // A page that prints a number of another numbering is not unnumbered,
     // even when that numbering is too short to be a run of its own, nor one
@@ -158,8 +158,11 @@ export function derivePageLabels(
         }
     }
     for (const run of accepted) {
-        if (run.endsDocument) continue;
         const last = run.pages[run.pages.length - 1];
+        // A run whose last page prints "N of N", in its own numbering or one
+        // alongside it ("Page 3 of 3" beside folio 103), ends the document's
+        // pages; a sheet after it is appended.
+        if (run.endsDocument || [...alongside.get(run)!].some((key) => lastPages.get(key)?.has(last))) continue;
         for (let k = 1; k <= RUN_EXTENSION_PAGES; k++) {
             const after = last + k;
             if (!claimable(after, run, run.pages.slice(-SIZE_NEIGHBORS))) break;
@@ -312,7 +315,7 @@ function withoutFurniture(
 function candidateRuns(
     allObservations: readonly PageNumberObservation[],
     pageCount: number,
-): { runs: Run[]; numberedPages: Map<number, Set<string>>; folioNumbers: Map<number, PageNumberObservation[]> } {
+): { runs: Run[]; numberedPages: Map<number, Set<string>>; folioNumbers: Map<number, PageNumberObservation[]>; lastPages: Map<string, Set<number>> } {
     const observations = withoutFurniture(withoutSpacedDigits(allObservations), pageCount);
     // Numbers a page prints as its folio, for `printsShiftedNumber`: those
     // margin detection removed, and prefixed folios ("S5"), which are only
@@ -399,7 +402,9 @@ function candidateRuns(
             start = k;
         }
     }
-    return { runs, numberedPages, folioNumbers };
+    // Pages each numbering prints as its last ("3 of 3").
+    const lastPages = new Map(Array.from(groups, ([key, group]) => [key, group.finalPages]));
+    return { runs, numberedPages, folioNumbers, lastPages };
 }
 
 /**

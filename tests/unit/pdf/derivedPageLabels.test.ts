@@ -310,6 +310,16 @@ describe("derivePageLabels", () => {
         expect(labels).toEqual({ 0: "01", 1: "02", 2: "03" });
     });
 
+    it("does not extend past a parallel counter's last page", () => {
+        // Folios 101–103 beside "Page 1 of 3" … "Page 3 of 3", then an
+        // appended sheet of the same size.
+        const counter = [0, 1, 2].map((p) => obs(p, `Page ${p + 1} of 3`, { value: p + 1, edge: true }));
+        const folios = [0, 1, 2].map((p) => obs(p, 101 + p));
+        const labels = derivePageLabels([...counter, ...folios], 4);
+        expect(labels[2]).toBe("103");
+        expect(labels[3]).toBeUndefined();
+    });
+
     it("weighs zero padding by page, not by how many readings a page has", () => {
         // A fullwidth "０１" is read three times (margin removal, the edge
         // row's normalized word "01", its own line); a plain "4" twice.
