@@ -86,8 +86,8 @@ interface Run {
     prefix: string;
     /** Digits each number is zero-padded to ("07"), or 0. */
     padding: number;
-    /** Median box height of the numbering's folios, when their boxes are known. */
-    folioHeight?: number;
+    /** Median font size of the numbering's folios, when known. */
+    folioEm?: number;
     /** `value - pageIndex` for every page of the run. */
     offset: number;
     /** Numbered pages, ascending. */
@@ -358,7 +358,7 @@ function candidateRuns(
         if (folios) folios.push(obs);
         else folioNumbers.set(obs.pageIndex, [obs]);
     }
-    const groups = new Map<string, { roman: boolean; prefix: string; offset: number; pages: Set<number>; removedPages: Set<number>; finalPages: Set<number>; counterPages: Set<number>; upper: number; lower: number; paddedPages: Map<number, number>; unpaddedPages: Map<number, number>; heights: number[]; removedHeights: number[]; folioEvidence: number }>();
+    const groups = new Map<string, { roman: boolean; prefix: string; offset: number; pages: Set<number>; removedPages: Set<number>; finalPages: Set<number>; counterPages: Set<number>; upper: number; lower: number; paddedPages: Map<number, number>; unpaddedPages: Map<number, number>; ems: number[]; removedEms: number[]; folioEvidence: number }>();
     for (const obs of observations) {
         if (obs.pageIndex < 0 || obs.pageIndex >= pageCount || obs.value < 1) continue;
         const offset = obs.value - obs.pageIndex;
@@ -370,7 +370,7 @@ function candidateRuns(
         const key = `${obs.roman ? "r" : "a"}${prefix}\u0000${offset}`;
         let group = groups.get(key);
         if (!group) {
-            group = { roman: obs.roman, prefix, offset, pages: new Set(), removedPages: new Set(), finalPages: new Set(), counterPages: new Set(), upper: 0, lower: 0, paddedPages: new Map(), unpaddedPages: new Map(), heights: [], removedHeights: [], folioEvidence: 0 };
+            group = { roman: obs.roman, prefix, offset, pages: new Set(), removedPages: new Set(), finalPages: new Set(), counterPages: new Set(), upper: 0, lower: 0, paddedPages: new Map(), unpaddedPages: new Map(), ems: [], removedEms: [], folioEvidence: 0 };
             groups.set(key, group);
         }
         // One padding vote per page: a folio is often read more than once
@@ -381,7 +381,7 @@ function candidateRuns(
             else group.unpaddedPages.set(obs.pageIndex, String(obs.value).length);
         }
         if (!obs.headingRow) group.folioEvidence++;
-        if (obs.bbox) (obs.edge ? group.heights : group.removedHeights).push(boxHeight(obs.bbox));
+        if (obs.em) (obs.edge ? group.ems : group.removedEms).push(obs.em);
         group.pages.add(obs.pageIndex);
         if (printsLastPage(obs)) group.finalPages.add(obs.pageIndex);
         if (isPageCounter(obs.text)) group.counterPages.add(obs.pageIndex);
@@ -422,9 +422,7 @@ function candidateRuns(
                     roman: group.roman,
                     prefix: group.prefix,
                     padding: padding(group.paddedPages, group.unpaddedPages),
-                    // An edge reading's box is its whole row's; a removed
-                    // number's box is the number's own.
-                    folioHeight: median(group.removedHeights.length > 0 ? group.removedHeights : group.heights) || undefined,
+                    folioEm: median(group.removedEms.length > 0 ? group.removedEms : group.ems) || undefined,
                     offset: group.offset,
                     pages: runPages,
                     weight: runPages.length
@@ -449,10 +447,10 @@ function candidateRuns(
 const SHIFTED_NUMBER_DISTANCE = 2;
 
 /**
- * Largest ratio between the box heights of a shifted number and the run's
+ * Largest ratio between the font sizes of a shifted number and the run's
  * folios for the number to count as one of its folios.
  */
-const FOLIO_HEIGHT_RATIO = 1.5;
+const FOLIO_SIZE_RATIO = 1.5;
 
 /**
  * Whether the page prints a folio (`candidateRuns`' folio numbers) close
@@ -461,7 +459,7 @@ const FOLIO_HEIGHT_RATIO = 1.5;
  * there. A number far from the run's is another numeral (a chapter number
  * on an opening page) and does not count, nor does one set at another size
  * than the run's folios (a display chapter numeral "1" on the opener of a
- * book's first chapter). Without known boxes a close number counts.
+ * book's first chapter). Without known font sizes a close number counts.
  */
 function printsShiftedNumber(
     folios: readonly PageNumberObservation[] | undefined,
@@ -478,13 +476,8 @@ function printsShiftedNumber(
 }
 
 function setLikeFolios(obs: PageNumberObservation, run: Run): boolean {
-    if (!obs.bbox || !run.folioHeight) return true;
-    const height = boxHeight(obs.bbox);
-    return height <= run.folioHeight * FOLIO_HEIGHT_RATIO && height * FOLIO_HEIGHT_RATIO >= run.folioHeight;
-}
-
-function boxHeight(bbox: BoundingBox): number {
-    return Math.abs(bbox.b - bbox.t);
+    if (!obs.em || !run.folioEm) return true;
+    return obs.em <= run.folioEm * FOLIO_SIZE_RATIO && obs.em * FOLIO_SIZE_RATIO >= run.folioEm;
 }
 
 
@@ -631,6 +624,9 @@ export function pageEdgeRowObservations(
             // take the box of the line they start or end, a line read on its
             // own its own box, the whole row the row's box.
             const texts = new Map<string, BoundingBox>();
+            // Font size of the line (or row) each candidate was read from.
+            const ems = new Map<string, number>();
+            const rowEm = Math.max(...lines.map(emOf));
             // Where the row prints each candidate, upright: the same numeral
             // read as a word and as a line is one place (see `distinctPlaces`).
             // The single digits of broken-up rows (a letter-spaced footer, a
@@ -659,6 +655,7 @@ export function pageEdgeRowObservations(
                 for (const word of rowPageNumberWords(rowText)) {
                     if (word === marker) continue;
                     texts.set(word, wordBox(word));
+                    ems.set(word, word === words[0] ? emOf(firstLine) : word === words[words.length - 1] ? emOf(lastLine) : rowEm);
                     if (bothEnds) placed(word, ...rowEndBoxes(uprightRowBox, em));
                     else placed(word, word === ends[0] ? firstLine.bbox : lastLine.bbox);
                 }
@@ -668,6 +665,7 @@ export function pageEdgeRowObservations(
                 // of its own) is not a counter.
                 if (marker === undefined && parsePrintedPageNumber(rowText)) {
                     texts.set(rowText.trim(), rowBox);
+                    ems.set(rowText.trim(), rowEm);
                     placed(rowText.trim(), uprightRowBox);
                 }
             }
@@ -683,6 +681,7 @@ export function pageEdgeRowObservations(
                 if (parsed && !isFootnoteMarker(line, pageLines)) {
                     const text = line.text.trim();
                     texts.set(text, sourceBox(line.bbox));
+                    ems.set(text, emOf(line));
                     placed(text, line.bbox);
                 }
             }
@@ -696,6 +695,7 @@ export function pageEdgeRowObservations(
                     edge: true,
                     spaced: true,
                     bbox: rowBox,
+                    em: rowEm,
                 });
             }
             for (const [text, bbox] of texts) {
@@ -710,6 +710,7 @@ export function pageEdgeRowObservations(
                     position,
                     edge: true,
                     bbox,
+                    em: ems.get(text),
                 });
             }
             // A numbered heading opens its row with an Arabic number and a

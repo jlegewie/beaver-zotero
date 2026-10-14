@@ -806,6 +806,11 @@ export interface PageNumberObservation {
     /** Read from letter-spaced digits ("3 8" for 38). */
     spaced?: boolean;
     /**
+     * Font size of the text the number was read from, the same whichever
+     * way the page is turned (unlike `bbox`'s height).
+     */
+    em?: number;
+    /**
      * An Arabic number, no larger than the page's position, opening a top or
      * bottom row whose other text no other page prints at its edges ("2
      * Methods"): a numbered heading's row rather than a running head's.

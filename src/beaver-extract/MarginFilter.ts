@@ -596,6 +596,7 @@ function pageNumberObservations(
             ...(printed?.prefix ? { prefix: printed.prefix } : {}),
             position: el.position,
             bbox: el.bbox,
+            em: emOf(el.line),
             ...(edge ? { edge } : {}),
             ...(spaced ? { spaced } : {}),
         };

@@ -265,12 +265,23 @@ describe("derivePageLabels", () => {
     it("extends onto a chapter opener whose chapter numeral is set larger than the folios", () => {
         // Folios 3–6 at indices 2–5; the opener at index 1 prints a display
         // chapter numeral "1" that margin detection removed.
-        const box = (height: number) => bboxFromXYWH(300, 760, 12, height, "top-left");
-        const folios = [2, 3, 4, 5].map((p) => obs(p, p + 1, { bbox: box(9) }));
-        const chapter = obs(1, 1, { position: "top", bbox: box(40) });
+        const folios = [2, 3, 4, 5].map((p) => obs(p, p + 1, { em: 9 }));
+        const chapter = obs(1, 1, { position: "top", em: 40 });
         const labels = derivePageLabels([chapter, ...folios], 6);
         expect(labels[0]).toBe("1");
         expect(labels[1]).toBe("2");
+    });
+
+    it("compares a sideways page's folio by font size, not box height", () => {
+        // S113 is missing; S115 sits on a sideways page, whose box is as
+        // tall as the upright folios are wide.
+        const upright = bboxFromXYWH(290, 800, 23, 13, "top-left");
+        const sideways = bboxFromXYWH(560, 420, 13, 23, "top-left");
+        const folio = (p: number, n: number, bbox = upright) =>
+            obs(p, `S${n}`, { value: n, prefix: "S", edge: true, em: 10, bbox });
+        const labels = derivePageLabels([folio(0, 110), folio(1, 111), folio(2, 112), folio(3, 114, sideways)], 4);
+        expect(labels[2]).toBe("S112");
+        expect(labels[3]).toBeUndefined();
     });
 
     it("does not extend onto a page whose folio, set like the run's, is one off", () => {
