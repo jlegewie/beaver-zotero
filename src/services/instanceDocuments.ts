@@ -100,8 +100,9 @@ export class InstanceDocuments {
      * Compile the document workers' WASM once and share it with every worker
      * (both slots, every respawn), so a new worker instantiates it instead of
      * loading and compiling ~12 MB of binaries. The compiled code (~13 MB)
-     * stays in this realm until disposal; live workers share it rather than
-     * holding their own copies. Returns null for a minute after a failure
+     * is held here until disposal (clients drop their reference once a worker
+     * is configured); live workers share it rather than holding their own
+     * copies. Returns null for a minute after a failure
      * (the workers then load the binaries themselves), then tries again.
      */
     getCompiledWasm(

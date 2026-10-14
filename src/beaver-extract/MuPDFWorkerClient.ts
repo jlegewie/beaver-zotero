@@ -1521,10 +1521,18 @@ export class MuPDFWorkerClient {
             return;
         }
         if (lifecycle.kind === "configured") {
-            if (this.startup?.worker === worker) {
-                this.compiledWasmShared = this.startup.compiledWasm !== null
-                    && lifecycle.compiledWasm === true;
-                this.startup.resolve();
+            const startup = this.startup;
+            if (startup?.worker === worker) {
+                // A worker can ack twice (early frame and the `ready` resend);
+                // only the first ack decides the stat.
+                if (!startup.configured) {
+                    this.compiledWasmShared = startup.compiledWasm !== null
+                        && lifecycle.compiledWasm === true;
+                }
+                // Nothing reads the modules after configure; drop this
+                // reference so a long-lived worker does not pin them here.
+                startup.compiledWasm = null;
+                startup.resolve();
                 // The worker completed its handshake — the slot is healthy
                 // again, so clear the consecutive start-failure streak.
                 this.consecutiveStartFailures = 0;

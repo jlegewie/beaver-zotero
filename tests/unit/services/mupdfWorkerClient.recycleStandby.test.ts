@@ -338,6 +338,22 @@ describe('MuPDFWorkerClient compiled WASM', () => {
         }
     });
 
+    it('drops its reference to the modules once the worker is configured, and a repeated ack keeps the stat', async () => {
+        withCompiledWasm(() => compiledModules());
+        const client = new MuPDFWorkerClient();
+        try {
+            await runOp(client);
+            const worker = MockWorker.instances[0];
+            expect(worker.configureMessages[0]).toHaveProperty('compiledWasm');
+            expect((client as any).startup.compiledWasm).toBeNull();
+
+            worker.onmessage?.({ data: { kind: 'configured', compiledWasm: false } });
+            expect(client.getStats().compiledWasmShared).toBe(true);
+        } finally {
+            client.dispose();
+        }
+    });
+
     it('reports not shared when the worker drops the modules it was sent', async () => {
         withCompiledWasm(() => compiledModules());
         MockWorker.dropNextConfigureAck = true;
