@@ -713,11 +713,6 @@ export interface MarginElement {
      */
     rowEndNumber?: boolean;
     /**
-     * The element opens with a footnote marker: a numeral set clearly
-     * smaller than the text beside it. Not page-number evidence.
-     */
-    footnoteMarker?: boolean;
-    /**
      * For a numeral in the left zone: body text rows between it and the
      * numeral above it (or the top of the body, for a page's first numeral)
      * that carry no numeral of their own. Manuscript line numbers number
@@ -773,59 +768,6 @@ export interface MarginRemovalResult {
     textsToRemove: Set<string>;
     /** Map of pageIndex -> set of texts to remove on that page */
     removalsByPage: Map<number, Set<string>>;
-    /**
-     * Margin numerals that may be printed page numbers, with their parsed
-     * values (see `derivedPageLabels.ts`). `identifyElementsToRemove` always
-     * sets it; optional for hand-built results.
-     */
-    pageNumbers?: PageNumberObservation[];
-}
-
-/** A numeral at the edge of a page that may be its printed page number. */
-export interface PageNumberObservation {
-    pageIndex: number;
-    /** Parsed value: the page number the element prints. */
-    value: number;
-    /** Text as printed ("12", "Page 12", "xiv"). */
-    text: string;
-    /** A bare Roman numeral ("xiv", "IV") rather than an Arabic number. */
-    roman: boolean;
-    /**
-     * Printed text before the number of a prefixed folio ("S" of "S12",
-     * "014105-" of "014105-3"), part of the page's label.
-     */
-    prefix?: string;
-    position: MarginPosition;
-    /**
-     * Read from a header or footer line that margin detection did not remove
-     * as a page number (its first or last word, as in "644 R. Allen and A.
-     * Vignoles"), or from a page's top or bottom text rows. Weaker evidence
-     * than a removed page number.
-     */
-    edge?: boolean;
-    /** Read from letter-spaced digits ("3 8" for 38). */
-    spaced?: boolean;
-    /**
-     * Font size of the text the number was read from, the same whichever
-     * way the page is turned (unlike `bbox`'s height).
-     */
-    em?: number;
-    /**
-     * An Arabic number, no larger than the page's position, opening a top or
-     * bottom row whose other text no other page prints at its edges ("2
-     * Methods"): a numbered heading's row rather than a running head's.
-     */
-    headingRow?: boolean;
-    /**
-     * Box of the element, line or row the number was read from, in MuPDF's
-     * page frame. A word of a longer line has the whole line's box.
-     */
-    bbox?: BoundingBox;
-    /**
-     * How often the page prints `text` in this zone, when more than once (a
-     * page number beside an equal fixed numeral).
-     */
-    occurrences?: number;
 }
 
 // ============================================================================

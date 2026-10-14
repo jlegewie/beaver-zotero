@@ -1,8 +1,8 @@
 /**
  * Derived page labels: the page numbers a PDF prints in its margins.
  *
- * Margin page-number detection (`MarginFilter.identifyElementsToRemove`)
- * reports the margin numerals that may be page numbers, and
+ * `pageNumberObservations` (in `MarginFilter`) reports the margin numerals
+ * that may be page numbers, and
  * `pageEdgeRowObservations` adds those of each page's top and bottom text
  * rows, which can sit outside the margin zones. A printed page number
  * advances in lockstep with the page index, so `value - pageIndex` is
@@ -21,8 +21,8 @@
 import {
     DEFAULT_MARGIN_ZONE,
     type BoundingBox,
+    type MarginPosition,
     type MarginSettings,
-    type PageNumberObservation,
     type RawLine,
     type RawPageData,
 } from "@beaver/agent-core/extract/types";
@@ -32,21 +32,71 @@ import {
     rotateRawPage,
 } from "./PageRotationNormalizer";
 import {
-    isFootnoteMarker,
+    containsBox,
     distinctPlaces,
     emOf,
-    isDashWrappedFolio,
+    isFootnoteMarker,
     isPageCounter,
     isScatteredRow,
-    normalizePageDigits,
-    SCATTERED_MIN_CHARACTERS,
-    SCATTERED_PLACE,
+    normalizeDigits,
+    parseCounter,
+    parseDashWrapped,
     parsePrintedPageNumber,
     rowEndBoxes,
     rowEndWords,
     rowPageNumberWords,
+    SCATTERED_MIN_CHARACTERS,
+    SCATTERED_PLACE,
     spacedRowNumber,
+    unionBBox,
 } from "./MarginFilter";
+
+/** A numeral at the edge of a page that may be its printed page number. */
+export interface PageNumberObservation {
+    pageIndex: number;
+    /** Parsed value: the page number the element prints. */
+    value: number;
+    /** Text as printed ("12", "Page 12", "xiv"). */
+    text: string;
+    /** A bare Roman numeral ("xiv", "IV") rather than an Arabic number. */
+    roman: boolean;
+    /**
+     * Printed text before the number of a prefixed folio ("S" of "S12",
+     * "014105-" of "014105-3"), part of the page's label.
+     */
+    prefix?: string;
+    position: MarginPosition;
+    /**
+     * Read from a header or footer line that margin detection did not remove
+     * as a page number (its first or last word, as in "644 R. Allen and A.
+     * Vignoles"), or from a page's top or bottom text rows. Weaker evidence
+     * than a removed page number.
+     */
+    edge?: boolean;
+    /** Read from letter-spaced digits ("3 8" for 38). */
+    spaced?: boolean;
+    /**
+     * Font size of the text the number was read from, the same whichever
+     * way the page is turned (unlike `bbox`'s height).
+     */
+    em?: number;
+    /**
+     * An Arabic number, no larger than the page's position, opening a top or
+     * bottom row whose other text no other page prints at its edges ("2
+     * Methods"): a numbered heading's row rather than a running head's.
+     */
+    headingRow?: boolean;
+    /**
+     * Box of the element, line or row the number was read from, in MuPDF's
+     * page frame. A word of a longer line has the whole line's box.
+     */
+    bbox?: BoundingBox;
+    /**
+     * How often the page prints `text` in this zone, when more than once (a
+     * page number beside an equal fixed numeral).
+     */
+    occurrences?: number;
+}
 
 /** Minimum numbered pages a run needs to be trusted. */
 const MIN_RUN_PAGES = 3;
@@ -278,20 +328,14 @@ function withoutSpacedDigits(
     if (spacedByPage.size === 0) return [...observations];
     return observations.filter((obs) => {
         if (obs.roman || obs.spaced || !obs.bbox || String(obs.value).length !== 1) return true;
-        const box = obs.bbox;
-        return !(spacedByPage.get(obs.pageIndex) ?? []).some((row) =>
-            box.l >= row.l - 1 && box.r <= row.r + 1 && box.t >= row.t - 1 && box.b <= row.b + 1,
-        );
+        return !(spacedByPage.get(obs.pageIndex) ?? []).some((row) => containsBox(row, obs.bbox!));
     });
 }
 
-/** "N of N" / "N/N" (optionally after a page word): the last page of N. */
-const LAST_PAGE_RE = /(\d+)\s*(?:of|von|de|di|van|из|\/)\s*(\d+)\s*$/iu;
-
 /** Whether an observation prints its page as the document's last ("8 of 8"). */
 function printsLastPage(obs: PageNumberObservation): boolean {
-    const match = normalizePageDigits(obs.text).match(LAST_PAGE_RE);
-    return !!match && Number(match[1]) === obs.value && Number(match[2]) === obs.value;
+    const counter = parseCounter(obs.text);
+    return !!counter && counter.page === obs.value && counter.total === obs.value;
 }
 
 /**
@@ -353,7 +397,7 @@ function candidateRuns(
     // entries end its rows too.
     const folioNumbers = new Map<number, PageNumberObservation[]>();
     for (const obs of observations) {
-        if (obs.edge && !obs.prefix && !isDashWrappedFolio(obs.text)) continue;
+        if (obs.edge && !obs.prefix && parseDashWrapped(obs.text) === null) continue;
         const folios = folioNumbers.get(obs.pageIndex);
         if (folios) folios.push(obs);
         else folioNumbers.set(obs.pageIndex, [obs]);
@@ -490,8 +534,8 @@ const COMPOUND_PREFIX_RE = /\d[-–:]$/u;
  * reads as its value.
  */
 function paddedWidth(obs: PageNumberObservation): number {
-    const text = normalizePageDigits(obs.text.trim());
-    const prefix = obs.prefix ? normalizePageDigits(obs.prefix) : "";
+    const text = normalizeDigits(obs.text.trim());
+    const prefix = obs.prefix ? normalizeDigits(obs.prefix) : "";
     const rest = prefix && text.startsWith(prefix) ? text.slice(prefix.length) : text;
     const digits = rest.match(/\d+/gu)?.find((group) => parseInt(group, 10) === obs.value);
     return digits && digits.length > 1 && digits[0] === "0" ? digits.length : 0;
@@ -606,6 +650,8 @@ export function pageEdgeRowObservations(
         for (const [rowIndex, position] of picked) {
             const lines = rows[rowIndex];
             const rowText = lines.map((line) => line.text).join(" ");
+            // The row's first and last word; a candidate word is one of them.
+            const ends = rowEndWords(rowText);
             const otherText = rowTextKey(rowText);
             if (otherText) {
                 const seen = pagesByRowText.get(otherText);
@@ -613,7 +659,7 @@ export function pageEdgeRowObservations(
                 else pagesByRowText.set(otherText, new Set([page.pageIndex]));
             }
             const rowStart = pageObservations.length;
-            const uprightRowBox = unionBox(lines);
+            const uprightRowBox = unionBBox(lines);
             const rowBox = sourceBox(uprightRowBox);
             const spaced = spacedRowNumber(
                 rowText,
@@ -621,7 +667,7 @@ export function pageEdgeRowObservations(
                 Math.max(...lines.map((line) => line.font?.size ?? 0)),
             );
             // Candidate texts with their boxes: the row's first and last word
-            // take the box of the line they start or end, a line read on its
+            // take the box of the line they start and end, a line read on its
             // own its own box, the whole row the row's box.
             const texts = new Map<string, BoundingBox>();
             // Font size of the line (or row) each candidate was read from.
@@ -641,23 +687,16 @@ export function pageEdgeRowObservations(
             if (!spaced) {
                 const firstLine = lines[0];
                 const lastLine = lines[lines.length - 1];
-                const words = rowText.trim().split(/\s+/u);
-                const wordBox = (word: string) =>
-                    word === words[0] ? sourceBox(firstLine.bbox)
-                    : word === words[words.length - 1] ? sourceBox(lastLine.bbox)
-                    : rowBox;
                 // A footnote line's marker steps with the pages as well.
-                const marker = isFootnoteMarker(firstLine, pageLines)
-                    ? rowPageNumberWords(words[0])[0]
-                    : undefined;
-                const ends = rowEndWords(rowText);
+                const marker = isFootnoteMarker(firstLine, pageLines) ? ends[0] : undefined;
                 const bothEnds = ends.length === 2 && ends[0] === ends[1] && !scattered;
                 for (const word of rowPageNumberWords(rowText)) {
                     if (word === marker) continue;
-                    texts.set(word, wordBox(word));
-                    ems.set(word, word === words[0] ? emOf(firstLine) : word === words[words.length - 1] ? emOf(lastLine) : rowEm);
+                    const line = word === ends[0] ? firstLine : lastLine;
+                    texts.set(word, sourceBox(line.bbox));
+                    ems.set(word, emOf(line));
                     if (bothEnds) placed(word, ...rowEndBoxes(uprightRowBox, em));
-                    else placed(word, word === ends[0] ? firstLine.bbox : lastLine.bbox);
+                    else placed(word, line.bbox);
                 }
                 // The whole row first: a counter split into lines ("Page 3",
                 // "of 3") still reads as one, keeping its last-page signal. A
@@ -676,7 +715,7 @@ export function pageEdgeRowObservations(
                 const parsed = parsePrintedPageNumber(line.text);
                 if (parsed?.prefix) {
                     rowWords ??= new Set(rowPageNumberWords(rowText));
-                    if (!rowWords.has(normalizePageDigits(line.text).trim())) continue;
+                    if (!rowWords.has(normalizeDigits(line.text).trim())) continue;
                 }
                 if (parsed && !isFootnoteMarker(line, pageLines)) {
                     const text = line.text.trim();
@@ -720,13 +759,12 @@ export function pageEdgeRowObservations(
             // Folios at a row's end, Roman folios and bare numbers read as
             // they are.
             if (otherText) {
-                const firstWord = rowEndWords(rowText)[0];
                 for (const obs of pageObservations.slice(rowStart)) {
                     if (
                         !obs.roman
                         && !obs.spaced
                         && obs.value <= page.pageIndex + 1
-                        && normalizePageDigits(obs.text).trim() === firstWord
+                        && normalizeDigits(obs.text).trim() === ends[0]
                     ) {
                         pageRowTexts.set(obs, otherText);
                     }
@@ -780,16 +818,6 @@ function median(values: readonly number[]): number {
     if (values.length === 0) return 0;
     const sorted = [...values].sort((a, b) => a - b);
     return sorted[Math.floor(sorted.length / 2)];
-}
-
-function unionBox(lines: readonly RawLine[]): BoundingBox {
-    return {
-        l: Math.min(...lines.map((line) => line.bbox.l)),
-        t: Math.min(...lines.map((line) => line.bbox.t)),
-        r: Math.max(...lines.map((line) => line.bbox.r)),
-        b: Math.max(...lines.map((line) => line.bbox.b)),
-        origin: lines[0].bbox.origin,
-    };
 }
 
 function center(line: RawLine): number {

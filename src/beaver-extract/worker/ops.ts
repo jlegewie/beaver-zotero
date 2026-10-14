@@ -18,7 +18,7 @@
  */
 
 import { DocumentAnalyzer, type RawPageProvider } from "../DocumentAnalyzer";
-import { MarginFilter } from "../MarginFilter";
+import { MarginFilter, pageNumberObservations } from "../MarginFilter";
 import { derivePageLabels, pageEdgeRowObservations } from "../derivedPageLabels";
 import { PageExtractor } from "../PageExtractor";
 import { resolveAnalysisPages } from "../AnalysisWindow";
@@ -647,7 +647,7 @@ export function runExtractFromIndices(
         && analysisPageByIndex.size === pageCount
         ? derivePageLabels(
             [
-                ...(marginRemoval.pageNumbers ?? []),
+                ...pageNumberObservations(marginAnalysis, marginRemoval.removalsByPage, analysisPageByIndex),
                 ...pageEdgeRowObservations(analysisPages, undefined, opts.marginZone),
             ],
             pageCount,

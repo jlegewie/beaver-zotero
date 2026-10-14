@@ -17,9 +17,9 @@ import type {
     MarginAnalysis,
     RemovalCandidate,
     MarginRemovalResult,
-    PageNumberObservation,
     TextStyle,
 } from "@beaver/agent-core/extract/types";
+import type { PageNumberObservation } from "./derivedPageLabels";
 import { bboxHeight } from "@beaver/agent-core/extract/types";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
@@ -106,15 +106,11 @@ const PAGE_NUMBER_PATTERNS: RegExp[] = [
 // truth (PAGE_PREFIX_RE / *_CONNECTOR_RE), so patterns and parser stay in
 // lockstep.
 const PARSE_PREFIX_RANGE_RE = new RegExp(
-    `^(?:${PAGE_PREFIX_RE})\\s*(\\d+)\\s*(?:${PREFIX_CONNECTOR_RE})\\s*\\d+$`,
+    `^(?:${PAGE_PREFIX_RE})\\s*(\\d+)\\s*(?:${PREFIX_CONNECTOR_RE})\\s*(\\d+)$`,
     "iu",
 );
 const PARSE_PREFIX_RE = new RegExp(`^(?:${PAGE_PREFIX_RE})\\s*(\\d+)$`, "iu");
 const PARSE_RANGE_RE = new RegExp(
-    `^(\\d+)\\s*(?:${BARE_CONNECTOR_RE})\\s*\\d+$`,
-    "iu",
-);
-const BARE_COUNTER_RE = new RegExp(
     `^(\\d+)\\s*(?:${BARE_CONNECTOR_RE})\\s*(\\d+)$`,
     "iu",
 );
@@ -155,7 +151,7 @@ const DIGIT_ZERO_BASES = [
     0x0E50, // Thai
 ];
 
-function normalizeDigits(text: string): string {
+export function normalizeDigits(text: string): string {
     const nfkc = text.normalize("NFKC");
     return nfkc.replace(/[٠-٩۰-۹०-९০-৯๐-๙]/g,
         (ch) => {
@@ -313,11 +309,6 @@ const ROW_WORD_SEPARATOR_RE = /[\s|\uFFFD]+/u;
 /** A row whose last word follows a letter and a space, with no separator between. */
 const CAPTIONED_TAIL_RE = /\p{L}[\s\uFFFD]+[^\s|\uFFFD]+$/u;
 
-/** `text` with compatibility and common non-Latin digits folded to ASCII. */
-export function normalizePageDigits(text: string): string {
-    return normalizeDigits(text);
-}
-
 /**
  * Whether `text` names itself a page number ("Page 3", "p. 3", "第3页",
  * "·12·", "Page 3 of 12", "3 of 12", "3/12"), unlike a bare numeral, which
@@ -327,8 +318,18 @@ export function isPageCounter(text: string): boolean {
     if (isStructuredPageNumber(text)) return true;
     // A bare counter ("3 of 12", "3/12") counts when the page is within
     // the total.
-    const counter = normalizeDigits(text).trim().toLowerCase().match(BARE_COUNTER_RE);
-    return !!counter && Number(counter[1]) >= 1 && Number(counter[1]) <= Number(counter[2]);
+    const counter = parseCounter(text);
+    return !!counter && counter.page >= 1 && counter.page <= counter.total;
+}
+
+/**
+ * The page and total of a counter ("3 of 12", "3/12", "Page 3 of 12",
+ * "Seite 3 von 12"), or `null`. Same connectors as page-number removal.
+ */
+export function parseCounter(text: string): { page: number; total: number } | null {
+    const cleaned = normalizeDigits(text).trim().toLowerCase();
+    const match = cleaned.match(PARSE_PREFIX_RANGE_RE) ?? cleaned.match(PARSE_RANGE_RE);
+    return match ? { page: parseInt(match[1], 10), total: parseInt(match[2], 10) } : null;
 }
 
 /**
@@ -375,12 +376,7 @@ function prefixedFolioWord(word: string): { value: number; prefix: string } | nu
  * as a page number by label derivation only: margin removal does not use
  * it, so extracted text stays as it was.
  */
-/** Whether `text` is a number between dashes ("- 5 -"), a folio's own form. */
-export function isDashWrappedFolio(text: string): boolean {
-    return parseDashWrapped(text) !== null;
-}
-
-function parseDashWrapped(text: string): number | null {
+export function parseDashWrapped(text: string): number | null {
     const normalized = normalizeDigits(text);
     const spaced = normalized.includes("\uFFFD") ? normalized.replace(/\uFFFD/gu, " ") : normalized;
     const match = spaced.trim().match(DASH_WRAPPED_RE);
@@ -462,6 +458,12 @@ export function emOf(line: RawLine): number {
     return line.font?.size > 0 ? line.font.size : 0.7 * (line.bbox.b - line.bbox.t);
 }
 
+/** Whether `inner` lies inside `outer`, give or take `slack` on each side. */
+export function containsBox(outer: BoundingBox, inner: BoundingBox, slack = 1): boolean {
+    return inner.l >= outer.l - slack && inner.r <= outer.r + slack
+        && inner.t >= outer.t - slack && inner.b <= outer.b + slack;
+}
+
 /** Distance, in em, between two printings of a numeral that count apart. */
 const DISTINCT_PLACE_EMS = 3;
 
@@ -505,24 +507,17 @@ function spacedElementNumber(el: MarginElement): string | null {
  * Digits come back ASCII. See `spacedRowNumber` for letter-spaced numbers.
  */
 export function rowPageNumberWords(text: string): string[] {
-    const words = rowWords(text);
-    if (words.length === 0) return [];
-    const ends = words.length === 1 ? [words[0]] : [words[0], words[words.length - 1]];
+    const ends = rowEndWords(text);
+    const [first, last] = [ends[0], ends[ends.length - 1]];
     // A prefixed number that ends a row right after a word ("Figure S1",
     // "Table A1", "the inductor L2") is a caption's or a formula's label; a
     // folio ending a running foot follows a date or a separator
     // ("Supplement | S1"). U+FFFD stands for a space here.
-    const last = words[words.length - 1];
-    const captioned = words.length > 1
+    const captioned = ends.length > 1
         && CAPTIONED_TAIL_RE.test(normalizeDigits(text).trim());
     return [...new Set(ends)].filter((word) =>
         EDGE_PAGE_NUMBER_RE.test(word)
-        || (prefixedFolioWord(word) !== null && !(captioned && word === last && word !== words[0])));
-}
-
-/** A row's words, digits ASCII. */
-function rowWords(text: string): string[] {
-    return normalizeDigits(text).trim().split(ROW_WORD_SEPARATOR_RE).filter(Boolean);
+        || (prefixedFolioWord(word) !== null && !(captioned && word === last && word !== first)));
 }
 
 /**
@@ -530,7 +525,7 @@ function rowWords(text: string): string[] {
  * ASCII. The same word at both ends appears twice.
  */
 export function rowEndWords(text: string): string[] {
-    const words = rowWords(text);
+    const words = normalizeDigits(text).trim().split(ROW_WORD_SEPARATOR_RE).filter(Boolean);
     if (words.length === 0) return [];
     return words.length === 1 ? [words[0]] : [words[0], words[words.length - 1]];
 }
@@ -547,10 +542,14 @@ export function rowEndWords(text: string): string[] {
  *   (`rowPageNumberWords`, marked `edge`). A running head set as one line
  *   with its page number changes text on every page, so no removal pass
  *   takes it.
+ *
+ * `removalsByPage` is `identifyElementsToRemove`'s; `pages` are the analyzed
+ * pages, whose lines tell footnote markers apart (`isFootnoteMarker`).
  */
-function pageNumberObservations(
+export function pageNumberObservations(
     analysis: MarginAnalysis,
-    removalsByPage: Map<number, Set<string>>,
+    removalsByPage: ReadonlyMap<number, ReadonlySet<string>>,
+    pages: ReadonlyMap<number, RawPageData>,
 ): PageNumberObservation[] {
     const observations: PageNumberObservation[] = [];
     const seen = new Map<string, PageNumberObservation>();
@@ -608,29 +607,39 @@ function pageNumberObservations(
     // collected one by one as row-end numbers. The last digit alone steps
     // with the page index until it wraps, so it must not count.
     const spacedRows = new Set<MarginElement>();
+    const spacedRowsByPage = new Map<number, MarginElement[]>();
     for (const elements of analysis.elements.values()) {
         for (const el of elements) {
-            if (!el.rowEndNumber && spacedElementNumber(el)) {
-                spacedRows.add(el);
-            }
+            if (el.rowEndNumber || !spacedElementNumber(el)) continue;
+            spacedRows.add(el);
+            const rows = spacedRowsByPage.get(el.pageIndex);
+            if (rows) rows.push(el);
+            else spacedRowsByPage.set(el.pageIndex, [el]);
         }
     }
-    const insideSpacedRow = (el: MarginElement) => [...spacedRows].some((row) =>
-        row.pageIndex === el.pageIndex
-        && row.position === el.position
-        && el.bbox.l >= row.bbox.l - 1 && el.bbox.r <= row.bbox.r + 1
-        && el.bbox.t >= row.bbox.t - 1 && el.bbox.b <= row.bbox.b + 1,
-    );
+    const insideSpacedRow = (el: MarginElement) => (spacedRowsByPage.get(el.pageIndex) ?? []).some((row) =>
+        row.position === el.position && containsBox(row.bbox, el.bbox));
+    const linesByPage = new Map<number, RawLine[]>();
+    const footnoteMarker = (el: MarginElement) => {
+        let lines = linesByPage.get(el.pageIndex);
+        if (!lines) {
+            lines = (pages.get(el.pageIndex)?.blocks ?? []).flatMap((block) =>
+                block.type === "text" && block.lines ? block.lines : []);
+            linesByPage.set(el.pageIndex, lines);
+        }
+        return isFootnoteMarker(el.line, lines);
+    };
 
     for (const elements of analysis.elements.values()) {
         for (const el of elements) {
-            if (el.rowEndNumber && spacedRows.size > 0 && insideSpacedRow(el)) continue;
+            if (el.rowEndNumber && insideSpacedRow(el)) continue;
             // A footnote marker that a page-number pass removed is still a
             // footnote marker.
-            if (el.footnoteMarker && isPageNumberPattern(el.text)) continue;
+            const pageNumberShaped = isPageNumberPattern(el.text);
+            if (pageNumberShaped && footnoteMarker(el)) continue;
             if (
                 !spacedRows.has(el)
-                && isPageNumberPattern(el.text)
+                && pageNumberShaped
                 && removalsByPage.get(el.pageIndex)?.has(normalizeText(el.text))
             ) {
                 observe(el, el.text, false);
@@ -646,10 +655,13 @@ function pageNumberObservations(
                 observe(el, el.text.trim(), true);
                 continue;
             }
+            const words = rowPageNumberWords(el.text);
+            if (words.length === 0) continue;
             const ends = rowEndWords(el.text);
-            const marker = el.footnoteMarker ? ends[0] : undefined;
+            // A footnote line's marker steps with the pages as well.
+            const marker = words.includes(ends[0]) && footnoteMarker(el) ? ends[0] : undefined;
             const bothEnds = ends.length === 2 && ends[0] === ends[1] && !isScatteredRow(el.text);
-            for (const word of rowPageNumberWords(el.text)) {
+            for (const word of words) {
                 if (word === marker) continue;
                 observe(el, word, true, false, bothEnds ? rowEndBoxes(el.bbox, emOf(el.line)) : [el.bbox]);
             }
@@ -1037,7 +1049,7 @@ interface TextRow {
     lines: RawLine[];
 }
 
-function unionBBox(lines: RawLine[]): BoundingBox {
+export function unionBBox(lines: readonly RawLine[]): BoundingBox {
     return {
         l: Math.min(...lines.map(line => line.bbox.l)),
         t: Math.min(...lines.map(line => line.bbox.t)),
@@ -1094,9 +1106,7 @@ function collectTextRows(page: RawPageData, joinLines: boolean): TextRow[] {
         return i;
     };
     const upright = lines.map(line => joinLines && line.wmode !== 1 && (line.rotation ?? 0) === 0);
-    const em = lines.map(line =>
-        line.font?.size > 0 ? line.font.size : 0.7 * (line.bbox.b - line.bbox.t),
-    );
+    const em = lines.map(emOf);
     const order = lines.map((_, i) => i)
         .filter(i => upright[i])
         .sort((a, b) => lines[a].bbox.t - lines[b].bbox.t);
@@ -1228,15 +1238,14 @@ function justifiedProseRows(page: RawPageData, marginZone: MarginSettings): RawL
         const lines = block.lines.filter(line =>
             (line.text || "").trim() && line.wmode !== 1 && (line.rotation ?? 0) === 0 && line.bbox.b > line.bbox.t,
         );
-        const em = (line: RawLine) => line.font?.size > 0 ? line.font.size : 0.7 * (line.bbox.b - line.bbox.t);
         const sameRow = (a: RawLine, b: RawLine) => {
             const ha = a.bbox.b - a.bbox.t;
             const hb = b.bbox.b - b.bbox.t;
             const minH = Math.min(ha, hb);
             if (Math.max(ha, hb) > 2 * minH) return false;
             if (Math.min(a.bbox.b, b.bbox.b) - Math.max(a.bbox.t, b.bbox.t) < 0.5 * minH) return false;
-            const minEm = Math.min(em(a), em(b));
-            if (Math.max(em(a), em(b)) > 1.25 * minEm) return false;
+            const minEm = Math.min(emOf(a), emOf(b));
+            if (Math.max(emOf(a), emOf(b)) > 1.25 * minEm) return false;
             const gap = b.bbox.l - a.bbox.r;
             return gap <= JUSTIFIED_WORD_GAP_EM * minEm && gap >= -0.25 * minEm;
         };
@@ -1253,7 +1262,7 @@ function justifiedProseRows(page: RawPageData, marginZone: MarginSettings): RawL
                 }
             }
             if (row.length < 2) continue;
-            const wide = row.some((line, k) => k > 0 && line.bbox.l - row[k - 1].bbox.r > 0.3 * Math.min(em(line), em(row[k - 1])));
+            const wide = row.some((line, k) => k > 0 && line.bbox.l - row[k - 1].bbox.r > 0.3 * Math.min(emOf(line), emOf(row[k - 1])));
             if (!wide) continue;
             const words = row.flatMap(line => line.text.trim().split(/\s+/u));
             if (words.filter(word => LOWERCASE_WORD_RE.test(word)).length < 3) continue;
@@ -1500,10 +1509,6 @@ export class MarginFilter {
             const paragraphLines = textRows ? paragraphBlockLines(page) : null;
             const positionOf = (bbox: BoundingBox) =>
                 getMarginPosition(bbox, page.width, page.height, marginZone);
-            let linesOfPage: RawLine[] | undefined;
-            const pageLines = () => linesOfPage ??= page.blocks.flatMap(block =>
-                block.type === "text" && block.lines ? block.lines : [],
-            );
             const push = (
                 text: string,
                 position: MarginPosition,
@@ -1518,7 +1523,6 @@ export class MarginFilter {
                     isLoneLowercaseWord(text) && parseRoman(text.trim()) === null &&
                     lines.every(line => paragraphLines.has(line))
                 ) return;
-                const footnoteMarker = isFootnoteMarker(lines[0], pageLines());
                 elements.get(position)!.push({
                     text,
                     position,
@@ -1527,7 +1531,6 @@ export class MarginFilter {
                     line: lines[0],
                     ...(lines.length > 1 ? { lineCount: lines.length } : {}),
                     ...(rowEndNumber ? { rowEndNumber } : {}),
-                    ...(footnoteMarker ? { footnoteMarker } : {}),
                 });
             };
             const rows = collectTextRows(page, textRows);
@@ -1986,12 +1989,7 @@ export class MarginFilter {
             }
         }
 
-        return {
-            candidates,
-            textsToRemove,
-            removalsByPage,
-            pageNumbers: pageNumberObservations(analysis, removalsByPage),
-        };
+        return { candidates, textsToRemove, removalsByPage };
     }
 
     /**

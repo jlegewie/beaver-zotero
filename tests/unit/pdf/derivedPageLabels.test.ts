@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { derivePageLabels, pageEdgeRowObservations } from "../../../src/beaver-extract/derivedPageLabels";
+import {
+    derivePageLabels,
+    pageEdgeRowObservations,
+    type PageNumberObservation,
+} from "../../../src/beaver-extract/derivedPageLabels";
 import {
     bboxFromXYWH,
-    type PageNumberObservation,
     type RawLine,
     type RawPageData,
 } from "@beaver/agent-core/extract/types";
@@ -499,6 +502,17 @@ describe("pageEdgeRowObservations", () => {
         const pages = [page(0, [line("1", 30, 40), line("16 The Sublime Object", 40, 40), body(100), body(140), body(600), body(700)])];
         const first = pageEdgeRowObservations(pages).find((o) => o.text === "1");
         expect(first?.bbox).toMatchObject({ l: 30, r: 36 });
+    });
+
+    it("gives a row's end word its line's box and size when digits or separators differ", () => {
+        // A full-width "１２" and a "|3" set against its bar.
+        for (const [last, value] of [["\uFF11\uFF12", 12], ["|3", 3]] as const) {
+            const folio = { ...line(last, 500, 740), font: { ...line(last, 500, 740).font, size: 8 } };
+            const pages = [page(0, [body(100), body(140), body(600), line("Journal of Things", 60, 740), folio])];
+            const found = pageEdgeRowObservations(pages).find((o) => o.value === value);
+            expect(found?.bbox).toMatchObject({ l: 500 });
+            expect(found?.em).toBe(8);
+        }
     });
 
     it("does not extend over a page whose dash-wrapped folio is one off", () => {

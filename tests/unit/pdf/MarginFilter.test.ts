@@ -10,6 +10,9 @@ import { describe, it, expect, test } from "vitest";
 import {
     MarginFilter,
     getEffectiveRepeatThreshold,
+    isPageCounter,
+    pageNumberObservations,
+    parseCounter,
     parsePrefixedFolio,
 } from "../../../src/beaver-extract/MarginFilter";
 import {
@@ -1997,7 +2000,7 @@ describe("smart removal on word-split rows", () => {
     });
 });
 
-describe("pageNumbers — margin numerals that may be printed page numbers", () => {
+describe("pageNumberObservations — margin numerals that may be printed page numbers", () => {
     function analysisOf(entries: { pageIndex: number; text: string; position?: MarginPosition; x?: number; width?: number; rowEndNumber?: boolean; lineCount?: number }[]): MarginAnalysis {
         const elements = new Map<MarginPosition, MarginElement[]>([
             ["top", []], ["bottom", []], ["left", []], ["right", []],
@@ -2019,11 +2022,18 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
         };
         return { elements, counts };
     }
-    const values = (out: MarginRemovalResult) =>
-        (out.pageNumbers ?? []).map((o) => [o.pageIndex, o.value, o.edge ?? false]);
+    /** Observations after removal, with `pages` for footnote markers. */
+    const observe = (analysis: MarginAnalysis, pages: readonly RawPageData[] = []) =>
+        pageNumberObservations(
+            analysis,
+            MarginFilter.identifyElementsToRemove(analysis, 3, true).removalsByPage,
+            new Map(pages.map((page) => [page.pageIndex, page])),
+        );
+    const values = (out: ReturnType<typeof observe>) =>
+        out.map((o) => [o.pageIndex, o.value, o.edge ?? false]);
 
     it("reports removed page numbers with their values", () => {
-        const out = MarginFilter.identifyElementsToRemove(oneTextPerPage(["1", "2", "3", "4"], "bottom"), 3, true);
+        const out = observe(oneTextPerPage(["1", "2", "3", "4"], "bottom"));
         expect(values(out)).toEqual([[0, 1, false], [1, 2, false], [2, 3, false], [3, 4, false]]);
     });
 
@@ -2031,8 +2041,8 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
         // A numbering that restarts: "1".."3" recur on enough pages to be
         // removed as repeats before the page-number passes see them.
         const texts = ["1", "2", "3", "1", "2", "3", "1", "2", "3"];
-        const out = MarginFilter.identifyElementsToRemove(oneTextPerPage(texts, "bottom"), 3, true);
-        expect((out.pageNumbers ?? []).map((o) => o.value)).toEqual([1, 2, 3, 1, 2, 3, 1, 2, 3]);
+        const out = observe(oneTextPerPage(texts, "bottom"));
+        expect(out.map((o) => o.value)).toEqual([1, 2, 3, 1, 2, 3, 1, 2, 3]);
     });
 
     it("reports the page number at either end of a running head as an edge word", () => {
@@ -2040,7 +2050,7 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
             { pageIndex: 0, text: "644 R. Allen and A. Vignoles" },
             { pageIndex: 1, text: "Index of school segregation 645" },
         ]);
-        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        const out = observe(analysis);
         expect(values(out)).toEqual([[0, 644, true], [1, 645, true]]);
     });
 
@@ -2052,7 +2062,7 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
                 { pageIndex, text: digits[1], rowEndNumber: true },
             ];
         });
-        const out = MarginFilter.identifyElementsToRemove(analysisOf(entries), 3, true);
+        const out = observe(analysisOf(entries));
         expect(values(out)).toEqual([[0, 21, true], [1, 22, true], [2, 23, true], [3, 24, true]]);
     });
 
@@ -2063,14 +2073,15 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
             { pageIndex, text: `${pageIndex + 1} Journal of Things`, position: "bottom" as const, x: 100, lineCount: 2 },
             { pageIndex, text: String(pageIndex + 1), position: "bottom" as const, x: 300 },
         ]);
-        const out = MarginFilter.identifyElementsToRemove(analysisOf(entries), 3, true);
+        const out = observe(analysisOf(entries));
         expect(values(out)).toEqual([[0, 1, false], [1, 2, false], [2, 3, false], [3, 4, false]]);
     });
 
     it("reports page numbers set between dashes without removing them", () => {
-        const out = MarginFilter.identifyElementsToRemove(oneTextPerPage(["- 1 -", "-2-", "— 3 —"], "bottom"), 3, true);
-        expect((out.pageNumbers ?? []).map((o) => o.value)).toEqual([1, 2, 3]);
-        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+        const analysis = oneTextPerPage(["- 1 -", "-2-", "— 3 —"], "bottom");
+        expect(observe(analysis).map((o) => o.value)).toEqual([1, 2, 3]);
+        const removal = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(removal.candidates.some((c) => c.reason === "page_number")).toBe(false);
     });
 
     it("reports prefixed folios at a row's end with their prefix", () => {
@@ -2080,8 +2091,8 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
             { pageIndex: 2, text: "Phys. Rev. B 96, 014105 (2017) 014105-3" },
             { pageIndex: 3, text: "212:4 F. Trujillo-Romero" },
         ]);
-        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
-        expect((out.pageNumbers ?? []).map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
+        const out = observe(analysis);
+        expect(out.map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
             [0, "e", 1], [1, "S", 2], [2, "014105-", 3], [3, "212:", 4],
         ]);
     });
@@ -2093,8 +2104,8 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
                 text: `Issued: 2024-${pad ? "0" : ""}${pageIndex + 1}`,
                 position: "bottom" as const,
             })));
-            const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
-            expect((out.pageNumbers ?? []).filter((o) => o.prefix)).toEqual([]);
+            const out = observe(analysis);
+            expect(out.filter((o) => o.prefix)).toEqual([]);
         }
         expect(parsePrefixedFolio("2024-3")).toBeNull();
         expect(parsePrefixedFolio("1043-5")).toEqual({ value: 5, prefix: "1043-" });
@@ -2105,8 +2116,8 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
             { pageIndex: 0, text: "Supplementary Information | S1", position: "bottom" },
             { pageIndex: 1, text: "see Figure S2", position: "bottom" },
         ]);
-        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
-        expect((out.pageNumbers ?? []).map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
+        const out = observe(analysis);
+        expect(out.map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
             [0, "S", 1],
         ]);
     });
@@ -2116,7 +2127,7 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
             { pageIndex: 0, text: "x�ACKNOWLEDGMENTS" },
             { pageIndex: 1, text: "-�2�-", position: "bottom" },
         ]);
-        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        const out = observe(analysis);
         expect(values(out)).toEqual([[0, 10, true], [1, 2, true]]);
     });
 
@@ -2124,16 +2135,16 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
         const entries = [0, 1, 2, 3].map((pageIndex) => (
             { pageIndex, text: String(21 + pageIndex).split("").join("  "), lineCount: 2, width: 14 }
         ));
-        const out = MarginFilter.identifyElementsToRemove(analysisOf(entries), 3, true);
-        expect((out.pageNumbers ?? []).map((o) => o.value)).toEqual([21, 22, 23, 24]);
+        const out = observe(analysisOf(entries));
+        expect(out.map((o) => o.value)).toEqual([21, 22, 23, 24]);
     });
 
     it("does not join the same digit printed at both ends of a row", () => {
         const entries = [4, 5, 6].map((n, pageIndex) => (
             { pageIndex, text: `${n} ${n}`, lineCount: 2, width: 400 }
         ));
-        const out = MarginFilter.identifyElementsToRemove(analysisOf(entries), 3, true);
-        expect((out.pageNumbers ?? []).some((o) => o.value > 10)).toBe(false);
+        const out = observe(analysisOf(entries));
+        expect(out.some((o) => o.value > 10)).toBe(false);
     });
 
     it("counts a numeral printed twice on a page", () => {
@@ -2145,15 +2156,15 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
             { pageIndex: 1, text: "17", position: "bottom", x: 500 },
             { pageIndex: 2, text: "16 Journal of Things 16", position: "bottom", lineCount: 3 },
         ]);
-        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
-        const counts = (out.pageNumbers ?? []).filter((o) => o.text === "16").map((o) => [o.pageIndex, o.occurrences ?? 1]);
+        const out = observe(analysis);
+        const counts = out.filter((o) => o.text === "16").map((o) => [o.pageIndex, o.occurrences ?? 1]);
         expect(counts).toEqual([[0, 2], [1, 1], [2, 2]]);
     });
 
     it("counts the characters of broken-up text once", () => {
         const analysis = analysisOf([{ pageIndex: 0, text: "2 1 0 7 i 2", position: "bottom", lineCount: 6 }]);
-        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
-        expect((out.pageNumbers ?? []).map((o) => [o.text, o.occurrences ?? 1])).toEqual([["2", 1]]);
+        const out = observe(analysis);
+        expect(out.map((o) => [o.text, o.occurrences ?? 1])).toEqual([["2", 1]]);
     });
 
     it("does not report footnote markers as page numbers", () => {
@@ -2177,8 +2188,23 @@ describe("pageNumbers — margin numerals that may be printed page numbers", () 
             }],
         }));
         const analysis = MarginFilter.collectMarginElements(pages, { left: 60, top: 80, right: 60, bottom: 80 });
-        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
-        expect(out.pageNumbers ?? []).toEqual([]);
+        expect(observe(analysis, pages)).toEqual([]);
+    });
+});
+
+describe("parseCounter — page counters", () => {
+    it("reads the page and total of bare and page-word counters", () => {
+        expect(parseCounter("3 of 12")).toEqual({ page: 3, total: 12 });
+        expect(parseCounter("3/12")).toEqual({ page: 3, total: 12 });
+        expect(parseCounter("Page 3 of 12")).toEqual({ page: 3, total: 12 });
+        expect(parseCounter("Seite \uFF13 von \uFF13")).toEqual({ page: 3, total: 3 });
+        expect(parseCounter("Page 3")).toBeNull();
+        expect(parseCounter("2024-05")).toBeNull();
+    });
+
+    it("counts a bare counter only when the page is within the total", () => {
+        expect(isPageCounter("3 из 12")).toBe(true);
+        expect(isPageCounter("12 of 3")).toBe(false);
     });
 });
 
