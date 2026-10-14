@@ -2,7 +2,7 @@ import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import { getMergedItemReference } from '../../../atoms/mergeItemsChoices';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { navigateToAnnotation } from '../../../utils/readerUtils';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
@@ -49,6 +49,14 @@ import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { DownloadIcon } from '@beaver/agent-ui/icons';
+import type { FileExportFormat } from '@beaver/agent-ui/host/types';
+import { exportNoteToFile, openExportedFile, revealExportedFile } from '../fileExport';
+import { exportWithFeedback, fileExportFormatMenuItems } from '../../../utils/fileExportFeedback';
+import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
+import { getCreatedNoteExportTarget } from './reviewChangeRows';
+import { countPendingNoteEdits } from './reviewChanges/useRunActionRows';
 import { useOverflowCollapse } from '@beaver/agent-ui/utils/useOverflowCollapse';
 import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
 import RunPermissionButton, { RunPermissionMode } from '../../../components/ui/buttons/RunPermissionButton';
@@ -234,6 +242,34 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
         fetchTitle();
     }, [action, pendingApproval, itemTitle, itemTitleKey, hasAssociatedItem, setItemTitle]);
+
+    // A created note exports as it is now in Zotero, with later edits by the
+    // agent or the user, from the same header as its Open link.
+    const noteExportTarget = toolName === 'create_note' && action ? getCreatedNoteExportTarget(action) : null;
+    const [isExportingNote, setIsExportingNote] = useState(false);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
+    const jotaiStore = useStore();
+    const handleExportNote = useCallback(async (format: FileExportFormat) => {
+        if (isExportingNote || !noteExportTarget) return;
+        setIsExportingNote(true);
+        try {
+            const pendingChanges = countPendingNoteEdits(jotaiStore, noteExportTarget);
+            await exportWithFeedback(
+                format,
+                () => exportNoteToFile({
+                    format,
+                    surface: 'note_card',
+                    note: noteExportTarget,
+                    createdBy: { runId, toolCallId: toolcallId },
+                    pendingChanges,
+                }),
+                addPopupMessage,
+                { reveal: revealExportedFile, open: openExportedFile },
+            );
+        } finally {
+            setIsExportingNote(false);
+        }
+    }, [isExportingNote, noteExportTarget, runId, toolcallId, addPopupMessage, jotaiStore]);
 
     const handleApprovalRecovered = useCallback(() => {
         setIsProcessingApproval(false);
@@ -674,6 +710,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     className="display-flex flex-row items-center gap-25 mr-2 mt-015"
                     style={{ visibility: !(isAwaitingApproval || status === 'pending') ? 'visible' : 'hidden' }}
                 >
+                    {noteExportTarget && !isProcessing && (isExportingNote ? (
+                        <IconButton
+                            icon={DownloadIcon}
+                            variant="ghost-secondary"
+                            iconClassName="scale-10"
+                            onClick={() => {}}
+                            loading
+                            ariaLabel="Exporting"
+                        />
+                    ) : (
+                        <MenuButton
+                            icon={DownloadIcon}
+                            variant="ghost-secondary"
+                            iconClassName="scale-10"
+                            menuItems={fileExportFormatMenuItems(handleExportNote)}
+                            tooltipContent="Export"
+                            ariaLabel="Export"
+                        />
+                    ))}
                     <Tooltip content="Expand" showArrow singleLine>
                         <IconButton
                             icon={ChevronIcon}

@@ -39,13 +39,13 @@ describe('exportNoteToFile', () => {
         exporter.exportNote.mockResolvedValue(saved(['1 image left out.']));
 
         const result = await exportNoteToFile({
-            runId: 'run-1', toolCallId: 'tc-1', format: 'docx',
+            createdBy: { runId: 'run-1', toolCallId: 'tc-1' }, surface: 'run_artifacts', format: 'docx',
             note: { library_ref: 'u', library_id: 1, zotero_key: 'NOTEKEY1' },
         });
 
         expect(exporter.exportNote).toHaveBeenCalledWith(
             { note: { key: 'NOTEKEY1', libraryRef: 'u', libraryID: 1 }, format: 'docx' },
-            { windowId: 'win-1' },
+            { windowId: 'win-1', surface: 'run_artifacts', fallsBackWhenNoteMissing: true },
         );
         expect(exporter.run).not.toHaveBeenCalled();
         expect(result).toMatchObject({ status: 'saved', fileName: 'Review.docx', warnings: ['1 image left out.'] });
@@ -56,18 +56,20 @@ describe('exportNoteToFile', () => {
         exporter.run.mockResolvedValue(saved());
 
         const result = await exportNoteToFile({
-            runId: 'run-1', toolCallId: 'tc-1', format: 'pdf', note: { zotero_key: 'NOTEKEY1' },
+            createdBy: { runId: 'run-1', toolCallId: 'tc-1' }, surface: 'run_artifacts', format: 'pdf', note: { zotero_key: 'NOTEKEY1' },
         });
 
         expect(buildNoteExportSource).toHaveBeenCalledWith({ id: 'run-1' }, 'tc-1');
-        expect(exporter.run).toHaveBeenCalledWith({ source: { kind: 'note', title: 'As written' }, format: 'pdf' }, { windowId: 'win-1' });
+        expect(exporter.run).toHaveBeenCalledWith({ source: { kind: 'note', title: 'As written' }, format: 'pdf' }, { windowId: 'win-1', surface: 'run_artifacts' });
         expect(result).toMatchObject({ status: 'saved', warnings: ['The note is no longer in your library. Exported the version Beaver wrote.'] });
     });
 
     it('exports the version the agent wrote when the note was never created', async () => {
         exporter.run.mockResolvedValue(saved());
 
-        const result = await exportNoteToFile({ runId: 'run-1', toolCallId: 'tc-1', format: 'markdown', note: null });
+        const result = await exportNoteToFile({
+            createdBy: { runId: 'run-1', toolCallId: 'tc-1' }, surface: 'run_artifacts', format: 'markdown', note: null,
+        });
 
         expect(exporter.exportNote).not.toHaveBeenCalled();
         expect(result).toMatchObject({ warnings: ['The note is not in your library. Exported the version Beaver wrote.'] });
@@ -77,7 +79,7 @@ describe('exportNoteToFile', () => {
         exporter.exportNote.mockRejectedValue(new Error('disk full'));
 
         await expect(exportNoteToFile({
-            runId: 'run-1', toolCallId: 'tc-1', format: 'docx', note: { zotero_key: 'NOTEKEY1' },
+            createdBy: { runId: 'run-1', toolCallId: 'tc-1' }, surface: 'run_artifacts', format: 'docx', note: { zotero_key: 'NOTEKEY1' },
         })).rejects.toThrow('disk full');
         expect(exporter.run).not.toHaveBeenCalled();
     });
@@ -86,9 +88,33 @@ describe('exportNoteToFile', () => {
         exporter.exportNote.mockResolvedValue({ status: 'canceled' });
 
         const result = await exportNoteToFile({
-            runId: 'run-1', toolCallId: 'tc-1', format: 'docx', note: { zotero_key: 'NOTEKEY1' },
+            createdBy: { runId: 'run-1', toolCallId: 'tc-1' }, surface: 'run_artifacts', format: 'docx', note: { zotero_key: 'NOTEKEY1' },
         });
 
         expect(result).toEqual({ status: 'canceled' });
+    });
+
+    it('exports an edited note and says which changes are not applied yet', async () => {
+        exporter.exportNote.mockResolvedValue(saved());
+
+        const result = await exportNoteToFile({
+            surface: 'run_artifacts', format: 'docx', pendingChanges: 2,
+            note: { library_ref: 'u', zotero_key: 'NOTEKEY1' },
+        });
+
+        expect(result).toMatchObject({
+            status: 'saved',
+            warnings: ['2 changes Beaver proposed are not applied yet. Exported the note as it is now.'],
+        });
+    });
+
+    it('reports an edited note that is gone instead of falling back', async () => {
+        exporter.exportNote.mockRejectedValue(Object.assign(new Error('The note could not be found.'), { code: 'note_not_found' }));
+
+        await expect(exportNoteToFile({
+            surface: 'run_artifacts', format: 'docx', note: { library_ref: 'u', zotero_key: 'NOTEKEY1' },
+        })).rejects.toThrow('The note could not be found.');
+        expect(exporter.run).not.toHaveBeenCalled();
+        expect(buildNoteExportSource).not.toHaveBeenCalled();
     });
 });
