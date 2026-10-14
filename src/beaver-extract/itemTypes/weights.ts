@@ -9,7 +9,7 @@ export const ITEM_TYPE_MODEL: ItemTypeModel = {
     featureSet: "item-type",
     featureVersion: 2,
     classes: ["caption","footnote","furniture","heading","reference","text"],
-    publicKind: {"caption":"text","footnote":"footnote","furniture":"margin","heading":"section_header","reference":"reference","text":"text"},
+    publicKind: {"caption":"caption","footnote":"footnote","furniture":"margin","heading":"section_header","reference":"reference","text":"text"},
     context: {"neighbors":[-2,-1,1,2],"style":"font and size (rounded to 0.5) covering most characters of the unit's lines","features":"own probabilities; probabilities of units at the neighbor offsets in document order (NaN past the document's ends); page mean; mean over the document's units of the same style; log1p(number of units of that style)"},
     stage1: {
         format: "bxm-trees-packed-v1",

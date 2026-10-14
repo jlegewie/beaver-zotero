@@ -2,9 +2,9 @@
  * The item-type model as an item pass: classifies every draft item of the
  * document (`classifyItemTypes`) and relabels it with its class's draft kind
  * (`ItemTypeModel.publicKind`): headings become `section_header`, page-bottom
- * notes `footnote`, reference-list entries `reference`, page furniture the
- * margin filter let through `margin` (internal, like the margin filter's
- * items), and captions and everything else `text`.
+ * notes `footnote`, figure and table captions `caption`, reference-list
+ * entries `reference`, page furniture the margin filter let through `margin`
+ * (internal, like the margin filter's items), and everything else `text`.
  *
  * It runs first in step 3. The model decides which items are references;
  * the reference pass that follows (`references/pass.ts`) only splits and

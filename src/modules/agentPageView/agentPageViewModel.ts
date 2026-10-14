@@ -7,11 +7,13 @@
  * continuation merging, margin items dropped):
  *
  * - An item with sentences is seen as its sentences: `<s4.12>…</s4.12>`. The
- *   item id itself is not shown, except for tables, whose row sentences are
- *   nested inside `<table4.1>…</table4.1>`.
+ *   item id itself is not shown, except for tables and captions, whose
+ *   sentences are nested inside `<table4.1>…</table4.1>` and
+ *   `<caption4.1>…</caption4.1>`.
  * - An item without sentences is seen as one tag around its text: headings,
- *   unsplit paragraphs, equations (`<eq4.1>`) and figures (`<fig4.1>` around
- *   the label text found inside the figure, empty when there is none).
+ *   unsplit paragraphs and captions, equations (`<eq4.1>`) and figures
+ *   (`<fig4.1>` around the label text found inside the figure, empty when
+ *   there is none).
  * - Margin items (running heads, page numbers) never reach the model.
  *
  * Rects stay in the public extraction frame (top-left origin, `page.width` ×
@@ -28,6 +30,7 @@ import type {
 
 export type AgentViewBoxKind =
     | 'table'
+    | 'caption'
     | 'figure'
     | 'equation'
     | 'table_row'
@@ -64,6 +67,7 @@ export interface ViewPage {
 
 export interface AgentViewPageCounts {
     tables: number;
+    captions: number;
     figures: number;
     equations: number;
     sentences: number;
@@ -80,9 +84,17 @@ export interface AgentViewPage extends ViewPage {
 
 const REGION_BOX_KIND: Partial<Record<DocumentItemKind, AgentViewBoxKind>> = {
     table: 'table',
+    caption: 'caption',
     picture: 'figure',
     formula: 'equation',
 };
+
+/** Kinds whose sentences the model sees nested inside the item's own tag. */
+type NestingKind = 'table' | 'caption';
+
+function nestsSentences(kind: DocumentItemKind): kind is NestingKind {
+    return kind === 'table' || kind === 'caption';
+}
 
 /** Escape text the way the backend does before tagging it. */
 function escapeXml(text: string): string {
@@ -95,6 +107,7 @@ function tag(id: string, text: string): string {
 
 const KIND_LABELS: Partial<Record<AgentViewBoxKind, string>> = {
     table: 'Table',
+    caption: 'Caption',
     figure: 'Figure',
     equation: 'Equation',
     table_row: 'Table row',
@@ -118,6 +131,7 @@ function itemSentences(item: DocumentItem): Sentence[] {
 function emptyCounts(): AgentViewPageCounts {
     return {
         tables: 0,
+        captions: 0,
         figures: 0,
         equations: 0,
         sentences: 0,
@@ -140,31 +154,36 @@ export function buildAgentViewPage(page: StructuredPage): AgentViewPage {
     for (const item of items) {
         const sentences = itemSentences(item);
 
-        if (item.kind === 'table' && sentences.length > 0) {
-            const rows = sentences.map((sentence) => `  ${tag(sentence.id, sentence.text)}`);
+        if (nestsSentences(item.kind) && sentences.length > 0) {
+            const isTable = item.kind === 'table';
+            const nested = sentences.map((sentence) => `  ${tag(sentence.id, sentence.text)}`);
             boxes.push({
-                kind: 'table',
+                kind: item.kind,
                 id: item.id,
                 rects: [item.bbox],
-                title: citeTitle('table', item.id),
-                text: [`<${item.id}>`, ...rows, `</${item.id}>`].join('\n'),
+                title: citeTitle(item.kind, item.id),
+                text: [`<${item.id}>`, ...nested, `</${item.id}>`].join('\n'),
                 shade: 0,
             });
-            counts.tables++;
+            if (isTable) counts.tables++;
+            else counts.captions++;
             sentences.forEach((sentence, rowIndex) => {
                 if (sentence.bboxes.length === 0) {
                     counts.unlocatedSentences++;
                     return;
                 }
+                // A table row is one sentence; caption sentences read like prose.
+                const kind = isTable ? 'table_row' : 'sentence';
                 boxes.push({
-                    kind: 'table_row',
+                    kind,
                     id: sentence.id,
                     rects: sentence.bboxes,
-                    title: citeTitle('table_row', sentence.id),
+                    title: citeTitle(kind, sentence.id),
                     text: tag(sentence.id, sentence.text),
-                    shade: (rowIndex % 2) as 0 | 1,
+                    shade: (isTable ? rowIndex % 2 : sentenceShade++ % 2) as 0 | 1,
                 });
-                counts.tableRows++;
+                if (isTable) counts.tableRows++;
+                else counts.sentences++;
             });
             continue;
         }
@@ -198,6 +217,7 @@ export function buildAgentViewPage(page: StructuredPage): AgentViewPage {
             shade: 0,
         });
         if (kind === 'table') counts.tables++;
+        else if (kind === 'caption') counts.captions++;
         else if (kind === 'figure') counts.figures++;
         else if (kind === 'equation') counts.equations++;
         else counts.items++;

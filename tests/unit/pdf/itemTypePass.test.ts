@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { extractPdf, itemsExport } from "../../../src/beaver-extract/node/api";
 import { createItemPasses } from "../../../src/beaver-extract/pipeline/structured";
 import { pdfExtractionPreset, type StructuredExtractResult } from "../../../src/beaver-extract/schema";
+import { syntheticFigurePdf } from "../../helpers/syntheticRegionPdf";
 
 const PDF = join(__dirname, "../../fixtures/pdfs/extract-public/_shared/d86a26bf17a0e19194abe41f10b32b4cf86e8caddf3c854773802e5a76b607cf.pdf");
 
@@ -26,9 +27,8 @@ describe("item-type pass", () => {
     it("relabels items", async () => {
         const result = await structured();
         const kinds = new Set(result.document.pages.flatMap((page) => page.items.map((item) => item.kind)));
-        // Margin items stay internal; captions are emitted as text.
+        // Margin items stay internal.
         expect(kinds.has("margin")).toBe(false);
-        expect(kinds.has("caption")).toBe(false);
         // Footnotes carry sentences like text.
         for (const page of result.document.pages) {
             for (const item of page.items) {
@@ -47,5 +47,11 @@ describe("item-type pass", () => {
         // Units keep the paragraph detector's kinds.
         const unitKinds = new Set(row.pages.flatMap((page) => page.units.map((unit) => unit.kind)));
         for (const kind of unitKinds) expect(["text", "section_header"]).toContain(kind);
+    }, 60_000);
+
+    it("exports caption items, which come from draft items like text", async () => {
+        const row = await itemsExport({ pdfData: syntheticFigurePdf(), task: "item-type", bboxPrecision: 1 });
+        const kinds = row.pages.flatMap((page) => page.items.map((item) => item.kind));
+        expect(kinds.filter((kind) => kind === "caption")).toHaveLength(2);
     }, 60_000);
 });

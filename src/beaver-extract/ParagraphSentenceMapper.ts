@@ -29,6 +29,7 @@
 
 import type {
     BoundingBox,
+    CaptionItem,
     DegradationNote,
     DegradationSummary,
     DocItem,
@@ -724,7 +725,7 @@ function itemFromDraft(
     pageIndex: number,
     index: number,
     lines: ItemLine[],
-): TextItem | SectionHeaderItem | ReferenceItem | FootnoteItem | MarginItem {
+): TextItem | SectionHeaderItem | CaptionItem | ReferenceItem | FootnoteItem | MarginItem {
     const text = publicItemText(item);
     const base: Omit<TextBearingItem, "kind"> = {
         id: `p${pageIndex}:i${index}`,
@@ -742,6 +743,8 @@ function itemFromDraft(
             return { ...base, kind: "section_header", level: 1 };
         case "text":
             return { ...base, kind: "text" };
+        case "caption":
+            return { ...base, kind: "caption" };
         case "footnote":
             return { ...base, kind: "footnote" };
         case "margin":

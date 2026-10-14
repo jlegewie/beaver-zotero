@@ -19,7 +19,7 @@ const proseText = (items: Awaited<ReturnType<typeof extract>>) =>
     items.filter((i) => i.kind === "text").map((i) => ("text" in i ? i.text : "")).join("\n");
 
 describe("regions in structured extraction", () => {
-    it("emits figures with their labels in schema 5 and keeps captions as prose", async () => {
+    it("emits figures with their labels and captions as caption items in schema 5", async () => {
         const items = await extract("5");
         const pictures = items.filter((i) => i.kind === "picture");
         expect(pictures.map((p) => p.id)).toEqual(["fig1.1", "fig1.2"]);
@@ -29,12 +29,17 @@ describe("regions in structured extraction", () => {
         const prose = proseText(items);
         expect(prose).not.toContain("Time in minutes");
         expect(prose).not.toMatch(/\b0 20 40\b/);
-        expect(prose).toContain("Figure 1. A synthetic chart");
-        expect(prose).toContain("Figure 2. A synthetic photo.");
+        expect(prose).not.toContain("Figure 1.");
+        const captions = items.filter((i) => i.kind === "caption");
+        expect(captions.map((c) => c.id)).toEqual(["caption1.1", "caption1.2"]);
+        expect(captions[0].text).toContain("Figure 1. A synthetic chart");
+        expect(captions[1].text).toContain("Figure 2. A synthetic photo.");
+        // Captions carry sentences, numbered with the page's other sentences.
+        for (const caption of captions) expect(caption.sentences?.[0]?.id).toMatch(/^s1\.\d+$/);
         // Each figure comes right before its caption.
-        const order = items.map((i) => (i.kind === "picture" ? i.id : "text" in i ? i.text.slice(0, 8) : i.kind));
-        expect(order[order.indexOf("fig1.1") + 1]).toBe("Figure 1");
-        expect(order[order.indexOf("fig1.2") + 1]).toBe("Figure 2");
+        const order = items.map((i) => i.id);
+        expect(order[order.indexOf("fig1.1") + 1]).toBe("caption1.1");
+        expect(order[order.indexOf("fig1.2") + 1]).toBe("caption1.2");
     });
 
     it.each([

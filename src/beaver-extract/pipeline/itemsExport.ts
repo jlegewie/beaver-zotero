@@ -179,7 +179,7 @@ export interface ItemsExportRow {
 }
 
 /** Published kinds made from draft items (`DraftItemKind` without `margin`). */
-const DRAFT_KINDS: ReadonlySet<DocItem["kind"]> = new Set(["text", "section_header", "reference", "footnote"] satisfies DraftItemKind[]);
+const DRAFT_KINDS: ReadonlySet<DocItem["kind"]> = new Set(["text", "section_header", "caption", "reference", "footnote"] satisfies DraftItemKind[]);
 
 /** Units of each step-2 line and item of a page. */
 interface PageUnits {
