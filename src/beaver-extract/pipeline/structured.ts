@@ -521,6 +521,9 @@ export function project(
         document: {
             pageCount: result.analysis.pageCount,
             pageLabels: pageLabelsToStringKeys(result.pageLabels),
+            ...(result.derivedPageLabels
+                ? { derivedPageLabels: pageLabelsToStringKeys(result.derivedPageLabels) }
+                : {}),
             bboxOrigin: "top-left",
             bboxPrecision,
             pages,

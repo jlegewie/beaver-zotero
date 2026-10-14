@@ -10,6 +10,11 @@ import { describe, it, expect, test } from "vitest";
 import {
     MarginFilter,
     getEffectiveRepeatThreshold,
+    isPageCounter,
+    normalizeDigits,
+    pageNumberObservations,
+    parseCounter,
+    parsePrefixedFolio,
 } from "../../../src/beaver-extract/MarginFilter";
 import {
     bboxFromXYWH,
@@ -1993,6 +1998,228 @@ describe("smart removal on word-split rows", () => {
         }
         const removal = analyze(pages);
         expect(keptText(pages[3], removal)).not.toContain("Working Paper");
+    });
+});
+
+describe("pageNumberObservations — margin numerals that may be printed page numbers", () => {
+    function analysisOf(entries: { pageIndex: number; text: string; position?: MarginPosition; x?: number; width?: number; rowEndNumber?: boolean; lineCount?: number }[]): MarginAnalysis {
+        const elements = new Map<MarginPosition, MarginElement[]>([
+            ["top", []], ["bottom", []], ["left", []], ["right", []],
+        ]);
+        for (const { pageIndex, text, position = "top", x = 100, width, rowEndNumber, lineCount } of entries) {
+            const line = makeLine(text, x, position === "bottom" ? PAGE_H - 30 : 30);
+            const bbox = width ? bboxFromXYWH(x, line.bbox.t, width, 10, "top-left") : line.bbox;
+            elements.get(position)!.push({
+                text, position, bbox, pageIndex, line,
+                ...(rowEndNumber ? { rowEndNumber } : {}),
+                ...(lineCount ? { lineCount } : {}),
+            });
+        }
+        const counts = {
+            top: elements.get("top")!.length,
+            bottom: elements.get("bottom")!.length,
+            left: elements.get("left")!.length,
+            right: elements.get("right")!.length,
+        };
+        return { elements, counts };
+    }
+    /** Observations after removal, with `pages` for footnote markers. */
+    const observe = (analysis: MarginAnalysis, pages: readonly RawPageData[] = []) =>
+        pageNumberObservations(
+            analysis,
+            MarginFilter.identifyElementsToRemove(analysis, 3, true).removalsByPage,
+            new Map(pages.map((page) => [page.pageIndex, page])),
+        );
+    const values = (out: ReturnType<typeof observe>) =>
+        out.map((o) => [o.pageIndex, o.value, o.edge ?? false]);
+
+    it("reports removed page numbers with their values", () => {
+        const out = observe(oneTextPerPage(["1", "2", "3", "4"], "bottom"));
+        expect(values(out)).toEqual([[0, 1, false], [1, 2, false], [2, 3, false], [3, 4, false]]);
+    });
+
+    it("reports bare numbers the repeat pass removed", () => {
+        // A numbering that restarts: "1".."3" recur on enough pages to be
+        // removed as repeats before the page-number passes see them.
+        const texts = ["1", "2", "3", "1", "2", "3", "1", "2", "3"];
+        const out = observe(oneTextPerPage(texts, "bottom"));
+        expect(out.map((o) => o.value)).toEqual([1, 2, 3, 1, 2, 3, 1, 2, 3]);
+    });
+
+    it("reports the page number at either end of a running head as an edge word", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "644 R. Allen and A. Vignoles" },
+            { pageIndex: 1, text: "Index of school segregation 645" },
+        ]);
+        const out = observe(analysis);
+        expect(values(out)).toEqual([[0, 644, true], [1, 645, true]]);
+    });
+
+    it("reads letter-spaced digits as one number and drops their row-end digits", () => {
+        const entries = [0, 1, 2, 3].flatMap((pageIndex) => {
+            const digits = String(21 + pageIndex).split("");
+            return [
+                { pageIndex, text: digits.join(" "), lineCount: 2, width: 14 },
+                { pageIndex, text: digits[1], rowEndNumber: true },
+            ];
+        });
+        const out = observe(analysisOf(entries));
+        expect(values(out)).toEqual([[0, 21, true], [1, 22, true], [2, 23, true], [3, 24, true]]);
+    });
+
+    it("keeps a removed page number's evidence when the same number is also an edge word", () => {
+        // A footer row ("1 Journal of Things") and its standalone number, which
+        // the page-number sequence removes.
+        const entries = [0, 1, 2, 3].flatMap((pageIndex) => [
+            { pageIndex, text: `${pageIndex + 1} Journal of Things`, position: "bottom" as const, x: 100, lineCount: 2 },
+            { pageIndex, text: String(pageIndex + 1), position: "bottom" as const, x: 300 },
+        ]);
+        const out = observe(analysisOf(entries));
+        expect(values(out)).toEqual([[0, 1, false], [1, 2, false], [2, 3, false], [3, 4, false]]);
+    });
+
+    it("reports page numbers set between dashes without removing them", () => {
+        const analysis = oneTextPerPage(["- 1 -", "-2-", "— 3 —"], "bottom");
+        expect(observe(analysis).map((o) => o.value)).toEqual([1, 2, 3]);
+        const removal = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(removal.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("reports prefixed folios at a row's end with their prefix", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "Cell Reports 40, 111280, August 23, 2022 e1", position: "bottom" },
+            { pageIndex: 1, text: "S2 | Nature | Supplement", position: "bottom" },
+            { pageIndex: 2, text: "Phys. Rev. B 96, 014105 (2017) 014105-3" },
+            { pageIndex: 3, text: "212:4 F. Trujillo-Romero" },
+        ]);
+        const out = observe(analysis);
+        expect(out.map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
+            [0, "e", 1], [1, "S", 2], [2, "014105-", 3], [3, "212:", 4],
+        ]);
+    });
+
+    it("does not read a year and month as a prefixed folio", () => {
+        for (const pad of [true, false]) {
+            const analysis = analysisOf([0, 1, 2].map((pageIndex) => ({
+                pageIndex,
+                text: `Issued: 2024-${pad ? "0" : ""}${pageIndex + 1}`,
+                position: "bottom" as const,
+            })));
+            const out = observe(analysis);
+            expect(out.filter((o) => o.prefix)).toEqual([]);
+        }
+        expect(parsePrefixedFolio("2024-3")).toBeNull();
+        expect(parsePrefixedFolio("1043-5")).toEqual({ value: 5, prefix: "1043-" });
+    });
+
+    it("reads a prefixed folio after a bar but not after a caption's word", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "Supplementary Information | S1", position: "bottom" },
+            { pageIndex: 1, text: "see Figure S2", position: "bottom" },
+        ]);
+        const out = observe(analysis);
+        expect(out.map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
+            [0, "S", 1],
+        ]);
+    });
+
+    it("splits a header's words at U+FFFD", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "x�ACKNOWLEDGMENTS" },
+            { pageIndex: 1, text: "-�2�-", position: "bottom" },
+        ]);
+        const out = observe(analysis);
+        expect(values(out)).toEqual([[0, 10, true], [1, 2, true]]);
+    });
+
+    it("reads letter-spaced digits with wider gaps as one number", () => {
+        const entries = [0, 1, 2, 3].map((pageIndex) => (
+            { pageIndex, text: String(21 + pageIndex).split("").join("  "), lineCount: 2, width: 14 }
+        ));
+        const out = observe(analysisOf(entries));
+        expect(out.map((o) => o.value)).toEqual([21, 22, 23, 24]);
+    });
+
+    it("does not join the same digit printed at both ends of a row", () => {
+        const entries = [4, 5, 6].map((n, pageIndex) => (
+            { pageIndex, text: `${n} ${n}`, lineCount: 2, width: 400 }
+        ));
+        const out = observe(analysisOf(entries));
+        expect(out.some((o) => o.value > 10)).toBe(false);
+    });
+
+    it("counts a numeral printed twice on a page", () => {
+        // A fixed volume number 16 in every footer, and page numbers 16-17.
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "16", position: "bottom", x: 60 },
+            { pageIndex: 0, text: "16", position: "bottom", x: 500 },
+            { pageIndex: 1, text: "16", position: "bottom", x: 60 },
+            { pageIndex: 1, text: "17", position: "bottom", x: 500 },
+            { pageIndex: 2, text: "16 Journal of Things 16", position: "bottom", lineCount: 3 },
+        ]);
+        const out = observe(analysis);
+        const counts = out.filter((o) => o.text === "16").map((o) => [o.pageIndex, o.occurrences ?? 1]);
+        expect(counts).toEqual([[0, 2], [1, 1], [2, 2]]);
+    });
+
+    it("counts the characters of broken-up text once", () => {
+        const analysis = analysisOf([{ pageIndex: 0, text: "2 1 0 7 i 2", position: "bottom", lineCount: 6 }]);
+        const out = observe(analysis);
+        expect(out.map((o) => [o.text, o.occurrences ?? 1])).toEqual([["2", 1]]);
+    });
+
+    it("does not report footnote markers as page numbers", () => {
+        // Each page's footnote area opens with a small marker beside larger
+        // text: "1", "2", "3" step one per page like page numbers.
+        const sized = (text: string, x: number, size: number): RawLine => {
+            const line = makeLine(text, x, PAGE_H - 40);
+            return { ...line, bbox: bboxFromXYWH(x, PAGE_H - 40, Math.max(1, text.length * 0.6 * size), size, "top-left"), font: { ...line.font, size } };
+        };
+        const pages: RawPageData[] = [0, 1, 2, 3].map((pageIndex) => ({
+            pageIndex,
+            pageNumber: pageIndex + 1,
+            width: PAGE_W,
+            height: PAGE_H,
+            viewBox: [0, 0, PAGE_W, PAGE_H],
+            rotation: 0,
+            blocks: [{
+                type: "text",
+                bbox: bboxFromXYWH(0, 0, PAGE_W, PAGE_H, "top-left"),
+                lines: [sized(String(pageIndex + 1), 100, 5), sized("See the appendix for details.", 104, 9)],
+            }],
+        }));
+        const analysis = MarginFilter.collectMarginElements(pages, { left: 60, top: 80, right: 60, bottom: 80 });
+        expect(observe(analysis, pages)).toEqual([]);
+    });
+});
+
+describe("normalizeDigits", () => {
+    it("returns ASCII text as it is", () => {
+        const text = "Page 12 of 30 | S1 - 7 -";
+        expect(normalizeDigits(text)).toBe(text);
+    });
+
+    it("folds compatibility and non-Latin digits to ASCII", () => {
+        expect(normalizeDigits("\uFF11\uFF12")).toBe("12");
+        expect(normalizeDigits("\u0663\u0664")).toBe("34");
+        expect(normalizeDigits("Seite \u0967\u0968")).toBe("Seite 12");
+        expect(normalizeDigits("p. \u00B2")).toBe("p. 2");
+    });
+});
+
+describe("parseCounter — page counters", () => {
+    it("reads the page and total of bare and page-word counters", () => {
+        expect(parseCounter("3 of 12")).toEqual({ page: 3, total: 12 });
+        expect(parseCounter("3/12")).toEqual({ page: 3, total: 12 });
+        expect(parseCounter("Page 3 of 12")).toEqual({ page: 3, total: 12 });
+        expect(parseCounter("Seite \uFF13 von \uFF13")).toEqual({ page: 3, total: 3 });
+        expect(parseCounter("Page 3")).toBeNull();
+        expect(parseCounter("2024-05")).toBeNull();
+    });
+
+    it("counts a bare counter only when the page is within the total", () => {
+        expect(isPageCounter("3 из 12")).toBe(true);
+        expect(isPageCounter("12 of 3")).toBe(false);
     });
 });
 

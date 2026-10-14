@@ -953,6 +953,11 @@ export interface InternalExtractionResult {
     fullText: string;
     /** Page labels for all pages in the document (0-indexed → label string). Only non-empty labels included. */
     pageLabels?: Record<number, string>;
+    /**
+     * Page numbers printed in the margins (0-indexed → label), from
+     * `derivePageLabels`. Set by full-document structured extraction only.
+     */
+    derivedPageLabels?: Record<number, string>;
     /** Extraction metadata */
     metadata: {
         extractedAt: string;

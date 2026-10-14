@@ -127,11 +127,16 @@ export interface PdfExtractionPreset {
      * Needs region weights trained on them (`REGION_GRID_FEATURES`).
      */
     gridTableCandidates: boolean;
+    /**
+     * Structured extraction reports the page numbers printed in the margins
+     * as `document.derivedPageLabels` (see `derivedPageLabels.ts`).
+     */
+    derivedPageLabels: boolean;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, exclusiveColumnLines: false, lineJoins: false, noteMarkers: false, learnedBoundaries: false, tableRowEvidence: false, gridTableCandidates: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, exclusiveColumnLines: true, lineJoins: true, noteMarkers: true, learnedBoundaries: true, tableRowEvidence: true, gridTableCandidates: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, exclusiveColumnLines: false, lineJoins: false, noteMarkers: false, learnedBoundaries: false, tableRowEvidence: false, gridTableCandidates: false, derivedPageLabels: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, exclusiveColumnLines: true, lineJoins: true, noteMarkers: true, learnedBoundaries: true, tableRowEvidence: true, gridTableCandidates: true, derivedPageLabels: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */

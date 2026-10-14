@@ -18,7 +18,8 @@
  */
 
 import { DocumentAnalyzer, type RawPageProvider } from "../DocumentAnalyzer";
-import { MarginFilter } from "../MarginFilter";
+import { MarginFilter, pageNumberObservations } from "../MarginFilter";
+import { derivePageLabels, pageEdgeRowObservations } from "../derivedPageLabels";
 import { PageExtractor } from "../PageExtractor";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
@@ -425,6 +426,7 @@ export function runExtractFromIndices(
     observers: StructuredRunObservers = {},
     regionSettings: RegionItemSettings = {},
     gridCandidates = false,
+    derivePrintedPageLabels = false,
 ): InternalExtractionResult {
     setAnalyzerLogging(!!opts.analyzerLogging);
     try {
@@ -638,11 +640,29 @@ export function runExtractFromIndices(
     const recordedEngine: "block" | "paragraph" | "structured" = engine;
 
     const totalMs = performance.now() - tStart;
+    // Printed page numbers need the margins of every page, which only
+    // full-document structured extraction analyzes.
+    const derivedPageLabels = derivePrintedPageLabels
+        && engine === "structured"
+        && analysisPageByIndex.size === pageCount
+        ? derivePageLabels(
+            [
+                ...pageNumberObservations(marginAnalysis, marginRemoval.removalsByPage, analysisPageByIndex),
+                ...pageEdgeRowObservations(analysisPages, undefined, opts.marginZone),
+            ],
+            pageCount,
+            Array.from({ length: pageCount }, (_, index) => analysisPageByIndex.get(index)),
+        )
+        : undefined;
+
     const baseResult: InternalExtractionResult = {
         pages,
         analysis,
         fullText,
         pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
+        ...(derivedPageLabels && Object.keys(derivedPageLabels).length > 0
+            ? { derivedPageLabels }
+            : {}),
         metadata: {
             extractedAt: new Date().toISOString(),
             version: SCHEMA_VERSION,
@@ -1119,6 +1139,7 @@ export async function opExtract(
             {},
             { tableRowEvidence: preset.tableRowEvidence },
             preset.gridTableCandidates,
+            preset.derivedPageLabels,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are
@@ -1249,6 +1270,7 @@ async function withStructuredRun<T>(
             observers,
             { tableRowEvidence: preset.tableRowEvidence },
             preset.gridTableCandidates,
+            preset.derivedPageLabels,
         );
         if (internal.metadata.timings) {
             internal.metadata.timings.docOpenMs = docOpenMs;
