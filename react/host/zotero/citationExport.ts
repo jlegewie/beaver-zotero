@@ -1,7 +1,7 @@
 import {
     firstPageNumber,
     formatCitationPages,
-    normalizePageLocator,
+    normalizePageRange,
     translatePageNumberToLabel,
 } from '../../../src/utils/pageLabelTranslation';
 import { buildNoteCitation, encodeNoteCitationData } from '../../../src/utils/zoteroUtils';
@@ -74,12 +74,12 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
                 ? { kind: 'page', value: page, raw: `page${page}` }
                 : undefined, navPage) };
         }
-        // Native citations store a single page label, the same rule note writes
-        // use: Zotero opens a citation by matching its locator exactly against
-        // the PDF's page labels, so a range would never navigate. Metadata pages
-        // are physical pages; a requested locator is a physical page too.
+        // The same rule note writes use: a page range or list the model wrote
+        // is kept, translated to labels; a structural locator (a sentence,
+        // paragraph, …) cites the page it starts on. Metadata pages and a
+        // requested locator are both physical pages.
         const startPage = pages.length > 0 ? Math.min(...pages) : undefined;
-        const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
+        const requestedPage = requestedRef ? normalizePageRange(getPageLocator(requestedRef) ?? '') || undefined : undefined;
         // Labels come from the active render store (passed in) so note export
         // respects the isolated store populated by renderToHTML.
         const loadedLabels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
@@ -88,9 +88,9 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
         // citation carries no page and the private metadata keeps the locator.
         let locator: string | undefined;
         if (citesPrintedPages(item)) {
-            locator = startPage
-                ? resolvePageLabelFromLabels(exportLabels, startPage)
-                : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, normalizePageLocator(requestedPage)) : undefined);
+            locator = requestedPage
+                ? translatePageNumberToLabelFromLabels(exportLabels, requestedPage)
+                : (startPage ? resolvePageLabelFromLabels(exportLabels, startPage) : undefined);
         }
         const meta = buildBeaverCitationMeta({
             loc: locatorToken(requestedRef?.loc),

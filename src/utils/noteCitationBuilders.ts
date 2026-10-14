@@ -10,7 +10,7 @@ import type { ExternalReference } from '@beaver/agent-core/types/externalReferen
 import { externalReferenceToCsl, externalReferenceUri } from '@beaver/agent-export/citations/externalCsl';
 import { isPdfDocument } from './attachmentFiles';
 import { buildBeaverCitationMeta, locatorToken, readBeaverCitationMeta } from './noteCitationMeta';
-import { normalizePageLocator } from './pageLabelTranslation';
+import { normalizePageRange } from './pageLabelTranslation';
 import { getBestPDFAttachment } from './zoteroItemHelpers';
 import {
     buildEmbeddedNoteCitation,
@@ -69,7 +69,7 @@ function embeddedWorkCitation(
     loc: Locator | undefined,
     options?: NoteCitationItemOptions,
 ): BuiltNoteCitation {
-    const page = loc?.kind === 'page' ? normalizePageLocator(loc.value) : undefined;
+    const page = loc?.kind === 'page' ? normalizePageRange(loc.value) || undefined : undefined;
     const meta = buildBeaverCitationMeta({ loc: locatorToken(loc), ext: work.ext, src: work.src, csl: work.csl });
     return buildEmbeddedNoteCitation(work.uri, work.csl, page, options, meta);
 }

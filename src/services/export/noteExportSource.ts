@@ -11,13 +11,18 @@
 import { restoreLocalHref } from '../../prosemirror/normalize';
 import type { PmNode } from '@beaver/agent-export/runtime';
 import { parseNoteHtml } from '../../prosemirror/parseNote';
+import { readBeaverCitationMeta } from '../../utils/noteCitationMeta';
 import { CREATED_FOOTER_TEXT_REGEX, stripBeaverEditFooter } from '../../utils/noteEditFooter';
 import type { NoteCitationCacheEntry } from './exportCitations';
 
 export interface NoteForExport {
     /** The note's ProseMirror document as JSON. */
     doc: PmNode;
-    /** Item metadata the note stores for its citations (`data-citation-items`). */
+    /**
+     * Item metadata the note stores for its citations: its
+     * `data-citation-items` entries first, then the metadata Beaver keeps on
+     * citations of works that are not in the library.
+     */
     citationItems: NoteCitationCacheEntry[];
 }
 
@@ -37,9 +42,12 @@ function parseCitationItems(attribute: string | undefined): NoteCitationCacheEnt
 /**
  * Record on each citation what the note shows for it: the text of each item
  * (`properties.beaverPreviewItems`) when the citation shows one piece per
- * item, and the whole citation (`properties.beaverPreview`).
+ * item, and the whole citation (`properties.beaverPreview`). Returns the CSL
+ * data Beaver stores on citations of works that are not in the library, as a
+ * fallback for a note whose `data-citation-items` lacks their entry.
  */
-function recordCitationPreviews(container: HTMLElement): void {
+function recordCitationPreviews(container: HTMLElement): NoteCitationCacheEntry[] {
+    const embedded: NoteCitationCacheEntry[] = [];
     for (const span of Array.from(container.querySelectorAll('span.citation[data-citation]')) as Element[]) {
         let citation: { citationItems?: unknown[]; properties?: Record<string, unknown> };
         try {
@@ -48,6 +56,14 @@ function recordCitationPreviews(container: HTMLElement): void {
             continue;
         }
         if (!citation || typeof citation !== 'object') continue;
+        for (const item of Array.isArray(citation.citationItems) ? citation.citationItems : []) {
+            // Malformed entries are skipped here, as the note parser skips them.
+            const csl = readBeaverCitationMeta(item)?.csl;
+            if (!csl) continue;
+            const uris = (item as { uris?: unknown }).uris;
+            const validUris = Array.isArray(uris) ? uris.filter((uri): uri is string => typeof uri === 'string' && !!uri) : [];
+            if (validUris.length > 0) embedded.push({ uris: validUris, itemData: csl });
+        }
         const pieces = (Array.from(span.querySelectorAll('.citation-item')) as Element[]).map(piece => piece.textContent?.trim() ?? '');
         const whole = span.textContent?.replace(/\s+/g, ' ').trim() ?? '';
         const count = Array.isArray(citation.citationItems) ? citation.citationItems.length : 0;
@@ -59,6 +75,7 @@ function recordCitationPreviews(container: HTMLElement): void {
         };
         span.setAttribute('data-citation', encodeURIComponent(JSON.stringify(citation)));
     }
+    return embedded;
 }
 
 /**
@@ -104,9 +121,11 @@ function removeBeaverBranding(container: HTMLElement): void {
 export function readNoteForExport(html: string): NoteForExport {
     // "Created by Beaver" lines (with their rules) are removed from the parsed DOM.
     const content = stripBeaverEditFooter(html);
+    let embedded: NoteCitationCacheEntry[] = [];
     const { doc, metadataAttributes } = parseNoteHtml(content, container => {
         removeBeaverBranding(container);
-        recordCitationPreviews(container);
+        embedded = recordCitationPreviews(container);
     });
-    return { doc, citationItems: parseCitationItems(metadataAttributes['data-citation-items']) };
+    // The note's stored metadata comes first: the resolver uses the first entry that matches.
+    return { doc, citationItems: [...parseCitationItems(metadataAttributes['data-citation-items']), ...embedded] };
 }

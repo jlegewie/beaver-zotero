@@ -132,10 +132,10 @@ describe('zoteroDocumentExport.renderCitation for native citations', () => {
         return JSON.parse(decodeURIComponent(result.citationData)).citationItems[0];
     }
 
-    it('stores the first page of a requested range, so the citation navigates', () => {
-        const ci = citationItem({ requestedRef: { loc: { kind: 'page', value: '12-14', raw: 'page12-14' } } });
+    it('stores a requested page range whole', () => {
+        const ci = citationItem({ requestedRef: { loc: { kind: 'page', value: '12-14', raw: 'page12-14' } }, pages: [12, 13, 14] });
 
-        expect(ci.locator).toBe('12');
+        expect(ci.locator).toBe('12-14');
         expect(ci).not.toHaveProperty('label');
     });
 

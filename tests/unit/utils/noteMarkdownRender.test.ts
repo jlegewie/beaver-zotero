@@ -64,3 +64,25 @@ describe('renderNoteMarkdownToHTML', () => {
         expect(html).toContain('Claim <citation id="u-AAAA1111"/>.');
     });
 });
+
+describe('renderNoteMarkdownToHTML footnotes', () => {
+    it('writes footnotes as endnotes a note can hold', async () => {
+        const html = await render('Claim.[^a] Another <citation id="u-AAAA1111"/>.[^2]\n\n[^a]: First *note* <citation id="u-BBBB2222" loc="page4"/>.\n[^2]: Second note.\n');
+
+        // References are plain superscript numbers.
+        expect(html).toContain('<p>Claim.<sup>1</sup> Another <citation id="u-AAAA1111"/>.<sup>2</sup></p>');
+        // Definitions are a visible list under a "Notes" heading, citations kept.
+        expect(html).toContain('<h2>Notes</h2>');
+        expect(html).toMatch(/<ol>\s*<li>\s*<p>First <em>note<\/em> <citation id="u-BBBB2222" loc="page4"\/>\.<\/p>\s*<\/li>\s*<li>\s*<p>Second note\.<\/p>/);
+        // No in-note anchors, back-references or the hidden chat heading.
+        expect(html).not.toMatch(/href="#|↩|data-footnote|Footnotes|sr-only|id="user-content/);
+    });
+
+    it('leaves no trailing space where several back-references were removed', async () => {
+        const html = await render('First[^a] and again[^a].\n\n[^a]: Note A para one.\n\n    Note A para two.\n');
+
+        expect(html).toContain('<p>First<sup>1</sup> and again<sup>1</sup>.</p>');
+        expect(html).toContain('<p>Note A para two.</p>');
+        expect(html).not.toMatch(/↩|href="#/);
+    });
+});

@@ -84,6 +84,37 @@ describe('readNoteForExport + parseNoteDoc', () => {
         expect(JSON.stringify(doc)).not.toContain('Beaver');
     });
 
+    it('falls back to the metadata Beaver stores on a citation of a work not in the library', () => {
+        const doi = 'https://doi.org/10.1000/xyz';
+        const csl = { id: doi, type: 'article-journal', title: 'External work' };
+        const cached = { id: doi, type: 'article-journal', title: 'Cached copy' };
+        const external = (cache: unknown[] | null) => (cache ? `<div data-citation-items="${encode(cache)}" data-schema-version="10">` : '<div data-schema-version="10">')
+            + `<p>${citation([{ uris: [doi], locator: '4', beaver: { v: 1, ext: 'W1', src: 'openalex', csl } }], '<span class="citation-item">Doe, 2020, p. 4</span>')}</p>`
+            + `<p>${citation([{ uris: [SMITH], beaver: { v: 2, csl } }], '<span class="citation-item">Smith, 2020</span>')}</p>`
+            + '</div>';
+
+        // Without a cache entry, the citation's own copy is used; metadata of another version is ignored.
+        expect(readNoteForExport(external(null)).citationItems).toEqual([{ uris: [doi], itemData: csl }]);
+        // The note's cache comes first, so the resolver prefers it.
+        expect(readNoteForExport(external([{ uris: [doi], itemData: cached }])).citationItems).toEqual([
+            { uris: [doi], itemData: cached },
+            { uris: [doi], itemData: csl },
+        ]);
+    });
+
+    it('skips malformed citation items and still reads the note', () => {
+        const doi = 'https://doi.org/10.1000/xyz';
+        const csl = { id: doi, type: 'article-journal', title: 'External work' };
+        const html = '<div data-schema-version="10">'
+            + `<p>Text ${citation([null as any, 'junk' as any, { uris: [doi], beaver: { v: 1, ext: 'W1', csl } }], '<span class="citation-item">Doe, 2020</span>')}</p>`
+            + '</div>';
+
+        const { doc, citationItems } = readNoteForExport(html);
+
+        expect(citationItems).toEqual([{ uris: [doi], itemData: csl }]);
+        expect(parseNoteDoc(doc, { liftTitle: false }).clusters[0].items.map(item => item.note?.uris)).toEqual([[doi]]);
+    });
+
     it('reads annotation notes: highlight text, its visible citation, image annotations', () => {
         const annotation = encode({
             attachmentURI: 'http://zotero.org/users/1/items/ATT00001', annotationKey: 'ANN00001', color: '#ffd400',

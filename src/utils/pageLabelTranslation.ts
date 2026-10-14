@@ -72,20 +72,13 @@ export function translatePageLabelToNumber(
 }
 
 /**
- * Normalize a page locator to a single page number.
- *
- * LLM-generated citations sometimes contain page ranges ("241-243") or
- * comma-separated pages ("222, 237-238"). Zotero's "Go to Page" does an
- * exact string match against PDF page labels, so multi-page locators
- * silently fail to navigate. This extracts the first page number.
- *
- * Only applied to locators that contain range/list separators (-, –, ,).
- * Non-numeric locators like "§3.2", "xii", or "fn. 5" pass through unchanged.
+ * A page locator as a note citation stores it: trimmed, with dashes written
+ * as hyphens (`100–105` → `100-105`). Citation styles format page ranges
+ * written with a hyphen (`100-5`, `100–105`), so a stored en dash would print
+ * as written while other ranges are styled.
  */
-export function normalizePageLocator(page: string): string {
-    if (!/[-–,]/.test(page)) return page;
-    const match = page.match(/^\s*(\d+)/);
-    return match ? match[1] : page;
+export function normalizePageRange(page: string): string {
+    return page.trim().replace(/[\u2012-\u2015\u2212]/g, '-');
 }
 
 /**

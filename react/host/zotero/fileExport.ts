@@ -5,6 +5,9 @@ import type { FileExportContent, FileExportFormat, FileExportResult } from '@bea
 import { buildNoteExportSource, buildResponseExportSource, buildThreadExportSource } from '../../utils/exportSource';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
 import { store } from '../../store';
+import type { OpenNoteTarget } from './components/reviewChangeRows';
+
+type ExporterResult = Awaited<ReturnType<typeof Zotero.Beaver.exporter.run>>;
 
 /**
  * Hand a source to the plugin-realm exporter, which asks where to save
@@ -12,7 +15,11 @@ import { store } from '../../store';
  * preference, and writes the file.
  */
 async function saveExport(source: ExportSource, format: FileExportFormat, windowId: string): Promise<FileExportResult> {
-    const result = await Zotero.Beaver.exporter.run({ source, format }, { windowId });
+    return fileExportResult(await Zotero.Beaver.exporter.run({ source, format }, { windowId }));
+}
+
+/** What the exporter saved, as the export UI reports it. */
+function fileExportResult(result: ExporterResult, extraWarnings: string[] = []): FileExportResult {
     if (result.status !== 'saved') return { status: 'canceled' };
     const folder = PathUtils.parent(result.path);
     return {
@@ -22,7 +29,7 @@ async function saveExport(source: ExportSource, format: FileExportFormat, window
         folderName: folder ? PathUtils.filename(folder) || folder : '',
         // A LaTeX export also writes its .bib file.
         companionFileNames: result.files.filter(file => file !== result.path).map(file => PathUtils.filename(file)),
-        warnings: result.warnings.map(warning => warning.message),
+        warnings: [...extraWarnings, ...result.warnings.map(warning => warning.message)],
     };
 }
 
@@ -48,19 +55,43 @@ async function exportThreadToFile(request: {
 }
 
 /**
- * Export a note the agent wrote (`create_note`) to a file, as the agent wrote
- * it. Interaction-time: reads the run from this window's thread.
+ * Export a note the agent wrote (`create_note`) to a file: the note as it is
+ * now in Zotero, with any later edits by the agent or the user. When there is
+ * no note to export — the action was not applied, was undone, or the note was
+ * deleted — the note is exported as the agent wrote it, with a warning.
+ * Interaction-time: reads the run from this window's thread.
  */
 export async function exportNoteToFile(request: {
     runId: string;
     toolCallId: string;
     format: FileExportFormat;
+    /** The created note, when the action is applied. */
+    note?: OpenNoteTarget | null;
 }): Promise<FileExportResult> {
     const windowId = getWindowRuntime().id;
+    if (request.note?.zotero_key) {
+        try {
+            const result = await Zotero.Beaver.exporter.exportNote({
+                note: {
+                    key: request.note.zotero_key,
+                    libraryRef: request.note.library_ref,
+                    libraryID: request.note.library_id,
+                },
+                format: request.format,
+            }, { windowId });
+            return fileExportResult(result);
+        } catch (error: any) {
+            // A note deleted since it was created falls back to the version the agent wrote.
+            if (error?.code !== 'note_not_found') throw error;
+        }
+    }
     const run = store.get(allRunsAtom).find(candidate => candidate.id === request.runId);
     const source = run ? await buildNoteExportSource(run, request.toolCallId) : null;
     if (!source) throw new Error('The note is no longer in this chat.');
-    return saveExport(source, request.format, windowId);
+    const fallbackWarning = request.note?.zotero_key
+        ? 'The note is no longer in your library. Exported the version Beaver wrote.'
+        : 'The note is not in your library. Exported the version Beaver wrote.';
+    return fileExportResult(await Zotero.Beaver.exporter.run({ source, format: request.format }, { windowId }), [fallbackWarning]);
 }
 
 export function revealExportedFile(path: string): Promise<void> {
