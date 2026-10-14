@@ -74,6 +74,7 @@ import {
     type RotationAngle,
 } from "./PageRotationNormalizer";
 import { carriesSentences, type SentenceBearingItem } from "./schema/itemKinds";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "./schema/presets";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -957,7 +958,7 @@ export function extractPageSentences(
     } else {
         const columnResult = detectColumns(detailedPage);
         const lineResult = detectLinesOnPage(detailedPage, columnResult.columns, {
-            exclusiveColumns: options.paragraphSettings?.exclusiveColumnLines ?? false,
+            exclusiveColumns: options.paragraphSettings?.exclusiveColumnLines ?? CURRENT_PDF_EXTRACTION_PRESET.exclusiveColumnLines,
         });
         draftItems = draftItemsFromParagraphs(detectParagraphs(
             lineResult,
@@ -1014,8 +1015,8 @@ export function extractPageSentences(
             detailedLines,
             options.compoundVocabulary,
             {
-                lineJoins: options.paragraphSettings?.lineJoins ?? false,
-                noteMarkers: options.paragraphSettings?.noteMarkers ?? false,
+                lineJoins: options.paragraphSettings?.lineJoins ?? CURRENT_PDF_EXTRACTION_PRESET.lineJoins,
+                noteMarkers: options.paragraphSettings?.noteMarkers ?? CURRENT_PDF_EXTRACTION_PRESET.noteMarkers,
                 leadMarker: item.kind === "footnote",
             },
         );
@@ -1102,7 +1103,7 @@ export function extractPageSentences(
         degradedItems,
         {
             endColumns: draftItems.map((item) => item.endColumnIndex ?? item.columnIndex),
-            skipInserts: options.paragraphSettings?.noteMarkers ?? false,
+            skipInserts: options.paragraphSettings?.noteMarkers ?? CURRENT_PDF_EXTRACTION_PRESET.noteMarkers,
         },
     );
 

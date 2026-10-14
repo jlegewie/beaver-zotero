@@ -2886,6 +2886,7 @@ describe('header detection', () => {
                     ...BODY_AFTER,
                 ],
                 [BODY],
+                { isolatedHeadings: false },
             );
             const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
             expect(headers).toEqual(['## RESULTS Summary Statistics']);

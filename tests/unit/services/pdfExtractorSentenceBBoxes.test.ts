@@ -4,7 +4,7 @@
  *
  * The key regression check: the facade dispatches exactly one `extract`
  * worker op — NOT a fan-out of `getPageCount` /
- * `extractRawPageDetailed` / `extractSentenceDebug` calls. Also
+ * `extractRawPageDetailed` calls. Also
  * verifies that the public `structured.splitter` / `structured.language`
  * args are translated to a serializable `splitterConfig` on the wire,
  * including the "explicit splitter wins over language" precedence rule.
@@ -119,7 +119,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
         );
         expect(ops).not.toContain('getPageCount');
         expect(ops).not.toContain('extractRawPageDetailed');
-        expect(ops).not.toContain('extractSentenceDebug');
     });
 
     it('defaults splitter to { type: "sentencex", language: undefined } when none provided', async () => {

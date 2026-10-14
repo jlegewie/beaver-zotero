@@ -72,12 +72,6 @@ export interface ExtractionSettings {
     /** Whether to detect and remove page number sequences */
     detectPageSequences?: boolean;
     /**
-     * Whether smart margin removal joins lines MuPDF split on one baseline
-     * back into text rows before matching (see `MarginFilter`). Set by the
-     * PDF schema preset; schema 4 keeps line-by-line matching.
-     */
-    marginTextRows?: boolean;
-    /**
      * Graphics-layer probe mode for column detection (see
      * `GraphicsLayerMode`). Default `"off"`. Set `"on"` or `"auto"` to opt in
      * of fill-rect detection entirely — useful when the per-page
@@ -101,7 +95,6 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
-    marginTextRows: true,
     graphicsLayerMode: "off",
     analyzerLogging: false,
 };
@@ -842,7 +835,7 @@ export interface DocumentAnalysis {
  * be normalized per 1k chars / per line / per item without a
  * second pass over the result.
  *
- * Only populated by the structured branch of `runExtractFromIndices`.
+ * Only populated by the structured engine of `runExtraction`.
  * Markdown branches leave `ExtractionTimings.perPagePhases` undefined.
  */
 export interface StructuredPagePhaseTimings {
@@ -973,7 +966,7 @@ export interface InternalExtractionResult {
         engine?: "block" | "paragraph" | "structured";
         /**
          * Per-phase worker timings. Optional — populated by `opExtract` /
-         * `runExtractFromIndices`; absent on direct InternalExtractionResult literals
+         * `runExtraction`; absent on direct InternalExtractionResult literals
          * built in tests or fixtures.
          */
         timings?: ExtractionTimings;

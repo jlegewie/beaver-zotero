@@ -286,7 +286,7 @@ describe("learned boundaries", () => {
             { l: 72, t: 100, lines: ["A paragraph the block", "detector cut"] },
             { l: 72, t: 140, lines: ["off here goes on."] },
         ]);
-        const off = detectParagraphs(page, [BODY], {}, { paragraph: 0, header: 0 }, { boundaryModel: CAPITAL_STARTS });
+        const off = detectParagraphs(page, [BODY], { learnedBoundaries: false }, { paragraph: 0, header: 0 }, { boundaryModel: CAPITAL_STARTS });
         expect(off.items.map((item) => item.columnIndex)).toEqual([0, 1]);
     });
 
