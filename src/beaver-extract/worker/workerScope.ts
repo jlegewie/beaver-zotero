@@ -12,6 +12,7 @@ export interface DedicatedWorkerGlobalScopeLike {
     postMessage(message: unknown, transfer?: Transferable[]): void;
     onmessage: ((ev: MessageEvent) => void) | null;
     onerror: ((ev: ErrorEvent) => void) | null;
+    onmessageerror: ((ev: MessageEvent) => void) | null;
 }
 
 let _cached: DedicatedWorkerGlobalScopeLike | null | undefined;

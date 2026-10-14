@@ -1,7 +1,8 @@
 /**
  * sentencex-wasm bootstrap inside the worker bundle.
  *
- * Mirrors `wasmInit.ts`:
+ * Mirrors `wasmInit.ts` (including the shared compiled module from the
+ * configure message, used when present):
  *   1. URLs come from the configure message (see `./config.ts` and
  *      `./index.ts`). The local `const` indirection at the call site keeps
  *      esbuild from rewriting the dynamic import. `external: ["chrome://*"]`
@@ -24,7 +25,8 @@
  */
 
 import { loadWasmBinaryXHR } from "./wasmHelpers";
-import { getWorkerUrls } from "./config";
+import { getWorkerCompiledWasm, getWorkerUrls } from "./config";
+import { postLog } from "./errors";
 import { getCachedSentencex, setCachedSentencex } from "./apiCache";
 import type { SentencexBoundary } from "../SentencexSplitter";
 
@@ -61,8 +63,6 @@ export async function ensureSentencex(): Promise<SentencexModule> {
         const factoryUrl = urls.sentencexWasmFactoryUrl;
         const binaryUrl = urls.sentencexWasmBinaryUrl;
 
-        const wasmBinary = await loadWasmBinaryXHR(binaryUrl);
-
         // Dynamic import of the wasm-bindgen factory at runtime — the
         // const-indirected specifier defeats esbuild's static analysis,
         // so the bundler leaves it alone (see file header).
@@ -71,7 +71,22 @@ export async function ensureSentencex(): Promise<SentencexModule> {
         )) as SentencexFactory;
 
         // initSync, NOT default — avoids the shim's import.meta.url / fetch path
-        mod.initSync({ module: wasmBinary });
+        let initialized = false;
+        const compiled = getWorkerCompiledWasm().sentencex;
+        if (compiled) {
+            try {
+                mod.initSync({ module: compiled });
+                initialized = true;
+            } catch (e) {
+                postLog(
+                    "warn",
+                    `[mupdf-worker] shared sentencex module failed to instantiate; loading the binary: ${e instanceof Error ? e.message : String(e)}`,
+                );
+            }
+        }
+        if (!initialized) {
+            mod.initSync({ module: await loadWasmBinaryXHR(binaryUrl) });
+        }
 
         setCachedSentencex(mod);
         return mod;

@@ -17,6 +17,7 @@ import { DocumentWorkQueue } from "./DocumentWorkQueue";
 import {
     getConfig,
     isConfigured,
+    type PDFCompiledWasm,
     type PDFTimerFunctions,
     type PDFWorkerSlotName,
     type PDFWorkerUrls,
@@ -64,9 +65,13 @@ export const DEFAULT_BUSY_LEASE_MS_HOT = 65_000;
 export const DEFAULT_BUSY_LEASE_MS_BACKGROUND = 240_000;
 const BUSY_LEASE_WATCHDOG_SLACK_MS = 1_000;
 const DEFAULT_RECYCLE_HEAP_BYTES = 512 * 1024 * 1024;
-const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT = 32;
+const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT = 64;
+const DEFAULT_RECYCLE_WHEN_IDLE_AFTER_DATA_OPERATIONS_HOT = 32;
 const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_BACKGROUND = 64;
+const DEFAULT_RECYCLE_IDLE_DELAY_MS = 1_000;
 const PROACTIVE_RECYCLE_FOLLOWUP_DATA_OPERATIONS = 1;
+/** Longest a spawn waits for the host's compiled WASM before configuring without it. */
+const COMPILED_WASM_WAIT_MS = 5_000;
 
 export type ProactiveRecycleReason = "heap_limit" | "data_operation_limit";
 
@@ -90,11 +95,11 @@ function defaultRecycleHeapBytesForSlot(
 
 /**
  * Both slots retire the worker after a fixed number of completed data
- * operations. The WASM heap does not grow per extraction: it rises to the
- * largest document seen so far and stays there, and the heap guard retires a
- * worker an outlier pushes past it. Each respawn recompiles the WASM module,
- * so the background slot, which runs whole-document extractions back to back,
- * uses a limit high enough to keep that cost small.
+ * operations (the forced limit). The WASM heap does not grow per extraction:
+ * it rises to the largest document seen so far and stays there, and the heap
+ * guard retires a worker an outlier pushes past it. A replacement worker
+ * starts with cold JIT code, so its first extractions are slower; the limit
+ * is high enough to keep that cost small.
  */
 function defaultRecycleDataOperationsForSlot(
     name: PDFWorkerSlotName,
@@ -102,6 +107,19 @@ function defaultRecycleDataOperationsForSlot(
     return name === "background"
         ? DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_BACKGROUND
         : DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT;
+}
+
+/**
+ * The hot slot retires its worker earlier, after half the forced limit, but
+ * only once the client has been idle for `DEFAULT_RECYCLE_IDLE_DELAY_MS`, so
+ * the replacement starts between interactive requests rather than during one.
+ */
+function defaultRecycleWhenIdleDataOperationsForSlot(
+    name: PDFWorkerSlotName,
+): number | null {
+    return name === "background"
+        ? null
+        : DEFAULT_RECYCLE_WHEN_IDLE_AFTER_DATA_OPERATIONS_HOT;
 }
 
 function normalizePositiveThreshold(value: number | null): number | null {
@@ -254,6 +272,11 @@ interface StartupEntry {
     reject: (reason: any) => void;
     configured: boolean;
     timeoutId: unknown | undefined;
+    /** Host-compiled WASM sent with the configure frame, if any. */
+    compiledWasm: PDFCompiledWasm | null;
+    /** False while waiting for the host's compiled WASM; configure is held until then. */
+    payloadReady: boolean;
+    payloadTimeoutId: unknown | undefined;
 }
 
 interface FatalOperationCandidate {
@@ -342,7 +365,9 @@ interface WorkerLogMessage {
 }
 
 interface WorkerLifecycleMessage {
-    kind: "ready" | "configured";
+    kind: "ready" | "configured" | "messageerror";
+    /** On `configured`: whether the worker kept usable compiled modules. */
+    compiledWasm?: boolean;
 }
 
 type WorkerReply =
@@ -386,13 +411,24 @@ export interface MuPDFWorkerStats {
     peakWorkerHeapBytes: number | null;
     completedDataOperationsSinceSpawn: number;
     recycleHeapThresholdBytes: number | null;
+    /** Completed data operations after which a recycle is due (idle limit if set, else forced). */
     recycleDataOperationThreshold: number | null;
+    /** Completed data operations after which the worker is retired even while busy. */
+    recycleDataOperationHardLimit: number | null;
+    /** Idle time before a due recycle runs; null when recycles are not deferred. */
+    recycleIdleDelayMs: number | null;
     proactiveRecyclePending: boolean;
     proactiveRecycleCount: number;
     lastProactiveRecycleReason: ProactiveRecycleReason | null;
     lastProactiveRecycleTime: number | null;
     lastProactiveRecycleHeapBytes: number | null;
     lastProactiveRecycleDataOperations: number | null;
+    /** Recycles that ran after the idle delay (a subset of `proactiveRecycleCount`). */
+    idleRecycleCount: number;
+    /** Replacement workers started right after an idle recycle, before any call needed them. */
+    standbySpawnCount: number;
+    /** Whether the most recently configured worker received the host's compiled WASM. */
+    compiledWasmShared: boolean | null;
     leaseReapCount: number;
     lastLeaseReapTime: number | null;
     lastLeaseReapOp: string | null;
@@ -465,6 +501,8 @@ export class MuPDFWorkerClient {
     private busyLeaseMs: number | null;
     private readonly recycleHeapThresholdBytes: number | null;
     private readonly recycleDataOperationThreshold: number | null;
+    private readonly recycleIdleDataOperationThreshold: number | null;
+    private readonly recycleIdleDelayMs: number | null;
     private worker: Worker | null = null;
     private spawnedFromWindowInternal: Window | null = null;
     private startup: StartupEntry | null = null;
@@ -502,6 +540,7 @@ export class MuPDFWorkerClient {
     private fatalOperationEntries: Array<{ key: string; prefix: string }> = [];
     private fatalOperationPrefixCounts = new Map<string, number>();
     private idleTimerId: unknown | undefined;
+    private idleRecycleTimerId: unknown | undefined;
     private busyLeaseWatchdogTimerId: unknown | undefined;
     private proactiveRecycleTimerId: unknown | undefined;
     private proactiveRecycleReason: ProactiveRecycleReason | null = null;
@@ -516,6 +555,11 @@ export class MuPDFWorkerClient {
     private lastProactiveRecycleTime: number | null = null;
     private lastProactiveRecycleHeapBytes: number | null = null;
     private lastProactiveRecycleDataOperations: number | null = null;
+    private idleRecycleCount = 0;
+    private standbySpawnCount = 0;
+    private compiledWasmShared: boolean | null = null;
+    /** Set when a worker could not receive compiled WASM; later spawns load the binaries. */
+    private compiledWasmUnusable = false;
     private leaseReapCount = 0;
     private lastLeaseReapTime: number | null = null;
     private lastLeaseReapOp: string | null = null;
@@ -544,7 +588,14 @@ export class MuPDFWorkerClient {
             idleTimeoutMs?: number;
             busyLeaseMs?: number | null;
             recycleHeapBytes?: number | null;
+            /** Forced limit: retire after this many data operations, even mid-burst. */
             recycleAfterDataOperations?: number | null;
+            /**
+             * Idle limit: once reached, retire after `recycleIdleDelayMs` without
+             * work. Ignored unless it is below the forced limit.
+             */
+            recycleWhenIdleAfterDataOperations?: number | null;
+            recycleIdleDelayMs?: number | null;
         } = {},
     ) {
         const config = isConfigured() ? getConfig() : null;
@@ -574,6 +625,22 @@ export class MuPDFWorkerClient {
                 ? defaultRecycleDataOperationsForSlot(this.slotName)
                 : opts.recycleAfterDataOperations,
         );
+        const idleThreshold = normalizePositiveThreshold(
+            opts.recycleWhenIdleAfterDataOperations === undefined
+                ? defaultRecycleWhenIdleDataOperationsForSlot(this.slotName)
+                : opts.recycleWhenIdleAfterDataOperations,
+        );
+        const idleDelayMs = opts.recycleIdleDelayMs === undefined
+            ? DEFAULT_RECYCLE_IDLE_DELAY_MS
+            : opts.recycleIdleDelayMs;
+        const idleRecycleEnabled = idleThreshold !== null
+            && this.recycleDataOperationThreshold !== null
+            && idleThreshold < this.recycleDataOperationThreshold
+            && idleDelayMs !== null
+            && Number.isFinite(idleDelayMs)
+            && idleDelayMs >= 0;
+        this.recycleIdleDataOperationThreshold = idleRecycleEnabled ? idleThreshold : null;
+        this.recycleIdleDelayMs = idleRecycleEnabled ? idleDelayMs : null;
     }
 
     /**
@@ -880,21 +947,98 @@ export class MuPDFWorkerClient {
         this.syncBusyLeaseWatchdog();
     }
 
+    /** Cancel both idle-state timers (idle reap and idle recycle); new work calls this. */
     private clearIdleTimer(): void {
-        if (this.idleTimerId === undefined) return;
-        this.cancelTimer(this.idleTimerId);
-        this.idleTimerId = undefined;
+        if (this.idleTimerId !== undefined) {
+            this.cancelTimer(this.idleTimerId);
+            this.idleTimerId = undefined;
+        }
+        if (this.idleRecycleTimerId !== undefined) {
+            this.cancelTimer(this.idleRecycleTimerId);
+            this.idleRecycleTimerId = undefined;
+        }
     }
 
     private armIdleTimer(): void {
         this.clearIdleTimer();
         if (this.disposed || !this.worker || this.pending.size !== 0) return;
 
+        this.armIdleRecycleTimer(this.worker);
         this.idleTimerId = this.scheduleTimer(() => {
             this.idleTimerId = undefined;
             if (this.disposed || !this.worker || this.pending.size !== 0) return;
             this.markStale("idle timeout");
         }, this.idleTimeoutMs);
+    }
+
+    /** The idle limit is reached and no forced recycle is already pending. */
+    private isIdleRecycleDue(): boolean {
+        return this.recycleIdleDataOperationThreshold !== null
+            && this.proactiveRecycleReason === null
+            && this.completedDataOperationsSinceSpawn
+                >= this.recycleIdleDataOperationThreshold;
+    }
+
+    /**
+     * Retire a worker past the idle limit once the client has had no work for
+     * `recycleIdleDelayMs`, and start its replacement. New work cancels the
+     * timer (`clearIdleTimer`) and re-arms it when it drains; the forced limit
+     * and the heap guard still apply while busy.
+     */
+    private armIdleRecycleTimer(worker: Worker): void {
+        if (
+            this.recycleIdleDelayMs === null
+            || this.startupWaiters.size !== 0
+            || !this.isIdleRecycleDue()
+        ) {
+            return;
+        }
+        this.idleRecycleTimerId = this.scheduleTimer(() => {
+            this.idleRecycleTimerId = undefined;
+            if (
+                this.disposed
+                || this.worker !== worker
+                || this.pending.size !== 0
+                || this.startupWaiters.size !== 0
+                || !this.isIdleRecycleDue()
+            ) {
+                return;
+            }
+            this.proactiveRecycleReason = "data_operation_limit";
+            if (this.performProactiveRecycle(worker)) {
+                this.idleRecycleCount += 1;
+                this.spawnStandby();
+            } else {
+                this.proactiveRecycleReason = null;
+            }
+        }, this.recycleIdleDelayMs);
+    }
+
+    /**
+     * Start the replacement for a worker retired by the idle recycle, and load
+     * its WASM, so the next call does not wait for either. Forced retirements
+     * (heap guard, forced limit) leave the slot empty until a call needs it.
+     * Failures are left to the next call, which spawns and retries as usual.
+     */
+    private spawnStandby(): void {
+        if (this.disposed || this.worker) return;
+        let worker: Worker;
+        try {
+            worker = this.ensureWorker();
+        } catch (e) {
+            getConfig().log(
+                `[MuPDFWorkerClient ${this.slotName}] standby spawn failed: ${e instanceof Error ? e.message : String(e)}`,
+                2,
+            );
+            return;
+        }
+        this.standbySpawnCount += 1;
+        this.callUncounted<void>(worker, "__init", {}).catch((e) => {
+            getConfig().log(
+                `[MuPDFWorkerClient ${this.slotName}] standby init failed: ${e instanceof Error ? e.message : String(e)}`,
+                2,
+            );
+        });
     }
 
     private clearProactiveRecycleTimer(): void {
@@ -1179,13 +1323,80 @@ export class MuPDFWorkerClient {
         this.worker = worker;
         this.spawnedFromWindowInternal = mainWindow;
         this.resetCurrentWorkerRecycleState();
-        this.startup = this.createStartupEntry(worker, cfg.worker);
-        // Send one configure frame immediately for the normal fast path. The
-        // worker also emits `ready` after installing its message handler; if
-        // this early frame is lost during startup, the ready handler sends a
-        // second configure before any op is allowed through.
-        this.postConfigure(worker, "spawn");
+        const startup = this.createStartupEntry(worker, cfg.worker);
+        this.startup = startup;
+        // Send one configure frame as soon as its payload is ready (at once
+        // unless the host is still compiling the WASM). The worker also emits
+        // `ready` after installing its message handler; if this early frame is
+        // lost during startup, the ready handler sends a second configure
+        // before any op is allowed through.
+        this.resolveConfigurePayload(worker, startup);
         return worker;
+    }
+
+    /**
+     * Attach the host's compiled WASM to the configure frame, then post it. A
+     * host that compiles asynchronously delays configure (the worker evaluates
+     * its bundle meanwhile), for at most `COMPILED_WASM_WAIT_MS`; any failure
+     * configures the worker without shared modules.
+     */
+    private resolveConfigurePayload(worker: Worker, startup: StartupEntry): void {
+        const cfg = getConfig();
+        let compiled: PDFCompiledWasm | null | Promise<PDFCompiledWasm | null> = null;
+        if (cfg.getCompiledWasm && !this.compiledWasmUnusable) {
+            try {
+                compiled = cfg.getCompiledWasm(startup.urls);
+            } catch (e) {
+                cfg.log(
+                    `[MuPDFWorkerClient ${this.slotName}] getCompiledWasm threw: ${e instanceof Error ? e.message : String(e)}`,
+                    2,
+                );
+            }
+        }
+        const settle = (value: PDFCompiledWasm | null) => {
+            if (startup.payloadReady) return;
+            if (startup.payloadTimeoutId !== undefined) {
+                this.cancelTimer(startup.payloadTimeoutId);
+                startup.payloadTimeoutId = undefined;
+            }
+            startup.compiledWasm = this.compiledWasmUnusable ? null : value;
+            startup.payloadReady = true;
+            this.postConfigure(worker, "spawn");
+        };
+        if (compiled && typeof (compiled as Promise<unknown>).then === "function") {
+            startup.payloadTimeoutId = this.scheduleTimer(() => {
+                startup.payloadTimeoutId = undefined;
+                if (startup.payloadReady) return;
+                cfg.log(
+                    `[MuPDFWorkerClient ${this.slotName}] compiled WASM not ready after ${COMPILED_WASM_WAIT_MS}ms; configuring without it`,
+                    2,
+                );
+                settle(null);
+            }, COMPILED_WASM_WAIT_MS);
+            (compiled as Promise<PDFCompiledWasm | null>).then(
+                (value) => settle(value ?? null),
+                (e) => {
+                    cfg.log(
+                        `[MuPDFWorkerClient ${this.slotName}] compiled WASM unavailable: ${e instanceof Error ? e.message : String(e)}`,
+                        2,
+                    );
+                    settle(null);
+                },
+            );
+            return;
+        }
+        settle(compiled as PDFCompiledWasm | null);
+    }
+
+    /** Stop offering compiled WASM to this client's workers; they load the binaries. */
+    private disableCompiledWasm(reason: string): void {
+        if (!this.compiledWasmUnusable) {
+            getConfig().log(
+                `[MuPDFWorkerClient ${this.slotName}] not sharing compiled WASM: ${reason}`,
+                2,
+            );
+        }
+        this.compiledWasmUnusable = true;
     }
 
     private createStartupEntry(worker: Worker, urls: PDFWorkerUrls): StartupEntry {
@@ -1219,13 +1430,25 @@ export class MuPDFWorkerClient {
                     this.cancelTimer(entry.timeoutId);
                     entry.timeoutId = undefined;
                 }
+                if (entry.payloadTimeoutId !== undefined) {
+                    this.cancelTimer(entry.payloadTimeoutId);
+                    entry.payloadTimeoutId = undefined;
+                }
                 reject(reason);
             },
             configured: false,
             timeoutId: undefined,
+            compiledWasm: null,
+            payloadReady: false,
+            payloadTimeoutId: undefined,
         };
         entry.timeoutId = this.scheduleTimer(() => {
             if (this.startup !== entry || entry.configured) return;
+            if (entry.compiledWasm) {
+                // The modules may be what kept configure from arriving; the
+                // retry spawn loads the binaries instead.
+                this.disableCompiledWasm("configure handshake timed out");
+            }
             this.markStale("configure handshake timed out", { startError: true });
         }, 15000);
         return entry;
@@ -1233,10 +1456,30 @@ export class MuPDFWorkerClient {
 
     private postConfigure(worker: Worker, reason: string): void {
         const startup = this.startup;
-        if (!startup || startup.worker !== worker || startup.configured) return;
+        if (
+            !startup
+            || startup.worker !== worker
+            || startup.configured
+            || !startup.payloadReady
+        ) {
+            return;
+        }
         try {
-            worker.postMessage({ kind: "configure", urls: startup.urls });
+            worker.postMessage(
+                startup.compiledWasm
+                    ? { kind: "configure", urls: startup.urls, compiledWasm: startup.compiledWasm }
+                    : { kind: "configure", urls: startup.urls },
+            );
         } catch (e) {
+            if (startup.compiledWasm) {
+                // e.g. a DataCloneError: this platform cannot post compiled modules.
+                this.disableCompiledWasm(
+                    `configure postMessage threw: ${e instanceof Error ? e.message : String(e)}`,
+                );
+                startup.compiledWasm = null;
+                this.postConfigure(worker, reason);
+                return;
+            }
             this.markStale(
                 `configure postMessage threw during ${reason}: ${e instanceof Error ? e.message : String(e)}`,
                 { startError: true },
@@ -1261,9 +1504,35 @@ export class MuPDFWorkerClient {
             this.postConfigure(worker, "worker ready");
             return;
         }
+        if (lifecycle.kind === "messageerror") {
+            // The worker could not deserialize a message. Before configure,
+            // that is the compiled WASM: resend configure without it.
+            const startup = this.startup;
+            if (startup?.worker === worker && !startup.configured && startup.compiledWasm) {
+                this.disableCompiledWasm("worker could not receive the compiled modules");
+                startup.compiledWasm = null;
+                this.postConfigure(worker, "worker messageerror");
+            } else {
+                getConfig().log(
+                    `[MuPDFWorkerClient ${this.slotName}] worker could not deserialize a message`,
+                    2,
+                );
+            }
+            return;
+        }
         if (lifecycle.kind === "configured") {
-            if (this.startup?.worker === worker) {
-                this.startup.resolve();
+            const startup = this.startup;
+            if (startup?.worker === worker) {
+                // A worker can ack twice (early frame and the `ready` resend);
+                // only the first ack decides the stat.
+                if (!startup.configured) {
+                    this.compiledWasmShared = startup.compiledWasm !== null
+                        && lifecycle.compiledWasm === true;
+                }
+                // Nothing reads the modules after configure; drop this
+                // reference so a long-lived worker does not pin them here.
+                startup.compiledWasm = null;
+                startup.resolve();
                 // The worker completed its handshake — the slot is healthy
                 // again, so clear the consecutive start-failure streak.
                 this.consecutiveStartFailures = 0;
@@ -2051,7 +2320,11 @@ export class MuPDFWorkerClient {
             completedDataOperationsSinceSpawn:
                 this.completedDataOperationsSinceSpawn,
             recycleHeapThresholdBytes: this.recycleHeapThresholdBytes,
-            recycleDataOperationThreshold: this.recycleDataOperationThreshold,
+            recycleDataOperationThreshold:
+                this.recycleIdleDataOperationThreshold
+                ?? this.recycleDataOperationThreshold,
+            recycleDataOperationHardLimit: this.recycleDataOperationThreshold,
+            recycleIdleDelayMs: this.recycleIdleDelayMs,
             proactiveRecyclePending: this.proactiveRecycleReason !== null,
             proactiveRecycleCount: this.proactiveRecycleCount,
             lastProactiveRecycleReason: this.lastProactiveRecycleReason,
@@ -2059,6 +2332,9 @@ export class MuPDFWorkerClient {
             lastProactiveRecycleHeapBytes: this.lastProactiveRecycleHeapBytes,
             lastProactiveRecycleDataOperations:
                 this.lastProactiveRecycleDataOperations,
+            idleRecycleCount: this.idleRecycleCount,
+            standbySpawnCount: this.standbySpawnCount,
+            compiledWasmShared: this.compiledWasmShared,
             leaseReapCount: this.leaseReapCount,
             lastLeaseReapTime: this.lastLeaseReapTime,
             lastLeaseReapOp: this.lastLeaseReapOp,
@@ -2079,6 +2355,8 @@ export class MuPDFWorkerClient {
         this.lastProactiveRecycleTime = null;
         this.lastProactiveRecycleHeapBytes = null;
         this.lastProactiveRecycleDataOperations = null;
+        this.idleRecycleCount = 0;
+        this.standbySpawnCount = 0;
         this.leaseReapCount = 0;
         this.lastLeaseReapTime = null;
         this.lastLeaseReapOp = null;
