@@ -114,15 +114,19 @@ export function derivePageLabels(
     const accepted = selectRuns(runs);
     // A page that prints a number of another numbering is not unnumbered,
     // even when that numbering is too short to be a run of its own, nor one
-    // that prints a number just off the run's (`printsShiftedNumber`). Nor is
-    // a sheet whose size matches none of the run's numbered pages next to
-    // it (`neighbors`): a cover or notice a repository added to the work is
-    // not one of its printed pages.
+    // that prints a number just off the run's (`printsShiftedNumber`). A
+    // numbering printed on the run's own pages as well (a "Page 3 of 6"
+    // counter beside the journal's folios) runs alongside it and doesn't
+    // count. Nor is a sheet whose size matches none of the run's numbered
+    // pages next to it (`neighbors`): a cover or notice a repository added
+    // to the work is not one of its printed pages.
+    const alongside = new Map(accepted.map((run) => [run, parallelKeys(run, numberedPages)]));
     const claimable = (pageIndex: number, run: Run, neighbors: readonly number[]) =>
         pageIndex >= 0
         && pageIndex < pageCount
         && !owner.has(pageIndex)
-        && [...(numberedPages.get(pageIndex) ?? [])].every((key) => key === run.key)
+        && [...(numberedPages.get(pageIndex) ?? [])].every((key) =>
+            key === run.key || alongside.get(run)!.has(key))
         && !printsShiftedNumber(removedNumbers.get(pageIndex), run, pageIndex)
         && neighbors.some((p) => sameSheetSize(pageSizes?.[pageIndex], pageSizes?.[p]));
 
@@ -173,6 +177,20 @@ export function derivePageLabels(
         if (label) labels[pageIndex] = label;
     }
     return labels;
+}
+
+/**
+ * Numberings other than `run`'s printed on at least half of its numbered
+ * pages: a parallel numbering of the same pages, not a separate one.
+ */
+function parallelKeys(run: Run, numberedPages: ReadonlyMap<number, ReadonlySet<string>>): Set<string> {
+    const counts = new Map<string, number>();
+    for (const page of run.pages) {
+        for (const key of numberedPages.get(page) ?? []) {
+            if (key !== run.key) counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+    }
+    return new Set([...counts].filter(([, n]) => n * 2 >= run.pages.length).map(([key]) => key));
 }
 
 /** A page's width and height, in points. */
@@ -430,13 +448,17 @@ function boxHeight(bbox: BoundingBox): number {
 /** A compound folio's prefix: an article number and a separator. */
 const COMPOUND_PREFIX_RE = /\d[-–:]$/u;
 
-/** Digits an observation prints its number with when zero-padded ("07"), else 0. */
+/**
+ * Digits an observation prints its number with when zero-padded ("07",
+ * "Page 07 of 12", "- 07 -"), else 0: the digit group after its prefix that
+ * reads as its value.
+ */
 function paddedWidth(obs: PageNumberObservation): number {
-    const text = obs.text.trim();
-    const digits = obs.prefix && text.startsWith(obs.prefix) ? text.slice(obs.prefix.length) : text;
-    if (digits.length < 2 || (digits[0] !== "0" && digits[0] !== "\uFF10")) return 0;
-    const ascii = normalizePageDigits(digits);
-    return /^0\d+$/u.test(ascii) ? ascii.length : 0;
+    const text = normalizePageDigits(obs.text.trim());
+    const prefix = obs.prefix ? normalizePageDigits(obs.prefix) : "";
+    const rest = prefix && text.startsWith(prefix) ? text.slice(prefix.length) : text;
+    const digits = rest.match(/\d+/gu)?.find((group) => parseInt(group, 10) === obs.value);
+    return digits && digits.length > 1 && digits[0] === "0" ? digits.length : 0;
 }
 
 /**

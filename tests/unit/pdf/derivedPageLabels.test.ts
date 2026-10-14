@@ -280,6 +280,21 @@ describe("derivePageLabels", () => {
         expect(labels[1]).toBeUndefined();
     });
 
+    it("extends a run over a counter that runs alongside it", () => {
+        // Journal folios 451–455 on pages 1–5 and a "Page N of 6" counter
+        // on every page: the unnumbered first page is still the journal's 450.
+        const counter = [0, 1, 2, 3, 4, 5].map((p) => obs(p, `Page ${p + 1} of 6`, { value: p + 1, edge: true }));
+        const folios = [1, 2, 3, 4, 5].map((p) => obs(p, 450 + p));
+        const labels = derivePageLabels([...counter, ...folios], 6);
+        expect(labels[1]).toBe("451");
+        expect(labels[0]).toBe("450");
+    });
+
+    it("keeps the zero padding of a counter's page number", () => {
+        const labels = derivePageLabels([0, 1, 2].map((p) => obs(p, `Page 0${p + 1} of 3`, { value: p + 1 })), 3);
+        expect(labels).toEqual({ 0: "01", 1: "02", 2: "03" });
+    });
+
     it("weighs zero padding by page, not by how many readings a page has", () => {
         // A fullwidth "０１" is read three times (margin removal, the edge
         // row's normalized word "01", its own line); a plain "4" twice.
