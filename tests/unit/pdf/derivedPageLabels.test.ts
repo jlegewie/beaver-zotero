@@ -280,6 +280,21 @@ describe("derivePageLabels", () => {
         expect(labels[1]).toBeUndefined();
     });
 
+    it("does not extend over a page whose prefixed folio is one off", () => {
+        // S4 is missing from the file: the page after S3 prints S5.
+        const folio = (p: number, n: number) => obs(p, `S${n}`, { value: n, prefix: "S", edge: true });
+        const labels = derivePageLabels([folio(0, 1), folio(1, 2), folio(2, 3), folio(3, 5)], 4);
+        expect(labels[2]).toBe("S3");
+        expect(labels[3]).toBeUndefined();
+    });
+
+    it("still extends onto a contents page whose rows end in nearby entries", () => {
+        // The unnumbered contents page vii lists "Illustrations … viii".
+        const folios = ["viii", "ix", "x", "xi"].map((t, k) => obs(k + 1, t));
+        const labels = derivePageLabels([obs(0, "viii", { edge: true, position: "top" }), ...folios], 5);
+        expect(labels[0]).toBe("vii");
+    });
+
     it("extends a run over a counter that runs alongside it", () => {
         // Journal folios 451–455 on pages 1–5 and a "Page N of 6" counter
         // on every page: the unnumbered first page is still the journal's 450.

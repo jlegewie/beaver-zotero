@@ -110,7 +110,7 @@ export function derivePageLabels(
     pageCount: number,
     pageSizes?: readonly (PageSize | undefined)[],
 ): Record<number, string> {
-    const { runs, numberedPages, removedNumbers } = candidateRuns(observations, pageCount);
+    const { runs, numberedPages, folioNumbers } = candidateRuns(observations, pageCount);
     const accepted = selectRuns(runs);
     // A page that prints a number of another numbering is not unnumbered,
     // even when that numbering is too short to be a run of its own, nor one
@@ -127,7 +127,7 @@ export function derivePageLabels(
         && !owner.has(pageIndex)
         && [...(numberedPages.get(pageIndex) ?? [])].every((key) =>
             key === run.key || alongside.get(run)!.has(key))
-        && !printsShiftedNumber(removedNumbers.get(pageIndex), run, pageIndex)
+        && !printsShiftedNumber(folioNumbers.get(pageIndex), run, pageIndex)
         && neighbors.some((p) => sameSheetSize(pageSizes?.[pageIndex], pageSizes?.[p]));
 
     // A run labels every page it spans. Its numbered pages on both sides
@@ -312,14 +312,18 @@ function withoutFurniture(
 function candidateRuns(
     allObservations: readonly PageNumberObservation[],
     pageCount: number,
-): { runs: Run[]; numberedPages: Map<number, Set<string>>; removedNumbers: Map<number, PageNumberObservation[]> } {
+): { runs: Run[]; numberedPages: Map<number, Set<string>>; folioNumbers: Map<number, PageNumberObservation[]> } {
     const observations = withoutFurniture(withoutSpacedDigits(allObservations), pageCount);
-    const removedNumbers = new Map<number, PageNumberObservation[]>();
+    // Numbers a page prints as its folio, for `printsShiftedNumber`: those
+    // margin detection removed, and prefixed folios ("S5"), which are only
+    // read from header and footer rows. Other numbers of those rows are not
+    // evidence enough: a contents page's entries end its rows too.
+    const folioNumbers = new Map<number, PageNumberObservation[]>();
     for (const obs of observations) {
-        if (obs.edge) continue;
-        const removed = removedNumbers.get(obs.pageIndex);
-        if (removed) removed.push(obs);
-        else removedNumbers.set(obs.pageIndex, [obs]);
+        if (obs.edge && !obs.prefix) continue;
+        const folios = folioNumbers.get(obs.pageIndex);
+        if (folios) folios.push(obs);
+        else folioNumbers.set(obs.pageIndex, [obs]);
     }
     const groups = new Map<string, { roman: boolean; prefix: string; offset: number; pages: Set<number>; removedPages: Set<number>; finalPages: Set<number>; counterPages: Set<number>; upper: number; lower: number; paddedPages: Map<number, number>; unpaddedPages: Map<number, number>; heights: number[]; removedHeights: number[] }>();
     for (const obs of observations) {
@@ -395,13 +399,13 @@ function candidateRuns(
             start = k;
         }
     }
-    return { runs, numberedPages, removedNumbers };
+    return { runs, numberedPages, folioNumbers };
 }
 
 /**
  * Largest difference between the number a run would give a page and a
- * different number margin detection removed from it as a page number, for
- * the page to count as numbered apart from the run.
+ * different folio the page prints, for the page to count as numbered apart
+ * from the run.
  */
 const SHIFTED_NUMBER_DISTANCE = 2;
 
@@ -412,8 +416,8 @@ const SHIFTED_NUMBER_DISTANCE = 2;
 const FOLIO_HEIGHT_RATIO = 1.5;
 
 /**
- * Whether margin detection removed a number from the page that is close to,
- * but not, the run's number for it: the page's own folio when a page was
+ * Whether the page prints a folio (`candidateRuns`' folio numbers) close
+ * to, but not, the run's number for it: the page's own folio when a page was
  * left out of or added to the file, so the run's offset no longer holds
  * there. A number far from the run's is another numeral (a chapter number
  * on an opening page) and does not count, nor does one set at another size
@@ -421,12 +425,12 @@ const FOLIO_HEIGHT_RATIO = 1.5;
  * book's first chapter). Without known boxes a close number counts.
  */
 function printsShiftedNumber(
-    removed: readonly PageNumberObservation[] | undefined,
+    folios: readonly PageNumberObservation[] | undefined,
     run: Run,
     pageIndex: number,
 ): boolean {
     const expected = pageIndex + run.offset;
-    return (removed ?? []).some((obs) =>
+    return (folios ?? []).some((obs) =>
         obs.roman === run.roman
         && (obs.prefix ?? "") === run.prefix
         && obs.value !== expected
