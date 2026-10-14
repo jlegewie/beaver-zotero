@@ -1526,9 +1526,16 @@ function applyRunCitations(
     // Preload PDF page labels for cited attachments so the rendering path can
     // resolve page numbers from explicit render state. Runs after metadata is
     // exposed to avoid blocking the UI on PDF extraction.
+    //
+    // The preload usually settles after the run, when this window no longer
+    // holds the thread writer and the callback setter drops writes. The labels
+    // are render state keyed by attachment, not thread history, so they go to
+    // this renderer's store directly (still scoped to the account).
+    const generation = getCredentialGeneration();
     preloadPageLabelsForCitations(citations)
         .then((labelsByAttachmentId) => {
-            set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
+            if (generation !== getCredentialGeneration()) return;
+            store.set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
         })
         .catch((err) =>
             logger(`WS: Failed to preload page labels: ${err}`, 1)

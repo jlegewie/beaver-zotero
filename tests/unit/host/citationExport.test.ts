@@ -20,6 +20,7 @@ vi.mock('../../../src/utils/zoteroLinkCitation', () => ({
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
+import { getPageLabelsForItem } from '../../../react/host/zotero/itemData';
 import { zoteroDocumentExport } from '../../../react/host/zotero/citationExport';
 
 function citationRequest(overrides: Record<string, unknown> = {}) {
@@ -78,12 +79,23 @@ describe('zoteroDocumentExport.renderCitation', () => {
         { pages: [2, 4, 2], labels: { 1: 'iv', 3: 'vi' }, expected: 'iv-vi' },
         { pages: [2, 2], labels: { 1: 'iv' }, expected: 'iv' },
     ])('formats structural spans as inclusive page ranges: $expected', ({ pages, labels, expected }) => {
+        vi.mocked(getPageLabelsForItem).mockReturnValueOnce(labels ?? null);
         zoteroDocumentExport.renderCitation(citationRequest({
             requestedRef: { loc: { kind: 'sentence', value: '1-5', raw: 's1-s5' } },
-            pages, metadata: { page_labels: labels },
+            pages,
         }));
         expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
             { kind: 'page', value: expected, raw: `page${expected}` }, 2);
+    });
+
+    it('never writes the citation\'s printed labels into a note locator', () => {
+        zoteroDocumentExport.renderCitation(citationRequest({
+            requestedRef: { loc: { kind: 'sentence', value: '1-5', raw: 's1-s5' } },
+            pages: [2, 4],
+            metadata: { page_labels: { 1: '1202', 3: '1204' } },
+        }));
+        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
+            { kind: 'page', value: '2-4', raw: 'page2-4' }, 2);
     });
 
     it.each([null, { loc: { kind: 'page', value: '2, 4', raw: 'page2, 4' } }])(

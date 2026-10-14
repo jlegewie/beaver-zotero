@@ -33,6 +33,8 @@ import {
     validateStructuredExtractResult,
 } from '../beaver-extract/schema/validators';
 import type { PageGeometry } from '@beaver/agent-core/extract/types';
+import { derivedPageLabelsForCache } from '../beaver-extract/pipeline/output';
+import { pdfExtractionPreset } from '../beaver-extract/schema/presets';
 import {
     buildEpubCachedMetadata,
     buildPdfCachedMetadata,
@@ -124,6 +126,12 @@ interface CacheMetadataInput {
     contentKind?: ExtractContentKind;
     pageCount: number | null;
     pageLabels: PageLabels | Record<number, string> | null;
+    /**
+     * Printed page numbers from full structured extraction; `null` when
+     * derivation found none, absent when the write does not know (a
+     * metadata-only preflight keeps the value already stored for the source).
+     */
+    derivedPageLabels?: PageLabels | Record<number, string> | null;
     pages: (PageGeometry | null)[] | null;
     epubSections?: EpubSectionSummary[];
     /** EPUB total page count (max stamped `pageNumber`); PDF uses `pageCount`. */
@@ -139,6 +147,56 @@ interface CacheMetadataInput {
     snapshotExtractedTextChars?: number | null;
     /** Authoritative error reason; omitted or `null` marks a successful extraction. */
     errorCode?: DocumentCacheErrorCode | null;
+}
+
+/** Bytes of a serialized result searched for the document's derived page labels. */
+const DERIVED_LABELS_SCAN_BYTES = 1024 * 1024;
+
+/**
+ * Read `document.derivedPageLabels` from a serialized structured result
+ * without parsing the whole payload. The document object writes its label maps
+ * before its pages, so only a prefix is decoded. Returns `null` when the
+ * document has no derived labels and `undefined` when the prefix does not tell.
+ */
+export function derivedPageLabelsFromSerializedResult(
+    jsonBytes: Uint8Array,
+): Record<string, string> | null | undefined {
+    const text = new TextDecoder().decode(
+        jsonBytes.subarray(0, Math.min(jsonBytes.byteLength, DERIVED_LABELS_SCAN_BYTES)),
+    );
+    const documentStart = text.indexOf('"document":{');
+    if (documentStart < 0) return undefined;
+    const key = '"derivedPageLabels":';
+    const keyIndex = text.indexOf(key, documentStart);
+    const pagesIndex = text.indexOf('"pages":', documentStart);
+    if (keyIndex < 0 || (pagesIndex >= 0 && pagesIndex < keyIndex)) {
+        return pagesIndex >= 0 ? null : undefined;
+    }
+    const start = keyIndex + key.length;
+    if (text[start] !== '{') return undefined;
+    let inString = false;
+    for (let i = start + 1; i < text.length; i++) {
+        const char = text[i];
+        if (inString) {
+            if (char === '\\') i++;
+            else if (char === '"') inString = false;
+        } else if (char === '"') {
+            inString = true;
+        } else if (char === '}') {
+            try {
+                const parsed: unknown = JSON.parse(text.slice(start, i + 1));
+                if (!parsed || typeof parsed !== 'object') return undefined;
+                const labels = Object.fromEntries(
+                    Object.entries(parsed as Record<string, unknown>)
+                        .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+                );
+                return Object.keys(labels).length > 0 ? labels : null;
+            } catch {
+                return undefined;
+            }
+        }
+    }
+    return undefined;
 }
 
 interface CacheablePayload {
@@ -358,6 +416,9 @@ export class DocumentCache {
             }
 
             await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
+            if (metadata.derivedPageLabels === undefined) {
+                this.backfillDerivedPageLabels(metadata, derivedPageLabelsForCache(result));
+            }
             return result;
         } catch (error) {
             logger(`DocumentCache.getResult error: ${error}`, 1);
@@ -413,6 +474,15 @@ export class DocumentCache {
             }
 
             await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
+            let derivedPageLabels = metadata.documentMetadata.derivedPageLabels;
+            if (
+                derivedPageLabels === undefined
+                && mode === 'structured'
+                && pdfExtractionPreset(metadata.extractionSchemaVersion)?.derivedPageLabels
+            ) {
+                derivedPageLabels = derivedPageLabelsFromSerializedResult(jsonBytes);
+                this.backfillDerivedPageLabels(metadata, derivedPageLabels);
+            }
             return {
                 schemaVersion: metadata.extractionSchemaVersion,
                 mode,
@@ -422,6 +492,7 @@ export class DocumentCache {
                 metadata: {
                     pageCount: metadata.documentMetadata.pageCount,
                     pageLabels: metadata.documentMetadata.pageLabels,
+                    derivedPageLabels,
                     pages: metadata.documentMetadata.pages,
                 },
             };
@@ -744,6 +815,7 @@ export class DocumentCache {
                 metadata: {
                     pageCount: created.cacheMetadata.pageCount,
                     pageLabels: created.cacheMetadata.pageLabels,
+                    derivedPageLabels: created.cacheMetadata.derivedPageLabels,
                     pages: created.cacheMetadata.pages,
                 },
             };
@@ -931,7 +1003,7 @@ export class DocumentCache {
                     input.item,
                     source,
                     input.contentType,
-                    input.metadata,
+                    this.withStoredDerivedPageLabels(input.metadata, existing, source),
                 );
                 const { deletedPayloads } = await this.db.upsertDocumentCacheMetadata(record);
                 await this.removePayloadFiles(deletedPayloads);
@@ -1488,7 +1560,12 @@ export class DocumentCache {
             && this.sourceIdentityMatches(source, { filePath: existing.filePath, fileSignature: existing.fileSignature, sourceSizeBytes: existing.sourceSizeBytes })
             && (await this.db.getDocumentCachePayloadsForMetadata(existing.id)).some(p => p.extractionSource === 'ocr')) return;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
+        const metadataInput = this.buildMetadataInput(
+            input.item,
+            source,
+            input.contentType,
+            this.withStoredDerivedPageLabels(input.metadata, existing, source),
+        );
         const result = input.result as { mode?: string; schemaVersion: string };
         if (
             (result.mode !== undefined && result.mode !== input.mode)
@@ -1553,7 +1630,12 @@ export class DocumentCache {
             && this.sourceIdentityMatches(source, { filePath: existing.filePath, fileSignature: existing.fileSignature, sourceSizeBytes: existing.sourceSizeBytes })
             && (await this.db.getDocumentCachePayloadsForMetadata(existing.id)).some(p => p.extractionSource === 'ocr')) return;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
+        const metadataInput = this.buildMetadataInput(
+            input.item,
+            source,
+            input.contentType,
+            this.withStoredDerivedPageLabels(input.metadata, existing, source),
+        );
         if (
             input.result.mode !== input.mode
             || input.result.schemaVersion !== metadataInput.extractionSchemaVersion
@@ -1865,6 +1947,9 @@ export class DocumentCache {
             throw new Error(`Document cache does not support ${contentKind} writes yet`);
         }
         const pageLabels = this.normalizePageLabels(metadata.pageLabels);
+        const derivedPageLabels = metadata.derivedPageLabels === undefined
+            ? undefined
+            : this.normalizeDerivedPageLabels(metadata.derivedPageLabels);
         const pages = metadata.pages ?? null;
         return {
             itemId: item.id,
@@ -1888,11 +1973,62 @@ export class DocumentCache {
                         metadata.snapshotPageCount,
                         metadata.snapshotExtractedTextChars,
                     )
-                    : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
+                    : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages, derivedPageLabels),
             errorCode: metadata.errorCode ?? null,
             extractionSchemaVersion,
             metadataFormatVersion: DOCUMENT_METADATA_FORMAT_VERSION,
         };
+    }
+
+    /**
+     * Metadata for a write that does not know the derived page labels (a
+     * metadata-only preflight, a markdown payload) keeps the ones stored for
+     * the same source. A changed source drops them with its payloads.
+     */
+    private withStoredDerivedPageLabels(
+        metadata: CacheMetadataInput,
+        existing: DocumentCacheMetadata | null,
+        source: DocumentCacheSourceIdentity,
+    ): CacheMetadataInput {
+        if (metadata.derivedPageLabels !== undefined || !existing) return metadata;
+        if (existing.derivedPageLabels === undefined) return metadata;
+        const sameSource = this.sourceIdentityMatches(source, {
+            filePath: existing.filePath,
+            fileSignature: existing.fileSignature,
+            sourceSizeBytes: existing.sourceSizeBytes,
+        });
+        return sameSource ? { ...metadata, derivedPageLabels: existing.derivedPageLabels } : metadata;
+    }
+
+    /** Derived labels with string keys; an empty map means none were found. */
+    private normalizeDerivedPageLabels(labels: PageLabels | Record<number, string> | null): PageLabels | null {
+        const normalized = this.normalizePageLabels(labels);
+        return normalized && Object.keys(normalized).length > 0 ? normalized : null;
+    }
+
+    /**
+     * Record derived page labels on metadata written before they were cached.
+     * Best effort and detached from the read that found them; skipped when the
+     * row changed meanwhile or the value is still not known.
+     */
+    private backfillDerivedPageLabels(
+        metadata: DocumentCacheMetadata,
+        derivedPageLabels: PageLabels | null | undefined,
+    ): void {
+        const documentMetadata = metadata.documentMetadata;
+        if (derivedPageLabels === undefined || documentMetadata?.content_kind !== 'pdf') return;
+        const item = { id: metadata.itemId, libraryID: metadata.libraryId, key: metadata.zoteroKey };
+        void this.trackCacheWrite(async () => {
+            if (Zotero.__beaverShuttingDown) return;
+            try {
+                await this.db.updateDocumentCacheDocumentMetadataIfUnchanged(metadata, {
+                    ...documentMetadata,
+                    derivedPageLabels: this.normalizeDerivedPageLabels(derivedPageLabels),
+                });
+            } catch (error) {
+                logger(`DocumentCache.backfillDerivedPageLabels error: ${error}`, 1);
+            }
+        }, false, item);
     }
 
     private normalizePageLabels(labels: PageLabels | Record<number, string> | null): PageLabels | null {

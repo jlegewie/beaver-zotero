@@ -40,7 +40,7 @@ function citationRender({ citation, formatted }: BuiltNoteCitation): CitationExp
  * Pre-formatted "link" citation items are returned as raw HTML.
  */
 function renderCitation(request: CitationExportRequest): CitationExportRender | null {
-    const { effectiveLibraryID, effectiveItemKey, effectiveLibraryRef, requestedRef, pages, metadata, pageLabelsByAttachmentId } = request;
+    const { effectiveLibraryID, effectiveItemKey, effectiveLibraryRef, requestedRef, pages, pageLabelsByAttachmentId } = request;
     if (!effectiveItemKey) return null;
     // `library_ref` is the portable identity and must win over a device-local
     // libraryID when both are present. The numeric id may be 0 (unresolved) or
@@ -57,8 +57,11 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
             const annotationCitation = buildAnnotationNoteCitation(item);
             if (annotationCitation) return citationRender(annotationCitation);
         }
+        // A note's locators are Zotero locator labels, preloaded into the
+        // export store. The citation's own `page_labels` are printed labels
+        // for display and must not reach a note.
         if (isLinkCitationItem(item)) {
-            const labels = getPageLabelsForItem(item, pageLabelsByAttachmentId) ?? metadata?.page_labels;
+            const labels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
             const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
             const page = requestedPage
                 ? translatePageNumberToLabel(labels, requestedPage)
@@ -82,8 +85,7 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
         const requestedPage = requestedRef ? normalizePageRange(getPageLocator(requestedRef) ?? '') || undefined : undefined;
         // Labels come from the active render store (passed in) so note export
         // respects the isolated store populated by renderToHTML.
-        const loadedLabels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
-        const exportLabels = loadedLabels ?? metadata?.page_labels;
+        const exportLabels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
         // Only a PDF page is a printed page; for other attachments the
         // citation carries no page and the private metadata keeps the locator.
         let locator: string | undefined;

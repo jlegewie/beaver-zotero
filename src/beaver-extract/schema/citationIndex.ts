@@ -41,7 +41,11 @@ function entryForSentence(
     };
 }
 
-/** Build a compact lookup for every citable item and sentence id. */
+/**
+ * Build a compact lookup for every citable item and sentence id. Entries carry
+ * the label the PDF declares for their page (the Zotero locator namespace);
+ * printed labels come from `document.derivedPageLabels`.
+ */
 export function buildCitationIndex(pages: StructuredPage[]): CitationIndex {
     const index: CitationIndex = {};
     for (const page of pages) {

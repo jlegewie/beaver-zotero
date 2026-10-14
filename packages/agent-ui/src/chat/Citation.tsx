@@ -108,7 +108,9 @@ const Citation: React.FC<CitationProps> = (props) => {
         citation,
         formatted_citation,
         previewText,
-        pagesDisplay,
+        locatorDisplay,
+        pageReference,
+        physicalPagesDisplay,
         pages,
     } = vm;
 
@@ -139,15 +141,15 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     // Format for display
     let displayText = '';
-    const hasLocatorDisplay = pagesDisplay.trim().length > 0;
+    const hasLocatorDisplay = locatorDisplay.length > 0;
     if (authorYearFormat) {
         if (isStreaming || isInvalid) {
             // We don't know the author/year string yet, or citation is invalid. Render a subtle placeholder.
             displayText = '?';
         } else {
             displayText = consecutive
-                ? (hasLocatorDisplay ? `p.${pagesDisplay}` : 'Ibid')
-                : (hasLocatorDisplay ? `${citation}, p.${pagesDisplay}` : citation);
+                ? (hasLocatorDisplay ? locatorDisplay : 'Ibid')
+                : (hasLocatorDisplay ? `${citation}, ${locatorDisplay}` : citation);
         }
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
@@ -202,7 +204,7 @@ const Citation: React.FC<CitationProps> = (props) => {
             // local copy. Name it by its id rather than export an empty pair of
             // parentheses.
             const fileLabel = citation || (externalFileKey ? `Attached file ext-${externalFileKey}` : '');
-            const locatorSuffix = hasLocatorDisplay ? `, p.${pagesDisplay}` : '';
+            const locatorSuffix = hasLocatorDisplay ? `, ${locatorDisplay}` : '';
             const exportedFile = getHost().documentExport?.renderExternalFileCitation?.({
                 externalFileKey,
                 displayName: fileLabel,
@@ -340,7 +342,10 @@ const Citation: React.FC<CitationProps> = (props) => {
                 <span className="flex-1" />
                 {!showItemInfo && hasLocatorDisplay && (
                     <span className="font-color-secondary text-sm" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-                        {`Page ${pagesDisplay}`}
+                        {pageReference.charAt(0).toUpperCase() + pageReference.slice(1)}
+                        {physicalPagesDisplay && (
+                            <span className="font-color-tertiary">{` · PDF page ${physicalPagesDisplay}`}</span>
+                        )}
                     </span>
                 )}
                 {!showItemInfo && (!pages || pages.length === 0) && textLineLocation && (
@@ -420,10 +425,10 @@ const Citation: React.FC<CitationProps> = (props) => {
                             <Icon icon={PdfIcon} className="font-color-secondary" />
                             <span className="text-sm font-color-secondary">
                                 {isEpubCitation
-                                    ? (hasLocatorDisplay ? `Opens EPUB at page ${pagesDisplay}` : 'Opens EPUB at location')
+                                    ? (hasLocatorDisplay ? `Opens EPUB at ${pageReference}` : 'Opens EPUB at location')
                                     : hasBoundingBoxes
-                                        ? (hasLocatorDisplay ? `Highlights passage on page ${pagesDisplay}` : 'Highlights passage in PDF')
-                                        : (hasLocatorDisplay ? `Opens PDF on page ${pagesDisplay}` : 'Opens PDF at location')}
+                                        ? (hasLocatorDisplay ? `Highlights passage on ${pageReference}` : 'Highlights passage in PDF')
+                                        : (hasLocatorDisplay ? `Opens PDF on ${pageReference}` : 'Opens PDF at location')}
                             </span>
                         </span>
                     </span>

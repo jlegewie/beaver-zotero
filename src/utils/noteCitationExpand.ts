@@ -68,6 +68,7 @@ import {
 import type { PageLabels } from '../services/documentCache';
 import type { ExternalFileRecord } from '../services/database';
 import type { StructuredExtractResult } from '@beaver/agent-core/extract/schema';
+import { zoteroLocatorPageLabelsFromMetadata } from '../services/documentExtraction/pageLabels';
 import { getCitationIndex } from '../beaver-extract/schema/citationIndex';
 import {
     locatorSchemaVersion,
@@ -219,7 +220,8 @@ async function attachmentCacheFilePath(attachmentItem: any): Promise<{ filePath:
 }
 
 /**
- * Resolve page labels for citations in a string that carry page locators.
+ * Resolve Zotero locator page labels for citations in a string that carry
+ * page locators.
  *
  * Returns a `PageLabelsByAttachmentId` map (attachment item ID → 0-based page
  * index → label). Callers thread the returned map into `expandToRawHtml` so
@@ -280,9 +282,8 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
                     zoteroKey: attachmentItem.key,
                 }, filePath);
             }
-            if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
-                labelsByAttachmentId[attachmentItem.id] = { ...record.pageLabels };
-            }
+            const labels = zoteroLocatorPageLabelsFromMetadata(record);
+            if (labels) labelsByAttachmentId[attachmentItem.id] = labels;
         } catch {
             // Skip items that can't be resolved
         }
@@ -304,8 +305,9 @@ async function itemExists(libraryID: number, key: string): Promise<boolean> {
 }
 
 /**
- * Load cached page labels for citations already stored in a raw Zotero note,
- * both native ones and the plain links used for standalone attachments.
+ * Load cached Zotero locator page labels for citations already stored in a
+ * raw Zotero note, both native ones and the plain links used for standalone
+ * attachments.
  *
  * This path is cache-first. Warm-cache reads only consult `documentCache`
  * metadata; callers can opt into local metadata seeding on a cache miss when
@@ -355,9 +357,8 @@ export async function preloadNotePageLabels(
                     zoteroKey: attachmentItem.key,
                 }, filePath);
             }
-            if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
-                labelsByItemId[itemId] = { ...record.pageLabels };
-            }
+            const labels = zoteroLocatorPageLabelsFromMetadata(record);
+            if (labels) labelsByItemId[itemId] = labels;
         } catch {
             // Skip attachments whose file or metadata cannot be read.
         }

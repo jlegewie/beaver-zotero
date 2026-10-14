@@ -252,6 +252,22 @@ describe('preloadNotePageLabels', () => {
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
 
+    it('returns the labels the PDF declares, not printed labels, as note locators', async () => {
+        const attachment = makeAttachment(42, 'ABCD1234');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({
+                pageLabels: { 0: '1' },
+                derivedPageLabels: { 0: '1201' },
+            }),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async () => attachment);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadNotePageLabels(makeRawCitation('ABCD1234'), 1);
+
+        expect(labels).toEqual({ '1-ABCD1234': { 0: '1' } });
+    });
+
     it('keeps the default cold-cache path read-only', async () => {
         const attachment = makeAttachment(43, 'EFGH5678');
         const cache = {
@@ -430,6 +446,16 @@ describe('preloadPageLabelsForNewCitations', () => {
         expect(labels).toEqual({ 47: { 4: 'iii' } });
         expect(cache.getMetadata).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: 'REMOTE01' }, 'remote:k:1-REMOTE01-v0');
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('writes the labels the PDF declares, not printed labels, into new note citations', async () => {
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 4: '5' }, derivedPageLabels: { 4: '1205' } }),
+        };
+        useAttachment(makeAttachment(50, 'LOCAL002'), cache);
+
+        expect(await preloadPageLabelsForNewCitations('<citation id="1-LOCAL002" loc="page5"/>'))
+            .toEqual({ 50: { 4: '5' } });
     });
 
     it('does not extract (and so download) a remote-only attachment on a cache miss', async () => {

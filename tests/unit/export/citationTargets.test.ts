@@ -138,6 +138,29 @@ describe('formatLocator', () => {
         expect(formatLocator(spec, { 0: 'iv', 1: 'v', 2: 'S1', 3: '10', 4: '12' })).toBe('iv-v, S1, 10, 12');
     });
 
+    it('writes an inclusive span as a range only when its labels span the cited pages', () => {
+        const spec = { pages: [5, 7], labels: null, inclusiveRange: true, labelsOnly: false };
+        expect(formatLocator(spec)).toBe('5-7');
+        expect(formatLocator(spec, { 4: '1205', 6: '1207' })).toBe('1205-1207');
+        expect(formatLocator(spec, { 4: 'iv', 6: 'vi' })).toBe('iv-vi');
+        // One end has no printed label: cite the printed end.
+        expect(formatLocator(spec, { 4: '1205' })).toBe('1205');
+        expect(formatLocator(spec, { 6: '1207' })).toBe('1207');
+        // Two numberings: no invented range.
+        expect(formatLocator(spec, { 4: 'xii', 6: '1' })).toBe('xii');
+    });
+
+    it('keeps spans and runs of prefixed labels that share a prefix', () => {
+        const span = { pages: [5, 7], labels: null, inclusiveRange: true, labelsOnly: false };
+        expect(formatLocator(span, { 4: 'S12', 6: 'S14' })).toBe('S12-S14');
+        expect(formatLocator(span, { 4: 'A-3', 6: 'A-5' })).toBe('A-3-A-5');
+        expect(formatLocator(span, { 4: 'S12', 6: 'T14' })).toBe('S12');
+        expect(formatLocator(span, { 4: 'S12', 6: '14' })).toBe('S12');
+
+        const run = { pages: [5, 6, 7], labels: null, inclusiveRange: false, labelsOnly: false };
+        expect(formatLocator(run, { 4: 'S12', 5: 'S13', 6: 'S14' })).toBe('S12-S14');
+    });
+
     it('shows only labelled pages for EPUB-like locators', () => {
         expect(formatLocator({ pages: [4], labels: null, inclusiveRange: false, labelsOnly: true })).toBeUndefined();
     });
@@ -146,6 +169,20 @@ describe('formatLocator', () => {
         const target = resolveCitationTarget(occurrence('<citation id="u-AAAAAAAA" loc="page1-150,200"/>'), snapshot());
         const spec = target.kind === 'zotero' ? target.locator! : null;
         expect(formatLocator(spec!)).toBe('1-150, 200');
-        expect(formatLocator(spec!, { 0: 'i', 199: '190' })).toBe('i-150, 190');
+        // Page 150 has no label: the range cites its printed start rather
+        // than mixing numberings ("i-150").
+        expect(formatLocator(spec!, { 0: 'i', 199: '190' })).toBe('i, 190');
+    });
+
+    it('writes an explicit range with labels only when they span the written pages', () => {
+        const written = (loc: string) => {
+            const target = resolveCitationTarget(occurrence(`<citation id="u-AAAAAAAA" loc="${loc}"/>`), snapshot());
+            return target.kind === 'zotero' ? target.locator! : null;
+        };
+        // An unnumbered cover before printed page 1201.
+        expect(formatLocator(written('page1-2')!, { 1: '1201' })).toBe('1201');
+        expect(formatLocator(written('page2-3')!, { 1: '1201', 2: '1202' })).toBe('1201-1202');
+        expect(formatLocator(written('page2-4')!, { 1: '1201', 3: '1205' })).toBe('1201');
+        expect(formatLocator(written('page5-6')!, { 1: '1201' })).toBe('5-6');
     });
 });

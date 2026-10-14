@@ -145,10 +145,24 @@ export function formatLocator(spec: LocatorSpec, labels?: Record<number, string>
     if (spec.written) {
         // Labels-only documents (EPUB section ordinals) show nothing without a printed label.
         let unlabelled = false;
-        const written = spec.written.replace(/\d+/g, number => {
-            const label = pageLabels?.[Number(number) - 1]?.trim();
-            if (!label) unlabelled = true;
-            return label || number;
+        const labelOfNumber = (number: string) => pageLabels?.[Number(number) - 1]?.trim() || undefined;
+        const written = spec.written.replace(/(\d+)-(\d+)|\d+/g, (match, start?: string, end?: string) => {
+            if (start === undefined || end === undefined) {
+                const label = labelOfNumber(match);
+                if (!label) unlabelled = true;
+                return label || match;
+            }
+            const first = labelOfNumber(start);
+            const last = labelOfNumber(end);
+            if (!first && !last) {
+                unlabelled = true;
+                return match;
+            }
+            if (labelsSpanPages(first, last, Number(end) - Number(start))) return `${first}-${last}`;
+            // The ends are not one printed sequence (an unnumbered cover, a
+            // gap, two numberings): cite a printed end rather than mix
+            // printed and physical numbers in one range.
+            return first ?? last!;
         });
         return spec.labelsOnly && unlabelled ? undefined : written;
     }
@@ -160,7 +174,17 @@ export function formatLocator(spec: LocatorSpec, labels?: Record<number, string>
     const pages = spec.pages.filter(page => labelOf(page) !== undefined);
     if (pages.length === 0) return undefined;
     if (spec.inclusiveRange && pages.length > 1) {
-        return `${labelOf(pages[0])}-${labelOf(pages[pages.length - 1])}`;
+        const first = pages[0];
+        const last = pages[pages.length - 1];
+        const printedFirst = pageLabels?.[first - 1]?.trim() || undefined;
+        const printedLast = pageLabels?.[last - 1]?.trim() || undefined;
+        if (!printedFirst && !printedLast) return `${first}-${last}`;
+        // Only a range whose labels span exactly the cited pages; otherwise
+        // (an unnumbered end, a gap, two numberings) cite a printed end
+        // rather than mix printed and physical numbers.
+        return labelsSpanPages(printedFirst, printedLast, last - first)
+            ? `${printedFirst}-${printedLast}`
+            : printedFirst ?? printedLast;
     }
     const ranges: string[] = [];
     for (let i = 0; i < pages.length; i++) {
@@ -188,14 +212,29 @@ function romanValue(label: string): number | null {
 }
 
 /**
+ * Whether labels `a` and `b` are `distance` apart in one numbering sequence:
+ * numbers with the same prefix (`12`→`14`, `S12`→`S14`, `A-3`→`A-5`) or Roman
+ * numerals (`iv`→`vi`).
+ */
+function labelsSpanPages(a: string | undefined, b: string | undefined, distance: number): boolean {
+    if (!a || !b) return false;
+    const numberedA = /^(.*?)(\d+)$/.exec(a);
+    const numberedB = /^(.*?)(\d+)$/.exec(b);
+    if (numberedA || numberedB) {
+        return !!numberedA && !!numberedB
+            && numberedA[1] === numberedB[1]
+            && Number(numberedB[2]) - Number(numberedA[2]) === distance;
+    }
+    const romanA = romanValue(a);
+    const romanB = romanValue(b);
+    return romanA !== null && romanB !== null && romanB - romanA === distance;
+}
+
+/**
  * Whether label `b` directly follows label `a` in one numbering sequence, so
  * a range between them names no pages that are not cited (`10`→`11`,
  * `iv`→`v`; not `10`→`12` or `iv`→`S1`).
  */
 function consecutiveLabels(a: string | undefined, b: string | undefined): boolean {
-    if (!a || !b) return false;
-    if (/^\d+$/.test(a) && /^\d+$/.test(b)) return Number(b) === Number(a) + 1;
-    const romanA = romanValue(a);
-    const romanB = romanValue(b);
-    return romanA !== null && romanB !== null && romanB === romanA + 1;
+    return labelsSpanPages(a, b, 1);
 }

@@ -15,11 +15,15 @@
  * All callers resolve labels up-front (via the `preload*` functions) and pass
  * an explicit `PageLabelsByAttachmentId` map into the `*FromLabels` resolvers,
  * so no rendering path reads mutable cache state synchronously.
+ *
+ * Each preload names its label namespace (`documentExtraction/pageLabels`):
+ * the chat shows printed labels; a Zotero note export writes locator labels.
  */
 
 import { makeRemoteFilePath } from '../../src/services/documentFileIdentity';
 import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/services/agentDataProvider/utils';
-import type { PageLabels } from '../../src/services/documentCache';
+import type { DocumentCacheMetadata, PageLabels } from '../../src/services/documentCache';
+import { loadPageLabelsForMetadata, type PageLabelNamespace } from '../../src/services/documentExtraction/pageLabels';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
 import { getParentItemAsync } from '../../src/utils/zoteroDataLoading';
@@ -41,11 +45,14 @@ export type PreloadFilePath =
     | { item: Zotero.Item; filePath: string; isRemoteOnly: false }
     | { item: Zotero.Item; filePath: string; isRemoteOnly: true };
 
-function addPageLabels(
+async function addPageLabels(
     target: PageLabelsByAttachmentId,
     itemId: number,
-    labels: PageLabels | null | undefined,
-): void {
+    record: DocumentCacheMetadata | null | undefined,
+    namespace: PageLabelNamespace,
+    filePath: string,
+): Promise<void> {
+    const labels = await loadPageLabelsForMetadata(record, namespace, filePath);
     if (!hasPageLabels(labels)) return;
     target[itemId] = { ...labels };
 }
@@ -96,8 +103,8 @@ export function translatePageNumberToLabelFromLabels(
 }
 
 /**
- * Pre-load attachment page labels into the in-memory cache for all citations
- * in the given content string. Must be called (and awaited) before synchronous
+ * Pre-load attachment page labels of one namespace for all citations in the
+ * given content string. Must be called (and awaited) before synchronous
  * rendering with `renderToMarkdown` or `renderToHTML`.
  *
  * For each referenced attachment:
@@ -105,7 +112,10 @@ export function translatePageNumberToLabelFromLabels(
  * 2. On local cache miss, run full extraction via `getAttachmentFileStatus`.
  *    On remote-only cache miss, skip rather than downloading during render.
  */
-export async function preloadPageLabelsForContent(content: string): Promise<PageLabelsByAttachmentId> {
+export async function preloadPageLabelsForContent(
+    content: string,
+    namespace: PageLabelNamespace,
+): Promise<PageLabelsByAttachmentId> {
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return {};
 
@@ -137,7 +147,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
                 zoteroKey: preloadItem.key,
             }, preloadPath.filePath);
             if (record) {
-                addPageLabels(labelsByAttachmentId, preloadItem.id, record.pageLabels);
+                await addPageLabels(labelsByAttachmentId, preloadItem.id, record, namespace, preloadPath.filePath);
                 continue;
             }
 
@@ -151,7 +161,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
                 libraryId: preloadItem.libraryID,
                 zoteroKey: preloadItem.key,
             }, preloadPath.filePath);
-            addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed?.pageLabels);
+            await addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed, namespace, preloadPath.filePath);
         } catch {
             // Skip items that can't be resolved
         }
@@ -161,8 +171,8 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
 }
 
 /**
- * Pre-load attachment page labels into the in-memory cache for the given
- * citation metadata records. Used when citation metadata is available directly
+ * Pre-load page labels of one namespace (printed by default) for the given
+ * citation metadata records, keyed by the attachment each citation resolved to. Used when citation metadata is available directly
  * (e.g., on run completion or thread load) so the rendering path can resolve
  * page labels synchronously.
  *
@@ -174,7 +184,8 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
  * lookup (`resolvePageLabels`) working for libraries not yet opened in Zotero.
  */
 export async function preloadPageLabelsForCitations(
-    citations: ReadonlyArray<Partial<Citation>>
+    citations: ReadonlyArray<Partial<Citation>>,
+    namespace: PageLabelNamespace = 'printed',
 ): Promise<PageLabelsByAttachmentId> {
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return {};
@@ -224,7 +235,7 @@ export async function preloadPageLabelsForCitations(
                 zoteroKey: preloadItem.key,
             }, preloadPath.filePath);
             if (record) {
-                addPageLabels(labelsByAttachmentId, preloadItem.id, record.pageLabels);
+                await addPageLabels(labelsByAttachmentId, preloadItem.id, record, namespace, preloadPath.filePath);
                 continue;
             }
 
@@ -235,7 +246,7 @@ export async function preloadPageLabelsForCitations(
                 libraryId: preloadItem.libraryID,
                 zoteroKey: preloadItem.key,
             }, preloadPath.filePath);
-            addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed?.pageLabels);
+            await addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed, namespace, preloadPath.filePath);
         } catch {
             // Skip items that can't be resolved
         }

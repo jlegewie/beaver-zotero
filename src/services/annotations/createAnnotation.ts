@@ -25,6 +25,7 @@ import {
     sourceBboxesToZoteroRects,
 } from "./annotationGeometry";
 import { getReadableContentKind } from "../documentExtraction/attachmentResolution";
+import { getZoteroLocatorPageLabels } from "../documentExtraction/pageLabels";
 import {
     resolveEpubAnnotationTarget,
     type EpubAnnotationLocator,
@@ -673,11 +674,9 @@ export async function createNoteAnnotation(
     item.annotationComment = input.comment;
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
     const filePath = await attachment.getFilePathAsync();
-    const metadata = filePath ? await Zotero.Beaver?.documentCache?.getMetadata(
-        { libraryId: attachment.libraryID, zoteroKey: attachment.key }, filePath,
-    ) : null;
+    const locatorLabels = filePath ? await getZoteroLocatorPageLabels(attachment, filePath) : null;
     const pageLabel = firstNonBlankPageLabel(input.pageLabel)
-        ?? metadata?.pageLabels?.[input.notePosition.page_index];
+        ?? locatorLabels?.[input.notePosition.page_index];
     applyAnnotationPlacement(item, buildNotePlacement({ ...input, pageLabel }, geometry));
     await saveBeaverAnnotation(attachment, item, input.tags);
 

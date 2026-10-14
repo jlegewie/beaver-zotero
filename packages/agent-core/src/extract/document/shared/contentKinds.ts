@@ -69,7 +69,14 @@ export type CachedDocumentMetadata =
     | {
         content_kind: 'pdf';
         pageCount: number | null;
+        /** Labels the PDF declares (its `/PageLabels`). */
         pageLabels: DocumentCachePageLabels | null;
+        /**
+         * Page numbers printed on the pages, from full structured extraction.
+         * Absent: not known (written before this field, or by a path that does
+         * not derive labels). `null`: derivation ran and found none.
+         */
+        derivedPageLabels?: DocumentCachePageLabels | null;
         pages: (PageGeometry | null)[] | null;
     }
     | {
@@ -171,11 +178,13 @@ export function buildPdfCachedMetadata(
     pageCount: number | null,
     pageLabels: DocumentCachePageLabels | null,
     pages: (PageGeometry | null)[] | null,
+    derivedPageLabels?: DocumentCachePageLabels | null,
 ): CachedDocumentMetadata {
     return {
         content_kind: 'pdf',
         pageCount,
         pageLabels,
+        ...(derivedPageLabels !== undefined ? { derivedPageLabels } : {}),
         pages,
     };
 }

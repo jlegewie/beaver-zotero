@@ -5,7 +5,22 @@
 import type { BoundingBox, InternalExtractionResult } from "@beaver/agent-core/extract/types";
 import { bboxFromXYWH } from "@beaver/agent-core/extract/types";
 import { inverseRotateBBox, type RotationAngle } from "../PageRotationNormalizer";
+import type { BeaverExtractResult } from "@beaver/agent-core/extract/schema";
 import type { PdfExtractionPreset } from "../schema";
+import { pdfExtractionPreset } from "../schema/presets";
+
+/**
+ * Derived page labels as document-cache metadata records them: the map when
+ * derivation found labels, `null` when it ran and found none, `undefined` when
+ * the result never derives them (markdown mode, or a schema without it).
+ */
+export function derivedPageLabelsForCache(
+    result: BeaverExtractResult,
+): Record<string, string> | null | undefined {
+    if (result.mode !== "structured") return undefined;
+    if (!pdfExtractionPreset(result.schemaVersion)?.derivedPageLabels) return undefined;
+    return result.document.derivedPageLabels ?? null;
+}
 
 export function pageLabelsToStringKeys(
     pageLabels?: Record<number, string>,

@@ -33,7 +33,8 @@ import {
 } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
-import { resolveExternalFile } from '../externalFiles';
+import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
+import { loadPageLabelsForMetadata } from '../documentExtraction/pageLabels';
 import {
     externalFileMissingMessage,
     getResolvedAttachmentParentStub,
@@ -632,7 +633,13 @@ async function handleExternalFileViewRequest(
         }, signal);
         throwIfTimedOut('pdf_render');
 
-        const pageLabels = renderResult.pageLabels ?? {};
+        // Printed labels of an extracted copy; a file never extracted has none.
+        const cachedMeta = await Zotero.Beaver?.documentCache?.getMetadata(
+            { libraryId: EXTERNAL_LIBRARY_ID, zoteroKey: extKey },
+            record.storedPath,
+        ).catch(() => null);
+        const pageLabels = await loadPageLabelsForMetadata(cachedMeta, 'printed', record.storedPath) ?? {};
+        throwIfTimedOut('page_label_lookup');
         const images: WSViewImage[] = renderResult.pages.map((page) => ({
             image_data: uint8ToBase64(page.data),
             format: page.format,
