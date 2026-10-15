@@ -170,11 +170,6 @@ export interface CitationViewModel {
     locatorDisplay: string;
     /** The cited pages for prose ("page 12", "PDF page 5"); "" without pages. */
     pageReference: string;
-    /**
-     * Physical pages ("3") when the printed labels shown differ from them;
-     * "" otherwise. Lets a reader match the PDF reader's own page box.
-     */
-    physicalPagesDisplay: string;
     pages: number[];
 }
 
@@ -359,10 +354,10 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
     // subscribed `labelsByAttachmentId` (from the active store) to the host so
     // it resolves correctly under the isolated store used for note export, and
     // so the recompute fires once the async page-label preload populates it.
-    const { pageLabels, locatorDisplay, pageReference, physicalPagesDisplay, pages } = useMemo(() => {
+    const { pageLabels, locatorDisplay, pageReference, pages } = useMemo(() => {
         let pageLabels: string[] = rawPages.map((p) => String(p));
         const contentKind = getContentKind(metadata);
-        const noPages = { locatorDisplay: '', pageReference: '', physicalPagesDisplay: '' };
+        const noPages = { locatorDisplay: '', pageReference: '' };
 
         if (contentKind === 'snapshot') {
             // Synthetic page numbers are a logical coordinate only; the snapshot
@@ -383,7 +378,6 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
                 pageLabels,
                 locatorDisplay: display ? `p.${display}` : '',
                 pageReference: display ? `page ${display}` : '',
-                physicalPagesDisplay: '',
                 pages: rawPages,
             };
         }
@@ -410,7 +404,6 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             pageLabels,
             locatorDisplay: display.locator,
             pageReference: display.reference,
-            physicalPagesDisplay: display.physicalWhenDifferent,
             pages: rawPages,
         };
     }, [rawPages, usePageLabels, resolvedRef, labelsByAttachmentId, metadata]);
@@ -442,7 +435,6 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         pageLabels,
         locatorDisplay,
         pageReference,
-        physicalPagesDisplay,
         pages,
     };
 }

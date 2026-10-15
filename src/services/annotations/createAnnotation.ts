@@ -25,7 +25,6 @@ import {
     sourceBboxesToZoteroRects,
 } from "./annotationGeometry";
 import { getReadableContentKind } from "../documentExtraction/attachmentResolution";
-import { getZoteroLocatorPageLabels } from "../documentExtraction/pageLabels";
 import {
     resolveEpubAnnotationTarget,
     type EpubAnnotationLocator,
@@ -164,29 +163,6 @@ export function resolvedAnnotationPageLabel(
     ...candidates: (string | null | undefined)[]
 ): string {
     return firstNonBlankPageLabel(...candidates) ?? String(pageIndex + 1);
-}
-
-/**
- * The label a Beaver-written PDF annotation on `pageIndex` stores: its Zotero
- * locator label (the printed page, else the label the PDF declares) when the
- * document cache knows it, else the label the request carried. Zotero shows
- * annotation labels as the page and labels a user's next annotations by
- * counting on from the nearest earlier one, so a correct printed label also
- * corrects those, while a physical number would spread. `null` leaves the
- * physical page to the placement builders.
- */
-export async function pdfAnnotationPageLabel(
-    attachment: Zotero.Item,
-    pageIndex: number,
-    requested: string | null | undefined,
-): Promise<string | null> {
-    let locator: string | undefined;
-    try {
-        locator = (await getZoteroLocatorPageLabels(attachment))?.[pageIndex];
-    } catch {
-        locator = undefined;
-    }
-    return firstNonBlankPageLabel(locator, requested);
 }
 
 /** Coerce `value` to a non-negative integer ≤ `max`. NaN/Infinity/null/negatives become 0. */
@@ -649,11 +625,7 @@ export async function createPdfHighlightForItem(
     const { first, next } = highlightPageSpan(item.page_locations ?? []);
     // The item-level label, when present, is the first page's label, which is
     // the page the annotation lives on.
-    const pageLabel = await pdfAnnotationPageLabel(
-        attachment,
-        first.page_idx,
-        first.page_label ?? item.page_label ?? null,
-    );
+    const pageLabel = first.page_label ?? item.page_label ?? null;
     const ref = await createHighlightAnnotation(attachment, {
         pageIndex: first.page_idx,
         boxes: first.boxes ?? [],
@@ -700,11 +672,12 @@ export async function createNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    const pageLabel = await pdfAnnotationPageLabel(
-        attachment,
-        input.notePosition.page_index,
-        input.pageLabel,
-    );
+    const filePath = await attachment.getFilePathAsync();
+    const metadata = filePath ? await Zotero.Beaver?.documentCache?.getMetadata(
+        { libraryId: attachment.libraryID, zoteroKey: attachment.key }, filePath,
+    ) : null;
+    const pageLabel = firstNonBlankPageLabel(input.pageLabel)
+        ?? metadata?.pageLabels?.[input.notePosition.page_index];
     applyAnnotationPlacement(item, buildNotePlacement({ ...input, pageLabel }, geometry));
     await saveBeaverAnnotation(attachment, item, input.tags);
 

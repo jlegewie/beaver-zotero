@@ -103,23 +103,17 @@ describe('formatPrintedPage', () => {
 });
 
 describe('formatCitedPages', () => {
-    it('shows printed labels and the physical pages they differ from', () => {
+    it('shows printed labels', () => {
         expect(formatCitedPages([3, 4], { 2: '1203', 3: '1204' })).toEqual({
             locator: 'p.1203-1204',
             reference: 'page 1203-1204',
-            physicalWhenDifferent: '3-4',
         });
-    });
-
-    it('omits the physical pages when the labels equal them', () => {
-        expect(formatCitedPages([3], { 2: '3' }).physicalWhenDifferent).toBe('');
     });
 
     it('uses the distinct PDF form for an unlabelled page of a labelled document', () => {
         expect(formatCitedPages([1], { 1: '1202' })).toEqual({
             locator: 'PDF p.1',
             reference: 'PDF page 1',
-            physicalWhenDifferent: '',
         });
         expect(formatCitedPages([1, 2], { 1: '1202' }).locator).toBe('p.1202, PDF p.1');
     });
@@ -129,12 +123,11 @@ describe('formatCitedPages', () => {
         expect(formatCitedPages([5], { 4: '1205' }, false)).toEqual({
             locator: 'p.5',
             reference: 'page 5',
-            physicalWhenDifferent: '',
         });
     });
 
     it('returns empty strings without pages', () => {
-        expect(formatCitedPages([], { 0: '1' })).toEqual({ locator: '', reference: '', physicalWhenDifferent: '' });
+        expect(formatCitedPages([], { 0: '1' })).toEqual({ locator: '', reference: '' });
     });
 });
 

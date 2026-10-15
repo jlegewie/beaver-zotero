@@ -73,11 +73,6 @@ export interface CitedPagesDisplay {
     locator: string;
     /** Same pages for prose: "page 12", "PDF page 5", "page 12, PDF page 5". */
     reference: string;
-    /**
-     * Physical pages ("3-4") when printed labels are shown and differ from
-     * them, so a reader can match the reader's own page box; else "".
-     */
-    physicalWhenDifferent: string;
 }
 
 /**
@@ -93,10 +88,10 @@ export function formatCitedPages(
     useLabels = true,
 ): CitedPagesDisplay {
     const pages = [...new Set(pageNumbers.filter(page => Number.isInteger(page) && page > 0))].sort((a, b) => a - b);
-    if (pages.length === 0) return { locator: '', reference: '', physicalWhenDifferent: '' };
+    if (pages.length === 0) return { locator: '', reference: '' };
     const physicalAll = formatNumberRanges(pages);
     if (!useLabels || !hasPageLabels(labels)) {
-        return { locator: `p.${physicalAll}`, reference: `page ${physicalAll}`, physicalWhenDifferent: '' };
+        return { locator: `p.${physicalAll}`, reference: `page ${physicalAll}` };
     }
 
     const labelled: number[] = [];
@@ -122,6 +117,5 @@ export function formatCitedPages(
         labelledPart ? `page ${labelledPart}` : '',
         unlabelledPart ? `PDF page ${unlabelledPart}` : '',
     ].filter(Boolean).join(', ');
-    const differs = labelled.some((page, i) => labelledText[i] !== String(page));
-    return { locator, reference, physicalWhenDifferent: differs ? physicalAll : '' };
+    return { locator, reference };
 }

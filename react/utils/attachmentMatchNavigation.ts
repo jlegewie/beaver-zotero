@@ -20,7 +20,6 @@ import { getCurrentReaderAndWaitForView } from './readerUtils';
 import { revealSource } from './sourceUtils';
 import { resolveItemReference } from '../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
-import { getZoteroLocatorPageLabels } from '../../src/services/documentExtraction/pageLabels';
 
 /** One find_in_attachments match to navigate to. */
 export interface AttachmentMatchNavRequest {
@@ -188,10 +187,6 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
                 { pageIndex, boxes, pageLabel: nav.page_label ?? null },
             ];
             if (useTemporaryAnnotations) {
-                // A temporary highlight is a real annotation while it exists, so
-                // it carries the label a Beaver annotation on the page would.
-                const locatorLabel = (await getZoteroLocatorPageLabels(item).catch(() => null))?.[pageIndex];
-                if (locatorLabel) locations[0].pageLabel = locatorLabel;
                 const annotationReferences = await createBoundingBoxHighlights(
                     locations,
                     nav.snippet ?? '',

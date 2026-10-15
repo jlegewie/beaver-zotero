@@ -110,7 +110,6 @@ const Citation: React.FC<CitationProps> = (props) => {
         previewText,
         locatorDisplay,
         pageReference,
-        physicalPagesDisplay,
         pages,
     } = vm;
 
@@ -343,9 +342,6 @@ const Citation: React.FC<CitationProps> = (props) => {
                 {!showItemInfo && hasLocatorDisplay && (
                     <span className="font-color-secondary text-sm" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                         {pageReference.charAt(0).toUpperCase() + pageReference.slice(1)}
-                        {physicalPagesDisplay && (
-                            <span className="font-color-tertiary">{` · PDF page ${physicalPagesDisplay}`}</span>
-                        )}
                     </span>
                 )}
                 {!showItemInfo && (!pages || pages.length === 0) && textLineLocation && (

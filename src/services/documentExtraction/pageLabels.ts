@@ -5,10 +5,12 @@
  *   (`resolvePrintedPageLabels`). Everything Beaver shows a person or sends the
  *   model as a page number uses them: chat citations, file exports, the
  *   `page_label` fields of backend responses.
- * - **Zotero locator** labels are what Beaver writes into Zotero: note-citation
- *   locators and annotation page labels (`resolveZoteroLocatorPageLabels`): the
- *   printed label, else the label the PDF declares. Pages with neither take
- *   their physical number at the caller.
+ * - **Zotero locator** labels are what Beaver writes into Zotero as
+ *   note-citation locators (`resolveZoteroLocatorPageLabels`): the printed
+ *   label, else the label the PDF declares. Pages with neither take their
+ *   physical number at the caller. Annotation labels follow the same rule but
+ *   are proposed by the backend, which has the structured document even when
+ *   this computer never extracted it, and stored as proposed.
  * - **Declared** labels are the PDF's own `/PageLabels`. Native note citations
  *   without Beaver's metadata are read back in them, model page references
  *   fall back to them, and the page suffix of a link citation that cannot
@@ -29,7 +31,6 @@ import {
     resolveZoteroLocatorPageLabels,
 } from '@beaver/agent-core/extract/pageLabels/printedPageLabels';
 import type { DocumentCacheMetadata, PageLabels } from '../documentCache';
-import { makeRemoteFilePath } from '../documentFileIdentity';
 import type { StoredLocatorPageLabels } from '../../utils/pageLabelTranslation';
 
 export type PageLabelNamespace = 'printed' | 'locator' | 'declared';
@@ -152,32 +153,4 @@ function sameLabels(a: PageLabels | null, b: PageLabels | null): boolean {
     if (!a || !b) return a === b;
     const keys = Object.keys(a);
     return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
-}
-
-/**
- * Cached metadata of a PDF attachment: its local file, or the remote key of
- * a sync-backed attachment without a local copy. Cache only; never extracts.
- */
-async function cachedMetadataForAttachment(
-    attachment: Zotero.Item,
-    filePath?: string | null,
-): Promise<DocumentCacheMetadata | null> {
-    const cache = Zotero.Beaver?.documentCache;
-    if (!cache) return null;
-    const path = filePath || (await attachment.getFilePathAsync()) || makeRemoteFilePath(attachment);
-    return cache.getMetadata({ libraryId: attachment.libraryID, zoteroKey: attachment.key }, path)
-        .catch(() => null);
-}
-
-/**
- * Zotero locator labels of an attachment, from the document cache (with
- * printed labels recovered from the cached payload when the record lacks
- * them). Cache only; never extracts.
- */
-export async function getZoteroLocatorPageLabels(
-    attachment: Zotero.Item,
-    filePath?: string | null,
-): Promise<PageLabels | null> {
-    const path = filePath || (await attachment.getFilePathAsync()) || makeRemoteFilePath(attachment);
-    return loadPageLabelsForMetadata(await cachedMetadataForAttachment(attachment, path), 'locator', path);
 }
