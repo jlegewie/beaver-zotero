@@ -1,6 +1,7 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from '../agents/types';
 import { getToolBaseLabel, parseArgs } from './toolCallRequest';
+import { textAnnotationStyle } from '../types/agentActions/createAnnotations';
 import { isExternalReferenceListView, isItemRow, type ToolResultView } from './toolResultViews';
 import { extractAuthorLastName, type ExternalReference } from '../types/externalReferences';
 
@@ -416,7 +417,11 @@ function computeMainLabel(
     opts?: ToolCallLabelOptions,
 ): string {
     const toolName = part.tool_name;
-    const baseLabel = getToolBaseLabel(toolName);
+    const args = parseArgs(part);
+    const baseLabel = toolName === 'create_highlight_annotations'
+        && textAnnotationStyle(args.style) === 'underline'
+        ? 'Creating underline annotations'
+        : getToolBaseLabel(toolName);
 
     // Progress messages take precedence when present
     if (status === 'in_progress' && part.progress) {
@@ -431,7 +436,6 @@ function computeMainLabel(
             : `${baseLabel}: no change needed`;
     }
 
-    const args = parseArgs(part);
     const view = opts?.view ?? null;
 
     // Headline name (item/note/annotation tools): prefer the hydrated view, else

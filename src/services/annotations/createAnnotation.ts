@@ -7,6 +7,7 @@ import type { PageLocation } from "@beaver/agent-core/types/citations";
 import type {
     CreatedAnnotationResult,
     HighlightAnnotationItem,
+    TextAnnotationStyle,
 } from "@beaver/agent-core/types/agentActions/createAnnotations";
 import { NotePosition } from "@beaver/agent-core/types/agentActions/annotations";
 import { PageGeometry } from "@beaver/agent-core/extract/types";
@@ -125,6 +126,8 @@ export interface CreateHighlightInput {
     nextPageBoxes?: BoundingBox[] | null;
     /** Tags applied to the created annotation. */
     tags?: string[];
+    /** Zotero annotation type to write. Defaults to highlight. */
+    style?: TextAnnotationStyle;
 }
 
 export interface CreateNoteInput {
@@ -597,7 +600,7 @@ export async function createHighlightAnnotation(
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
     item.parentID = attachment.id;
-    item.annotationType = "highlight";
+    item.annotationType = input.style ?? "highlight";
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
     applyAnnotationPlacement(item, buildHighlightPlacement(input, geometry, nextPageGeometry));
@@ -621,6 +624,7 @@ export async function createPdfHighlightForItem(
         "client_item_id" | "index" | "loc_raw" | "text" | "color" | "comment" | "page_locations" | "page_label"
     >,
     tags?: string[],
+    style?: TextAnnotationStyle,
 ): Promise<CreatedAnnotationResult> {
     const { first, next } = highlightPageSpan(item.page_locations ?? []);
     // The item-level label, when present, is the first page's label, which is
@@ -636,6 +640,7 @@ export async function createPdfHighlightForItem(
         pageLabel,
         readingOrderOffset: first.reading_order_offset ?? null,
         tags,
+        style,
     });
     return {
         client_item_id: item.client_item_id,
@@ -718,6 +723,8 @@ export interface CreateEpubHighlightInput extends EpubLocatorInput {
     /** Cited passage to locate and highlight. */
     text: string;
     comment?: string | null;
+    /** Zotero annotation type to write. Defaults to highlight. */
+    style?: TextAnnotationStyle;
 }
 
 export interface CreateEpubNoteInput extends EpubLocatorInput {
@@ -788,7 +795,7 @@ export async function createEpubHighlightAnnotation(
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
     item.parentID = attachment.id;
-    item.annotationType = "highlight";
+    item.annotationType = input.style ?? "highlight";
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
     applyAnnotationPlacement(
@@ -868,6 +875,8 @@ export interface CreateSnapshotHighlightInput extends SnapshotLocatorInput {
     /** Cited passage to locate and highlight. */
     text: string;
     comment?: string | null;
+    /** Zotero annotation type to write. Defaults to highlight. */
+    style?: TextAnnotationStyle;
 }
 
 export interface CreateSnapshotNoteInput extends SnapshotLocatorInput {
@@ -966,7 +975,7 @@ export async function createSnapshotHighlightAnnotation(
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
     item.parentID = attachment.id;
-    item.annotationType = "highlight";
+    item.annotationType = input.style ?? "highlight";
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
     applyAnnotationPlacement(

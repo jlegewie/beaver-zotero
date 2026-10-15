@@ -13,6 +13,15 @@ function toolCall(overrides: Partial<ToolCallPart> = {}): ToolCallPart {
 }
 
 describe('getToolCallLabel', () => {
+    it('names underline annotation calls by their style', () => {
+        const call = (args: Record<string, unknown>) => toolCall({ tool_name: 'create_highlight_annotations', args });
+
+        expect(getToolCallLabel(call({ style: 'underline' }), 'in_progress'))
+            .toBe('Creating underline annotations');
+        expect(getToolCallLabel(call({}), 'in_progress'))
+            .toBe('Creating highlight annotations');
+    });
+
     it('reports a write that changed nothing', () => {
         expect(getToolCallLabel(toolCall(), 'completed', { noChange: true }))
             .toBe('Edit metadata: no change needed');

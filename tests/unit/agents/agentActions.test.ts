@@ -831,3 +831,30 @@ describe('undoAgentActionAtom', () => {
         expect(undone.proposed_data).toEqual(before);
     });
 });
+
+describe('toAgentAction create_highlight_annotations normalization', () => {
+    const proposed = (extra: Record<string, unknown> = {}) => ({
+        requested_ref: { library_id: 1, zotero_key: 'ATT00001' },
+        resolved_ref: { library_id: 1, zotero_key: 'ATT00001' },
+        items: [],
+        ...extra,
+    });
+
+    it('keeps an underline style', () => {
+        const action = toAgentAction({
+            action_type: 'create_highlight_annotations',
+            proposed_data: proposed({ style: 'underline' }),
+        });
+
+        expect((action.proposed_data as CreateHighlightAnnotationsProposedData).style).toBe('underline');
+    });
+
+    it('adds no style to a highlight action', () => {
+        const action = toAgentAction({
+            action_type: 'create_highlight_annotations',
+            proposed_data: proposed(),
+        });
+
+        expect(action.proposed_data).not.toHaveProperty('style');
+    });
+});
