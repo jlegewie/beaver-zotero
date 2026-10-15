@@ -34,6 +34,20 @@ describe('resolveCitationTarget', () => {
         if (target.kind === 'zotero') expect(formatLocator(target.locator!)).toBe('iii-iv');
     });
 
+    it('leaves the locator without labels when the metadata labels are all empty', () => {
+        const citation: Citation = {
+            citation_id: 'c1',
+            requested_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'AAAAAAAA', loc: { kind: 'sentence', value: '5', raw: 's5' } },
+            resolved_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'AAAAAAAA' },
+            pages: [11],
+            page_labels: { 10: '' },
+            display_name: 'Smith 2004',
+        };
+        const target = resolveCitationTarget(occurrence('<citation id="u-AAAAAAAA" loc="s5"/>'),
+            snapshot({ citationsByKey: { 'zotero:u-AAAAAAAA:s5': citation } }));
+        expect(target.kind === 'zotero' && target.locator?.labels).toBeNull();
+    });
+
     it('does not give a locator-free citation the pages of a page-specific alias', () => {
         // The only metadata for the work is page-specific; lookup maps also file it under the base key.
         const citation: Citation = {
