@@ -30,9 +30,9 @@ const mockIOUtils = (globalThis as any).IOUtils as {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Only declared (locator) labels, as documents without printed labels have. */
+/** Only declared labels, as documents without printed labels have. */
 function declared(labels: Record<number, string> | null) {
-    return { printed: null, locator: labels };
+    return { printed: null, declared: labels };
 }
 
 function makeCachedMeta(
@@ -142,13 +142,13 @@ describe('resolvePageValue (printed and declared labels)', () => {
     it('matches printed labels before the labels the PDF declares', () => {
         const labels = {
             printed: { 0: '1201', 1: '1202', 2: '1203' },
-            locator: { 0: '1', 1: '2', 2: '1202' },
+            declared: { 0: '1', 1: '2', 2: '1202' },
         };
         expect(resolvePageValue('1202', labels, true)).toBe(2);
     });
 
     it('falls back to declared labels, then to the physical page', () => {
-        const labels = { printed: { 2: '1203' }, locator: { 0: 'i', 1: 'ii' } };
+        const labels = { printed: { 2: '1203' }, declared: { 0: 'i', 1: 'ii' } };
         expect(resolvePageValue('ii', labels, true)).toBe(2);
         expect(resolvePageValue('3', labels, true)).toBe(3);
     });
@@ -156,11 +156,11 @@ describe('resolvePageValue (printed and declared labels)', () => {
     it('prefers the main-body page when a printed label repeats', () => {
         // A cover sheet printed "5" ahead of a body run 1..6.
         const printed = { 0: '5', 1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6' };
-        expect(resolvePageValue('5', { printed, locator: null }, true)).toBe(6);
+        expect(resolvePageValue('5', { printed, declared: null }, true)).toBe(6);
     });
 
     it('names printed labels in the miss message when there are any', () => {
-        const labels = { printed: { 0: '1201' }, locator: { 0: '1' } };
+        const labels = { printed: { 0: '1201' }, declared: { 0: '1' } };
         try {
             resolvePageValue('xyz', labels, true);
             expect.unreachable();

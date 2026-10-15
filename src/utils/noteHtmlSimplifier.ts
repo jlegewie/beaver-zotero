@@ -17,9 +17,19 @@ import { normalizeNoteHtml } from '../prosemirror/normalize';
 import {
     parseLinkCitationPageSuffix,
     parseZoteroCitationLinkHref,
+    parseZoteroCitationLinkPage,
+    parseZoteroCitationLinkPages,
     zoteroLinkCitationPattern,
 } from './zoteroLinkCitation';
-import { translatePageLabelToNumber } from './pageLabelTranslation';
+import { parseLoc } from '@beaver/agent-core/citations/citationGrammar';
+import { parseExtractIdValue } from '@beaver/agent-core/extract/ids';
+import {
+    declaredReadbackLabels,
+    locatorReadbackLabels,
+    translateLinkPageLabelToNumber,
+    translatePageLabelToNumber,
+    type StoredLocatorPageLabels,
+} from './pageLabelTranslation';
 import { citationItemRefFromUri } from './zoteroUri';
 import { modelObjectId } from './libraryIdentity';
 import { citationReadback, isItemKey, readBeaverCitationMeta } from './noteCitationMeta';
@@ -100,16 +110,104 @@ function quickHash(str: string): string {
     return String(hash) + ':' + str.length;
 }
 
-function fingerprintPageLabels(pageLabelsByItemId?: Record<string, PageLabels>): string {
+interface AnnotationCitation {
+    uri: string;
+    locator: string;
+    pageIndex: number;
+}
+
+/** The citation item and page Zotero stores in an annotation's `data-annotation`. */
+function annotationCitationOf(encoded: string): AnnotationCitation | null {
+    try {
+        const data = JSON.parse(decodeURIComponent(encoded));
+        const uri = data?.citationItem?.uris?.[0];
+        const locator = data?.citationItem?.locator;
+        const pageIndex = data?.position?.pageIndex;
+        if (typeof uri !== 'string' || locator == null || !Number.isInteger(pageIndex) || pageIndex < 0) return null;
+        return { uri, locator: String(locator), pageIndex };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Physical page indexes of the citations Zotero wrote for annotations, keyed
+ * by the citation's offset in `html`.
+ *
+ * Zotero's "Add to Note" (`serializeAnnotations`) stores the annotation's
+ * position and citation item (parent item URI, locator = the annotation's page
+ * label) in `data-annotation`, and writes that citation item as the citation
+ * after it, in the same paragraph (Zotero's note templates). An annotation is
+ * paired with the first citation that follows it in its block, when no other
+ * annotation comes between and the citation names the same item and locator;
+ * any other citation keeps its own reading, so an annotation whose citation
+ * was deleted captures nothing further on. `html` is the note as
+ * the citation step sees it: highlights and annotation images are already
+ * tokens, whose raw HTML is in `metadata`.
+ */
+function annotationCitationPageIndexes(html: string, metadata: SimplificationMetadata): Map<number, number> {
+    const pages = new Map<number, number>();
+    let pending: AnnotationCitation | null = null;
+    const pattern = /<annotation(?:-image)?\s+id="([^"]*)"|data-annotation="([^"]*)"|<span\s+class="citation"\s+data-citation="([^"]*)">|(<\/?(?:p|li|ul|ol|h[1-6]|blockquote|pre|table|tr|td|th|div|hr)\b[^>]*>)/g;
+    for (const match of html.matchAll(pattern)) {
+        const [, tokenId, rawAnnotation, encodedCitation, blockBoundary] = match;
+        if (blockBoundary !== undefined) {
+            pending = null;
+            continue;
+        }
+        if (encodedCitation === undefined) {
+            const encoded = tokenId !== undefined
+                ? metadata.elements.get(tokenId)?.rawHtml.match(/data-annotation="([^"]*)"/)?.[1]
+                : rawAnnotation;
+            pending = encoded ? annotationCitationOf(encoded) : null;
+            continue;
+        }
+        if (pending) {
+            try {
+                const items = JSON.parse(decodeURIComponent(encodedCitation))?.citationItems ?? [];
+                const item = items.length === 1 ? items[0] : null;
+                if (item?.uris?.[0] === pending.uri && item.locator != null && String(item.locator) === pending.locator) {
+                    pages.set(match.index!, pending.pageIndex);
+                }
+            } catch {
+                // Malformed citation metadata is reported where the citation is simplified.
+            }
+        }
+        pending = null;
+    }
+    return pages;
+}
+
+/**
+ * The physical page or page range a citation item's Beaver metadata records:
+ * a page token (`beaver.loc` = `page12`, `page12-14`) or a page-scoped record
+ * id, which names its page (`s5.6` → 5, `s5.30-s6.2` → 5-6). Undefined for any
+ * other locator.
+ */
+function recordedPhysicalPage(citationItem: unknown): string | undefined {
+    const loc = parseLoc(readBeaverCitationMeta(citationItem)?.loc);
+    if (!loc) return undefined;
+    if (loc.kind === 'page') return /^\d+(?:[-–]\d+)?$/.test(loc.value) ? loc.value : undefined;
+    const ends = loc.value.split('-').map((end) => parseExtractIdValue(end));
+    if (ends.length > 2 || ends.some((end) => end?.scheme !== 'page' || !end.page)) return undefined;
+    return [...new Set(ends.map((end) => end!.page!))].join('-');
+}
+
+function fingerprintPageLabels(pageLabelsByItemId?: Record<string, StoredLocatorPageLabels>): string {
     if (!pageLabelsByItemId || Object.keys(pageLabelsByItemId).length === 0) return '';
+    const sortedEntries = (labels: PageLabels | null) => Object.entries(labels ?? {})
+        .sort(([a], [b]) => Number(a) - Number(b));
     return JSON.stringify(
         Object.keys(pageLabelsByItemId)
             .sort()
-            .map((itemId) => [
-                itemId,
-                Object.entries(pageLabelsByItemId[itemId] ?? {})
-                    .sort(([a], [b]) => Number(a) - Number(b)),
-            ])
+            .map((itemId) => {
+                const labels = pageLabelsByItemId[itemId];
+                return [
+                    itemId,
+                    sortedEntries(declaredReadbackLabels(labels)),
+                    sortedEntries(locatorReadbackLabels(labels)),
+                ];
+            })
     );
 }
 
@@ -120,7 +218,7 @@ export function getOrSimplify(
     noteId: string,
     rawHtml: string,
     libraryID: number,
-    pageLabelsByItemId?: Record<string, PageLabels>,
+    pageLabelsByItemId?: Record<string, StoredLocatorPageLabels>,
 ): { simplified: string; metadata: SimplificationMetadata; isStale: boolean } {
     const contentHash = quickHash(rawHtml);
     const pageLabelsFingerprint = fingerprintPageLabels(pageLabelsByItemId);
@@ -186,7 +284,7 @@ export function invalidateSimplificationCache(noteId: string): void {
 export function simplifyNoteHtml(
     rawHtml: string,
     libraryID: number,
-    pageLabelsByItemId?: Record<string, PageLabels>,
+    pageLabelsByItemId?: Record<string, StoredLocatorPageLabels>,
 ): SimplificationResult {
     const metadata: SimplificationMetadata = { elements: new Map() };
 
@@ -308,9 +406,10 @@ export function simplifyNoteHtml(
     // Regex handles nested <span class="citation-item"> tags inside citations.
     // Zotero's formatCitation() wraps each item: (<span class="citation-item">Author, 2024</span>)
     // The content group matches: non-< chars, or nested <span>...</span> pairs (one level deep).
+    const annotationPageIndexes = annotationCitationPageIndexes(simplified, metadata);
     simplified = simplified.replace(
         /<span\s+class="citation"\s+data-citation="([^"]*)">((?:[^<]*(?:<span\b[^>]*>[^<]*<\/span>)?)*)<\/span>/g,
-        (match, encodedCitation, visibleContent) => {
+        (match, encodedCitation, visibleContent, offset: number) => {
             try {
                 const citationData = JSON.parse(decodeURIComponent(encodedCitation));
                 const citationItems = citationData.citationItems || [];
@@ -408,8 +507,25 @@ export function simplifyNoteHtml(
                     const rawPage = ci.locator != null ? String(ci.locator) : '';
                     let page = rawPage;
                     let pageConvention: 'number' | 'label' | undefined = page ? 'label' : undefined;
-                    const pageLabels = pageLabelsByItemId?.[itemId];
-                    if (page && pageLabels && (ci.label == null || ci.label === 'page')) {
+                    const isPageLocator = ci.label == null || ci.label === 'page';
+                    // A citation Zotero wrote for the annotation before it reads
+                    // as that annotation's page. Otherwise, without Beaver's
+                    // record of the page, the locator is read in the PDF's
+                    // declared labels, as it always has been.
+                    const annotatedIndex = page && isPageLocator ? annotationPageIndexes.get(offset) : undefined;
+                    const annotatedPage = annotatedIndex !== undefined ? String(annotatedIndex + 1) : undefined;
+                    // A citation whose recorded annotation or attachment is gone
+                    // reads back under the parent, but keeps the physical page
+                    // Beaver recorded: its locator may be a printed label.
+                    const recordedPage = page && isPageLocator ? recordedPhysicalPage(ci) : undefined;
+                    const pageLabels = declaredReadbackLabels(pageLabelsByItemId?.[itemId]);
+                    if (recordedPage) {
+                        page = recordedPage;
+                        pageConvention = 'number';
+                    } else if (annotatedPage) {
+                        page = annotatedPage;
+                        pageConvention = 'number';
+                    } else if (page && pageLabels && isPageLocator) {
                         const translated = translatePageLabelToNumber(pageLabels, page);
                         if (translated !== rawPage) {
                             page = translated;
@@ -443,8 +559,13 @@ export function simplifyNoteHtml(
                         const itemRef = itemRefs[i];
                         const itemId = modelObjectId(itemRef?.libraryID ?? libraryID, itemRef?.key ?? 'unknown');
                         let page = ci.locator != null ? String(ci.locator) : '';
-                        const pageLabels = pageLabelsByItemId?.[itemId];
-                        if (page && pageLabels && (ci.label == null || ci.label === 'page')) {
+                        // A page Beaver recorded is the physical page already;
+                        // only a stored label needs translating back.
+                        const recordedPage = recordedPhysicalPage(ci);
+                        const pageLabels = declaredReadbackLabels(pageLabelsByItemId?.[itemId]);
+                        if (page && recordedPage) {
+                            page = recordedPage;
+                        } else if (page && pageLabels && (ci.label == null || ci.label === 'page')) {
                             page = translatePageLabelToNumber(pageLabels, page);
                         }
                         return page ? `${itemId}:page=${page}` : itemId;
@@ -507,13 +628,23 @@ export function simplifyNoteHtml(
                 const ref = nextRef(parsed.itemKey);
 
                 // The stored locator is a display label. Show the agent physical
-                // page numbers where labels are known, as native citations do.
+                // page numbers, as native citations do: a single page is the
+                // page the link opens; a range is translated through the labels
+                // that agree with that page.
                 const rawPage = wrapped && suffixPage ? suffixPage : '';
                 let page = rawPage;
                 let pageConvention: 'number' | 'label' | undefined = page ? 'label' : undefined;
+                const recordedPages = parseZoteroCitationLinkPages(rawHref);
+                const linkPage = parseZoteroCitationLinkPage(rawHref);
                 const pageLabels = pageLabelsByItemId?.[itemId];
-                if (page && pageLabels) {
-                    const translated = translatePageLabelToNumber(pageLabels, page);
+                if (page && recordedPages) {
+                    page = recordedPages;
+                    pageConvention = 'number';
+                } else if (page && linkPage && !/[-–,]/.test(page)) {
+                    page = String(linkPage);
+                    pageConvention = 'number';
+                } else if (page && pageLabels) {
+                    const translated = translateLinkPageLabelToNumber(pageLabels, page, linkPage);
                     if (translated !== rawPage) {
                         page = translated;
                         pageConvention = 'number';

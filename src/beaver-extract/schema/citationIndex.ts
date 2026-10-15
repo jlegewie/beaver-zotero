@@ -7,6 +7,7 @@ import type {
     StructuredDocument,
     StructuredPage,
 } from "@beaver/agent-core/extract/schema";
+import { resolveZoteroLocatorPageLabels } from "@beaver/agent-core/extract/pageLabels/printedPageLabels";
 
 export interface ResolvedCitation {
     pageIndex: number;
@@ -16,12 +17,12 @@ export interface ResolvedCitation {
     bboxes: Rect[];
 }
 
-function entryForItem(page: StructuredPage, item: DocumentItem): CitationIndexEntry {
+function entryForItem(page: StructuredPage, item: DocumentItem, pageLabel?: string): CitationIndexEntry {
     return {
         id: item.id,
         kind: "item",
         pageIndex: page.index,
-        pageLabel: page.label,
+        pageLabel,
         itemId: item.id,
     };
 }
@@ -30,30 +31,51 @@ function entryForSentence(
     page: StructuredPage,
     item: DocumentItem,
     sentence: Sentence,
+    pageLabel?: string,
 ): CitationIndexEntry {
     return {
         id: sentence.id,
         kind: "sentence",
         pageIndex: page.index,
-        pageLabel: page.label,
+        pageLabel,
         itemId: item.id,
         sentenceId: sentence.id,
     };
 }
 
 /**
- * Build a compact lookup for every citable item and sentence id. Entries carry
- * the label the PDF declares for their page (the Zotero locator namespace);
- * printed labels come from `document.derivedPageLabels`.
+ * Zotero locator label per page index: the printed label, else the label the
+ * PDF declares (`resolveZoteroLocatorPageLabels`).
  */
-export function buildCitationIndex(pages: StructuredPage[]): CitationIndex {
+function locatorPageLabels(
+    pages: StructuredPage[],
+    derivedPageLabels?: Record<string, string> | null,
+): Record<number, string> {
+    const embedded: Record<number, string> = {};
+    for (const page of pages) {
+        if (page.label) embedded[page.index] = page.label;
+    }
+    return resolveZoteroLocatorPageLabels({ pageCount: null, derived: derivedPageLabels, embedded });
+}
+
+/**
+ * Build a compact lookup for every citable item and sentence id. Entries carry
+ * the Zotero locator label of their page: the printed label from
+ * `derivedPageLabels`, else the label the PDF declares (`page.label`).
+ */
+export function buildCitationIndex(
+    pages: StructuredPage[],
+    derivedPageLabels?: Record<string, string> | null,
+): CitationIndex {
+    const labels = locatorPageLabels(pages, derivedPageLabels);
     const index: CitationIndex = {};
     for (const page of pages) {
+        const pageLabel = labels[page.index];
         for (const item of page.items) {
-            index[item.id] = entryForItem(page, item);
+            index[item.id] = entryForItem(page, item, pageLabel);
             if (!("sentences" in item) || !item.sentences?.length) continue;
             for (const sentence of item.sentences) {
-                index[sentence.id] = entryForSentence(page, item, sentence);
+                index[sentence.id] = entryForSentence(page, item, sentence, pageLabel);
             }
         }
     }
@@ -69,7 +91,7 @@ const citationIndexes = new WeakMap<StructuredDocument, CitationIndex>();
 export function getCitationIndex(document: StructuredDocument): CitationIndex {
     let index = citationIndexes.get(document);
     if (!index) {
-        index = buildCitationIndex(document.pages);
+        index = buildCitationIndex(document.pages, document.derivedPageLabels);
         citationIndexes.set(document, index);
     }
     return index;
@@ -91,7 +113,7 @@ export function resolveCitation(
         : undefined;
     return {
         pageIndex: page.index,
-        pageLabel: page.label,
+        pageLabel: entry.pageLabel,
         item,
         sentence,
         bboxes: sentence?.bboxes ?? [item.bbox],

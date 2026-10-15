@@ -89,6 +89,23 @@ describe("canonical extraction schema helpers", () => {
         expect(resolveCitation(doc, "s1")?.bboxes).toEqual([[0, 10, 80, 20]]);
     });
 
+    it("labels citation entries with the printed page, else the label the PDF declares", () => {
+        const page = (index: number, label?: string) => ({
+            index, label, width: 100, height: 100,
+            items: [{ id: `p${index}`, kind: "text", text: "Text.", bbox: [0, 0, 10, 10] }],
+        }) as any;
+        const pages = [page(0, "i"), page(1, "1"), page(2)];
+        const index = buildCitationIndex(pages, { "1": "1201", "2": "1202" });
+        expect(index.p0.pageLabel).toBe("i");
+        expect(index.p1.pageLabel).toBe("1201");
+        expect(index.p2.pageLabel).toBe("1202");
+        expect(buildCitationIndex(pages).p1.pageLabel).toBe("1");
+
+        const doc = { pageCount: 3, pages, derivedPageLabels: { "1": "1201" } } as any;
+        expect(resolveCitation(doc, "p1")?.pageLabel).toBe("1201");
+        expect(resolveCitation(doc, "p0")?.pageLabel).toBe("i");
+    });
+
     it("clips overflow locators without changing page geometry or text", () => {
         const page = projectStructuredPage({
             index: 0, width: 612, height: 792, viewBox: [10, 20, 622, 812], rotation: 0,

@@ -58,24 +58,26 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
             if (annotationCitation) return citationRender(annotationCitation);
         }
         // A note's locators are Zotero locator labels, preloaded into the
-        // export store. The citation's own `page_labels` are printed labels
-        // for display and must not reach a note.
+        // export store. The citation's own `page_labels` are display labels
+        // persisted with the run and do not fill pages without a printed
+        // label, so they do not reach a note.
         if (isLinkCitationItem(item)) {
             const labels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
             const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
+            const inclusiveRange = !!requestedRef?.loc && isRecordIdRange(requestedRef.loc);
             const page = requestedPage
                 ? translatePageNumberToLabel(labels, requestedPage)
-                : formatCitationPages(pages, labels, {
-                    inclusiveRange: !!requestedRef?.loc && isRecordIdRange(requestedRef.loc),
-                });
+                : formatCitationPages(pages, labels, { inclusiveRange });
             // The visible locator is a display label; the link navigates by
-            // physical page, which is what the cited pages already are.
+            // physical page, which is what the cited pages already are, and
+            // records them all.
             const navPage = requestedPage
                 ? firstPageNumber(requestedPage)
                 : (pages.length > 0 ? Math.min(...pages) : undefined);
+            const physicalPages = requestedPage ?? formatCitationPages(pages, null, { inclusiveRange });
             return { kind: 'html', html: buildZoteroCitationLinkHTML(item, page
                 ? { kind: 'page', value: page, raw: `page${page}` }
-                : undefined, navPage) };
+                : undefined, navPage, physicalPages) };
         }
         // The same rule note writes use: a page range or list the model wrote
         // is kept, translated to labels; a structural locator (a sentence,

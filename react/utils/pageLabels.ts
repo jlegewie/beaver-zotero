@@ -26,6 +26,7 @@ import type { DocumentCacheMetadata, PageLabels } from '../../src/services/docum
 import { loadPageLabelsForMetadata, type PageLabelNamespace } from '../../src/services/documentExtraction/pageLabels';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
+import { linkCitationPageLabelNamespace } from '../../src/utils/zoteroLinkCitation';
 import { getParentItemAsync } from '../../src/utils/zoteroDataLoading';
 import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import {
@@ -47,12 +48,15 @@ export type PreloadFilePath =
 
 async function addPageLabels(
     target: PageLabelsByAttachmentId,
-    itemId: number,
+    item: Zotero.Item,
     record: DocumentCacheMetadata | null | undefined,
     namespace: PageLabelNamespace,
     filePath: string,
 ): Promise<void> {
-    const labels = await loadPageLabelsForMetadata(record, namespace, filePath);
+    // A link citation that cannot carry its page writes the suffix in declared labels.
+    const effective = namespace === 'locator' ? linkCitationPageLabelNamespace(item) : namespace;
+    const labels = await loadPageLabelsForMetadata(record, effective, filePath);
+    const itemId = item.id;
     if (!hasPageLabels(labels)) return;
     target[itemId] = { ...labels };
 }
@@ -112,8 +116,10 @@ export function translatePageNumberToLabelFromLabels(
  * 2. On a local cache miss for locator labels, analyze the PDF via
  *    `getAttachmentFileStatus` (reads the file: its declared labels and OCR
  *    needs), which caches the labels it declares. Printed labels come only
- *    from a full extraction, so a printed-label miss is skipped. A
- *    remote-only miss is skipped rather than downloading during render.
+ *    from a full extraction, so a printed-label miss is skipped, and locator
+ *    labels after the analysis are the declared ones until the PDF is fully
+ *    extracted (see `preloadPageLabelsForNewCitations`). A remote-only miss is
+ *    skipped rather than downloading during render.
  */
 export async function preloadPageLabelsForContent(
     content: string,
@@ -150,7 +156,7 @@ export async function preloadPageLabelsForContent(
                 zoteroKey: preloadItem.key,
             }, preloadPath.filePath);
             if (record) {
-                await addPageLabels(labelsByAttachmentId, preloadItem.id, record, namespace, preloadPath.filePath);
+                await addPageLabels(labelsByAttachmentId, preloadItem, record, namespace, preloadPath.filePath);
                 continue;
             }
 
@@ -165,7 +171,7 @@ export async function preloadPageLabelsForContent(
                 libraryId: preloadItem.libraryID,
                 zoteroKey: preloadItem.key,
             }, preloadPath.filePath);
-            await addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed, namespace, preloadPath.filePath);
+            await addPageLabels(labelsByAttachmentId, preloadItem, refreshed, namespace, preloadPath.filePath);
         } catch {
             // Skip items that can't be resolved
         }
@@ -240,7 +246,7 @@ export async function preloadPageLabelsForCitations(
                 zoteroKey: preloadItem.key,
             }, preloadPath.filePath);
             if (record) {
-                await addPageLabels(labelsByAttachmentId, preloadItem.id, record, namespace, preloadPath.filePath);
+                await addPageLabels(labelsByAttachmentId, preloadItem, record, namespace, preloadPath.filePath);
                 continue;
             }
 
@@ -251,7 +257,7 @@ export async function preloadPageLabelsForCitations(
                 libraryId: preloadItem.libraryID,
                 zoteroKey: preloadItem.key,
             }, preloadPath.filePath);
-            await addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed, namespace, preloadPath.filePath);
+            await addPageLabels(labelsByAttachmentId, preloadItem, refreshed, namespace, preloadPath.filePath);
         } catch {
             // Skip items that can't be resolved
         }

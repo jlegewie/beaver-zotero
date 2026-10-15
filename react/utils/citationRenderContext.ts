@@ -70,8 +70,8 @@ function printedLabelsOf(result: StructuredExtractResult): Record<number, string
 
 /**
  * Labels of the pages the entries sit on. Locator labels come from the index
- * (the labels the PDF declares); printed labels from the document's derived
- * page numbers.
+ * (`buildCitationIndex`); printed labels from the document's derived page
+ * numbers.
  */
 function pageLabelsFromEntries(
     entries: CitationIndexEntry[],

@@ -1,6 +1,7 @@
 /**
- * Temporary citation highlights shown in Zotero's reader carry the labels the
- * PDF declares, never the citation's printed labels.
+ * Temporary citation highlights shown in Zotero's reader carry the label an
+ * annotation Beaver creates would store (the attachment's Zotero locator
+ * label), not the labels persisted on the citation.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -95,21 +96,22 @@ describe('citation activation page labels', () => {
         vi.clearAllMocks();
     });
 
-    it('labels temporary highlights with the declared label, not the citation\'s printed one', async () => {
-        mocks.getZoteroLocatorPageLabels.mockResolvedValue({ 0: 'iv' });
+    it('labels temporary highlights with the locator label, not the label persisted on the citation', async () => {
+        // History written before printed labels carries the declared label.
+        mocks.getZoteroLocatorPageLabels.mockResolvedValue({ 0: '1205' });
 
-        await activate({ page_labels: { 0: '1205' } });
+        await activate({ page_labels: { 0: 'iv' } });
 
         expect(mocks.getZoteroLocatorPageLabels).toHaveBeenCalledWith(attachment);
         expect(mocks.createBoundingBoxHighlights).toHaveBeenCalledWith(
-            [expect.objectContaining({ pageIndex: 0, pageLabel: 'iv' })],
+            [expect.objectContaining({ pageIndex: 0, pageLabel: '1205' })],
             'preview',
             expect.anything(),
             expect.anything(),
         );
     });
 
-    it('falls back to the physical page when the PDF declares no label', async () => {
+    it('falls back to the physical page when the page has no locator label', async () => {
         mocks.getZoteroLocatorPageLabels.mockResolvedValue(null);
 
         await activate({ page_labels: { 0: '1205' } });

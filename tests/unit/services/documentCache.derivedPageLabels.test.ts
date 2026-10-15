@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BeaverDB } from '../../../src/services/database';
 import { DocumentCache, derivedPageLabelsFromSerializedResult } from '../../../src/services/documentCache';
 import {
+    declaredPageLabelsFromMetadata,
     printedPageLabelsFromMetadata,
     zoteroLocatorPageLabelsFromMetadata,
 } from '../../../src/services/documentExtraction/pageLabels';
@@ -206,8 +207,19 @@ describe('page-label namespaces from cache metadata', () => {
         expect(printedPageLabelsFromMetadata(null)).toBeNull();
     });
 
-    it('reads Zotero locator labels from the labels the PDF declares, ignoring derived labels', () => {
-        expect(zoteroLocatorPageLabelsFromMetadata(record)).toEqual({ '0': '1', '1': '2', '2': '3' });
-        expect(zoteroLocatorPageLabelsFromMetadata({ ...record, pageLabels: {} })).toBeNull();
+    it('reads Zotero locator labels as printed labels, with declared labels filling the gaps', () => {
+        expect(zoteroLocatorPageLabelsFromMetadata(record)).toEqual({ '0': '1', '1': '1202', '2': '1203' });
+        expect(zoteroLocatorPageLabelsFromMetadata({ ...record, pageLabels: {} }))
+            .toEqual({ '1': '1202', '2': '1203' });
+        expect(zoteroLocatorPageLabelsFromMetadata({ ...record, derivedPageLabels: null }))
+            .toEqual({ '0': '1', '1': '2', '2': '3' });
+        expect(zoteroLocatorPageLabelsFromMetadata({ ...record, pageLabels: {}, derivedPageLabels: null }))
+            .toBeNull();
+        expect(zoteroLocatorPageLabelsFromMetadata(null)).toBeNull();
+    });
+
+    it('reads declared labels from the PDF only', () => {
+        expect(declaredPageLabelsFromMetadata(record)).toEqual({ '0': '1', '1': '2', '2': '3' });
+        expect(declaredPageLabelsFromMetadata({ ...record, pageLabels: { '0': ' ' } })).toBeNull();
     });
 });

@@ -40,7 +40,7 @@ import {
     fileAccessDeniedMessage,
 } from '../documentExtraction/attachmentSource';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
-import { loadPageLabelsForMetadata, zoteroLocatorPageLabelsFromMetadata } from '../documentExtraction/pageLabels';
+import { declaredPageLabelsFromMetadata, loadPageLabelsForMetadata } from '../documentExtraction/pageLabels';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
     MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
@@ -215,7 +215,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // from its structured payload (once; the read backfills the record).
         const printedLabels = await loadPageLabelsForMetadata(cachedMeta, 'printed', effectiveFilePath);
         throwIfTimedOut('page_label_lookup');
-        let locatorLabels: Record<number, string> | null = null;
+        let declaredLabels: Record<number, string> | null = null;
         let totalPages: number | null = null;
 
         // 5a. Load page labels for label-aware resolution. Short-circuits on cache.
@@ -228,7 +228,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 workerDispatched.mark,
             );
             throwIfTimedOut('page_label_resolution');
-            locatorLabels = labelResult.labels;
+            declaredLabels = labelResult.labels;
             if (labelResult.pageCount != null) {
                 totalPages = labelResult.pageCount;
             }
@@ -236,7 +236,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 pdfData = labelResult.pdfData;
             }
         } else {
-            locatorLabels = zoteroLocatorPageLabelsFromMetadata(cachedMeta);
+            declaredLabels = declaredPageLabelsFromMetadata(cachedMeta);
         }
 
         // 5b. Adopt cached page count when available (no doc-open).
@@ -313,7 +313,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
             try {
                 resolvedPages = pages.map(p => resolvePageValue(
                     p,
-                    { printed: printedLabels, locator: locatorLabels },
+                    { printed: printedLabels, declared: declaredLabels },
                     prefer_page_labels === true,
                 ));
             } catch (error) {

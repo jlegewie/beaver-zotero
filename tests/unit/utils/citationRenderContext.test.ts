@@ -119,7 +119,19 @@ describe('citation render context', () => {
         expect(printed['local:zotero:1-ATTACH01:s25-s26'].page_labels).toEqual({ 2: '1207' });
 
         const locator = await buildLocalCitationDataMapForContent(content);
+        expect(locator['local:zotero:1-ATTACH01:s25-s26'].page_labels).toEqual({ 2: '1207' });
+    });
+
+    it('labels Zotero locator metadata with the declared label where the page prints none', async () => {
+        const result = structuredResult();
+        (result.document as any).derivedPageLabels = null;
+        cache.getResult.mockResolvedValue(result);
+
+        const content = 'Claim <citation id="1-ATTACH01" loc="s25-s26"/>';
+        const locator = await buildLocalCitationDataMapForContent(content);
         expect(locator['local:zotero:1-ATTACH01:s25-s26'].page_labels).toEqual({ 2: '7' });
+        const printed = await buildLocalCitationDataMapForContent(content, 'printed');
+        expect(printed['local:zotero:1-ATTACH01:s25-s26'].page_labels).toBeUndefined();
     });
 
     it('preloads Zotero locator labels for note export and printed labels when asked', async () => {

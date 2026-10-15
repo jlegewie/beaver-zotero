@@ -8,6 +8,7 @@ import { resolveBeaverAnnotationColor } from '../../src/constants/annotations';
 import { markBeaverAnnotationWriteByKey } from '../../src/services/annotations/beaverAnnotationRegistry';
 import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { getZoteroLocatorPageLabels } from '../../src/services/documentExtraction/pageLabels';
 
 
 const NOTE_RECT_SIZE = 18;
@@ -21,6 +22,26 @@ async function getAttachmentItem(
     attachmentKey: string
 ): Promise<Zotero.Item | null> {
     return (await Zotero.Items.getByLibraryAndKeyAsync(libraryId, attachmentKey)) || null;
+}
+
+/**
+ * Label an annotation created through the reader stores: the attachment's
+ * Zotero locator label for the page (see `pdfAnnotationPageLabel`), else the
+ * physical page number.
+ */
+async function readerAnnotationPageLabel(
+    libraryId: number,
+    attachmentKey: string,
+    pageIndex: number,
+): Promise<string> {
+    try {
+        const attachment = await getAttachmentItem(libraryId, attachmentKey);
+        const label = attachment ? (await getZoteroLocatorPageLabels(attachment))?.[pageIndex] : undefined;
+        if (label) return label;
+    } catch {
+        // Fall back to the physical page.
+    }
+    return String(pageIndex + 1);
 }
 
 function isReaderForAttachment(reader: ZoteroReader | null, attachment: Zotero.Item): boolean {
@@ -176,7 +197,11 @@ async function createHighlightAnnotation(
         type: 'highlight',
         color: resolveHighlightColor(annotation.proposed_data.color),
         comment: annotation.proposed_data.comment || '',
-        pageLabel: primaryLocation.page_idx + 1,
+        pageLabel: await readerAnnotationPageLabel(
+            libraryId,
+            annotation.proposed_data.attachment_key,
+            primaryLocation.page_idx,
+        ),
         sortIndex,
         position: {
             pageIndex: primaryLocation.page_idx,
@@ -260,7 +285,7 @@ async function createNoteAnnotation(
         type: 'note',
         comment: annotation.proposed_data.comment || annotation.proposed_data.title || '',
         color: resolveHighlightColor(annotation.proposed_data.color),
-        pageLabel: pageIndex + 1,
+        pageLabel: await readerAnnotationPageLabel(libraryId, annotation.proposed_data.attachment_key, pageIndex),
         sortIndex,
         position: {
             pageIndex,

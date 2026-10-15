@@ -142,7 +142,7 @@ describe('locator resolution by id scheme', () => {
         const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
 
         expect(resolved.unresolved).toEqual([]);
-        expect(Object.values(resolved.pages)).toEqual([{ label: 'i', page: 1 }]);
+        expect(Object.values(resolved.pages)).toEqual([{ label: 'i', page: 1, pages: '1' }]);
         expect(extractAndCacheResolvedPdfDocument).toHaveBeenCalledExactlyOnceWith(
             expect.objectContaining({ schemaVersion: '5', mode: 'structured' }),
         );
@@ -199,13 +199,35 @@ describe('locator resolution by id scheme', () => {
         expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
     });
 
+    it('labels a structural locator for a standalone PDF by whether its link can carry the page', async () => {
+        // s1.2 sits on physical page 1, which declares "i" and prints "3".
+        const printed = () => {
+            const result = currentResult();
+            (result.document as any).derivedPageLabels = { '0': '3' };
+            return result;
+        };
+        Object.assign(attachment, { parentID: false, isFileAttachment: () => true, isPDFAttachment: () => true });
+
+        getResult.mockResolvedValue(printed());
+        attachment.fileExistsCached = () => true;
+        const opens = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
+        expect(opens.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: '3', page: 1, pages: '1' });
+
+        // A missing file links with zotero://select, which records no page:
+        // the suffix stays in the declared label it is read back in.
+        getResult.mockResolvedValue(printed());
+        attachment.fileExistsCached = () => false;
+        const select = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
+        expect(select.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: 'i', page: 1, pages: '1' });
+    });
+
     it('resolves a remote-only attachment\'s current-version locator from the remote cache key', async () => {
         attachment.getFilePathAsync.mockResolvedValue(null);
 
         const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
 
         expect(resolved.unresolved).toEqual([]);
-        expect(resolved.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: 'i', page: 1 });
+        expect(resolved.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: 'i', page: 1, pages: '1' });
         expect(getResult).toHaveBeenCalledExactlyOnceWith(
             { libraryId: 1, zoteroKey: 'ATTACH12' }, 'structured', 'remote:k:1-ATTACH12-v0',
         );

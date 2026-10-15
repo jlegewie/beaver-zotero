@@ -376,11 +376,10 @@ export async function activateCitation(activation: CitationActivation): Promise<
 
         // Handle the three scenarios
         if (boundingBoxData.length > 0) {
-            // Highlights shown in Zotero's reader carry the labels the PDF
-            // declares, like the annotations Beaver creates, never the
-            // citation's printed labels: the reader derives labels for new
-            // annotations from nearby ones. Without a declared label the
-            // highlight shows the physical page.
+            // Highlights shown in Zotero's reader carry the label an annotation
+            // Beaver creates would store (its Zotero locator label): while they
+            // exist, the reader labels new annotations from them. Without a
+            // locator label the highlight shows the physical page.
             const locatorLabels = await getZoteroLocatorPageLabels(pdfItem);
             const highlightLocations = boundingBoxData.map(({ page, bboxes }) => ({
                 pageIndex: page - 1,

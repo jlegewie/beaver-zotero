@@ -1,4 +1,5 @@
 import type { PageLabels } from '../services/documentCache';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Translate a page number string (1-based, as humans see it) to its display
@@ -22,28 +23,118 @@ export function translatePageNumberToLabel(
 }
 
 /**
- * Translate stored page labels back to 1-based physical page numbers.
- *
- * Whole-string labels are mapped directly. Ranges and comma-separated lists are
- * translated token-by-token, leaving unknown labels untouched. Duplicate labels
- * resolve to their first physical page.
+ * Length of the run of consecutive Arabic labels that page `index` belongs to.
  */
-export function translatePageLabelToNumber(
+function arabicRunLength(labels: PageLabels, index: number): number {
+    const value = (i: number): number | null => {
+        const label = labels[i];
+        return label != null && /^\d+$/.test(label) ? Number(label) : null;
+    };
+    if (value(index) === null) return 0;
+    let start = index;
+    while (value(start - 1) !== null && value(start - 1)! + 1 === value(start)) start--;
+    let end = index;
+    while (value(end + 1) !== null && value(end)! + 1 === value(end + 1)) end++;
+    return end - start + 1;
+}
+
+/**
+ * 1-based page whose label is `target`, or null. When several pages carry the
+ * label, the one in the longest Arabic run (the main body) wins, so a cover or
+ * front-matter page that repeats a body number does not capture it.
+ */
+export function findLabelledPage(labels: PageLabels | null | undefined, target: string): number | null {
+    if (!labels || target === '') return null;
+    const matches = Object.entries(labels)
+        .filter(([, label]) => label === target)
+        .map(([idx]) => Number(idx))
+        .filter((idx) => Number.isInteger(idx) && idx >= 0)
+        .sort((a, b) => a - b);
+    if (matches.length === 0) return null;
+    if (matches.length === 1) return matches[0] + 1;
+    let best = matches[0];
+    let bestRun = arabicRunLength(labels, best);
+    for (const idx of matches.slice(1)) {
+        const run = arabicRunLength(labels, idx);
+        if (run > bestRun) {
+            best = idx;
+            bestRun = run;
+        }
+    }
+    logger(`findLabelledPage: page label '${target}' is on ${matches.length} pages; using page ${best + 1}`, 2);
+    return best + 1;
+}
+
+/**
+ * Label maps a stored note-citation locator is read back through, for one
+ * attachment. Beaver records the physical page of every citation it writes
+ * now (`beaver.loc`, or the page a link opens), so these maps only matter for
+ * locators without that record:
+ *
+ * - `declared`: the PDF's own labels. Native citations without Beaver's
+ *   metadata (written by older Beaver versions, or by Zotero) have always been
+ *   read in them, and still are, so existing notes read back unchanged. The
+ *   exception is a citation Zotero wrote beside an annotation in the same
+ *   note, which reads as that annotation's page (see `noteHtmlSimplifier`).
+ * - `locator`: Zotero locator labels (`resolveZoteroLocatorPageLabels`), which
+ *   current Beaver writes into the suffix of a link citation that opens its
+ *   page.
+ *
+ * A plain map stands for both, as when the two agree.
+ */
+export type StoredLocatorPageLabels =
+    | PageLabels
+    | { declared: PageLabels | null; locator: PageLabels | null };
+
+function isLabelPair(
+    labels: StoredLocatorPageLabels,
+): labels is { declared: PageLabels | null; locator: PageLabels | null } {
+    return 'declared' in labels && 'locator' in labels
+        && (labels.declared === null || typeof labels.declared === 'object')
+        && (labels.locator === null || typeof labels.locator === 'object');
+}
+
+/** The declared labels of a read-back map (see `StoredLocatorPageLabels`). */
+export function declaredReadbackLabels(labels: StoredLocatorPageLabels | null | undefined): PageLabels | null {
+    if (!labels) return null;
+    return isLabelPair(labels) ? labels.declared : labels;
+}
+
+/** The Zotero locator labels of a read-back map (see `StoredLocatorPageLabels`). */
+export function locatorReadbackLabels(labels: StoredLocatorPageLabels | null | undefined): PageLabels | null {
+    if (!labels) return null;
+    return isLabelPair(labels) ? labels.locator : labels;
+}
+
+/**
+ * Translate stored page labels back to 1-based physical page numbers, or null
+ * when the map does not resolve every label in the locator.
+ *
+ * Whole-string labels are mapped directly. Ranges and comma-separated lists
+ * are translated token-by-token. A label on several pages resolves to the
+ * main-body page (`findLabelledPage`).
+ *
+ * With `physicalFallback`, a number that is no label in the map reads as that
+ * physical page when the map has no label for it: the writers keep the
+ * physical number for unlabelled pages (`translatePageNumberToLabel`,
+ * `formatCitationPages`), so a range may mix the two ("1-1202").
+ */
+export function tryTranslatePageLabelToNumber(
     pageLabels: PageLabels | null | undefined,
     locStr: string,
-): string {
-    if (!pageLabels || Object.keys(pageLabels).length === 0) return locStr;
+    { physicalFallback = false }: { physicalFallback?: boolean } = {},
+): string | null {
+    if (!pageLabels || Object.keys(pageLabels).length === 0) return null;
 
-    const reverse = new Map<string, string>();
-    for (const [indexStr, label] of Object.entries(pageLabels)) {
-        if (label == null || label === '' || reverse.has(label)) continue;
-        const index = Number(indexStr);
-        if (!Number.isInteger(index) || index < 0) continue;
-        reverse.set(label, String(index + 1));
-    }
-    if (reverse.size === 0) return locStr;
+    const lookup = (label: string): string | undefined => {
+        const page = findLabelledPage(pageLabels, label);
+        if (page !== null) return String(page);
+        if (!physicalFallback || !/^\d+$/.test(label)) return undefined;
+        const physical = Number(label);
+        return physical > 0 && !pageLabels[physical - 1]?.trim() ? String(physical) : undefined;
+    };
 
-    const whole = reverse.get(locStr);
+    const whole = lookup(locStr);
     if (whole) return whole;
 
     const parts = locStr.split(/([-–,])/);
@@ -62,13 +153,61 @@ export function translatePageLabelToNumber(
             translatedParts.push(part);
             continue;
         }
-        const translated = reverse.get(token);
-        if (!translated) return locStr;
+        const translated = lookup(token);
+        if (!translated) return null;
         translatedAny = true;
         translatedParts.push(`${leading}${translated}${trailing}`);
     }
 
-    return translatedAny ? translatedParts.join('') : locStr;
+    return translatedAny ? translatedParts.join('') : null;
+}
+
+/**
+ * Translate stored page labels back to 1-based physical page numbers
+ * (`tryTranslatePageLabelToNumber`): in labels alone, else with physical
+ * numbers on unlabelled pages, else the locator unchanged.
+ */
+export function translatePageLabelToNumber(
+    pageLabels: PageLabels | null | undefined,
+    locStr: string,
+): string {
+    return tryTranslatePageLabelToNumber(pageLabels, locStr)
+        ?? tryTranslatePageLabelToNumber(pageLabels, locStr, { physicalFallback: true })
+        ?? locStr;
+}
+
+/**
+ * Translate a link citation's stored page suffix back to physical pages.
+ *
+ * A link that opens a page (`linkPage`, the first page it cites) tells the
+ * convention its suffix was written in: current Beaver writes Zotero locator
+ * labels, older versions the declared ones. Only a map that resolves the
+ * whole suffix and puts its first page there is accepted, trying labels alone
+ * before physical numbers on unlabelled pages; a suffix that is already that
+ * physical page is kept.
+ *
+ * A link without a page (`zotero://select`, for an attachment whose file is
+ * missing) has its suffix written in declared labels
+ * (`linkCitationPageLabelNamespace`), so it is read in them, then as a
+ * physical page.
+ */
+export function translateLinkPageLabelToNumber(
+    pageLabels: StoredLocatorPageLabels | null | undefined,
+    locStr: string,
+    linkPage: number | null,
+): string {
+    const declared = declaredReadbackLabels(pageLabels);
+    const locator = locatorReadbackLabels(pageLabels);
+    if (linkPage) {
+        for (const physicalFallback of [false, true]) {
+            for (const labels of [locator, declared]) {
+                const translated = tryTranslatePageLabelToNumber(labels, locStr, { physicalFallback });
+                if (translated !== null && firstPageNumber(translated) === linkPage) return translated;
+            }
+        }
+        if (firstPageNumber(locStr) === linkPage) return locStr;
+    }
+    return translatePageLabelToNumber(declared, locStr);
 }
 
 /**

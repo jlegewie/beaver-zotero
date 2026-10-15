@@ -52,7 +52,18 @@ export function buildAnnotationNoteCitation(
     } catch {
         pageLabel = undefined;
     }
-    return buildNoteCitation(parent, pageLabel, options, buildBeaverCitationMeta({ ann: annotation.key }));
+    let pageIndex: unknown;
+    try {
+        pageIndex = JSON.parse(annotation.annotationPosition)?.pageIndex;
+    } catch {
+        pageIndex = undefined;
+    }
+    // The annotation's physical page is recorded too: the locator is its label,
+    // which may be printed, and the page is needed if the annotation is deleted.
+    const loc = typeof pageIndex === 'number' && Number.isInteger(pageIndex) && pageIndex >= 0
+        ? `page${pageIndex + 1}`
+        : undefined;
+    return buildNoteCitation(parent, pageLabel, options, buildBeaverCitationMeta({ ann: annotation.key, loc }));
 }
 
 /** An external work, as an embedded citation names and describes it. */

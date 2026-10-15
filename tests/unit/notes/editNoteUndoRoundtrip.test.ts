@@ -2304,7 +2304,7 @@ describe('external-file citations through React apply and undo', () => {
         });
         expect(attachment.getFilePathAsync).toHaveBeenCalled();
         expect(item._getHtml()).toContain(
-            '<a href="zotero://select/library/items/ATTACH12" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 6)');
+            '<a href="zotero://select/library/items/ATTACH12#beaver-pages=6" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 6)');
     });
 
     it('applies a filename link and can undo without stored undo HTML', async () => {

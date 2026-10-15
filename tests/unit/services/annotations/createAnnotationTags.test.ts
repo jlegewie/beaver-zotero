@@ -172,29 +172,41 @@ describe("createAnnotation tag application", () => {
     expect((constructedItems[0] as any).annotationPageLabel).toBe('220');
   });
 
-  it("prefers the declared PDF label over the label a request carries", async () => {
+  it("prefers the printed label over the label a request carries", async () => {
     (globalThis as any).Zotero.Beaver.documentCache.getMetadata.mockResolvedValue({
       pages: [geometry], pageLabels: { 0: '220' }, derivedPageLabels: { 0: '1220' },
     });
     await createNoteAnnotation(mockAttachment(), {
       notePosition: { page_index: 0, x: 100, y: 100, side: 'right', coord_origin: CoordOrigin.TOPLEFT },
       comment: 'A note',
-      pageLabel: '1220',
+      pageLabel: '220',
+    });
+    expect((constructedItems[0] as any).annotationPageLabel).toBe('1220');
+  });
+
+  it("uses the declared label on a page without a printed label", async () => {
+    (globalThis as any).Zotero.Beaver.documentCache.getMetadata.mockResolvedValue({
+      pages: [geometry], pageLabels: { 0: '220' }, derivedPageLabels: null,
+    });
+    await createNoteAnnotation(mockAttachment(), {
+      notePosition: { page_index: 0, x: 100, y: 100, side: 'right', coord_origin: CoordOrigin.TOPLEFT },
+      comment: 'A note',
+      pageLabel: '7',
     });
     expect((constructedItems[0] as any).annotationPageLabel).toBe('220');
   });
 
-  it("stores and reports the declared label for an agent highlight", async () => {
+  it("stores and reports the printed label for an agent highlight", async () => {
     (globalThis as any).Zotero.Beaver.documentCache.getMetadata.mockResolvedValue({
       pages: [geometry], pageLabels: { 0: '220' }, derivedPageLabels: { 0: '1220' },
     });
     const result = await createPdfHighlightForItem(mockAttachment(), {
       client_item_id: 'c1', index: 0, loc_raw: 's1.1', text: 'text', color: 'yellow', comment: '',
-      page_locations: [{ page_idx: 0, boxes: [{ l: 10, t: 20, r: 110, b: 50, coord_origin: CoordOrigin.TOPLEFT }], page_label: '1220' }],
-      page_label: '1220',
+      page_locations: [{ page_idx: 0, boxes: [{ l: 10, t: 20, r: 110, b: 50, coord_origin: CoordOrigin.TOPLEFT }], page_label: '220' }],
+      page_label: '220',
     } as any);
-    expect((constructedItems[0] as any).annotationPageLabel).toBe('220');
-    expect(result.page_label).toBe('220');
+    expect((constructedItems[0] as any).annotationPageLabel).toBe('1220');
+    expect(result.page_label).toBe('1220');
   });
 
   it("keeps the requested label when the PDF declares none", async () => {
@@ -207,7 +219,7 @@ describe("createAnnotation tag application", () => {
     expect((constructedItems[0] as any).annotationPageLabel).toBe('7');
   });
 
-  it("labels an omitted PDF note with the declared label, not the printed one", async () => {
+  it("labels an omitted PDF note with the printed label, not the declared one", async () => {
     (globalThis as any).Zotero.Beaver.documentCache.getMetadata.mockResolvedValue({
       pages: [geometry], pageLabels: { 0: '220' }, derivedPageLabels: { 0: '1220' },
     });
@@ -215,7 +227,7 @@ describe("createAnnotation tag application", () => {
       notePosition: { page_index: 0, x: 100, y: 100, side: 'right', coord_origin: CoordOrigin.TOPLEFT },
       comment: 'A note',
     });
-    expect((constructedItems[0] as any).annotationPageLabel).toBe('220');
+    expect((constructedItems[0] as any).annotationPageLabel).toBe('1220');
   });
 
   it("applies note tags before saveTx", async () => {

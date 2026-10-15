@@ -65,44 +65,44 @@ describe('zoteroDocumentExport.renderCitation', () => {
     it('uses resolved pages for structural locators', () => {
         const loc = { kind: 'sentence', value: '4', raw: 's4' };
         zoteroDocumentExport.renderCitation(citationRequest({ requestedRef: { loc }, pages: [6] }));
-        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, { kind: 'page', value: '6', raw: 'page6' }, 6);
+        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, { kind: 'page', value: '6', raw: 'page6' }, 6, '6');
     });
 
     it('retains all metadata pages when no requested locator exists', () => {
         zoteroDocumentExport.renderCitation(citationRequest({ pages: [6, 7] }));
         expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
-            { kind: 'page', value: '6-7', raw: 'page6-7' }, 6);
+            { kind: 'page', value: '6-7', raw: 'page6-7' }, 6, '6-7');
     });
 
     it.each([
-        { pages: [2, 4], labels: undefined, expected: '2-4' },
-        { pages: [2, 4, 2], labels: { 1: 'iv', 3: 'vi' }, expected: 'iv-vi' },
-        { pages: [2, 2], labels: { 1: 'iv' }, expected: 'iv' },
-    ])('formats structural spans as inclusive page ranges: $expected', ({ pages, labels, expected }) => {
+        { pages: [2, 4], labels: undefined, expected: '2-4', physical: '2-4' },
+        { pages: [2, 4, 2], labels: { 1: 'iv', 3: 'vi' }, expected: 'iv-vi', physical: '2-4' },
+        { pages: [2, 2], labels: { 1: 'iv' }, expected: 'iv', physical: '2' },
+    ])('formats structural spans as inclusive page ranges: $expected', ({ pages, labels, expected, physical }) => {
         vi.mocked(getPageLabelsForItem).mockReturnValueOnce(labels ?? null);
         zoteroDocumentExport.renderCitation(citationRequest({
             requestedRef: { loc: { kind: 'sentence', value: '1-5', raw: 's1-s5' } },
             pages,
         }));
         expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
-            { kind: 'page', value: expected, raw: `page${expected}` }, 2);
+            { kind: 'page', value: expected, raw: `page${expected}` }, 2, physical);
     });
 
-    it('never writes the citation\'s printed labels into a note locator', () => {
+    it('takes note locators from the preloaded locator labels, not the citation\'s persisted labels', () => {
         zoteroDocumentExport.renderCitation(citationRequest({
             requestedRef: { loc: { kind: 'sentence', value: '1-5', raw: 's1-s5' } },
             pages: [2, 4],
             metadata: { page_labels: { 1: '1202', 3: '1204' } },
         }));
         expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
-            { kind: 'page', value: '2-4', raw: 'page2-4' }, 2);
+            { kind: 'page', value: '2-4', raw: 'page2-4' }, 2, '2-4');
     });
 
     it.each([null, { loc: { kind: 'page', value: '2, 4', raw: 'page2, 4' } }])(
         'preserves separate cited pages without a structural span (%j)', (requestedRef) => {
             zoteroDocumentExport.renderCitation(citationRequest({ requestedRef, pages: [2, 4] }));
             expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
-                { kind: 'page', value: '2, 4', raw: 'page2, 4' }, 2);
+                { kind: 'page', value: '2, 4', raw: 'page2, 4' }, 2, '2, 4');
         },
     );
 
@@ -110,7 +110,7 @@ describe('zoteroDocumentExport.renderCitation', () => {
         zoteroDocumentExport.renderCitation(citationRequest({
             requestedRef: { loc: { kind: 'sentence', value: '1-5', raw: 's1-s5' } },
         }));
-        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, undefined, undefined);
+        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, undefined, undefined, undefined);
     });
 
     it('falls back to the legacy local library id when no portable ref exists', () => {

@@ -22,6 +22,8 @@ function makeItem(id: number, key: string) {
         attachmentSyncedHash: null,
         attachmentContentType: 'application/pdf',
         isAttachment: () => true,
+        isFileAttachment: () => true,
+        isPDFAttachment: () => true,
         isStoredFileAttachment: () => false,
         getFilePathAsync: vi.fn().mockResolvedValue(`/storage/${key}/test.pdf`),
     };
@@ -104,15 +106,33 @@ describe('preloadPageLabelsForContent', () => {
             getMetadata: vi.fn().mockResolvedValue({
                 pageCount: 2,
                 pageLabels: { 0: '1', 1: '2' },
-                derivedPageLabels: { 0: '1201', 1: '1202' },
+                derivedPageLabels: { 1: '1202' },
             }),
         };
         (globalThis as any).Zotero.Items = { ...itemLookups(() => item) };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
         const content = '<citation att_id="1-NSPACE01" page="1"/>';
 
-        expect(await preloadPageLabelsForContent(content, 'locator')).toEqual({ 44: { 0: '1', 1: '2' } });
-        expect(await preloadPageLabelsForContent(content, 'printed')).toEqual({ 44: { 0: '1201', 1: '1202' } });
+        // Locator labels are printed labels, with the declared label on a page that prints none.
+        expect(await preloadPageLabelsForContent(content, 'locator')).toEqual({ 44: { 0: '1', 1: '1202' } });
+        expect(await preloadPageLabelsForContent(content, 'printed')).toEqual({ 44: { 1: '1202' } });
+    });
+
+    it('loads declared labels for a standalone attachment whose link cannot carry its page', async () => {
+        const item = { ...makeItem(45, 'ALONE003'), parentID: false, isFileAttachment: () => true, fileExistsCached: () => false };
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({
+                pageCount: 2,
+                pageLabels: { 0: '1', 1: '2' },
+                derivedPageLabels: { 1: '1202' },
+            }),
+        };
+        (globalThis as any).Zotero.Items = { ...itemLookups(() => item) };
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+        const content = '<citation att_id="1-ALONE003" page="2"/>';
+
+        expect(await preloadPageLabelsForContent(content, 'locator')).toEqual({ 45: { 0: '1', 1: '2' } });
+        expect(await preloadPageLabelsForContent(content, 'printed')).toEqual({ 45: { 1: '1202' } });
     });
 
     it('calls getAttachmentFileStatus on cache miss', async () => {
@@ -343,12 +363,12 @@ describe('preloadPageLabelsForCitations', () => {
         expect(cache.getSerializedResult).toHaveBeenCalledWith(
             { libraryId: 1, zoteroKey: 'PRINTED3' }, 'structured', '/storage/PRINTED3/test.pdf',
         );
-        // Locator labels never need the payload.
+        // Locator labels recover the printed labels the same way.
         cache.getSerializedResult.mockClear();
         expect(await preloadPageLabelsForCitations([
             { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'PRINTED3' }, pages: [2] },
-        ], 'locator')).toEqual({ 62: { 0: '1', 1: '2', 2: '3' } });
-        expect(cache.getSerializedResult).not.toHaveBeenCalled();
+        ], 'locator')).toEqual({ 62: { 0: '1', 1: '1202', 2: '3' } });
+        expect(cache.getSerializedResult).toHaveBeenCalledTimes(1);
     });
 
     it('loads no labels for a document whose printed labels are not known', async () => {
@@ -440,12 +460,13 @@ describe('preloadPageLabelsForCitations', () => {
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
 
-    it('returns locator labels after analyzing the PDF on a local cache miss', async () => {
+    it('returns the declared labels as locator labels after analyzing the PDF on a local cache miss', async () => {
+        // The analysis records the labels the PDF declares, not printed ones.
         const item = makeItem(53, 'LOCAL01');
         const cache = {
             getMetadata: vi.fn()
                 .mockResolvedValueOnce(null)
-                .mockResolvedValue({ item_id: 53, pageLabels: { 0: '1' }, derivedPageLabels: { 0: 'i' } }),
+                .mockResolvedValue({ item_id: 53, pageLabels: { 0: '1' } }),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -471,7 +492,7 @@ describe('preloadPageLabelsForCitations', () => {
         const cache = {
             getMetadata: vi.fn()
                 .mockResolvedValueOnce(null)
-                .mockResolvedValue({ item_id: 78, pageLabels: { 2: '9' }, derivedPageLabels: { 2: '3' } }),
+                .mockResolvedValue({ item_id: 78, pageLabels: { 2: '9' } }),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -497,7 +518,7 @@ describe('preloadPageLabelsForCitations', () => {
         const cache = {
             getMetadata: vi.fn()
                 .mockResolvedValueOnce(null)
-                .mockResolvedValue({ item_id: 55, pageLabels: { 3: '9' }, derivedPageLabels: { 3: '4' } }),
+                .mockResolvedValue({ item_id: 55, pageLabels: { 3: '9' } }),
         };
 
         (globalThis as any).Zotero.Items = {

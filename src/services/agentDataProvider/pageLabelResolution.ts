@@ -12,7 +12,8 @@
 
 import { BeaverExtractor, isWorkerDeadlineError } from '../../beaver-extract';
 import type { DocumentCacheMetadata, PageLabels } from '../documentCache';
-import { zoteroLocatorPageLabelsFromMetadata } from '../documentExtraction/pageLabels';
+import { declaredPageLabelsFromMetadata } from '../documentExtraction/pageLabels';
+import { findLabelledPage } from '../../utils/pageLabelTranslation';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
@@ -40,50 +41,8 @@ export class InvalidPageValueError extends Error {
 export interface PageLabelResolutionLabels {
     /** Printed page labels (see `documentExtraction/pageLabels`). */
     printed: PageLabels | null;
-    /** Labels the PDF declares. */
-    locator: PageLabels | null;
-}
-
-/**
- * Length of the run of consecutive Arabic labels that page `index` belongs to.
- */
-function arabicRunLength(labels: PageLabels, index: number): number {
-    const value = (i: number): number | null => {
-        const label = labels[i];
-        return label != null && /^\d+$/.test(label) ? Number(label) : null;
-    };
-    if (value(index) === null) return 0;
-    let start = index;
-    while (value(start - 1) !== null && value(start - 1)! + 1 === value(start)) start--;
-    let end = index;
-    while (value(end + 1) !== null && value(end)! + 1 === value(end + 1)) end++;
-    return end - start + 1;
-}
-
-/**
- * 1-based page whose label is `target`, or null. When several pages carry the
- * label, the one in the longest Arabic run (the main body) wins.
- */
-function findLabelledPage(labels: PageLabels | null, target: string): number | null {
-    if (!labels) return null;
-    const matches = Object.entries(labels)
-        .filter(([, label]) => label === target)
-        .map(([idx]) => Number(idx))
-        .filter((idx) => Number.isInteger(idx) && idx >= 0)
-        .sort((a, b) => a - b);
-    if (matches.length === 0) return null;
-    if (matches.length === 1) return matches[0] + 1;
-    let best = matches[0];
-    let bestRun = arabicRunLength(labels, best);
-    for (const idx of matches.slice(1)) {
-        const run = arabicRunLength(labels, idx);
-        if (run > bestRun) {
-            best = idx;
-            bestRun = run;
-        }
-    }
-    logger(`resolvePageValue: page label '${target}' is on ${matches.length} pages; using page ${best + 1}`, 2);
-    return best + 1;
+    /** Labels the PDF declares (its `/PageLabels`). */
+    declared: PageLabels | null;
 }
 
 /**
@@ -102,10 +61,10 @@ function findLabelledPage(labels: PageLabels | null, target: string): number | n
  *                              if the string can't be parsed as a positive int
  *
  * Examples:
- *   const none = { printed: null, locator: null };
+ *   const none = { printed: null, declared: null };
  *   resolvePageValue(5, none, false)                                              → 5
- *   resolvePageValue(1, { printed: {0:"i",1:"ii",2:"iii",3:"iv",4:"1"}, locator: null }, true) → 5
- *   resolvePageValue("iv", { printed: null, locator: {0:"i",1:"ii",2:"iii",3:"iv"} }, true)    → 4
+ *   resolvePageValue(1, { printed: {0:"i",1:"ii",2:"iii",3:"iv",4:"1"}, declared: null }, true) → 5
+ *   resolvePageValue("iv", { printed: null, declared: {0:"i",1:"ii",2:"iii",3:"iv"} }, true)    → 4
  *   resolvePageValue("38", none, false)                                           → 38
  *   resolvePageValue("iv", none, false)                                           → throws
  */
@@ -115,7 +74,7 @@ export function resolvePageValue(
     preferPageLabels: boolean,
 ): number {
     const matchLabel = (target: string): number | null =>
-        findLabelledPage(labels.printed, target) ?? findLabelledPage(labels.locator, target);
+        findLabelledPage(labels.printed, target) ?? findLabelledPage(labels.declared, target);
 
     const parseAsPositiveInt = (s: string): number | null => {
         const trimmed = s.trim();
@@ -155,7 +114,7 @@ export function resolvePageValue(
 
 /** The labels shown to the model in errors: printed ones when there are any. */
 function knownLabels(labels: PageLabelResolutionLabels): PageLabels | null {
-    return labels.printed && Object.keys(labels.printed).length > 0 ? labels.printed : labels.locator;
+    return labels.printed && Object.keys(labels.printed).length > 0 ? labels.printed : labels.declared;
 }
 
 /** Collect up to MAX_LABEL_SAMPLES distinct label values from the labels map. */
@@ -234,7 +193,7 @@ export async function ensurePageLabelsForResolution(
     //    {} means "checked, no custom labels".
     if (cachedMeta && cachedMeta.pageLabels !== null) {
         return {
-            labels: zoteroLocatorPageLabelsFromMetadata(cachedMeta),
+            labels: declaredPageLabelsFromMetadata(cachedMeta),
             pageCount: cachedMeta.pageCount,
             pdfData: null,
         };

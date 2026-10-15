@@ -167,25 +167,26 @@ export function resolvedAnnotationPageLabel(
 }
 
 /**
- * The label a Beaver-written PDF annotation on `pageIndex` stores: the label
- * the PDF declares for the page when the document cache knows it, else the
- * label the request carried. Zotero shows annotation labels as its own and
- * derives new annotations' labels from them, so they come from the Zotero
- * locator namespace, never from printed labels. `null` leaves the physical
- * page to the placement builders.
+ * The label a Beaver-written PDF annotation on `pageIndex` stores: its Zotero
+ * locator label (the printed page, else the label the PDF declares) when the
+ * document cache knows it, else the label the request carried. Zotero shows
+ * annotation labels as the page and labels a user's next annotations by
+ * counting on from the nearest earlier one, so a correct printed label also
+ * corrects those, while a physical number would spread. `null` leaves the
+ * physical page to the placement builders.
  */
 export async function pdfAnnotationPageLabel(
     attachment: Zotero.Item,
     pageIndex: number,
     requested: string | null | undefined,
 ): Promise<string | null> {
-    let declared: string | undefined;
+    let locator: string | undefined;
     try {
-        declared = (await getZoteroLocatorPageLabels(attachment))?.[pageIndex];
+        locator = (await getZoteroLocatorPageLabels(attachment))?.[pageIndex];
     } catch {
-        declared = undefined;
+        locator = undefined;
     }
-    return firstNonBlankPageLabel(declared, requested);
+    return firstNonBlankPageLabel(locator, requested);
 }
 
 /** Coerce `value` to a non-negative integer ≤ `max`. NaN/Infinity/null/negatives become 0. */

@@ -1,8 +1,43 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolvePrintedPageLabels } from '@beaver/agent-core/extract/pageLabels/printedPageLabels';
+import {
+    resolvePrintedPageLabels,
+    resolveZoteroLocatorPageLabels,
+} from '@beaver/agent-core/extract/pageLabels/printedPageLabels';
 import { formatCitedPages, formatPrintedPage } from '@beaver/agent-ui/utils/pageLabels';
 import { formatPageRangesWithLabels } from '@beaver/agent-ui/utils/pageRanges';
+
+describe('resolveZoteroLocatorPageLabels', () => {
+    it('uses the printed label where there is one and the embedded label elsewhere', () => {
+        expect(resolveZoteroLocatorPageLabels({
+            pageCount: 4,
+            derived: { '1': '1202', '2': '1203' },
+            embedded: { '0': '1', '1': '2', '2': '3', '3': '4' },
+        })).toEqual({ 0: '1', 1: '1202', 2: '1203', 3: '4' });
+    });
+
+    it('returns printed labels alone without embedded labels, and embedded labels alone without printed ones', () => {
+        expect(resolveZoteroLocatorPageLabels({ pageCount: 3, derived: { '1': '1202' } })).toEqual({ 1: '1202' });
+        expect(resolveZoteroLocatorPageLabels({ pageCount: 2, derived: null, embedded: { 0: 'i', 1: 'ii' } }))
+            .toEqual({ 0: 'i', 1: 'ii' });
+        expect(resolveZoteroLocatorPageLabels({ pageCount: 2 })).toEqual({});
+    });
+
+    it('leaves pages with neither label absent and ignores blank embedded labels', () => {
+        expect(resolveZoteroLocatorPageLabels({
+            pageCount: 4,
+            derived: { '2': '7' },
+            embedded: { '0': ' ', '1': '', '3': '8' },
+        })).toEqual({ 2: '7', 3: '8' });
+    });
+
+    it('drops embedded labels with invalid keys or past the page count', () => {
+        expect(resolveZoteroLocatorPageLabels({
+            pageCount: 2,
+            embedded: { x: '9', '-1': '0', '1': '2', '5': '6' },
+        })).toEqual({ 1: '2' });
+    });
+});
 
 describe('resolvePrintedPageLabels', () => {
     it('returns the derived label of each page', () => {
