@@ -1,6 +1,6 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { stagedReaderActionContextAtom, currentReaderAttachmentAtom, effectiveReaderTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, removeExternalFileFromMessageAtom, clearMessageContextAtom } from '../../atoms/messageComposition';
+import { stagedReaderActionContextAtom, currentReaderAttachmentAtom, effectiveReaderTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, removeExternalFileFromMessageAtom, clearMessageContextAtom, messageItemDataRevisionAtom } from '../../atoms/messageComposition';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { removePopupMessagesByTypeAtom } from '../../atoms/ui';
 import { TextSelectionButton } from '../input/TextSelectionButton';
@@ -36,6 +36,8 @@ const MessageAttachmentDisplay = () => {
     const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
     const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    // Bumped when attached items finish loading the data their labels read.
+    const itemDataRevision = useAtomValue(messageItemDataRevisionAtom);
     const currentMessageCollections = useAtomValue(currentMessageCollectionsAtom);
     const currentMessageExternalFiles = useAtomValue(currentMessageExternalFilesAtom);
     const removeExternalFileFromMessage = useSetAtom(removeExternalFileFromMessageAtom);
@@ -77,7 +79,7 @@ const MessageAttachmentDisplay = () => {
         () => overflowCount > 0
             ? buildItemsSummaryListPopup(overflowMessageItems)
             : null,
-        [overflowCount, overflowMessageItems],
+        [overflowCount, overflowMessageItems, itemDataRevision],
     );
 
     // Count of editable (removable) context items currently attached. Excludes

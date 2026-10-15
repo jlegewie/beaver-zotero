@@ -19,6 +19,7 @@ import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getDisplayNameFromItem } from './sourceUtils';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
+import { readOrFallback } from '../../src/utils/zoteroDataLoading';
 
 // ---------------------------------------------------------------------------
 // ActionContext — combines Zotero state with manually-attached message items
@@ -182,7 +183,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
 
     // --- 1. Reader group ---
     if (isReader) {
-        const label = truncateText(readerAtt!.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
+        const label = getItemLabel(readerAtt!);
 
         const readerActions = allActions.filter(a => a.targets.includes('attachment'));
 
@@ -260,7 +261,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
             const noteActions = allActions.filter(a => a.targets.includes('note'));
             if (noteActions.length > 0) {
                 const label = selectedNotes.length === 1
-                    ? truncateText(selectedNotes[0].getNoteTitle(), MAX_LABEL_ITEM_LENGTH)
+                    ? getNoteLabel(selectedNotes[0])
                     : `${selectedNotes.length} selected notes`;
                 groups.push({
                     id: 'selected-notes',
@@ -278,9 +279,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
         const noteActions = allActions.filter(a => a.targets.includes('note'));
         if (noteActions.length > 0) {
             const noteItem = ctx.zotero.noteItem;
-            const label = noteItem
-                ? truncateText(noteItem.getNoteTitle(), MAX_LABEL_ITEM_LENGTH)
-                : 'Note';
+            const label = noteItem ? getNoteLabel(noteItem) : 'Note';
             groups.push({ id: 'note', label, actions: noteActions, targetType: 'note', iconInfo: { type: 'css-icon', name: 'note' } });
         }
     }
@@ -349,9 +348,7 @@ export function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     // 2. Note
     if (zotero.type === 'note') {
         const noteItem = zotero.noteItem;
-        const label = noteItem
-            ? truncateText(noteItem.getNoteTitle(), MAX_LABEL_ITEM_LENGTH)
-            : null;
+        const label = noteItem ? getNoteLabel(noteItem) : null;
         return { targetType: 'note', label, iconInfo: { type: 'css-icon', name: 'note' } };
     }
 
@@ -382,7 +379,7 @@ export function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
         const selectedNotes = zotero.selectedItems.filter(i => i.isNote());
         if (selectedNotes.length > 0) {
             const label = selectedNotes.length === 1
-                ? truncateText(selectedNotes[0].getNoteTitle(), MAX_LABEL_ITEM_LENGTH)
+                ? getNoteLabel(selectedNotes[0])
                 : `${selectedNotes.length} selected notes`;
             return { targetType: 'note', label, iconInfo: { type: 'css-icon', name: 'note' } };
         }
@@ -474,12 +471,24 @@ function getSelectedLabel(items: Zotero.Item[]): string {
     return `${items.length} selected items`;
 }
 
-/** Display name for any item type — regular items use author/year, others use parent or display title */
+/**
+ * Display name for any item type — regular items use author/year, others their
+ * display title. An item whose data is not loaded yet (a library not opened
+ * this session) gets a generic label instead of throwing; the composer loads
+ * the data and re-renders with the real one.
+ */
 function getItemLabel(item: Zotero.Item): string {
-    if (item.isRegularItem()) {
-        return truncateText(getDisplayNameFromItem(item), MAX_LABEL_ITEM_LENGTH);
-    }
-    return truncateText(item.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
+    const fallback = item.isNote() ? 'Note' : item.isAttachment() ? 'Attachment' : 'Item';
+    return readOrFallback(() => {
+        if (item.isRegularItem()) {
+            return truncateText(getDisplayNameFromItem(item), MAX_LABEL_ITEM_LENGTH);
+        }
+        return truncateText(item.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
+    }, fallback);
+}
+
+function getNoteLabel(note: Zotero.Item): string {
+    return readOrFallback(() => truncateText(note.getNoteTitle(), MAX_LABEL_ITEM_LENGTH), 'Note');
 }
 
 // ---------------------------------------------------------------------------
