@@ -96,8 +96,10 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
         if (citesPrintedPages(item) && citedPages) {
             locator = citationPageLocator(exportLabels, citedPages);
         }
+        // The metadata records the physical page whenever it is known, so the
+        // citation reads back exactly although its locator is a printed label.
         const meta = buildBeaverCitationMeta({
-            loc: locatorToken(requestedRef?.loc),
+            loc: locatorToken(requestedRef?.loc) ?? (startPage ? `page${startPage}` : undefined),
             att: item.isAttachment() ? item.key : undefined,
         });
         return citationRender(buildNoteCitation(item, locator, {}, meta));

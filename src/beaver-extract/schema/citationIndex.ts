@@ -44,8 +44,8 @@ function entryForSentence(
 }
 
 /**
- * Zotero locator label per page index: the printed label, else the label the
- * PDF declares (`resolveZoteroLocatorPageLabels`).
+ * Zotero locator label per page index (`resolveZoteroLocatorPageLabels`): the
+ * printed labels, or the labels the PDF declares for a document without any.
  */
 function locatorPageLabels(
     pages: StructuredPage[],
@@ -60,8 +60,9 @@ function locatorPageLabels(
 
 /**
  * Build a compact lookup for every citable item and sentence id. Entries carry
- * the Zotero locator label of their page: the printed label from
- * `derivedPageLabels`, else the label the PDF declares (`page.label`).
+ * the Zotero locator label of their page: from `derivedPageLabels`, or from
+ * the labels the PDF declares (`page.label`) for a document without printed
+ * labels.
  */
 export function buildCitationIndex(
     pages: StructuredPage[],

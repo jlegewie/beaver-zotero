@@ -156,6 +156,16 @@ describe('zoteroDocumentExport.renderCitation for native citations', () => {
         vi.mocked(getPageLabelsForItem).mockReturnValue(null);
     });
 
+    it('records the physical page of a citation that names no locator of its own', () => {
+        vi.mocked(getPageLabelsForItem).mockReturnValue({ 1: '813', 2: '814' } as any);
+
+        const ci = citationItem({ pages: [2] });
+
+        expect(ci.locator).toBe('813');
+        expect(ci.beaver).toEqual({ v: 1, loc: 'page2' });
+        vi.mocked(getPageLabelsForItem).mockReturnValue(null);
+    });
+
     it('stores a requested page range whole', () => {
         const ci = citationItem({ requestedRef: { loc: { kind: 'page', value: '12-14', raw: 'page12-14' } }, pages: [12, 13, 14] });
 

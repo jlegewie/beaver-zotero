@@ -277,7 +277,7 @@ describe('preloadNotePageLabels', () => {
         const labels = await preloadNotePageLabels(makeRawCitation('ABCD1234'), 1);
 
         expect(labels).toEqual({
-            '1-ABCD1234': { declared: { 0: '1', 1: '2' }, locator: { 0: '1', 1: '1202' } },
+            '1-ABCD1234': { declared: { 0: '1', 1: '2' }, locator: { 1: '1202' } },
         });
     });
 
@@ -507,7 +507,7 @@ describe('preloadPageLabelsForNewCitations', () => {
         useAttachment(makeAttachment(50, 'LOCAL002'), cache);
 
         expect(await preloadPageLabelsForNewCitations('<citation id="1-LOCAL002" loc="page5"/>'))
-            .toEqual({ 50: { 3: '4', 4: '1205' } });
+            .toEqual({ 50: { 4: '1205' } });
     });
 
     it('does not extract (and so download) a remote-only attachment on a cache miss', async () => {

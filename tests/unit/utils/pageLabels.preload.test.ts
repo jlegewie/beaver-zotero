@@ -113,8 +113,8 @@ describe('preloadPageLabelsForContent', () => {
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
         const content = '<citation att_id="1-NSPACE01" page="1"/>';
 
-        // Locator labels are printed labels, with the declared label on a page that prints none.
-        expect(await preloadPageLabelsForContent(content, 'locator')).toEqual({ 44: { 0: '1', 1: '1202' } });
+        // Locator labels are the printed labels; the declared ones do not fill gaps.
+        expect(await preloadPageLabelsForContent(content, 'locator')).toEqual({ 44: { 1: '1202' } });
         expect(await preloadPageLabelsForContent(content, 'printed')).toEqual({ 44: { 1: '1202' } });
     });
 
@@ -367,7 +367,7 @@ describe('preloadPageLabelsForCitations', () => {
         cache.getSerializedResult.mockClear();
         expect(await preloadPageLabelsForCitations([
             { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'PRINTED3' }, pages: [2] },
-        ], 'locator')).toEqual({ 62: { 0: '1', 1: '1202', 2: '3' } });
+        ], 'locator')).toEqual({ 62: { 1: '1202' } });
         expect(cache.getSerializedResult).toHaveBeenCalledTimes(1);
     });
 

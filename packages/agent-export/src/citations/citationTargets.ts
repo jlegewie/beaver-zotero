@@ -20,6 +20,7 @@ import {
     type CitationRef,
 } from '@beaver/agent-core/citations/citationGrammar';
 import { getCitationPages, getContentKind, type Citation } from '@beaver/agent-core/types/citations';
+import { labelsSpanPages } from '@beaver/agent-core/extract/pageLabels/printedPageLabels';
 import type { CitationOccurrence, CitationSnapshot, CitationTarget, LocatorSpec } from '../types';
 
 /** Metadata for an occurrence, by the same key precedence the chat uses. */
@@ -199,40 +200,6 @@ export function formatLocator(spec: LocatorSpec, labels?: Record<number, string>
         ranges.push(start === end ? labelOf(start)! : `${labelOf(start)}-${labelOf(end)}`);
     }
     return ranges.join(', ');
-}
-
-const ROMAN_VALUES: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
-
-/** The value of a Roman numeral label (`xiv` → 14), or null. */
-function romanValue(label: string): number | null {
-    const lower = label.toLowerCase();
-    if (!/^[ivxlcdm]+$/.test(lower)) return null;
-    let total = 0;
-    for (let i = 0; i < lower.length; i++) {
-        const value = ROMAN_VALUES[lower[i]];
-        const next = ROMAN_VALUES[lower[i + 1]] ?? 0;
-        total += value < next ? -value : value;
-    }
-    return total > 0 ? total : null;
-}
-
-/**
- * Whether labels `a` and `b` are `distance` apart in one numbering sequence:
- * numbers with the same prefix (`12`→`14`, `S12`→`S14`, `A-3`→`A-5`) or Roman
- * numerals (`iv`→`vi`).
- */
-function labelsSpanPages(a: string | undefined, b: string | undefined, distance: number): boolean {
-    if (!a || !b) return false;
-    const numberedA = /^(.*?)(\d+)$/.exec(a);
-    const numberedB = /^(.*?)(\d+)$/.exec(b);
-    if (numberedA || numberedB) {
-        return !!numberedA && !!numberedB
-            && numberedA[1] === numberedB[1]
-            && Number(numberedB[2]) - Number(numberedA[2]) === distance;
-    }
-    const romanA = romanValue(a);
-    const romanB = romanValue(b);
-    return romanA !== null && romanB !== null && romanB - romanA === distance;
 }
 
 /**

@@ -7,8 +7,10 @@
  *   `page_label` fields of backend responses.
  * - **Zotero locator** labels are what Beaver writes into Zotero as
  *   note-citation locators (`resolveZoteroLocatorPageLabels`): the printed
- *   label, else the label the PDF declares. Pages with neither take their
- *   physical number at the caller. Annotation labels follow the same rule but
+ *   labels, or the labels the PDF declares for a document without printed
+ *   labels, never mixed per page. A page the chosen labels do not cover is
+ *   left out of a citation; a document without labels cites physical pages.
+ *   Annotation labels follow the same rule but
  *   are proposed by the backend, which has the structured document even when
  *   this computer never extracted it, and stored as proposed.
  * - **Declared** labels are the PDF's own `/PageLabels`. Native note citations

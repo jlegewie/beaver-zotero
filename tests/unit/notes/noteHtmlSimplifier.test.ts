@@ -4069,8 +4069,32 @@ describe('citationPageLocator', () => {
         expect(citationPageLocator(labels, '1, 3')).toBe('2');
     });
 
+    it('never mixes numberings in a range', () => {
+        // An unnumbered cover that declares "1", then printed pages 813-814.
+        expect(citationPageLocator({ 0: '1', 1: '813', 2: '814' }, '1-3')).toBe('813-814');
+        // Two one-page runs: a tie takes the later run (covers and front matter come first).
+        expect(citationPageLocator({ 0: '1', 1: '813', 2: '814' }, '1-2')).toBe('813');
+        // The cover alone still cites the label it has.
+        expect(citationPageLocator({ 0: '1', 1: '813', 2: '814' }, '1')).toBe('1');
+        // Roman front matter then Arabic body: the longer run wins.
+        expect(citationPageLocator({ 0: 'i', 1: '1', 2: '2', 3: '3' }, '1-4')).toBe('1-3');
+    });
+
+    it('keeps ranges in alphabetic and unrecognized label styles whole', () => {
+        expect(citationPageLocator({ 0: 'A', 1: 'B', 2: 'C', 3: 'D' }, '1-4')).toBe('A-D');
+        expect(citationPageLocator({ 0: 'Z', 1: 'AA' }, '1-2')).toBe('Z-AA');
+        expect(citationPageLocator({ 0: 'α', 1: 'β' }, '1-2')).toBe('α-β');
+    });
+
     it('keeps the labelled pages of a long range whose endpoints print none', () => {
         expect(citationPageLocator({ 1: '1', 1999: '1999' }, '1-2002')).toBe('1-1999');
+    });
+
+    it('translates a long consecutive range in linear time', () => {
+        const many = Object.fromEntries(Array.from({ length: 30000 }, (_, i) => [i, String(i + 1)]));
+        const started = performance.now();
+        expect(citationPageLocator(many, '1-30000')).toBe('1-30000');
+        expect(performance.now() - started).toBeLessThan(500);
     });
 
     it('returns promptly for page numbers beyond the safe integer range', () => {

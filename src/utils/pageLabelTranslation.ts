@@ -1,5 +1,6 @@
 import type { PageLabels } from '../services/documentCache';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { labelsBreakNumbering } from '@beaver/agent-core/extract/pageLabels/printedPageLabels';
 
 /**
  * Translate a page number string (1-based, as humans see it) to its display
@@ -24,24 +25,27 @@ export function translatePageNumberToLabel(
 
 /**
  * The page locator a native note citation stores for physical `pages` ("5",
- * "5-7", "2, 9"): the cited pages in Zotero locator labels.
+ * "5-7", "2, 9"), in Zotero locator labels (`resolveZoteroLocatorPageLabels`,
+ * which picks one label source per document).
  *
- * In a document with labels, a page without one (an unnumbered title page
- * before the numbering starts) is left out: it prints no number to cite, and
- * its physical number may be another page's label, so Zotero would open that
- * page. A range keeps its labelled pages ("1-3" with page 1 unlabelled reads
- * "<label of 2>-<label of 3>"). When no cited page has a label the citation
- * gets no locator (undefined); Beaver's metadata still records the physical
- * page. Without labels, or for a locator that is not a physical page
- * reference, `pages` is returned as written.
+ * A cited page the labels do not cover (an unnumbered cover in a numbered
+ * document) is left out: it prints no number to cite, and its physical number
+ * may be another page's label, so Zotero would open that page. A range or list
+ * keeps the labels of its labelled pages, and a range never mixes numberings:
+ * of the runs its labelled pages form (`labelsBreakNumbering`), it cites the
+ * longest, the later one on a tie (front matter comes first). When no cited
+ * page has a label the citation gets no locator (undefined); Beaver's metadata
+ * still records the physical page. Without labels, or for a locator that is
+ * not a physical page reference, `pages` is returned as written.
+ *
+ * Linear in the number of labelled pages; cited ranges are matched against
+ * them, never enumerated, so any page number or range length is safe.
  */
 export function citationPageLocator(
     pageLabels: PageLabels | Record<number, string> | null | undefined,
     pages: string,
 ): string | undefined {
     const normalized = normalizePageRange(pages);
-    // 1-based pages that carry a label, ascending. Ranges are matched against
-    // these rather than enumerated, so any page number or range length is safe.
     const labelled = Object.entries((pageLabels ?? {}) as Record<string, string>)
         .filter(([index, label]) => /^\d+$/.test(index) && typeof label === 'string' && label.trim() !== '')
         .map(([index]) => Number(index) + 1)
@@ -57,8 +61,18 @@ export function citationPageLocator(
         const end = Math.max(Number(match[1]), Number(match[2] ?? match[1]));
         const inRange = labelled.filter((page) => page >= start && page <= end);
         if (inRange.length === 0) continue;
-        const first = labelOf(inRange[0]);
-        const last = labelOf(inRange[inRange.length - 1]);
+        let best = { start: 0, end: 0 };
+        let runStart = 0;
+        for (let i = 0; i < inRange.length; i++) {
+            const next = inRange[i + 1];
+            if (next !== undefined && !labelsBreakNumbering(labelOf(inRange[i]), labelOf(next), next - inRange[i])) {
+                continue;
+            }
+            if (i - runStart >= best.end - best.start) best = { start: runStart, end: i };
+            runStart = i + 1;
+        }
+        const first = labelOf(inRange[best.start]);
+        const last = labelOf(inRange[best.end]);
         parts.push(first === last ? first : `${first}-${last}`);
     }
     return parts.length > 0 ? parts.join(', ') : undefined;

@@ -1,19 +1,41 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    labelsBreakNumbering,
+    labelsSpanPages,
     resolvePrintedPageLabels,
     resolveZoteroLocatorPageLabels,
 } from '@beaver/agent-core/extract/pageLabels/printedPageLabels';
 import { formatCitedPages, formatPrintedPage } from '@beaver/agent-ui/utils/pageLabels';
 import { formatPageRangesWithLabels } from '@beaver/agent-ui/utils/pageRanges';
 
+describe('labelsSpanPages and labelsBreakNumbering', () => {
+    it('follows numbers, Roman numerals and letters of one case', () => {
+        expect(labelsSpanPages('812', '814', 2)).toBe(true);
+        expect(labelsSpanPages('S12', 'S13', 1)).toBe(true);
+        expect(labelsSpanPages('iv', 'vi', 2)).toBe(true);
+        expect(labelsSpanPages('A', 'D', 3)).toBe(true);
+        expect(labelsSpanPages('Z', 'AA', 1)).toBe(true);
+        expect(labelsSpanPages('a', 'B', 1)).toBe(false);
+        expect(labelsSpanPages('1', '813', 1)).toBe(false);
+    });
+
+    it('sees a change of numbering only where a recognized label does not follow', () => {
+        expect(labelsBreakNumbering('1', '813', 1)).toBe(true);
+        expect(labelsBreakNumbering('iv', '1', 1)).toBe(true);
+        expect(labelsBreakNumbering('812', '813', 1)).toBe(false);
+        expect(labelsBreakNumbering('α', 'β', 1)).toBe(false);
+    });
+});
+
 describe('resolveZoteroLocatorPageLabels', () => {
-    it('uses the printed label where there is one and the embedded label elsewhere', () => {
+    it('uses only printed labels when the document has any, never filling gaps with embedded ones', () => {
+        // An unnumbered cover that declares "1" stays unlabelled next to printed 1202.
         expect(resolveZoteroLocatorPageLabels({
             pageCount: 4,
             derived: { '1': '1202', '2': '1203' },
             embedded: { '0': '1', '1': '2', '2': '3', '3': '4' },
-        })).toEqual({ 0: '1', 1: '1202', 2: '1203', 3: '4' });
+        })).toEqual({ 1: '1202', 2: '1203' });
     });
 
     it('returns printed labels alone without embedded labels, and embedded labels alone without printed ones', () => {
@@ -23,12 +45,12 @@ describe('resolveZoteroLocatorPageLabels', () => {
         expect(resolveZoteroLocatorPageLabels({ pageCount: 2 })).toEqual({});
     });
 
-    it('leaves pages with neither label absent and ignores blank embedded labels', () => {
+    it('uses embedded labels for a document without printed labels, ignoring blank ones', () => {
         expect(resolveZoteroLocatorPageLabels({
             pageCount: 4,
-            derived: { '2': '7' },
+            derived: {},
             embedded: { '0': ' ', '1': '', '3': '8' },
-        })).toEqual({ 2: '7', 3: '8' });
+        })).toEqual({ 3: '8' });
     });
 
     it('drops embedded labels with invalid keys or past the page count', () => {

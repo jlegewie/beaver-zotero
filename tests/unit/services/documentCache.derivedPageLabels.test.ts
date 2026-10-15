@@ -207,8 +207,8 @@ describe('page-label namespaces from cache metadata', () => {
         expect(printedPageLabelsFromMetadata(null)).toBeNull();
     });
 
-    it('reads Zotero locator labels as printed labels, with declared labels filling the gaps', () => {
-        expect(zoteroLocatorPageLabelsFromMetadata(record)).toEqual({ '0': '1', '1': '1202', '2': '1203' });
+    it('reads Zotero locator labels as printed labels, or declared ones for a document without them', () => {
+        expect(zoteroLocatorPageLabelsFromMetadata(record)).toEqual({ '1': '1202', '2': '1203' });
         expect(zoteroLocatorPageLabelsFromMetadata({ ...record, pageLabels: {} }))
             .toEqual({ '1': '1202', '2': '1203' });
         expect(zoteroLocatorPageLabelsFromMetadata({ ...record, derivedPageLabels: null }))
