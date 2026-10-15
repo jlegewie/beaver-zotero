@@ -37,7 +37,6 @@ import {
     ArrowRightIcon,
     ArrowUpRightIcon,
     CancelIcon,
-    ChevronIcon,
     EditIcon,
     FileDiffIcon,
     Icon,
@@ -791,28 +790,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         </div>
                         <div className="two-line-header">
                             <span className="font-color-primary font-medium">{groupLabel}</span>
-                            {noteTitle && (
-                                <>
-                                    <span className="font-color-secondary ml-15">{noteTitle}</span>
-                                    {'\u00A0'}
-                                    {isOpenableEditNoteTarget(resolvedTarget) && (
-                                        <Tooltip content="Open note" singleLine>
-                                            <span
-                                                className="font-color-secondary scale-10"
-                                                style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
-                                                role="button"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    e.preventDefault();
-                                                    openNoteByKey(resolvedTarget.libraryId, resolvedTarget.zoteroKey);
-                                                }}
-                                            >
-                                                <Icon icon={ArrowUpRightIcon} />
-                                            </span>
-                                        </Tooltip>
-                                    )}
-                                </>
-                            )}
+                            {noteTitle && <span className="font-color-secondary ml-15">{noteTitle}</span>}
                             {progressMessage && (
                                 <span className="font-color-tertiary ml-15 shimmer-text">{progressMessage}</span>
                             )}
@@ -822,49 +800,44 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
                 <div className="flex-1" />
 
-                <div
-                    className="display-flex flex-row items-center gap-25 mr-2 mt-015"
-                    style={{ visibility: !(aggregateStatus === 'awaiting' || aggregateStatus === 'pending') ? 'visible' : 'hidden' }}
-                >
-                    <Tooltip content={isExpanded ? 'Collapse' : 'Expand'} showArrow singleLine>
-                        <IconButton
-                            icon={ChevronIcon}
-                            variant="ghost-secondary"
-                            iconClassName="scale-12"
-                            onClick={toggleExpanded}
-                            disabled={hasStreamingChild}
-                        />
-                    </Tooltip>
-                </div>
-
-                {showCollapsedHeaderActions && (
-                    <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
-                        {(!isProcessing || clickedButton === 'reject') && (
+                {/* Header actions, right-aligned: Apply / Reject all alone while
+                    the collapsed group awaits a decision, otherwise the open link.
+                    Folding is the header button itself. */}
+                <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
+                    {showCollapsedHeaderActions && (
+                        <>
                             <Tooltip content="Reject all" showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-red"
                                     onClick={handleRejectAll}
-                                    disabled={isProcessing}
-                                    loading={isProcessing && clickedButton === 'reject'}
+                                    ariaLabel="Reject all"
                                 />
                             </Tooltip>
-                        )}
-                        {(!isProcessing || clickedButton === 'approve') && (
                             <Tooltip content="Apply all" showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
                                     onClick={handleApplyAll}
-                                    disabled={isProcessing}
-                                    loading={isProcessing && clickedButton === 'approve'}
+                                    ariaLabel="Apply all"
                                 />
                             </Tooltip>
-                        )}
-                    </div>
-                )}
+                        </>
+                    )}
+                    {isOpenableEditNoteTarget(resolvedTarget) && !showCollapsedHeaderActions && (
+                        <Tooltip content="Open note" showArrow singleLine>
+                            <IconButton
+                                icon={ArrowUpRightIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={() => openNoteByKey(resolvedTarget.libraryId, resolvedTarget.zoteroKey)}
+                                ariaLabel="Open note"
+                            />
+                        </Tooltip>
+                    )}
+                </div>
             </div>
 
             {isExpanded && (

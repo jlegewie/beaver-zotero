@@ -37,7 +37,8 @@ import {
     ArrowRightIcon,
     ArrowUpRightIcon,
 } from '../../../../components/icons/icons';
-import { getZoteroItemReferenceFromAgentAction } from '../../../../agents/agentActions';
+import { getZoteroItemReferenceFromAgentAction, isCreateAnnotationsAgentAction } from '../../../../agents/agentActions';
+import { getCreateAnnotationsOpenLink } from '../createAnnotationsNavigation';
 import { getCurrentCollectionKeyForItem, openNoteByKey, revealSource } from '../../../../utils/sourceUtils';
 import { getMergedItemReference } from '../../../../atoms/mergeItemsChoices';
 import { isStaleMergeProposal } from '../mergeItemsErrors';
@@ -253,6 +254,21 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         revealSource(revealReference, collectionKey);
     }, [revealReference]);
 
+    // The row's open link (↗), with the same destination as the action's card
+    // in the response: a note opens, annotations open in the reader, and any
+    // other single item is shown in the library.
+    const annotationOpenLink = row.actions.length === 1 && isCreateAnnotationsAgentAction(firstAction)
+        ? getCreateAnnotationsOpenLink(
+            firstAction.action_type === 'create_highlight_annotations' ? 'highlight' : 'note',
+            firstAction.proposed_data,
+            firstAction.result_data,
+            firstAction.status === 'applied',
+        )
+        : null;
+    const openLink = openNoteTarget
+        ? { tooltip: 'Open note', onClick: handleOpenNote }
+        : annotationOpenLink ?? (revealReference ? { tooltip: 'Reveal in library', onClick: handleReveal } : null);
+
     const toggleExpanded = useCallback(
         () => setExpanded({ key: expansionKey, expanded: !isExpanded }),
         [expansionKey, isExpanded, setExpanded],
@@ -336,19 +352,6 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         />
                     ))}
 
-                    {(openNoteTarget || revealReference) && !isBusy && (
-                        <Tooltip content={openNoteTarget ? 'Open note' : 'Show in library'} showArrow singleLine>
-                            <IconButton
-                                icon={ArrowUpRightIcon}
-                                variant="ghost-secondary"
-                                iconClassName="font-color-secondary scale-10"
-                                onClick={openNoteTarget ? handleOpenNote : handleReveal}
-                                disabled={isDisabled}
-                                ariaLabel={openNoteTarget ? 'Open note' : 'Show in library'}
-                            />
-                        </Tooltip>
-                    )}
-
                     {/* A note row is an artifact to open or export; deleting it stays
                         on the note's own card in the response, away from those. */}
                     {!isNoteArtifact && (config.showUndo || (isBusy && activeButton === 'undo')) && (
@@ -399,6 +402,21 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                                 onClick={handleApply}
                                 disabled={isDisabled}
                                 loading={isBusy && activeButton === 'approve'}
+                            />
+                        </Tooltip>
+                    )}
+
+                    {/* The open / reveal link is the rightmost icon, and stays out of
+                        an open decision so Apply / Reject stand alone. */}
+                    {openLink && !isBusy && status !== 'awaiting' && status !== 'pending' && (
+                        <Tooltip content={openLink.tooltip} showArrow singleLine>
+                            <IconButton
+                                icon={ArrowUpRightIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={() => void openLink.onClick()}
+                                disabled={isDisabled}
+                                ariaLabel={openLink.tooltip}
                             />
                         </Tooltip>
                     )}

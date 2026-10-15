@@ -1,7 +1,6 @@
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import { getMergedItemReference } from '../../../atoms/mergeItemsChoices';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { navigateToAnnotation } from '../../../utils/readerUtils';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
 import {
@@ -9,7 +8,6 @@ import {
     getAgentActionsByToolcallAtom,
     pendingApprovalsAtom,
     removePendingApprovalAtom,
-    isCreateAnnotationsAgentAction,
 } from '../../../agents/agentActions';
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
@@ -37,7 +35,6 @@ import { notifyReferenceUnavailable } from '../sourceActions';
 import {
     TickIcon,
     CancelIcon,
-    ChevronIcon,
     Spinner,
     Icon,
     RepeatIcon,
@@ -57,6 +54,7 @@ import { exportWithFeedback, fileExportFormatMenuItems } from '../../../utils/fi
 import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { getCreatedNoteExportTarget } from './reviewChangeRows';
 import { countPendingNoteEdits } from './reviewChanges/useRunActionRows';
+import { getCreateAnnotationsOpenLink } from './createAnnotationsNavigation';
 import { useOverflowCollapse } from '@beaver/agent-ui/utils/useOverflowCollapse';
 import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
 import RunPermissionButton, { RunPermissionMode } from '../../../components/ui/buttons/RunPermissionButton';
@@ -104,10 +102,6 @@ interface AgentActionViewProps {
 type HeaderLinkAction = {
     tooltip: string;
     onClick: () => void | Promise<void>;
-};
-
-type HeaderLinkActionRule = HeaderLinkAction & {
-    matches: () => boolean;
 };
 
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
@@ -499,6 +493,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [action]);
 
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
+    // While the action awaits a decision, a collapsed card carries Apply /
+    // Reject in its header. Expanded, the footer's labeled buttons decide and
+    // the header keeps the open link, so the item can be checked first.
+    const isDecisionState = isAwaitingApproval || status === 'pending';
+    const showDecisionButtons = isDecisionState && !isExpanded && !isProcessing && !isConfirmAction && !hasNoActionData;
     const previewData = buildPreviewData(toolName, pendingApproval, action);
     const runPermissionMode: RunPermissionMode =
         isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
@@ -521,82 +520,70 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     };
 
     const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle, actions);
-    const bulkAnnotationRevealRef = action && isCreateAnnotationsAgentAction(action)
-        ? action.proposed_data.resolved_ref
-        : null;
     const mergedItemReference = action ? getMergedItemReference(action) : null;
-    const headerLinkActionRules: HeaderLinkActionRule[] = [
-        {
-            matches: () => !!mergedItemReference,
-            tooltip: 'Reveal merged item',
-            onClick: async () => {
-                const ref = mergedItemReference!;
-                // The collection lookup is a local query, so it needs this
-                // device's rowid; `revealSource` resolves the reference itself.
-                const libraryId = resolveLibraryRef(ref);
-                const collectionKey = libraryId
-                    ? await getCurrentCollectionKeyForItem(libraryId, ref.zotero_key)
-                    : undefined;
-                revealSource(ref, collectionKey);
-            },
-        },
-        {
-            matches: () => (
-                toolName === 'create_note' &&
-                action?.status === 'applied' &&
-                // The click handler resolves through `library_ref`, so gate on
-                // library identity rather than a rowid the result may not carry.
-                hasLibraryIdentity({
-                    library_id: action?.result_data?.library_id,
-                    library_ref: action?.result_data?.library_ref,
-                }) &&
-                !!action?.result_data?.zotero_key
-            ),
-            tooltip: 'Open note',
-            onClick: () => {
-                // Resolve through the device-portable library_ref so a note created
-                // in a group library on another computer opens the right local item.
-                const libraryId = resolveLibraryRef({
-                    library_ref: action!.result_data!.library_ref,
-                    library_id: action!.result_data!.library_id,
-                });
-                if (libraryId) void openNoteByKey(libraryId, action!.result_data!.zotero_key);
-                else notifyReferenceUnavailable('item', 'library_unavailable');
-            },
-        },
-        {
-            matches: () => (
-                (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations')&&
-                action?.status === 'applied' &&
-                action?.result_data?.created?.length > 0
-            ),
-            tooltip: 'Open annotation',
-            onClick: async () => {
-                const firstCreated = action!.result_data!.created[0];
-                const resolved = await resolveItemReference({
-                    library_ref: firstCreated.library_ref,
-                    library_id: firstCreated.library_id,
-                    zotero_key: firstCreated.zotero_key,
-                });
-                if (resolved.status === 'found') {
-                    await navigateToAnnotation(resolved.item as Zotero.Item);
-                } else {
-                    notifyReferenceUnavailable('annotation', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
-                }
-            },
-        },
-    ];
+    const annotationKind = toolName === 'create_highlight_annotations'
+        ? 'highlight'
+        : toolName === 'create_note_annotations' ? 'note' : null;
+    // The header's open link (↗) goes to the action's result, where it is
+    // viewed: a note opens in the note editor, annotations in the reader, and
+    // an item-level change shows the item in the library. Each card type has
+    // one destination; a card with nothing to open yet shows no link.
+    const headerLinkAction: HeaderLinkAction | null = (() => {
+        if (mergedItemReference) {
+            return {
+                tooltip: 'Reveal in library',
+                onClick: async () => {
+                    // The collection lookup is a local query, so it needs this
+                    // device's rowid; `revealSource` resolves the reference itself.
+                    const libraryId = resolveLibraryRef(mergedItemReference);
+                    const collectionKey = libraryId
+                        ? await getCurrentCollectionKeyForItem(libraryId, mergedItemReference.zotero_key)
+                        : undefined;
+                    revealSource(mergedItemReference, collectionKey);
+                },
+            };
+        }
 
-    const defaultHeaderLinkAction: HeaderLinkAction | null = (() => {
-        const revealRef = bulkAnnotationRevealRef ?? {
+        if (toolName === 'create_note') {
+            const created = action?.status === 'applied' ? action.result_data : undefined;
+            // The click handler resolves through `library_ref`, so gate on
+            // library identity rather than a rowid the result may not carry.
+            if (!created?.zotero_key || !hasLibraryIdentity({
+                library_id: created.library_id,
+                library_ref: created.library_ref,
+            })) return null;
+            return {
+                tooltip: 'Open note',
+                onClick: () => {
+                    // Resolve through the device-portable library_ref so a note created
+                    // in a group library on another computer opens the right local item.
+                    const libraryId = resolveLibraryRef({
+                        library_ref: created.library_ref,
+                        library_id: created.library_id,
+                    });
+                    if (libraryId) void openNoteByKey(libraryId, created.zotero_key);
+                    else notifyReferenceUnavailable('item', 'library_unavailable');
+                },
+            };
+        }
+
+        if (annotationKind) {
+            return getCreateAnnotationsOpenLink(
+                annotationKind,
+                previewData?.actionData ?? action?.proposed_data,
+                action?.result_data,
+                action?.status === 'applied',
+            );
+        }
+
+        const revealRef = {
             library_id: action?.proposed_data?.library_id,
             zotero_key: action?.proposed_data?.zotero_key,
             library_ref: action?.proposed_data?.library_ref,
         };
         if (!hasLibraryIdentity(revealRef) || !revealRef.zotero_key) return null;
-
         return {
-            tooltip: 'Reveal in Zotero',
+            tooltip: 'Reveal in library',
             onClick: () => {
                 revealSource({
                     library_id: revealRef.library_id,
@@ -606,7 +593,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             },
         };
     })();
-    const headerLinkAction = headerLinkActionRules.find((rule) => rule.matches()) ?? defaultHeaderLinkAction;
 
     if (isStreaming) {
         const effectiveArgs = streamingArgs ?? {};
@@ -677,25 +663,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     no action row exists yet. */}
                                 <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
                                 {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                                {headerLinkAction && (
-                                    <>
-                                        {'\u00A0'}
-                                        <Tooltip content={headerLinkAction.tooltip} singleLine>
-                                            <span
-                                                className="font-color-secondary scale-10"
-                                                style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
-                                                role="button"
-                                                onClick={async (e) => {
-                                                    e.stopPropagation();
-                                                    e.preventDefault();
-                                                    await headerLinkAction.onClick();
-                                                }}
-                                            >
-                                                <Icon icon={ArrowUpRightIcon} />
-                                            </span>
-                                        </Tooltip>
-                                    </>
-                                )}
                             </div>
                             {progressMessage && (
                                 <span className="font-color-tertiary shimmer-text">{progressMessage}</span>
@@ -706,15 +673,38 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                 <div className="flex-1" />
 
-                <div
-                    className="display-flex flex-row items-center gap-25 mr-2 mt-015"
-                    style={{ visibility: !(isAwaitingApproval || status === 'pending') ? 'visible' : 'hidden' }}
-                >
-                    {noteExportTarget && !isProcessing && (isExportingNote ? (
+                {/* Header actions, right-aligned: Apply / Reject alone while a
+                    collapsed card awaits a decision; otherwise at most one
+                    tool-specific action, then the open / reveal link as the
+                    rightmost icon. Folding is the header button itself. */}
+                <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
+                    {showDecisionButtons && (
+                        <>
+                            <Tooltip content="Reject" showArrow singleLine>
+                                <IconButton
+                                    icon={CancelIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="font-color-red"
+                                    onClick={isAwaitingApproval ? handleReject : handleRejectPending}
+                                    ariaLabel="Reject"
+                                />
+                            </Tooltip>
+                            <Tooltip content="Apply" showArrow singleLine>
+                                <IconButton
+                                    icon={TickIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="font-color-green scale-14"
+                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
+                                    ariaLabel="Apply"
+                                />
+                            </Tooltip>
+                        </>
+                    )}
+                    {!isDecisionState && noteExportTarget && !isProcessing && (isExportingNote ? (
                         <IconButton
                             icon={DownloadIcon}
                             variant="ghost-secondary"
-                            iconClassName="scale-10"
+                            iconClassName="font-color-secondary scale-10"
                             onClick={() => {}}
                             loading
                             ariaLabel="Exporting"
@@ -723,50 +713,24 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <MenuButton
                             icon={DownloadIcon}
                             variant="ghost-secondary"
-                            iconClassName="scale-10"
+                            iconClassName="font-color-secondary scale-10"
                             menuItems={fileExportFormatMenuItems(handleExportNote)}
                             tooltipContent="Export"
                             ariaLabel="Export"
                         />
                     ))}
-                    <Tooltip content="Expand" showArrow singleLine>
-                        <IconButton
-                            icon={ChevronIcon}
-                            variant="ghost-secondary"
-                            iconClassName="scale-12"
-                            onClick={toggleExpanded}
-                        />
-                    </Tooltip>
+                    {headerLinkAction && !showDecisionButtons && (
+                        <Tooltip content={headerLinkAction.tooltip} showArrow singleLine>
+                            <IconButton
+                                icon={ArrowUpRightIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={() => void headerLinkAction.onClick()}
+                                ariaLabel={headerLinkAction.tooltip}
+                            />
+                        </Tooltip>
+                    )}
                 </div>
-
-                {((isAwaitingApproval || status === 'pending') && !isProcessing && !isConfirmAction && !hasNoActionData) && (
-                    <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
-                        {(!isProcessing || clickedButton === 'reject') && (
-                            <Tooltip content="Reject" showArrow singleLine>
-                                <IconButton
-                                    icon={CancelIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="font-color-red"
-                                    onClick={isAwaitingApproval ? handleReject : handleRejectPending}
-                                    disabled={isProcessing}
-                                    loading={isProcessing && clickedButton === 'reject'}
-                                />
-                            </Tooltip>
-                        )}
-                        {(!isProcessing || clickedButton === 'approve') && (
-                            <Tooltip content="Apply" showArrow singleLine>
-                                <IconButton
-                                    icon={TickIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="font-color-green scale-14"
-                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                    disabled={isProcessing}
-                                    loading={isProcessing && clickedButton === 'approve'}
-                                />
-                            </Tooltip>
-                        )}
-                    </div>
-                )}
             </div>
 
             {isExpanded && (
