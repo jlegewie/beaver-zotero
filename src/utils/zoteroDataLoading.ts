@@ -92,3 +92,54 @@ export async function readWithDataReload<T>(
         return read();
     }
 }
+
+/**
+ * Run a synchronous read of an item's data, returning `fallback` when Zotero
+ * reports the data as unloaded. For render paths that cannot await a load;
+ * pair with {@link loadItemDisplayData} so the real value follows.
+ */
+export function readOrFallback<T>(read: () => T, fallback: T): T {
+    try {
+        return read();
+    } catch (error) {
+        if (isUnloadedDataError(error)) return fallback;
+        throw error;
+    }
+}
+
+/**
+ * Whether reading an item's display label would throw because its data (or
+ * its parent) is not loaded. An item from a library that has not been opened
+ * this session carries only primary data until something loads the rest.
+ */
+export function hasUnloadedDisplayData(item: Zotero.Item): boolean {
+    try {
+        item.getDisplayTitle();
+        void item.parentItem;
+        return false;
+    } catch (error) {
+        return isUnloadedDataError(error);
+    }
+}
+
+/**
+ * Load the data synchronous label reads need: all data types of the given
+ * items and of their parents. Items and parents are deduplicated and loaded
+ * in one batch, and only data types that are not loaded yet are read, so
+ * cached objects — and any unsaved edits on them — are left alone (unlike
+ * `item.loadAllData()`, which re-queries every type). Never throws: failures
+ * are logged and labels keep their fallback.
+ */
+export async function loadItemDisplayData(items: Zotero.Item[]): Promise<void> {
+    try {
+        const parentIds = [...new Set(items.map(item => item.parentID).filter((id): id is number => !!id))];
+        const parents = parentIds.length > 0 ? await Zotero.Items.getAsync(parentIds) : [];
+        const unique = new Map<number, Zotero.Item>();
+        for (const object of [...items, ...parents]) {
+            if (object) unique.set(object.id, object);
+        }
+        await Zotero.Items.loadDataTypes([...unique.values()]);
+    } catch (error) {
+        logger(`loadItemDisplayData: failed to load data for ${items.length} item(s): ${error}`, 1);
+    }
+}

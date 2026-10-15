@@ -72,6 +72,8 @@ const {
     currentMessageContentAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
+    composerDraftAtom,
+    messageItemDataRevisionAtom,
     pendingPillInsertsAtom,
     removeItemFromMessageAtom,
     readerActionContextAtom,
@@ -193,4 +195,64 @@ it('removes the live selection when no reader action is staged', () => {
     expect(store.get(effectiveReaderTextSelectionAtom)).toEqual({ text: 'live passage' });
     store.set(effectiveReaderTextSelectionAtom, null);
     expect(store.get(readerTextSelectionAtom)).toBeNull();
+});
+
+// An item from a library not opened this session carries only primary data;
+// the composer loads the rest and bumps a label revision so labels pick up the
+// title. Loading data is not a draft edit.
+describe('attached items with unloaded data', () => {
+    const loadedItems = new Set<unknown>();
+
+    beforeEach(() => {
+        loadedItems.clear();
+        (globalThis as any).Zotero.Items = {
+            ...(globalThis as any).Zotero.Items,
+            loadDataTypes: vi.fn(async (items: unknown[]) => { items.forEach(item => loadedItems.add(item)); }),
+        };
+    });
+
+    function unloadedItem(key: string) {
+        const item = {
+            id: 46,
+            libraryID: 3,
+            key,
+            parentID: false,
+            parentItem: null,
+            getDisplayTitle: () => {
+                if (loadedItems.has(item)) return 'Loaded title';
+                const error = new Error("Item data not loaded and field 'title' not set");
+                error.name = 'UnloadedDataException';
+                throw error;
+            },
+        };
+        return item as unknown as Zotero.Item;
+    }
+
+    it('loads the data and bumps the label revision without touching the draft', async () => {
+        const store = createStore();
+        const item = unloadedItem('46GA3WJK');
+        store.set(currentMessageItemsAtom, [item]);
+        const published = store.get(currentMessageItemsAtom);
+        const draftChanged = vi.fn();
+        const unsubscribe = store.sub(composerDraftAtom, draftChanged);
+
+        await vi.waitFor(() => expect(store.get(messageItemDataRevisionAtom)).toBe(1));
+        unsubscribe();
+
+        expect(item.getDisplayTitle()).toBe('Loaded title');
+        expect(store.get(currentMessageItemsAtom)).toBe(published);
+        expect(draftChanged).not.toHaveBeenCalled();
+    });
+
+    it('does not bump the revision when the item was removed before loading finished', async () => {
+        const store = createStore();
+        const item = unloadedItem('46GA3WJK');
+        store.set(currentMessageItemsAtom, [item]);
+        store.set(currentMessageItemsAtom, []);
+
+        await vi.waitFor(() => expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalled());
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(store.get(messageItemDataRevisionAtom)).toBe(0);
+    });
 });
