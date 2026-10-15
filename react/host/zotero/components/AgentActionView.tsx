@@ -493,10 +493,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [action]);
 
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
-    // While the action awaits a decision, the header carries Apply / Reject in
-    // place of the tool-specific action.
+    // While the action awaits a decision, a collapsed card carries Apply /
+    // Reject in its header. Expanded, the footer's labeled buttons decide and
+    // the header keeps the open link, so the item can be checked first.
     const isDecisionState = isAwaitingApproval || status === 'pending';
-    const showDecisionButtons = isDecisionState && !isProcessing && !isConfirmAction && !hasNoActionData;
+    const showDecisionButtons = isDecisionState && !isExpanded && !isProcessing && !isConfirmAction && !hasNoActionData;
     const previewData = buildPreviewData(toolName, pendingApproval, action);
     const runPermissionMode: RunPermissionMode =
         isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
@@ -673,9 +674,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 <div className="flex-1" />
 
                 {/* Header actions, right-aligned: Apply / Reject alone while a
-                    decision is open; otherwise at most one tool-specific action,
-                    then the open / reveal link as the rightmost icon. Folding is
-                    the header button itself. */}
+                    collapsed card awaits a decision; otherwise at most one
+                    tool-specific action, then the open / reveal link as the
+                    rightmost icon. Folding is the header button itself. */}
                 <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
                     {showDecisionButtons && (
                         <>
