@@ -73,7 +73,7 @@ export interface PageNumberObservation {
      * than a removed page number.
      */
     edge?: boolean;
-    /** Read from letter-spaced digits ("3 8" for 38). */
+    /** Read from letter-spaced digits ("3 8" for 38, "· 3 8 ·" for "·38·"). */
     spaced?: boolean;
     /**
      * Font size of the text the number was read from, the same whichever
@@ -726,10 +726,11 @@ export function pageEdgeRowObservations(
                     placed(text, line.bbox);
                 }
             }
-            if (spaced) {
+            const spacedValue = spaced ? parsePrintedPageNumber(spaced)?.value : undefined;
+            if (spaced && spacedValue !== undefined) {
                 pageObservations.push({
                     pageIndex: page.pageIndex,
-                    value: Number(spaced),
+                    value: spacedValue,
                     text: spaced,
                     roman: false,
                     position,

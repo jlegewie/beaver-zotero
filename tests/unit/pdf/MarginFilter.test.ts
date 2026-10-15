@@ -15,6 +15,7 @@ import {
     pageNumberObservations,
     parseCounter,
     parsePrefixedFolio,
+    spacedRowNumber,
 } from "../../../src/beaver-extract/MarginFilter";
 import {
     bboxFromXYWH,
@@ -2085,6 +2086,65 @@ describe("pageNumberObservations — margin numerals that may be printed page nu
         expect(removal.candidates.some((c) => c.reason === "page_number")).toBe(false);
     });
 
+    it("reads letter-spaced digits between middle dots or dashes as one number", () => {
+        // Full-width digits set glyph by glyph between two marks ("· ９ ３ ·",
+        // "— １ ０ ０ —"), and the same in ASCII. The marks and their gaps make
+        // the row about two ems wider than its digits.
+        const rows = [
+            ["· ９ ３ ·", "・ ９ ４ ・", "— ９ ５ —", "－ ９ ６ －", "— １ ０ ０ —"],
+            ["· 9 3 ·", "‧ 9 4 ‧", "- 9 5 -", "– 9 6 –", "- 1 0 0 -"],
+        ];
+        for (const texts of rows) {
+            const entries = texts.flatMap((text, pageIndex) => {
+                const digits = normalizeDigits(text).replace(/\D/gu, "");
+                return [
+                    { pageIndex, text, position: "bottom" as const, lineCount: digits.length + 2, width: (digits.length + 2.2) * 8 },
+                    { pageIndex, text: digits[digits.length - 1], position: "bottom" as const, rowEndNumber: true },
+                ];
+            });
+            const out = observe(analysisOf(entries));
+            expect(values(out)).toEqual([[0, 93, true], [1, 94, true], [2, 95, true], [3, 96, true], [4, 100, true]]);
+            expect(out.every((o) => o.spaced)).toBe(true);
+            // Read as the same folio set solid: "·93·", "—100—".
+            expect(out[0].text).toMatch(/^.93.$/u);
+        }
+    });
+
+    it("does not read a wrapped spaced number wider than its digits and marks", () => {
+        const entries = ["· ９ ３ ·", "— １ ０ ０ —"].map((text, pageIndex) => (
+            { pageIndex, text, position: "bottom" as const, lineCount: 4, width: 41 + 8 * pageIndex }
+        ));
+        expect(observe(analysisOf(entries))).toEqual([]);
+    });
+
+    it("does not read spaced digits with a mark on one side only as one number", () => {
+        const texts = ["· ９ ３", "９ ３ ·", "— １ ０ ０", "１ ０ ０ —", "· ９ ３ —"];
+        const entries = texts.map((text, pageIndex) => (
+            { pageIndex, text, position: "bottom" as const, lineCount: 4, width: 32 }
+        ));
+        const out = observe(analysisOf(entries));
+        expect(out.some((o) => o.value > 10 || o.spaced)).toBe(false);
+    });
+
+    it("does not join the same digit printed at both ends of a row between marks", () => {
+        const entries = [4, 5, 6].map((n, pageIndex) => (
+            { pageIndex, text: `· ${n} ${n} ·`, lineCount: 4, width: 400 }
+        ));
+        const out = observe(analysisOf(entries));
+        expect(out.some((o) => o.value > 10)).toBe(false);
+    });
+
+    it("leaves margin removal of wrapped spaced numbers as it was", () => {
+        // Label derivation alone reads them: removal sees text that matches
+        // no page-number pattern, whatever its width.
+        const analysis = analysisOf(["· ９ ３ ·", "· ９ ４ ·", "· ９ ５ ·", "· ９ ６ ·"].map((text, pageIndex) => (
+            { pageIndex, text, position: "bottom" as const, lineCount: 4, width: 32 }
+        )));
+        const removal = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(removal.candidates.some((c) => c.reason === "page_number")).toBe(false);
+        expect(observe(analysis).map((o) => o.value)).toEqual([93, 94, 95, 96]);
+    });
+
     it("reports prefixed folios at a row's end with their prefix", () => {
         const analysis = analysisOf([
             { pageIndex: 0, text: "Cell Reports 40, 111280, August 23, 2022 e1", position: "bottom" },
@@ -2190,6 +2250,39 @@ describe("pageNumberObservations — margin numerals that may be printed page nu
         }));
         const analysis = MarginFilter.collectMarginElements(pages, { left: 60, top: 80, right: 60, bottom: 80 });
         expect(observe(analysis, pages)).toEqual([]);
+    });
+});
+
+describe("spacedRowNumber", () => {
+    it("reads bare letter-spaced digits as narrow as their digits", () => {
+        expect(spacedRowNumber("2 1", 16, 8)).toBe("21");
+        expect(spacedRowNumber("２ １", 16, 8)).toBe("21");
+        expect(spacedRowNumber("2 1", 17, 8)).toBeNull();
+    });
+
+    it("sets a number between marks solid, keeping its marks", () => {
+        expect(spacedRowNumber("· ９ ３ ·", 35.9, 9)).toBe("·93·");
+        expect(spacedRowNumber("・ ９ ３ ・", 35.9, 9)).toBe("・93・");
+        expect(spacedRowNumber("－ ９ ３ －", 35.9, 9)).toBe("-93-");
+        expect(spacedRowNumber("— １ ０ ０ —", 47, 10)).toBe("—100—");
+    });
+
+    it("allows three ems for a mark on each side", () => {
+        expect(spacedRowNumber("— ９ ９ —", 41.7, 10)).toBe("—99—");
+        expect(spacedRowNumber("· ９ ３ ·", 45, 9)).toBe("·93·");
+        expect(spacedRowNumber("· ９ ３ ·", 45.1, 9)).toBeNull();
+        expect(spacedRowNumber("— １ ０ ０ —", 60.1, 10)).toBeNull();
+    });
+
+    it("reads U+FFFD as a space between the marks only", () => {
+        expect(spacedRowNumber("-\uFFFD9\uFFFD3\uFFFD-", 30, 8)).toBe("-93-");
+        expect(spacedRowNumber("9\uFFFD3", 16, 8)).toBeNull();
+    });
+
+    it("rejects one-sided, mismatched or non-mark wrappers and unspaced numbers", () => {
+        for (const text of ["· 9 3", "9 3 ·", "· 9 3 —", "• 9 3 •", "( 9 3 )", "· 93 ·", "— 100 —", "· 9 ·"]) {
+            expect(spacedRowNumber(text, 30, 8)).toBeNull();
+        }
     });
 });
 

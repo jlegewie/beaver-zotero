@@ -488,6 +488,37 @@ describe("pageEdgeRowObservations", () => {
         expect(pageEdgeRowObservations(pages).map((o) => o.value)).toContain(21);
     });
 
+    it("reads letter-spaced folios between marks over the single digits they split into", () => {
+        // A footer set glyph by glyph, each glyph an em-wide line: a mark,
+        // digits about half an em apart, a mark ("· ９ ３ ·", "— １ ０ ０ —").
+        // Read singly, the last digits step with the pages and would label
+        // them 3, 4, 5, … or 8, 9, 0, ….
+        const glyph = (text: string, x: number, size: number): RawLine => ({
+            ...line(text, x, 740),
+            bbox: bboxFromXYWH(x, 740, size, size, "top-left"),
+            font: { name: "T", family: "T", weight: "normal", style: "normal", size },
+        });
+        const footer = (folio: number, mark: string, size: number): RawLine[] => {
+            const digits = [...String(folio)].map((d) => String.fromCharCode(0xFF10 + Number(d)));
+            const x = 480;
+            const marksGap = 1.6 * size;
+            return [
+                glyph(mark, x, size),
+                ...digits.map((d, i) => glyph(d, x + marksGap + i * 0.55 * size, size)),
+                glyph(mark, x + 2 * marksGap + (digits.length - 1) * 0.55 * size, size),
+            ];
+        };
+        for (const [mark, size, first] of [["·", 9, 93], ["—", 10, 98]] as const) {
+            const pages = [0, 1, 2, 3, 4].map((p) => page(p, [body(100), body(140), body(600), ...footer(first + p, mark, size)]));
+            const expected = Object.fromEntries([0, 1, 2, 3, 4].map((p) => [p, String(first + p)]));
+            expect(derivePageLabels(pageEdgeRowObservations(pages), 5)).toEqual(expected);
+        }
+        // A page from elsewhere in the issue, bound in after the article,
+        // names its own folio: the run does not extend over it.
+        const pages = [61, 62, 63, 64, 205].map((n, p) => page(p, [body(100), body(140), body(600), ...footer(n, "·", 9)]));
+        expect(derivePageLabels(pageEdgeRowObservations(pages), 5)).toEqual({ 0: "61", 1: "62", 2: "63", 3: "64" });
+    });
+
     it("reads a page counter split into lines as one counter", () => {
         // Three numbered pages and an appended cover sheet.
         const pages = [0, 1, 2].map((p) => page(p, [

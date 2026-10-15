@@ -287,6 +287,19 @@ const DASH_WRAPPED_RE = /^[-–—]\s*(\d{1,5})\s*[-–—]$/u;
 const SPACED_DIGITS_RE = /^\d(?:\s+\d){1,4}$/u;
 
 /**
+ * A letter-spaced number between two middle dots or two dashes ("· 9 3 ·",
+ * "— 1 0 0 —"), the marks `MIDDOT_WRAPPED_RE` and `DASH_WRAPPED_RE` accept.
+ * A fullwidth hyphen ("－") is a hyphen once digits are normalized.
+ */
+const WRAPPED_SPACED_DIGITS_RES = [MIDDOT_CHARS, "-–—"].map((marks) => new RegExp(
+    `^([${marks}])\\s*(\\d(?:\\s+\\d){1,4})\\s*([${marks}])$`,
+    "u",
+));
+
+/** Ems a number's two wrapping marks take, with the space that sets each off. */
+const WRAPPING_MARKS_EMS = 3;
+
+/**
  * A page number after one letter ("S12", "e3", "F358"). Not after a letter
  * a scan's text layer reads for a digit (I, i, l, T, t for 1; O, o for 0):
  * "I3" for 13, "T53" for 153.
@@ -393,16 +406,30 @@ export function parseDashWrapped(text: string): number | null {
 }
 
 /**
- * The number a letter-spaced row prints ("2 1" → "21"), or `null`. The row
- * must be about as narrow as its digits set solid (`width` at most one
- * `fontSize` per digit): the same page number printed at both ends of a
- * footer ("4 … 4") is not one number.
+ * A letter-spaced row's number set solid ("2 1" → "21"), keeping a mark on
+ * each side ("· 9 3 ·" → "·93·", "— 1 0 0 —" → "—100—") so that it reads
+ * as the same folio printed solid would. `null` when the row is not one.
+ * The row must be about as narrow as its digits set solid (`width` at most
+ * one `fontSize` per digit, plus `WRAPPING_MARKS_EMS` for the marks): the
+ * same page number printed at both ends of a footer ("4 … 4") is not one
+ * number. A mark on one side only does not count. Like `parseDashWrapped`,
+ * read by label derivation only.
  */
 export function spacedRowNumber(text: string, width: number, fontSize: number): string | null {
     const normalized = normalizeDigits(text).trim();
+    const fits = (ems: number) => fontSize > 0 && width <= ems * fontSize;
+    // U+FFFD between the marks and the digits stands for a space, as in
+    // `parseDashWrapped`. Without marks around them it may be any glyph.
+    const marked = normalized.replace(/\uFFFD/gu, " ").trim();
+    for (const re of WRAPPED_SPACED_DIGITS_RES) {
+        const wrapped = marked.match(re);
+        if (!wrapped) continue;
+        const digits = wrapped[2].replace(/\s+/gu, "");
+        return fits(digits.length + WRAPPING_MARKS_EMS) ? `${wrapped[1]}${digits}${wrapped[3]}` : null;
+    }
     if (!SPACED_DIGITS_RE.test(normalized)) return null;
     const digits = normalized.replace(/\s+/gu, "");
-    return fontSize > 0 && width <= digits.length * fontSize ? digits : null;
+    return fits(digits.length) ? digits : null;
 }
 
 /**
