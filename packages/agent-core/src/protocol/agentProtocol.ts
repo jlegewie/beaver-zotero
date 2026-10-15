@@ -2918,6 +2918,12 @@ export const CLIENT_FEATURES = {
      * relocation targets, which an older client refuses.
      */
     TWO_PAGE_HIGHLIGHTS: 'two_page_highlights',
+    /**
+     * `create_highlight_annotations` actions may carry `style: 'underline'`,
+     * written as Zotero underline annotations. Without it the backend never
+     * offers the style, since an older client would write highlights instead.
+     */
+    UNDERLINE_ANNOTATIONS: 'underline_annotations',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

@@ -11,7 +11,7 @@ import type {
     FailedAnnotationResult,
     HighlightAnnotationItem,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
-import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/createAnnotations';
+import { normalizeAnnotationTags, textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
@@ -77,6 +77,8 @@ function getActionData(request: ActionValidateRequest | WSAgentActionExecuteRequ
         resolved_ref: normalizeRef(raw.resolved_ref ?? raw.resolvedRef ?? {}),
         items: Array.isArray(raw.items) ? raw.items.map(normalizeItem) : [],
         tags: normalizeAnnotationTags(raw.tags),
+        // Absent for highlights, so a normalized payload matches what was sent.
+        ...(textAnnotationStyle(raw.style) === 'underline' ? { style: 'underline' } : {}),
     } as CreateHighlightAnnotationsProposedData;
 }
 
@@ -302,6 +304,7 @@ export async function executeCreateHighlightAnnotationsAction(
 ): Promise<WSAgentActionExecuteResponse> {
     const data = getActionData(request);
     const { requested_ref, resolved_ref, items, tags } = data;
+    const style = textAnnotationStyle(data.style);
 
     // TOCTOU guard: never annotate an attachment in a library the user excluded
     // from Beaver, even if validation passed earlier or the request skipped it.
@@ -375,6 +378,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         comment: item.comment ?? '',
                         pageLabel: item.page_label ?? null,
                         tags,
+                        style,
                     });
                     created.push({
                         client_item_id: item.client_item_id,
@@ -404,6 +408,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         color: item.color,
                         comment: item.comment ?? '',
                         tags,
+                        style,
                     }, snapshotDoc);
                     created.push({
                         client_item_id: item.client_item_id,
@@ -437,7 +442,7 @@ export async function executeCreateHighlightAnnotationsAction(
             }
 
             try {
-                created.push(await createPdfHighlightForItem(attachment, item, tags));
+                created.push(await createPdfHighlightForItem(attachment, item, tags, style));
             } catch (error: any) {
                 failed.push({
                     client_item_id: item.client_item_id,

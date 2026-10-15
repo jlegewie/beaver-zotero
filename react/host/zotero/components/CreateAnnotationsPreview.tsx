@@ -23,6 +23,7 @@ import type {
     HighlightAnnotationItem,
     NoteAnnotationItem,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
+import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
@@ -106,7 +107,7 @@ function statusForItem(
 
 function formatAnnotationFailureMessage(
     failure: FailedAnnotationResult,
-    noun: 'highlight' | 'note',
+    noun: string,
 ): string {
     switch (failure.error_code) {
         case 'page_extraction_failed':
@@ -133,7 +134,7 @@ function formatAnnotationFailureMessage(
 
 function formatAnnotationFailureMessages(
     failures: FailedAnnotationResult[],
-    noun: 'highlight' | 'note',
+    noun: string,
 ): string {
     return Array.from(new Set(
         failures.map((failure) => formatAnnotationFailureMessage(failure, noun)),
@@ -192,7 +193,9 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
         library_ref: resolvedRef?.library_ref,
         library_id: resolvedRef?.library_id,
     });
-    const noun = kind === 'highlight' ? 'highlight' : 'note';
+    // Underlines share the highlight action and differ only in the type Zotero stores.
+    const isUnderline = kind === 'highlight' && textAnnotationStyle(actionData.style) === 'underline';
+    const noun = kind === 'note' ? 'note' : isUnderline ? 'underline' : 'highlight';
     const { openItemMenu, itemMenu } = useItemContextMenu();
 
     // Resolve the attachment's content kind once
@@ -352,7 +355,9 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                             ? fallbackLabel
                             : null;
 
-                        const kindLabel = kind === 'highlight' ? 'Highlight Annotation' : 'Sticky Note';
+                        const kindLabel = noun === 'underline'
+                            ? 'Underline Annotation'
+                            : noun === 'highlight' ? 'Highlight Annotation' : 'Sticky Note';
                         const tooltipContent = text || rawItem.title || '';
                         // Only a pending highlight previews (the reader flashes its
                         // cited extent). Notes have no flashable extent and applied
@@ -377,7 +382,9 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                     <Icon icon={AlertIcon} size={14} className="font-color-red" style={{ marginTop: 2 }} />
                                 ) : (
                                     <ZoteroIcon
-                                        icon={kind === 'highlight' ? ZOTERO_ICONS.ANNOTATE_HIGHLIGHT : ZOTERO_ICONS.ANNOTATION}
+                                        icon={noun === 'underline'
+                                            ? ZOTERO_ICONS.ANNOTATE_UNDERLINE
+                                            : noun === 'highlight' ? ZOTERO_ICONS.ANNOTATE_HIGHLIGHT : ZOTERO_ICONS.ANNOTATION}
                                         size={14}
                                         color={COLOR_VALUES[color] ?? COLOR_VALUES.yellow}
                                         style={{ marginTop: 2 }}
@@ -406,7 +413,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                 body={tooltipContent}
                                 footerLabel={footerLabel}
                                 footerClassName={footerClass}
-                                typeIcon={getAnnotationTooltipIcon(kind === 'highlight' ? 'highlight' : 'note')}
+                                typeIcon={getAnnotationTooltipIcon(noun)}
                                 stayOpenOnAnchorClick
                             >
                                 {row}

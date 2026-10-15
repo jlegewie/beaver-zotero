@@ -100,6 +100,8 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // two_page_highlights is declaration-only because it gates a relocation shape
 // the client must apply: a build that predates it refuses a two-page highlight
 // destination, so the backend keeps rejecting those unless it is declared.
+// underline_annotations is declaration-only because a build that predates it
+// ignores `style` and writes highlights where the user asked for underlines.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -125,6 +127,7 @@ const DECLARATION_ONLY_FEATURES = [
     'continuation_new_run',
     'zotero_duplicates',
     'two_page_highlights',
+    'underline_annotations',
     'item_import_v2',
     'book_chapters',
 ];

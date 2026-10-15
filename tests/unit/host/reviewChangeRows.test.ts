@@ -256,6 +256,28 @@ describe('getChangesCardHeading trail', () => {
             .toEqual({ lead: 'Library changes', trail: '10 edited items' });
     });
 
+    it('names underlines apart from highlights', () => {
+        const created = (count: number) => ({
+            created: Array.from({ length: count }, (_, index) => ({ client_item_id: `c${index}` })),
+        });
+        const underlines = rowsOf([action({
+            action_type: 'create_highlight_annotations',
+            status: 'applied',
+            proposed_data: { style: 'underline' },
+            result_data: created(3),
+        })]);
+        const highlights = rowsOf([action({
+            action_type: 'create_highlight_annotations',
+            status: 'applied',
+            result_data: created(2),
+        })]);
+
+        expect(getChangesCardHeading(underlines))
+            .toEqual({ lead: 'Library changes', trail: '3 created underlines' });
+        expect(getChangesCardHeading(highlights))
+            .toEqual({ lead: 'Library changes', trail: '2 created highlights' });
+    });
+
     it('counts changes of mixed kinds rather than naming them', () => {
         const rows = rowsOf([
             action({ toolcall_id: 'call-1', action_type: 'create_collection', status: 'applied' }),

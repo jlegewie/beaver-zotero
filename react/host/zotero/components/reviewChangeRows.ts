@@ -1,4 +1,5 @@
 import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
+import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { getActionToolGroup } from '../../../atoms/runApprovalPolicy';
 
 /** A tool call the changes card lists, with all of its actions. */
@@ -434,6 +435,7 @@ function countChangedUnits(action: AgentAction): number {
         case 'organize_items':
             return action.result_data?.items_modified ?? data?.item_ids?.length ?? 0;
         case 'create_highlight_annotations':
+        case 'create_underline_annotations':
         case 'create_note_annotations':
             return action.result_data?.created?.length ?? data?.items?.length ?? 0;
         case 'edit_annotations':
@@ -481,6 +483,10 @@ function changeTypeKey(action: AgentAction): string {
     if (actionType === 'edit_annotations' && (action.proposed_data as any)?.operation === 'delete') {
         return 'delete_annotations';
     }
+    // Underlines are written by the highlight action but counted on their own.
+    if (actionType === 'create_highlight_annotations' && textAnnotationStyle((action.proposed_data as any)?.style) === 'underline') {
+        return 'create_underline_annotations';
+    }
     return actionType;
 }
 
@@ -496,6 +502,7 @@ const CHANGE_KINDS: Record<string, { verb: string; noun: string }> = {
     manage_tags: { verb: 'updated', noun: 'tag' },
     manage_collections: { verb: 'updated', noun: 'collection' },
     create_highlight_annotations: { verb: 'created', noun: 'highlight' },
+    create_underline_annotations: { verb: 'created', noun: 'underline' },
     create_note_annotations: { verb: 'created', noun: 'sticky note' },
     edit_annotations: { verb: 'edited', noun: 'annotation' },
     delete_annotations: { verb: 'deleted', noun: 'annotation' },

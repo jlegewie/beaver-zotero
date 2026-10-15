@@ -24,6 +24,7 @@ import {
 } from '../../../components/icons/icons';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { countEditAnnotationTargets } from './reviewChangeRows';
+import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -256,9 +257,10 @@ export function getActionLabel(
             return completed ? 'Created Note' : 'Create Note';
         case 'create_highlight_annotations': {
             const count = actionData?.items?.length ?? 0;
+            const noun = textAnnotationStyle(actionData?.style) === 'underline' ? 'Underline' : 'Highlight';
             return count > 1
-                ? `${count} Highlights`
-                : 'Highlight';
+                ? `${count} ${noun}s`
+                : noun;
         }
         case 'create_note_annotations': {
             const count = actionData?.items?.length ?? 0;
