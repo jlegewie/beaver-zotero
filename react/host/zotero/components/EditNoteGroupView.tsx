@@ -800,9 +800,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
                 <div className="flex-1" />
 
-                {/* Header actions, right-aligned: Apply / Reject all while the
-                    collapsed group awaits a decision, then the open link as the
-                    rightmost icon. Folding is the header button itself. */}
+                {/* Header actions, right-aligned: Apply / Reject all alone while
+                    the collapsed group awaits a decision, otherwise the open link.
+                    Folding is the header button itself. */}
                 <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
                     {showCollapsedHeaderActions && (
                         <>
@@ -826,7 +826,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                             </Tooltip>
                         </>
                     )}
-                    {isOpenableEditNoteTarget(resolvedTarget) && (
+                    {isOpenableEditNoteTarget(resolvedTarget) && !showCollapsedHeaderActions && (
                         <Tooltip content="Open note" showArrow singleLine>
                             <IconButton
                                 icon={ArrowUpRightIcon}

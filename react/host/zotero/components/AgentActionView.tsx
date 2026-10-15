@@ -672,10 +672,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                 <div className="flex-1" />
 
-                {/* Header actions, right-aligned: approval controls while a decision
-                    is open, otherwise at most one tool-specific action. The open /
-                    reveal link is always the rightmost icon. Folding is the header
-                    button itself. */}
+                {/* Header actions, right-aligned: Apply / Reject alone while a
+                    decision is open; otherwise at most one tool-specific action,
+                    then the open / reveal link as the rightmost icon. Folding is
+                    the header button itself. */}
                 <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
                     {showDecisionButtons && (
                         <>
@@ -718,7 +718,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             ariaLabel="Export"
                         />
                     ))}
-                    {headerLinkAction && (
+                    {headerLinkAction && !showDecisionButtons && (
                         <Tooltip content={headerLinkAction.tooltip} showArrow singleLine>
                             <IconButton
                                 icon={ArrowUpRightIcon}

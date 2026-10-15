@@ -5,6 +5,7 @@ import { AlertIcon, Icon } from '../../../components/icons/icons';
 import { formatLocationChip } from '@beaver/agent-ui/utils/locationDisplay';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { openCreateAnnotationTarget, pageIndexForItem } from './createAnnotationsNavigation';
+import { notifyReferenceUnavailable } from '../sourceActions';
 import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { TagPill } from '../../../components/agentRuns/TagPill';
@@ -199,8 +200,9 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
         item: HighlightAnnotationItem | NoteAnnotationItem,
         createdEntries: CreatedAnnotationResult[],
     ) => {
-        await openCreateAnnotationTarget(kind, resolvedRef, item, createdEntries);
-    }, [kind, resolvedRef?.library_id, resolvedRef?.library_ref, resolvedRef?.zotero_key]);
+        const outcome = await openCreateAnnotationTarget(kind, resolvedRef, item, createdEntries);
+        if (outcome !== 'opened') notifyReferenceUnavailable(createdEntries.length > 0 && status === 'applied' ? 'annotation' : 'item', outcome);
+    }, [kind, status, resolvedRef?.library_id, resolvedRef?.library_ref, resolvedRef?.zotero_key]);
 
     return (
         <div ref={previewRootRef} className="create-annotations-preview overflow-hidden">

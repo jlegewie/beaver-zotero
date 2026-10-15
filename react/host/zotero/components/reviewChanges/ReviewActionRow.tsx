@@ -406,8 +406,9 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         </Tooltip>
                     )}
 
-                    {/* The open / reveal link is always the rightmost icon. */}
-                    {openLink && !isBusy && (
+                    {/* The open / reveal link is the rightmost icon, and stays out of
+                        an open decision so Apply / Reject stand alone. */}
+                    {openLink && !isBusy && status !== 'awaiting' && status !== 'pending' && (
                         <Tooltip content={openLink.tooltip} showArrow singleLine>
                             <IconButton
                                 icon={ArrowUpRightIcon}
