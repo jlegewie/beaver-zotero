@@ -34,6 +34,10 @@ export function findCitationMetadata(occurrence: CitationOccurrence, snapshot: C
     return occurrence.invalidKey ? byKey[occurrence.invalidKey] : undefined;
 }
 
+function hasPrintedLabel(labels: Record<number, string> | undefined): labels is Record<number, string> {
+    return !!labels && Object.values(labels).some(label => typeof label === 'string' && label.trim() !== '');
+}
+
 /**
  * `metadata` describes exactly this passage (its pages are the cited pages);
  * `workMetadata` is any metadata of the cited work, which still tells what
@@ -43,8 +47,9 @@ function locatorFor(ref: CitationRef, metadata: Citation | undefined, workMetada
     const contentKind = workMetadata ? getContentKind(workMetadata) : null;
     // Snapshot "pages" are a navigation coordinate, not something a reader can look up.
     if (contentKind === 'snapshot') return null;
-    const labelSource = metadata?.page_labels ?? workMetadata?.page_labels;
-    const labels = labelSource && Object.keys(labelSource).length > 0 ? labelSource : null;
+    // A map whose labels are all empty says nothing, so it leaves the caller
+    // free to fall back to the attachment's labels.
+    const labels = [metadata?.page_labels, workMetadata?.page_labels].find(hasPrintedLabel) ?? null;
     const labelsOnly = contentKind === 'epub';
 
     const metadataPages = metadata ? getCitationPages(metadata) : [];

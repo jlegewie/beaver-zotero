@@ -23,8 +23,13 @@ import { formatNumberRanges, formatPageRangesWithLabels } from './pageRanges';
  */
 export type PageLabelMap = Record<number, string>;
 
+/**
+ * Whether the map has at least one printed label. Persisted citation metadata
+ * can carry maps whose labels are all empty (`{"10": ""}`); those say nothing
+ * about the document and must not stand in for real labels.
+ */
 export function hasPageLabels(labels: PageLabelMap | null | undefined): labels is PageLabelMap {
-    return !!labels && Object.keys(labels).length > 0;
+    return !!labels && Object.values(labels).some(label => typeof label === 'string' && label.trim() !== '');
 }
 
 /**
