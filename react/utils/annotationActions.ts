@@ -176,7 +176,8 @@ async function createHighlightAnnotation(
         type: 'highlight',
         color: resolveHighlightColor(annotation.proposed_data.color),
         comment: annotation.proposed_data.comment || '',
-        pageLabel: primaryLocation.page_idx + 1,
+        // Zotero keeps page labels as strings; its label editor calls `trim()`.
+        pageLabel: String(primaryLocation.page_idx + 1),
         sortIndex,
         position: {
             pageIndex: primaryLocation.page_idx,
@@ -260,7 +261,7 @@ async function createNoteAnnotation(
         type: 'note',
         comment: annotation.proposed_data.comment || annotation.proposed_data.title || '',
         color: resolveHighlightColor(annotation.proposed_data.color),
-        pageLabel: pageIndex + 1,
+        pageLabel: String(pageIndex + 1),
         sortIndex,
         position: {
             pageIndex,

@@ -46,13 +46,27 @@ export function buildAnnotationNoteCitation(
     const attachment = annotation.parentID ? Zotero.Items.get(annotation.parentID) : null;
     const parent = attachment?.parentID ? Zotero.Items.get(attachment.parentID) : null;
     if (!parent || !parent.isRegularItem()) return null;
+    // "-" is Zotero's label for a page that prints no number: cite no page,
+    // as for any such page (`citationPageLocator`).
     let pageLabel: string | undefined;
     try {
-        pageLabel = annotation.annotationPageLabel || undefined;
+        const label = annotation.annotationPageLabel?.trim();
+        pageLabel = label && label !== '-' ? annotation.annotationPageLabel : undefined;
     } catch {
         pageLabel = undefined;
     }
-    return buildNoteCitation(parent, pageLabel, options, buildBeaverCitationMeta({ ann: annotation.key }));
+    let pageIndex: unknown;
+    try {
+        pageIndex = JSON.parse(annotation.annotationPosition)?.pageIndex;
+    } catch {
+        pageIndex = undefined;
+    }
+    // The annotation's physical page is recorded too: the locator is its label,
+    // which may be printed, and the page is needed if the annotation is deleted.
+    const loc = typeof pageIndex === 'number' && Number.isInteger(pageIndex) && pageIndex >= 0
+        ? `page${pageIndex + 1}`
+        : undefined;
+    return buildNoteCitation(parent, pageLabel, options, buildBeaverCitationMeta({ ann: annotation.key, loc }));
 }
 
 /** An external work, as an embedded citation names and describes it. */

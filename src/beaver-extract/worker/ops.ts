@@ -94,7 +94,7 @@ import {
     type ResolvedExtractionSettings,
 } from "../pipeline/documentAnalysis";
 import { runExtraction, type ExtractionEngine } from "../pipeline/extract";
-import { pageLabelsToStringKeys, replaceControlCharsInResult } from "../pipeline/output";
+import { derivedPageLabelsForCache, pageLabelsToStringKeys, replaceControlCharsInResult } from "../pipeline/output";
 import {
     project,
     createItemPasses,
@@ -446,9 +446,11 @@ function buildSerializedCacheMetadata(
             rotation: page.rotation,
         };
     }
+    const derivedPageLabels = derivedPageLabelsForCache(result);
     return {
         pageCount: doc.pageCount,
         pageLabels,
+        ...(derivedPageLabels !== undefined ? { derivedPageLabels } : {}),
         pages,
     };
 }

@@ -42,10 +42,21 @@ function makeAttachment(id: number, key: string) {
         id,
         key,
         libraryID: 1,
+        parentID: 900,
         attachmentContentType: 'application/pdf',
         isAttachment: () => true,
         isPDFAttachment: () => true,
         getFilePathAsync: vi.fn().mockResolvedValue(`/storage/${key}/test.pdf`),
+    };
+}
+
+/** A standalone PDF; `hasFile` is what `getFilePathAsync` primed. */
+function makeStandalonePdf(id: number, key: string, hasFile: boolean) {
+    return {
+        ...makeAttachment(id, key),
+        parentID: false,
+        isFileAttachment: () => true,
+        fileExistsCached: () => hasFile,
     };
 }
 
@@ -252,6 +263,39 @@ describe('preloadNotePageLabels', () => {
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
 
+    it('returns the declared and the locator labels when they differ', async () => {
+        const attachment = makeAttachment(42, 'ABCD1234');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({
+                pageLabels: { 0: '1', 1: '2' },
+                derivedPageLabels: { 1: '1202' },
+            }),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async () => attachment);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadNotePageLabels(makeRawCitation('ABCD1234'), 1);
+
+        expect(labels).toEqual({
+            '1-ABCD1234': { declared: { 0: '1', 1: '2' }, locator: { 1: '1202' } },
+        });
+    });
+
+    it('returns one label map when locator and declared labels agree', async () => {
+        const attachment = makeAttachment(45, 'MNOP3456');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({
+                pageLabels: { 0: '1', 1: '2' },
+                derivedPageLabels: { 0: '1', 1: '2' },
+            }),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async () => attachment);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        expect(await preloadNotePageLabels(makeRawCitation('MNOP3456'), 1))
+            .toEqual({ '1-MNOP3456': { 0: '1', 1: '2' } });
+    });
+
     it('keeps the default cold-cache path read-only', async () => {
         const attachment = makeAttachment(43, 'EFGH5678');
         const cache = {
@@ -430,6 +474,40 @@ describe('preloadPageLabelsForNewCitations', () => {
         expect(labels).toEqual({ 47: { 4: 'iii' } });
         expect(cache.getMetadata).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: 'REMOTE01' }, 'remote:k:1-REMOTE01-v0');
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('writes locator labels into a link to a standalone PDF that opens its page', async () => {
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 4: '3' }, derivedPageLabels: { 4: '1205' } }),
+        };
+        useAttachment(makeStandalonePdf(51, 'ALONE001', true), cache);
+
+        expect(await preloadPageLabelsForNewCitations('<citation id="1-ALONE001" loc="page5"/>'))
+            .toEqual({ 51: { 4: '1205' } });
+    });
+
+    it('writes declared labels into a link that cannot carry its page (file missing)', async () => {
+        // The select link records no page, so its suffix stays in the labels it is read back in.
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 4: '5' }, derivedPageLabels: { 4: '3' } }),
+        };
+        useAttachment(makeStandalonePdf(52, 'ALONE002', false), cache);
+
+        expect(await preloadPageLabelsForNewCitations('<citation id="1-ALONE002" loc="page5"/>'))
+            .toEqual({ 52: { 4: '5' } });
+    });
+
+    it('writes printed labels, not the labels the PDF declares, into new note citations', async () => {
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({
+                pageLabels: { 3: '4', 4: '5' },
+                derivedPageLabels: { 4: '1205' },
+            }),
+        };
+        useAttachment(makeAttachment(50, 'LOCAL002'), cache);
+
+        expect(await preloadPageLabelsForNewCitations('<citation id="1-LOCAL002" loc="page5"/>'))
+            .toEqual({ 50: { 4: '1205' } });
     });
 
     it('does not extract (and so download) a remote-only attachment on a cache miss', async () => {

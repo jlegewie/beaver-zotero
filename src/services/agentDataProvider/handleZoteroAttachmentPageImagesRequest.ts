@@ -40,6 +40,7 @@ import {
     fileAccessDeniedMessage,
 } from '../documentExtraction/attachmentSource';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
+import { declaredPageLabelsFromMetadata, loadPageLabelsForMetadata } from '../documentExtraction/pageLabels';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
     MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
@@ -206,9 +207,15 @@ export async function handleZoteroAttachmentPageImagesRequest(
         }
 
         // 5. Resolve page labels and (only if needed) page count up-front.
+        // The response reports printed labels; a requested label also matches
+        // the labels the PDF declares.
         const extractor = new BeaverExtractor();
         let pdfData: Uint8Array | null = null;
-        let pageLabels: Record<number, string> | null = null;
+        // Metadata cached before printed labels were recorded recovers them
+        // from its structured payload (once; the read backfills the record).
+        const printedLabels = await loadPageLabelsForMetadata(cachedMeta, 'printed', effectiveFilePath);
+        throwIfTimedOut('page_label_lookup');
+        let declaredLabels: Record<number, string> | null = null;
         let totalPages: number | null = null;
 
         // 5a. Load page labels for label-aware resolution. Short-circuits on cache.
@@ -221,15 +228,15 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 workerDispatched.mark,
             );
             throwIfTimedOut('page_label_resolution');
-            pageLabels = labelResult.labels;
+            declaredLabels = labelResult.labels;
             if (labelResult.pageCount != null) {
                 totalPages = labelResult.pageCount;
             }
             if (labelResult.pdfData) {
                 pdfData = labelResult.pdfData;
             }
-        } else if (cachedMeta?.pageLabels && Object.keys(cachedMeta.pageLabels).length > 0) {
-            pageLabels = cachedMeta.pageLabels;
+        } else {
+            declaredLabels = declaredPageLabelsFromMetadata(cachedMeta);
         }
 
         // 5b. Adopt cached page count when available (no doc-open).
@@ -304,7 +311,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
         if (pages && pages.length > 0) {
             let resolvedPages: number[];
             try {
-                resolvedPages = pages.map(p => resolvePageValue(p, pageLabels, prefer_page_labels === true));
+                resolvedPages = pages.map(p => resolvePageValue(
+                    p,
+                    { printed: printedLabels, declared: declaredLabels },
+                    prefer_page_labels === true,
+                ));
             } catch (error) {
                 if (error instanceof InvalidPageValueError) {
                     throwIfTimedOut('invalid_page_value_response');
@@ -382,9 +393,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // Refresh local state from the worker result.
         totalPages = renderResult.pageCount;
-        if (!pageLabels && Object.keys(renderResult.pageLabels).length > 0) {
-            pageLabels = renderResult.pageLabels;
-        }
 
         // 11. Convert to base64 and build response
         const pageImages: WSPageImage[] = renderResult.pages.map((result) => {
@@ -392,7 +400,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
             return {
                 page_number: result.pageIndex + 1, // Convert back to 1-indexed
-                page_label: pageLabels?.[result.pageIndex],
+                page_label: printedLabels?.[result.pageIndex],
                 image_data: base64Data,
                 format: result.format,
                 width: result.width,

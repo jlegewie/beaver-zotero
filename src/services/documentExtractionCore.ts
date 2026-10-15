@@ -17,6 +17,7 @@ import type {
     SerializedBeaverExtractResult,
 } from '../beaver-extract/schema';
 import type { PageGeometry } from '@beaver/agent-core/extract/types';
+import { derivedPageLabelsForCache } from '../beaver-extract/pipeline/output';
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -281,6 +282,7 @@ export type ExtractAndCacheSnapshotResult =
 export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResult): {
     pageCount: number;
     pageLabels: Record<string, string>;
+    derivedPageLabels?: Record<string, string> | null;
     pages: (PageGeometry | null)[];
 } {
     const doc = extracted.document;
@@ -300,9 +302,11 @@ export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResu
             rotation: page.rotation,
         };
     }
+    const derivedPageLabels = derivedPageLabelsForCache(extracted);
     return {
         pageCount: doc.pageCount,
         pageLabels: extractedPageLabels,
+        ...(derivedPageLabels !== undefined ? { derivedPageLabels } : {}),
         pages,
     };
 }
@@ -319,6 +323,7 @@ function serializedWorkerResultToCacheResult(
         metadata: {
             pageCount: extracted.cacheMetadata.pageCount,
             pageLabels: extracted.cacheMetadata.pageLabels,
+            derivedPageLabels: extracted.cacheMetadata.derivedPageLabels,
             pages: extracted.cacheMetadata.pages,
         },
     };

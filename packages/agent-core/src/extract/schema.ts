@@ -49,6 +49,8 @@ export type BeaverExtractResult =
 export interface SerializedExtractCacheMetadata {
     pageCount: number;
     pageLabels: Record<string, string>;
+    /** See `CachedDocumentMetadata.derivedPageLabels`. */
+    derivedPageLabels?: Record<string, string> | null;
     pages: (PageGeometry | null)[];
 }
 
@@ -85,7 +87,8 @@ export interface StructuredDocument {
      * Page numbers printed in the page margins, keyed by page index. Derived
      * from the text, independent of `pageLabels`: pages inside a run of
      * printed numbers are labeled even when unnumbered; pages outside one are
-     * absent. Not used as a page label anywhere yet.
+     * absent. Omitted when derivation found nothing. Source of the printed
+     * page labels (`resolvePrintedPageLabels`).
      */
     derivedPageLabels?: Record<string, string>;
     /**

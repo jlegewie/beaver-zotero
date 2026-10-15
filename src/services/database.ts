@@ -184,6 +184,8 @@ export interface DocumentCacheMetadataRecord {
     documentMetadata: CachedDocumentMetadata | null;
     pageCount: number | null;
     pageLabels: DocumentCachePageLabels | null;
+    /** See `CachedDocumentMetadata.derivedPageLabels`; `undefined` = not known. */
+    derivedPageLabels: DocumentCachePageLabels | null | undefined;
     pages: PdfCachedDocumentMetadata['pages'];
     errorCode: DocumentCacheErrorCode | null;
     extractionSchemaVersion: string;
@@ -229,6 +231,7 @@ export type DocumentCacheMetadataInput = Omit<
     | 'documentMetadata'
     | 'pageCount'
     | 'pageLabels'
+    | 'derivedPageLabels'
     | 'pages'
 > & {
     documentMetadata: CachedDocumentMetadata;
@@ -3558,6 +3561,7 @@ export class BeaverDB {
             documentMetadata,
             pageCount: pdfMetadata?.pageCount ?? null,
             pageLabels: pdfMetadata?.pageLabels ?? null,
+            derivedPageLabels: pdfMetadata?.derivedPageLabels,
             pages: pdfMetadata?.pages ?? null,
             errorCode: row.error_code ?? null,
             extractionSchemaVersion: row.extraction_schema_version,
@@ -4154,6 +4158,28 @@ export class BeaverDB {
             );
         });
         return deletedPayloads;
+    }
+
+    /**
+     * Replace a row's document metadata when the row is still exactly the one
+     * inspected. Leaves `updated_at` alone: the content is unchanged, only a
+     * field the row was written without is filled in. Returns whether it wrote.
+     */
+    public async updateDocumentCacheDocumentMetadataIfUnchanged(
+        metadata: DocumentCacheMetadataRecord,
+        documentMetadata: CachedDocumentMetadata,
+    ): Promise<boolean> {
+        let updated = false;
+        await this.conn.executeTransaction(async () => {
+            const current = await this.getDocumentCacheMetadataById(metadata.id);
+            if (!current || !BeaverDB.documentCacheMetadataMatches(current, metadata)) return;
+            await this.queryAsync(
+                `UPDATE document_cache_metadata SET document_metadata_json = ? WHERE id = ?`,
+                [JSON.stringify(documentMetadata), metadata.id],
+            );
+            updated = true;
+        });
+        return updated;
     }
 
     /** Delete metadata rows for a library and return payload rows for file cleanup. */

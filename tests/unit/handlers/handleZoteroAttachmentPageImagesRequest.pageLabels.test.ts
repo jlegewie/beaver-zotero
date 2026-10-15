@@ -149,10 +149,12 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
     function setupRequestScenario(opts: {
         cachedPageCount: number | null;
         cachedPageLabels?: Record<number, string> | null;
+        cachedDerivedPageLabels?: Record<string, string> | null;
     }) {
         return setupRequestScenarioWithFullCache({
             cachedPageCount: opts.cachedPageCount,
             cachedPageLabels: opts.cachedPageLabels,
+            cachedDerivedPageLabels: opts.cachedDerivedPageLabels,
             // Default to a complete, non-OCR record for tests that just need
             // a plausible cache hit and don't exercise OCR-state branches.
             needs_ocr: false,
@@ -163,6 +165,7 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
     function setupRequestScenarioWithFullCache(opts: {
         cachedPageCount: number | null;
         cachedPageLabels?: Record<number, string> | null;
+        cachedDerivedPageLabels?: Record<string, string> | null;
         needs_ocr?: boolean | null | undefined;
         has_text_layer?: boolean | null | undefined;
     }) {
@@ -173,6 +176,7 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
                     : {
                           pageCount: opts.cachedPageCount,
                           pageLabels: opts.cachedPageLabels ?? null,
+                          derivedPageLabels: opts.cachedDerivedPageLabels,
                           errorCode: opts.needs_ocr ? 'no_text_layer' : null,
                       },
             ),
@@ -252,9 +256,57 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
         expect(response.error_code).not.toBe('file_permission_denied');
     });
 
-    it('hydrates page_label on cold caches even when prefer_page_labels is false', async () => {
-        // Cached page_count present, labels: null → handler should call render
-        // (with-meta) and read pageLabels back from the result.
+    it('reports printed page labels from cache metadata, not the labels the PDF declares', async () => {
+        setupRequestScenario({
+            cachedPageCount: 3,
+            cachedPageLabels: { 0: '1', 1: '2', 2: '3' },
+            cachedDerivedPageLabels: { '0': '1201', '1': '1202', '2': '1203' },
+        });
+
+        const response = await handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-1',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: [1],
+            skip_local_limits: true,
+        });
+
+        expect(response.pages).toEqual([
+            expect.objectContaining({ page_number: 1, page_label: '1201' }),
+        ]);
+    });
+
+    it('recovers printed labels from the cached payload for metadata written without them', async () => {
+        setupRequestScenario({ cachedPageCount: 3, cachedPageLabels: { 0: '1', 1: '2', 2: '3' } });
+        const cache = (globalThis as any).Zotero.Beaver.documentCache;
+        cache.getMetadata.mockResolvedValue({
+            libraryId: 1, zoteroKey: 'ABCD1234', contentKind: 'pdf',
+            pageCount: 3, pageLabels: { 0: '1', 1: '2', 2: '3' }, errorCode: null,
+        });
+        cache.getSerializedResult = vi.fn().mockResolvedValue({
+            metadata: { derivedPageLabels: { '0': '1201', '1': '1202', '2': '1203' } },
+        });
+
+        const response = await handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-1',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: ['1202'],
+            skip_local_limits: true,
+            prefer_page_labels: true,
+        });
+
+        expect(cache.getSerializedResult).toHaveBeenCalledWith(
+            { libraryId: 1, zoteroKey: 'ABCD1234' }, 'structured', '/storage/ABCD1234/test.pdf',
+        );
+        expect(response.pages).toEqual([
+            expect.objectContaining({ page_number: 2, page_label: '1202' }),
+        ]);
+    });
+
+    it('omits page_label when printed labels are not known, even if the PDF declares labels', async () => {
+        // Cached page_count present, no derived labels: the rendered PDF's
+        // own label ('i') is not a printed label.
         setupRequestScenario({ cachedPageCount: 3, cachedPageLabels: null });
 
         const response = await handleZoteroAttachmentPageImagesRequest({
@@ -263,17 +315,35 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             attachment: { library_id: 1, zotero_key: 'ABCD1234' },
             pages: [1],
             skip_local_limits: true,
-            prefer_pageLabels: false,
         });
 
-        expect(response.pages).toEqual([
-            expect.objectContaining({
-                page_number: 1,
-                page_label: 'i',
-            }),
-        ]);
+        expect(response.pages).toHaveLength(1);
+        expect(response.pages[0].page_number).toBe(1);
+        expect(response.pages[0].page_label).toBeUndefined();
         // Exactly one render call (no separate getPageCount or label hydration).
         expect(mockState.renderCalls).toHaveLength(1);
+    });
+
+    it('resolves a requested label against printed labels before declared ones', async () => {
+        setupRequestScenario({
+            cachedPageCount: 3,
+            cachedPageLabels: { 0: '1', 1: '2', 2: '3' },
+            cachedDerivedPageLabels: { '0': '2', '1': '3', '2': '4' },
+        });
+
+        const response = await handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-1',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: ['2'],
+            skip_local_limits: true,
+            prefer_page_labels: true,
+        });
+
+        // Printed "2" is physical page 1; the declared "2" would be page 2.
+        expect(response.pages).toEqual([
+            expect.objectContaining({ page_number: 1, page_label: '2' }),
+        ]);
     });
 
     it('attaches worker diagnostics when uncached page-label metadata times out', async () => {
