@@ -23,6 +23,48 @@ export function translatePageNumberToLabel(
 }
 
 /**
+ * The page locator a native note citation stores for physical `pages` ("5",
+ * "5-7", "2, 9"): the cited pages in Zotero locator labels.
+ *
+ * In a document with labels, a page without one (an unnumbered title page
+ * before the numbering starts) is left out: it prints no number to cite, and
+ * its physical number may be another page's label, so Zotero would open that
+ * page. A range keeps its labelled pages ("1-3" with page 1 unlabelled reads
+ * "<label of 2>-<label of 3>"). When no cited page has a label the citation
+ * gets no locator (undefined); Beaver's metadata still records the physical
+ * page. Without labels, or for a locator that is not a physical page
+ * reference, `pages` is returned as written.
+ */
+export function citationPageLocator(
+    pageLabels: PageLabels | Record<number, string> | null | undefined,
+    pages: string,
+): string | undefined {
+    const normalized = normalizePageRange(pages);
+    // 1-based pages that carry a label, ascending. Ranges are matched against
+    // these rather than enumerated, so any page number or range length is safe.
+    const labelled = Object.entries((pageLabels ?? {}) as Record<string, string>)
+        .filter(([index, label]) => /^\d+$/.test(index) && typeof label === 'string' && label.trim() !== '')
+        .map(([index]) => Number(index) + 1)
+        .sort((a, b) => a - b);
+    if (labelled.length === 0 || !/^\d+(?:\s*[-,]\s*\d+)*$/.test(normalized)) return normalized || undefined;
+
+    const labelOf = (page: number): string => (pageLabels as Record<number, string>)[page - 1];
+    const parts: string[] = [];
+    for (const part of normalized.split(',')) {
+        const match = /^\s*(\d+)\s*(?:-\s*(\d+))?\s*$/.exec(part);
+        if (!match) continue;
+        const start = Math.min(Number(match[1]), Number(match[2] ?? match[1]));
+        const end = Math.max(Number(match[1]), Number(match[2] ?? match[1]));
+        const inRange = labelled.filter((page) => page >= start && page <= end);
+        if (inRange.length === 0) continue;
+        const first = labelOf(inRange[0]);
+        const last = labelOf(inRange[inRange.length - 1]);
+        parts.push(first === last ? first : `${first}-${last}`);
+    }
+    return parts.length > 0 ? parts.join(', ') : undefined;
+}
+
+/**
  * Length of the run of consecutive Arabic labels that page `index` belongs to.
  */
 function arabicRunLength(labels: PageLabels, index: number): number {

@@ -83,7 +83,7 @@ import {
     buildUnresolvedLocatorWarning,
 } from '../../../src/utils/noteCitationExpand';
 import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
-import { translateLinkPageLabelToNumber, translatePageLabelToNumber } from '../../../src/utils/pageLabelTranslation';
+import { citationPageLocator, translateLinkPageLabelToNumber, translatePageLabelToNumber } from '../../../src/utils/pageLabelTranslation';
 import {
     isNoteInEditor,
     getLatestNoteHtml,
@@ -993,7 +993,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // Sentence locator s4 was pre-resolved to page "9".
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
-        const resolvedLocatorPages = { 'zotero:u-EX1:s4': { label: '9', page: 9 } };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': { label: '9', page: 9, locator: '9' } };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -1022,7 +1022,7 @@ describe('expandToRawHtml', () => {
         // page is already a final label and must be stored verbatim.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
         const pageLabels = { '1-EX1': { 8: 'ix' } };
-        const resolvedLocatorPages = { 'zotero:u-EX1:s4': { label: '9', page: 9 } };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': { label: '9', page: 9, locator: '9' } };
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels as any, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -1032,11 +1032,40 @@ describe('expandToRawHtml', () => {
         );
     });
 
+    it('cites no page for a structural locator on a page that prints none', () => {
+        const { metadata } = makeMetadata();
+        const input = '<citation id="1-EX1" loc="s1.2" ref="c_EX1_new"/>';
+        // The resolver labels the passage for links but gives native citations no locator.
+        const resolvedLocatorPages = { 'zotero:u-EX1:s1.2': { label: '1', page: 1, pages: '1' } };
+        expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'EX1' }),
+            undefined,
+            undefined,
+            { v: 1, loc: 's1.2' },
+        );
+    });
+
+    it('cites no page for a page locator on a page that prints none, keeping the page in metadata', () => {
+        const attachment = {
+            id: 77, key: 'ATT77', libraryID: 1, parentID: 5,
+            isAttachment: () => true, isAnnotation: () => false, isNote: () => false,
+            isFileAttachment: () => true, isPDFAttachment: () => true,
+            attachmentContentType: 'application/pdf',
+        };
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue(attachment as any);
+        const labels = { 77: { 1: '1', 2: '2' } };
+        expandToRawHtml('<citation id="1-ATT77" loc="page1"/>', { elements: new Map() }, 'new', undefined, labels as any);
+        expect(createCitationHTML).toHaveBeenLastCalledWith(attachment, undefined, undefined, { v: 1, loc: 'page1', att: 'ATT77' });
+        expandToRawHtml('<citation id="1-ATT77" loc="page2"/>', { elements: new Map() }, 'new', undefined, labels as any);
+        expect(createCitationHTML).toHaveBeenLastCalledWith(attachment, '1', undefined, { v: 1, loc: 'page2', att: 'ATT77' });
+    });
+
     it('resolves a structural locator when editing an existing citation', () => {
         const { metadata } = makeMetadata();
         // c_EX1_1 originally has page="10"; change its locator to sentence s4.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024, p. 10)" ref="c_EX1_1"/>';
-        const resolvedLocatorPages = { 'zotero:u-EX1:s4': { label: '3', page: 3 } };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': { label: '3', page: 3, locator: '3' } };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -1049,7 +1078,7 @@ describe('expandToRawHtml', () => {
     it('substitutes a resolved page for a legacy att_id structural locator', () => {
         const { metadata } = makeMetadata();
         const input = '<citation att_id="1-ATT1" loc="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': { label: '9', page: 9 } };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': { label: '9', page: 9, locator: '9' } };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
@@ -1063,7 +1092,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // The `sid` attribute is the legacy alias for a structural locator.
         const input = '<citation att_id="1-ATT1" sid="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': { label: '9', page: 9 } };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': { label: '9', page: 9, locator: '9' } };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
@@ -4024,6 +4053,38 @@ describe('translatePageLabelToNumber', () => {
 
 });
 
+describe('citationPageLocator', () => {
+    // Physical page 1 prints no number; the numbering starts on page 2 with "1".
+    const labels = { 1: '1', 2: '2', 3: '3' };
+
+    it('cites the labels of the cited pages', () => {
+        expect(citationPageLocator(labels, '2')).toBe('1');
+        expect(citationPageLocator(labels, '2-4')).toBe('1-3');
+        expect(citationPageLocator(labels, '2, 4')).toBe('1, 3');
+    });
+
+    it('leaves out pages without a label in a labelled document', () => {
+        expect(citationPageLocator(labels, '1')).toBeUndefined();
+        expect(citationPageLocator(labels, '1-3')).toBe('1-2');
+        expect(citationPageLocator(labels, '1, 3')).toBe('2');
+    });
+
+    it('keeps the labelled pages of a long range whose endpoints print none', () => {
+        expect(citationPageLocator({ 1: '1', 1999: '1999' }, '1-2002')).toBe('1-1999');
+    });
+
+    it('returns promptly for page numbers beyond the safe integer range', () => {
+        expect(citationPageLocator(labels, '9007199254740992')).toBeUndefined();
+        expect(citationPageLocator(labels, '1-9007199254740993')).toBe('1-3');
+    });
+
+    it('keeps physical pages, and non-page locators, when the document has no labels', () => {
+        expect(citationPageLocator(null, '1')).toBe('1');
+        expect(citationPageLocator({}, '2–4')).toBe('2-4');
+        expect(citationPageLocator(labels, 'xii')).toBe('xii');
+    });
+});
+
 describe('translateLinkPageLabelToNumber', () => {
     // Declared labels 1..8; printed body labels 1..6 from physical page 3.
     const labels = {
@@ -4633,7 +4694,7 @@ describe('Beaver citation metadata', () => {
         const raw = metaCitation('PARENT1', '12', { v: 1, loc: 's5.6' });
         const { metadata } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
         const edited = '<citation id="u-PARENT1" loc="s7.1" ref="c_PARENT1_0"/>';
-        const resolvedLocatorPages = { 'zotero:u-PARENT1:s7.1': { label: '7', page: 7 } };
+        const resolvedLocatorPages = { 'zotero:u-PARENT1:s7.1': { label: '7', page: 7, locator: '7' } };
 
         expandToRawHtml(edited, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
@@ -4674,6 +4735,23 @@ describe('Beaver citation metadata', () => {
         const tag = '<citation id="u-ANNOT001" ref="c_ANNOT001_0"/>';
         expect(simplified.trim()).toBe(`<p>${tag}</p>`);
         expect(expandToRawHtml(tag, metadata, 'new')).toBe(metadata.elements.get('c_ANNOT001_0')!.rawHtml);
+    });
+
+    it('cites an annotation labelled "-" without a page', () => {
+        const parent = { id: 30, key: 'PARENT1', libraryID: 1, isRegularItem: () => true, isAttachment: () => false, getField: () => 'Parent' };
+        const attachment = { id: 40, key: 'ATTACH01', libraryID: 1, parentID: 30, isAttachment: () => true };
+        const annotation = {
+            id: 50, key: 'ANNOT001', libraryID: 1, parentID: 40, annotationPageLabel: '-',
+            annotationPosition: JSON.stringify({ pageIndex: 0, rects: [[0, 0, 1, 1]] }),
+            isAnnotation: () => true, isAttachment: () => false, isNote: () => false, isRegularItem: () => false,
+        };
+        const zotero = (globalThis as any).Zotero;
+        zotero.Items.getByLibraryAndKey = vi.fn((_lib: number, key: string) =>
+            ({ ANNOT001: annotation, PARENT1: parent } as any)[key] ?? null);
+        zotero.Items.get = vi.fn((id: number) => ({ 30: parent, 40: attachment } as any)[id] ?? null);
+
+        expandToRawHtml('<citation id="1-ANNOT001"/>', { elements: new Map() }, 'new');
+        expect(buildNoteCitation).toHaveBeenCalledWith(parent, undefined, undefined, { v: 1, loc: 'page1', ann: 'ANNOT001' });
     });
 
     it('records the physical page of a cited annotation without showing it as a locator', () => {

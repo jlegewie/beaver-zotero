@@ -144,6 +144,18 @@ describe('zoteroDocumentExport.renderCitation for native citations', () => {
         return JSON.parse(decodeURIComponent(result.citationData)).citationItems[0];
     }
 
+    it('cites no page for a page that prints none in a labelled document', () => {
+        // Physical page 1 prints no number; the numbering starts on page 2 with "1".
+        vi.mocked(getPageLabelsForItem).mockReturnValue({ 1: '1', 2: '2' } as any);
+        const sentence = { loc: { kind: 'sentence', value: '1.2', raw: 's1.2' } };
+
+        expect(citationItem({ requestedRef: sentence, pages: [1] }).locator).toBeUndefined();
+        expect(citationItem({ requestedRef: sentence, pages: [2] }).locator).toBe('1');
+        expect(citationItem({ requestedRef: { loc: { kind: 'page', value: '1-3', raw: 'page1-3' } }, pages: [1, 2, 3] })
+            .locator).toBe('1-2');
+        vi.mocked(getPageLabelsForItem).mockReturnValue(null);
+    });
+
     it('stores a requested page range whole', () => {
         const ci = citationItem({ requestedRef: { loc: { kind: 'page', value: '12-14', raw: 'page12-14' } }, pages: [12, 13, 14] });
 

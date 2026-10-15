@@ -74,6 +74,7 @@ import {
     loadPageLabelsForMetadata,
 } from '../services/documentExtraction/pageLabels';
 import { getCitationIndex } from '../beaver-extract/schema/citationIndex';
+import { resolveZoteroLocatorPageLabels } from '@beaver/agent-core/extract/pageLabels/printedPageLabels';
 import {
     locatorSchemaVersion,
     structuredPdfResultForSchema,
@@ -83,6 +84,7 @@ import {
     firstPageNumber,
     formatCitationPages,
     normalizePageRange,
+    citationPageLocator,
     translatePageLabelToNumber,
     translatePageNumberToLabel,
     type StoredLocatorPageLabels,
@@ -108,6 +110,12 @@ export interface ResolvedLocatorPage {
     page?: number;
     /** The physical pages behind `label` ("4", "4-7", "2, 9"), recorded in links. */
     pages?: string;
+    /**
+     * Locator for a native citation (`citationPageLocator`): the cited pages in
+     * Zotero locator labels without the pages that print none; absent when no
+     * cited page has a label in a labelled document.
+     */
+    locator?: string;
 }
 
 /**
@@ -434,6 +442,19 @@ export async function preloadNotePageLabels(
     return labelsByItemId;
 }
 
+/** Zotero locator labels of a structured document, per 0-based page index. */
+function documentLocatorLabels(document: StructuredExtractResult['document']): Record<number, string> {
+    const embedded: Record<number, string> = {};
+    for (const page of document.pages) {
+        if (page.label) embedded[page.index] = page.label;
+    }
+    return resolveZoteroLocatorPageLabels({
+        pageCount: document.pageCount ?? null,
+        derived: document.derivedPageLabels,
+        embedded,
+    });
+}
+
 /**
  * Map a non-page (structural) locator to the page it appears on, using the
  * document's structured citation index. The label is the page's label in
@@ -466,12 +487,17 @@ function resolvePageFromStructuredResult(
     }
     const inclusiveRange = includeRange && isRecordIdRange(locator);
     const label = formatCitationPages(pages, labels, { inclusiveRange });
+    if (!label) return null;
     // The physical pages are kept alongside the label: a label cannot be
     // translated back once the extraction result is out of scope, and link
     // citations navigate the reader by physical page and record the pages.
-    return label
-        ? { label, page: Math.min(...pages), pages: formatCitationPages(pages, null, { inclusiveRange }) }
-        : null;
+    const physical = formatCitationPages(pages, null, { inclusiveRange })!;
+    return {
+        label,
+        page: Math.min(...pages),
+        pages: physical,
+        locator: citationPageLocator(documentLocatorLabels(result.document), physical),
+    };
 }
 
 /**
@@ -731,6 +757,11 @@ interface SimplifiedCitationAttrs {
     navPage?: number;
     /** All physical pages behind a resolved label, recorded in link citations. */
     navPages?: string;
+    /**
+     * Locator a native citation stores for a resolved structural locator
+     * (`ResolvedLocatorPage.locator`); absent when it cites no labelled page.
+     */
+    citationPage?: string;
     /** The locator as written, recorded in the citation's private metadata. */
     loc?: Locator;
 }
@@ -745,14 +776,20 @@ interface SimplifiedCitationAttrs {
 function resolveLocatorPageAttr(
     ref: CitationRef,
     resolvedLocatorPages?: ResolvedLocatorPages,
-): { page?: string; pageIsResolvedLabel?: boolean; navPage?: number; navPages?: string } {
+): { page?: string; pageIsResolvedLabel?: boolean; navPage?: number; navPages?: string; citationPage?: string } {
     const page = getPageLocator(ref);
     if (page) return { page };
 
     if (ref.loc && ref.loc.kind !== 'page' && resolvedLocatorPages) {
         const resolved = resolvedLocatorPages[requestedCitationKey(ref)];
         if (resolved) {
-            return { page: resolved.label, pageIsResolvedLabel: true, navPage: resolved.page, navPages: resolved.pages };
+            return {
+                page: resolved.label,
+                pageIsResolvedLabel: true,
+                navPage: resolved.page,
+                navPages: resolved.pages,
+                citationPage: resolved.locator,
+            };
         }
     }
     return {};
@@ -773,10 +810,10 @@ function parseSimplifiedCitationAttrs(
         throw new Error('Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
     }
     const item_id = modelObjectIdFromReference(normalized.ref);
-    const { page, pageIsResolvedLabel, navPage, navPages } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
+    const { page, pageIsResolvedLabel, navPage, navPages, citationPage } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
     return {
         item_id,
-        ...(page ? { page, pageIsResolvedLabel, navPage, navPages } : {}),
+        ...(page ? { page, pageIsResolvedLabel, navPage, navPages, citationPage } : {}),
         ...(normalized.ref.loc ? { loc: normalized.ref.loc } : {}),
     };
 }
@@ -823,19 +860,13 @@ function resolvePageForCitation(
     pageLabels?: PageLabelsByAttachmentId,
 ): string | undefined {
     if (!page) return undefined;
-    // A range or list the model wrote is kept: the citation claims those pages.
-    let resolved = normalizePageRange(page);
-    if (shouldTranslate && resolved) {
-        if (item.isAttachment()) {
-            resolved = translatePageNumberToLabel(pageLabels?.[item.id] ?? null, resolved);
-        } else {
-            const att = getBestPDFAttachment(item);
-            if (att) {
-                resolved = translatePageNumberToLabel(pageLabels?.[att.id] ?? null, resolved);
-            }
-        }
-    }
-    return resolved;
+    // A range or list the model wrote is kept: the citation claims those pages,
+    // in labels, without pages that print none (`citationPageLocator`).
+    const resolved = normalizePageRange(page);
+    if (!shouldTranslate || !resolved) return resolved;
+    const attachment = item.isAttachment() ? item : getBestPDFAttachment(item);
+    if (!attachment) return resolved;
+    return citationPageLocator(pageLabels?.[attachment.id] ?? null, resolved);
 }
 
 /**
@@ -853,6 +884,7 @@ function buildCitation({
     pageIsResolvedLabel,
     navPage,
     navPages,
+    citationPage,
     loc,
     attrName = 'item_id',
     shouldTranslatePage = true,
@@ -914,9 +946,9 @@ function buildCitation({
     const isPageLocator = !citationOptions?.label || citationOptions.label === 'page';
     let resolvedPage: string | undefined;
     if (!isPageLocator || citesPrintedPages(item)) {
-        // Structural locators already resolve to final labels; do not translate twice.
+        // Structural locators already resolve to their locator; do not translate twice.
         resolvedPage = pageIsResolvedLabel
-            ? page
+            ? citationPage
             : resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
     }
     // A page locator kept in the convention it was read in is a printed label,
@@ -1241,9 +1273,9 @@ export function expandNoteCitationTags(
             if (attId) {
                 // Resolve structural locators on legacy att_id/attachment_id
                 // citations the same way as the unified id path.
-                const { page, pageIsResolvedLabel, navPage, navPages } = normalizedCitation.ok
+                const { page, pageIsResolvedLabel, navPage, navPages, citationPage } = normalizedCitation.ok
                     ? resolveLocatorPageAttr(normalizedCitation.ref, resolvedLocatorPages)
-                    : { page: extractAttr(attrStr, 'page'), pageIsResolvedLabel: false, navPage: undefined, navPages: undefined };
+                    : { page: extractAttr(attrStr, 'page'), pageIsResolvedLabel: false, navPage: undefined, navPages: undefined, citationPage: undefined };
                 return buildCitation({
                     item_id: attId,
                     attrName: 'att_id',
@@ -1252,6 +1284,7 @@ export function expandNoteCitationTags(
                     pageIsResolvedLabel,
                     navPage,
                     navPages,
+                    citationPage,
                     loc: normalizedCitation.ok ? normalizedCitation.ref.loc : undefined,
                 });
             }

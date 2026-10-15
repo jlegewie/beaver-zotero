@@ -1,4 +1,5 @@
 import {
+    citationPageLocator,
     firstPageNumber,
     formatCitationPages,
     normalizePageRange,
@@ -15,8 +16,6 @@ import { buildBeaverCitationMeta, locatorToken } from '../../../src/utils/noteCi
 import { formatExternalFileCitationHTML } from '../../../src/utils/externalFileCitation';
 import { getPageLabelsForItem } from './itemData';
 import { getPageLocator, isRecordIdRange } from '@beaver/agent-core/citations/citationGrammar';
-import { translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
-import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -90,11 +89,12 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
         const exportLabels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
         // Only a PDF page is a printed page; for other attachments the
         // citation carries no page and the private metadata keeps the locator.
+        // Pages without a label in a labelled document are left out
+        // (`citationPageLocator`).
         let locator: string | undefined;
-        if (citesPrintedPages(item)) {
-            locator = requestedPage
-                ? translatePageNumberToLabelFromLabels(exportLabels, requestedPage)
-                : (startPage ? resolvePageLabelFromLabels(exportLabels, startPage) : undefined);
+        const citedPages = requestedPage ?? (startPage ? String(startPage) : undefined);
+        if (citesPrintedPages(item) && citedPages) {
+            locator = citationPageLocator(exportLabels, citedPages);
         }
         const meta = buildBeaverCitationMeta({
             loc: locatorToken(requestedRef?.loc),

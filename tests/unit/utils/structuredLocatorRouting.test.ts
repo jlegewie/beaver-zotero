@@ -142,7 +142,7 @@ describe('locator resolution by id scheme', () => {
         const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
 
         expect(resolved.unresolved).toEqual([]);
-        expect(Object.values(resolved.pages)).toEqual([{ label: 'i', page: 1, pages: '1' }]);
+        expect(Object.values(resolved.pages)).toEqual([{ label: 'i', page: 1, pages: '1', locator: 'i' }]);
         expect(extractAndCacheResolvedPdfDocument).toHaveBeenCalledExactlyOnceWith(
             expect.objectContaining({ schemaVersion: '5', mode: 'structured' }),
         );
@@ -211,14 +211,15 @@ describe('locator resolution by id scheme', () => {
         getResult.mockResolvedValue(printed());
         attachment.fileExistsCached = () => true;
         const opens = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
-        expect(opens.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: '3', page: 1, pages: '1' });
+        expect(opens.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: '3', page: 1, pages: '1', locator: '3' });
 
         // A missing file links with zotero://select, which records no page:
         // the suffix stays in the declared label it is read back in.
         getResult.mockResolvedValue(printed());
         attachment.fileExistsCached = () => false;
         const select = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
-        expect(select.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: 'i', page: 1, pages: '1' });
+        // A native citation of the same passage would still cite the printed page.
+        expect(select.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: 'i', page: 1, pages: '1', locator: '3' });
     });
 
     it('resolves a remote-only attachment\'s current-version locator from the remote cache key', async () => {
@@ -227,7 +228,7 @@ describe('locator resolution by id scheme', () => {
         const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s1.2"/>');
 
         expect(resolved.unresolved).toEqual([]);
-        expect(resolved.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: 'i', page: 1, pages: '1' });
+        expect(resolved.pages['zotero:1-ATTACH12:s1.2']).toEqual({ label: 'i', page: 1, pages: '1', locator: 'i' });
         expect(getResult).toHaveBeenCalledExactlyOnceWith(
             { libraryId: 1, zoteroKey: 'ATTACH12' }, 'structured', 'remote:k:1-ATTACH12-v0',
         );
