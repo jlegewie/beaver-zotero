@@ -15,7 +15,15 @@ import {
     TissuePaperIcon,
     ScissorIcon,
 } from "../icons/icons";
-import { CustomChatModel, validateCustomProviderApiBase } from "../../types/settings";
+import {
+    CUSTOM_MODEL_FORMAT_LABELS,
+    CustomChatModel,
+    CustomModelFormat,
+    customEndpointFormatHint,
+    isOpenRouterApiBase,
+    normalizeCustomModelFormat,
+    validateCustomProviderApiBase,
+} from "../../types/settings";
 import { DocLink, ExternalLink, INTELLIGENCE_INDEX_URL } from "./components/SettingsElements";
 import {
     chatService,
@@ -105,6 +113,9 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
 
     // --- Validation (mirrors the backend security checks) ---
     const apiBaseValidation = useMemo(() => validateCustomProviderApiBase(model.api_base), [model.api_base]);
+    const format = normalizeCustomModelFormat(model.format);
+    const formatHint = apiBaseValidation.valid ? customEndpointFormatHint(model.api_base, format) : null;
+    const isOpenRouter = isOpenRouterApiBase(model.api_base);
     const hasName = !!model.name?.trim();
     const hasSnapshot = !!model.snapshot?.trim();
     const hasApiKey = !!model.api_key?.trim();
@@ -119,7 +130,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
             const result = await chatService.testCustomProviderRockPaperScissors(
                 {
                     api_base: model.api_base?.trim() || undefined,
-                    format: model.format === 'anthropic' ? 'anthropic' : 'openai',
+                    format,
                     api_key: model.api_key?.trim() ?? '',
                     name: model.name?.trim() ?? '',
                     snapshot: model.snapshot?.trim() ?? '',
@@ -139,7 +150,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
             setTestStatus('error');
             setTestError(error instanceof Error ? error.message : 'The provider test failed.');
         }
-    }, [model]);
+    }, [model, format]);
 
     const testMenuItems: MenuItem[] = useMemo(() => [
         { label: '', isDivider: true, onClick: () => {} },
@@ -168,11 +179,9 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
         </span>
     );
 
-    const formatLabel = model.format === 'anthropic' ? 'Anthropic' : 'OpenAI';
-    const formatMenuItems: MenuItem[] = [
-        { label: 'OpenAI', onClick: () => update({ format: 'openai' }) },
-        { label: 'Anthropic', onClick: () => update({ format: 'anthropic' }) },
-    ];
+    const formatMenuItems: MenuItem[] = (['openai', 'openai_responses', 'anthropic'] as CustomModelFormat[]).map(
+        (value) => ({ label: CUSTOM_MODEL_FORMAT_LABELS[value], onClick: () => update({ format: value }) }),
+    );
 
     // --- Collapsed view ---
     if (!isExpanded) {
@@ -264,39 +273,55 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                             </span>
                         </span>
                     )}
+                    {formatHint && (
+                        <span className="display-flex flex-row items-start text-sm" style={{ color: 'var(--tag-orange-secondary)' }}>
+                            <Icon icon={AlertIcon} className="flex-shrink-0 mt-020 mr-1" />
+                            <span>{formatHint}</span>
+                        </span>
+                    )}
                 </label>
 
                 {/* Format + Context window row */}
-                <div className="display-flex flex-row gap-4">
-                    <label className="display-flex flex-col items-start">
-                        <span className="text-sm font-color-secondary">Format</span>
-                        <MenuButton
-                            menuItems={formatMenuItems}
-                            buttonLabel={formatLabel}
-                            variant="outline"
-                            rightIcon={ArrowDownIcon}
-                            width="160px"
-                            className="text-base"
-                            ariaLabel="API format"
-                        />
-                    </label>
-                    <label className="display-flex flex-col flex-1">
-                        <span className="text-sm font-color-secondary">Context window</span>
-                        <input
-                            type="text"
-                            inputMode="numeric"
-                            value={contextWindowText}
-                            onChange={(e) => handleContextWindowChange(e.target.value)}
-                            placeholder="128000"
-                            aria-label="Context window"
-                            className="chat-input text-base font-color-primary"
-                        />
-                        {contextWindowError && (
-                            <span className="text-sm" style={{ color: 'var(--tag-red-secondary)' }}>
-                                Enter a number (e.g. 128000).
-                            </span>
-                        )}
-                    </label>
+                <div className="display-flex flex-col gap-1">
+                    <div className="display-flex flex-row gap-4">
+                        {/* Not a <label>: the menu renders inside this wrapper, and a label
+                            forwards clicks on its menu items to the button, reopening the menu. */}
+                        <div className="display-flex flex-col items-start">
+                            <span className="text-sm font-color-secondary">Format</span>
+                            <MenuButton
+                                menuItems={formatMenuItems}
+                                buttonLabel={CUSTOM_MODEL_FORMAT_LABELS[format]}
+                                variant="outline"
+                                rightIcon={ArrowDownIcon}
+                                width="210px"
+                                className="text-base"
+                                ariaLabel="API format"
+                                disabled={isOpenRouter}
+                            />
+                        </div>
+                        <label className="display-flex flex-col flex-1">
+                            <span className="text-sm font-color-secondary">Context window</span>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                value={contextWindowText}
+                                onChange={(e) => handleContextWindowChange(e.target.value)}
+                                placeholder="128000"
+                                aria-label="Context window"
+                                className="chat-input text-base font-color-primary"
+                            />
+                            {contextWindowError && (
+                                <span className="text-sm" style={{ color: 'var(--tag-red-secondary)' }}>
+                                    Enter a number (e.g. 128000).
+                                </span>
+                            )}
+                        </label>
+                    </div>
+                    {isOpenRouter && (
+                        <span className="text-sm font-color-tertiary">
+                            OpenRouter uses Beaver's built-in OpenRouter connection, so Format does not apply.
+                        </span>
+                    )}
                 </div>
 
                 {/* API key. The copy button is required: Gecko's built-in reveal button

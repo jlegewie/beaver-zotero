@@ -7,6 +7,58 @@
 export type ModelProvider = "anthropic" | "google" | "openai" | "mistralai" | "meta-llama" | "deepseek-ai" | "groq";
 
 /**
+ * Wire protocol for a custom endpoint: OpenAI Chat Completions, OpenAI
+ * Responses, or Anthropic Messages.
+ */
+export type CustomModelFormat = 'openai' | 'openai_responses' | 'anthropic';
+
+export const CUSTOM_MODEL_FORMAT_LABELS: Record<CustomModelFormat, string> = {
+    openai: 'OpenAI Chat Completions',
+    openai_responses: 'OpenAI Responses',
+    anthropic: 'Anthropic',
+};
+
+const isCustomModelFormat = (value: unknown): value is CustomModelFormat =>
+    value === 'openai' || value === 'openai_responses' || value === 'anthropic';
+
+/** Coerces a stored format into a known one; anything else is Chat Completions. */
+export const normalizeCustomModelFormat = (value: unknown): CustomModelFormat =>
+    isCustomModelFormat(value) ? value : 'openai';
+
+/**
+ * Whether the endpoint is OpenRouter. The backend serves OpenRouter through its
+ * dedicated OpenRouter connection, which ignores the format.
+ */
+export const isOpenRouterApiBase = (apiBase: string | undefined): boolean => {
+    try {
+        const host = new URL((apiBase ?? '').trim()).hostname.toLowerCase();
+        return host === 'openrouter.ai' || host.endsWith('.openrouter.ai');
+    } catch {
+        return false;
+    }
+};
+
+/**
+ * Hint shown when the endpoint URL names an API other than the selected format.
+ * Beaver removes a pasted endpoint path from the URL, so only the format
+ * selects the API.
+ */
+export const customEndpointFormatHint = (
+    apiBase: string | undefined,
+    format: CustomModelFormat,
+): string | null => {
+    if (isOpenRouterApiBase(apiBase)) return null;
+    const url = (apiBase ?? '').trim().replace(/\/+$/, '').toLowerCase();
+    if (url.endsWith('/responses') && format !== 'openai_responses') {
+        return "This URL points to the Responses API. To use it, set Format to 'OpenAI Responses'.";
+    }
+    if (url.endsWith('/chat/completions') && format !== 'openai') {
+        return "This URL points to the Chat Completions API. To use it, set Format to 'OpenAI Chat Completions'.";
+    }
+    return null;
+};
+
+/**
  * Configuration for custom models.
  *
  * Either:
@@ -18,7 +70,7 @@ export type ModelProvider = "anthropic" | "google" | "openai" | "mistralai" | "m
 export interface CustomChatModel {
     provider?: string;  // defaults to "custom"
     api_base?: string;
-    format?: 'openai' | 'anthropic';
+    format?: CustomModelFormat;
     api_key: string;
     name: string;
     snapshot: string;
@@ -58,7 +110,7 @@ export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
     // Optional field validations
     if (provider !== undefined && typeof provider !== 'string') return false;
     if (api_base !== undefined && typeof api_base !== 'string') return false;
-    if (format !== undefined && format !== 'openai' && format !== 'anthropic') return false;
+    if (format !== undefined && !isCustomModelFormat(format)) return false;
     if (context_window !== undefined && typeof context_window !== 'number') return false;
     if (reasoning_effort !== undefined &&
         reasoning_effort !== 'low' &&
