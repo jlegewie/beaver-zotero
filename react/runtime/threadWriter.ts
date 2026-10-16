@@ -4,6 +4,8 @@ import { tryGetWindowRuntime } from "./windowRuntime";
 export interface WriterLease {
     claim: ThreadClaim;
     preparing: number;
+    /** The admission read in flight for this lease; resolves to whether writes may proceed. */
+    admission?: Promise<boolean>;
 }
 let lease: WriterLease | undefined;
 let draftSeq = 0;

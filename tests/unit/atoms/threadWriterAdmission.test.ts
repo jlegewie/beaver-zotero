@@ -237,6 +237,61 @@ describe("writer admission at the real send entry point", () => {
         expect(connectMock).toHaveBeenCalledTimes(2);
         expect(connectMock.mock.calls[1][0].expected_tail_run_id).toBe("saved");
     });
+    it.each(["stopped follow-up", "failed first run"])("admits a repeated send after a %s with the saved tail", async (shape) => {
+        cancelMock.mockResolvedValue(undefined);
+        const firstRun = shape === "failed first run";
+        if (firstRun) store.set(currentThreadIdAtom, null);
+        else store.set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
+        vi.mocked(agentRunService.getThreadRuns).mockResolvedValue({
+            runs: [], tail_run_id: "saved", activity: { state: "idle", run_id: null },
+        });
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const run = store.get(activeRunAtom)!;
+        callbacks.onRequestAck({ runId: run.id });
+        callbacks.onThread("t");
+        if (firstRun) callbacks.onError({ event: "error", type: "llm_rate_limit", message: "Rate limited", run_id: run.id });
+        else await store.set(closeWSConnectionAtom);
+        // The server kept the unfinished run, which the client never saw confirmed.
+        let answer!: () => void;
+        vi.mocked(agentRunService.getThreadRuns).mockClear().mockImplementation(() => new Promise(resolve => {
+            answer = () => resolve({ runs: [], tail_run_id: run.id, activity: { state: "idle", run_id: null } } as any);
+        }));
+
+        const sends = [store.set(sendWSMessageAtom, "follow-up"), store.set(sendWSMessageAtom, "follow-up")];
+        await Promise.resolve();
+        answer();
+        await Promise.all(sends);
+
+        expect(agentRunService.getThreadRuns).toHaveBeenCalledOnce();
+        expect(connectMock).toHaveBeenCalledTimes(2);
+        expect(connectMock.mock.calls[1][0].expected_tail_run_id).toBe(run.id);
+    });
+    it("refuses a repeated send when the admission read finds unseen history", async () => {
+        cancelMock.mockResolvedValue(undefined);
+        store.set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
+        vi.mocked(agentRunService.getThreadRuns).mockResolvedValue({
+            runs: [], tail_run_id: "saved", activity: { state: "idle", run_id: null },
+        });
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        callbacks.onThread("t");
+        await store.set(closeWSConnectionAtom);
+        let answer!: () => void;
+        vi.mocked(agentRunService.getThreadRuns).mockImplementation(() => new Promise(resolve => {
+            answer = () => resolve({ runs: [], tail_run_id: "foreign", activity: { state: "idle", run_id: null } } as any);
+        }));
+
+        const sends = [store.set(sendWSMessageAtom, "follow-up"), store.set(sendWSMessageAtom, "follow-up")];
+        await Promise.resolve();
+        answer();
+        await Promise.all(sends);
+
+        expect(connectMock).toHaveBeenCalledTimes(1);
+        expect(store.get(threadConflictAtom)).toBe("thread_tail_mismatch");
+    });
     it.each(["foreign", "missing"])("preserves the draft when the tail snapshot is %s", async (snapshot) => {
         let callbacks: any;
         connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
