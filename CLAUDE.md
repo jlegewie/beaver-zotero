@@ -495,7 +495,9 @@ scripts/worktree/setup-worktree.sh --lite /path/to/worktree
   checkout's version — and edits to them mutate that version. `.env` is a real copy,
   since full setup rewrites it with this worktree's profile path and ports.
 - The instruction-file links are also created by `scripts/worktree/hooks/post-checkout`,
-  which the bootstrap installs into the shared hook directory. It fires on every
+  which the bootstrap installs into the shared hook directory. The hook also links the
+  git-ignored skills directory (`.claude/skills`, and `.agents/skills` if main has one),
+  so every worktree shares the main checkout's skills. It fires on every
   `git worktree add`, so worktrees created by other tooling get them without running any
   setup. It never replaces an existing file and always exits 0. If a worktree has no
   `CLAUDE.local.md`, the hook is not installed on this machine — run the `--lite`
