@@ -56,6 +56,13 @@
     min-height: 560px;
 }
 
+/* Menus and tooltips use the overlay surface, which is tuned against the
+ * sidepane; on the preferences window's plain background it reads as a dark
+ * block. Match the separate window and lift overlays to the background. */
+#beaver-pane-preferences {
+    --beaver-surface-overlay: var(--material-background);
+}
+
 /* Preferences window: two-column shell. The sidebar keeps the window's
  * sidepane material; the settings column sits on the plain background so the
  * cards read against it the way they do in Zotero's own settings. */
