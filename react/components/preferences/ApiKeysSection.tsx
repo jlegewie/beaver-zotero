@@ -158,6 +158,8 @@ const ApiKeysSection: React.FC = () => {
                 </div>
             </SettingsGroup>
 
+            <PlusToolsSection />
+
             {/* Custom Providers */}
             <div>
                 <div className="display-flex flex-row items-end justify-between">
@@ -216,8 +218,6 @@ const ApiKeysSection: React.FC = () => {
                     </div>
                 )}
             </div>
-
-            <PlusToolsSection />
 
         </>
     );
