@@ -21,7 +21,7 @@ import { dismissFeatureTipAtom, showFeatureTipAtom } from '../../../react/atoms/
 import { popupMessagesAtom } from '../../../react/atoms/ui';
 import { floatingPopupMessagesAtom } from '../../../react/atoms/floatingPopup';
 import { getVersionUpdateMessageConfig } from '../../../react/constants/versionUpdateMessages';
-import { deferFeatureTips, isFeatureTipDeferred, markFeatureTipShown, readFeatureTipState, writeFeatureTipState } from '../../../react/utils/featureTipPrefs';
+import { deferFeatureTips, isFeatureTipDeferred, markFeatureTipShown, readFeatureTipState, retireFeatureTip, writeFeatureTipState } from '../../../react/utils/featureTipPrefs';
 
 let store = createStore();
 const inPanel = () => store.get(popupMessagesAtom).map((m) => m.id);
@@ -74,6 +74,17 @@ describe('showFeatureTipAtom', () => {
         store.set(dismissFeatureTipAtom, 'run-status-popup');
         expect(inPanel()).toEqual([]);
         expect(store.set(showFeatureTipAtom, 'run-status-popup')).toBe(false);
+    });
+
+    it('never shows a retired tip, and does not pace other tips against it', () => {
+        retireFeatureTip('run-status-popup', Date.now());
+        expect(readFeatureTipState().lastShownAt).toBeUndefined();
+        expect(store.set(showFeatureTipAtom, 'run-status-popup')).toBe(false);
+        expect(inPanel()).toEqual([]);
+
+        const retiredAt = readFeatureTipState().shown['run-status-popup'];
+        retireFeatureTip('run-status-popup', Date.now() + 1000);
+        expect(readFeatureTipState().shown['run-status-popup']).toBe(retiredAt);
     });
 
     it('waits while another popup is up', () => {

@@ -64,6 +64,7 @@ import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActio
 import { useReaderTabSelection } from './hooks/useReaderTabSelection';
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useRunStatusTip } from './hooks/useRunStatusTip';
+import { useNoteExportTip } from './hooks/useNoteExportTip';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
@@ -206,6 +207,9 @@ const GlobalContextInitializer = () => {
 
     // One-time tip that the corner card follows a run while the sidebar is closed
     useRunStatusTip();
+
+    // One-time tip about exporting, once Beaver has created a note
+    useNoteExportTip();
 
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();

@@ -94,6 +94,16 @@ export function markFeatureTipShown(state: FeatureTipState, tipId: string, now: 
     return { ...state, shown: { ...state.shown, [tipId]: at }, lastShownAt: at };
 }
 
+/**
+ * Records a tip as no longer needed — the user found the feature on their
+ * own — without counting it as shown, so other tips are not paced against it.
+ */
+export function retireFeatureTip(tipId: string, now: number): void {
+    const state = readFeatureTipState();
+    if (hasSeenFeatureTip(state, tipId)) return;
+    writeFeatureTipState({ ...state, shown: { ...state.shown, [tipId]: new Date(now).toISOString() } });
+}
+
 export function readFeatureTipState(): FeatureTipState {
     try {
         return parseFeatureTipState(getPref('featureTips'));

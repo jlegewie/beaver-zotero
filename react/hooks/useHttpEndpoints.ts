@@ -46,6 +46,7 @@ import {
     handleTestReaderStateHttpRequest,
 } from './httpHandlers/testReaderHandlers';
 import { handleTestRunStatusPopupHttpRequest } from './httpHandlers/testRunStatusPopupHandlers';
+import { handleTestFeatureTipHttpRequest } from './httpHandlers/testFeatureTipHandlers';
 import { handleTestListSavedActionsHttpRequest } from './httpHandlers/testSavedActionsHandlers';
 import {
     handleTestSnapshotAnnotationParityHttpRequest,
@@ -98,6 +99,7 @@ export function registerWindowTestCommands(
         '/beaver/test/beaver-sidebar': handleTestBeaverSidebarHttpRequest,
         '/beaver/test/select-tab': handleTestSelectTabHttpRequest,
         '/beaver/test/run-status-popup': handleTestRunStatusPopupHttpRequest,
+        '/beaver/test/feature-tip': handleTestFeatureTipHttpRequest,
         '/beaver/test/quick-prompt': handleTestQuickPromptHttpRequest,
         '/beaver/test/version-popup': handleTestVersionPopupHttpRequest,
         '/beaver/test/saved-actions': handleTestListSavedActionsHttpRequest,

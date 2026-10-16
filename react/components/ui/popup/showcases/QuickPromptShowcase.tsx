@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import Button from '@beaver/agent-ui/primitives/Button';
 import {
     ArrowDownIcon,
@@ -15,6 +15,7 @@ import {
 } from '../../../icons/icons';
 import RunPulse from '../../../runStatusPopup/RunPulse';
 import { quickPromptShortcutKeys } from '../../../../utils/quickPromptShortcut';
+import { useShowcaseTimeline, type ShowcaseBeat } from './useShowcaseTimeline';
 
 /** The prompt the showcase types, and what the run makes of it. */
 const PROMPT = 'Summarize the key findings and save them as a note';
@@ -39,10 +40,7 @@ interface Frame {
     status?: number;
 }
 
-interface Beat {
-    frame: Frame;
-    holdMs: number;
-}
+type Beat = ShowcaseBeat<Frame>;
 
 const TYPING_MS_PER_CHAR = 28;
 
@@ -79,36 +77,6 @@ const STILL_TIMELINE: Beat[] = [
     { frame: { scene: 'running', status: 0 }, holdMs: 3000 },
     { frame: { scene: 'completed' }, holdMs: 4000 },
 ];
-
-/**
- * Plays the timeline on the window the showcase is drawn in, looping until
- * the showcase goes away. The timers are the window's own: a popup can be
- * drawn in either main window, and a timer scheduled elsewhere would outlive
- * the one that closes.
- */
-function useTimeline(rootRef: React.RefObject<HTMLElement>): Frame {
-    const [frame, setFrame] = useState<Frame>(TIMELINE[0].frame);
-    useEffect(() => {
-        const win = rootRef.current?.ownerDocument.defaultView;
-        if (!win) return;
-        const reducedMotion = win.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
-        const beats = reducedMotion ? STILL_TIMELINE : TIMELINE;
-        let index = 0;
-        let timer: number | null = null;
-        const play = () => {
-            setFrame(beats[index].frame);
-            timer = win.setTimeout(() => {
-                index = (index + 1) % beats.length;
-                play();
-            }, beats[index].holdMs);
-        };
-        play();
-        return () => {
-            if (timer !== null) win.clearTimeout(timer);
-        };
-    }, [rootRef]);
-    return frame;
-}
 
 const Chord: React.FC<{ keys: string[]; pressed: boolean }> = ({ keys, pressed }) => (
     <div className={`beaver-showcase__chord ${pressed ? 'beaver-showcase__chord--pressed' : ''}`}>
@@ -227,7 +195,7 @@ const CompletedCard: React.FC = () => (
  */
 const QuickPromptShowcase: React.FC = () => {
     const rootRef = useRef<HTMLDivElement>(null);
-    const frame = useTimeline(rootRef);
+    const frame = useShowcaseTimeline(rootRef, TIMELINE, STILL_TIMELINE);
     const keys = quickPromptShortcutKeys();
 
     return (

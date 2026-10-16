@@ -4,6 +4,7 @@ import { DocIcon, DownloadIcon, MarkdownIcon, PdfIcon, TexIcon } from '@beaver/a
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { PopupMessage } from '../types/popupMessage';
 import { exportErrorMessage } from '../../src/services/export/exportErrors';
+import { retireFeatureTip } from './featureTipPrefs';
 
 export { exportErrorMessage };
 
@@ -92,6 +93,13 @@ export async function exportWithFeedback(
         return;
     }
     if (result.status !== 'saved') return;
+
+    // Someone who exports has found the feature; the tip about it is moot.
+    try {
+        retireFeatureTip('note-export', Date.now());
+    } catch (error: any) {
+        logger(`File export: could not retire the export tip: ${error?.message ?? error}`, 2);
+    }
 
     // A file action fails when the file has since been moved or deleted.
     const withErrorFeedback = (action: ((path: string) => Promise<void>) | undefined, title: string) => (
