@@ -808,9 +808,10 @@ export type ZoteroFulltextEngine =
  * Request from the backend to find passages for a full-text search.
  *
  * The client finds candidate attachments with Zotero's full-text index (stage 1),
- * cuts passages from those attachments' text and ranks them with BM25 (stage 2),
- * and returns the top passages for the backend to rerank. Filters have the same
- * semantics as {@link WSResolveSearchFiltersRequest}.
+ * cuts passages from Beaver's extraction of each candidate (from the document
+ * cache, or extracted now), ranks them with BM25 (stage 2), and returns the top
+ * passages for the backend to rerank. Filters have the same semantics as
+ * {@link WSResolveSearchFiltersRequest}.
  */
 export interface WSZoteroFulltextSearchRequest extends WSBaseEvent {
     event: 'zotero_fulltext_search_request';
@@ -830,7 +831,7 @@ export interface WSZoteroFulltextSearchRequest extends WSBaseEvent {
     max_documents?: number;
     /** Passages returned for reranking. Default 160. */
     max_passages?: number;
-    /** Budget for reading candidate text, in milliseconds. Default 8000. */
+    /** Budget for reading and extracting candidates, in milliseconds. Default 30000. */
     timeout_ms?: number;
 }
 
@@ -842,36 +843,29 @@ export interface ZoteroFulltextDocument {
     served_attachment?: AttachmentStub;
     /** 1-based rank from Zotero's index. */
     stage1_rank: number;
-    /**
-     * Where the passages came from: Beaver's cached extraction (sentence
-     * locators, all pages) or Zotero's extracted text (page numbers only).
-     */
-    passage_source: 'beaver' | 'zotero';
-    /** Zotero indexed only part of the document (page or character limit). */
-    partially_indexed?: boolean;
-    indexed_pages?: number;
-    total_pages?: number;
 }
 
-/** One passage of a candidate document. */
+/** One passage of a candidate document, cut from Beaver's extraction. */
 export interface ZoteroFulltextPassage {
     /** Index into the response's `documents`. */
     document: number;
     /** 1-based BM25 rank among all returned passages. */
     rank: number;
     text: string;
-    /** 0-based page, or null for unpaged text. */
-    page_index: number | null;
-    /** Section heading of a passage without a locator ('References' for a bibliography). */
-    section?: string;
     /**
-     * Sentence locator for Beaver passages, in the backend's chunk-locator shape
-     * (`content_kind` pdf | epub | snapshot, `spans` with code-point offsets).
+     * Sentence locator in the backend's chunk-locator shape (`content_kind`
+     * pdf | epub | snapshot, `spans` with code-point offsets).
      */
-    locator?: Record<string, unknown>;
+    locator: Record<string, unknown>;
 }
 
-export type ZoteroFulltextDropReason = 'no_text' | 'timeout' | 'file_missing' | 'error';
+/**
+ * Why a candidate was not searched: extraction did not finish in time (it
+ * continues in the background), the document has no extractable text, its
+ * file is not on this device, it exceeds Beaver's size or page limits, or
+ * extraction failed.
+ */
+export type ZoteroFulltextDropReason = 'timeout' | 'no_text' | 'file_missing' | 'too_large' | 'error';
 
 /** Index coverage of the searched scope (PDF, EPUB and snapshot attachments). */
 export interface ZoteroFulltextCoverage {
@@ -895,7 +889,7 @@ export interface WSZoteroFulltextSearchResponse {
     terms_truncated?: number;
     documents: ZoteroFulltextDocument[];
     passages: ZoteroFulltextPassage[];
-    /** Candidates whose text could not be read. */
+    /** Candidates that could not be extracted. */
     dropped?: { attachment: ZoteroItemReference; reason: ZoteroFulltextDropReason }[];
     /** Requested attachments that Zotero has not indexed. */
     unindexed_attachments?: ZoteroItemReference[];

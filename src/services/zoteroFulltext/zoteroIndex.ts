@@ -16,7 +16,7 @@
 import type { ZoteroFulltextEngine } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { processableAttachmentSql, processableKindFromStoredFields } from '../../utils/attachmentFiles';
-import { ftsExpression, htmlToText, type QueryTerm } from './text';
+import { ftsExpression, type QueryTerm } from './text';
 
 export type ContentKind = 'pdf' | 'epub' | 'snapshot';
 
@@ -30,8 +30,6 @@ export interface ScopeAttachment {
     indexed: boolean;
     /** Zotero stopped at its page or character limit. */
     partial: boolean;
-    indexedPages: number | null;
-    totalPages: number | null;
     /** MD5 of the file as Zotero last synced it; identifies copies of one file across libraries. */
     storageHash: string | null;
 }
@@ -152,8 +150,6 @@ export async function listScopeAttachments(scope: SearchScope, engine: ZoteroFul
                     contentKind: contentKind as ContentKind,
                     indexed,
                     partial,
-                    indexedPages: indexedPages ?? null,
-                    totalPages: totalPages ?? null,
                     storageHash: row.getResultByIndex(11) || null,
                 });
             },
@@ -285,43 +281,4 @@ export async function rankWithWordIndex(
         incomplete: failed || timedOut,
         timedOut,
     };
-}
-
-/**
- * Text Zotero extracted for an attachment (`.zotero-ft-cache`), with form feeds
- * between PDF pages. Null when Zotero has no cache file for it.
- */
-export async function readZoteroCacheText(item: Zotero.Item): Promise<string | null> {
-    try {
-        const file = Zotero.Fulltext.getItemCacheFile(item);
-        const path = file?.path;
-        if (!path || !(await IOUtils.exists(path))) return null;
-        const text = await Zotero.File.getContentsAsync(path);
-        return typeof text === 'string' && text.trim() ? text : null;
-    } catch (error) {
-        logger(`zoteroFulltext: could not read Zotero's text for ${item.libraryID}/${item.key}: ${error}`, 2);
-        return null;
-    }
-}
-
-/** Snapshot files above this size are not read for passages. */
-const MAX_SNAPSHOT_BYTES = 10 * 1024 * 1024;
-
-/**
- * Visible text of a snapshot's own file. Zotero writes no text cache for some
- * snapshot types (XHTML), although it indexes them.
- */
-export async function readSnapshotFileText(item: Zotero.Item): Promise<string | null> {
-    try {
-        const path = await item.getFilePathAsync();
-        if (!path) return null;
-        const info = await IOUtils.stat(path);
-        if ((info.size ?? 0) > MAX_SNAPSHOT_BYTES) return null;
-        const html = await Zotero.File.getContentsAsync(path);
-        const text = typeof html === 'string' ? htmlToText(html) : '';
-        return text.trim() ? text : null;
-    } catch (error) {
-        logger(`zoteroFulltext: could not read snapshot ${item.libraryID}/${item.key}: ${error}`, 2);
-        return null;
-    }
 }

@@ -3,8 +3,7 @@ import { rankWithWordIndex, type ScopeAttachment } from '../../../../src/service
 import { buildQueryTerms } from '../../../../src/services/zoteroFulltext/text';
 
 const attachment = (itemID: number): ScopeAttachment => ({
-    itemID, libraryID: 1, key: `K${itemID}`, contentKind: 'pdf', indexed: true, partial: false,
-    indexedPages: 1, totalPages: 1, storageHash: null,
+    itemID, libraryID: 1, key: `K${itemID}`, contentKind: 'pdf', indexed: true, partial: false, storageHash: null,
 });
 const scope = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(attachment);
 

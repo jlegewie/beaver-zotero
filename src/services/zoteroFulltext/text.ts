@@ -1,7 +1,7 @@
 /**
  * Pure text helpers for full-text search on Zotero's own index: query-term
- * construction, the FTS5 expressions sent to Zotero's content tables, page-bounded
- * passages cut from extracted text, and in-memory BM25 over those passages.
+ * construction, the FTS5 expressions sent to Zotero's content tables, and
+ * in-memory BM25 over the candidates' passages.
  *
  * Nothing here touches Zotero, so it runs unchanged in unit tests. Normalization
  * mirrors `Zotero.Utilities.Internal.normalizeForSearch`, the form Zotero indexes,
@@ -21,11 +21,6 @@ const WORD_RE = /[\p{L}\p{N}]+/gu;
 /** Query terms without agent keywords; with keywords the expanded expression is larger. */
 export const MAX_QUERY_TERMS = 16;
 export const MAX_EXPANDED_TERMS = 32;
-
-/** Passage packing target, in characters (lines are packed until the next would pass it). */
-export const PASSAGE_TARGET_CHARS = 1300;
-/** A single line longer than this is split at sentence or word boundaries. */
-export const PASSAGE_MAX_CHARS = 2000;
 
 /**
  * Short multilingual stopword list (function and question words). Dropping them
@@ -229,117 +224,6 @@ export function termDisplay(term: QueryTerm): string {
 }
 
 // ---------------------------------------------------------------------------
-// Passages
-// ---------------------------------------------------------------------------
-
-export interface TextPassage {
-    /** 0-based page in the source text, or null for unpaged text (EPUB, snapshots). */
-    pageIndex: number | null;
-    text: string;
-    /** The passage sits in a reference list (bibliography). */
-    reference?: boolean;
-}
-
-/** A line that is only a bibliography heading, in the languages Beaver's users write in. */
-const REFERENCE_HEADING_RE = new RegExp(
-    '^(?:[0-9ivx]+\\.?\\s*)?(?:references?|bibliography|works cited|literature cited|cited literature|reference list'
-    + '|literatur|literaturverzeichnis|quellenverzeichnis|bibliographie|références|referencias|bibliografía|bibliografia'
-    + '|referências|riferimenti bibliografici|参考文献|引用文献|참고문헌)\\s*:?$',
-    'i',
-);
-/** A short line that starts back matter after the references (appendices, supplements). */
-const BACK_MATTER_RE = /^(?:appendix|appendices|supplementary|supplemental|anhang|annexe|online appendix)\b/i;
-
-/** Split an over-long line at sentence ends, then spaces, into pieces of at most `max` chars. */
-function splitLongLine(line: string, max: number): string[] {
-    const pieces: string[] = [];
-    let rest = line;
-    while (rest.length > max) {
-        const window = rest.slice(0, max);
-        let cut = Math.max(window.lastIndexOf('. '), window.lastIndexOf('? '), window.lastIndexOf('! '), window.lastIndexOf('。'));
-        if (cut < max / 2) cut = window.lastIndexOf(' ');
-        if (cut < max / 2) cut = max - 1;
-        pieces.push(rest.slice(0, cut + 1).trim());
-        rest = rest.slice(cut + 1);
-    }
-    if (rest.trim()) pieces.push(rest.trim());
-    return pieces.filter(Boolean);
-}
-
-/**
- * Cut passages from extracted text.
- *
- * With `paged`, the text is split into pages on form feeds (how Zotero stores
- * PDF text) and passages never cross a page, so each keeps its page number.
- * Lines are packed until the next would pass the target size. Passages after a
- * bibliography heading are marked as references until back matter starts.
- */
-export function cutPassages(text: string, paged: boolean): TextPassage[] {
-    const pages = paged ? text.split('\f') : [text];
-    const passages: TextPassage[] = [];
-    let inReferences = false;
-    pages.forEach((page, index) => {
-        const pageIndex = paged ? index : null;
-        let buffer: string[] = [];
-        let size = 0;
-        const flush = () => {
-            if (buffer.length) {
-                passages.push({ pageIndex, text: buffer.join('\n'), ...(inReferences ? { reference: true } : {}) });
-            }
-            buffer = [];
-            size = 0;
-        };
-        for (const raw of page.split('\n')) {
-            const line = raw.replace(/\s+/g, ' ').trim();
-            if (!line) continue;
-            const startsReferences = !inReferences && REFERENCE_HEADING_RE.test(line);
-            const endsReferences = inReferences && line.length < 60 && BACK_MATTER_RE.test(line);
-            if (startsReferences || endsReferences) {
-                flush();
-                inReferences = startsReferences;
-            }
-            for (const piece of line.length > PASSAGE_MAX_CHARS ? splitLongLine(line, PASSAGE_TARGET_CHARS) : [line]) {
-                if (buffer.length && size + piece.length > PASSAGE_TARGET_CHARS) flush();
-                buffer.push(piece);
-                size += piece.length;
-            }
-        }
-        flush();
-    });
-    return passages;
-}
-
-/**
- * Whether form feeds split `text` into exactly `pageCount` pages. Zotero's
- * cache has no page breaks for text synced from Zotero's servers, and a
- * mismatch means page numbers cannot be trusted.
- */
-export function hasPageBreaksFor(text: string, pageCount: number | null): boolean {
-    if (!pageCount) return false;
-    let breaks = 0;
-    for (let i = text.indexOf('\f'); i !== -1; i = text.indexOf('\f', i + 1)) breaks++;
-    return breaks + 1 === pageCount;
-}
-
-const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-
-/** Visible text of an HTML document: scripts and styles dropped, block elements on their own lines. */
-export function htmlToText(html: string): string {
-    return html
-        .replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1\s*>/gi, ' ')
-        .replace(/<!--[\s\S]*?-->/g, ' ')
-        .replace(/<\/?(?:p|div|br|li|ul|ol|h[1-6]|tr|td|th|table|section|article|header|footer|blockquote|pre|dd|dt|figcaption)\b[^>]*>/gi, '\n')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
-            if (entity[0] === '#') {
-                const code = entity[1] === 'x' || entity[1] === 'X' ? parseInt(entity.slice(2), 16) : Number(entity.slice(1));
-                return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
-            }
-            return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
-        });
-}
-
-// ---------------------------------------------------------------------------
 // BM25
 // ---------------------------------------------------------------------------
 
@@ -387,27 +271,22 @@ export function bm25Scores(docs: readonly (readonly string[])[], terms: readonly
     });
 }
 
-/** BM25 weight of reference-list passages: they quote cited titles, so they match topics without discussing them. */
-export const REFERENCE_WEIGHT = 0.3;
-
 /**
- * Pick the passages to return: BM25 matches first, best first (reference-list
- * passages down-weighted), then — when fewer than `limit` matched — unmatched
- * body passages taken round-robin across documents, so the reranker can still
- * find a passage worded differently from the query.
+ * Pick the passages to return: BM25 matches first, best first, then — when
+ * fewer than `limit` matched — unmatched passages taken round-robin across
+ * documents, so the reranker can still find a passage worded differently from
+ * the query.
  */
 export function selectPassages(
-    candidates: readonly { passages: readonly { text: string; reference?: boolean }[] }[],
+    candidates: readonly { passages: readonly { text: string }[] }[],
     terms: readonly QueryTerm[],
     limit: number,
 ): { candidate: number; passage: number; score: number }[] {
     const flat: { candidate: number; passage: number }[] = [];
     candidates.forEach((candidate, c) => candidate.passages.forEach((_, p) => flat.push({ candidate: c, passage: p })));
     const scores = bm25Scores(flat.map(({ candidate, passage }) => tokenize(candidates[candidate].passages[passage].text)), terms);
-    const isReference = (entry: { candidate: number; passage: number }) =>
-        !!candidates[entry.candidate].passages[entry.passage].reference;
     const matched = flat
-        .map((entry, i) => ({ ...entry, score: scores[i] * (isReference(entry) ? REFERENCE_WEIGHT : 1) }))
+        .map((entry, i) => ({ ...entry, score: scores[i] }))
         .filter((entry) => entry.score > 0)
         .sort((a, b) => b.score - a.score || a.candidate - b.candidate || a.passage - b.passage)
         .slice(0, limit);
@@ -417,7 +296,7 @@ export function selectPassages(
     const longest = Math.max(0, ...candidates.map((candidate) => candidate.passages.length));
     for (let p = 0; p < longest && matched.length + fill.length < limit; p++) {
         for (let c = 0; c < candidates.length && matched.length + fill.length < limit; c++) {
-            if (p < candidates[c].passages.length && !taken.has(`${c}:${p}`) && !candidates[c].passages[p].reference) {
+            if (p < candidates[c].passages.length && !taken.has(`${c}:${p}`)) {
                 fill.push({ candidate: c, passage: p, score: 0 });
             }
         }

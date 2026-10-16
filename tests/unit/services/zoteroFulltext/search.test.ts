@@ -33,12 +33,12 @@ function response(): WSZoteroFulltextSearchResponse {
         engine: 'fts5',
         terms: ['x'],
         documents: [
-            { attachment: ref(2, 'BBBB'), content_kind: 'pdf', stage1_rank: 1, passage_source: 'zotero' },
-            { attachment: ref(1, 'AAAA'), content_kind: 'pdf', stage1_rank: 2, passage_source: 'zotero' },
+            { attachment: ref(2, 'BBBB'), content_kind: 'pdf', stage1_rank: 1 },
+            { attachment: ref(1, 'AAAA'), content_kind: 'pdf', stage1_rank: 2 },
         ],
         passages: [
-            { document: 0, rank: 1, text: 'from group', page_index: 0 },
-            { document: 1, rank: 2, text: 'from user', page_index: 1 },
+            { document: 0, rank: 1, text: 'from group', locator: { content_kind: 'pdf' } },
+            { document: 1, rank: 2, text: 'from user', locator: { content_kind: 'pdf' } },
         ],
         dropped: [{ attachment: ref(2, 'CCCC'), reason: 'timeout' }],
         unindexed_attachments: [ref(2, 'DDDD'), ref(1, 'EEEE')],
@@ -58,7 +58,7 @@ describe('withoutRevokedLibraries', () => {
         searchable.ids = [1];
         const filtered = withoutRevokedLibraries(response(), [1, 2]);
         expect(filtered.documents.map((d) => d.attachment.zotero_key)).toEqual(['AAAA']);
-        expect(filtered.passages).toEqual([{ document: 0, rank: 1, text: 'from user', page_index: 1 }]);
+        expect(filtered.passages).toEqual([{ document: 0, rank: 1, text: 'from user', locator: { content_kind: 'pdf' } }]);
         expect(filtered.dropped).toBeUndefined();
         expect(filtered.unindexed_attachments).toEqual([ref(1, 'EEEE')]);
         expect(filtered.coverage).toBeUndefined();

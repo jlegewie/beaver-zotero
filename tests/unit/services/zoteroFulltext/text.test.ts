@@ -1,16 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-    REFERENCE_WEIGHT,
-    hasPageBreaksFor,
-    htmlToText,
     bm25Scores,
     buildQueryTerms,
-    cutPassages,
     ftsExpression,
     MAX_EXPANDED_TERMS,
     MAX_QUERY_TERMS,
     normalizeForSearch,
-    PASSAGE_MAX_CHARS,
     selectPassages,
     termDisplay,
     termFrequency,
@@ -111,64 +106,6 @@ describe('ftsExpression', () => {
     });
 });
 
-describe('cutPassages', () => {
-    it('keeps passages within a page and records the page', () => {
-        const text = 'Page one line\nmore one\fPage two line';
-        expect(cutPassages(text, true)).toEqual([
-            { pageIndex: 0, text: 'Page one line\nmore one' },
-            { pageIndex: 1, text: 'Page two line' },
-        ]);
-    });
-
-    it('packs lines up to the target size and skips blank lines', () => {
-        const line = 'x'.repeat(500);
-        const passages = cutPassages([line, '', '   ', line, line, line].join('\n'), false);
-        expect(passages.map((p) => p.text.length)).toEqual([1001, 1001]);
-        expect(passages.every((p) => p.pageIndex === null)).toBe(true);
-    });
-
-    it('splits an over-long line at sentence ends', () => {
-        const sentence = 'This is a sentence about something. ';
-        const passages = cutPassages(sentence.repeat(120), false);
-        expect(passages.length).toBeGreaterThan(1);
-        expect(passages.every((p) => p.text.length <= PASSAGE_MAX_CHARS)).toBe(true);
-        expect(passages[0].text.endsWith('.')).toBe(true);
-    });
-});
-
-describe('reference lists', () => {
-    it('marks passages after a bibliography heading until back matter starts', () => {
-        const text = 'Body text here\nReferences\nSmith, J. 2020. A title.\fJones, K. 2019. Another.\nAppendix A\nTable A1';
-        expect(cutPassages(text, true)).toEqual([
-            { pageIndex: 0, text: 'Body text here' },
-            { pageIndex: 0, text: 'References\nSmith, J. 2020. A title.', reference: true },
-            { pageIndex: 1, text: 'Jones, K. 2019. Another.', reference: true },
-            { pageIndex: 1, text: 'Appendix A\nTable A1' },
-        ]);
-    });
-
-    it.each(['REFERENCES', '7. References', 'Literaturverzeichnis', 'Bibliographie:', '参考文献'])('recognizes %s', (heading) => {
-        expect(cutPassages(`x\n${heading}\ny`, false)[1].reference).toBe(true);
-    });
-
-    it('does not treat a sentence mentioning references as a heading', () => {
-        expect(cutPassages('See the references below for details', false)[0].reference).toBeUndefined();
-    });
-
-    it('down-weights reference passages and leaves them out of the fill', () => {
-        const { terms } = buildQueryTerms('glacier');
-        const selected = selectPassages([{ passages: [
-            { text: 'glacier glacier glacier', reference: true },
-            { text: 'glacier retreat' },
-            { text: 'unrelated', reference: true },
-            { text: 'other words' },
-        ] }], terms, 4);
-        expect(selected.map((e) => e.passage)).toEqual([1, 0, 3]);
-        expect(selected[1].score).toBeLessThan(selected[0].score);
-        expect(REFERENCE_WEIGHT).toBeLessThan(1);
-    });
-});
-
 describe('bm25', () => {
     it('counts phrase occurrences only for adjacent tokens', () => {
         const [term] = buildQueryTerms('"social capital"').terms;
@@ -206,24 +143,5 @@ describe('selectPassages', () => {
     it('stops at the limit', () => {
         const { terms } = buildQueryTerms('a1');
         expect(selectPassages([doc('a1', 'a1 a1', 'b')], terms, 2)).toHaveLength(2);
-    });
-});
-
-describe('hasPageBreaksFor', () => {
-    it('trusts form feeds only when they match the page count', () => {
-        expect(hasPageBreaksFor('a\fb\fc', 3)).toBe(true);
-        expect(hasPageBreaksFor('all pages in one string', 38)).toBe(false);
-        expect(hasPageBreaksFor('a\fb', 3)).toBe(false);
-        expect(hasPageBreaksFor('a', null)).toBe(false);
-        expect(hasPageBreaksFor('a', 1)).toBe(true);
-    });
-});
-
-describe('htmlToText', () => {
-    it('keeps visible text, drops scripts and styles, and decodes entities', () => {
-        const html = '<html><head><style>p{}</style><script>var x = 1;</script></head>'
-            + '<body><h1>Title &amp; More</h1><p>First&nbsp;para &#8211; <b>bold</b></p><!-- note --><p>&#x4e2d;&lt;x&gt;</p></body></html>';
-        const lines = htmlToText(html).split('\n').map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
-        expect(lines).toEqual(['Title & More', 'First para – bold', '中<x>']);
     });
 });

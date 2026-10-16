@@ -4,18 +4,20 @@
  * 1. Scope: searchable libraries, narrowed by filters and explicit attachments.
  * 2. Stage 1: Zotero's index ranks the scope's attachments; the top N become
  *    candidates. Explicit attachments that fit in N skip this step.
- * 3. Stage 2: passages are cut from each candidate's text — Beaver's cached
- *    extraction when there is one (sentence locators, every page), otherwise
- *    Zotero's own extracted text (page numbers only) — and ranked together with
- *    in-memory BM25. The top passages go to the backend for reranking.
+ * 3. Stage 2: passages with sentence locators are cut from Beaver's extraction
+ *    of each candidate — cached candidates first, then the others extracted now
+ *    in stage-1 order until the deadline — and ranked together with in-memory
+ *    BM25. The top passages go to the backend for reranking.
  *
- * Excluded libraries never enter the scope, so their text is never read here.
+ * Excluded libraries never enter the scope, so their documents are never read
+ * or extracted here.
  */
 
 import type {
     ResolveSearchFiltersUnresolved,
     WSZoteroFulltextSearchRequest,
     WSZoteroFulltextSearchResponse,
+    ZoteroDocumentErrorCode,
     ZoteroFulltextDocument,
     ZoteroFulltextDropReason,
     ZoteroFulltextEngine,
@@ -24,9 +26,16 @@ import type {
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { StructuredDocument } from '@beaver/agent-core/extract/schema';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectId, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { serializeAttachmentStub, serializeItemStub, safeStub } from '../../utils/zoteroSerializers';
 import { resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
+import {
+    extractAndCacheEpubDocument,
+    extractAndCacheResolvedPdfDocument,
+    extractAndCacheSnapshotDocument,
+} from '../documentExtractionCore';
+import { DEFAULT_PAGES_TIMEOUT_SECONDS } from '../agentDataProvider/timeout';
+import { enqueuePdfExtractionRetry } from '../agentDataProvider/pdfExtractionRetry';
 import { handleResolveSearchFiltersRequest } from '../agentDataProvider/handleResolveSearchFiltersRequest';
 import {
     getSearchableLibraryIds,
@@ -34,35 +43,32 @@ import {
     librariesFilterError,
     resolveLibrariesFilter,
 } from '../agentDataProvider/utils';
-import { domDocumentPassages, structuredDocumentPassages } from './beaverPassages';
-import { buildQueryTerms, cutPassages, hasPageBreaksFor, selectPassages, termDisplay } from './text';
+import { domDocumentPassages, structuredDocumentPassages, type BeaverPassage } from './beaverPassages';
+import { buildQueryTerms, selectPassages, termDisplay } from './text';
 import {
     detectEngine,
     listScopeAttachments,
     rankWithFts5,
     rankWithWordIndex,
-    readSnapshotFileText,
-    readZoteroCacheText,
     type ScopeAttachment,
 } from './zoteroIndex';
 
 export const DEFAULT_MAX_DOCUMENTS = 16;
 export const DEFAULT_MAX_PASSAGES = 160;
-export const DEFAULT_TIMEOUT_MS = 8000;
+export const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_DOCUMENTS_LIMIT = 50;
 const MAX_PASSAGES_LIMIT = 400;
 /** Stage 1 runs within this budget on the word-index path (one search per term). */
 const STAGE1_TIMEOUT_MS = 10_000;
 /** Extra stage-1 candidates, so copies of one file in several libraries don't shrink the candidate set. */
 const DUPLICATE_SLACK = 8;
-/** Section reported for reference-list passages of Zotero's text, so the reranker demotes them. */
-const REFERENCE_SECTION = 'References';
 
 interface CandidateText {
     attachment: ScopeAttachment;
     item: Zotero.Item;
-    source: 'beaver' | 'zotero';
-    passages: { pageIndex: number | null; text: string; reference?: boolean; locator?: Record<string, unknown> }[];
+    /** Served from the document cache rather than extracted by this search. */
+    cached: boolean;
+    passages: BeaverPassage[];
 }
 
 const clamp = (value: number | undefined, fallback: number, max: number) =>
@@ -120,15 +126,15 @@ function textHash(texts: readonly string[]): string {
 function withoutDuplicateTexts(texts: CandidateText[]): CandidateText[] {
     const seen = new Set<string>();
     return texts.filter((text) => {
-        const fingerprint = `${text.source}:${text.passages.length}:${textHash(text.passages.map((passage) => passage.text))}`;
+        const fingerprint = `${text.passages.length}:${textHash(text.passages.map((passage) => passage.text))}`;
         if (seen.has(fingerprint)) return false;
         seen.add(fingerprint);
         return true;
     });
 }
 
-/** Beaver's cached extraction of an attachment as passages, or null on a cache miss. */
-async function beaverPassages(item: Zotero.Item, kind: ScopeAttachment['contentKind']): Promise<CandidateText['passages'] | null> {
+/** Passages of Beaver's cached extraction of an attachment, or null on a cache miss. */
+async function cachedPassages(item: Zotero.Item, kind: ScopeAttachment['contentKind']): Promise<BeaverPassage[] | null> {
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return null;
     const source = await resolveAttachmentFileSource({ item, localSizeStrategy: 'stat' });
@@ -146,29 +152,95 @@ async function beaverPassages(item: Zotero.Item, kind: ScopeAttachment['contentK
     return document ? domDocumentPassages(document, kind) : null;
 }
 
-/** Read one candidate's passages: Beaver's cache first, then Zotero's extracted text. */
-async function readCandidate(attachment: ScopeAttachment): Promise<CandidateText | ZoteroFulltextDropReason> {
+/** Drop reason for a failed extraction. */
+function dropReason(code: ZoteroDocumentErrorCode): ZoteroFulltextDropReason {
+    switch (code) {
+        case 'timeout':
+            return 'timeout';
+        case 'no_text_layer':
+        case 'empty_document':
+            return 'no_text';
+        case 'file_missing':
+        case 'file_permission_denied':
+        case 'download_failed':
+            return 'file_missing';
+        case 'file_too_large':
+        case 'too_many_pages':
+            return 'too_large';
+        default:
+            return 'error';
+    }
+}
+
+/**
+ * Extract an attachment with Beaver on the hot worker, the way `read` does, so
+ * the result is cached for later searches and reads. A PDF that exceeds the
+ * hot-worker timeout is queued for background extraction, as `read` does.
+ */
+async function extractPassages(item: Zotero.Item, kind: ScopeAttachment['contentKind']): Promise<BeaverPassage[] | ZoteroFulltextDropReason> {
+    const source = { kind: 'zotero' as const, item };
+    const resolvedKey = modelObjectId(item.libraryID, item.key);
+    const contentType = item.attachmentContentType || 'unknown';
+    if (kind === 'pdf') {
+        const result = await extractAndCacheResolvedPdfDocument({
+            source,
+            resolvedKey,
+            contentType,
+            mode: 'structured',
+            maxPages: null,
+            timeoutSeconds: DEFAULT_PAGES_TIMEOUT_SECONDS,
+            workerName: 'hot',
+        });
+        if (result.kind === 'ok') {
+            return result.result?.mode === 'structured'
+                ? structuredDocumentPassages(result.result.document as StructuredDocument)
+                : 'error';
+        }
+        if (result.kind === 'timeout' || result.kind === 'external_abort') {
+            // Hot extraction gave up: finish it in the background so the next
+            // search (or read) finds it in the cache
+            await enqueuePdfExtractionRetry({
+                libraryId: item.libraryID,
+                zoteroKey: item.key,
+                mode: 'structured',
+                maxPages: null,
+                logContext: 'zoteroFulltext',
+            });
+            return 'timeout';
+        }
+        return dropReason(result.code);
+    }
+    const args = { source, resolvedKey, contentType, maxPages: null };
+    const result = kind === 'epub' ? await extractAndCacheEpubDocument(args) : await extractAndCacheSnapshotDocument(args);
+    return result.kind === 'ok' ? domDocumentPassages(result.document, kind) : dropReason(result.code);
+}
+
+/** One candidate's passages: Beaver's cached extraction, else (with `extract`) a new one. */
+async function readCandidate(
+    attachment: ScopeAttachment,
+    extract: boolean,
+): Promise<CandidateText | ZoteroFulltextDropReason | null> {
     const item = await Zotero.Items.getAsync(attachment.itemID);
     if (!item) return 'file_missing';
     try {
-        const passages = await beaverPassages(item, attachment.contentKind);
-        if (passages?.length) return { attachment, item, source: 'beaver', passages };
+        const passages = await cachedPassages(item, attachment.contentKind);
+        if (passages) return passages.length ? { attachment, item, cached: true, passages } : 'no_text';
     } catch (error) {
         logger(`zoteroFulltext: cached extraction unreadable for ${item.libraryID}/${item.key}: ${error}`, 2);
     }
-    const text = await readZoteroCacheText(item)
-        ?? (attachment.contentKind === 'snapshot' ? await readSnapshotFileText(item) : null);
-    if (!text) return 'no_text';
-    const paged = attachment.contentKind === 'pdf' && hasPageBreaksFor(text, attachment.indexedPages);
-    const passages = cutPassages(text, paged);
-    return passages.length ? { attachment, item, source: 'zotero', passages } : 'no_text';
+    if (!extract) return null;
+    const passages = await extractPassages(item, attachment.contentKind);
+    if (typeof passages === 'string') return passages;
+    return passages.length ? { attachment, item, cached: false, passages } : 'no_text';
 }
 
 async function withDeadline<T>(promise: Promise<T>, deadline: number): Promise<T | 'timeout'> {
     const remaining = deadline - Date.now();
     if (remaining <= 0) return 'timeout';
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // A read that outlives the deadline finishes unobserved; keep its failure from going unhandled
+    // Work that outlives the deadline finishes unobserved: an extraction runs
+    // on to its own timeout and is cached, or queued for background extraction
+    // if it times out. Keep its failure from going unhandled
     promise.catch(() => undefined);
     try {
         return await Promise.race([
@@ -200,10 +272,6 @@ async function documentMetadata(candidate: CandidateText, rank: number): Promise
             return stub ? { served_attachment: stub } : {};
         })(),
         stage1_rank: rank,
-        passage_source: candidate.source,
-        ...(attachment.partial ? { partially_indexed: true } : {}),
-        ...(attachment.indexedPages != null ? { indexed_pages: attachment.indexedPages } : {}),
-        ...(attachment.totalPages != null ? { total_pages: attachment.totalPages } : {}),
     };
 }
 
@@ -400,26 +468,36 @@ export async function runZoteroFulltextSearch(
     // ---- stage 2: passages ---------------------------------------------------
     const readStart = Date.now();
     const deadline = readStart + timeoutMs;
+    // Cached candidates first, so a slow extraction never costs one that is
+    // ready; then the others are extracted in stage-1 order. Past the budget,
+    // no further candidate is read or extracted.
+    const outcomes: (CandidateText | ZoteroFulltextDropReason | null)[] = candidates.map(() => null);
+    for (const extract of [false, true]) {
+        for (const [i, candidate] of candidates.entries()) {
+            if (outcomes[i] !== null) continue;
+            try {
+                outcomes[i] = Date.now() >= deadline ? 'timeout' : await withDeadline(readCandidate(candidate, extract), deadline);
+            } catch (error) {
+                logger(`zoteroFulltext: reading ${candidate.libraryID}/${candidate.key} failed: ${error}`, 1);
+                outcomes[i] = 'error';
+            }
+        }
+    }
     const texts: CandidateText[] = [];
     const dropped: { attachment: ZoteroItemReference; reason: ZoteroFulltextDropReason }[] = [];
-    for (const candidate of candidates) {
-        let outcome: CandidateText | ZoteroFulltextDropReason | 'timeout';
-        try {
-            // Past the budget, the remaining candidates are not read at all
-            outcome = Date.now() >= deadline ? 'timeout' : await withDeadline(readCandidate(candidate), deadline);
-        } catch (error) {
-            logger(`zoteroFulltext: reading ${candidate.libraryID}/${candidate.key} failed: ${error}`, 1);
-            outcome = 'error';
+    for (const [i, outcome] of outcomes.entries()) {
+        if (outcome === null || typeof outcome === 'string') {
+            dropped.push({ attachment: reference(candidates[i].libraryID, candidates[i].key), reason: outcome ?? 'error' });
+        } else {
+            texts.push(outcome);
         }
-        if (typeof outcome === 'string') dropped.push({ attachment: reference(candidate.libraryID, candidate.key), reason: outcome });
-        else texts.push(outcome);
     }
     lap('read', readStart);
+    timing.cached_documents = texts.filter((text) => text.cached).length;
+    timing.extracted_documents = texts.length - timing.cached_documents;
     const distinctTexts = withoutDuplicateTexts(texts);
     timing.duplicate_documents = texts.length - distinctTexts.length;
     texts.splice(0, texts.length, ...distinctTexts);
-    timing.beaver_documents = texts.filter((text) => text.source === 'beaver').length;
-    timing.zotero_documents = texts.filter((text) => text.source === 'zotero').length;
     const droppedField = dropped.length ? { dropped } : {};
     if (!texts.length) return respond({ status: 'no_matches', coverage, ...droppedField, ...unindexedField, ...incompleteField });
 
@@ -443,9 +521,7 @@ export async function runZoteroFulltextSearch(
             document: docIndex.get(entry.candidate)!,
             rank: i + 1,
             text: passage.text,
-            page_index: passage.pageIndex,
-            ...(passage.reference ? { section: REFERENCE_SECTION } : {}),
-            ...(passage.locator ? { locator: passage.locator } : {}),
+            locator: passage.locator,
         });
     }
     lap('metadata', metadataStart);

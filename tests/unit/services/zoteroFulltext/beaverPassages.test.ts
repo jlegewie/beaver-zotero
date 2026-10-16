@@ -47,7 +47,7 @@ describe('structuredDocumentPassages', () => {
     const passages = structuredDocumentPassages(document);
 
     it('cuts one passage per page with page-scoped locators', () => {
-        expect(passages.map((p) => p.pageIndex)).toEqual([0, 1]);
+        expect(passages.map((p) => (p.locator.pages as { page_index: number }[])[0].page_index)).toEqual([0, 1]);
         expect(passages[0].locator).toMatchObject({
             content_kind: 'pdf',
             pages: [{ page_index: 0, page_label: 'iv' }],
@@ -155,7 +155,6 @@ describe('domDocumentPassages', () => {
         const passages = domDocumentPassages(document, 'epub');
         expect(passages).toHaveLength(2);
         expect(passages[0]).toMatchObject({
-            pageIndex: null,
             text: 'Chapter 1\n\nHello world.',
             locator: {
                 content_kind: 'epub', section_index: 0, section_href: 'ch1.xhtml', section_label: 'Chapter 1',

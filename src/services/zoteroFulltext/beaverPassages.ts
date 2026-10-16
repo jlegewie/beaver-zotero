@@ -1,5 +1,5 @@
 /**
- * Passages cut from Beaver's cached extractions, with sentence locators.
+ * Passages cut from Beaver's extractions, with sentence locators.
  *
  * A passage packs paragraph-level units of one PDF page, or of one EPUB or
  * snapshot section, and records a citation span per sentence. The locator has
@@ -36,8 +36,6 @@ export interface PassageSpan {
 }
 
 export interface BeaverPassage {
-    /** 0-based page for PDFs; null for EPUB and snapshot passages. */
-    pageIndex: number | null;
     text: string;
     locator: Record<string, unknown>;
 }
@@ -247,7 +245,6 @@ export function structuredDocumentPassages(document: StructuredDocument): Beaver
             const { text, spans } = renderUnits(group, page.index);
             const groupSection = sectionOf(group, section);
             passages.push({
-                pageIndex: page.index,
                 text,
                 locator: {
                     content_kind: 'pdf',
@@ -291,7 +288,6 @@ export function domDocumentPassages(document: DomDocument, contentKind: 'epub' |
             const anchorId = group.find((unit) => unit.anchorId)?.anchorId ?? null;
             const common = { anchor_id: anchorId, page_numbers: pageNumbers, spans, item_ids: uniqueItemIds(group), section: groupSection };
             passages.push({
-                pageIndex: null,
                 text,
                 locator: contentKind === 'epub'
                     ? { content_kind: 'epub', section_index: section.index, section_href: section.rawHref, section_label: section.label ?? null, ...common }
