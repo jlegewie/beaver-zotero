@@ -31,6 +31,7 @@ import {
     WSErrorEvent,
     WSCallbacks,
     WSAuthMessage,
+    WSPingMessage,
     WSReadyData,
     WSRequestAckData,
     WSRequestKeepalive,
@@ -103,6 +104,22 @@ export async function getWSAuthToken(): Promise<string> {
 
 /** Backstop timeout for a full connect attempt (auth token + handshake + ready). */
 export const CONNECT_TIMEOUT_MS = 20_000;
+
+/** Interval between `ping` heartbeats on a ready connection. */
+export const HEARTBEAT_INTERVAL_MS = 15_000;
+/**
+ * Inbound silence after which a ready connection is treated as lost. The
+ * server answers every ping, so a healthy socket is never quiet this long.
+ */
+export const HEARTBEAT_TIMEOUT_MS = 45_000;
+/**
+ * Longer bound while a message is still being written: its pong queues behind
+ * the upload. Matches how long the server waits on an acknowledged request, so
+ * an upload stalled past it could not have completed the request anyway.
+ */
+export const HEARTBEAT_UPLOAD_TIMEOUT_MS = 180_000;
+/** Close reason recorded when the heartbeat, not the browser, detected the loss. */
+export const HEARTBEAT_TIMEOUT_REASON = 'heartbeat_timeout';
 
 interface ConnectionAttemptState {
     stage: ConnectionFailureStage;
@@ -183,6 +200,9 @@ export class AgentService {
     private serverSupportsRequestAcks: boolean = false;
     /** Whether the connected backend understands `request_keepalive` messages (from the ready event) */
     private serverSupportsRequestKeepalive: boolean = false;
+    /** Whether the connected backend answers `ping` heartbeats (from the ready event) */
+    private serverSupportsHeartbeat: boolean = false;
+    private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     /**
      * Arrival times of inbound messages not yet fully handled: the one being
      * handled plus those queued behind it. Reported in acks as `queue_depth`
@@ -241,6 +261,11 @@ export class AgentService {
         this.actionExecutionQueue = Promise.resolve();
         this.serverSupportsRequestAcks = false;
         this.serverSupportsRequestKeepalive = false;
+        this.serverSupportsHeartbeat = false;
+        if (this.heartbeatTimer !== null) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
         this.queuedMessageArrivals = [];
         this.stopAllKeepalives();
     }
@@ -495,6 +520,20 @@ export class AgentService {
                         this.close(1000, 'Request could not be sent');
                         return;
                     }
+                    this.startHeartbeat(wsInstance, attempt, (silentMs) => {
+                        logger(`AgentService: No message for ${silentMs}ms, treating the connection as lost`, 1);
+                        // Report the loss now instead of waiting for the
+                        // browser: a close handshake over a dead connection
+                        // only ends when its own timeout fires. Reporting
+                        // resets this socket's state, so its eventual native
+                        // close event is ignored as stale.
+                        reportClose(1006, HEARTBEAT_TIMEOUT_REASON, false);
+                        try {
+                            wsInstance.close(1000, 'Heartbeat timeout');
+                        } catch (error) {
+                            logger(`AgentService: Error closing lost connection: ${error}`, 1);
+                        }
+                    });
                     // Resolve the connect promise
                     finish();
                 },
@@ -600,35 +639,94 @@ export class AgentService {
                 logger(`AgentService: WebSocket error event (close will follow)`, 1);
             };
 
-            wsInstance.onclose = (event) => {
-                if (this.ws !== wsInstance || this.connectionId !== connId) {
-                    logger('AgentService: Ignoring stale close event from superseded connection', 1);
-                    return;
-                }
-                logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
+            const reportClose = (code: number, reason: string, wasClean: boolean) => {
+                logger(`AgentService: Connection closed - code=${code}, reason=${reason}, clean=${wasClean}`, 1);
                 // Notify before resetConnectionState() so the callback can
                 // still read connection-scoped state.
                 const evidence = attemptEvidence(attempt, {
                     stage: attempt.readyReceived ? 'mid_run' : attempt.stage,
-                    closeCode: event.code,
-                    closeReason: event.reason,
-                    wasClean: event.wasClean,
+                    closeCode: code,
+                    closeReason: reason,
+                    wasClean,
                 });
-                callbacks.onClose?.(event.code, event.reason, event.wasClean, evidence);
+                callbacks.onClose?.(code, reason, wasClean, evidence);
                 this.resetConnectionState();
                 // If we haven't resolved yet, the connection closed before
                 // ready. Close-code details for the error UI travel via the
                 // onClose callback above, not the rejection.
                 if (!hasResolved) {
                     finish(new AgentConnectionError(
-                        event.reason
-                            ? `Connection closed: ${event.reason}`
-                            : `Connection closed before ready (code ${event.code})`,
+                        reason
+                            ? `Connection closed: ${reason}`
+                            : `Connection closed before ready (code ${code})`,
                         evidence,
                     ));
                 }
             };
+
+            wsInstance.onclose = (event) => {
+                if (this.ws !== wsInstance || this.connectionId !== connId) {
+                    logger('AgentService: Ignoring stale close event from superseded connection', 1);
+                    return;
+                }
+                reportClose(event.code, event.reason, event.wasClean);
+            };
         });
+    }
+
+    /**
+     * Ping a ready connection and call `onLost` once no message has arrived
+     * for HEARTBEAT_TIMEOUT_MS. A browser only notices a dropped connection
+     * when a write fails, so a socket the client is not writing to — a run
+     * waiting on an approval card — can look open long after the server has
+     * dropped it. No-op against a backend that does not answer pings.
+     */
+    private startHeartbeat(
+        wsInstance: WebSocket,
+        attempt: ConnectionAttemptState,
+        onLost: (silentMs: number) => void,
+    ): void {
+        if (!this.serverSupportsHeartbeat) return;
+        const connId = this.connectionId;
+        const ping = JSON.stringify({ type: 'ping' } satisfies WSPingMessage);
+        let lastTickAt = Date.now();
+        let aliveAt = lastTickAt;
+        let lastBuffered = wsInstance.bufferedAmount;
+        const timer = setInterval(() => {
+            if (this.connectionId !== connId || this.ws !== wsInstance) {
+                clearInterval(timer);
+                return;
+            }
+            const now = Date.now();
+            // Sampled before this tick's ping, which would otherwise read as
+            // a drain on the next tick. Browsers lower bufferedAmount only
+            // when a whole message has been written, so a drop is the only
+            // visible upload progress; the pong for that window still waits
+            // behind whatever is queued.
+            const buffered = wsInstance.bufferedAmount;
+            // A late tick means timers were starved (busy main thread, system
+            // sleep), so pongs may still be waiting to be dispatched.
+            if (now - lastTickAt > 2 * HEARTBEAT_INTERVAL_MS || buffered < lastBuffered) {
+                aliveAt = now;
+            }
+            lastTickAt = now;
+            lastBuffered = buffered;
+            if (attempt.lastMessageAt !== null) {
+                aliveAt = Math.max(aliveAt, attempt.lastMessageAt);
+            }
+            const silentMs = now - aliveAt;
+            if (silentMs >= (buffered > 0 ? HEARTBEAT_UPLOAD_TIMEOUT_MS : HEARTBEAT_TIMEOUT_MS)) {
+                clearInterval(timer);
+                onLost(silentMs);
+                return;
+            }
+            try {
+                wsInstance.send(ping);
+            } catch (error) {
+                logger(`AgentService: Failed to send ping: ${error}`, 1);
+            }
+        }, HEARTBEAT_INTERVAL_MS);
+        this.heartbeatTimer = timer;
     }
 
     /**
@@ -854,6 +952,7 @@ export class AgentService {
                 case 'ready': {
                     this.serverSupportsRequestAcks = event.supports_request_acks === true;
                     this.serverSupportsRequestKeepalive = event.supports_request_keepalive === true;
+                    this.serverSupportsHeartbeat = event.supports_heartbeat === true;
                     // Convert snake_case backend response to camelCase frontend data
                     const readyData: WSReadyData = {
                         thread_admission_version:
@@ -908,6 +1007,10 @@ export class AgentService {
 
                 case 'done':
                     this.callbacks.onDone();
+                    break;
+
+                case 'pong':
+                    // Its arrival already counted as connection activity.
                     break;
 
                 case 'thread':
