@@ -632,7 +632,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         featureList: [
             {
                 title: "Export to Word, PDF, LaTeX, and Markdown",
-                description: "Save a created note, a response or a whole chat as a file, with formatted citations.",
+                description: "Save a note, a response or a whole chat as a file. Word exports keep live Zotero citations.",
             },
             {
                 title: "Find and merge duplicates",
