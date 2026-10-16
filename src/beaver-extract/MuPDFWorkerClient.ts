@@ -44,7 +44,7 @@ import type {
 import type { SentenceSplitterConfig } from "./sentenceTypes";
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 
-const DEFAULT_IDLE_TIMEOUT_MS_HOT = 5 * 60 * 1000;
+const DEFAULT_IDLE_TIMEOUT_MS_HOT = 10 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS_BACKGROUND = 60 * 1000;
 // Last-resort backstops: a lease must stay a few seconds ABOVE the longest
 // deadline after which callers legitimately reclaim a slot operation
@@ -68,6 +68,12 @@ const DEFAULT_RECYCLE_IDLE_DELAY_MS = 1_000;
 const PROACTIVE_RECYCLE_FOLLOWUP_DATA_OPERATIONS = 1;
 /** Longest a spawn waits for the host's compiled WASM before configuring without it. */
 const COMPILED_WASM_WAIT_MS = 5_000;
+/**
+ * Longest an operation waits for a running warm-up before it is sent anyway
+ * (it then queues behind the warm-up in the worker). A warm-up takes about a
+ * second; the bound only matters if one stalls.
+ */
+const WARMUP_WAIT_MS = 10_000;
 
 export type ProactiveRecycleReason = "heap_limit" | "data_operation_limit";
 
@@ -332,9 +338,11 @@ export interface WorkerCallTiming {
     /**
      * The worker when the op was dispatched: `starting` (the op waited for the
      * worker to spawn and load), `first_extract` (no extraction has run on this
-     * worker yet, so its code is not yet optimised by the engine), or `warm`.
+     * worker yet, so its code is not yet optimised by the engine), `warmed` (no
+     * extraction has run yet, but the worker ran its warm-up extraction), or
+     * `warm`.
      */
-    workerState?: "starting" | "first_extract" | "warm";
+    workerState?: WorkerState;
     /** Waiting in the client's work queue behind this client's earlier ops. */
     clientQueueMs?: number;
     /** After admission, waiting for the worker to start (spawn, MuPDF load, recycle). */
@@ -346,7 +354,13 @@ export interface WorkerCallTiming {
     queueMs?: number;
     /** The worker running the op. */
     opMs?: number;
+    /** The worker's WASM heap after the op, bytes. */
+    heapBytes?: number;
+    /** The largest WASM heap any of this client's workers has reported, bytes. */
+    peakHeapBytes?: number;
 }
+
+export type WorkerState = "starting" | "first_extract" | "warmed" | "warm";
 
 /** When the work queue admitted each timed op (for `WorkerCallTiming.startMs`). */
 const admittedAt = new WeakMap<WorkerCallTiming, number>();
@@ -425,6 +439,12 @@ export interface MuPDFWorkerStats {
     standbySpawnCount: number;
     /** Whether the most recently configured worker received the host's compiled WASM. */
     compiledWasmShared: boolean | null;
+    /** Warm-ups sent to workers (`__warmup`; at most one per worker). */
+    warmupCount: number;
+    /** Whether the current worker finished its warm-up. */
+    warmedUp: boolean;
+    /** Whether the current worker's warm-up is still running. */
+    warmupInFlight: boolean;
     leaseReapCount: number;
     lastLeaseReapTime: number | null;
     lastLeaseReapOp: string | null;
@@ -492,6 +512,13 @@ export class MuPDFWorkerClient {
     private readonly workQueue: DocumentWorkQueue | null;
     /** Extraction ops dispatched to each worker (`WorkerCallTiming.workerState`). */
     private readonly extractionDispatches = new WeakMap<Worker, number>();
+    /** Workers that were sent a warm-up; each gets at most one. */
+    private readonly warmupStarted = new WeakSet<Worker>();
+    /** Workers whose warm-up succeeded (`WorkerCallTiming.workerState`). */
+    private readonly warmedUp = new WeakSet<Worker>();
+    /** The running warm-up; operations for its worker wait for it (`dispatch`). */
+    private warmup: { worker: Worker; promise: Promise<void> } | null = null;
+    private warmupCount = 0;
     private readonly slotName: PDFWorkerSlotName;
     private idleTimeoutMs: number;
     private busyLeaseMs: number | null;
@@ -717,6 +744,19 @@ export class MuPDFWorkerClient {
      */
     get inFlight(): number {
         return this.pending.size + this.startupWaiters.size;
+    }
+
+    /**
+     * Calls waiting in the work queue for earlier calls to finish; they are
+     * not yet part of `inFlight`. O(1) read for busy-context snapshots.
+     */
+    get queued(): number {
+        return this.workQueue?.queued ?? 0;
+    }
+
+    /** The current worker's WASM heap from its latest reply, bytes; null when unknown. O(1) read. */
+    get heapBytes(): number | null {
+        return this.workerHeapBytes;
     }
 
     /**
@@ -1029,11 +1069,111 @@ export class MuPDFWorkerClient {
             return;
         }
         this.standbySpawnCount += 1;
-        this.callUncounted<void>(worker, "__init", {}).catch((e) => {
-            getConfig().log(
-                `[MuPDFWorkerClient ${this.slotName}] standby init failed: ${e instanceof Error ? e.message : String(e)}`,
-                2,
-            );
+        void this.warmUpWorker(worker);
+    }
+
+    /**
+     * Start a worker for the next call if none is running, and warm it up
+     * (`warmUpWorker`). Called when an agent run starts, so a cold worker is
+     * ready by the time the model asks for a document. Resolves when the
+     * warm-up settles; never rejects for a failed warm-up.
+     */
+    async prewarm(): Promise<void> {
+        if (this.disposed) return;
+        const worker = this.ensureWorker();
+        const warmup = this.warmUpWorker(worker);
+        // An idle worker that needs no warm-up restarts its idle timeout, so a
+        // worker stays up while the user keeps starting runs.
+        if (this.warmup?.worker !== worker && this.inFlight === 0) this.armIdleTimer();
+        await warmup;
+    }
+
+    /**
+     * Load MuPDF and sentencex in `worker` and run one extraction of a small
+     * generated document (`__warmup`), so its first real extraction runs
+     * closer to warm speed. At most once per worker, and only while the worker is idle
+     * and has not extracted yet: once real work runs, it warms the worker
+     * itself. Calls that arrive meanwhile wait for the warm-up (`dispatch`).
+     *
+     * The warm-up is not a data operation (it never counts toward recycling)
+     * and not an extraction (`workerState` of the first real one is
+     * `warmed`). It has no abort signal: callers that give up waiting leave it
+     * running, so it never terminates the worker. A failure is logged.
+     */
+    private warmUpWorker(worker: Worker): Promise<void> {
+        if (this.warmup?.worker === worker) return this.warmup.promise;
+        if (
+            this.disposed
+            || this.worker !== worker
+            || this.warmupStarted.has(worker)
+            || (this.extractionDispatches.get(worker) ?? 0) > 0
+            || this.inFlight !== 0
+            || this.proactiveRecycleReason !== null
+        ) {
+            return Promise.resolve();
+        }
+        this.warmupStarted.add(worker);
+        this.warmupCount += 1;
+        const startedAt = Date.now();
+        const entry: { worker: Worker; promise: Promise<void> } = {
+            worker,
+            promise: this.callUncounted<{ mupdfMs: number; sentencexMs: number | null; extractMs: number }>(
+                worker,
+                "__warmup",
+                {},
+            ).then(
+                (result) => {
+                    this.warmedUp.add(worker);
+                    if (!isConfigured()) return;
+                    getConfig().log(
+                        `[MuPDFWorkerClient ${this.slotName}] warm-up done in ${Date.now() - startedAt}ms`
+                            + ` (mupdf=${Math.round(result.mupdfMs)}ms sentencex=${result.sentencexMs === null ? "failed" : `${Math.round(result.sentencexMs)}ms`}`
+                            + ` extract=${Math.round(result.extractMs)}ms)`,
+                        3,
+                    );
+                },
+                (e) => {
+                    // Shutdown can unconfigure the package before a pending
+                    // warm-up is rejected; a worker torn down mid-warm-up
+                    // (dispose, idle reap, window change) is not a failure.
+                    if (!isConfigured()) return;
+                    getConfig().log(
+                        `[MuPDFWorkerClient ${this.slotName}] warm-up failed: ${e instanceof Error ? e.message : String(e)}`,
+                        e instanceof StaleWorkerError ? 3 : 2,
+                    );
+                },
+            ).finally(() => {
+                if (this.warmup === entry) this.warmup = null;
+            }),
+        };
+        this.warmup = entry;
+        return entry.promise;
+    }
+
+    /**
+     * Wait for `worker`'s running warm-up, if any, for at most
+     * `WARMUP_WAIT_MS`. Aborting rejects this call only; the warm-up keeps
+     * running and the worker survives.
+     */
+    private waitForWarmup(worker: Worker, signal?: AbortSignal): Promise<void> {
+        const warmup = this.warmup;
+        if (!warmup || warmup.worker !== worker) return Promise.resolve();
+        if (signal?.aborted) return Promise.reject(new WorkerAbortError());
+        return new Promise<void>((resolve, reject) => {
+            // Every path into `settle` runs asynchronously, after `timerId` is set.
+            let settled = false;
+            const onAbort = () => settle(new WorkerAbortError());
+            const settle = (error?: Error) => {
+                if (settled) return;
+                settled = true;
+                signal?.removeEventListener("abort", onAbort);
+                if (timerId !== undefined) this.cancelTimer(timerId);
+                if (error) reject(error);
+                else resolve();
+            };
+            const timerId = this.scheduleTimer(() => settle(), WARMUP_WAIT_MS);
+            signal?.addEventListener("abort", onAbort, { once: true });
+            void warmup.promise.then(() => settle());
         });
     }
 
@@ -1557,6 +1697,10 @@ export class MuPDFWorkerClient {
             entry,
             reply.heapBytes,
         );
+        if (entry.timing && typeof reply.heapBytes === "number" && Number.isFinite(reply.heapBytes)) {
+            entry.timing.heapBytes = reply.heapBytes;
+            if (this.peakWorkerHeapBytes !== null) entry.timing.peakHeapBytes = this.peakWorkerHeapBytes;
+        }
 
         if (reply.ok) {
             entry.resolve(reply.result);
@@ -1761,9 +1905,15 @@ export class MuPDFWorkerClient {
         }
         const worker = this.ensureWorker();
         const startup = this.pendingStartupFor(worker);
-        if (startup) {
+        if (startup || this.warmup?.worker === worker) {
+            // Counted as a startup waiter while it waits for the configure
+            // handshake and then for a running warm-up, so busy snapshots and
+            // the busy lease see it.
             const waiterId = this.addStartupWaiter();
-            return this.waitForStartup(worker, startup, signal).then(
+            const started = startup
+                ? this.waitForStartup(worker, startup, signal)
+                : Promise.resolve();
+            return started.then(() => this.waitForWarmup(worker, signal)).then(
                 () => {
                     const startedAt = this.deleteStartupWaiter(waiterId);
                     return this.dispatchConfigured<T>(
@@ -1774,7 +1924,7 @@ export class MuPDFWorkerClient {
                         fatalCandidate,
                         startedAt ?? undefined,
                         timing,
-                        true,
+                        startup !== null,
                     );
                 },
                 (error) => {
@@ -1865,7 +2015,11 @@ export class MuPDFWorkerClient {
         }
         const extractions = this.extractionDispatches.get(worker) ?? 0;
         if (timing) {
-            timing.workerState = waitedForStartup ? "starting" : extractions === 0 ? "first_extract" : "warm";
+            timing.workerState = waitedForStartup
+                ? "starting"
+                : extractions > 0
+                    ? "warm"
+                    : this.warmedUp.has(worker) ? "warmed" : "first_extract";
         }
         if (EXTRACTION_OPS.has(op)) this.extractionDispatches.set(worker, extractions + 1);
         const id = this.nextId++;
@@ -2290,6 +2444,9 @@ export class MuPDFWorkerClient {
             idleRecycleCount: this.idleRecycleCount,
             standbySpawnCount: this.standbySpawnCount,
             compiledWasmShared: this.compiledWasmShared,
+            warmupCount: this.warmupCount,
+            warmedUp: this.worker !== null && this.warmedUp.has(this.worker),
+            warmupInFlight: this.warmup !== null && this.warmup.worker === this.worker,
             leaseReapCount: this.leaseReapCount,
             lastLeaseReapTime: this.lastLeaseReapTime,
             lastLeaseReapOp: this.lastLeaseReapOp,
@@ -2312,6 +2469,7 @@ export class MuPDFWorkerClient {
         this.lastProactiveRecycleDataOperations = null;
         this.idleRecycleCount = 0;
         this.standbySpawnCount = 0;
+        this.warmupCount = 0;
         this.leaseReapCount = 0;
         this.lastLeaseReapTime = null;
         this.lastLeaseReapOp = null;

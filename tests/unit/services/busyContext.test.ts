@@ -45,6 +45,21 @@ describe('getBusyContext extraction stats', () => {
         });
     });
 
+    it('reports hot calls waiting in the work queue and the hot worker heap', () => {
+        (Zotero as any).__beaverMuPDFWorkerClient_hot = {
+            inFlight: 1,
+            queued: 4,
+            heapBytes: 150.6 * 1024 * 1024,
+            oldestInFlightStartedAt: Date.now(),
+        };
+
+        expect(getBusyContext()).toMatchObject({
+            extracting_hot_pending: 1,
+            extracting_hot_queued: 4,
+            extracting_hot_heap_mb: 151,
+        });
+    });
+
     it('returns zero ages when both workers are idle', () => {
         (Zotero as any).__beaverMuPDFWorkerClient_hot = {
             inFlight: 0,
@@ -67,6 +82,8 @@ describe('getBusyContext extraction stats', () => {
         };
 
         expect(getBusyContext()).toMatchObject({
+            extracting_hot_queued: 0,
+            extracting_hot_heap_mb: 0,
             extracting_hot_has_worker: 0,
             extracting_hot_spawn_count: 0,
             extracting_hot_lease_reap_count: 0,

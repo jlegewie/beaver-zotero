@@ -5,9 +5,10 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { extractSerializedMock, getPageCountMock } = vi.hoisted(() => ({
+const { extractSerializedMock, getPageCountMock, loadAttachmentDataMock } = vi.hoisted(() => ({
     extractSerializedMock: vi.fn(),
     getPageCountMock: vi.fn(),
+    loadAttachmentDataMock: vi.fn(),
 }));
 
 vi.mock('../../../src/beaver-extract', () => ({
@@ -39,10 +40,7 @@ vi.mock('../../../src/services/documentExtraction', async () => {
     );
     return {
         ...actual,
-        loadAttachmentData: vi.fn().mockResolvedValue({
-            kind: 'ok',
-            data: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
-        }),
+        loadAttachmentData: loadAttachmentDataMock,
     };
 });
 
@@ -71,9 +69,10 @@ const documentCacheMock = {
     getMetadata: vi.fn(),
     getSerializedResult: vi.fn(),
     getOrCreateSerializedResult: vi.fn(),
+    getUnwrittenResult: vi.fn(),
 };
 
-const runPdf = () =>
+const runPdf = (workerName: 'hot' | 'background' = 'hot') =>
     extractAndCacheResolvedPdfDocument({
         source: {
             kind: 'external',
@@ -85,14 +84,24 @@ const runPdf = () =>
         mode: 'structured',
         maxPages: null,
         timeoutSeconds: 60,
-        workerName: 'hot',
+        workerName,
         serializedResult: true,
     });
 
-/** The cache runs this request's extraction (`create`) and stores the result. */
-const leaderCache = () =>
-    documentCacheMock.getOrCreateSerializedResult.mockImplementation(async (input: { create: (s: AbortSignal) => Promise<unknown> }) => {
+type LeaderInput = {
+    create: (s: AbortSignal) => Promise<unknown>;
+    onCacheWrite?: (ms: number) => void;
+};
+
+/**
+ * The cache runs this request's extraction (`create`) and stores the result,
+ * reporting a write of `writeMs` (or none yet, as when the write runs after
+ * the response).
+ */
+const leaderCache = (writeMs: number | null = 15) =>
+    documentCacheMock.getOrCreateSerializedResult.mockImplementation(async (input: LeaderInput) => {
         await input.create(new AbortController().signal);
+        if (writeMs !== null) input.onCacheWrite?.(writeMs);
         return stored;
     });
 
@@ -110,6 +119,11 @@ describe('extractAndCacheResolvedPdfDocument timings', () => {
         documentCacheMock.getSourceIdentitySnapshot.mockResolvedValue({ sourceSizeBytes: 1000 });
         documentCacheMock.getMetadata.mockResolvedValue(null);
         documentCacheMock.getSerializedResult.mockResolvedValue(null);
+        documentCacheMock.getUnwrittenResult.mockReturnValue(null);
+        loadAttachmentDataMock.mockResolvedValue({
+            kind: 'ok',
+            data: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+        });
         (globalThis as any).Zotero = { ...(globalThis as any).Zotero };
         (globalThis as any).Zotero.Beaver = { data: { env: 'production' }, documentCache: documentCacheMock };
         (globalThis as any).IOUtils = {
@@ -132,11 +146,61 @@ describe('extractAndCacheResolvedPdfDocument timings', () => {
             workerQueueMs: 4,
             workerOpMs: 121,
         });
-        for (const stage of ['resolveMs', 'cacheLookupMs', 'fileReadMs', 'pageCountMs', 'extractMs', 'cacheWriteMs'] as const) {
+        for (const stage of ['resolveMs', 'cacheLookupMs', 'fileReadMs', 'pageCountMs', 'extractMs'] as const) {
             expect(timings?.[stage]).toBeGreaterThanOrEqual(0);
         }
+        expect(timings?.cacheWriteMs).toBe(15);
         // The worker reported its own times to the extraction call.
         expect(extractSerializedMock.mock.calls[0][3]).toMatchObject({ clientQueueMs: 50.2, queueMs: 3.4, opMs: 120.6 });
+    });
+
+    it('writes the hot-slot result to the cache after returning it, and the background result before', async () => {
+        leaderCache(null);
+        const hot = await runPdf('hot');
+        expect(documentCacheMock.getOrCreateSerializedResult.mock.calls[0][0]).toMatchObject({ writeAfterResolve: true });
+        const hotTimings = hot.kind === 'ok' ? hot.timings : undefined;
+        expect(hotTimings).not.toHaveProperty('cacheWriteMs');
+
+        // A write that finishes later still reaches the request's timings.
+        const { onCacheWrite } = documentCacheMock.getOrCreateSerializedResult.mock.calls[0][0] as LeaderInput;
+        onCacheWrite?.(42);
+        expect(hotTimings?.cacheWriteMs).toBe(42);
+
+        leaderCache(9);
+        const background = await runPdf('background');
+        expect(documentCacheMock.getOrCreateSerializedResult.mock.calls[1][0]).toMatchObject({ writeAfterResolve: false });
+        expect(background.kind === 'ok' ? background.timings?.cacheWriteMs : undefined).toBe(9);
+    });
+
+    it('reports the worker heap after the extraction and the slot peak, in MB', async () => {
+        extractSerializedMock.mockImplementation(async (_data: unknown, _args: unknown, _signal: unknown, timing?: WorkerCallTiming) => {
+            if (timing) Object.assign(timing, { workerState: 'warmed', opMs: 80, heapBytes: 96 * 1024 * 1024, peakHeapBytes: 300.4 * 1024 * 1024 });
+            return serialized;
+        });
+        leaderCache();
+        const result = await runPdf();
+        expect(result.kind === 'ok' ? result.timings : undefined).toMatchObject({
+            workerState: 'warmed',
+            workerHeapMb: 96,
+            workerPeakHeapMb: 300,
+        });
+    });
+
+    it('takes a result whose cache write is still running without reading the file', async () => {
+        documentCacheMock.getSourceIdentitySnapshot.mockResolvedValue({ sourceSizeBytes: 0, filePath: '/tmp/does-not-matter.pdf' });
+        documentCacheMock.getUnwrittenResult.mockReturnValue(stored);
+        const result = await runPdf();
+        expect(result).toMatchObject({ kind: 'ok', cached: false, serializedResult: stored, totalPages: 3 });
+        expect(result.kind === 'ok' ? result.timings?.source : undefined).toBe('shared');
+        expect(documentCacheMock.getUnwrittenResult).toHaveBeenCalledWith(expect.objectContaining({
+            mode: 'structured',
+            serialized: true,
+            lockScope: 'hot',
+            source: { sourceSizeBytes: 0, filePath: '/tmp/does-not-matter.pdf' },
+        }));
+        expect(loadAttachmentDataMock).not.toHaveBeenCalled();
+        expect(getPageCountMock).not.toHaveBeenCalled();
+        expect(documentCacheMock.getOrCreateSerializedResult).not.toHaveBeenCalled();
     });
 
     it('reports a cache hit without worker stages', async () => {

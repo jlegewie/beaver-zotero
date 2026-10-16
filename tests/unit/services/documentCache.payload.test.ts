@@ -909,6 +909,117 @@ describe('DocumentCache payloads', () => {
         expect(files.has(payload!.payloadPath)).toBe(true);
     });
 
+    describe('cache write after resolving (writeAfterResolve)', () => {
+        const jsonBytes = new TextEncoder().encode(JSON.stringify(structuredResult));
+        const created = () => ({
+            schemaVersion: structuredResult.schemaVersion,
+            mode: 'structured' as const,
+            pageCount: 1,
+            byteLength: jsonBytes.byteLength,
+            jsonBytes,
+            cacheMetadata: { pageCount: 1, pageLabels: { '0': '1' }, pages: onePageGeometry },
+        });
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+
+        /** Hold every file write until the returned release is called. */
+        function holdWrites(): () => void {
+            let release!: () => void;
+            const barrier = new Promise<void>((resolve) => { release = resolve; });
+            mockIOUtils.write.mockImplementation(async (path: string, bytes: Uint8Array) => {
+                await barrier;
+                files.set(path, new Uint8Array(bytes));
+            });
+            return release;
+        }
+
+        async function request(
+            create: () => Promise<ReturnType<typeof created>>,
+            options: { writeAfterResolve?: boolean; onCacheWrite?: (ms: number) => void } = {},
+        ) {
+            return cache.getOrCreateSerializedResult({
+                item: createCacheAttachment(),
+                filePath: sourcePath,
+                mode: 'structured',
+                sourceSizeBytes: 0,
+                contentType: 'application/pdf',
+                lockScope: 'hot',
+                expectedSourceIdentity: await cache.getSourceIdentitySnapshot(sourcePath),
+                create,
+                ...options,
+            });
+        }
+
+        it('resolves before the write, shares the result while it runs, and serves the cache after', async () => {
+            const release = holdWrites();
+            const create = vi.fn(async () => created());
+            const onCacheWrite = vi.fn();
+
+            const result = await request(create, { writeAfterResolve: true, onCacheWrite });
+            expect(result?.jsonBytes).toEqual(jsonBytes);
+            await vi.waitFor(() => expect(mockIOUtils.write).toHaveBeenCalled());
+            expect(onCacheWrite).not.toHaveBeenCalled();
+            expect(await db.getDocumentCachePayloadCount()).toBe(0);
+
+            // While the write runs, a request finds the result without extracting.
+            const source = await cache.getSourceIdentitySnapshot(sourcePath);
+            expect(cache.getUnwrittenResult({
+                item: createCacheAttachment(), mode: 'structured', source, serialized: true, lockScope: 'hot',
+            })).toBe(result);
+            expect(cache.getUnwrittenResult({
+                item: createCacheAttachment(), mode: 'structured', source, serialized: false, lockScope: 'hot',
+            })).toBeNull();
+            await expect(request(create)).resolves.toBe(result);
+            expect(create).toHaveBeenCalledOnce();
+
+            release();
+            await vi.waitFor(() => expect(onCacheWrite).toHaveBeenCalledOnce());
+            expect(onCacheWrite.mock.calls[0][0]).toBeGreaterThanOrEqual(0);
+            await vi.waitFor(() => expect(cache.getUnwrittenResult({
+                item: createCacheAttachment(), mode: 'structured', source, serialized: true, lockScope: 'hot',
+            })).toBeNull());
+            expect(await db.getDocumentCachePayloadCount()).toBe(1);
+            const cached = await request(create);
+            expect(new TextDecoder().decode(cached?.jsonBytes)).toBe(JSON.stringify(structuredResult));
+            expect(create).toHaveBeenCalledOnce();
+            expect((await cache.getSerializedResult(ref, 'structured', sourcePath))?.byteLength).toBe(jsonBytes.byteLength);
+        });
+
+        it('keeps the result when the write fails, and the next request extracts again', async () => {
+            mockIOUtils.write.mockRejectedValue(new Error('disk full'));
+            const create = vi.fn(async () => created());
+            const onCacheWrite = vi.fn();
+
+            const result = await request(create, { writeAfterResolve: true, onCacheWrite });
+            expect(result?.jsonBytes).toEqual(jsonBytes);
+            await vi.waitFor(() => expect(onCacheWrite).toHaveBeenCalledOnce());
+            expect(await db.getDocumentCachePayloadCount()).toBe(0);
+
+            mockIOUtils.write.mockImplementation(async (path: string, bytes: Uint8Array) => {
+                files.set(path, new Uint8Array(bytes));
+            });
+            await vi.waitFor(async () => {
+                await request(create);
+                expect(create).toHaveBeenCalledTimes(2);
+            });
+        });
+
+        it('resolves only after the write by default', async () => {
+            const release = holdWrites();
+            const onCacheWrite = vi.fn();
+            let resolved = false;
+            const pending = request(async () => created(), { onCacheWrite }).then((value) => {
+                resolved = true;
+                return value;
+            });
+            await vi.waitFor(() => expect(mockIOUtils.write).toHaveBeenCalled());
+            expect(resolved).toBe(false);
+            release();
+            await expect(pending).resolves.toMatchObject({ byteLength: jsonBytes.byteLength });
+            expect(onCacheWrite).toHaveBeenCalledOnce();
+            expect(await db.getDocumentCachePayloadCount()).toBe(1);
+        });
+    });
+
     it('coalesces concurrent cold result creation for the same source identity', async () => {
         const item = createCacheAttachment();
         let createCalls = 0;

@@ -1084,10 +1084,20 @@ export interface WSDocumentTimings {
     /**
      * The worker when this request used it: `starting` (it waited for the
      * worker to spawn and load), `first_extract` (no extraction had run on
-     * this worker yet, so its code was not yet optimised), or `warm`.
+     * this worker yet, so its code was not yet optimised), `warmed` (no
+     * extraction had run yet, but the worker had run its warm-up extraction),
+     * or `warm`.
      */
-    worker_state?: 'starting' | 'first_extract' | 'warm';
-    /** Writing the extracted result to the document cache. */
+    worker_state?: 'starting' | 'first_extract' | 'warmed' | 'warm';
+    /** The worker's WASM heap after the request's last worker operation, MB. */
+    worker_heap_mb?: number;
+    /** The largest WASM heap a worker of this slot has reported so far, MB. */
+    worker_peak_heap_mb?: number;
+    /**
+     * Writing the extracted result to the document cache. The plugin writes
+     * after responding, so this is present only when the write had already
+     * finished when the response was built; it is not part of `total_ms`.
+     */
     cache_write_ms?: number;
     /** Waiting for `attachment_diagnostics` before responding. */
     diagnostics_wait_ms?: number;
