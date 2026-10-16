@@ -42,6 +42,7 @@ import { getCreateAnnotationsOpenLink } from '../createAnnotationsNavigation';
 import { getCurrentCollectionKeyForItem, openNoteByKey, revealSource } from '../../../../utils/sourceUtils';
 import { getMergedItemReference } from '../../../../atoms/mergeItemsChoices';
 import { isStaleMergeProposal } from '../mergeItemsErrors';
+import { isStaleNoteEdit } from '../editNoteErrors';
 import { resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -127,9 +128,9 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         : row.actions.length > 1
             ? getOverallStatus(row.actions)
             : (getCreateAnnotationsDisplayStatus(firstAction) ?? firstAction.status);
-    // A merge refused because its records changed since the proposal fails the
-    // same way on every retry; only a new proposal helps.
-    const config = row.actions.some(isStaleMergeProposal)
+    // A merge or note edit refused because its target changed since the
+    // proposal fails the same way on every retry; only a new proposal helps.
+    const config = row.actions.some((action) => isStaleMergeProposal(action) || isStaleNoteEdit(action))
         ? { ...STATUS_CONFIGS[status], showRetry: false }
         : STATUS_CONFIGS[status];
     const headerIcon = isBusy
