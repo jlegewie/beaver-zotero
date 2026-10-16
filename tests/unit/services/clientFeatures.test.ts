@@ -100,6 +100,8 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // two_page_highlights is declaration-only because it gates a relocation shape
 // the client must apply: a build that predates it refuses a two-page highlight
 // destination, so the backend keeps rejecting those unless it is declared.
+// zotero_fulltext_search is declaration-only because it gates a data request
+// (zotero_fulltext_search_request) an older build has no handler for.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -127,6 +129,7 @@ const DECLARATION_ONLY_FEATURES = [
     'two_page_highlights',
     'item_import_v2',
     'book_chapters',
+    'zotero_fulltext_search',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
