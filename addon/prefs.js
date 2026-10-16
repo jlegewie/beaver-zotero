@@ -55,7 +55,6 @@ pref("dataProviderEnabled", false);
 
 // Agent actions
 pref("autoApplyAnnotations", true);
-pref("autoCreateNotes", true);
 pref("autoImportItems", false);
 pref("confirmExtractionCosts", true);
 pref("confirmExternalSearchCosts", true);

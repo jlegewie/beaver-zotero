@@ -73,7 +73,7 @@ src/beaver-extract/
 ├── prewarm.ts                     # Eager worker spawn helper
 ├── worker/
 │   ├── index.ts                   # Worker entry point + dispatcher
-│   ├── ops.ts                     # Worker-side op handlers
+│   ├── ops.ts                     # Worker-side op handlers (argument checks, doc lifecycle, result projection)
 │   ├── opQueue.ts                 # Per-worker op serialization queue
 │   ├── apiCache.ts                # Module-level cache for MuPDF + sentencex handles (shared by worker + Node CLI)
 │   ├── config.ts                  # Worker-side URL/config storage
@@ -84,9 +84,29 @@ src/beaver-extract/
 │   ├── wasmHelpers.ts             # WASM utility helpers
 │   ├── workerScope.ts             # Worker globalThis typing
 │   ├── errors.ts                  # Worker-side error envelopes
-│   ├── sentenceExtraction.ts      # Worker-side sentence-bbox pipeline
+│   ├── sentenceExtraction.ts      # Per-page structured phases (paragraphs, sentence mapping)
 │   ├── sentencexInit.ts           # sentencex bootstrap (lazy, with fallback)
 │   └── splitterResolver.ts        # Resolves SentenceSplitterConfig → splitter fn
+├── pipeline/                      # Extraction pipeline (runs in the worker)
+│   ├── extract.ts                 # `runExtraction`: document study + paragraph, block or structured engine
+│   ├── documentAnalysis.ts        # Page-walk cache + cross-page analysis context
+│   ├── structured.ts              # Structured extraction phases (analyze → segment → item passes → sentences → project)
+│   ├── draftItems.ts              # Draft items between segmentation and sentence mapping
+│   ├── itemPasses.ts              # Step 3: `ItemPass` interface; presets list their passes
+│   ├── itemsExport.ts             # `items export` rows (items, lines, filtered lines, task features; flow lines for `boundaries`)
+│   ├── regionsExport.ts           # `items export --task regions-v2` rows (region pass observed in `segmentPages`)
+│   └── output.ts                  # Helpers shared by the markdown and structured results
+├── models/runtime.ts              # One evaluator for every learned model (bxm-trees-v1, bxm-logistic-v1)
+├── features/                      # Feature parts shared by the item models
+│   ├── itemInput.ts               # Per-page model input built from draft items
+│   ├── text.ts                    # Text patterns (word counts, leaders, bibliographic details, list headings)
+│   ├── style.ts                   # Line typography (size, font, bold/italic, lead marker) and glyph geometry (baseline, core)
+│   ├── geometry.ts                # Line-block geometry in em
+│   └── context.ts                 # Document context (page position, list headings so far)
+├── itemTypes/                     # Item-type model: input, features (incl. reference item features), model, item pass, generated weights
+├── boundaries/                    # Item boundaries: startNewItem reason codes, per-block input, feature rows, model (preset switch `learnedBoundaries`), generated weights
+├── references/                    # Reference entries: line model, entry planning, item pass (splits and joins the item-type model's references), generated weights
+├── regions/                       # Region detection (pictures, tables, formulas): step 2; grid candidates for text-heavy tables (preset switch `gridTableCandidates`)
 ├── DocumentAnalyzer.ts            # Text layer & OCR detection
 ├── StyleAnalyzer.ts               # Font/style analysis
 ├── MarginFilter.ts                # Header/footer removal
@@ -208,9 +228,6 @@ LayoutAnalysisResult; // Result of BeaverExtractor.analyzeLayout — pre-extract
                       // shared prefix structured extract runs, so the analysis
                       // context is byte-identical for the same settings /
                       // pageIndices / analysisWindow.
-SentenceTraceResult; // Result of getMuPDFWorkerClient().extractSentenceDebug
-                     // — single-page debug envelope { result, trace } used by
-                     // fixture capture and the extract-trace endpoint.
 PDFSearchResult; // Result of BeaverExtractor.search
 PageImageResult; // Per-page entry in BeaverExtractor.renderPages result.pages
 ```
@@ -275,12 +292,21 @@ DEFAULT_MARGINS = { left: 25, top: 40, right: 25, bottom: 40 };
 ```typescript
 DEFAULT_MARGIN_ZONE = { left: 60, top: 80, right: 60, bottom: 80 }
 
-1. Collect elements in margin zones
-2. Group by normalized text (case-insensitive, trimmed)
-3. Remove if appears on ≥3 pages (repeatThreshold)
+1. Join lines MuPDF split on one baseline back into text rows (word-split
+   PDFs emit every word as a line), and collect the rows that sit in a
+   margin zone. Words of a justified prose row, split too far apart to
+   join, and lone lowercase words ("the", "and") are not margin elements
+   (schema 5)
+2. Group by normalized text (case-insensitive, trimmed; digits ignored for
+   joined rows)
+3. Remove if appears on ≥3 pages (repeatThreshold); a row that does not
+   match as a whole still loses a leading/trailing run matching a running
+   head of the same zone; words of justified prose rows stay (schema 5)
 4. Detect page numbers:
    - Regex patterns: /^\d+$/, /^page \d+$/, /^[ivxlcm]+$/
-   - Verify strictly increasing sequence
+   - Verify strictly increasing sequence that, in schema 5, advances with
+     the pages; only each page's own number is removed (a contents page
+     keeps its page references)
 5. Log what was removed
 ```
 
@@ -398,13 +424,15 @@ export interface InternalProcessedPage {
 3. **Integrate in the worker pipeline**:
 
 The fused `extract` op runs inside the worker. Wire new analyzers into
-`worker/ops.ts` (or `PageExtractor.ts`) so they execute alongside the
-existing column/line/paragraph passes:
+`pipeline/extract.ts` (markdown engines), `pipeline/structured.ts`
+(structured extraction) or `PageExtractor.ts` so they execute alongside the
+existing column/line/paragraph passes. A change to extracted text or ids
+belongs behind a switch of the schema preset (`schema/presets.ts`):
 
 ```typescript
 import { detectSections } from "../SectionDetector";
 
-// Inside the per-page loop in worker/ops.ts → opExtract
+// Inside an engine's per-page loop in pipeline/extract.ts
 for (const rawPage of rawPages) {
   // ... existing column/line/paragraph detection
   const sectionResult = detectSections(lineResult, styleProfile);
@@ -748,20 +776,6 @@ console.log(layout.analysis.styleProfile.primaryBodyStyle);
 for (const c of layout.analysis.marginRemoval.candidates) {
   console.log(c.text, c.reason, c.pageIndices);
 }
-
-// Single-page debug surface (fixture capture / extract-trace endpoint).
-// Returns `{ result, trace }` with all pipeline intermediates (raw doc,
-// detailed page, font-bridged pagesForFilter, margin analysis/removal,
-// filtered-paragraph result). Not a parity oracle for the production
-// multi-page structured path — see worker/sentenceExtraction.ts for
-// the divergence rationale. For analysis-context parity, prefer
-// `analyzeLayout` above.
-import { getMuPDFWorkerClient } from "../../src/beaver-extract";
-const debug = await getMuPDFWorkerClient().extractSentenceDebug(
-  pdfData,
-  0,
-  { splitterConfig: { type: "sentencex", language: "en" } },
-);
 ```
 
 ### Page Image Rendering

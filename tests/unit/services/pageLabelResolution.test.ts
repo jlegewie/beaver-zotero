@@ -30,6 +30,11 @@ const mockIOUtils = (globalThis as any).IOUtils as {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Only declared labels, as documents without printed labels have. */
+function declared(labels: Record<number, string> | null) {
+    return { printed: null, declared: labels };
+}
+
 function makeCachedMeta(
     overrides: Partial<DocumentCacheMetadata> = {}
 ): DocumentCacheMetadata {
@@ -70,29 +75,29 @@ function makeMockExtractor(result: { pageCount: number; pageLabels: Record<numbe
 describe('resolvePageValue (numeric input)', () => {
     describe('preferPageLabels=false (strict numeric mode)', () => {
         it('returns the input unchanged when labels are null', () => {
-            expect(resolvePageValue(5, null, false)).toBe(5);
-            expect(resolvePageValue(1, null, false)).toBe(1);
-            expect(resolvePageValue(999, null, false)).toBe(999);
+            expect(resolvePageValue(5, declared(null), false)).toBe(5);
+            expect(resolvePageValue(1, declared(null), false)).toBe(1);
+            expect(resolvePageValue(999, declared(null), false)).toBe(999);
         });
 
         it('ignores labels even when they match (strict mode)', () => {
             // prefer_page_labels=false means the number is always a physical index
             const labels = { 0: 'i', 1: 'ii', 2: 'iii', 3: 'iv', 4: '1', 5: '2' };
-            expect(resolvePageValue(1, labels, false)).toBe(1); // NOT 5
-            expect(resolvePageValue(2, labels, false)).toBe(2); // NOT 6
+            expect(resolvePageValue(1, declared(labels), false)).toBe(1); // NOT 5
+            expect(resolvePageValue(2, declared(labels), false)).toBe(2); // NOT 6
         });
     });
 
     describe('preferPageLabels=true (label-aware mode)', () => {
         it('falls through to input when labels are null', () => {
-            expect(resolvePageValue(5, null, true)).toBe(5);
+            expect(resolvePageValue(5, declared(null), true)).toBe(5);
         });
 
         it('is a no-op when labels are sequential and match 1-based indices', () => {
             const labels = { 0: '1', 1: '2', 2: '3', 3: '4', 4: '5' };
-            expect(resolvePageValue(1, labels, true)).toBe(1);
-            expect(resolvePageValue(3, labels, true)).toBe(3);
-            expect(resolvePageValue(5, labels, true)).toBe(5);
+            expect(resolvePageValue(1, declared(labels), true)).toBe(1);
+            expect(resolvePageValue(3, declared(labels), true)).toBe(3);
+            expect(resolvePageValue(5, declared(labels), true)).toBe(5);
         });
 
         it('resolves label "1" to the correct 1-based index with front-matter offset', () => {
@@ -100,26 +105,31 @@ describe('resolvePageValue (numeric input)', () => {
                 0: 'i', 1: 'ii', 2: 'iii', 3: 'iv',
                 4: '1', 5: '2', 6: '3',
             };
-            expect(resolvePageValue(1, labels, true)).toBe(5); // label "1" → index 5
-            expect(resolvePageValue(2, labels, true)).toBe(6);
-            expect(resolvePageValue(3, labels, true)).toBe(7);
+            expect(resolvePageValue(1, declared(labels), true)).toBe(5); // label "1" → index 5
+            expect(resolvePageValue(2, declared(labels), true)).toBe(6);
+            expect(resolvePageValue(3, declared(labels), true)).toBe(7);
         });
 
         it('falls through to numeric index when the value does not match any label', () => {
             // Roman labels — numeric "4" doesn't match "iv", falls through
             const labels = { 0: 'i', 1: 'ii', 2: 'iii', 3: 'iv' };
-            expect(resolvePageValue(4, labels, true)).toBe(4);
+            expect(resolvePageValue(4, declared(labels), true)).toBe(4);
         });
 
-        it('resolves the first matching label when duplicates exist', () => {
+        it('resolves duplicate labels to the page in the longest Arabic run', () => {
             const labels = { 0: '1', 1: '1', 2: '2' };
-            expect(resolvePageValue(1, labels, true)).toBe(1);
+            expect(resolvePageValue(1, declared(labels), true)).toBe(2);
+        });
+
+        it('resolves duplicate labels to the first page when no run is longer', () => {
+            const labels = { 0: 'A', 1: 'A' };
+            expect(resolvePageValue('A', declared(labels), true)).toBe(1);
         });
 
         it('handles non-contiguous label keys correctly', () => {
             const labels = { 0: 'cover', 5: '1', 6: '2' };
-            expect(resolvePageValue(1, labels, true)).toBe(6); // index 5 → 1-based 6
-            expect(resolvePageValue(2, labels, true)).toBe(7);
+            expect(resolvePageValue(1, declared(labels), true)).toBe(6); // index 5 → 1-based 6
+            expect(resolvePageValue(2, declared(labels), true)).toBe(7);
         });
     });
 });
@@ -128,38 +138,70 @@ describe('resolvePageValue (numeric input)', () => {
 // resolvePageValue — string input
 // ---------------------------------------------------------------------------
 
+describe('resolvePageValue (printed and declared labels)', () => {
+    it('matches printed labels before the labels the PDF declares', () => {
+        const labels = {
+            printed: { 0: '1201', 1: '1202', 2: '1203' },
+            declared: { 0: '1', 1: '2', 2: '1202' },
+        };
+        expect(resolvePageValue('1202', labels, true)).toBe(2);
+    });
+
+    it('falls back to declared labels, then to the physical page', () => {
+        const labels = { printed: { 2: '1203' }, declared: { 0: 'i', 1: 'ii' } };
+        expect(resolvePageValue('ii', labels, true)).toBe(2);
+        expect(resolvePageValue('3', labels, true)).toBe(3);
+    });
+
+    it('prefers the main-body page when a printed label repeats', () => {
+        // A cover sheet printed "5" ahead of a body run 1..6.
+        const printed = { 0: '5', 1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6' };
+        expect(resolvePageValue('5', { printed, declared: null }, true)).toBe(6);
+    });
+
+    it('names printed labels in the miss message when there are any', () => {
+        const labels = { printed: { 0: '1201' }, declared: { 0: '1' } };
+        try {
+            resolvePageValue('xyz', labels, true);
+            expect.unreachable();
+        } catch (error) {
+            expect((error as InvalidPageValueError).knownLabels).toEqual(['1201']);
+        }
+    });
+});
+
 describe('resolvePageValue (string input)', () => {
     describe('preferPageLabels=true (label-aware mode)', () => {
         it('resolves a label string to its physical index', () => {
             const labels = { 0: 'i', 1: 'ii', 2: 'iii', 3: 'iv', 4: '1' };
-            expect(resolvePageValue('iv', labels, true)).toBe(4);
-            expect(resolvePageValue('i', labels, true)).toBe(1);
-            expect(resolvePageValue('1', labels, true)).toBe(5);
+            expect(resolvePageValue('iv', declared(labels), true)).toBe(4);
+            expect(resolvePageValue('i', declared(labels), true)).toBe(1);
+            expect(resolvePageValue('1', declared(labels), true)).toBe(5);
         });
 
         it('resolves non-numeric labels like "A-3" or "S12"', () => {
             const labels = { 0: '1', 1: '2', 2: 'A-1', 3: 'A-2', 4: 'S12' };
-            expect(resolvePageValue('A-1', labels, true)).toBe(3);
-            expect(resolvePageValue('A-2', labels, true)).toBe(4);
-            expect(resolvePageValue('S12', labels, true)).toBe(5);
+            expect(resolvePageValue('A-1', declared(labels), true)).toBe(3);
+            expect(resolvePageValue('A-2', declared(labels), true)).toBe(4);
+            expect(resolvePageValue('S12', declared(labels), true)).toBe(5);
         });
 
         it('falls back to numeric parse when label not found but string parses as int', () => {
             // "38" misses label lookup (labels are roman), falls through to numeric 38
             const labels = { 0: 'i', 1: 'ii', 2: 'iii' };
-            expect(resolvePageValue('38', labels, true)).toBe(38);
+            expect(resolvePageValue('38', declared(labels), true)).toBe(38);
         });
 
         it('throws InvalidPageValueError when label missing and not numeric', () => {
             const labels = { 0: 'i', 1: 'ii', 2: 'iii' };
-            expect(() => resolvePageValue('nonexistent', labels, true))
+            expect(() => resolvePageValue('nonexistent', declared(labels), true))
                 .toThrow(InvalidPageValueError);
         });
 
         it('error payload includes a sample of known labels', () => {
             const labels = { 0: 'i', 1: 'ii', 2: 'iii', 3: 'iv' };
             try {
-                resolvePageValue('fig-2', labels, true);
+                resolvePageValue('fig-2', declared(labels), true);
                 expect.fail('expected throw');
             } catch (error) {
                 expect(error).toBeInstanceOf(InvalidPageValueError);
@@ -174,7 +216,7 @@ describe('resolvePageValue (string input)', () => {
             const labels: Record<number, string> = {};
             for (let i = 0; i < 20; i++) labels[i] = `label-${i}`;
             try {
-                resolvePageValue('bogus', labels, true);
+                resolvePageValue('bogus', declared(labels), true);
                 expect.fail('expected throw');
             } catch (error) {
                 const err = error as InvalidPageValueError;
@@ -185,7 +227,7 @@ describe('resolvePageValue (string input)', () => {
 
         it('error payload has no knownLabels when labels is null', () => {
             try {
-                resolvePageValue('iv', null, true);
+                resolvePageValue('iv', declared(null), true);
                 expect.fail('expected throw');
             } catch (error) {
                 const err = error as InvalidPageValueError;
@@ -195,33 +237,33 @@ describe('resolvePageValue (string input)', () => {
         });
 
         it('handles whitespace in numeric fallback', () => {
-            expect(resolvePageValue('  38  ', null, true)).toBe(38);
+            expect(resolvePageValue('  38  ', declared(null), true)).toBe(38);
         });
     });
 
     describe('preferPageLabels=false (strict numeric mode)', () => {
         it('parses a numeric string as a physical index', () => {
-            expect(resolvePageValue('38', null, false)).toBe(38);
-            expect(resolvePageValue('1', null, false)).toBe(1);
+            expect(resolvePageValue('38', declared(null), false)).toBe(38);
+            expect(resolvePageValue('1', declared(null), false)).toBe(1);
         });
 
         it('parses a numeric string even when labels exist (ignores labels)', () => {
             const labels = { 0: 'i', 1: 'ii', 2: 'iii', 3: 'iv', 4: '1' };
             // "1" would match labels[4] in label-aware mode, but strict mode
             // treats it purely as numeric → physical index 1.
-            expect(resolvePageValue('1', labels, false)).toBe(1);
+            expect(resolvePageValue('1', declared(labels), false)).toBe(1);
         });
 
         it('throws InvalidPageValueError on non-parseable string', () => {
-            expect(() => resolvePageValue('iv', null, false))
+            expect(() => resolvePageValue('iv', declared(null), false))
                 .toThrow(InvalidPageValueError);
-            expect(() => resolvePageValue('A-3', null, false))
+            expect(() => resolvePageValue('A-3', declared(null), false))
                 .toThrow(InvalidPageValueError);
         });
 
         it('error message mentions prefer_page_labels gating', () => {
             try {
-                resolvePageValue('iv', null, false);
+                resolvePageValue('iv', declared(null), false);
                 expect.fail('expected throw');
             } catch (error) {
                 expect((error as Error).message).toMatch(/read_note/);
@@ -229,19 +271,19 @@ describe('resolvePageValue (string input)', () => {
         });
 
         it('rejects zero and negative as invalid positive integers', () => {
-            expect(() => resolvePageValue('0', null, false))
+            expect(() => resolvePageValue('0', declared(null), false))
                 .toThrow(InvalidPageValueError);
-            expect(() => resolvePageValue('-5', null, false))
+            expect(() => resolvePageValue('-5', declared(null), false))
                 .toThrow(InvalidPageValueError);
         });
 
         it('rejects decimals', () => {
-            expect(() => resolvePageValue('3.14', null, false))
+            expect(() => resolvePageValue('3.14', declared(null), false))
                 .toThrow(InvalidPageValueError);
         });
 
         it('handles leading/trailing whitespace', () => {
-            expect(resolvePageValue('  38  ', null, false)).toBe(38);
+            expect(resolvePageValue('  38  ', declared(null), false)).toBe(38);
         });
     });
 });

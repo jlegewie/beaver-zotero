@@ -22,7 +22,7 @@ import { setBusyContextProvider } from '@beaver/agent-core/transport/busyContext
 
 /**
  * Numeric-only snapshot (booleans encoded as 0/1) so the fields can be merged
- * into `FrontendTimingMetadata`, whose index signature is `number | undefined`.
+ * into `FrontendTimingMetadata` as timing values.
  *
  * A type alias rather than an interface: only an alias picks up an implicit
  * index signature, which is what lets this satisfy the provider seam's

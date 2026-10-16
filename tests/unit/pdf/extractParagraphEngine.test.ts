@@ -1,5 +1,5 @@
 /**
- * Unit tests for the paragraph engine branch in `runExtractFromIndices`.
+ * Unit tests for the paragraph engine branch in `runExtraction`.
  *
  * Hermetic — synthetic RawPageData fed in via a mocked
  * `extractRawPageFromDoc`. The DocumentLike stub only needs to satisfy the
@@ -29,7 +29,12 @@ vi.mock("../../../src/beaver-extract/worker/docHelpers", async () => {
     };
 });
 
-import { runExtractFromIndices } from "../../../src/beaver-extract/worker/ops";
+import {
+    runExtraction,
+    type ExtractionEngine,
+} from "../../../src/beaver-extract/pipeline/extract";
+import { PageWalkCache } from "../../../src/beaver-extract/pipeline/documentAnalysis";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "../../../src/beaver-extract/schema/presets";
 import type { DocumentLike } from "../../../src/beaver-extract/worker/mupdfApi";
 
 // ---------------------------------------------------------------------------
@@ -123,28 +128,38 @@ function makeDocStub(): DocumentLike {
     };
 }
 
+/** `runExtraction` over the synthetic pages with the current schema's preset. */
+function extractPages(
+    engine: ExtractionEngine,
+    targetIndices: number[],
+    pageCount: number,
+) {
+    const doc = makeDocStub();
+    const preset = CURRENT_PDF_EXTRACTION_PRESET;
+    return runExtraction(doc, {
+        engine,
+        preset,
+        pageCache: new PageWalkCache(doc, undefined, preset),
+        opts: { ...DEFAULT_EXTRACTION_SETTINGS },
+        requestedRepeatThreshold: undefined,
+        targetIndices,
+        analysisIndices: targetIndices,
+        pageCount,
+        pageLabels: {},
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("runExtractFromIndices: paragraph engine", () => {
+describe("runExtraction: paragraph engine", () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
     it("emits markdown-shaped pageContent with `## ` for the header", () => {
-        const doc = makeDocStub();
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS };
-        const result = runExtractFromIndices(
-            doc,
-            opts as any,
-            undefined,
-            [0],
-            [0],
-            1,
-            {},
-            "paragraph",
-        );
+        const result = extractPages("paragraph", [0], 1);
         expect(result.pages).toHaveLength(1);
         const page = result.pages[0];
         expect(page.content).toContain("## Section Title");
@@ -153,29 +168,9 @@ describe("runExtractFromIndices: paragraph engine", () => {
     });
 
     it("preserves the same InternalExtractionResult shape as the block engine", () => {
-        const doc = makeDocStub();
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS };
 
-        const blockResult = runExtractFromIndices(
-            doc,
-            opts as any,
-            undefined,
-            [0],
-            [0],
-            1,
-            {},
-            "block",
-        );
-        const paragraphResult = runExtractFromIndices(
-            doc,
-            opts as any,
-            undefined,
-            [0],
-            [0],
-            1,
-            {},
-            "paragraph",
-        );
+        const blockResult = extractPages("block", [0], 1);
+        const paragraphResult = extractPages("paragraph", [0], 1);
 
         // Same top-level keys.
         expect(Object.keys(paragraphResult).sort()).toEqual(
@@ -194,18 +189,7 @@ describe("runExtractFromIndices: paragraph engine", () => {
     });
 
     it("produces fullText by joining per-page paragraph content", () => {
-        const doc = makeDocStub();
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS };
-        const result = runExtractFromIndices(
-            doc,
-            opts as any,
-            undefined,
-            [0, 1],
-            [0, 1],
-            2,
-            {},
-            "paragraph",
-        );
+        const result = extractPages("paragraph", [0, 1], 2);
         expect(result.pages).toHaveLength(2);
         // fullText is page contents joined with blank lines.
         expect(result.fullText).toContain(result.pages[0].content);

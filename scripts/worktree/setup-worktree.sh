@@ -4,7 +4,8 @@
 #
 # Usage:
 #   scripts/worktree/setup-worktree.sh --lite [path]     # fixtures + .env/docs + npm install (no Zotero)
-#   scripts/worktree/setup-worktree.sh [--start] <branch>  # full: lite + isolated Zotero profile/ports
+#   scripts/worktree/setup-worktree.sh [--start] [--zotero11-hardening] <branch>
+#                                                        # full: lite + isolated Zotero profile/ports
 #
 # --lite (seconds, no Zotero):
 #   Bootstraps an existing worktree (default: $PWD) for unit tests / lint /
@@ -26,11 +27,25 @@
 #   SRC_PROFILE   ~/Library/Application Support/Zotero/Profiles/i1aek1w8.beaver-dev
 #   SRC_DATADIR   ~/Zotero beaver-dev
 #   ZOTERO_BIN    /Applications/Zotero.app/Contents/MacOS/zotero
+#                 Written to the worktree's .env as ZOTERO_PLUGIN_ZOTERO_BIN_PATH,
+#                 which `npm start` and worktree-zotero.sh launch. Point it at a
+#                 second app to run that worktree on another Zotero version.
 #   WORKTREE_DIR  <repo-parent>/beaver-zotero-<branchname>
 #                 Override when an existing worktree doesn't fit the naming
 #                 pattern (e.g. WORKTREE_DIR=/path/to/beaver-v0.19.1).
 #                 If the path already exists, the `git worktree add` step is
 #                 skipped and only the profile/data/env steps run.
+#
+# Testing on Zotero 11 (dev build installed beside the stable app):
+#   ZOTERO_BIN="/Applications/Zotero 11 Dev.app/Contents/MacOS/zotero" \
+#     scripts/worktree/setup-worktree.sh [--zotero11-hardening] <branch>
+#   The data dir is a clone, so Zotero 11's schema upgrade never touches the
+#   main data dir. Never point a Zotero 11 binary at the main data dir.
+#   --zotero11-hardening (or ZOTERO11_HARDENING=1) writes user.js prefs that
+#   undo Zotero 11's temporary overrides (security.allow_unsafe_subscript_loads
+#   = false, security.chrome_baseline_csp.enabled = true). ZOTERO11_HARDENING=
+#   subscript or =csp writes only one. Change later with
+#   `worktree-zotero.sh hardening on|subscript|csp|off`.
 #
 # Port allocation:
 #   Main dev   = HTTP 23124 / RDP 6100
@@ -61,19 +76,25 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/zotero-clone.sh
 source "$SCRIPT_DIR/lib/zotero-clone.sh"
+# shellcheck source=lib/zotero11-hardening.sh
+source "$SCRIPT_DIR/lib/zotero11-hardening.sh"
 
 # Parse flags + positionals.
 #   --lite    fixtures/config/npm only (no Zotero profile). Optional [path].
 #   --start   full mode only: launch `npm start` in the background when done.
+#   --zotero11-hardening  full mode only: see the header.
 LITE=0
 START=0
+HARDENING="${ZOTERO11_HARDENING:-0}"
+[[ "$HARDENING" == "1" ]] && HARDENING=on
 POSITIONAL=()
 for arg in "$@"; do
   case "$arg" in
     --lite)  LITE=1 ;;
     --start) START=1 ;;
+    --zotero11-hardening) HARDENING=on ;;
     -h|--help|help)
-      sed -n '3,55p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '3,71p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     -*)      echo "Unknown flag: $arg" >&2; exit 2 ;;
@@ -83,6 +104,14 @@ done
 
 if [[ "$LITE" == "1" && "$START" == "1" ]]; then
   echo "error: --lite and --start cannot be combined" >&2
+  exit 2
+fi
+case "$HARDENING" in
+  0|on|subscript|csp) ;;
+  *) echo "error: ZOTERO11_HARDENING must be 1, on, subscript or csp" >&2; exit 2 ;;
+esac
+if [[ "$LITE" == "1" && "$HARDENING" != "0" ]]; then
+  echo "error: --lite and --zotero11-hardening cannot be combined" >&2
   exit 2
 fi
 
@@ -280,6 +309,7 @@ SAFE="${BRANCH//\//-}"
 SRC_PROFILE="${SRC_PROFILE:-$HOME/Library/Application Support/Zotero/Profiles/i1aek1w8.beaver-dev}"
 SRC_DATADIR="${SRC_DATADIR:-$HOME/Zotero beaver-dev}"
 ZOTERO_BIN="${ZOTERO_BIN:-/Applications/Zotero.app/Contents/MacOS/zotero}"
+[[ -x "$ZOTERO_BIN" ]] || { echo "ZOTERO_BIN is not executable: $ZOTERO_BIN" >&2; exit 1; }
 
 [[ -d "$SRC_PROFILE" ]] || { echo "SRC_PROFILE not found: $SRC_PROFILE" >&2; exit 1; }
 [[ -d "$SRC_DATADIR" ]] || { echo "SRC_DATADIR not found: $SRC_DATADIR" >&2; exit 1; }
@@ -504,6 +534,18 @@ set_pref("app.update.auto",                              "false")
 p.write_text(text)
 PY
 
+# 5a. Optional Zotero 11 hardening prefs (user.js). Skipped while this
+#     profile's Zotero runs: it would rewrite prefs.js on exit.
+if [[ "$HARDENING" != "0" ]]; then
+  if zc_dir_in_use "$DEST_PROFILE"; then
+    echo "==> Zotero is running on $DEST_PROFILE -- not writing hardening prefs."
+    echo "    Stop it, then: $SCRIPT_DIR/worktree-zotero.sh hardening $HARDENING \"$WORKTREE_DIR\""
+  else
+    echo "==> Writing Zotero 11 hardening prefs ($HARDENING) to $DEST_PROFILE/user.js"
+    z11_set_hardening "$DEST_PROFILE" "$HARDENING"
+  fi
+fi
+
 # 5b. Fresh clones inherit extensions.json whose addon `path` values still
 #     point at the *source* profile. Zotero then fails to activate Beaver (and
 #     other XPIs) from the clone's own extensions/ dir. Purge the registry so
@@ -564,9 +606,9 @@ PY
 #    ports/paths without re-deriving them (read with `jq` or any JSON parser).
 META_FILE="$WORKTREE_DIR/.worktree-meta.json"
 echo "==> Writing $META_FILE"
-python3 - "$META_FILE" "$BRANCH" "$WORKTREE_DIR" "$DEST_PROFILE" "$DEST_DATADIR" "$HTTP_PORT" "$RDP_PORT" <<'PY'
+python3 - "$META_FILE" "$BRANCH" "$WORKTREE_DIR" "$DEST_PROFILE" "$DEST_DATADIR" "$HTTP_PORT" "$RDP_PORT" "$ZOTERO_BIN" <<'PY'
 import json, sys
-path, branch, wt, profile, datadir, http_port, rdp_port = sys.argv[1:]
+path, branch, wt, profile, datadir, http_port, rdp_port, zbin = sys.argv[1:]
 data = {
     "branch": branch,
     "worktree": wt,
@@ -574,6 +616,7 @@ data = {
     "dataDir": datadir,
     "httpPort": int(http_port),
     "rdpPort": int(rdp_port),
+    "zoteroBin": zbin,
     "mcpServer": "zotero-worktree",
 }
 with open(path, "w") as f:
@@ -665,6 +708,8 @@ cat <<EOF
 ==> Done.
 
   Worktree   : $WORKTREE_DIR
+  Zotero bin : $ZOTERO_BIN
+  Hardening  : $(z11_hardening_state "$DEST_PROFILE") (Zotero 11 prefs in user.js)
   Profile    : $DEST_PROFILE
   Data dir   : $DEST_DATADIR
   HTTP port  : $HTTP_PORT

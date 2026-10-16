@@ -22,27 +22,52 @@ function asReadableItem(opts: MockItemOptions = {}): ReadableItem {
 
 describe('readable attachment predicates', () => {
     describe('getReadableContentKind', () => {
-        it('detects PDFs from the native attachment predicate', () => {
-            const item = asReadableAttachment({
-                contentType: 'application/octet-stream',
-                isPDF: true,
-            });
-
-            expect(getReadableContentKind(item)).toBe('pdf');
+        it('detects PDFs and EPUBs from their canonical content types', () => {
+            expect(getReadableContentKind(
+                asReadableAttachment({ contentType: 'application/pdf' }),
+            )).toBe('pdf');
+            expect(getReadableContentKind(
+                asReadableAttachment({ contentType: 'application/epub+zip' }),
+            )).toBe('epub');
         });
 
-        it('detects EPUBs from the native predicate and MIME fallback', () => {
-            const native = asReadableAttachment({
-                contentType: 'application/octet-stream',
-                isEPUB: true,
-            });
-            const mime = asReadableAttachment({
-                contentType: 'application/epub+zip',
-                isEPUB: false,
-            });
+        it('detects PDFs and EPUBs stored under nonstandard content types', () => {
+            for (const contentType of ['application/x-pdf', 'APPLICATION/PDF', 'application/pdf; charset=binary', 'text/pdf']) {
+                expect(getReadableContentKind(asReadableAttachment({ contentType }))).toBe('pdf');
+            }
+            expect(getReadableContentKind(
+                asReadableAttachment({ contentType: 'application/epub' }),
+            )).toBe('epub');
+        });
 
-            expect(getReadableContentKind(native)).toBe('epub');
-            expect(getReadableContentKind(mime)).toBe('epub');
+        it('falls back to the file extension when the content type is generic', () => {
+            const withFilename = (contentType: string, filename: string) => ({
+                ...asReadableAttachment({ contentType }),
+                attachmentFilename: filename,
+            }) as unknown as ReadableItem;
+
+            expect(getReadableContentKind(withFilename('application/octet-stream', 'Chu_2026.pdf'))).toBe('pdf');
+            expect(getReadableContentKind(withFilename('', 'Cawthon - 2010 (2).PDF'))).toBe('pdf');
+            expect(getReadableContentKind(withFilename('binary/octet-stream', 'Neyland - 2019.epub'))).toBe('epub');
+            expect(getReadableContentKind(withFilename('application/octet-stream', 'data'))).toBeNull();
+        });
+
+        it('keeps a specific non-document content type over a misleading extension', () => {
+            const item = {
+                ...asReadableAttachment({ contentType: 'application/msword' }),
+                attachmentFilename: 'report.pdf',
+            } as unknown as ReadableItem;
+
+            expect(getReadableContentKind(item)).toBeNull();
+        });
+
+        it('does not classify linked URLs as documents', () => {
+            const item = {
+                ...asReadableAttachment({ contentType: 'application/pdf', linkMode: LINK_MODE_LINKED_URL }),
+                attachmentFilename: 'paper.pdf',
+            } as unknown as ReadableItem;
+
+            expect(getReadableContentKind(item)).toBeNull();
         });
 
         it('detects images from the native predicate and MIME fallback', () => {

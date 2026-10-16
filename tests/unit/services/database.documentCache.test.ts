@@ -237,6 +237,19 @@ describe('BeaverDB document cache methods', () => {
         expect((await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))?.extractionSource).toBe('ocr');
     });
 
+    it('adds the OCR source md5 column to an existing cache without discarding its rows', async () => {
+        const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
+        await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id, extractionSource: 'ocr' }));
+        conn.getRawDB().exec('ALTER TABLE document_cache_payloads DROP COLUMN source_md5');
+
+        await db.initDatabase('0.99.0');
+
+        expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))
+            .toMatchObject({ extractionSource: 'ocr', sourceMd5: null });
+        await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id, extractionSource: 'ocr', sourceMd5: 'scan-md5' }));
+        expect((await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))?.sourceMd5).toBe('scan-md5');
+    });
+
     it('does not evict a candidate whose provenance became OCR after inspection', async () => {
         const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
         const native = await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id }));

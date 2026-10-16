@@ -3,7 +3,7 @@
  * recognized as object ids, and how they are written when saved into a note.
  */
 import { describe, expect, it } from 'vitest';
-import { hydrateItemLinkLibraryRefs, itemLinkExportHref, parseItemLinkHref } from '../../../react/utils/itemLinks';
+import { hydrateItemLinkLibraryRefs, itemLinkExportHref, parseItemLinkHref } from '@beaver/agent-core/identity/itemLinks';
 
 describe('parseItemLinkHref', () => {
     it('recognizes a bare object id in every library form', () => {

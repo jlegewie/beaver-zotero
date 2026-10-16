@@ -15,6 +15,8 @@
  * URLs come from the configure message (see `./config.ts` and `./index.ts`)
  * — the package no longer hardcodes any `chrome://` paths.
  *
+ * When the host shared a compiled module in the configure message, it is
+ * instantiated directly. Otherwise the binary is loaded and compiled here.
  * Workers don't have ChromeUtils/NetUtil and `fetch('chrome://...')` is
  * unreliable in worker scope, so XHR is the only reliable path for the
  * WASM binary.
@@ -26,7 +28,8 @@
 
 import { makeDocumentApi, type MuPDFApi, type LibMuPdf } from "./mupdfApi";
 import { loadWasmBinaryXHR } from "./wasmHelpers";
-import { getWorkerUrls } from "./config";
+import { getWorkerCompiledWasm, getWorkerUrls } from "./config";
+import { postLog } from "./errors";
 import {
     getCachedApi,
     getCachedLibMuPdf,
@@ -43,6 +46,39 @@ if (typeof globalThis.$libmupdf_load_font_file !== "function") {
 
 let _initPromise: Promise<LibMuPdf> | null = null;
 
+type MuPdfWasmFactory = (config: unknown) => Promise<LibMuPdf>;
+
+/**
+ * Run the Emscripten factory on an already compiled module. The factory's
+ * `instantiateWasm` hook has no failure callback, so a failed instantiation
+ * rejects this promise directly instead of leaving the factory pending.
+ */
+function instantiateCompiled(
+    wasmFactory: MuPdfWasmFactory,
+    module: WebAssembly.Module,
+): Promise<LibMuPdf> {
+    return new Promise((resolve, reject) => {
+        wasmFactory({
+            instantiateWasm: (
+                imports: WebAssembly.Imports,
+                receiveInstance: (
+                    instance: WebAssembly.Instance,
+                    module: WebAssembly.Module,
+                ) => void,
+            ) => {
+                WebAssembly.instantiate(module, imports).then((instance) => {
+                    try {
+                        receiveInstance(instance, module);
+                    } catch (e) {
+                        reject(e);
+                    }
+                }, reject);
+                return {};
+            },
+        }).then(resolve, reject);
+    });
+}
+
 export async function ensureInit(): Promise<LibMuPdf> {
     const cached = getCachedLibMuPdf();
     if (cached) return cached;
@@ -55,20 +91,31 @@ export async function ensureInit(): Promise<LibMuPdf> {
         const factoryUrl = urls.mupdfWasmFactoryUrl;
         const binaryUrl = urls.mupdfWasmBinaryUrl;
 
-        const wasmBinary = await loadWasmBinaryXHR(binaryUrl);
-        const wasmConfig = {
-            wasmBinary,
-            locateFile: (path: string) =>
-                path && path.endsWith(".wasm") ? binaryUrl : path,
-        };
-
         // Dynamic import of the WASM factory at runtime — see file header.
         // esbuild leaves this dynamic because the specifier is a variable.
-        const mod: { default: (config: unknown) => Promise<LibMuPdf> } =
-            await import(factoryUrl);
+        const mod: { default: MuPdfWasmFactory } = await import(factoryUrl);
         const wasmFactory = mod.default;
 
-        const libmupdf = await wasmFactory(wasmConfig);
+        let libmupdf: LibMuPdf | null = null;
+        const compiled = getWorkerCompiledWasm().mupdf;
+        if (compiled) {
+            try {
+                libmupdf = await instantiateCompiled(wasmFactory, compiled);
+            } catch (e) {
+                postLog(
+                    "warn",
+                    `[mupdf-worker] shared MuPDF module failed to instantiate; loading the binary: ${e instanceof Error ? e.message : String(e)}`,
+                );
+            }
+        }
+        if (!libmupdf) {
+            const wasmBinary = await loadWasmBinaryXHR(binaryUrl);
+            libmupdf = await wasmFactory({
+                wasmBinary,
+                locateFile: (path: string) =>
+                    path && path.endsWith(".wasm") ? binaryUrl : path,
+            });
+        }
         libmupdf._wasm_init_context();
         return libmupdf;
     })();

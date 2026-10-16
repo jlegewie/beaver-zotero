@@ -146,11 +146,12 @@ describe('external file citations in notes', () => {
             .toThrow('Copy the existing link or text from read_note');
     });
 
-    it('keeps existing compound citations immutable', () => {
+    it('refuses to replace an existing compound citation with a file reference', () => {
         const meta = metadata();
         meta.elements.set('c_existing', { rawHtml: 'compound citation', isCompound: true });
-        expect(expandToRawHtml(tag.replace('id=', 'ref="c_existing" id='), meta, 'new'))
-            .toBe('compound citation');
+        expect(() => expandToRawHtml(tag.replace('id=', 'ref="c_existing" id='), meta, 'new'))
+            .toThrow('compound citation, which cannot be edited');
+        expect(expandToRawHtml('<citation ref="c_existing"/>', meta, 'new')).toBe('compound citation');
     });
 
     it('requires old_string to use the stored link, and round-trips that link', () => {

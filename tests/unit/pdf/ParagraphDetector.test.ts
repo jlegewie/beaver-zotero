@@ -16,13 +16,14 @@ import { describe, it, expect } from 'vitest';
 import {
     looksLikeFragmentedCJKBody,
     detectParagraphs,
+    type ParagraphDetectionSettings,
 } from '../../../src/beaver-extract/ParagraphDetector';
 import type {
     PageLine,
     DetectedSpan,
     PageLineResult,
 } from '../../../src/beaver-extract/LineDetector';
-import { bboxHeight, type BoundingBox, type TextStyle } from '@beaver/agent-core/extract/types';
+import { bboxHeight, type BoundingBox, type RawStyleRun, type TextStyle } from '@beaver/agent-core/extract/types';
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -283,7 +284,8 @@ interface LeaderLineSpec {
         font?: string;
         bold?: boolean;
         italic?: boolean;
-    };
+    };    /** Per-glyph style runs attached to the main span (see `RawLine.styleRuns`). */
+    styleRuns?: RawStyleRun[];
 }
 
 // Line bbox height tracks main span size so font-size + line-height shifts
@@ -330,6 +332,7 @@ function makeMultiSpanLine(spec: LeaderLineSpec, top: number): PageLine {
         fontName: font,
         fontWeight: bold ? 'bold' : 'normal',
         fontStyle: italic ? 'italic' : 'normal',
+        styleRuns: spec.styleRuns,
     };
     spans.push(mainSpan);
 
@@ -1213,8 +1216,29 @@ describe('header detection', () => {
         i === FILLERS.length - 1 ? { ...f, gapAfter: 14 } : f,
     );
 
-    function items(specs: LeaderLineSpec[], bodyStyles: TextStyle[]) {
-        return detectParagraphs(makeColumnPageResult(specs), bodyStyles).items;
+    function items(specs: LeaderLineSpec[], bodyStyles: TextStyle[], settings: ParagraphDetectionSettings = {}) {
+        return detectParagraphs(makeColumnPageResult(specs), bodyStyles, settings).items;
+    }
+
+    // Per-glyph style run (see `RawLine.styleRuns`).
+    function run(
+        font: string,
+        chars: number,
+        letters: number,
+        opts: { size?: number; exactSize?: number; bold?: boolean; italic?: boolean } = {},
+    ): RawStyleRun {
+        return {
+            font: {
+                name: font,
+                family: font,
+                weight: opts.bold ? 'bold' : 'normal',
+                style: opts.italic ? 'italic' : 'normal',
+                size: opts.size ?? 10,
+            },
+            exactSize: opts.exactSize,
+            chars,
+            letters,
+        };
     }
 
     describe('heading-capitalization guard', () => {
@@ -1294,6 +1318,1481 @@ describe('header detection', () => {
         });
     });
 
+    describe('majority styling veto', () => {
+        // MuPDF reports a line's font from its first glyph. With per-glyph
+        // style runs, a heading cue carried by the opening word alone no
+        // longer makes the line a heading.
+        function kindOf(spec: LeaderLineSpec, needle: string): string | undefined {
+            return items([...FILLERS_BEFORE_HEADING, spec], [BODY]).find(it => it.text.includes(needle))?.type;
+        }
+
+        it('demotes a line whose bold cue is only the run-in label', () => {
+            const spec: LeaderLineSpec = {
+                text: 'Practice points: undocumented immigrant; stop and frisk',
+                l: 0,
+                size: 10,
+                bold: true,
+                font: 'Sans-Bold',
+            };
+            // Without style runs the first-glyph bold reads as a bold line.
+            expect(kindOf(spec, 'Practice points:')).toBe('header');
+            const runs = [run('Sans-Bold', 15, 14, { bold: true }), run('Sans', 39, 37)];
+            expect(kindOf({ ...spec, styleRuns: runs }, 'Practice points:')).toBe('paragraph');
+        });
+
+        it('demotes a line whose italic cue is only the opening word', () => {
+            const runs = [
+                run('Times-Italic', 5, 4, { italic: true }),
+                run('Times-Roman', 1, 0),
+                run('Times-Italic', 1, 1, { italic: true }),
+                run('Times-Roman', 6, 0),
+                run('Times-Roman', 1, 0),
+                run('Times-Italic', 1, 1, { italic: true }),
+                run('Times-Roman', 6, 0),
+            ];
+            const spec: LeaderLineSpec = {
+                text: 'Note: * p < 0.05; † p < 0.01.',
+                l: 0,
+                size: 10,
+                italic: true,
+                font: 'Times-Italic',
+                styleRuns: runs,
+            };
+            expect(kindOf(spec, 'Note:')).toBe('paragraph');
+        });
+
+        it('demotes a line whose semibold face covers only the run-in label', () => {
+            // The semibold label has more glyphs than either plain face after
+            // it, but a weight-named face must cover the majority share to
+            // describe the line.
+            const runs = [
+                run('Graphik-Semibold', 21, 21, { bold: true }),
+                run('Graphik-RegularItalic', 14, 14, { italic: true }),
+                run('Graphik-Regular', 20, 19),
+            ];
+            const spec: LeaderLineSpec = {
+                text: 'Peer review information Nature Medicine thanks Harald Kittler,',
+                l: 0,
+                size: 10,
+                bold: true,
+                font: 'Graphik-Semibold',
+                styleRuns: runs,
+            };
+            expect(kindOf(spec, 'Peer review information')).toBe('paragraph');
+        });
+
+        it('keeps a semibold heading with a short math run', () => {
+            const runs = [run('Graphik-Semibold', 30, 30, { bold: true }), run('Graphik-Regular', 3, 2)];
+            const spec: LeaderLineSpec = {
+                text: 'Estimating the effect of X on outcomes',
+                l: 0,
+                size: 10,
+                font: 'Graphik-Semibold',
+                styleRuns: runs,
+            };
+            expect(kindOf(spec, 'Estimating the effect')).toBe('header');
+        });
+
+        it('keeps a bold heading with a trailing footnote marker in another font', () => {
+            const runs = [run('Heading-Bold', 19, 19, { bold: true }), run('Times-Roman', 1, 0, { size: 7 })];
+            const spec: LeaderLineSpec = {
+                text: 'Materials and Methods1',
+                l: 0,
+                size: 10,
+                bold: true,
+                font: 'Heading-Bold',
+                styleRuns: runs,
+            };
+            expect(kindOf(spec, 'Materials and Methods')).toBe('header');
+        });
+
+        it('keeps a fake small-caps heading set in two sizes of one font', () => {
+            const runs = [run('Times-Roman', 3, 2, { size: 12 }), run('Times-Roman', 11, 11, { size: 9 })];
+            const spec: LeaderLineSpec = {
+                text: 'I. INTRODUCTION',
+                l: 0,
+                size: 12,
+                font: 'Times-Roman',
+                styleRuns: runs,
+            };
+            expect(kindOf(spec, 'INTRODUCTION')).toBe('header');
+        });
+
+        it('does not let math-font glyphs outvote a bold heading', () => {
+            const runs = [
+                run('Heading-Bold', 12, 12, { bold: true }),
+                run('CMMI10', 1, 1, { italic: true }),
+                run('CMR10', 1, 0),
+                run('CMMI10', 5, 5, { italic: true }),
+                run('Heading-Bold', 4, 4, { bold: true }),
+            ];
+            const spec: LeaderLineSpec = {
+                text: 'Bounds for the k = const case',
+                l: 0,
+                size: 10,
+                bold: true,
+                font: 'Heading-Bold',
+                styleRuns: runs,
+            };
+            expect(kindOf(spec, 'Bounds for the')).toBe('header');
+        });
+
+        it('keeps a heading separate from a following line that only opens in bold', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    // Both lines end at the column's right edge, so no early-line-end
+                    // break separates them; only the style change does.
+                    { text: 'Add a walrus', l: 0, r: 305, size: 10, bold: true, font: 'Georgia-Bold' },
+                    {
+                        text: 'Add a walrus is delightfully dumb. Upload an image to try it.',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Sans-Bold',
+                        styleRuns: [run('Sans-Bold', 10, 10, { bold: true }), run('Sans', 42, 39)],
+                    },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Add a walrus'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).not.toContain('delightfully');
+            const body = all.find(it => it.text.includes('delightfully'));
+            expect(body!.type).toBe('paragraph');
+        });
+
+        it('keeps a heading separate from a same-style run-in line set below it', () => {
+            // A heading sits above its paragraph with extra space; the gap,
+            // not the opening style, ends the heading.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: 'Materials and Methods',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-Bold',
+                        gapAfter: 14,
+                    },
+                    {
+                        text: 'Keywords: undocumented immigrant; stop and frisk; education',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-Bold',
+                        styleRuns: [run('Heading-Bold', 9, 8, { bold: true }), run('Sans', 45, 44)],
+                    },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Materials and Methods'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).not.toContain('Keywords');
+            expect(all.find(it => it.text.includes('Keywords:'))!.type).toBe('paragraph');
+        });
+
+        it('keeps a larger heading separate from a same-font run-in line set one point smaller', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: 'Materials and Methods',
+                        l: 0,
+                        r: 305,
+                        size: 11,
+                        bold: true,
+                        font: 'Heading-Bold',
+                        styleRuns: [run('Heading-Bold', 19, 19, { size: 11, exactSize: 11, bold: true })],
+                    },
+                    {
+                        text: 'Study design. Participants were recruited from twelve clinics',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-Bold',
+                        styleRuns: [
+                            run('Heading-Bold', 12, 11, { exactSize: 10, bold: true }),
+                            run('Sans', 44, 42, { exactSize: 10 }),
+                        ],
+                    },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Materials and Methods'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).not.toContain('Study design');
+        });
+
+        it('treats a one-point difference from size truncation as the same face', () => {
+            // An italic reference title wrapping across lines whose sizes
+            // truncate to 10 and 9 (exact 10.06 / 9.86) stays one paragraph.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: 'of Interior Immigration Enforcement on the Behaviors of',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        italic: true,
+                        font: 'Times-Italic',
+                        styleRuns: [run('Times-Italic', 50, 48, { size: 10, exactSize: 10.06, italic: true })],
+                    },
+                    {
+                        text: 'Immigrants. Report. La Jolla, CA: Policy Center and other places.',
+                        l: 0,
+                        r: 305,
+                        size: 9,
+                        italic: true,
+                        font: 'Times-Italic',
+                        styleRuns: [
+                            run('Times-Italic', 11, 10, { size: 9, exactSize: 9.86, italic: true }),
+                            run('Times-Roman', 46, 40, { size: 9, exactSize: 9.96 }),
+                        ],
+                    },
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('of Interior'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('Immigrants. Report.');
+        });
+
+        it('keeps a run-in heading that wraps onto its second line in one paragraph', () => {
+            // Without a gap, a full-width bold line followed by a line that
+            // opens in the same bold face is a wrapped run-in heading, not a
+            // heading followed by a paragraph.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: 'Generation of Constructs for Expression in',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-Bold',
+                    },
+                    {
+                        text: 'Mammalian Cells. We cloned the full-length coding sequence into',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-Bold',
+                        styleRuns: [run('Heading-Bold', 15, 14, { bold: true }), run('Sans', 40, 39)],
+                    },
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('Generation of Constructs'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('Mammalian Cells. We cloned');
+        });
+
+        it('never promotes a line on its majority styling', () => {
+            // An italic quotation whose opening quote mark is in the body
+            // font: the first-glyph style rejects it, and the italic majority
+            // must not override that.
+            const runs = [
+                run('Times-Roman', 1, 0),
+                run('Times-Italic', 40, 38, { italic: true }),
+                run('Times-Roman', 1, 0),
+            ];
+            const spec: LeaderLineSpec = {
+                text: '“Quoted words in italic carry no heading signal at all.”',
+                l: 0,
+                size: 10,
+                font: 'Times-Roman',
+                styleRuns: runs,
+            };
+            expect(kindOf(spec, 'Quoted words')).toBe('paragraph');
+        });
+    });
+
+    describe('numbered headings with the number in the body face', () => {
+        // "2.4 Freeing Up Women's Time": the section number is set in the
+        // body face and the title in italic.
+        function numbered(text: string, titleChars: number, r: number, withRuns = true): LeaderLineSpec {
+            const numberChars = text.split(' ')[0].length;
+            return {
+                text,
+                l: 0,
+                r,
+                size: 10,
+                font: 'Times-Roman',
+                styleRuns: withRuns
+                    ? [run('Times-Roman', numberChars, 0), run('Times-Italic', titleChars, titleChars, { italic: true })]
+                    : undefined,
+            };
+        }
+        const BODY_AFTER: LeaderLineSpec[] = FILLERS.slice(0, 2);
+
+        it('promotes a numbered title set in a heading face', () => {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, numbered('2.4 Freeing Up Women’s Time', 22, 140), ...BODY_AFTER],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Freeing Up'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).not.toContain('Filler');
+        });
+
+        it('keeps a wrapped numbered title in one heading', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    numbered('2.1 Relaxing the Grip of Poverty through', 34, 200),
+                    {
+                        text: 'Economic Development',
+                        l: 0,
+                        r: 105,
+                        size: 10,
+                        italic: true,
+                        font: 'Times-Italic',
+                        styleRuns: [run('Times-Italic', 19, 19, { italic: true })],
+                        gapAfter: 8,
+                    },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Relaxing the Grip'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).toContain('Economic Development');
+        });
+
+        it('does not promote a numbered line whose text opens in the body face', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: '2. The book Wealth of Nations is cited throughout.',
+                        l: 0,
+                        r: 250,
+                        size: 10,
+                        font: 'Times-Roman',
+                        styleRuns: [
+                            run('Times-Roman', 10, 8),
+                            run('Times-Italic', 15, 15, { italic: true }),
+                            run('Times-Roman', 17, 16),
+                        ],
+                    },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('Wealth of Nations'))!.type).toBe('paragraph');
+        });
+
+        it('keeps a numbered run-in heading that wraps into its paragraph', () => {
+            // The title wraps onto a line that opens in the same bold face and
+            // switches to body prose at normal leading.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: '2.4 Generation of Constructs for Expression in',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        font: 'Times-Roman',
+                        styleRuns: [run('Times-Roman', 3, 0), run('Times-Bold', 38, 38, { bold: true })],
+                    },
+                    {
+                        text: 'Mammalian Cells. We cloned the full-length coding sequence into',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Times-Bold',
+                        styleRuns: [run('Times-Bold', 15, 14, { bold: true }), run('Times-Roman', 48, 46)],
+                    },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('Generation of Constructs'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('Mammalian Cells. We cloned');
+        });
+
+        it('does not promote a table row whose first cell is a numbered label', () => {
+            // "1. Placebo treatment | 40 | 50": the label and the value cells
+            // are separate spans; only the label is bold.
+            const page = makeColumnPageResult([...FILLERS_BEFORE_HEADING, ...BODY_AFTER]);
+            const lines = page.columnResults[0].lines;
+            const top = lines[FILLERS_BEFORE_HEADING.length - 1].bbox.b + 14;
+            const cell = (text: string, l: number, runs: RawStyleRun[]): DetectedSpan => ({
+                text,
+                bbox: bbox(l, top, l + text.length * 5, top + 10),
+                lineBBox: bbox(l, top, l + text.length * 5, top + 10),
+                size: 10,
+                fontName: 'Times-Roman',
+                fontWeight: 'normal',
+                fontStyle: 'normal',
+                styleRuns: runs,
+            });
+            const spans = [
+                cell('1. Placebo treatment', 0, [run('Times-Roman', 2, 0), run('Times-Bold', 16, 16, { bold: true })]),
+                cell('40', 200, [run('Times-Roman', 2, 0)]),
+                cell('50', 260, [run('Times-Roman', 2, 0)]),
+            ];
+            const row: PageLine = {
+                spans,
+                bboxes: spans.map(s => s.lineBBox),
+                bbox: bbox(0, top, 270, top + 12),
+                text: '1. Placebo treatment 40 50',
+                fontSize: 10,
+            };
+            // Shift the body lines below the row.
+            for (const line of lines.slice(FILLERS_BEFORE_HEADING.length)) {
+                const shift = 30;
+                line.bbox = bbox(line.bbox.l, line.bbox.t + shift, line.bbox.r, line.bbox.b + shift);
+            }
+            lines.splice(FILLERS_BEFORE_HEADING.length, 0, row);
+            page.allLines = lines;
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('Placebo'))!.type).toBe('paragraph');
+        });
+
+        it('promotes a numbered title that continues in a second span', () => {
+            // The title is split across two spans, both in the title's face.
+            const page = makeColumnPageResult([...FILLERS_BEFORE_HEADING, ...BODY_AFTER]);
+            const lines = page.columnResults[0].lines;
+            const top = lines[FILLERS_BEFORE_HEADING.length - 1].bbox.b + 14;
+            const span = (text: string, l: number, font: string, runs: RawStyleRun[]): DetectedSpan => ({
+                text,
+                bbox: bbox(l, top, l + text.length * 5, top + 10),
+                lineBBox: bbox(l, top, l + text.length * 5, top + 10),
+                size: 10,
+                fontName: font,
+                fontWeight: 'normal',
+                fontStyle: font.includes('Italic') ? 'italic' : 'normal',
+                styleRuns: runs,
+            });
+            const spans = [
+                span('4.2 Power absorption', 0, 'Times-Roman', [
+                    run('Times-Roman', 3, 0),
+                    run('Times-Italic', 15, 15, { italic: true }),
+                ]),
+                span('of particle suspensions', 105, 'Times-Italic', [run('Times-Italic', 21, 21, { italic: true })]),
+            ];
+            const heading: PageLine = {
+                spans,
+                bboxes: spans.map(s => s.lineBBox),
+                bbox: bbox(0, top, 220, top + 12),
+                text: '4.2 Power absorption of particle suspensions',
+                fontSize: 10,
+            };
+            for (const line of lines.slice(FILLERS_BEFORE_HEADING.length)) {
+                line.bbox = bbox(line.bbox.l, line.bbox.t + 30, line.bbox.r, line.bbox.b + 30);
+            }
+            lines.splice(FILLERS_BEFORE_HEADING.length, 0, heading);
+            page.allLines = lines;
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('Power absorption'))!.type).toBe('header');
+        });
+
+        it('promotes a numbered title with a math-font span', () => {
+            const page = makeColumnPageResult([...FILLERS_BEFORE_HEADING, ...BODY_AFTER]);
+            const lines = page.columnResults[0].lines;
+            const top = lines[FILLERS_BEFORE_HEADING.length - 1].bbox.b + 14;
+            const span = (text: string, l: number, font: string, runs: RawStyleRun[]): DetectedSpan => ({
+                text,
+                bbox: bbox(l, top, l + text.length * 5, top + 10),
+                lineBBox: bbox(l, top, l + text.length * 5, top + 10),
+                size: 10,
+                fontName: font,
+                fontWeight: 'normal',
+                fontStyle: 'italic',
+                styleRuns: runs,
+            });
+            const spans = [
+                span('2. Case of the entangled state', 0, 'Times-Roman', [
+                    run('Times-Roman', 2, 0),
+                    run('Times-Italic', 24, 24, { italic: true }),
+                ]),
+                span('Ψ', 155, 'CMMI10', [run('CMMI10', 1, 1, { italic: true })]),
+            ];
+            const heading: PageLine = {
+                spans,
+                bboxes: spans.map(s => s.lineBBox),
+                bbox: bbox(0, top, 160, top + 12),
+                text: '2. Case of the entangled state Ψ',
+                fontSize: 10,
+            };
+            for (const line of lines.slice(FILLERS_BEFORE_HEADING.length)) {
+                line.bbox = bbox(line.bbox.l, line.bbox.t + 30, line.bbox.r, line.bbox.b + 30);
+            }
+            lines.splice(FILLERS_BEFORE_HEADING.length, 0, heading);
+            page.allLines = lines;
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('entangled state'))!.type).toBe('header');
+        });
+
+        it('does not promote a bare page number before a running head', () => {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { ...numbered('90 Aoife O’Donoghue and Adam Rowe', 25, 180), gapAfter: 12 }, ...BODY_AFTER],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('Aoife'))!.type).toBe('paragraph');
+        });
+
+        it('does not promote an affiliation behind a smaller marker number', () => {
+            const spec = { ...numbered('2. Center for Anxiety and Traumatic Stress Disorders', 46, 260), gapAfter: 12 };
+            spec.styleRuns = [run('Times-Roman', 2, 0, { size: 6, exactSize: 6 }), run('Times-Italic', 46, 46, { italic: true })];
+            const all = items([...FILLERS_BEFORE_HEADING, spec, ...BODY_AFTER], [BODY]);
+            expect(all.find(it => it.text.includes('Center for Anxiety'))!.type).toBe('paragraph');
+        });
+
+        it('does not promote a contents entry with dot leaders', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { ...numbered('12.9.5. Grupo familiar . . . . . . . . . 45', 30, 300), gapAfter: 12 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('Grupo familiar'))!.type).toBe('paragraph');
+        });
+
+        it('does not promote a numbered entry set smaller than the body', () => {
+            const spec: LeaderLineSpec = {
+                text: '89. Sandhu S, Lemmon ME, Eisenson H, Crowder C',
+                l: 0,
+                r: 230,
+                size: 8,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', 3, 0, { size: 8 }), run('Times-Bold', 36, 30, { size: 8, bold: true })],
+                gapAfter: 12,
+            };
+            const all = items([...FILLERS_BEFORE_HEADING, spec, ...BODY_AFTER], [BODY]);
+            expect(all.find(it => it.text.includes('Sandhu'))!.type).toBe('paragraph');
+        });
+
+        it('leaves the line alone without style runs', () => {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, numbered('2.4 Freeing Up Women’s Time', 22, 140, false), ...BODY_AFTER],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('Freeing Up'))!.type).toBe('paragraph');
+        });
+    });
+
+    describe('size differences within one font', () => {
+        // Style runs in one font at different sizes: fake small caps,
+        // superscripts and subscripts, size-truncation jitter, and text set
+        // larger in the body font for emphasis.
+        function kindOf(spec: LeaderLineSpec, needle: string): string | undefined {
+            return items([...FILLERS_BEFORE_HEADING, spec, ...FILLERS.slice(0, 2)], [BODY]).find(it =>
+                it.text.includes(needle),
+            )?.type;
+        }
+
+        it('demotes a line whose run-in label is set larger in the body font', () => {
+            // "Speed: Translation by…": the label is emphasized by size, not
+            // by a bold face, so the first glyph reads larger than the body.
+            const spec: LeaderLineSpec = {
+                text: 'Speed: Translation by or with the aid of machines can be faster.',
+                l: 0,
+                size: 11,
+                font: 'Times-Roman',
+            };
+            expect(kindOf({ ...spec, gapAfter: 12 }, 'Speed:')).toBe('header');
+            const runs = [
+                run('Times-Roman', 6, 5, { size: 11, exactSize: 10.8 }),
+                run('Times-Roman', 49, 44, { size: 10, exactSize: 10 }),
+            ];
+            expect(kindOf({ ...spec, gapAfter: 12, styleRuns: runs }, 'Speed:')).toBe('paragraph');
+        });
+
+        it('demotes prose around a larger operator glyph', () => {
+            const runs = [
+                run('Times-Roman', 2, 2, { size: 13, exactSize: 13.6 }),
+                run('Times-Roman', 16, 14, { size: 10, exactSize: 10 }),
+                run('Times-Roman', 1, 0, { size: 13, exactSize: 13.6 }),
+                run('Times-Roman', 20, 18, { size: 10, exactSize: 10 }),
+            ];
+            const spec: LeaderLineSpec = {
+                text: 'If x is part of y, then x = ab is a substring of y here',
+                l: 0,
+                size: 13,
+                font: 'Times-Roman',
+                styleRuns: runs,
+                gapAfter: 12,
+            };
+            expect(kindOf(spec, 'If x is part')).toBe('paragraph');
+        });
+
+        it('keeps a heading whose acronyms are set in small caps', () => {
+            // Capital letters set smaller in the heading's own font.
+            const runs = [
+                run('Sans', 10, 10, { size: 12, exactSize: 12 }),
+                run('Sans', 5, 5, { size: 10, exactSize: 9.6 }),
+                run('Sans', 3, 3, { size: 12, exactSize: 12 }),
+                run('Sans', 4, 4, { size: 10, exactSize: 9.6 }),
+            ];
+            const spec: LeaderLineSpec = {
+                text: 'Estimating NAIRU for OECD',
+                l: 0,
+                size: 12,
+                font: 'Sans',
+                styleRuns: runs,
+                gapAfter: 12,
+            };
+            expect(kindOf(spec, 'Estimating NAIRU')).toBe('header');
+        });
+
+        it('keeps a heading with lowercase subscripts', () => {
+            // "2. Case 2h2m": the subscripts are set much smaller than the
+            // italic title, in the title's own font.
+            const runs = [
+                run('Times-Roman', 2, 0, { exactSize: 10 }),
+                run('Times-Italic', 4, 4, { exactSize: 10, italic: true }),
+                run('Times-Roman', 1, 0, { size: 6, exactSize: 6 }),
+                run('Times-Italic', 1, 1, { size: 6, exactSize: 6, italic: true }),
+                run('Times-Roman', 1, 0, { size: 6, exactSize: 6 }),
+                run('Times-Italic', 1, 1, { size: 6, exactSize: 6, italic: true }),
+            ];
+            const spec: LeaderLineSpec = {
+                text: '2. Case 2h2m',
+                l: 0,
+                size: 10,
+                font: 'Times-Roman',
+                styleRuns: runs,
+                gapAfter: 12,
+            };
+            expect(kindOf(spec, 'Case 2h2m')).toBe('header');
+        });
+    });
+
+    describe('numbered titles split from their section number', () => {
+        // A wide space after the section number makes the number a span of
+        // its own; the number and the title read as two styles when their
+        // sizes truncate differently (11.94 → 11, 12.0 → 12).
+        function lineOf(parts: { text: string; font: string; size: number; runs: RawStyleRun[] }[]): {
+            page: PageLineResult;
+            text: string;
+        } {
+            const page = makeColumnPageResult([...FILLERS_BEFORE_HEADING, ...FILLERS.slice(0, 2)]);
+            const lines = page.columnResults[0].lines;
+            const top = lines[FILLERS_BEFORE_HEADING.length - 1].bbox.b + 14;
+            let l = 0;
+            const spans: DetectedSpan[] = parts.map(part => {
+                const r = l + part.text.length * 5;
+                const span: DetectedSpan = {
+                    text: part.text,
+                    bbox: bbox(l, top, r, top + part.size),
+                    lineBBox: bbox(l, top, r, top + part.size),
+                    size: part.size,
+                    fontName: part.font,
+                    fontWeight: part.font.includes('Bold') ? 'bold' : 'normal',
+                    fontStyle: part.font.includes('Italic') ? 'italic' : 'normal',
+                    styleRuns: part.runs,
+                };
+                l = r + 15;
+                return span;
+            });
+            const text = parts.map(p => p.text).join(' ');
+            const line: PageLine = {
+                spans,
+                bboxes: spans.map(s => s.lineBBox),
+                bbox: bbox(0, top, l, top + 13),
+                text,
+                fontSize: parts[0].size,
+            };
+            for (const below of lines.slice(FILLERS_BEFORE_HEADING.length)) {
+                below.bbox = bbox(below.bbox.l, below.bbox.t + 30, below.bbox.r, below.bbox.b + 30);
+            }
+            lines.splice(FILLERS_BEFORE_HEADING.length, 0, line);
+            page.allLines = lines;
+            return { page, text };
+        }
+
+        it('promotes a numbered title whose number is set in its face at a jittered size', () => {
+            const { page } = lineOf([
+                {
+                    text: '2.1.1',
+                    font: 'Sans-Bold',
+                    size: 11,
+                    runs: [run('Sans-Bold', 5, 0, { size: 11, exactSize: 11.94, bold: true })],
+                },
+                {
+                    text: 'Levels of Linguistic Description',
+                    font: 'Sans-Bold',
+                    size: 12,
+                    runs: [run('Sans-Bold', 29, 29, { size: 12, exactSize: 12, bold: true })],
+                },
+            ]);
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('Levels of Linguistic'))!.type).toBe('header');
+        });
+
+        it('does not read another subset of the number’s font as a title face', () => {
+            // A numbered reference entry set larger than the body: the
+            // author names need a glyph from a second subset of the same face.
+            const { page } = lineOf([
+                { text: '27.', font: 'AAAAAA+Calibri', size: 11, runs: [run('AAAAAA+Calibri', 3, 0, { size: 11 })] },
+                {
+                    text: 'Henyš P and Čapek L. Individual yarn fibre extraction',
+                    font: 'BBBBBB+Calibri',
+                    size: 11,
+                    runs: [run('BBBBBB+Calibri', 46, 42, { size: 11 })],
+                },
+            ]);
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('Henyš'))!.type).toBe('paragraph');
+        });
+
+        it('does not describe a line by an italic face that covers only part of it', () => {
+            // A numbered question: an italic question, then its roman gloss.
+            // The italic face has the most glyphs but doesn't make the line
+            // italic.
+            const { page } = lineOf([
+                { text: '2.', font: 'Garamond', size: 10, runs: [run('Garamond', 2, 0)] },
+                {
+                    text: 'Was sind Medienveränderungen im Netzwerk? Konkret: Was sind die',
+                    font: 'Garamond-Italic',
+                    size: 10,
+                    runs: [run('Garamond-Italic', 37, 35, { italic: true }), run('Garamond', 25, 22)],
+                },
+            ]);
+            const all = detectParagraphs(page, [bodyStyle(10, 'Garamond')]).items;
+            expect(all.find(it => it.text.includes('Medienveränderungen'))!.type).toBe('paragraph');
+        });
+    });
+
+    describe('heading followed by a flush-left paragraph', () => {
+        // The column's right edge sits at 305 (filler lines). A long heading
+        // that stops short of it by less than the early-line-end threshold
+        // is followed by a paragraph at normal leading: no gap, indent or
+        // early-end break separates them.
+        const BODY_LINES: LeaderLineSpec[] = [
+            'The first paragraph after the heading starts flush left here.',
+            'and it continues at the same leading as the rest of the text.',
+        ].map(text => ({
+            text,
+            l: 0,
+            r: 305,
+            size: 10,
+            font: 'Times-Roman',
+            styleRuns: [run('Times-Roman', 50, 48)],
+        }));
+
+        function headingSpec(text: string, r: number, withRuns = true): LeaderLineSpec {
+            return {
+                text,
+                l: 0,
+                r,
+                size: 10,
+                bold: true,
+                font: 'Heading-BoldItalic',
+                styleRuns: withRuns ? [run('Heading-BoldItalic', 60, 58, { bold: true })] : undefined,
+            };
+        }
+
+        it('ends a long heading at the first body line', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    headingSpec('Neighborhood racial boundaries versus other forms of spatial interdependence', 270),
+                    ...BODY_LINES,
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Neighborhood racial boundaries'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).not.toContain('first paragraph');
+            expect(all.find(it => it.text.includes('first paragraph'))!.type).toBe('paragraph');
+        });
+
+        it('keeps the heading merged when lines carry no style runs', () => {
+            // Without per-glyph runs a prose line opening with a bold phrase
+            // can't be told from a heading line, so the boundary needs them.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    headingSpec('Neighborhood racial boundaries versus other forms of spatial interdependence', 270, false),
+                    ...BODY_LINES.map(spec => ({ ...spec, styleRuns: undefined })),
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('Neighborhood racial boundaries'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('first paragraph');
+        });
+
+        it('does not split a bold line that fills the column from the text it wraps into', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: 'Applications of single-cell transcriptomics in tumour biology. One major',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-Bold',
+                        styleRuns: [run('Heading-Bold', 55, 52, { bold: true }), run('Times-Roman', 9, 8)],
+                    },
+                    ...BODY_LINES,
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('Applications of single-cell'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('first paragraph');
+        });
+
+        it('keeps a ragged run-in heading that wraps into its paragraph', () => {
+            // The first line ends short of the right edge, as in ragged-right
+            // text; the second line opens in the same bold face and switches
+            // to the body face.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    headingSpec('Generation of Constructs for Expression in', 270),
+                    {
+                        text: 'Mammalian Cells. We cloned the full-length coding sequence into',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-BoldItalic',
+                        styleRuns: [
+                            run('Heading-BoldItalic', 15, 14, { bold: true }),
+                            run('Times-Roman', 48, 46),
+                        ],
+                    },
+                    ...BODY_LINES,
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('Generation of Constructs'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('Mammalian Cells. We cloned');
+        });
+
+        it('ends a heading above a paragraph that opens with its own run-in lead', () => {
+            // Same bold face as the heading, but set slightly apart (4pt
+            // against 2pt leading, still below the paragraph-gap threshold).
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { ...headingSpec('A.5.2 Effect of k on answer consistency in the ablation', 280), gapAfter: 4 },
+                    {
+                        text: 'Accuracy. Small values of k stop the search too early and hurt',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-BoldItalic',
+                        styleRuns: [
+                            run('Heading-BoldItalic', 9, 8, { bold: true }),
+                            run('Times-Roman', 45, 43),
+                        ],
+                    },
+                    ...BODY_LINES,
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('A.5.2 Effect of k'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).not.toContain('Accuracy.');
+        });
+
+        it('ends an all-caps heading set in the body face at the first body line', () => {
+            const caps = (text: string, r: number): LeaderLineSpec => ({
+                text,
+                l: 0,
+                r,
+                size: 10,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', text.replace(/\s/g, '').length, text.replace(/\W/g, '').length)],
+            });
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, caps('INTERNATIONAL HUMAN RIGHTS COMMUNICATION AS LEGAL', 250), ...BODY_LINES],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('INTERNATIONAL HUMAN RIGHTS'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).not.toContain('first paragraph');
+        });
+
+        it('keeps a wrapped all-caps heading together', () => {
+            // Set in the body face: the single-word last line fails the
+            // multi-word caps test on its own but continues the heading.
+            const caps = (text: string, r: number): LeaderLineSpec => ({
+                text,
+                l: 0,
+                r,
+                size: 10,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', text.replace(/\s/g, '').length, text.replace(/\W/g, '').length)],
+            });
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    caps('INTERNATIONAL HUMAN RIGHTS COMMUNICATION AS LEGAL', 250),
+                    caps('PREFIGURATION?', 70),
+                    ...BODY_LINES,
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('INTERNATIONAL HUMAN RIGHTS'));
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).toContain('PREFIGURATION?');
+        });
+
+        it('keeps a heading-styled line with the lowercase text that continues it', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    headingSpec('Accuracy verification and data cleaning: the', 240),
+                    { ...BODY_LINES[1], text: 'accuracy and consistency of the extracted data were verified.' },
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('Accuracy verification'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('accuracy and consistency');
+        });
+
+        it('keeps a heading-styled line with a parenthesised note below it', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    headingSpec('S1 Appendix. Medline search strategy.', 200),
+                    { ...BODY_LINES[1], text: '(DOCX)', r: 30 },
+                ],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('S1 Appendix'))!.text).toContain('(DOCX)');
+        });
+
+        it('does not end a label that introduces the text below it', () => {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, headingSpec('Contact information for the program office:', 240), ...BODY_LINES],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('Contact information'))!.text).toContain('first paragraph');
+        });
+
+        it('does not split table rows', () => {
+            // Column gaps of a table: a header row in a heading face over a
+            // data row in the body face.
+            function row(cells: string[], spec: LeaderLineSpec, top: number): PageLine {
+                const line = makeMultiSpanLine({ ...spec, text: cells.join('') }, top);
+                let x = 0;
+                line.bboxes = cells.map(cell => {
+                    const box = bbox(x, top, x + cell.length * 5, top + 10);
+                    x += cell.length * 5 + 40;
+                    return box;
+                });
+                line.text = cells.join(' ');
+                return line;
+            }
+            const page = makeColumnPageResult([...FILLERS_BEFORE_HEADING]);
+            const lines = page.columnResults[0].lines;
+            const top = lines[lines.length - 1].bbox.b + 14;
+            const header = row(['Source of variance', 'F', 'df', 'p'], headingSpec('', 250), top);
+            const data = row(['Group effect', '89.9', '2,97', '0.000'], BODY_LINES[0], top + 14);
+            lines.push(header, data);
+            page.allLines = lines;
+            const all = detectParagraphs(page, [BODY]).items;
+            expect(all.find(it => it.text.includes('Source of variance'))!.text).toContain('Group effect');
+        });
+
+        it('keeps an italic journal name with its citation tail at the top of a column', () => {
+            const all = items(
+                [
+                    {
+                        text: 'International Journal of Environmental Research and Public Health',
+                        l: 0,
+                        r: 250,
+                        size: 10,
+                        italic: true,
+                        font: 'Times-Italic',
+                        styleRuns: [run('Times-Italic', 58, 58, { italic: true })],
+                    },
+                    {
+                        text: '21, 1234–1248 (2024).',
+                        l: 0,
+                        r: 105,
+                        size: 10,
+                        font: 'Times-Roman',
+                        styleRuns: [run('Times-Roman', 19, 0)],
+                        gapAfter: 14,
+                    },
+                    ...FILLERS,
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('International Journal'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('1234–1248');
+        });
+
+        it('keeps a numbered italic journal name with its citation tail', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: '2. International Journal of Environmental Research and Public Health',
+                        l: 0,
+                        r: 250,
+                        size: 10,
+                        font: 'Times-Roman',
+                        styleRuns: [run('Times-Roman', 2, 0), run('Times-Italic', 58, 58, { italic: true })],
+                    },
+                    {
+                        text: '21, 1234–1248 (2024).',
+                        l: 0,
+                        r: 105,
+                        size: 10,
+                        font: 'Times-Roman',
+                        styleRuns: [run('Times-Roman', 19, 0)],
+                        gapAfter: 14,
+                    },
+                    ...FILLERS,
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('International Journal'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('1234–1248');
+        });
+
+        it('judges a run-in continuation by its own leading on a mixed-leading page', () => {
+            // A dense reference column pulls the page's median gap to 1pt;
+            // the body column is set with 13pt gaps.
+            function column(specs: LeaderLineSpec[], left: number, index: number): ColumnLineResult {
+                let top = 0;
+                const lines = specs.map(s => {
+                    const line = makeMultiSpanLine({ ...s, l: s.l + left, r: s.r !== undefined ? s.r + left : undefined }, top);
+                    top += bboxHeight(line.bbox) + (s.gapAfter ?? 2);
+                    return line;
+                });
+                return {
+                    column: { x: left, y: 0, w: 305, h: top },
+                    columnIndex: index,
+                    lines,
+                };
+            }
+            const refs: LeaderLineSpec[] = Array.from({ length: 30 }, (_, i) => ({
+                text: `Reference entry number ${i + 1} set densely in the side column.`,
+                l: 0,
+                r: 305,
+                size: 10,
+                font: 'Times-Roman',
+                gapAfter: 1,
+            }));
+            const loose = (spec: LeaderLineSpec): LeaderLineSpec => ({ ...spec, gapAfter: 13 });
+            const body = column(
+                [
+                    ...FILLERS.map(loose).map((f, i) => (i === FILLERS.length - 1 ? { ...f, gapAfter: 30 } : f)),
+                    loose(headingSpec('Generation of Constructs for Expression in', 270)),
+                    loose({
+                        text: 'Mammalian Cells. We cloned the full-length coding sequence into',
+                        l: 0,
+                        r: 305,
+                        size: 10,
+                        bold: true,
+                        font: 'Heading-BoldItalic',
+                        styleRuns: [run('Heading-BoldItalic', 15, 14, { bold: true }), run('Times-Roman', 48, 46)],
+                    }),
+                    ...BODY_LINES.map(loose),
+                ],
+                0,
+                0,
+            );
+            const side = column(refs, 330, 1);
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 700,
+                height: 900,
+                columnResults: [body, side],
+                allLines: [...body.lines, ...side.lines],
+            };
+            const all = detectParagraphs(page, [BODY]).items;
+            const item = all.find(it => it.text.includes('Generation of Constructs'));
+            expect(item!.type).toBe('paragraph');
+            expect(item!.text).toContain('Mammalian Cells. We cloned');
+        });
+
+        it('does not cut a paragraph after a diagonal watermark line', () => {
+            // The watermark's box runs far down across the body lines that
+            // follow it.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { ...headingSpec('For Peer Review', 200), bboxHeight: 120, gapAfter: -110 },
+                    ...BODY_LINES,
+                ],
+                [BODY],
+            );
+            expect(all.find(it => it.text.includes('For Peer Review'))!.text).toContain('first paragraph');
+        });
+    });
+
+    describe('figure and table labels', () => {
+        it('does not promote extended-data and supplementary caption titles', () => {
+            for (const text of [
+                'Extended Data Fig. 2 | MITOMICS profiles suggest new protein functions',
+                'Supplementary Table 5: PCR conditions and primers used for validation',
+            ]) {
+                const all = items(
+                    [...FILLERS_BEFORE_HEADING, { text, l: 0, size: 10, bold: true, font: 'Heading-Bold' }],
+                    [BODY],
+                );
+                expect(all.find(it => it.text.includes(text.slice(0, 15)))!.type).toBe('paragraph');
+            }
+        });
+
+        it('keeps extended-data and supplementary caption titles as headings without heading label filters', () => {
+            const text = 'Supplementary Table 5: PCR conditions and primers used for validation';
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { text, l: 0, size: 10, bold: true, font: 'Heading-Bold' }],
+                [BODY],
+                { headingLabelFilters: false },
+            );
+            expect(all.find(it => it.text.includes(text.slice(0, 15)))!.type).toBe('header');
+        });
+    });
+
+    describe('run-in labels', () => {
+        function kindOf(text: string, settings: ParagraphDetectionSettings = {}): string | undefined {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { text, l: 0, size: 10, bold: true, font: 'Heading-Bold' }],
+                [BODY],
+                settings,
+            );
+            return all.find(it => it.text.includes(text.slice(0, 12)))?.type;
+        }
+
+        it('keeps run-in label lines as headings without heading label filters', () => {
+            const off = { headingLabelFilters: false };
+            expect(kindOf('Received: 5 May 2020; Accepted: 2 June 2020', off)).toBe('header');
+            expect(kindOf('Keywords Peer influence · Adolescence · Substance use', off)).toBe('header');
+            expect(
+                kindOf('Results: We found that the treatment improved outcomes in most of the enrolled patients', off),
+            ).toBe('header');
+        });
+
+        it('demotes a front-matter label line set entirely in a heading face', () => {
+            expect(kindOf('Received: 5 May 2020; Accepted: 2 June 2020')).toBe('paragraph');
+            expect(kindOf('Conflict of interest: None declared')).toBe('paragraph');
+            expect(kindOf('To cite this article: Smith J (2020) A study of things')).toBe('paragraph');
+        });
+
+        it('demotes a keywords line without a colon', () => {
+            expect(kindOf('Keywords Peer influence · Adolescence · Substance use')).toBe('paragraph');
+        });
+
+        it('demotes a structured-abstract label followed by prose', () => {
+            expect(
+                kindOf('Results: We found that the treatment improved outcomes in most of the enrolled patients'),
+            ).toBe('paragraph');
+        });
+
+        it('keeps a structured-abstract word heading with a subtitle', () => {
+            expect(kindOf('Conclusion: Future Directions')).toBe('header');
+        });
+
+        it('keeps a long sentence-case subtitle that has no prose signal', () => {
+            expect(kindOf('Results: Effects of the intervention on the quality of life in older adults')).toBe('header');
+        });
+
+        it('keeps a question subtitle', () => {
+            // Ten words with auxiliaries and pronouns, past the prose-word check's floor.
+            expect(
+                kindOf('Conclusions: are there viable alternatives to the profit-maximising model of business?'),
+            ).toBe('header');
+        });
+
+        it('keeps a question subtitle containing an initialism', () => {
+            expect(
+                kindOf(
+                    'Conclusions: Are there viable alternatives to the profit-maximising model of business in the U.S. and Europe?',
+                ),
+            ).toBe('header');
+        });
+
+        it('keeps a long subtitle whose only prose-like feature is a number', () => {
+            expect(
+                kindOf('Results: Effects of the COVID-19 pandemic on the quality of life in older adults'),
+            ).toBe('header');
+        });
+
+        it('demotes a run-in that asks a question and goes on in prose', () => {
+            expect(
+                kindOf('Objective: Does peer support improve outcomes? We conducted a randomized trial in schools'),
+            ).toBe('paragraph');
+        });
+
+        it('demotes a run-in line that wraps before its sentence ends', () => {
+            expect(
+                kindOf('Results: We found that high basal area of very large trees, high volumes of standing'),
+            ).toBe('paragraph');
+        });
+
+        it('keeps a label word standing alone as a heading', () => {
+            expect(kindOf('Abstract')).toBe('header');
+            expect(kindOf('Keywords')).toBe('header');
+        });
+    });
+
+    describe('equations and web addresses', () => {
+        // Display equations and link lines pass the style rules when set in
+        // a larger face; a heading names its section in words.
+        function kindOf(text: string, settings: ParagraphDetectionSettings = {}): string | undefined {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { text, l: 0, size: 12, font: 'Times-Italic', italic: true }],
+                [BODY],
+                settings,
+            );
+            return all.find(it => it.text.includes(text.slice(0, 8)))?.type;
+        }
+
+        it('demotes a display equation', () => {
+            expect(kindOf('Σ* = {0, a, b, aa, ab, aabb, abab, ... }')).toBe('paragraph');
+            expect(kindOf('P(A, B) = P(A)P(B)')).toBe('paragraph');
+            expect(kindOf('T = {(x,a,y),(x,b,z),(y,a,x),(y,b,z)}')).toBe('paragraph');
+        });
+
+        it('keeps a heading that mentions an equation', () => {
+            expect(kindOf('4.3 Proving the efficiency for the k = const case')).toBe('header');
+            expect(kindOf('B.3 PROOF FOR EQUATION ∆PK0(K0)T = 0')).toBe('header');
+        });
+
+        it('keeps a short mathematical title that names its subject in words', () => {
+            expect(kindOf('2.1.1 Case n = 1')).toBe('header');
+            expect(kindOf('3. Proof of a² + b² = c²')).toBe('header');
+            expect(kindOf('3. Case 1: x = y')).toBe('header');
+            expect(kindOf('3. Proof: a² + b² = c²')).toBe('header');
+            expect(kindOf('Theorem 3.1 (n = 2)')).toBe('header');
+        });
+
+        it('demotes a numbered equation', () => {
+            expect(kindOf('3. P(A U B) = P(A) + P(B) if A ∩ B = {}')).toBe('paragraph');
+        });
+
+        it('demotes an equation whose function arguments are words', () => {
+            expect(kindOf('P(can | N) = 0.9 P(can | V) = 0.1')).toBe('paragraph');
+        });
+
+        it('demotes a line of web addresses', () => {
+            expect(kindOf('www.aclweb.org')).toBe('paragraph');
+            expect(kindOf('babel.uoregon.edu/yamada/guides.html')).toBe('paragraph');
+            expect(kindOf('https://doi.org/10.1353/gsr.2014.0029')).toBe('paragraph');
+            expect(kindOf('ftp://ftp.ora.com/pub/examples/nutshell/ujip/ doc/cjk.inf')).toBe('paragraph');
+        });
+
+        it('keeps a heading that names a site or a slash pair', () => {
+            expect(kindOf('Booking.com')).toBe('header');
+            expect(kindOf('Input/Output Systems')).toBe('header');
+            expect(kindOf('Resources at www.aclweb.org')).toBe('header');
+        });
+
+        it('keeps equations and web addresses as headings without heading label filters', () => {
+            const off = { headingLabelFilters: false };
+            expect(kindOf('P(A, B) = P(A)P(B)', off)).toBe('header');
+            expect(kindOf('www.aclweb.org', off)).toBe('header');
+        });
+
+        it('demotes a lone identifier: a wrapped link tail, an e-mail address, a rule', () => {
+            expect(kindOf('071d4a94-28a8-11e4-8593-da634b334390_story.html')).toBe('paragraph');
+            expect(kindOf('/content/333/6042/627.full.html')).toBe('paragraph');
+            expect(kindOf('3f2a9c1e7b4d5a6c8e9f0a1b2c3d4e5f6a7b8c9d')).toBe('paragraph');
+            expect(kindOf('9B2E4F1A-7C3D-4E5F-8A9B-0C1D2E3F4A5B')).toBe('paragraph');
+            expect(kindOf('ophir.klein@ucsf.edu')).toBe('paragraph');
+            expect(kindOf('______________________________')).toBe('paragraph');
+        });
+
+        it('keeps one-word headings, slash pairs and CJK headings', () => {
+            expect(kindOf('ABCC10-Mediated-Chemoresistance')).toBe('header');
+            expect(kindOf('Phosphatidylinositol-3-Kinase')).toBe('header');
+            expect(kindOf('17β-Hydroxysteroid-Dehydrogenase')).toBe('header');
+            expect(kindOf('Acknowledgements')).toBe('header');
+            expect(kindOf('Literaturverzeichnis')).toBe('header');
+            expect(kindOf('Metabolism/Elimination')).toBe('header');
+            expect(kindOf('一、中国共产党纪律体系的历史演进2021')).toBe('header');
+        });
+    });
+
+    describe('page body styles', () => {
+        // A page appended in another face ("This article has been cited by:"
+        // in Times under a New Caledonia article): its numbered entries fit
+        // Rule 6 (same size, different font, section-number prefix) against
+        // the document body, but on their own page that face is the body.
+        const DOC_BODY = bodyStyle(10, 'NewCaledonia');
+        const ENTRIES: LeaderLineSpec[] = Array.from({ length: 8 }, (_, i): LeaderLineSpec[] => [
+            {
+                text: `${i + 1}. A. Author, B. Author. 2011. A study of something that matters a great deal to`,
+                l: 0,
+                size: 10,
+                font: 'Times-Roman',
+            },
+            { text: 'Economic Perspectives and Policy 3: 1-9.', l: 10, size: 10, font: 'Times-Roman', gapAfter: 14 },
+        ]).flat();
+
+        function types(specs: LeaderLineSpec[], settings: ParagraphDetectionSettings) {
+            return items(specs, [DOC_BODY], settings).map(it => it.type);
+        }
+
+        it('reads the page style as body on a page set in another face', () => {
+            expect(types(ENTRIES, { pageBodyStyles: true })).not.toContain('header');
+        });
+
+        it('keeps the document-wide reading without page body styles (PDF schema 4)', () => {
+            expect(types(ENTRIES, { pageBodyStyles: false })).toContain('header');
+        });
+
+        it('keeps a heading that stands out on its page', () => {
+            const heading: LeaderLineSpec = {
+                text: 'This article has been cited by:',
+                l: 0,
+                size: 10,
+                font: 'Times-Bold',
+                bold: true,
+                gapAfter: 10,
+            };
+            const all = items([heading, ...ENTRIES], [DOC_BODY], { pageBodyStyles: true });
+            expect(all.filter(it => it.type === 'header').map(it => it.text)).toEqual([
+                '## This article has been cited by:',
+            ]);
+        });
+
+        it('keeps an all-caps heading set in the page body face', () => {
+            // An appendix page set in Times under a New Caledonia document.
+            const prose = (n: number): LeaderLineSpec[] =>
+                Array.from({ length: n }, (_, i) => ({
+                    text: `Appendix prose in the page face, line ${i + 1} of a paragraph that runs across the page.`,
+                    l: 0,
+                    size: 10,
+                    font: 'Times-Roman',
+                }));
+            const before = prose(6);
+            before[5] = { ...before[5], gapAfter: 14 };
+            const heading: LeaderLineSpec = { text: 'APPENDIX METHODS', l: 0, size: 10, font: 'Times-Roman' };
+            for (const pageBodyStyles of [false, true]) {
+                const all = items([...before, heading, ...prose(6)], [DOC_BODY], { pageBodyStyles });
+                expect(all.find(it => it.text.includes('APPENDIX METHODS'))?.type, String(pageBodyStyles)).toBe('header');
+            }
+        });
+
+        it('keeps an all-caps heading that qualifies by the document body on a page with its own', () => {
+            // Document body 11pt, the page's own body 9pt, the heading 10pt,
+            // all in one face: not larger than the document body, it is a
+            // heading as it would be without the page's body style.
+            const docBody = bodyStyle(11, 'Times-Bold', true);
+            const prose = (n: number): LeaderLineSpec[] =>
+                Array.from({ length: n }, (_, i) => ({
+                    text: `Reference list text set smaller, line ${i + 1} of an entry that runs across the page.`,
+                    l: 0,
+                    size: 9,
+                    font: 'Times-Bold',
+                    bold: true,
+                }));
+            const before = prose(6);
+            before[5] = { ...before[5], gapAfter: 14 };
+            const heading: LeaderLineSpec = { text: 'REFERENCES', l: 0, size: 10, font: 'Times-Bold', bold: true };
+            for (const pageBodyStyles of [false, true]) {
+                const all = items([...before, heading, ...prose(6)], [docBody], { pageBodyStyles });
+                expect(all.find(it => it.text.includes('REFERENCES'))?.type, String(pageBodyStyles)).toBe('header');
+            }
+        });
+
+        it('keeps a CJK heading on a page set in another body face at the body size', () => {
+            // A 10pt SimSun document with an appendix page in NotoSansCJK: the
+            // page's body face is no evidence that the document's body font is
+            // split across subsets.
+            const prose = (n: number): LeaderLineSpec[] =>
+                Array.from({ length: n }, () => ({
+                    text: '本附录说明研究所使用的数据来源样本构成以及变量的测量方式和处理过程',
+                    l: 0,
+                    size: 10,
+                    font: 'NotoSansCJK-Regular',
+                }));
+            const before = prose(12);
+            before[11] = { ...before[11], gapAfter: 14 };
+            const heading: LeaderLineSpec = { text: '研究方法', l: 0, size: 10, font: 'NotoSansCJK-Medium' };
+            for (const pageBodyStyles of [false, true]) {
+                const all = items([...before, heading, ...prose(12)], [bodyStyle(10, 'SimSun')], { pageBodyStyles });
+                expect(all.find(it => it.text.includes('研究方法'))?.type, String(pageBodyStyles)).toBe('header');
+            }
+        });
+
+        it('leaves a page with document body text to the document-wide rules', () => {
+            const body: LeaderLineSpec[] = Array.from({ length: 12 }, (_, i) => ({
+                text: `Ordinary body text in the document face, line ${i + 1} of the section that continues.`,
+                l: 0,
+                size: 10,
+                font: 'NewCaledonia',
+            }));
+            const heading: LeaderLineSpec = { text: '2.1 Methods and Data', l: 0, size: 10, font: 'Helvetica' };
+            const all = items(
+                [...body.slice(0, 6), { ...body[5], gapAfter: 14 }, heading, ...body.slice(6)],
+                [DOC_BODY],
+                { pageBodyStyles: true },
+            );
+            expect(all.find(it => it.text.includes('Methods'))?.type).toBe('header');
+        });
+    });
+
+    describe('numbered CJK headings styled only by their number', () => {
+        function run(font: string, chars: number, letters: number, size: number, bold = false): RawStyleRun {
+            const weight = bold ? 'bold' : 'normal';
+            return { font: { name: font, family: font, weight, style: 'normal', size }, chars, letters };
+        }
+
+        function kindOf(text: string, runs: RawStyleRun[], size: number, bold: boolean): string | undefined {
+            const all = items(
+                [...FILLERS_BEFORE_HEADING, { text, l: 0, size, bold, font: runs[0].font.name, styleRuns: runs }],
+                [BODY],
+            );
+            return all.find(it => it.text.includes(text.slice(0, 3)))?.type;
+        }
+
+        it('keeps a heading whose larger number is its only styled part', () => {
+            const runs = [run('Digits', 1, 0, 12), run('Digits', 1, 0, 12), run('Digits', 1, 0, 12), run('SimHei', 16, 16, 10)];
+            expect(kindOf('２．２ 明确对党忠诚的科学内涵及判断标准', runs, 12, false)).toBe('header');
+        });
+
+        it('keeps a heading whose bold Latin number precedes CJK heading text', () => {
+            const runs = [run('Times-Bold', 1, 0, 10, true), run('SimHei', 17, 16, 10)];
+            expect(kindOf('5．突出质量导向，实现教学评价一体化', runs, 10, true)).toBe('header');
+        });
+
+        it('keeps a heading whose bold ASCII number precedes Latin and CJK text', () => {
+            const runs = [run('Times-Bold', 2, 0, 10, true), run('Times-Roman', 4, 4, 10), run('SimSun', 5, 5, 10)];
+            expect(kindOf('2. VOCs 挥发性有机物', runs, 10, true)).toBe('header');
+        });
+
+        it('does not keep a numbered CJK footnote set smaller than the body', () => {
+            const runs = [run('Times-Bold', 2, 0, 10, true), run('SimSun', 14, 13, 8)];
+            expect(kindOf('3. 这是一个较长的脚注内容说明来源', runs, 10, true)).toBe('paragraph');
+        });
+
+        it('does not keep numbered CJK prose ending in a quoted sentence', () => {
+            const runs = [run('Times-Bold', 2, 0, 10, true), run('SimSun', 27, 23, 10)];
+            expect(kindOf('2. 研究表明，这一结果可以解释为“社会环境影响个体行为。”', runs, 10, true)).toBe('paragraph');
+        });
+
+        it('does not keep a numbered Latin line', () => {
+            const runs = [run('Times-Bold', 2, 0, 10, true), run('Times-Roman', 30, 30, 10)];
+            expect(kindOf('2. Promote open discussion about the topic', runs, 10, true)).toBe('paragraph');
+        });
+    });
+
     describe('numbered section headings', () => {
         it('promotes a single-line numbered heading in a distinct font', () => {
             const all = items(
@@ -1369,6 +2868,276 @@ describe('header detection', () => {
     // equation lead-ins, table headers, and author bylines (all set in a
     // distinct face at body size), so it is left as body text. Missing such a
     // heading is preferred to mislabelling body/figure/table text.
+    // A section heading set directly over a subsection heading in the same
+    // face ("RESULTS" / "Summary Statistics"): the paragraph-sized gap
+    // between them makes two headings, while a heading wrapped over two
+    // lines keeps its own (small) leading and stays one.
+    describe('stacked headings in one style', () => {
+        const SECTION_FACE = { size: 10, font: 'SerifGothic-Bold', bold: true };
+        const BODY_AFTER: LeaderLineSpec[] = FILLERS.slice(0, 3);
+        const ISOLATED: ParagraphDetectionSettings = { isolatedHeadings: true };
+
+        it('keeps stacked same-style headings as one heading without isolatedHeadings (PDF schema 4)', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'RESULTS', l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    { text: 'Summary Statistics', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+                { isolatedHeadings: false },
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual(['## RESULTS Summary Statistics']);
+        });
+
+        it('splits two same-style headings separated by a paragraph gap', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'RESULTS', l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    { text: 'Summary Statistics', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual(['## RESULTS', '## Summary Statistics']);
+        });
+
+        it('keeps a heading wrapped at normal leading as one heading', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'School Resource Officers and', l: 0, ...SECTION_FACE },
+                    { text: 'School Discipline in Texas', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual(['## School Resource Officers and School Discipline in Texas']);
+        });
+
+        it('keeps a loosely leaded display title as one heading', () => {
+            // 16pt title lines 6pt apart: more than the body's paragraph-gap
+            // threshold, but well under the title's own line height.
+            const title = { size: 16, font: 'SerifGothic-Bold', bold: true };
+            const all = items(
+                [
+                    { text: 'Patrolling Public Schools: The', l: 0, ...title, gapAfter: 6 },
+                    { text: 'Impact of Funding for School', l: 0, ...title, gapAfter: 6 },
+                    { text: 'Police on Student Discipline', l: 0, ...title, gapAfter: 14 },
+                    ...FILLERS,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual([
+                '## Patrolling Public Schools: The Impact of Funding for School Police on Student Discipline',
+            ]);
+        });
+
+        it.each([
+            ['the next line opens in lowercase', 'Academic and Wellness Outcomes Associated', 'with Use of Anki in Medical School'],
+            ['the first line ends on a function word', 'A Systematic Review of Social Media Use to', 'Discuss and View Self-Harm Acts'],
+            ['the first line ends on joining punctuation', 'Massage and Cancer:', 'Practice Guidelines'],
+            ['the first line runs to the column edge', 'Filler body line number 9 that anchors the column left edge.', 'Practice Guidelines'],
+        ])('keeps a loosely leaded heading together when %s', (_, first, second) => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: first, l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    { text: second, l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual([`## ${first} ${second}`]);
+        });
+
+        it('splits stacked headings when the first ends in a label letter', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'APPENDIX A', l: 0, ...SECTION_FACE, gapAfter: 14 },
+                    { text: 'Data Timeline', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                    ...BODY_AFTER,
+                ],
+                [BODY],
+                ISOLATED,
+            );
+            const headers = all.filter(it => it.type === 'header').map(it => it.text.trim());
+            expect(headers).toEqual(['## APPENDIX A', '## Data Timeline']);
+        });
+
+        it('does not split a run of lines in the heading face into one heading per line', () => {
+            // Bold list items spaced like headings: a run longer than an
+            // isolated heading stays one item, as it was.
+            const list = ['Convenient online submission', 'Thorough peer review', 'No space constraints',
+                'Immediate publication on acceptance'].map(
+                (text, i, all): LeaderLineSpec => ({ text, l: 0, ...SECTION_FACE, gapAfter: i === all.length - 1 ? 8 : 14 }),
+            );
+            const all = items([...FILLERS_BEFORE_HEADING, ...list, ...BODY_AFTER], [BODY], ISOLATED);
+            expect(all.filter(it => it.type === 'header').length).toBeLessThanOrEqual(1);
+        });
+
+        it('does not split a loosely leaded block set in a heading face into lines', () => {
+            // A block of short lines in the heading face, in a column piece of
+            // its own beside tightly leaded body text: a run of heading-styled
+            // lines, whose gaps are its own leading, not section spacing.
+            const block = makeColumnPageResult(
+                ['Convenient online submission', 'Thorough peer review', 'No space constraints',
+                    'Immediate publication on acceptance', 'Inclusion in indexing services'].map(
+                    (text): LeaderLineSpec => ({ text, l: 0, ...SECTION_FACE, bboxHeight: 9, gapAfter: 7 }),
+                ),
+            ).columnResults[0];
+            const body = makeColumnPageResult(FILLERS).columnResults[0];
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [body, { ...block, columnIndex: 1 }],
+                allLines: [...body.lines, ...block.lines],
+            };
+            const headers = detectParagraphs(page, [BODY], ISOLATED).items.filter(it => it.type === 'header');
+            expect(headers.length).toBeLessThanOrEqual(1);
+        });
+
+        it('keeps a title apart from the author line below it in a short front-matter piece', () => {
+            // Title, authors and affiliations in a column piece of their own,
+            // spaced as on a real cover page. The gap under the title is
+            // section spacing, but the piece's median gap is leading, so the
+            // piece keeps its own threshold and the title stays a heading.
+            // (Taking the page's lower threshold here lets the uniform-leading
+            // protection read the title gap as leading, and the two lines'
+            // equally tall boxes give no size break.)
+            const piece = makeColumnPageResult([
+                { text: 'Natural course of posterior subcapsular cataract over a short time', l: 0, r: 470, size: 14, font: 'Title-Sans', bboxHeight: 10, gapAfter: 11.3 },
+                { text: 'Thomas Neumayer, Nino Hirnschall, Michael Georgopoulos and Oliver Findl', l: 0, r: 400, size: 10, font: 'Author-Serif', bboxHeight: 10, gapAfter: 8.8 },
+                { text: 'Vienna Institute for Research in Ocular Surgery, A Karl Landsteiner Institute, Hanusch', l: 0, r: 500, size: 10, font: 'Times-Roman', gapAfter: 1.5 },
+                { text: 'Ophthalmology, Medical University of Vienna, Vienna, Austria', l: 0, r: 300, size: 10, font: 'Times-Roman' },
+            ]).columnResults[0];
+            const body = makeColumnPageResult(FILLERS).columnResults[0];
+            const offset = piece.column.y + piece.column.h + 20;
+            const bodyLines = body.lines.map(line => ({
+                ...line,
+                bbox: { ...line.bbox, t: line.bbox.t + offset, b: line.bbox.b + offset },
+            }));
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [piece, { ...body, columnIndex: 1, lines: bodyLines }],
+                allLines: [...piece.lines, ...bodyLines],
+            };
+            const headers = detectParagraphs(page, [BODY], ISOLATED).items
+                .filter(it => it.type === 'header')
+                .map(it => it.text.trim());
+            expect(headers).toEqual(['## Natural course of posterior subcapsular cataract over a short time']);
+        });
+
+        it('keeps body lines together in a short piece holding a caption, a heading and a paragraph', () => {
+            // The gaps left once the heading's are set aside mix the caption's
+            // tight leading with the body's; the piece takes the page's
+            // threshold instead of their median.
+            const piece = makeColumnPageResult([
+                { text: 'Figure 11. Mean number of cloud-free observations per tile in the', l: 0, r: 480, size: 9, font: 'Times-Bold', bold: true, gapAfter: -1 },
+                { text: 'corresponding mosaics, computed over the Planet NICFI tiles. Only', l: 0, r: 480, size: 9, font: 'Times-Roman', gapAfter: 1 },
+                { text: 'pixels greater than zero were considered in the computation.', l: 0, r: 300, size: 9, font: 'Times-Roman', gapAfter: 27 },
+                { text: '3.9. Amazon forest canopy height', l: 0, r: 200, ...SECTION_FACE, gapAfter: 13 },
+                { text: 'We found that the mean canopy height of the Amazon forest was 22.09 m, with', l: 0, r: 480, size: 10, font: 'Times-Roman', gapAfter: 5.3 },
+                { text: 'a median of 22.25 m and a 97.5th percentile of 32.10 m (Table 1).', l: 0, r: 330, size: 10, font: 'Times-Roman' },
+            ]).columnResults[0];
+            const body = makeColumnPageResult(
+                FILLERS.map((f): LeaderLineSpec => ({ ...f, gapAfter: 5.3 })),
+            ).columnResults[0];
+            const offset = piece.column.y + piece.column.h + 20;
+            const bodyLines = body.lines.map(line => ({
+                ...line,
+                bbox: { ...line.bbox, t: line.bbox.t + offset, b: line.bbox.b + offset },
+            }));
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [piece, { ...body, columnIndex: 1, lines: bodyLines }],
+                allLines: [...piece.lines, ...bodyLines],
+            };
+            const texts = detectParagraphs(page, [BODY], ISOLATED).items.map(it => it.text.trim());
+            expect(texts).toContain(
+                'We found that the mean canopy height of the Amazon forest was 22.09 m, with a median of 22.25 m and a 97.5th percentile of 32.10 m (Table 1).',
+            );
+        });
+
+        it('never raises a short piece threshold to a looser page leading', () => {
+            // The piece's median gap borders the heading, but the page's
+            // double-spaced body sets a higher threshold than the piece's own:
+            // section gaps only inflate a median, so the lower value stands.
+            const piece = makeColumnPageResult([
+                { text: 'In conclusion, our results suggest that the interventions have a lasting', l: 0, r: 480, size: 10, font: 'Times-Roman', gapAfter: 2 },
+                { text: 'effect on the outcomes we measured.', l: 0, r: 200, size: 10, font: 'Times-Roman', gapAfter: 11 },
+                { text: 'Conclusions', l: 0, ...SECTION_FACE, gapAfter: 8 },
+                { text: 'Taken together, these findings extend earlier work on the topic.', l: 0, r: 400, size: 10, font: 'Times-Roman' },
+            ]).columnResults[0];
+            const body = makeColumnPageResult(
+                FILLERS.map((f): LeaderLineSpec => ({ ...f, gapAfter: 12 })),
+            ).columnResults[0];
+            const offset = piece.column.y + piece.column.h + 20;
+            const bodyLines = body.lines.map(line => ({
+                ...line,
+                bbox: { ...line.bbox, t: line.bbox.t + offset, b: line.bbox.b + offset },
+            }));
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [piece, { ...body, columnIndex: 1, lines: bodyLines }],
+                allLines: [...piece.lines, ...bodyLines],
+            };
+            const headers = detectParagraphs(page, [BODY], ISOLATED).items
+                .filter(it => it.type === 'header')
+                .map(it => it.text.trim());
+            expect(headers).toEqual(['## Conclusions']);
+        });
+
+        it('finds stacked headings in a short column piece cut off above the body', () => {
+            // The column detector can cut a single-column page at its
+            // headings, leaving a piece with a paragraph's last lines and two
+            // stacked headings. Their gaps are section spacing; they must not
+            // set the piece's own paragraph-gap threshold.
+            const piece = makeColumnPageResult([
+                { text: 'types partially account for interest in alternate security aims, such as', l: 0, size: 10, font: 'Times-Roman' },
+                { text: 'security equipment and technology.', l: 0, r: 180, size: 10, font: 'Times-Roman', gapAfter: 16 },
+                { text: 'RESULTS', l: 0, ...SECTION_FACE, gapAfter: 14 },
+                { text: 'Summary Statistics', l: 0, ...SECTION_FACE },
+            ]).columnResults[0];
+            const body = makeColumnPageResult(FILLERS).columnResults[0];
+            const offset = piece.column.y + piece.column.h + 8;
+            const bodyLines = body.lines.map(line => ({
+                ...line,
+                bbox: { ...line.bbox, t: line.bbox.t + offset, b: line.bbox.b + offset },
+            }));
+            const page: PageLineResult = {
+                pageIndex: 0,
+                width: 612,
+                height: 792,
+                columnResults: [piece, { ...body, columnIndex: 1, lines: bodyLines }],
+                allLines: [...piece.lines, ...bodyLines],
+            };
+            const headers = detectParagraphs(page, [BODY], ISOLATED).items
+                .filter(it => it.type === 'header')
+                .map(it => it.text.trim());
+            expect(headers).toEqual(['## RESULTS', '## Summary Statistics']);
+        });
+    });
+
     describe('bare font-difference is not a heading signal', () => {
         it('does NOT promote a Regular-weight, different-family line with no other cue', () => {
             const all = items(
@@ -1723,5 +3492,171 @@ describe('short CJK section headings', () => {
         const candidate = all.find(it => it.text.trim() === 'Ab');
         expect(candidate).toBeDefined();
         expect(candidate!.type).toBe('paragraph');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Font-expansion size jitter
+//
+// LaTeX `microtype` scales each line's glyphs by up to about 2%, so 10pt
+// body lines report truncated sizes of 9 (9.96pt) or 10 (10.04pt) at random.
+// The exact sizes in the style runs show they are one size.
+// ---------------------------------------------------------------------------
+describe('font-expansion size jitter', () => {
+    const BODY9 = bodyStyle(9, 'Times-Roman');
+
+    function run(
+        font: string,
+        chars: number,
+        exactSize: number,
+        opts: { size?: number; italic?: boolean } = {},
+    ): RawStyleRun {
+        return {
+            font: {
+                name: font,
+                family: font,
+                weight: 'normal',
+                style: opts.italic ? 'italic' : 'normal',
+                size: opts.size ?? Math.trunc(exactSize),
+            },
+            exactSize,
+            chars,
+            letters: chars,
+        };
+    }
+
+    // A paragraph whose lines alternate between the two truncated sizes.
+    const JITTERED_BODY: LeaderLineSpec[] = Array.from({ length: 6 }, (_, i) => {
+        const exact = i % 2 === 0 ? 9.96 : 10.04;
+        return {
+            text: `Body line number ${i + 1} of a paragraph that runs on across the`,
+            l: 0,
+            r: 305,
+            size: Math.trunc(exact),
+            bboxHeight: 12,
+            font: 'Times-Roman',
+            styleRuns: [run('Times-Roman', 55, exact)],
+        };
+    });
+
+    function items(specs: LeaderLineSpec[]) {
+        return detectParagraphs(makeColumnPageResult(specs), [BODY9]).items;
+    }
+
+    it('does not read an italic line expanded past the next point as a larger heading', () => {
+        const all = items([
+            ...JITTERED_BODY,
+            {
+                text: 'Proficient in English, More Educated Than a Decade Ago. Report.',
+                l: 0,
+                r: 305,
+                size: 10,
+                bboxHeight: 12,
+                italic: true,
+                font: 'Times-Italic',
+                styleRuns: [
+                    run('Times-Italic', 46, 10.04, { italic: true }),
+                    run('Times-Roman', 8, 10.04),
+                ],
+            },
+            {
+                text: 'Washington, DC: Pew Research Center.',
+                l: 0,
+                size: 9,
+                bboxHeight: 12,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', 31, 9.96)],
+            },
+        ]);
+        expect(all).toHaveLength(1);
+        expect(all[0].type).toBe('paragraph');
+    });
+
+    it('keeps a wrapped italic statement together when its lines land on either side of a point', () => {
+        const all = items([
+            ...JITTERED_BODY,
+            {
+                text: 'if the Laplacian maximum eigenvalues of the non-regular',
+                l: 0,
+                r: 305,
+                size: 10,
+                bboxHeight: 12,
+                italic: true,
+                font: 'Times-Italic',
+                styleRuns: [run('Times-Italic', 48, 10.06, { italic: true })],
+            },
+            {
+                text: 'graphs to be compared are not the same. Otherwise it is not.',
+                l: 0,
+                size: 9,
+                bboxHeight: 12,
+                italic: true,
+                font: 'Times-Italic',
+                styleRuns: [run('Times-Italic', 48, 9.86, { italic: true })],
+            },
+        ]);
+        const statement = all.find(it => it.text.includes('if the Laplacian'));
+        expect(statement?.text).toContain('graphs to be compared');
+    });
+
+    it('still reads a line set a full point larger as a heading', () => {
+        const all = items([
+            ...JITTERED_BODY,
+            {
+                text: 'Results',
+                l: 0,
+                size: 11,
+                bboxHeight: 13,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', 7, 11.0)],
+            },
+            {
+                text: 'Washington, DC: Pew Research Center.',
+                l: 0,
+                size: 9,
+                bboxHeight: 12,
+                font: 'Times-Roman',
+                styleRuns: [run('Times-Roman', 31, 9.96)],
+            },
+        ]);
+        expect(all.find(it => it.text.includes('Results'))?.type).toBe('header');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Numbered entries
+// ---------------------------------------------------------------------------
+describe('consecutive numbered entries', () => {
+    // Part of the hanging-block reading, so enabled with it.
+    const texts = (result: PageLineResult, hangingIndentBlocks = true) =>
+        detectParagraphs(result, [BODY], { hangingIndentBlocks }).items
+            .filter(it => it.type === 'paragraph')
+            .map(it => it.text.trim());
+
+    it('starts a new entry at the next number even when the previous entry fills its line', () => {
+        const result = makeColumnPageResult([
+            ...FILLERS,
+            { text: '46. Goadsby, P. J. & Edvinsson, L. Human in vivo evidence for the', l: 0, r: 305 },
+            { text: 'trigeminovascular system. Brain 117, 427–434 (1994).', l: 12, r: 250 },
+            { text: '47. Lang, J. Clinical Anatomy of the Head Neurocranium and Orbit.', l: 0, r: 305 },
+            { text: '48. Holton, P. Antidromic vasodilatation in the isolated perfused ear.', l: 0, r: 305 },
+            { text: '49. Jancso, G. Neurogenic Inflammation in Health and Disease (2008).', l: 0, r: 300 },
+        ]);
+        const paragraphs = texts(result);
+        for (const n of ['46.', '47.', '48.', '49.']) {
+            expect(paragraphs.filter(p => p.includes(`${n} `))).toHaveLength(1);
+        }
+        expect(paragraphs.find(p => p.startsWith('47.'))).not.toContain('48.');
+        expect(paragraphs.find(p => p.startsWith('48.'))).not.toContain('49.');
+        expect(texts(result, false).find(p => p.includes('47.'))).toContain('48.');
+    });
+
+    it('does not split a line that opens with any other number', () => {
+        const result = makeColumnPageResult([
+            ...FILLERS,
+            { text: '47. Lang, J. Clinical Anatomy of the Head Neurocranium and Orbit,', l: 0, r: 305 },
+            { text: '12. Auflage. Springer, Berlin and Heidelberg and New York (1983).', l: 0, r: 305 },
+        ]);
+        expect(texts(result).find(p => p.includes('47.'))).toContain('12. Auflage');
     });
 });

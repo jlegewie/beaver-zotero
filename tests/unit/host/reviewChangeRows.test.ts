@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    buildEditedNoteArtifacts,
     buildReviewRows,
+    getCreatedNoteExportTarget,
+    getEditedNoteHeading,
+    pendingNoteChanges,
+    summarizeNoteEdits,
     buildReviewRowsForRunChain,
     getChangesCardHeading,
     hasPendingReviewRows,
+    getExportNoteTarget,
     getOpenNoteTarget,
     isArtifactAction,
     isBulkApplicable,
@@ -248,6 +254,28 @@ describe('getChangesCardHeading trail', () => {
 
         expect(getChangesCardHeading(rows))
             .toEqual({ lead: 'Library changes', trail: '10 edited items' });
+    });
+
+    it('names underlines apart from highlights', () => {
+        const created = (count: number) => ({
+            created: Array.from({ length: count }, (_, index) => ({ client_item_id: `c${index}` })),
+        });
+        const underlines = rowsOf([action({
+            action_type: 'create_highlight_annotations',
+            status: 'applied',
+            proposed_data: { style: 'underline' },
+            result_data: created(3),
+        })]);
+        const highlights = rowsOf([action({
+            action_type: 'create_highlight_annotations',
+            status: 'applied',
+            result_data: created(2),
+        })]);
+
+        expect(getChangesCardHeading(underlines))
+            .toEqual({ lead: 'Library changes', trail: '3 created underlines' });
+        expect(getChangesCardHeading(highlights))
+            .toEqual({ lead: 'Library changes', trail: '2 created highlights' });
     });
 
     it('counts changes of mixed kinds rather than naming them', () => {
@@ -651,6 +679,28 @@ describe('getChangesCardHeading zero-target actions', () => {
     });
 });
 
+describe('getExportNoteTarget', () => {
+    const noteRow = (overrides: Partial<AgentAction>) =>
+        buildReviewRows([action({ action_type: 'create_note', ...overrides })], { include: 'artifacts' })[0];
+    const result_data = { library_id: 1, library_ref: 'user', zotero_key: 'NOTE1' };
+
+    it('exports the note of an applied action', () => {
+        expect(getExportNoteTarget(noteRow({ status: 'applied', result_data } as Partial<AgentAction>)))
+            .toEqual({ library_id: 1, library_ref: 'user', zotero_key: 'NOTE1' });
+    });
+
+    it('exports the note of an action whose undo failed, which may still exist', () => {
+        expect(getExportNoteTarget(noteRow({ status: 'error', result_data } as Partial<AgentAction>)))
+            .toEqual({ library_id: 1, library_ref: 'user', zotero_key: 'NOTE1' });
+    });
+
+    it('has no note before it is created, after an undo, or after a failed write', () => {
+        expect(getExportNoteTarget(noteRow({ status: 'pending' }))).toBeNull();
+        expect(getExportNoteTarget(noteRow({ status: 'undone', result_data } as Partial<AgentAction>))).toBeNull();
+        expect(getExportNoteTarget(noteRow({ status: 'error' }))).toBeNull();
+    });
+});
+
 describe('getOpenNoteTarget', () => {
     const noteRow = (overrides: Partial<AgentAction>) =>
         buildReviewRows([action({ action_type: 'create_note', ...overrides })], { include: 'artifacts' })[0];
@@ -689,5 +739,181 @@ describe('getOpenNoteTarget', () => {
         } as Partial<AgentAction>)]);
 
         expect(getOpenNoteTarget(rows[0])).toBeNull();
+    });
+});
+
+describe('edited-note artifacts', () => {
+    const edit = (overrides: Partial<Omit<AgentAction, 'action_type'>> & { action_type?: string } = {}) => action({
+        action_type: 'edit_note',
+        status: 'applied',
+        proposed_data: { library_id: 1, library_ref: 'u', zotero_key: 'NOTE0001', new_string: 'x' },
+        ...overrides,
+    });
+
+    it('gives one summary per note, counting each edit and every edit of a batch', () => {
+        const summaries = summarizeNoteEdits([[
+            edit({ toolcall_id: 'call-1' }),
+            edit({ toolcall_id: 'call-2' }),
+            edit({
+                toolcall_id: 'call-3',
+                action_type: 'edit_note_batch',
+                proposed_data: { library_id: 1, library_ref: 'u', zotero_key: 'NOTE0001', edits: [{}, {}, {}] },
+                result_data: { applied: [{}, {}] },
+            }),
+        ]]);
+
+        expect(summaries).toEqual([{
+            runId: 'run-1',
+            toolcallId: 'call-1',
+            note: { library_id: 1, library_ref: 'u', zotero_key: 'NOTE0001' },
+            appliedChanges: 4,
+            pendingChanges: 0,
+        }]);
+    });
+
+    it('counts pending edits apart from applied ones, and skips rejected and undone edits', () => {
+        const [summary] = summarizeNoteEdits([[
+            edit({ toolcall_id: 'call-1' }),
+            edit({ toolcall_id: 'call-2', status: 'pending' }),
+            edit({ toolcall_id: 'call-3', status: 'rejected' }),
+            edit({ toolcall_id: 'call-4', status: 'undone' }),
+        ]]);
+
+        expect(summary).toMatchObject({ appliedChanges: 1, pendingChanges: 1 });
+    });
+
+    it('drops a note whose edits were all rejected or undone, and leaves live approvals to the in-stream card', () => {
+        const live = edit({ toolcall_id: 'call-2', status: 'pending', proposed_data: { library_ref: 'u', zotero_key: 'NOTE0002' } });
+
+        const summaries = summarizeNoteEdits([[
+            edit({ toolcall_id: 'call-1', status: 'undone' }),
+            live,
+        ]], { liveApprovalActionIds: new Set([live.id]) });
+
+        expect(summaries).toEqual([]);
+    });
+
+    it('treats an edit whose apply failed after landing as applied', () => {
+        const [summary] = summarizeNoteEdits([[
+            edit({ status: 'error', result_data: { zotero_key: 'NOTE0001' } }),
+            edit({ status: 'error' }),
+        ]]);
+
+        expect(summary).toMatchObject({ appliedChanges: 1, pendingChanges: 0 });
+    });
+
+    it('lists notes across a continued answer in the order they were first edited', () => {
+        const summaries = summarizeNoteEdits([
+            [edit({ run_id: 'run-1', proposed_data: { library_ref: 'g5', zotero_key: 'NOTE0002' } })],
+            [edit({ run_id: 'run-2' }), edit({ run_id: 'run-2', proposed_data: { library_ref: 'g5', zotero_key: 'NOTE0002' } })],
+        ]);
+
+        expect(summaries.map((summary) => [summary.runId, summary.note.zotero_key, summary.appliedChanges])).toEqual([
+            ['run-1', 'NOTE0002', 2],
+            ['run-2', 'NOTE0001', 1],
+        ]);
+    });
+
+    it('leaves out a note the answer also created, matched by library ref or local id', () => {
+        const created = action({
+            action_type: 'create_note',
+            toolcall_id: 'call-1',
+            status: 'applied',
+            result_data: { library_id: 1, zotero_key: 'NOTE0001' },
+        });
+
+        const artifacts = buildEditedNoteArtifacts([[
+            created,
+            edit({ toolcall_id: 'call-2' }),
+            edit({ toolcall_id: 'call-3', proposed_data: { library_ref: 'u', zotero_key: 'NOTE0002' } }),
+        ]]);
+
+        expect(artifacts.map((artifact) => artifact.note.zotero_key)).toEqual(['NOTE0002']);
+    });
+
+    it('finds the pending edits of a created note', () => {
+        const summaries = summarizeNoteEdits([[edit({ status: 'pending' })]]);
+
+        expect(pendingNoteChanges(summaries, { library_id: 1, zotero_key: 'NOTE0001' })).toBe(1);
+        expect(pendingNoteChanges(summaries, { library_ref: 'u', zotero_key: 'OTHER001' })).toBe(0);
+    });
+
+    it('merges edits that name one note by local id, by library ref, or both', () => {
+        const summaries = summarizeNoteEdits([[
+            edit({ toolcall_id: 'call-1', proposed_data: { library_id: 1, zotero_key: 'NOTE0001' } }),
+            edit({ toolcall_id: 'call-2', status: 'pending', proposed_data: { library_ref: 'u', zotero_key: 'NOTE0001' } }),
+            edit({ toolcall_id: 'call-3', status: 'pending' }),
+        ]]);
+
+        expect(summaries).toEqual([{
+            runId: 'run-1',
+            toolcallId: 'call-1',
+            note: { library_id: 1, library_ref: 'u', zotero_key: 'NOTE0001' },
+            appliedChanges: 1,
+            pendingChanges: 2,
+        }]);
+        expect(pendingNoteChanges(summaries, { library_ref: 'u', zotero_key: 'NOTE0001' })).toBe(2);
+    });
+
+    it('joins edits naming a note only by local id and only by library ref when the host completes identities', () => {
+        const completeNoteIdentity = (note: { library_ref?: string; library_id?: number; zotero_key: string }) => ({
+            ...note,
+            library_ref: note.library_ref ?? (note.library_id === 1 ? 'u' : undefined),
+            library_id: note.library_id ?? (note.library_ref === 'u' ? 1 : undefined),
+        });
+        const actionsByRun = [[
+            edit({ toolcall_id: 'call-1', proposed_data: { library_id: 1, zotero_key: 'NOTE0001' } }),
+            edit({ toolcall_id: 'call-2', status: 'pending', proposed_data: { library_ref: 'u', zotero_key: 'NOTE0001' } }),
+        ]];
+
+        expect(buildEditedNoteArtifacts(actionsByRun, { completeNoteIdentity })).toEqual([{
+            runId: 'run-1',
+            toolcallId: 'call-1',
+            note: { library_id: 1, library_ref: 'u', zotero_key: 'NOTE0001' },
+            appliedChanges: 1,
+            pendingChanges: 1,
+        }]);
+    });
+
+    it('names the note of an applied edit by what the apply reported, not by its proposal', () => {
+        const [summary] = summarizeNoteEdits([[
+            edit({
+                proposed_data: { library_id: 2, zotero_key: 'NOTE0001' },
+                result_data: { library_ref: 'g5', library_id: 3, zotero_key: 'NOTE0001' },
+            }),
+        ]]);
+
+        expect(summary.note).toEqual({ library_ref: 'g5', library_id: 3, zotero_key: 'NOTE0001' });
+    });
+
+    it('counts pending edits under each identity when no edit names the note both ways', () => {
+        const summaries = summarizeNoteEdits([[
+            edit({ proposed_data: { library_id: 1, zotero_key: 'NOTE0001' } }),
+            edit({ status: 'pending', proposed_data: { library_ref: 'u', zotero_key: 'NOTE0001' } }),
+        ]]);
+
+        expect(pendingNoteChanges(summaries, { library_ref: 'u', library_id: 1, zotero_key: 'NOTE0001' })).toBe(1);
+    });
+
+    it('says what happened to the note', () => {
+        const summary = { runId: 'run-1', toolcallId: 'call-1', note: { zotero_key: 'NOTE0001' } };
+
+        expect(getEditedNoteHeading({ ...summary, appliedChanges: 1, pendingChanges: 0 }))
+            .toEqual({ label: 'Edited Note', detail: '1 change' });
+        expect(getEditedNoteHeading({ ...summary, appliedChanges: 3, pendingChanges: 1 }))
+            .toEqual({ label: 'Edited Note', detail: '3 changes, 1 pending' });
+        expect(getEditedNoteHeading({ ...summary, appliedChanges: 0, pendingChanges: 2 }))
+            .toEqual({ label: 'Note Edits', detail: '2 changes pending' });
+    });
+});
+
+describe('getCreatedNoteExportTarget', () => {
+    it('is the created note of an applied create_note action, and nothing for other actions', () => {
+        const result_data = { library_ref: 'u', library_id: 1, zotero_key: 'NOTE0001' };
+
+        expect(getCreatedNoteExportTarget(action({ action_type: 'create_note', status: 'applied', result_data })))
+            .toEqual(result_data);
+        expect(getCreatedNoteExportTarget(action({ action_type: 'create_note', status: 'undone', result_data }))).toBeNull();
+        expect(getCreatedNoteExportTarget(action({ action_type: 'edit_note', status: 'applied', result_data }))).toBeNull();
     });
 });

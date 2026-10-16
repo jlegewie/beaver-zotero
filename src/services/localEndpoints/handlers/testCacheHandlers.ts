@@ -15,6 +15,27 @@ export async function handleTestPingHttpRequest(_request: any) {
         ok: true,
         cache_available: !!cache,
         db_available: !!db,
+        platform: getPlatformInfo(),
+    };
+}
+
+/**
+ * The running Zotero and Gecko versions, plus the two security prefs that
+ * Zotero 11 relaxes temporarily (`null` when the build does not define them).
+ * Lets tests and harness logs record which platform they ran against.
+ */
+function getPlatformInfo() {
+    const boolPref = (name: string): boolean | null => {
+        const value = Zotero.Prefs.get(name, true);
+        return typeof value === 'boolean' ? value : null;
+    };
+    return {
+        zoteroVersion: Zotero.version,
+        platformMajorVersion: Zotero.platformMajorVersion,
+        prefs: {
+            allowUnsafeSubscriptLoads: boolPref('security.allow_unsafe_subscript_loads'),
+            chromeBaselineCsp: boolPref('security.chrome_baseline_csp.enabled'),
+        },
     };
 }
 
@@ -81,13 +102,16 @@ export async function handleTestCacheInvalidateHttpRequest(request: any) {
  * PDF extraction. The source identity (mtime/size) is derived from the real
  * attachment file, so the seeded record is treated as fresh by `getMetadata`.
  *
- * Request: `{ library_id, zotero_key, page_labels: { "0": "iii", ... }, page_count? }`.
+ * Request: `{ library_id, zotero_key, page_labels: { "0": "iii", ... }, derived_page_labels?, page_count? }`.
+ * `derived_page_labels` seeds the printed labels (a map, or `null` for "the
+ * extraction has none"); omitted, the stored value for the same source is kept.
  */
 export async function handleTestCacheSeedPageLabelsHttpRequest(request: any) {
-    const { library_id, zotero_key, page_labels, page_count } = request as {
+    const { library_id, zotero_key, page_labels, derived_page_labels, page_count } = request as {
         library_id?: number;
         zotero_key?: string;
         page_labels?: Record<string, string>;
+        derived_page_labels?: Record<string, string> | null;
         page_count?: number;
     };
     const cache = Zotero.Beaver?.documentCache;
@@ -120,6 +144,7 @@ export async function handleTestCacheSeedPageLabelsHttpRequest(request: any) {
             contentKind: 'pdf',
             pageCount: typeof page_count === 'number' ? page_count : Object.keys(pageLabels).length,
             pageLabels,
+            ...(derived_page_labels !== undefined ? { derivedPageLabels: derived_page_labels } : {}),
             pages: null,
         },
     });
@@ -132,6 +157,7 @@ export async function handleTestCacheSeedPageLabelsHttpRequest(request: any) {
         ok: true,
         seeded: !!(record?.pageLabels && Object.keys(record.pageLabels).length > 0),
         page_labels: record?.pageLabels ?? null,
+        derived_page_labels: record?.derivedPageLabels ?? null,
     };
 }
 

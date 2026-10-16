@@ -22,12 +22,9 @@ import type {
     ReaderFrameContext,
     SectionHeaderItem,
     SentenceItem,
-    SentenceTrace,
-    SentenceTraceResult,
     TableItem,
     TextBearingItem,
     TextItem,
-    WorkerSentenceDebugOptions,
 } from "../../../src/beaver-extract";
 
 type PublicTypeSmoke = [
@@ -54,9 +51,6 @@ type PublicTypeSmoke = [
     DegradationSummary,
     DegradationNote,
     DegradationReason,
-    SentenceTrace,
-    SentenceTraceResult,
-    WorkerSentenceDebugOptions,
 ];
 
 describe("pdf barrel exports", () => {

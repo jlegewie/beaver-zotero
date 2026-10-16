@@ -1,10 +1,12 @@
-import React from 'react';
+import { MergeItemsPreview } from './MergeItemsPreview';
+import React, { useEffect, useState } from 'react';
 import type { AgentAction } from '../../../agents/agentActions';
 import type { OrganizeItemsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
 import { CreateItemsPreview } from './CreateItemsPreview';
+import { ImportItemsPreview } from './ImportItemsPreview';
 import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
 import { EditNotePreview } from '../../../components/agentRuns/EditNotePreview';
@@ -21,6 +23,52 @@ import {
     getEditNotePreviewKind,
 } from './editNoteBatchPreviewData';
 
+/** Synchronous item-type lookup; undefined when the item is missing or not loaded yet. */
+function readItemTypeID(libraryId: number, zoteroKey: string): number | undefined {
+    try {
+        const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
+        return item ? item.itemTypeID : undefined;
+    } catch {
+        // Items of a library Zotero has not loaded yet throw on sync lookup.
+        return undefined;
+    }
+}
+
+/**
+ * Resolve an item's type id, reading synchronously when the item is cached
+ * and otherwise loading it once in an effect.
+ */
+function useItemTypeID(libraryId: number | null, zoteroKey: string | undefined): number | undefined {
+    const syncValue = libraryId && zoteroKey ? readItemTypeID(libraryId, zoteroKey) : undefined;
+    const lookupKey = `${libraryId}:${zoteroKey}`;
+    const [loaded, setLoaded] = useState<{ lookupKey: string; itemTypeID: number } | null>(null);
+    const needsAsync = !!libraryId && !!zoteroKey && syncValue === undefined;
+
+    useEffect(() => {
+        if (!needsAsync || !libraryId || !zoteroKey) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+                if (!cancelled && item) setLoaded({ lookupKey, itemTypeID: item.itemTypeID });
+            } catch {
+                // Leave the type unresolved; the preview falls back to the agent-supplied label.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [needsAsync, libraryId, zoteroKey, lookupKey]);
+
+    return syncValue ?? (loaded?.lookupKey === lookupKey ? loaded.itemTypeID : undefined);
+}
+
+const EditMetadataActionPreview: React.FC<{
+    libraryId: number | null;
+    zoteroKey: string | undefined;
+} & Omit<React.ComponentProps<typeof EditMetadataPreview>, 'itemTypeID'>> = ({ libraryId, zoteroKey, ...props }) => {
+    const itemTypeID = useItemTypeID(libraryId, zoteroKey);
+    return <EditMetadataPreview {...props} itemTypeID={itemTypeID} />;
+};
+
 /**
  * Dispatches to action-specific preview components
  */
@@ -34,7 +82,23 @@ export const ActionPreview: React.FC<{
     isStreaming?: boolean;
     /** Use the compact presentation intended for the end-of-run review card. */
     compact?: boolean;
-}> = ({ toolName, previewData, status, actions, isStreaming, compact = false }) => {
+    disabled?: boolean;
+}> = ({ toolName, previewData, status, actions, isStreaming, compact = false, disabled = false }) => {
+    if (toolName === 'merge_items') {
+        // A failed undo leaves the merge in place, and the action keeps its
+        // result: show it as merged, not as the proposal.
+        const merged = status === 'applied' || (status === 'error' && previewData.resultData != null);
+        return (
+            <MergeItemsPreview
+                compact={compact}
+                action={actions?.[0]}
+                actionId={actions?.[0]?.id}
+                data={previewData.actionData as any}
+                result={merged ? previewData.resultData as any : undefined}
+                editable={!disabled && (status === 'pending' || status === 'awaiting' || status === 'undone' || status === 'rejected')}
+            />
+        );
+    }
     const editNotePreviewKind = getEditNotePreviewKind(toolName, previewData.actionType);
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
@@ -66,8 +130,7 @@ export const ActionPreview: React.FC<{
         // Resolve the edited item's type so the preview can display the field
         // that will actually change (the edit handler remaps wrong-type labels
         // to the type's equivalent field). Falls back to the agent-supplied
-        // label when the item is not loaded.
-        let itemTypeID: number | undefined;
+        // label when the item is not available.
         const zoteroKey = previewData.actionData.zotero_key;
         // Resolve the portable library_ref to a local library id first: a group
         // item's device-local library_id is UNRESOLVED_LIBRARY_ID (0) — its
@@ -79,20 +142,17 @@ export const ActionPreview: React.FC<{
             library_ref: previewData.actionData.library_ref,
             library_id: previewData.actionData.library_id,
         });
-        if (libraryId && zoteroKey) {
-            const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
-            if (item) itemTypeID = item.itemTypeID;
-        }
 
         return (
-            <EditMetadataPreview
+            <EditMetadataActionPreview
+                libraryId={libraryId}
+                zoteroKey={zoteroKey}
                 edits={edits}
                 currentValues={currentValues}
                 appliedEdits={appliedEdits}
                 status={status}
                 oldCreators={oldCreators}
                 newCreators={newCreators}
-                itemTypeID={itemTypeID}
             />
         );
     }
@@ -242,7 +302,10 @@ export const ActionPreview: React.FC<{
         );
     }
 
-    if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item') {
+    if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item' || previewData.actionType === 'import_item') {
+        if (actions && actions.length > 0 && actions[0].action_type === 'import_item') {
+            return <ImportItemsPreview actions={actions} status={status} />;
+        }
         // If no actions array provided, return fallback
         if (!actions || actions.length === 0) {
             return (

@@ -66,7 +66,7 @@ describe('OCR artifact validation and publication', () => {
         expect(mocks.put).toHaveBeenCalledTimes(2);
         for (const [input] of mocks.put.mock.calls) {
             expect(input).toMatchObject({ filePath: '/original.pdf', expectedSourceIdentity: identity,
-                metadata: { extractionSource: 'ocr' } });
+                metadata: { extractionSource: 'ocr', sourceMd5: 'original-hash' } });
         }
         expect(mocks.put.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.extract.mock.invocationCallOrder[1]);
         expect(mocks.put.mock.calls.map(([input]) => input.mode)).toEqual(['structured', 'markdown']);

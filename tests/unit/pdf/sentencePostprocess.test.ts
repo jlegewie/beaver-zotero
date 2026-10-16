@@ -159,6 +159,41 @@ describe("mergeLabelSentences", () => {
         ]);
     });
 
+    it.each([
+        ["appendix-prefixed", "Table A1."],
+        ["supplement-prefixed", "Fig. S2"],
+        ["dotted appendix", "Table B.3:"],
+        ["hyphenated appendix", "Figure A-1."],
+        ["two-letter prefix", "Table SI2."],
+        ["panel suffix", "Fig. 3a."],
+        ["roman numeral", "Table IV."],
+        ["upper-case keyword", "TABLE II."],
+    ])("merges a %s caption label like '%s' with its caption", (_, label) => {
+        const text = `${label} Impact of grants on suspensions.`;
+        const ranges = rangesFromChunks(text, [label, "Impact of grants on suspensions."]);
+        expect(slice(text, mergeLabelSentences(ranges, text, { captionLabels: true }))).toEqual([text]);
+    });
+
+    it("reads only plain-numbered labels without captionLabels (earlier PDF schemas)", () => {
+        const text = "Table A1. Impact of grants on suspensions.";
+        const ranges = rangesFromChunks(text, ["Table A1.", "Impact of grants on suspensions."]);
+        expect(slice(text, mergeLabelSentences(ranges, text))).toEqual([
+            "Table A1.",
+            "Impact of grants on suspensions.",
+        ]);
+    });
+
+    it.each([
+        ["a lower-case word in place of a number prefix", "Table of 3."],
+        ["a lower-case word made of roman-numeral letters", "Box mix."],
+        ["a lower-case roman numeral", "Table iv."],
+        ["a letter without a number", "Appendix A."],
+    ])("does NOT treat %s as a label ('%s')", (_, first) => {
+        const text = `${first} This is fine.`;
+        const ranges = rangesFromChunks(text, [first, "This is fine."]);
+        expect(slice(text, mergeLabelSentences(ranges, text, { captionLabels: true }))).toEqual([first, "This is fine."]);
+    });
+
     it("does NOT merge 'OK.' with the following sentence", () => {
         const text = "OK. This is fine.";
         const ranges = rangesFromChunks(text, ["OK.", "This is fine."]);

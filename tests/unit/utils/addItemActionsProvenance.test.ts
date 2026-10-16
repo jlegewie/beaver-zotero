@@ -88,7 +88,7 @@ describe("createZoteroItem import target", () => {
     (Zotero as any).Beaver.searchableLibraryIds = searchable;
     (Zotero as any).Libraries.get = vi.fn(() => ({ editable }));
     (Zotero as any).Item = vi.fn();
-    const { createZoteroItem: importItem } = await import('../../../src/services/itemImport');
+    const { createZoteroItem: importItem } = await import('../../../src/services/itemImport/legacy');
     await expect(importItem({ title: 'Explicit target' } as any, {
       libraryId: target,
     })).rejects.toThrow(error);

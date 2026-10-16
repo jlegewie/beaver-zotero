@@ -34,7 +34,7 @@ describe('startFulltextUpsertLane', () => {
         vi.useRealTimers();
     });
 
-    it('drains cleanup several requests at a time, fewer while the user is active', async () => {
+    it('fills two cleanup batches at a time, one while the user is active', async () => {
         vi.useFakeTimers();
         const registerExecutor = vi.fn();
         (globalThis as any).Zotero.Beaver = {
@@ -44,7 +44,7 @@ describe('startFulltextUpsertLane', () => {
 
         expect(registerExecutor).toHaveBeenCalledTimes(1);
         expect(registerExecutor).toHaveBeenCalledWith(expect.objectContaining({ jobType: 'fulltext_untag' }),
-            { maxInFlight: 8, activeMaxInFlight: 4, survivesLibraryExclusion: true });
+            { maxInFlight: 200, activeMaxInFlight: 100, survivesLibraryExclusion: true });
         await stop();
     });
 });

@@ -12,7 +12,7 @@
  * Parsing is pure. Resolving a link against the libraries on this computer
  * happens at click time, through the host (`navigation.revealObject`).
  */
-import { parseItemReference } from '@beaver/agent-core/identity/libraryRef';
+import { parseItemReference } from './libraryRef';
 
 /**
  * Shape of a Zotero object key. Zotero generates eight characters from an

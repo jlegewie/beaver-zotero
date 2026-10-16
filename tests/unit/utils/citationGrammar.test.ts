@@ -52,6 +52,8 @@ describe('citationGrammar', () => {
         expect(parseLoc('s5.6')).toEqual({ kind: 'sentence', value: '5.6', raw: 's5.6' });
         expect(parseLoc('p12.3')).toEqual({ kind: 'paragraph', value: '12.3', raw: 'p12.3' });
         expect(parseLoc('heading5.1')).toEqual({ kind: 'heading', value: '5.1', raw: 'heading5.1' });
+        expect(parseLoc('caption5.2')).toEqual({ kind: 'caption', value: '5.2', raw: 'caption5.2' });
+        expect(citationIndexCandidateIdsForLocator(parseLoc('caption5.2')!)).toEqual(['caption5.2']);
         expect(parseLoc('paragraph5.2')).toEqual({ kind: 'paragraph', value: '5.2', raw: 'paragraph5.2' });
         expect(parseLoc('s5.6-s5.9')).toEqual({ kind: 'sentence', value: '5.6-5.9', raw: 's5.6-s5.9' });
         // Cross-page and reversed ranges keep their ends as written.

@@ -10,6 +10,7 @@ import WelcomeOnboardingContent from './WelcomeOnboardingContent';
 import ReaderTipContent from './ReaderTipContent';
 import NoteTipContent from './NoteTipContent';
 import FeatureTipContent from './FeatureTipContent';
+import FileExportMessageContent from './FileExportMessageContent';
 import { CitationTipContent } from '../../sources/CitationTipContent';
 import Button from "@beaver/agent-ui/primitives/Button";
 import PopupMessageHeader from './PopupMessageHeader';
@@ -120,7 +121,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                 `}
             >
                 {/* Floating version_update/welcome_onboarding/reader_tip/cloud_consent render their own headers; a feature tip always does */}
-                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip' || message.type === 'cloud_consent')) && message.type !== 'feature_tip' && (
+                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip' || message.type === 'cloud_consent')) && message.type !== 'feature_tip' && message.type !== 'file_export' && (
                     <PopupMessageHeader
                         icon={message.icon || getDefaultIcon()}
                         rightIcon={message.rightIcon}
@@ -199,6 +200,10 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
 
                 {message.type === 'feature_tip' && message.tipId && (
                     <FeatureTipContent tipId={message.tipId} onDismiss={handleDismiss} />
+                )}
+
+                {message.type === 'file_export' && (
+                    <FileExportMessageContent message={message} onDismiss={handleDismiss} />
                 )}
 
                 {message.type === 'citation_tip' && (

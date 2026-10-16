@@ -4,10 +4,11 @@
 */
 
 import { openReader } from '../runtime/navigation';
+import { isPdfDocument } from '../../src/utils/attachmentFiles';
 export async function openPDFInNewWindow(item: Zotero.Item, page: number | null = null) {
     // If the item itself is not a PDF attachment, find the first available PDF attachment
     let pdfItem: Zotero.Item | null = item;
-    if (!item.isPDFAttachment()) {
+    if (!isPdfDocument(item)) {
         // Get all attachments and find the first PDF
         pdfItem = await item.getBestAttachment() || null;
         if (!pdfItem) {

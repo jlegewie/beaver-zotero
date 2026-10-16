@@ -117,6 +117,7 @@ vi.mock('../../src/services/documentCache', () => ({
 vi.mock('../../src/utils/configurePDFForBeaver', () => ({ configurePDFForBeaver: vi.fn() }));
 vi.mock('../../src/modules/readerIntegration', () => ({ initReaderIntegration: vi.fn(), cleanupReaderIntegration: vi.fn() }));
 vi.mock('../../src/modules/readerToolbarMenu', () => ({ initReaderToolbarMenu: vi.fn(), cleanupReaderToolbarMenu: vi.fn() }));
+vi.mock('../../src/modules/noteEditorExportMenu', () => ({ initNoteEditorExportMenu: vi.fn(), cleanupNoteEditorExportMenu: vi.fn() }));
 vi.mock('../../src/services/artifacts/view/readerTableView', () => ({
     initReaderTableViews: vi.fn(), cleanupReaderTableViews: vi.fn(), cleanupReaderTableViewsForWindow: vi.fn(),
 }));
@@ -192,6 +193,7 @@ function setupGlobals() {
         preferences: { dispose: vi.fn() },
         runtime: new BeaverInstance(),
         mutations: { cancelOwner: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) },
+        itemImport: { dispose: vi.fn() },
         notePreviews: { detachOwner: vi.fn().mockResolvedValue(undefined) },
         syncPause: { releaseWindow: vi.fn(), scheduleResumeAfterRun: vi.fn(), resumeSyncNow: vi.fn() },
         data: {
@@ -364,6 +366,13 @@ describe('hooks auth lock shutdown cleanup', () => {
 
         expect((globalThis as any).addon.account.dispose).toHaveBeenCalled();
         expect(Zotero.debug).toHaveBeenCalledWith(expect.stringContaining('disposeAccount timed out after 3000ms'));
+    });
+
+    it('clears the shutdown flag for the next startup even when cleanup throws', async () => {
+        const hooks = await loadHooks();
+        vi.mocked(ztoolkit.unregisterAll).mockImplementation(() => { throw new Error('cleanup failure'); });
+        await hooks.onShutdown();
+        expect(Zotero.__beaverShuttingDown).toBeUndefined();
     });
 
     it('disposes instance auth in fallback shutdown cleanup', async () => {

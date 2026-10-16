@@ -16,6 +16,14 @@ export function normalizeAnnotationTags(raw: unknown): string[] | undefined {
     return tags.length > 0 ? tags : undefined;
 }
 
+/** Zotero annotation type a create_highlight_annotations action writes. */
+export type TextAnnotationStyle = 'highlight' | 'underline';
+
+/** Read an action's `style`; anything but 'underline' means highlight. */
+export function textAnnotationStyle(raw: unknown): TextAnnotationStyle {
+    return raw === 'underline' ? 'underline' : 'highlight';
+}
+
 export interface BackendLocator {
     kind:
         | 'sentence'
@@ -28,6 +36,7 @@ export interface BackendLocator {
         | 'equation'
         | 'table'
         | 'margin'
+        | 'reference'
         | 'page'
         | 'unknown';
     value: string;
@@ -119,6 +128,8 @@ export interface CreateHighlightAnnotationsProposedData {
     items: HighlightAnnotationItem[];
     /** Tags applied to every created annotation (call-level, not per item). */
     tags?: string[];
+    /** Annotation type for every item. Absent means highlight. */
+    style?: TextAnnotationStyle;
 }
 
 export interface CreateNoteAnnotationsProposedData {

@@ -10,7 +10,7 @@ import { useAccountMenuItems } from '../ui/buttons/UserAccountMenuButton';
 import { formatPlanName } from '../preferences/BillingSection';
 import { highlightMatch } from '../../utils/highlightMatch';
 import ChatLoadFailure from '../ChatLoadFailure';
-import { Icon, MoreHorizontalIcon, PlusSignIcon, SearchIcon, UserIcon, CancelIcon } from '../icons/icons';
+import { Icon, MoreHorizontalIcon, PlusSignIcon, SearchIcon, UserIcon, CancelIcon, DeleteIcon, EditIcon, PinIcon, PinOffIcon } from '../icons/icons';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
@@ -156,10 +156,12 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
     const menuItems: MenuItem[] = [
         {
             label: 'Rename chat',
+            icon: EditIcon,
             onClick: () => onStartRename(thread),
         },
         {
             label: thread.isPinned ? 'Unpin chat' : 'Pin chat',
+            icon: thread.isPinned ? PinOffIcon : PinIcon,
             onClick: () => onTogglePin(thread),
             disabled: pinPending,
         },
@@ -169,7 +171,8 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
             isDivider: true,
         },
         {
-            label: 'Delete chat',
+            label: 'Delete chat…',
+            icon: DeleteIcon,
             onClick: () => onDelete(thread),
         },
     ];

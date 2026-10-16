@@ -1880,7 +1880,7 @@ export async function trimTableUncoordinated(
         throw new TableItemError('Trim requires thread_id and run_ids.', 'invalid_request');
     }
     const result = await withTableLock(ref, async (): Promise<TableTrimResult> => {
-        const existing = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
+        const existing = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryID, ref.key) as
             | Zotero.Item
             | false;
         requireWritable(ref);
@@ -2052,7 +2052,7 @@ export async function deleteTableUncoordinated(ref: TableRef): Promise<void> {
 export async function restoreTableUncoordinated(ref: TableRef): Promise<void> {
     requireWritable(ref);
     await withTableLock(ref, async () => {
-        const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryID, ref.key) as
             | Zotero.Item
             | false;
         if (!item) {

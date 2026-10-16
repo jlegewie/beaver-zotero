@@ -3,14 +3,14 @@ import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRun } from '@beaver/agent-core/agents/types';
-import { RepeatIcon, MoreHorizontalIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
+import { RepeatIcon, MoreHorizontalIcon, ArrowDownIcon, ArrowRightIcon, CopyIcon, LinkIcon, ToolsIcon } from '../icons/icons';
 import { copyToClipboard } from '../../utils/clipboard';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import Button from '@beaver/agent-ui/primitives/Button';
 import CitedSourcesList from '@beaver/agent-ui/chat/CitedSourcesList';
-import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
+import { renderToHTML, preprocessNoteContent, renderToMarkdownAsync } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
@@ -28,7 +28,10 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
+import { exportWithFeedback, fileExportMenuItem } from '../../utils/fileExportFeedback';
+import { menuDivider, saveAsNoteMenuItem } from '../../utils/saveNoteMenu';
 import { getHost } from '@beaver/agent-ui/host';
+import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -136,58 +139,61 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         [chainRuns],
     );
 
-    // Build share menu items
+    // Build share menu items: the clipboard, then notes and files, then
+    // developer tools.
     const getShareMenuItems = () => {
         const host = getHost();
         const noteWriter = host.noteWriter;
-        const hasParent = noteWriter?.canSaveAsChildNote() ?? false;
 
         const items: MenuItem[] = [
             {
                 label: 'Copy',
+                icon: CopyIcon,
                 onClick: () => handleCopy()
             },
             {
                 label: 'Copy link to message',
+                icon: LinkIcon,
                 onClick: () => copyRunUrl()
             },
-            {
-                label: 'Copy message ID',
-                onClick: () => copyRunId()
-            }
         ];
 
+        const output: MenuItem[] = [];
         if (noteWriter) {
-            items.splice(1, 0,
-                {
-                    label: 'Save as note',
-                    onClick: () => saveToLibrary(),
-                    disabled: isResolvingCitations
-                },
-                {
-                    label: 'Save as child note',
-                    onClick: () => saveToItem(),
-                    disabled: !hasParent || isResolvingCitations
-                },
-            );
+            output.push(saveAsNoteMenuItem({
+                onSaveStandalone: () => saveToLibrary(),
+                onSaveChild: () => saveToItem(),
+                hasParent: noteWriter.canSaveAsChildNote(),
+                parentTitle: noteWriter.childNoteParentTitle?.(),
+                disabled: isResolvingCitations,
+            }));
         }
+        if (host.documentExport?.exportResponseToFile) {
+            output.push(fileExportMenuItem(exportToFile, isResolvingCitations));
+        }
+        if (output.length > 0) items.push(menuDivider('output-divider'), ...output);
 
         if (host.config?.isDevelopment() ?? false) {
-            items.push({
-                label: 'Copy chat ID',
-                onClick: () => copyThreadId()
-            });
-            items.push({
-                label: 'Copy citation metadata',
-                onClick: () => copyCitationMetadata()
-            });
+            items.push(
+                menuDivider('developer-divider'),
+                {
+                    label: 'Copy message ID',
+                    icon: ToolsIcon,
+                    onClick: () => copyRunId()
+                },
+                {
+                    label: 'Copy citation metadata (JSON)',
+                    icon: ToolsIcon,
+                    onClick: () => copyCitationMetadata()
+                },
+            );
         }
 
         return items;
     };
 
     const handleCopy = async () => {
-        const formattedContent = renderToMarkdown(await buildRunContent());
+        const formattedContent = await renderToMarkdownAsync(await buildRunContent());
         await copyToClipboard(formattedContent);
     };
 
@@ -252,6 +258,23 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     /** Save as child note attached to selected/current item. */
     const saveToItem = () => saveRunNote(true);
 
+    /**
+     * Export the response's final answer (its whole resume chain) to a file
+     * (Word, PDF, Markdown or LaTeX). The host asks where to save and formats citations in
+     * the citation style setting.
+     */
+    const exportToFile = async (format: FileExportFormat) => {
+        const documentExport = getHost().documentExport;
+        const exportResponse = documentExport?.exportResponseToFile;
+        if (!exportResponse) return;
+        await exportWithFeedback(
+            format,
+            () => exportResponse({ runs: chainRuns, format, content: 'final' }),
+            addPopupMessage,
+            { reveal: documentExport.revealExportedFile, open: documentExport.openExportedFile },
+        );
+    };
+
     const copyRunUrl = async () => {
         const threadId = store.get(currentThreadIdAtom);
         if (!threadId) return;
@@ -264,10 +287,6 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     const copyCitationMetadata = async () => {
         await copyToClipboard(JSON.stringify(runCitations, null, 2));
-    };
-
-    const copyThreadId = async () => {
-        await copyToClipboard(store.get(currentThreadIdAtom ) || '');
     };
 
     const threadReadOnly = useAtomValue(threadReadOnlyAtom);
@@ -358,7 +377,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     >
                         <CopyButton
                             content={buildRunContent}
-                            formatContent={renderToMarkdown}
+                            formatContent={renderToMarkdownAsync}
                             className="scale-11"
                         />
                     </Tooltip>

@@ -1,5 +1,7 @@
+import { handleDuplicatesRequest } from '../duplicates/discovery';
 import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCacheHandlers';
 import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
+import { handleTestExportHttpRequest, handleTestExportNoteHttpRequest } from './handlers/testExportHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
 import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
 import {
@@ -132,6 +134,12 @@ import {
     handleTestWorkerStatsHttpRequest,
     handleTestWorkerWedgeProbeHttpRequest,
 } from './handlers/testCacheHandlers';
+
+import {
+    handleTestItemImportCapabilitiesHttpRequest,
+    handleTestItemImportResolveHttpRequest,
+    handleTestItemImportWriteHttpRequest,
+} from './handlers/testItemImportHandlers';
 
 
 import {
@@ -830,6 +838,8 @@ export function registerEndpoints(): (() => void) | undefined {
         createEndpoint(handleListTagsHttpRequest);
 
     // Deferred tool endpoints
+    endpoints['/beaver/library/duplicates'] = createEndpoint((request: any) => handleDuplicatesRequest({ ...request, event: 'duplicates_request', request_id: generateRequestId() }));
+
     endpoints['/beaver/agent-action/validate'] =
         createEndpoint(handleAgentActionValidateHttpRequest);
 
@@ -886,6 +896,12 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
+        endpoints['/beaver/test/item-import-resolve'] =
+            createEndpoint(handleTestItemImportResolveHttpRequest);
+        endpoints['/beaver/test/item-import-write'] =
+            createEndpoint(handleTestItemImportWriteHttpRequest);
+        endpoints['/beaver/test/item-import-capabilities'] =
+            createEndpoint(handleTestItemImportCapabilitiesHttpRequest);
         endpoints['/beaver/test/resolve-readable'] =
             createEndpoint(handleTestResolveReadableHttpRequest);
         endpoints['/beaver/test/best-epub-attachment'] =
@@ -1193,6 +1209,12 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/version-popup'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/version-popup', request));
 
         endpoints['/beaver/test/saved-actions'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/saved-actions', request));
+
+        // File export without the save dialog: a given source, or a response of
+        // a window's open thread.
+        endpoints['/beaver/test/export'] = createEndpoint(handleTestExportHttpRequest);
+        // Export of a Zotero note (or given note HTML) without the save dialog.
+        endpoints['/beaver/test/export-note'] = createEndpoint(handleTestExportNoteHttpRequest);
     }
 
     const releases = Object.entries(endpoints).map(([path, handler]) =>

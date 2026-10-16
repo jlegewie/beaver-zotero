@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@beaver/agent-core/platform/logger", () => ({ logger: vi.fn() }));
 vi.mock("../../../../src/services/agentDataProvider/utils", () => ({
   getAttachmentFileStatus: vi.fn(),
+  isLibrarySearchable: vi.fn(() => true),
 }));
 
 import {
@@ -47,7 +49,8 @@ class MockAnnotationItem {
 
 function mockAttachment() {
   return {
-    isPDFAttachment: () => true,
+    isAttachment: () => true,
+    attachmentContentType: "application/pdf",
     libraryID: 1,
     id: 42,
     key: "ATT123",
@@ -66,6 +69,7 @@ describe("createAnnotation tag application", () => {
     previousZotero = (globalThis as any).Zotero;
     (globalThis as any).Zotero = {
       Item: MockAnnotationItem,
+      Attachments: { LINK_MODE_LINKED_URL: 3 },
       DB: { inTransaction: () => inTransaction },
       Prefs: { get: vi.fn() },
       Beaver: {
@@ -92,6 +96,52 @@ describe("createAnnotation tag application", () => {
     expect(constructedItems[0].tags).toEqual(["methods", "important"]);
     expect(constructedItems[0].tagsAtSave).toEqual(["methods", "important"]);
     expect(constructedItems[0].saveTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("corrects a mislabelled parent PDF before saving the annotation", async () => {
+    const attachment = Object.assign(mockAttachment(), {
+      attachmentContentType: "application/octet-stream",
+      attachmentFilename: "file.pdf",
+      saveTx: vi.fn(async () => {}),
+    }) as any;
+    Object.assign((globalThis as any).Zotero, {
+      Libraries: { get: () => ({ editable: true }) },
+      File: { getSample: vi.fn(async () => "%PDF-1.4") },
+      MIME: { sniffForMIMEType: vi.fn(() => "application/pdf") },
+    });
+
+    await createHighlightAnnotation(attachment, {
+      pageIndex: 0,
+      boxes: [{ l: 10, t: 20, r: 110, b: 50, coord_origin: CoordOrigin.TOPLEFT }],
+      text: "highlighted text",
+    });
+
+    expect(attachment.attachmentContentType).toBe("application/pdf");
+    expect(attachment.saveTx).toHaveBeenCalledOnce();
+    expect(attachment.saveTx.mock.invocationCallOrder[0])
+      .toBeLessThan(constructedItems[0].saveTx.mock.invocationCallOrder[0]);
+  });
+
+  it("does not save an annotation when the parent file cannot be confirmed as a PDF", async () => {
+    const attachment = Object.assign(mockAttachment(), {
+      attachmentContentType: "",
+      attachmentFilename: "file.pdf",
+      saveTx: vi.fn(async () => {}),
+    }) as any;
+    Object.assign((globalThis as any).Zotero, {
+      Libraries: { get: () => ({ editable: true }) },
+      File: { getSample: vi.fn(async () => "<html>") },
+      MIME: { sniffForMIMEType: vi.fn(() => "text/html") },
+    });
+
+    await expect(createHighlightAnnotation(attachment, {
+      pageIndex: 0,
+      boxes: [{ l: 10, t: 20, r: 110, b: 50, coord_origin: CoordOrigin.TOPLEFT }],
+      text: "highlighted text",
+    })).rejects.toThrow("Zotero cannot annotate this attachment");
+
+    expect(attachment.saveTx).not.toHaveBeenCalled();
+    expect(constructedItems[0].saveTx).not.toHaveBeenCalled();
   });
 
   it("keeps its own transaction while an unrelated one is open", async () => {

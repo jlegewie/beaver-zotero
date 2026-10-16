@@ -1,6 +1,6 @@
 import React from 'react';
 import { ToolCallPart, AgentRunStatus } from '@beaver/agent-core/agents/types';
-import { TOOL_BASE_LABELS, parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
+import { getToolBaseLabel, parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 
 /**
  * Client-agnostic fallback for agent-action tool calls.
@@ -26,16 +26,6 @@ interface GenericAgentActionViewProps {
     runStatus?: AgentRunStatus;
     /** Partial args while a tool call is still streaming. */
     streamingArgs?: Record<string, unknown> | null;
-}
-
-/** Humanize an unknown tool name ("create_note" → "Create note"). */
-function humanizeToolName(toolName: string): string {
-    const spaced = toolName.replace(/[_-]+/g, ' ').trim();
-    return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'Action';
-}
-
-function baseLabel(toolName: string): string {
-    return TOOL_BASE_LABELS[toolName] ?? humanizeToolName(toolName);
 }
 
 /** Best-effort, request-side one-line detail for common agent actions. */
@@ -113,7 +103,7 @@ const ActionRow: React.FC<{ part: ToolCallPart; streamingArgs?: Record<string, u
     return (
         <div className="display-flex flex-row gap-2 items-baseline min-w-0 px-15 py-15">
             <div className="text-sm font-color-secondary whitespace-nowrap">
-                {baseLabel(part.tool_name)}
+                {getToolBaseLabel(part.tool_name)}
             </div>
             {detail && (
                 <div className="text-sm font-color-tertiary truncate min-w-0">

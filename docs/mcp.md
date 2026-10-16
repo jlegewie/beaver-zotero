@@ -236,6 +236,8 @@ Read supported attachment text from the user's Zotero library. Maximum 30 pages 
 
 Read a Zotero note as simplified HTML. Citation, annotation, and image nodes are represented as compact self-closing tags.
 
+Citations Beaver wrote read back as they were written: the same attachment or annotation ID and the same locator (for example a sentence locator such as `loc="s5.6-s5.9"`), even though the note shows the cited item with a page number. Beaver keeps this in private metadata on the citation; editing the citation in Zotero's citation dialog removes it, and the citation then reads back as the item and page the note shows. A cited work that is not in the library reads back as `<citation external_id="…"/>` with a `label` (authors, year and title) and the `url` it is cited by.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `note_id` | `string` | Yes | Note ID in `<library_id>-<zotero_key>` format. Get this from `get_item_details` with `include_notes: true`, search, or `list_items` with note categories. |
@@ -252,7 +254,7 @@ Read a Zotero note as simplified HTML. Citation, annotation, and image nodes are
 
 Create a Zotero note from markdown. This is a mutating tool: it is advertised only when **Write Tools** is enabled (`extensions.zotero.beaver.mcpCreateNoteToolEnabled`, default `false`), and MCP clients should apply their own approval policy before calling it.
 
-Citation tags use the unified format `<citation id="libraryID-zoteroKey"/>`. Add page locators with `loc`, for example `loc="page5"` or `loc="page5-page6"`. Use the 1-based page numbers from `read_attachment` `<pageN>` tags (physical page index, not printed labels). Use only IDs returned by tool results in the current session, copy page locators verbatim from `read_note` when editing existing notes, omit `loc` for metadata-only citations, and do not use legacy attributes such as `item_id`, `att_id`, `page`, or `sid`.
+Citation tags use the unified format `<citation id="libraryID-zoteroKey"/>`. Add page locators with `loc`, for example `loc="page5"` or `loc="page5-page6"`. Use the 1-based page numbers from `read_attachment` `<pageN>` tags (physical page index, not printed labels). Use only IDs returned by tool results in the current session, copy citation tags and their locators verbatim from `read_note` when reusing them, omit `loc` for metadata-only citations, and do not use legacy attributes such as `item_id`, `att_id`, `page`, or `sid`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -262,7 +264,9 @@ Citation tags use the unified format `<citation id="libraryID-zoteroKey"/>`. Add
 | `library` | `string` | No | Target library name or ID. Omit to use the default user library. |
 | `collection` | `string` | No | Collection name or key for standalone notes. Ignored when `parent_id` is set. |
 
-**Response**: JSON with `note_id`, `parent_item_id`, `related_item_id`, `collection_key`, `note_content` (rendered simplified HTML), `warning`, and `citation_issues` containing `invalid_keys[]` and `errors[]`.
+**Response**: JSON with `note_id`, `parent_item_id`, `related_item_id`, `collection_key`, `note_content` (rendered simplified HTML), `warning`, and `citation_issues` containing `invalid_keys[]` and `errors[]`, which report non-fatal problems resolving cited items after the note is written.
+
+Every citation is checked before the note is written. A citation that cannot be stored (an unknown, malformed or excluded item ID) returns an MCP error naming it, and no note is created. Citation tags inside code examples are not checked.
 
 **Underlying handlers**: `validateCreateNoteAction` and `executeCreateNoteAction` from `src/services/agentDataProvider/actions/createNote.ts`.
 

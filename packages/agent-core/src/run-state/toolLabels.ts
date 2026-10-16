@@ -1,6 +1,7 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from '../agents/types';
-import { parseArgs, TOOL_BASE_LABELS } from './toolCallRequest';
+import { getToolBaseLabel, parseArgs } from './toolCallRequest';
+import { textAnnotationStyle } from '../types/agentActions/createAnnotations';
 import { isExternalReferenceListView, isItemRow, type ToolResultView } from './toolResultViews';
 import { extractAuthorLastName, type ExternalReference } from '../types/externalReferences';
 
@@ -33,6 +34,8 @@ export interface ToolCallLabelOptions {
      * label reports that instead of naming an edit that never happened.
      */
     noChange?: boolean;
+    /** With `noChange`: the target did not exist (see isNotFoundWriteReturn). */
+    notFound?: boolean;
 }
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -164,6 +167,10 @@ export function getToolResultLabelSuffix(
                 const n = view.found_count ?? view.references.length;
                 return n != null ? ` (${n} found)` : null;
             }
+            if (toolName === 'find_book_chapters') {
+                const n = view.found_count ?? view.references.length;
+                return n ? ` (${plural(n, 'chapter')})` : null;
+            }
             // find_related_works: the page is a window into a larger set.
             if (view.tool_info) {
                 const shown = view.references.length;
@@ -182,6 +189,15 @@ export function getToolResultLabelSuffix(
                 return ` (${view.status_label})`;
             }
             return view.scope_primary ? ` (${view.scope_primary})` : null;
+        }
+        case 'duplicates': {
+            const shown = view.groups.length;
+            const total = view.total_count;
+            if (!shown) return null;
+            if (total <= shown) return ` (${plural(shown, 'group')})`;
+            // The view carries no offset; recover it from where the page ends.
+            const start = (view.next_offset ?? total) - shown + 1;
+            return ` (groups ${start}–${start + shown - 1} of ${total})`;
         }
         case 'user_question': {
             // The backend omits the default status — treat absent as answered.
@@ -401,7 +417,11 @@ function computeMainLabel(
     opts?: ToolCallLabelOptions,
 ): string {
     const toolName = part.tool_name;
-    const baseLabel = TOOL_BASE_LABELS[toolName] ?? 'Calling function';
+    const args = parseArgs(part);
+    const baseLabel = toolName === 'create_highlight_annotations'
+        && textAnnotationStyle(args.style) === 'underline'
+        ? 'Creating underline annotations'
+        : getToolBaseLabel(toolName);
 
     // Progress messages take precedence when present
     if (status === 'in_progress' && part.progress) {
@@ -411,10 +431,11 @@ function computeMainLabel(
     // A write that changed nothing: the return holds guidance written for the
     // model, so the label is the whole story the row can tell.
     if (opts?.noChange) {
-        return `${baseLabel}: no change needed`;
+        return opts.notFound
+            ? `${baseLabel}: nothing found to change`
+            : `${baseLabel}: no change needed`;
     }
 
-    const args = parseArgs(part);
     const view = opts?.view ?? null;
 
     // Headline name (item/note/annotation tools): prefer the hydrated view, else
@@ -426,6 +447,15 @@ function computeMainLabel(
     const viewLocator = getViewLocationLabel(view, toolName);
 
     switch (toolName) {
+        // === Item import (create_items v2: `items` is one entry per input) ===
+        case 'create_items': {
+            const items = Array.isArray(args.items) ? args.items : null;
+            if (items && items.length > 0 && status === 'in_progress') {
+                return `${baseLabel}: looking up ${items.length} source${items.length === 1 ? '' : 's'}…`;
+            }
+            return baseLabel;
+        }
+
         // === Fulltext search tools ===
         case 'fulltext_search': {
             const query = args.query_semantic as string | undefined;
@@ -834,7 +864,7 @@ function computeMainLabel(
         }
 
         case 'manage_tags': {
-            const tag = args.tag as string | undefined;
+            const tag = args.name as string | undefined;
             if (tag) {
                 return `${baseLabel}: "${truncate(tag, 20)}"`;
             }

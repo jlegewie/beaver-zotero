@@ -13,6 +13,9 @@ import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
 import { LibraryMutations } from './services/libraryMutations';
 import { LibraryOperations } from './services/libraryOperations';
+import { DeferredCommits } from './services/committedTransaction';
+import { ItemImportService } from './services/itemImport/service';
+import { InstanceExport } from './services/export/instanceExport';
 import { NotePreviews } from './services/notePreviews';
 import { AIProvider } from "./services/OpenAIProvider";
 import { createSyncPauseService } from './services/syncPause';
@@ -43,6 +46,9 @@ class Addon {
         },
     );
     public libraryOperations = new LibraryOperations();
+    public deferredCommits = new DeferredCommits();
+    public itemImport = new ItemImportService();
+    public exporter = new InstanceExport();
     public runtime = new BeaverInstance();
     public voiceNative?: import("./services/voice/nativeVoice").NativeVoice;
     public voice?: VoiceService;

@@ -12,10 +12,11 @@ import {
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
     FailedAnnotationResult,
+    textAnnotationStyle,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { libraryRefForLibraryID, resolveItemReference } from '../../utils/libraryIdentity';
-import { getAttachmentFileStatus } from '../agentDataProvider/utils';
+import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { checkLibraryExcluded, excludedLibraryUserMessage, getAttachmentFileStatus } from '../agentDataProvider/utils';
 import {
     createEpubHighlightAnnotation,
     createEpubNoteAnnotation,
@@ -41,9 +42,30 @@ function mapAnnotationErrorCode(error: unknown): string {
     return 'apply_failed';
 }
 
+type UserFacingError = Error & { userMessage?: string };
+
+/**
+ * Reject an annotation write or undo in a library excluded from Beaver.
+ *
+ * A library can be excluded after the action was proposed or applied, so the
+ * boundary is re-checked when the user applies or undoes it.
+ */
+function assertAnnotationLibraryNotExcluded(
+    ref: { library_id?: number | null; library_ref?: string | null },
+): void {
+    const libraryId = resolveLibraryRef(ref);
+    if (libraryId === null) return;
+    const exclusion = checkLibraryExcluded(libraryId);
+    if (!exclusion) return;
+    const error: UserFacingError = new Error(exclusion.message);
+    error.userMessage = excludedLibraryUserMessage(libraryId);
+    throw error;
+}
+
 async function getAnnotationAttachment(
     ref: ZoteroItemReference,
 ): Promise<{ attachment: Zotero.Item; contentKind: AnnotationContentKind }> {
+    assertAnnotationLibraryNotExcluded(ref);
     const resolved = await resolveItemReference(ref);
     if (resolved.status === 'library_unavailable') {
         throw new Error('Attachment library is not available on this computer');
@@ -69,6 +91,7 @@ export async function executeCreateHighlightAnnotationsAction(
 ): Promise<CreateHighlightAnnotationsResultData> {
     const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
     const { requested_ref, resolved_ref, items, tags } = data;
+    const style = textAnnotationStyle(data.style);
     const { attachment, contentKind } = await getAnnotationAttachment(resolved_ref);
 
     await getAttachmentFileStatus(attachment, false);
@@ -85,9 +108,10 @@ export async function executeCreateHighlightAnnotationsAction(
                     anchorId: item.anchor_id ?? undefined,
                     text: item.text ?? '',
                     color: item.color,
-                    comment: item.comment ?? item.title,
+                    comment: item.comment ?? '',
                     pageLabel: item.page_label ?? null,
                     tags,
+                    style,
                 });
                 created.push({
                     client_item_id: item.client_item_id,
@@ -121,7 +145,7 @@ export async function executeCreateHighlightAnnotationsAction(
         }
 
         try {
-            created.push(await createPdfHighlightForItem(attachment, item, tags));
+            created.push(await createPdfHighlightForItem(attachment, item, tags, style));
         } catch (error: any) {
             failed.push({
                 client_item_id: item.client_item_id,
@@ -232,6 +256,7 @@ export async function undoCreateAnnotationsAction(action: AgentAction): Promise<
         return;
     }
 
+    for (const ref of created) assertAnnotationLibraryNotExcluded(ref);
     for (const ref of created) {
         const resolved = await resolveItemReference(ref);
         if (resolved.status === 'library_unavailable') {

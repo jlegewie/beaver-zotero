@@ -107,17 +107,53 @@ describe("fixture schema validator", () => {
         expectFixtureError(f, /items\[0\]\.sentences: forbidden/);
     });
 
-    it("rejects text on table and picture items", () => {
+    it("accepts table rows as text and sentences, and pictures with or without label text", () => {
         const f = fixture();
-        f.expected.structured.pages[0].items[0] = {
+        const table = {
+            id: "table1",
+            kind: "table",
+            pageIndex: 0,
+            order: 1,
+            bbox: [1, 2, 3, 4],
+            text: "a | b\n1 | 2",
+            sentences: [
+                { id: "t0", order: 0, text: "a | b", bboxes: [[1, 2, 3, 3]] },
+                { id: "t1", order: 1, text: "1 | 2", bboxes: [[1, 3, 3, 4]] },
+            ],
+        };
+        const labelled = { id: "fig1", kind: "picture", pageIndex: 0, order: 2, bbox: [1, 2, 3, 4], text: "Wages" };
+        const bare = { id: "fig2", kind: "picture", pageIndex: 0, order: 3, bbox: [1, 2, 3, 4] };
+        f.expected.structured.pages[0].items.push(table, labelled, bare);
+
+        const items = validateFixture(f).expected.structured.pages[0].items;
+        expect(items[1]).toMatchObject({ kind: "table", text: "a | b\n1 | 2" });
+        expect("sentences" in items[1] && items[1].sentences?.map((s) => s.text)).toEqual(["a | b", "1 | 2"]);
+        expect(items[2]).toMatchObject({ kind: "picture", text: "Wages" });
+        expect("text" in items[3]).toBe(false);
+    });
+
+    it("requires text on table items and forbids sentences on pictures", () => {
+        const table = fixture();
+        table.expected.structured.pages[0].items[0] = {
             id: "table1",
             kind: "table",
             pageIndex: 0,
             order: 0,
             bbox: [1, 2, 3, 4],
-            text: "not allowed",
         };
-        expectFixtureError(f, /items\[0\]\.text: forbidden for table/);
+        expectFixtureError(table, /items\[0\]\.text: expected string/);
+
+        const picture = fixture();
+        picture.expected.structured.pages[0].items[0] = {
+            id: "fig1",
+            kind: "picture",
+            pageIndex: 0,
+            order: 0,
+            bbox: [1, 2, 3, 4],
+            text: "Wages",
+            sentences: [],
+        };
+        expectFixtureError(picture, /items\[0\]\.sentences: forbidden for picture/);
     });
 
     it("requires numeric section-header level", () => {

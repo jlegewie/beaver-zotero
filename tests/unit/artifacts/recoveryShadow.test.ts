@@ -333,7 +333,7 @@ beforeEach(async () => {
             ),
         },
         Items: {
-            getByLibraryAndKey: vi.fn((libraryID: number, key: string) =>
+            getByLibraryAndKeyAsync: vi.fn(async (libraryID: number, key: string) =>
                 libraryID === LIBRARY_ID && key === KEY ? item : false
             ),
             loadDataTypes: vi.fn(async () => undefined),

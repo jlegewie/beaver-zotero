@@ -3,16 +3,17 @@ import { isTableAttachment } from '../../../src/services/artifacts/tableItemIden
 import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { getContextWindow } from '../../runtime/windowRuntime';
 import React, { forwardRef } from 'react';
-import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, PdfIcon, NoteIcon, FileViewIcon } from "../icons/icons";
+import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, NoteIcon, FileViewIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { getItemValidationAtom, isHardBlockedValidation } from '../../atoms/itemValidation';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
+import { readOrFallback } from '../../../src/utils/zoteroDataLoading';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { navigateToAnnotation, isItemActiveTab } from '../../utils/readerUtils';
-import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
+import { currentReaderAttachmentKeyAtom, messageItemDataRevisionAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
 import { selectItemById } from '../../utils/selectItem';
 import { openNoteById } from '../../utils/sourceUtils';
@@ -145,11 +146,18 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const validation = getValidation(item);
 
         // Determine display name based on item type
+        // Falls back to a generic label while the item's data is not loaded
+        // yet; the composer loads it and bumps the revision, which re-renders
+        // the chip and rebuilds its popup.
+        const itemDataRevision = useAtomValue(messageItemDataRevisionAtom);
         const displayName = isAnnotation && annotation
             ? ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation'
-            : (item.isRegularItem() || item.isNote())
-                ? item.isRegularItem() ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH) : getDisplayNameFromItem(item)
-                : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
+            : readOrFallback(
+                () => (item.isRegularItem() || item.isNote())
+                    ? item.isRegularItem() ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH) : getDisplayNameFromItem(item)
+                    : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH),
+                item.isNote() ? 'Note' : item.isAttachment() ? 'Attachment' : 'Item',
+            );
 
         const isFileAttachment = item.isAttachment() && item.isFileAttachment();
 
@@ -206,7 +214,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // the one in view.
         const useItemMenu = !isTableAttachment(item) && !revealInCollectionKey;
         const revealMenuItems: MenuItem[] = useItemMenu ? [] : isAnnotation
-            ? [{ label: 'Reveal in PDF', icon: PdfIcon, onClick: () => navigateToAnnotation(item) }]
+            ? [{ label: 'Reveal in PDF', icon: FileViewIcon, onClick: () => navigateToAnnotation(item) }]
             : item.isNote()
                 ? [
                     { label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary },
@@ -341,7 +349,9 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 };
             }
             return buildMessageItemChipPopup(item, validation, getValidation);
-        }, [isAnnotation, annotation, item, validation, getValidation]);
+            // itemDataRevision: the popup reads the item's data, which can finish
+            // loading after every other dependency has settled.
+        }, [isAnnotation, annotation, item, validation, getValidation, itemDataRevision]);
 
         const button = (
             <ChipButton

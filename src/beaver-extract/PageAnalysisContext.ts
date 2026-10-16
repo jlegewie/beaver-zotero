@@ -2,8 +2,8 @@
  * PageAnalysisContext — shared cross-page analysis stage.
  *
  * Single source of truth for the StyleAnalyzer + MarginFilter passes
- * that both the markdown fast path (`runExtractFromIndices`) and the
- * sentence structured path (`detectFilteredParagraphs`) need to run
+ * that both the extraction pipeline (`buildAnalysisFromDoc`) and the
+ * standalone paragraph path (`detectFilteredParagraphs`) need to run
  * before per-page processing.
  *
  * Returns `marginAnalysis` alongside `marginRemoval` because the
@@ -19,6 +19,7 @@
 
 import { MarginFilter, getEffectiveRepeatThreshold } from "./MarginFilter";
 import { StyleAnalyzer } from "./StyleAnalyzer";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "./schema/presets";
 import {
     DEFAULT_MARGIN_ZONE,
     type MarginAnalysis,
@@ -47,6 +48,16 @@ export interface PageAnalysisContextInput {
     repeatThreshold?: number;
     /** Whether to detect ascending page-number sequences in margins. */
     detectPageSequences?: boolean;
+    /**
+     * Match text rows rather than single lines
+     * (`PdfExtractionPreset.marginTextRows`). Defaults to the current schema's.
+     */
+    marginTextRows?: boolean;
+    /**
+     * Also detect runs of page numbers that advance with the page index
+     * (`PdfExtractionPreset.pageNumberRuns`). Defaults to the current schema's.
+     */
+    pageNumberRuns?: boolean;
 }
 
 export interface PageAnalysisContext {
@@ -81,6 +92,8 @@ export function buildPageAnalysisContext(
         marginZone = DEFAULT_MARGIN_ZONE,
         repeatThreshold,
         detectPageSequences = true,
+        marginTextRows = CURRENT_PDF_EXTRACTION_PRESET.marginTextRows,
+        pageNumberRuns = CURRENT_PDF_EXTRACTION_PRESET.pageNumberRuns,
     } = input;
 
     const styleProfile = new StyleAnalyzer().analyze(pages, 4, 0.15, 0);
@@ -88,6 +101,7 @@ export function buildPageAnalysisContext(
     const marginAnalysis = MarginFilter.collectMarginElements(
         pages,
         marginZone,
+        marginTextRows,
     );
     const marginRemoval = MarginFilter.identifyElementsToRemove(
         marginAnalysis,
@@ -97,6 +111,7 @@ export function buildPageAnalysisContext(
             analysisPageCount: pages.length,
         }),
         detectPageSequences,
+        pageNumberRuns,
     );
 
     return { styleProfile, marginAnalysis, marginRemoval };

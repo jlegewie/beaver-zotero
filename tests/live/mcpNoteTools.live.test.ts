@@ -159,14 +159,16 @@ describe('MCP note tools', () => {
         expect(created.collection_key).toBeNull();
     });
 
-    it('surfaces fabricated citation IDs as citation issues', async () => {
-        const created = await mcpCreateNote({
+    it('rejects a fabricated citation ID with an error naming it, instead of dropping the citation', async () => {
+        const res = await mcpCreateNoteRaw({
             title: 'MCP bad citation',
             content: 'Bad citation. <citation id="not-a-real-id"/>',
         });
 
-        expect(created.note_id).toMatch(/^(u|g\d+|\d+)-[A-Z0-9]{8}$/);
-        expect(created.citation_issues.invalid_keys).toContain('not-a-real-id');
+        expect(isMcpError(res.result)).toBe(true);
+        if (isMcpError(res.result)) {
+            expect(res.result.content[0]?.text).toContain('not-a-real-id');
+        }
     });
 
     it('returns an MCP error object for missing content', async () => {

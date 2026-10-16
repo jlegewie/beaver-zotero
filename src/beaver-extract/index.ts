@@ -50,6 +50,7 @@ export {
     getExistingMuPDFWorkerClient,
     disposeMuPDFWorker,
 } from "./MuPDFWorkerClient";
+export type { WorkerCallTiming } from "./MuPDFWorkerClient";
 export { prewarmMuPDFWorker } from "./prewarm";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
@@ -137,12 +138,7 @@ export type {
     FilteredParagraphContext,
     FilteredParagraphResult,
 } from "./FilteredParagraphPipeline";
-export type {
-    SentenceSplitterConfig,
-    WorkerSentenceDebugOptions,
-    SentenceTrace,
-    SentenceTraceResult,
-} from "./sentenceTypes";
+export type { SentenceSplitterConfig } from "./sentenceTypes";
 
 /**
  * BeaverExtractor - High-level API for extracting text from PDFs.

@@ -4,11 +4,12 @@
  * Kept in its own module so esbuild-side callers can use them without dragging
  * the rest of `zoteroUtils.ts`.
  *
- * Allowed imports: the agent-core logger and type-only references. Never
- * value-import from `react/*`.
+ * Allowed imports: the agent-core logger, `zoteroDataLoading` and type-only
+ * references. Never value-import from `react/*`.
  */
 
 import { logger } from "@beaver/agent-core/platform/logger";
+import { isInTrashAsync } from "./zoteroDataLoading";
 
 /**
  * Build Beaver's stable library-key identifier for a Zotero item.
@@ -82,6 +83,21 @@ export const safeIsInTrash = (item: any): boolean | null => {
         return item.isInTrash();
     } catch (error: any) {
         logger(`safeIsInTrash: isInTrash threw error="${error?.message ?? error}". Item details: ${getItemDetailsForLogging(item)}`, 2);
+        return null;
+    }
+};
+
+/**
+ * Async {@link safeIsInTrash}: when the synchronous check throws because an
+ * ancestor is not loaded yet, loads the ancestors and checks again. Returns
+ * null only when the item has no usable `isInTrash`.
+ */
+export const safeIsInTrashAsync = async (item: any): Promise<boolean | null> => {
+    const syncState = safeIsInTrash(item);
+    if (syncState !== null || typeof item?.isInTrash !== "function") return syncState;
+    try {
+        return await isInTrashAsync(item);
+    } catch {
         return null;
     }
 };

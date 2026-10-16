@@ -19,8 +19,20 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
+import { readWithDataReload } from '../../utils/zoteroDataLoading';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { getCollectionByIdOrName, validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, resolveStoredTagName } from './utils';
+import {
+    getCollectionByIdOrName,
+    validateLibraryAccess,
+    extractYear,
+    formatCreatorsString,
+    getAttachmentInfoForItem,
+    degradedAttachmentRow,
+    degradedNoteRow,
+    degradedRegularRow,
+    resolveStoredTagName,
+    ROW_DATA_TYPES,
+} from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -349,7 +361,12 @@ export async function handleListItemsRequest(
         for (const { item } of paginatedItems) {
             if (item.isNote()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                items.push(serializeNote(item, parentInfo));
+                try {
+                    items.push(await readWithDataReload(item, ROW_DATA_TYPES, () => serializeNote(item, parentInfo)));
+                } catch (error) {
+                    logger(`handleListItemsRequest: Degrading unreadable note ${item.key}: ${error}`, 2);
+                    items.push(degradedNoteRow(item, parentInfo ?? null));
+                }
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
                 let attachmentItem: AttachmentRowResult;
@@ -376,25 +393,32 @@ export async function handleListItemsRequest(
                 }
                 items.push(attachmentItem);
             } else {
-                const creators = item.getCreators();
-                let date = '';
-                try { date = item.getField('date', false, true) as string; } catch { /* */ }
-                let title = '';
-                try { title = item.getField('title', false, true) as string; }
-                catch { title = item.getDisplayTitle?.() || ''; }
+                try {
+                    items.push(await readWithDataReload(item, ROW_DATA_TYPES, (): RegularListResultItem => {
+                        const creators = item.getCreators();
+                        let date = '';
+                        try { date = item.getField('date', false, true) as string; } catch { /* */ }
+                        let title = '';
+                        try { title = item.getField('title', false, true) as string; }
+                        catch { title = item.getDisplayTitle?.() || ''; }
 
-                const resultItem: RegularListResultItem = {
-                    result_type: 'regular',
-                    item_id: modelObjectId(library.libraryID, item.key),
-                    library_ref: libraryRef,
-                    item_type: item.itemType,
-                    title,
-                    creators: formatCreatorsString(creators),
-                    year: extractYear(date),
-                    date_added: item.dateAdded,
-                    date_modified: item.dateModified,
-                };
-                items.push(resultItem);
+                        return {
+                            result_type: 'regular',
+                            item_id: modelObjectId(library.libraryID, item.key),
+                            library_ref: libraryRef,
+                            item_type: item.itemType,
+                            title,
+                            creators: formatCreatorsString(creators),
+                            year: extractYear(date),
+                            date_added: item.dateAdded,
+                            date_modified: item.dateModified,
+                        };
+                    }));
+                } catch (error) {
+                    // Isolate the row so one unreadable record does not empty the page.
+                    logger(`handleListItemsRequest: Degrading unreadable item ${item.key}: ${error}`, 2);
+                    items.push(degradedRegularRow(item));
+                }
             }
         }
         

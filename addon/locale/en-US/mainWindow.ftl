@@ -23,6 +23,12 @@ beaver-context-menu-action =
 beaver-context-menu-add-action =
     .label = Add custom action…
 
+beaver-note-export-submenu =
+    .label = Export with Beaver
+
+beaver-note-export-format =
+    .label = { $format }…
+
 beaver-table-section-header =
     .label = Beaver Table
 beaver-table-section-sidenav =

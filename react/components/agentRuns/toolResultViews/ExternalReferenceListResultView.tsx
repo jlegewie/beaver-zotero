@@ -58,7 +58,7 @@ const RelatedWorksHeader: React.FC<{
 
 /**
  * Shared renderer for the {@link ExternalReferenceListView} view model
- * (external_search / lookup_work / find_related_works).
+ * (external_search / lookup_work / find_related_works / find_book_chapters).
  *
  * When `tool_info` is present it renders a tool-specific header above the
  * cards (currently only the find_related_works "References of / Cited by"
@@ -84,7 +84,9 @@ export const ExternalReferenceListResultView: React.FC<{ view: ExternalReference
                 : 'No citing works found'
             : isLookupWork
               ? 'No works found'
-              : 'No external references found';
+              : view.tool_name === 'find_book_chapters'
+                ? 'No chapters found'
+                : 'No external references found';
         return (
             <div className="p-3 text-sm font-color-tertiary">
                 {view.message || emptyDefault}

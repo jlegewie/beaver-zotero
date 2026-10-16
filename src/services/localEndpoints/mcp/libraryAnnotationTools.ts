@@ -83,6 +83,7 @@ function creationTool(highlight: boolean) {
             properties: {
                 attachment_id: { ...string, description: 'Attachment ID from search or get_item_details, e.g. u-ABC12345.' },
                 tags: { type: 'array', maxItems: 100, items: string },
+                ...(highlight ? { style: { type: 'string', enum: ['highlight', 'underline'], default: 'highlight', description: "Use 'underline' only when the user asks for underlines." } } : {}),
                 items: {
                     type: 'array', minItems: 1, maxItems: 50,
                     items: {
@@ -160,6 +161,7 @@ async function createAnnotations(args: any, highlight: boolean): Promise<any> {
         const actionType = highlight ? 'create_highlight_annotations' : 'create_note_annotations';
         const data = {
             requested_ref: ref, resolved_ref: ref, tags: args.tags,
+            ...(highlight && args.style === 'underline' ? { style: 'underline' } : {}),
             items: args.items.map((item: any, index: number) => ({
                 ...item, index, client_item_id: String(index), title: '', loc_raw: '',
                 loc: { kind: 'unknown', value: '', raw: '' }, color: item.color ?? 'yellow',

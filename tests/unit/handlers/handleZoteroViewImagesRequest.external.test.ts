@@ -147,7 +147,9 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
         expect(response.kind).toBe('pdf');
         expect(response.total_pages).toBe(12);
         expect(response.images.map((image) => image.page_number)).toEqual([1, 2]);
-        expect(response.images[0].page_label).toBe('i');
+        // The PDF's declared label ('i') is not a printed label; without a
+        // cached extraction the file has none.
+        expect(response.images[0].page_label).toBeNull();
         const renderArgs = renderPagesMock.mock.calls[0];
         expect(renderArgs[1].pageIndices).toEqual([0, 1]);
         expect(response.served_attachment).toMatchObject({
@@ -157,6 +159,52 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
             content_kind: 'pdf',
         });
         expect(response.parent_item).toBeUndefined();
+    });
+
+    it('reports printed page labels of a cached extraction', async () => {
+        vi.mocked(resolveExternalFile).mockResolvedValue({ ok: true, record: pdfRecord });
+        getPageCountMock.mockResolvedValue(12);
+        renderPagesMock.mockResolvedValue({
+            pageCount: 12,
+            pageLabels: { 0: 'i' },
+            pages: [{ pageIndex: 0, data: new Uint8Array([9]), format: 'png', width: 100, height: 140 }],
+        });
+        const getMetadata = vi.fn().mockResolvedValue({
+            pageCount: 12, pageLabels: { 0: 'i' }, derivedPageLabels: { 0: '1201' },
+        });
+        const previousBeaver = (globalThis as any).Zotero.Beaver;
+        (globalThis as any).Zotero.Beaver = { ...previousBeaver, documentCache: { getMetadata } };
+        try {
+            const response = await handleZoteroViewImagesRequest(baseRequest({ start_page: 1, end_page: 1 }));
+            expect(response.images[0].page_label).toBe('1201');
+            expect(getMetadata).toHaveBeenCalledWith({ libraryId: -1, zoteroKey: EXT_KEY }, pdfRecord.storedPath);
+        } finally {
+            (globalThis as any).Zotero.Beaver = previousBeaver;
+        }
+    });
+
+    it('times out when the page-label lookup outlasts the request deadline', async () => {
+        vi.useFakeTimers();
+        vi.mocked(resolveExternalFile).mockResolvedValue({ ok: true, record: pdfRecord });
+        getPageCountMock.mockResolvedValue(12);
+        renderPagesMock.mockResolvedValue({
+            pageCount: 12,
+            pageLabels: {},
+            pages: [{ pageIndex: 0, data: new Uint8Array([9]), format: 'png', width: 100, height: 140 }],
+        });
+        const getMetadata = vi.fn(() => new Promise(resolve => setTimeout(() => resolve(null), 1500)));
+        const previousBeaver = (globalThis as any).Zotero.Beaver;
+        (globalThis as any).Zotero.Beaver = { ...previousBeaver, documentCache: { getMetadata } };
+        try {
+            const pending = handleZoteroViewImagesRequest(baseRequest({ start_page: 1, end_page: 1, timeout_seconds: 1 }));
+            await vi.advanceTimersByTimeAsync(1500);
+            const response = await pending;
+            expect(response.error_code).toBe('timeout');
+            expect(response.images ?? []).toHaveLength(0);
+        } finally {
+            (globalThis as any).Zotero.Beaver = previousBeaver;
+            vi.useRealTimers();
+        }
     });
 
     it('rejects text and EPUB files as not viewable', async () => {

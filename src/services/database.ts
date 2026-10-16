@@ -238,6 +238,8 @@ export interface DocumentCacheMetadataRecord {
     documentMetadata: CachedDocumentMetadata | null;
     pageCount: number | null;
     pageLabels: DocumentCachePageLabels | null;
+    /** See `CachedDocumentMetadata.derivedPageLabels`; `undefined` = not known. */
+    derivedPageLabels: DocumentCachePageLabels | null | undefined;
     pages: PdfCachedDocumentMetadata['pages'];
     errorCode: DocumentCacheErrorCode | null;
     extractionSchemaVersion: string;
@@ -262,6 +264,11 @@ export interface DocumentCachePayloadRecord {
     payloadPath: string;
     payloadSizeBytes: number;
     payloadSha256: string | null;
+    /**
+     * md5 of the source file bytes a protected OCR payload was prepared from.
+     * Lets a renamed or touched file be verified without a processing ledger row.
+     */
+    sourceMd5?: string | null;
     extractionSchemaVersion: string;
     cacheFormatVersion: number;
     createdAt: string;
@@ -278,6 +285,7 @@ export type DocumentCacheMetadataInput = Omit<
     | 'documentMetadata'
     | 'pageCount'
     | 'pageLabels'
+    | 'derivedPageLabels'
     | 'pages'
 > & {
     documentMetadata: CachedDocumentMetadata;
@@ -1019,6 +1027,10 @@ export class BeaverDB {
                     }
                 });
             }
+            // Nullable and ignored by older builds, so the schema version stays put.
+            if (!columns.has('source_md5')) {
+                await this.queryAsync(`ALTER TABLE document_cache_payloads ADD COLUMN source_md5 TEXT`);
+            }
         }
         await this.setSchemaVersion('document_cache', DOCUMENT_CACHE_SCHEMA_VERSION);
 
@@ -1072,6 +1084,7 @@ export class BeaverDB {
                 payload_size_bytes         INTEGER NOT NULL,
                 payload_sha256             TEXT,
                 extraction_source          TEXT NOT NULL DEFAULT 'native',
+                source_md5                 TEXT,
                 extraction_schema_version  TEXT NOT NULL,
                 cache_format_version       INTEGER NOT NULL,
                 created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1255,10 +1268,17 @@ export class BeaverDB {
     }
 
     /**
-     * Close the database connection.
+     * Close the database connection permanently.
+     *
+     * Every caller is a teardown path, and each plugin instance opens its own
+     * connection. A non-permanent close lets `Zotero.DBConnection` reopen on
+     * the next query, and it keeps the connection's idle observer (backup +
+     * vacuum) registered with the app. After a plugin reload or a quit, a late
+     * query or an idle callback would then reopen a connection nothing closes,
+     * and Sqlite.sys.mjs blocks app shutdown waiting for it.
      */
     public async closeDatabase(): Promise<void> {
-        await this.conn.closeDatabase();
+        await this.conn.closeDatabase(true);
     }
 
     /**
@@ -3353,6 +3373,16 @@ export class BeaverDB {
         );
     }
 
+    /** Move a parked attachment behind the others waiting for OCR admission. */
+    public async touchAttachmentOcrUnavailable(libraryId: number, zoteroKey: string): Promise<void> {
+        await this.queryAsync(
+            `UPDATE attachment_processing_state SET updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?
+               AND extract_status = 'done' AND ocr_status = 'needed' AND last_error = ?`,
+            [libraryId, zoteroKey, OCR_SERVICE_UNAVAILABLE],
+        );
+    }
+
     /**
      * Rows parked by a closed OCR admission gate, oldest marker first.
      * `ticketed` is true while an OCR job for the attachment is queued, running
@@ -3909,6 +3939,7 @@ export class BeaverDB {
             documentMetadata,
             pageCount: pdfMetadata?.pageCount ?? null,
             pageLabels: pdfMetadata?.pageLabels ?? null,
+            derivedPageLabels: pdfMetadata?.derivedPageLabels,
             pages: pdfMetadata?.pages ?? null,
             errorCode: row.error_code ?? null,
             extractionSchemaVersion: row.extraction_schema_version,
@@ -3938,6 +3969,7 @@ export class BeaverDB {
             payloadSizeBytes: row.payload_size_bytes,
             payloadSha256: row.payload_sha256 ?? null,
             extractionSource: row.extraction_source === "ocr" ? "ocr" : "native",
+            sourceMd5: row.source_md5 ?? null,
             extractionSchemaVersion: row.extraction_schema_version,
             cacheFormatVersion: row.cache_format_version,
             createdAt: row.created_at,
@@ -4296,6 +4328,7 @@ export class BeaverDB {
                     updated_at: row.getResultByIndex(17),
                     last_accessed_at: row.getResultByIndex(18),
                     extraction_source: row.getResultByIndex(19),
+                    source_md5: row.getResultByIndex(20),
                 });
             },
         });
@@ -4316,7 +4349,7 @@ export class BeaverDB {
                        content_kind, source_file_path, source_file_mtime_ms, source_file_size_bytes,
                        source_size_bytes, payload_path, payload_size_bytes,
                        payload_sha256, extraction_schema_version, cache_format_version,
-                       created_at, updated_at, last_accessed_at, extraction_source
+                       created_at, updated_at, last_accessed_at, extraction_source, source_md5
                 FROM document_cache_payloads`;
     }
 
@@ -4505,6 +4538,28 @@ export class BeaverDB {
         return deletedPayloads;
     }
 
+    /**
+     * Replace a row's document metadata when the row is still exactly the one
+     * inspected. Leaves `updated_at` alone: the content is unchanged, only a
+     * field the row was written without is filled in. Returns whether it wrote.
+     */
+    public async updateDocumentCacheDocumentMetadataIfUnchanged(
+        metadata: DocumentCacheMetadataRecord,
+        documentMetadata: CachedDocumentMetadata,
+    ): Promise<boolean> {
+        let updated = false;
+        await this.conn.executeTransaction(async () => {
+            const current = await this.getDocumentCacheMetadataById(metadata.id);
+            if (!current || !BeaverDB.documentCacheMetadataMatches(current, metadata)) return;
+            await this.queryAsync(
+                `UPDATE document_cache_metadata SET document_metadata_json = ? WHERE id = ?`,
+                [JSON.stringify(documentMetadata), metadata.id],
+            );
+            updated = true;
+        });
+        return updated;
+    }
+
     /** Delete metadata rows for a library and return payload rows for file cleanup. */
     public async deleteDocumentCacheMetadataByLibrary(libraryId: number): Promise<DocumentCachePayloadRecord[]> {
         const payloads = await this.selectDocumentCachePayloads(
@@ -4549,8 +4604,8 @@ export class BeaverDB {
                 (metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
                  source_file_path, source_file_mtime_ms, source_file_size_bytes,
                  source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
-                 extraction_schema_version, cache_format_version, extraction_source, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 extraction_schema_version, cache_format_version, extraction_source, source_md5, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
              ON CONFLICT(metadata_id, payload_kind) DO UPDATE SET
                 metadata_id = excluded.metadata_id,
                 item_id = excluded.item_id,
@@ -4567,6 +4622,7 @@ export class BeaverDB {
                 extraction_schema_version = excluded.extraction_schema_version,
                 cache_format_version = excluded.cache_format_version,
                 extraction_source = excluded.extraction_source,
+                source_md5 = excluded.source_md5,
                 updated_at = datetime('now')`,
             [
                 record.metadataId,
@@ -4585,6 +4641,7 @@ export class BeaverDB {
                 record.extractionSchemaVersion,
                 record.cacheFormatVersion,
                 record.extractionSource ?? "native",
+                record.sourceMd5 ?? null,
             ],
         );
         const payload = await this.getDocumentCachePayload(record.libraryId, record.zoteroKey, record.payloadKind);

@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ runtime: { id: 'A', status: 'attached' }, imports: vi.fn(), emit: vi.fn() }));
 vi.mock('../../../react/runtime/windowRuntime', () => ({ tryGetWindowRuntime: () => state.runtime }));
 vi.mock('../../../react/utils/attachmentResolvedEvent', () => ({ emitAttachmentResolved: state.emit }));
-vi.mock('../../../src/services/itemImport', async importOriginal => ({ ...await importOriginal<any>(), applyCreateItemData: state.imports }));
+vi.mock('../../../src/services/itemImport/legacy', async importOriginal => ({ ...await importOriginal<any>(), applyCreateItemData: state.imports }));
 import { executeCreateItemAction, executeCreateItemActions } from '../../../react/utils/createItemActions';
 import { installMutationInstance } from '../../helpers/mutationInstance';
 

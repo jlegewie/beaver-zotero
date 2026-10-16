@@ -9,19 +9,22 @@ import {
 } from "@beaver/agent-core/layouts/table";
 import { getHost, type ClientHost } from "../host";
 import { anchorActionHandler, rowActionHandler } from "./rowActionHandlers";
-import { ArrowUpRightIcon, FileViewIcon, MoreHorizontalIcon } from "../icons";
+import { ArrowUpRightIcon, FileViewIcon, LibraryIcon, MoreHorizontalIcon } from "../icons";
 import IconButton from "../primitives/IconButton";
 import MenuButton from "../primitives/MenuButton";
 import type { MenuItem } from "../primitives/ContextMenu";
 
 type IconComponent = React.ComponentType<React.SVGProps<SVGSVGElement>>;
 
-/** Glyph and label for each verb, as a control or a menu entry. */
+/**
+ * Glyph and label for each verb. `menuIcon` is the glyph in the overflow menu,
+ * matching the item context menus, where it differs from the inline control's.
+ */
 const ACTION_UI: Record<
     Exclude<RowAction, "import">,
-    { icon: IconComponent; label: string }
+    { icon: IconComponent; menuIcon?: IconComponent; label: string }
 > = {
-    reveal: { icon: ArrowUpRightIcon, label: "Reveal in library" },
+    reveal: { icon: ArrowUpRightIcon, menuIcon: LibraryIcon, label: "Reveal in library" },
     open: { icon: FileViewIcon, label: "Open" },
 };
 
@@ -84,8 +87,8 @@ export function RowActionsView({
         if (action === "import" || action === primary) continue;
         const handler = rowActionHandler(row, action, host);
         if (!handler) continue;
-        const { icon, label } = ACTION_UI[action];
-        items.push({ label, icon, onClick: handler });
+        const { icon, menuIcon, label } = ACTION_UI[action];
+        items.push({ label, icon: menuIcon ?? icon, onClick: handler });
     }
     if (items.length > 0)
         controls.push(

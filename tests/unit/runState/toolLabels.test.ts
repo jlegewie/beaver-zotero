@@ -13,6 +13,15 @@ function toolCall(overrides: Partial<ToolCallPart> = {}): ToolCallPart {
 }
 
 describe('getToolCallLabel', () => {
+    it('names underline annotation calls by their style', () => {
+        const call = (args: Record<string, unknown>) => toolCall({ tool_name: 'create_highlight_annotations', args });
+
+        expect(getToolCallLabel(call({ style: 'underline' }), 'in_progress'))
+            .toBe('Creating underline annotations');
+        expect(getToolCallLabel(call({}), 'in_progress'))
+            .toBe('Creating highlight annotations');
+    });
+
     it('reports a write that changed nothing', () => {
         expect(getToolCallLabel(toolCall(), 'completed', { noChange: true }))
             .toBe('Edit metadata: no change needed');
@@ -30,6 +39,18 @@ describe('getToolCallLabel', () => {
             .toBe('Edit metadata: Applying edits');
     });
 
+    it('humanizes the name of a tool this client has no label for', () => {
+        const part = toolCall({ tool_name: 'find_patent_families', args: {} });
+        expect(getToolCallLabel(part, 'completed')).toBe('Find patent families');
+        expect(getToolCallLabel({ ...part, progress: 'Querying the registry' }, 'in_progress'))
+            .toBe('Find patent families: Querying the registry');
+    });
+
+    it('names find_book_chapters', () => {
+        const part = toolCall({ tool_name: 'find_book_chapters', args: { book: ['10.1002/9783527677429'] } });
+        expect(getToolCallLabel(part, 'completed')).toBe('Book chapters');
+    });
+
     // create_items normally renders as an agent-action card, so its label is only
     // reached when the call created nothing. Without a base label the row read
     // "Calling function".
@@ -41,5 +62,32 @@ describe('getToolCallLabel', () => {
         expect(getToolCallLabel(part, 'completed')).toBe('Import items');
         expect(getToolCallLabel(part, 'completed', { noChange: true }))
             .toBe('Import items: no change needed');
+    });
+
+    it('names the tag a manage_tags call operates on', () => {
+        const part = toolCall({ tool_name: 'manage_tags', args: { action: 'rename', name: 'methods', new_name: 'methodology' } });
+        expect(getToolCallLabel(part, 'completed')).toBe('Manage tags: "methods"');
+    });
+
+    it('does not call a write on a missing target unnecessary', () => {
+        const part = toolCall({ tool_name: 'manage_tags', args: { action: 'delete', name: 'gone' } });
+        expect(getToolCallLabel(part, 'completed', { noChange: true }))
+            .toBe('Manage tags: no change needed');
+        expect(getToolCallLabel(part, 'completed', { noChange: true, notFound: true }))
+            .toBe('Manage tags: nothing found to change');
+    });
+});
+
+describe('getToolCallLabel for create_items', () => {
+    const importCall = (items: unknown[]) => toolCall({ tool_name: 'create_items', args: { items } });
+
+    it('names the lookup while the sources are being resolved', () => {
+        expect(getToolCallLabel(importCall([{ id: '10.1/a' }, { id: 'https://x.org' }]), 'in_progress'))
+            .toMatch(/looking up 2 sources…$/);
+        expect(getToolCallLabel(importCall([{ id: '10.1/a' }]), 'in_progress')).toMatch(/looking up 1 source…$/);
+    });
+
+    it('drops the lookup note once the call completed', () => {
+        expect(getToolCallLabel(importCall([{ id: '10.1/a' }]), 'completed')).not.toMatch(/looking up/);
     });
 });

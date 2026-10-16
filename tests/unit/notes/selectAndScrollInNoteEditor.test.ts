@@ -57,6 +57,10 @@ vi.mock('../../../react/components/agentRuns/EditNotePreview', () => ({
     computeDiff: vi.fn(),
 }));
 
+vi.mock('../../../src/utils/noteCitationExpand', () => ({
+    ensureCitedLibrariesLoaded: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock('../../../src/utils/sync', () => ({
     syncingItemFilter: vi.fn(),
     syncingItemFilterAsync: vi.fn(),

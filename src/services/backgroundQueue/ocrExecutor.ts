@@ -89,6 +89,12 @@ interface ResolvedJob {
     /** Original byte length for a remote source (keys the cache); `0` for local. */
     sourceSizeBytes: number;
     sourceKey: string;
+    /**
+     * The ledger row was parked by a closed OCR admission gate when the job
+     * started. A recovery extraction clears that marker before the request, so
+     * admission is reported from this snapshot.
+     */
+    parkedForAdmission: boolean;
     /** Lazily reads/downloads the original scan bytes once, memoized per job. */
     loadOriginalBytes: () => Promise<Uint8Array>;
 }
@@ -434,6 +440,9 @@ export class OcrExecutor implements JobExecutor {
             localSizeStrategy: 'zotero-total',
         });
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        if (source.kind === 'error' && source.code === 'file_permission_denied') {
+            throw new OcrFileAccessDeniedError();
+        }
         if (source.kind === 'error') {
             await ctx.db.recordAttachmentReadingOutcome({
                 libraryId: record.libraryId, zoteroKey: record.zoteroKey,
@@ -486,6 +495,7 @@ export class OcrExecutor implements JobExecutor {
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
         let state = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        const parkedForAdmission = state?.lastError === OCR_SERVICE_UNAVAILABLE;
         const currentDetection = () => state?.fileHash === fileHash
             && state.extractStatus === 'done';
         const detectedScan = () => meta?.errorCode === 'no_text_layer' || repreparation !== null;
@@ -549,6 +559,7 @@ export class OcrExecutor implements JobExecutor {
                 pageCount,
                 sourceSizeBytes,
                 sourceKey: `${record.libraryId}-${record.zoteroKey}`,
+                parkedForAdmission,
                 loadOriginalBytes,
             },
         };
@@ -689,7 +700,8 @@ export class OcrExecutor implements JobExecutor {
 
     /** Clear this attachment's unavailable marker and resume the others it was parked with. */
     private async markAdmitted(job: ResolvedJob, ctx: JobExecutionContext): Promise<void> {
-        if (await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash)) {
+        const cleared = await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
+        if (cleared || job.parkedForAdmission) {
             Zotero.Beaver?.processingReconciler?.notifyOcrAdmissionReopened();
         }
     }

@@ -30,6 +30,7 @@ import {
     currentMessageCollectionsAtom,
     pendingPillInsertsAtom,
     addItemsToCurrentMessageItemsAtom,
+    messageItemDataRevisionAtom,
 } from './messageComposition';
 import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
@@ -259,6 +260,9 @@ export const markActionUsedAtom = atom(
 export const actionContextAtom = atom<ActionContext>((get) => {
     const zotero = get(zoteroContextAtom);
     const searchableLibraryIds = get(searchableLibraryIdsAtom);
+    // Recompute once attached items load their data, so labels derived from
+    // this context replace their placeholders.
+    get(messageItemDataRevisionAtom);
 
     // Actions stage their target for a run, so the context an action is chosen
     // from must contain only items Beaver can actually use.

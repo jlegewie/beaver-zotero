@@ -1,6 +1,7 @@
 import type { SearchIndexState, SearchIndexLibraryState } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID } from '../utils/libraryIdentity';
+import { processableAttachmentSql, processableKindFromStoredFields } from '../utils/attachmentFiles';
 import { getIndexScopeRef, getZoteroUserIdentifier } from '../utils/zoteroInstanceIdentity';
 import { expectedExtractionSchemaVersion } from './documentExtraction/shared/extractionSchemaVersions';
 import { EXPECTED_SEARCH_INDEX_VERSION } from './backgroundProcessing/constants';
@@ -84,21 +85,21 @@ export async function getSearchIndexState(): Promise<SearchIndexState | undefine
         const rows = await beaver.db.getSearchPreparationRows(libraryIds);
         const states = new Map(rows.map(row => [`${row.libraryId}:${row.key}`, row]));
         if (libraryIds.length) await Zotero.DB.queryAsync(
-            `SELECT i.libraryID, i.key, LOWER(a.contentType)
+            `SELECT i.libraryID, i.key, a.contentType, a.path
              FROM items i JOIN itemAttachments a USING (itemID)
              WHERE i.libraryID IN (${libraryIds.map(() => '?').join(',')})
                AND a.linkMode != ?
-               AND LOWER(a.contentType) IN ('application/pdf', 'application/epub+zip', 'text/html', 'application/xhtml+xml')
+               AND ${processableAttachmentSql('a.contentType', 'a.path')}
                AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID = i.itemID)
                AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID = a.parentItemID)`,
             [...libraryIds, Zotero.Attachments.LINK_MODE_LINKED_URL],
             { onRow: (result: any) => {
+                const kind = processableKindFromStoredFields(result.getResultByIndex(2), result.getResultByIndex(3));
+                if (!kind) return;
                 const id = Number(result.getResultByIndex(0));
                 const summary = libraries.get(id)!;
                 summary.total++;
                 const row = states.get(`${id}:${result.getResultByIndex(1)}`);
-                const mime = result.getResultByIndex(2);
-                const kind = mime === 'application/pdf' ? 'pdf' : mime === 'application/epub+zip' ? 'epub' : 'snapshot';
                 if (!row || row.contentKind !== kind) return;
                 const state = classifySearchPreparation(row, { accountId, localId, scopeRef: scopes.get(id)! });
                 if (state !== 'pending') summary[state]++;

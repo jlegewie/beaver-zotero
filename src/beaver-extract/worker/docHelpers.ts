@@ -14,6 +14,7 @@ import type {
     RawPageDataDetailed,
     RawLineDetailed,
     RawChar,
+    RawGlyphMetrics,
     PageGeometry,
     PDFPageSearchResult,
     PageImageResult,
@@ -31,7 +32,9 @@ import type {
     PageLike,
     QuadTuple,
     RectTuple,
+    StructuredTextLike,
 } from "./mupdfApi";
+import type { GraphicsSummary } from "./graphicsSummary";
 import { ERROR_CODES, postLog, workerError } from "./errors";
 import { isRecoverablePageError } from "../wasmFatal";
 import { isUnmappedTextLayer, recoveredTextIsAcceptable } from "../unmappedGlyphRecovery";
@@ -196,13 +199,13 @@ export function tupleToBBox(t: RectTuple): BoundingBox {
 
 /** Compute an axis-aligned BoundingBox from a QuadPoint's four corners. */
 export function bboxFromQuad(q: QuadTuple): BoundingBox {
-    const xs = [q[0], q[2], q[4], q[6]];
-    const ys = [q[1], q[3], q[5], q[7]];
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
-    const maxX = Math.max(...xs);
-    const maxY = Math.max(...ys);
-    return { l: minX, t: minY, r: maxX, b: maxY, origin: "top-left" };
+    return {
+        l: Math.min(q[0], q[2], q[4], q[6]),
+        t: Math.min(q[1], q[3], q[5], q[7]),
+        r: Math.max(q[0], q[2], q[4], q[6]),
+        b: Math.max(q[1], q[3], q[5], q[7]),
+        origin: "top-left",
+    };
 }
 
 /** Compute an axis-aligned bbox from an array of quads. */
@@ -696,6 +699,87 @@ function deriveFontFamily(name: string): string {
     );
 }
 
+/** Median of `values`, which it sorts in place. */
+function medianInPlace(values: Float64Array): number {
+    // A typed array sorts numerically without a comparator.
+    const s = values.sort();
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/**
+ * Per-glyph cross-axis metrics of one line's visible glyphs, in walk order:
+ * origin, ascent edge and descent edge. Reused across lines; a style run's
+ * glyphs are the contiguous range `[start, start + chars)`.
+ */
+class LineGlyphBuffer {
+    baselines = new Float64Array(256);
+    tops = new Float64Array(256);
+    bottoms = new Float64Array(256);
+    length = 0;
+
+    push(baseline: number, top: number, bottom: number): void {
+        if (this.length === this.baselines.length) {
+            const grow = (a: Float64Array) => {
+                const b = new Float64Array(a.length * 2);
+                b.set(a);
+                return b;
+            };
+            this.baselines = grow(this.baselines);
+            this.tops = grow(this.tops);
+            this.bottoms = grow(this.bottoms);
+        }
+        const i = this.length++;
+        this.baselines[i] = baseline;
+        this.tops[i] = top;
+        this.bottoms[i] = bottom;
+    }
+}
+
+/**
+ * Glyph metrics of a line's style runs, one entry per size. Sizes are keyed to
+ * the half point from each run's exact size, as `lineSize` keys them, so the
+ * line's dominant size picks its entry. Sorts the buffer's ranges in place.
+ */
+function glyphMetricsOfRuns(
+    runs: readonly { exactSize: number; chars: number; start: number }[],
+    glyphs: LineGlyphBuffer,
+): RawGlyphMetrics[] {
+    const bySize = new Map<number, { start: number; chars: number }[]>();
+    for (const run of runs) {
+        if (run.chars === 0) continue;
+        const size = Math.round(run.exactSize * 2) / 2;
+        const entry = bySize.get(size);
+        if (entry) entry.push(run);
+        else bySize.set(size, [run]);
+    }
+    const out: RawGlyphMetrics[] = [];
+    for (const [size, sizeRuns] of bySize) {
+        // One run is a contiguous range; several are gathered into a copy.
+        const values = (a: Float64Array): Float64Array => {
+            if (sizeRuns.length === 1) return a.subarray(sizeRuns[0].start, sizeRuns[0].start + sizeRuns[0].chars);
+            let n = 0;
+            for (const r of sizeRuns) n += r.chars;
+            const v = new Float64Array(n);
+            n = 0;
+            for (const r of sizeRuns) {
+                v.set(a.subarray(r.start, r.start + r.chars), n);
+                n += r.chars;
+            }
+            return v;
+        };
+        const baselines = values(glyphs.baselines);
+        out.push({
+            size,
+            glyphs: baselines.length,
+            baseline: medianInPlace(baselines),
+            top: medianInPlace(values(glyphs.tops)),
+            bottom: medianInPlace(values(glyphs.bottoms)),
+        });
+    }
+    return out;
+}
+
 /**
  * Extract detailed (character-level) page data, including per-character
  * quad and bbox metadata.
@@ -716,7 +800,9 @@ function extractRawPageDetailedOnce(
     fontApi?: FontApi,
     recoverUnmappedGlyphs?: boolean,
     textRepair = CURRENT_PDF_EXTRACTION_PRESET.textRepair,
+    extras: DetailedWalkExtras = {},
 ): RawPageDataDetailed {
+    const { onGraphics, fontSpans, styleRuns = CURRENT_PDF_EXTRACTION_PRESET.styleRuns } = extras;
     const page = doc.loadPage(pageIndex);
     try {
         const pb = page.getBounds("CropBox");
@@ -734,7 +820,16 @@ function extractRawPageDetailedOnce(
 
         let stextOptions = detailedStructuredTextOptions(includeImages, textRepair);
         if (recoverUnmappedGlyphs) stextOptions = withRecoveryFlags(stextOptions);
-        const stext = page.toStructuredText(stextOptions);
+        // With `onGraphics`, the graphics summary comes from the same pass over the
+        // page contents; the structured text is identical either way.
+        let stext: StructuredTextLike;
+        if (onGraphics) {
+            const both = page.toStructuredTextWithGraphics(stextOptions);
+            stext = both.stext;
+            onGraphics(both.graphics);
+        } else {
+            stext = page.toStructuredText(stextOptions);
+        }
 
         const blocks: RawBlock[] = [];
         let currentBlock: (RawBlock & { type: "text"; lines: RawLineDetailed[] }) | null = null;
@@ -769,6 +864,98 @@ function extractRawPageDetailedOnce(
             return entry;
         };
 
+        // Per-glyph style runs (`RawLine.styleRuns`). Needs `fontApi` for the
+        // font names. Whitespace glyphs neither count nor split a run.
+        const captureRuns = styleRuns && !!fontApi;
+        let glyphFontPtr = 0;
+        let glyphSize = 0;
+        let glyphExactSize = 0;
+        let runFontPtr = 0;
+        type Run = {
+            fontPtr: number;
+            size: number;
+            exactSize: number;
+            chars: number;
+            letters: number;
+            /** Index of the run's first glyph in `glyphs`. */
+            start: number;
+        };
+        let runs: Run[] = [];
+        const glyphs = new LineGlyphBuffer();
+        // Glyph metrics are measured across the writing direction: y for
+        // horizontal lines, x for vertical ones (`beginLine`).
+        let crossX = false;
+        let glyphOriginX = 0;
+        let glyphOriginY = 0;
+        const noteGlyphStyle = (fontPtr: number, size: number) => {
+            glyphFontPtr = typeof fontPtr === "number" ? fontPtr : 0;
+            glyphExactSize = typeof size === "number" ? size : 0;
+            glyphSize = Math.trunc(glyphExactSize);
+        };
+        const countRunGlyph = (rune: string, quad: QuadTuple) => {
+            // `rune` is one code point; ASCII is classified without a regex.
+            const code = rune.charCodeAt(0);
+            const ascii = code < 0x80;
+            if (ascii ? code === 0x20 || (code >= 0x09 && code <= 0x0d) : !/\S/u.test(rune)) return;
+            let run = runs[runs.length - 1];
+            if (!run || runFontPtr !== glyphFontPtr || run.size !== glyphSize) {
+                run = {
+                    fontPtr: glyphFontPtr, size: glyphSize, exactSize: glyphExactSize, chars: 0, letters: 0,
+                    start: glyphs.length,
+                };
+                runs.push(run);
+                runFontPtr = glyphFontPtr;
+            }
+            run.chars++;
+            if (ascii ? ((code | 0x20) >= 0x61 && (code | 0x20) <= 0x7a) : /\p{L}/u.test(rune)) run.letters++;
+            // Quad: upper-left, upper-right, lower-left, lower-right corners in
+            // the glyph's own frame; "upper" is the ascent side.
+            if (crossX) glyphs.push(glyphOriginX, quad[0], quad[4]);
+            else glyphs.push(glyphOriginY, quad[1], quad[5]);
+        };
+        const flushRuns = (line: RawLineDetailed) => {
+            if (!captureRuns) return;
+            line.styleRuns = runs.map((r) => {
+                const f = lookupFont(r.fontPtr);
+                return {
+                    font: { name: f.name, family: f.family, weight: f.weight, style: f.style, size: r.size },
+                    exactSize: r.exactSize,
+                    chars: r.chars,
+                    letters: r.letters,
+                };
+            });
+            line.glyphMetrics = glyphMetricsOfRuns(runs, glyphs);
+            runs = [];
+            glyphs.length = 0;
+        };
+
+        // Per-line font runs (`RawLineDetailed.spans`, region walks only).
+        // `spanFontPtr` is the font pointer of the current line's last span.
+        let spanFontPtr = 0;
+        const recordFontSpan = (fontPtr: number, size: number) => {
+            if (!currentLine) return;
+            const spans = (currentLine.spans ??= []);
+            const last = spans[spans.length - 1];
+            if (last && spanFontPtr === fontPtr && last.font.size === size) return;
+            const f = lookupFont(fontPtr);
+            spanFontPtr = fontPtr;
+            spans.push({
+                start: currentLine.chars.length,
+                font: { name: f.name, family: f.family, weight: f.weight, style: f.style, size },
+            });
+        };
+
+        // Style runs and font spans share the walker's single per-glyph font
+        // callback, which is left undefined when neither is wanted (it costs
+        // two WASM calls per glyph).
+        const onCharFont =
+            captureRuns || fontSpans
+                ? (fontPtr: number, size: number) => {
+                      if (captureRuns) noteGlyphStyle(fontPtr, size);
+                      if (fontSpans) recordFontSpan(fontPtr, size);
+                  }
+                : undefined;
+
         try {
             stext.walk({
                 beginTextBlock: (bbox) => {
@@ -785,6 +972,10 @@ function extractRawPageDetailedOnce(
                     }
                 },
                 beginLine: (bbox, wmode, dir) => {
+                    runs = [];
+                    glyphs.length = 0;
+                    const rotation = dirToRotation(dir[0], dir[1]);
+                    crossX = rotation === 90 || rotation === 270;
                     currentLine = {
                         wmode,
                         bbox: tupleToBBox(bbox),
@@ -802,17 +993,25 @@ function extractRawPageDetailedOnce(
                         // nearest cardinal so downstream rotation
                         // normalization gets a stable, sign-precise
                         // angle. See `PageRotationNormalizer`.
-                        rotation: dirToRotation(dir[0], dir[1]),
+                        rotation,
                         chars: [] as RawChar[],
                     } as RawLineDetailed;
                 },
                 endLine: () => {
+                    if (currentLine) flushRuns(currentLine);
                     if (currentLine && currentBlock) {
                         if (textRepair) maskDetailedLineTerminators(currentLine);
                         currentBlock.lines.push(currentLine);
                     }
                     currentLine = null;
                 },
+                onCharFont,
+                onCharOrigin: captureRuns
+                    ? (x: number, y: number) => {
+                          glyphOriginX = x;
+                          glyphOriginY = y;
+                      }
+                    : undefined,
                 onLineFont: (fontPtr, size) => {
                     if (!currentLine) return;
                     const f = lookupFont(typeof fontPtr === "number" ? fontPtr : 0);
@@ -833,6 +1032,7 @@ function extractRawPageDetailedOnce(
                 },
                 onChar: (rune, quad) => {
                     if (!currentLine) return;
+                    if (captureRuns) countRunGlyph(rune, quad);
                     currentLine.text += rune;
                     currentLine.chars.push({
                         c: rune,
@@ -1352,17 +1552,41 @@ export function extractRawPageFromDoc(
     return recovered;
 }
 
-/** Extract a page's detailed-walk data, recovering an unmapped text layer when present. */
+/** Optional extras recorded by the detailed walk. */
+export interface DetailedWalkExtras {
+    /**
+     * Receives the page's graphics summary, collected in the same pass as the
+     * text (requires `MuPDFApi.supportsGraphicsSummary`).
+     */
+    onGraphics?: (graphics: GraphicsSummary) => void;
+    /** Record per-line font runs (`RawLineDetailed.spans`, region detection). */
+    fontSpans?: boolean;
+    /**
+     * Record per-glyph style runs (`RawLine.styleRuns`, heading detection).
+     * Defaults to the current schema preset's `styleRuns`.
+     */
+    styleRuns?: boolean;
+}
+
+/**
+ * Extract a page's detailed-walk data, recovering an unmapped text layer when
+ * present. The graphics summary does not depend on text options, so the
+ * unmapped-glyph retry does not re-collect it.
+ */
 export function extractRawPageDetailedFromDoc(
     doc: DocumentLike,
     pageIndex: number,
     includeImages: boolean,
     fontApi?: FontApi,
     textRepair?: boolean,
+    extras: DetailedWalkExtras = {},
 ): RawPageDataDetailed {
-    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair);
+    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, false, textRepair, extras);
     if (!isUnmappedTextLayer(page)) return page;
-    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair);
+    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true, textRepair, {
+        fontSpans: extras.fontSpans,
+        styleRuns: extras.styleRuns,
+    });
     if (!recoveredTextIsAcceptable(recovered)) return page;
     postLog("info", `Recovered unmapped text layer on page ${pageIndex}`);
     return recovered;

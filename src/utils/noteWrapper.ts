@@ -12,6 +12,9 @@
  *   - `rebuildDataCitationItems`  regenerate the cache from inline citations
  */
 
+import { readBeaverCitationMeta } from './noteCitationMeta';
+import { isZoteroItemUri } from './zoteroUri';
+
 // =============================================================================
 // Wrapper Div
 // =============================================================================
@@ -140,16 +143,32 @@ export function rebuildDataCitationItems(
                         continue;
                     }
 
+                    // A work that is not a library item (an embedded external
+                    // reference) carries its data in Beaver's private
+                    // metadata, or inline (a note saved from a chat response).
+                    if (!isZoteroItemUri(uriKey)) {
+                        const embeddedItemData = readBeaverCitationMeta(ci)?.csl
+                            ?? (ci.itemData && typeof ci.itemData === 'object' ? ci.itemData : undefined);
+                        if (embeddedItemData) {
+                            storedCitationItems.push({ uris: ci.uris, itemData: embeddedItemData });
+                        }
+                        continue;
+                    }
+
                     // Fresh lookup for new citations not in the pre-edit cache.
-                    const itemInfo = (Zotero.URI as any).getURIItemLibraryKey(uriKey);
-                    if (itemInfo) {
-                        const item = Zotero.Items.getByLibraryAndKey(itemInfo.libraryID, itemInfo.key);
+                    // A URI Zotero cannot resolve skips only its own item, not
+                    // the rest of a multi-item citation.
+                    try {
+                        const itemInfo = (Zotero.URI as any).getURIItemLibraryKey(uriKey);
+                        const item = itemInfo && Zotero.Items.getByLibraryAndKey(itemInfo.libraryID, itemInfo.key);
                         if (item) {
                             storedCitationItems.push({
                                 uris: ci.uris,
                                 itemData: Zotero.Utilities.Item.itemToCSLJSON(item)
                             });
                         }
+                    } catch {
+                        // Unresolvable item: no cache entry for it.
                     }
                 }
             }

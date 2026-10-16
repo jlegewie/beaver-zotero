@@ -14,6 +14,7 @@ import {
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
+import type { CitationExportRender } from '../host/types';
 import { useCitationViewModel } from './useCitationViewModel';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
 import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons';
@@ -59,6 +60,24 @@ interface CitationProps {
     children?: React.ReactNode;
 }
 
+/**
+ * Wrap a host-rendered export citation: raw HTML, or a native citation span
+ * carrying its serialized payload. Both hold HTML, e.g.
+ * "(<span class="citation-item">Author, 2024</span>)".
+ */
+function renderExportedCitation(exported: CitationExportRender): React.ReactElement {
+    if (exported.kind === 'html') {
+        return <span dangerouslySetInnerHTML={{ __html: exported.html }} />;
+    }
+    return (
+        <span
+            className="citation"
+            data-citation={exported.citationData}
+            dangerouslySetInnerHTML={{ __html: exported.html }}
+        />
+    );
+}
+
 const Citation: React.FC<CitationProps> = (props) => {
     const { exportRendering = false } = props;
 
@@ -89,7 +108,8 @@ const Citation: React.FC<CitationProps> = (props) => {
         citation,
         formatted_citation,
         previewText,
-        pagesDisplay,
+        locatorDisplay,
+        pageReference,
         pages,
     } = vm;
 
@@ -120,15 +140,15 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     // Format for display
     let displayText = '';
-    const hasLocatorDisplay = pagesDisplay.trim().length > 0;
+    const hasLocatorDisplay = locatorDisplay.length > 0;
     if (authorYearFormat) {
         if (isStreaming || isInvalid) {
             // We don't know the author/year string yet, or citation is invalid. Render a subtle placeholder.
             displayText = '?';
         } else {
             displayText = consecutive
-                ? (hasLocatorDisplay ? `p.${pagesDisplay}` : 'Ibid')
-                : (hasLocatorDisplay ? `${citation}, p.${pagesDisplay}` : citation);
+                ? (hasLocatorDisplay ? locatorDisplay : 'Ibid')
+                : (hasLocatorDisplay ? `${citation}, ${locatorDisplay}` : citation);
         }
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
@@ -140,11 +160,20 @@ const Citation: React.FC<CitationProps> = (props) => {
     if (exportRendering) {
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
 
-        // External citations cannot be exported as proper Zotero citations
+        // External works not in the library: a host-native citation when the
+        // host can build one, otherwise a link to the work.
         if (isExternal && !mappedZoteroItem) {
             const externalReference = externalSourceId
                 ? externalReferenceMap[externalSourceId]
                 : undefined;
+            const exportedReference = externalSourceId && externalReference
+                ? getHost().documentExport?.renderExternalReferenceCitation?.({
+                    externalId: externalSourceId,
+                    reference: externalReference,
+                    requestedRef,
+                })
+                : null;
+            if (exportedReference) return renderExportedCitation(exportedReference);
             const label = citation
                 || (externalReference ? formatExternalReferenceLabel(externalReference) : '')
                 || externalSourceId
@@ -174,7 +203,7 @@ const Citation: React.FC<CitationProps> = (props) => {
             // local copy. Name it by its id rather than export an empty pair of
             // parentheses.
             const fileLabel = citation || (externalFileKey ? `Attached file ext-${externalFileKey}` : '');
-            const locatorSuffix = hasLocatorDisplay ? `, p.${pagesDisplay}` : '';
+            const locatorSuffix = hasLocatorDisplay ? `, ${locatorDisplay}` : '';
             const exportedFile = getHost().documentExport?.renderExternalFileCitation?.({
                 externalFileKey,
                 displayName: fileLabel,
@@ -199,19 +228,7 @@ const Citation: React.FC<CitationProps> = (props) => {
             metadata: citationMetadata,
             pageLabelsByAttachmentId: labelsByAttachmentId,
         });
-        if (!exported) return null;
-        if (exported.kind === 'html') {
-            return <span dangerouslySetInnerHTML={{ __html: exported.html }} />;
-        }
-        // Use dangerouslySetInnerHTML because the formatted citation is HTML
-        // (e.g., "(<span class="citation-item">Author, 2024</span>)").
-        return (
-            <span
-                className="citation"
-                data-citation={exported.citationData}
-                dangerouslySetInnerHTML={{ __html: exported.html }}
-            />
-        );
+        return exported ? renderExportedCitation(exported) : null;
     }
 
     // Determine the CSS class based on citation type and state
@@ -324,7 +341,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                 <span className="flex-1" />
                 {!showItemInfo && hasLocatorDisplay && (
                     <span className="font-color-secondary text-sm" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-                        {`Page ${pagesDisplay}`}
+                        {pageReference.charAt(0).toUpperCase() + pageReference.slice(1)}
                     </span>
                 )}
                 {!showItemInfo && (!pages || pages.length === 0) && textLineLocation && (
@@ -404,10 +421,10 @@ const Citation: React.FC<CitationProps> = (props) => {
                             <Icon icon={PdfIcon} className="font-color-secondary" />
                             <span className="text-sm font-color-secondary">
                                 {isEpubCitation
-                                    ? (hasLocatorDisplay ? `Opens EPUB at page ${pagesDisplay}` : 'Opens EPUB at location')
+                                    ? (hasLocatorDisplay ? `Opens EPUB at ${pageReference}` : 'Opens EPUB at location')
                                     : hasBoundingBoxes
-                                        ? (hasLocatorDisplay ? `Highlights passage on page ${pagesDisplay}` : 'Highlights passage in PDF')
-                                        : (hasLocatorDisplay ? `Opens PDF on page ${pagesDisplay}` : 'Opens PDF at location')}
+                                        ? (hasLocatorDisplay ? `Highlights passage on ${pageReference}` : 'Highlights passage in PDF')
+                                        : (hasLocatorDisplay ? `Opens PDF on ${pageReference}` : 'Opens PDF at location')}
                             </span>
                         </span>
                     </span>

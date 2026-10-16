@@ -4,6 +4,7 @@ import 'dotenv/config';
 
 const agentCoreSrc = fileURLToPath(new URL('./packages/agent-core/src', import.meta.url));
 const agentUiSrc = fileURLToPath(new URL('./packages/agent-ui/src', import.meta.url));
+const agentExportSrc = fileURLToPath(new URL('./packages/agent-export/src', import.meta.url));
 
 // Smoke-tier config — opt-in, exercises real MuPDF WASM and sharp.
 // Slower and more environment-sensitive than `npm test`, so kept out of
@@ -27,6 +28,7 @@ export default defineConfig({
         alias: {
             '@beaver/agent-core': agentCoreSrc,
             '@beaver/agent-ui': agentUiSrc,
+            '@beaver/agent-export': agentExportSrc,
         },
     },
 });

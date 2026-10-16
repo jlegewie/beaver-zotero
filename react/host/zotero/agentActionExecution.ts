@@ -1,6 +1,8 @@
+import { mergeItemsChoicesAtom, withMergeChoices } from '../../atoms/mergeItemsChoices';
+import { executeMergeItemsAction, undoMergeItemsAction } from '../../utils/mergeItemsActions';
 import { atom, Getter, Setter } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
-import type { CreateItemProposedData } from '@beaver/agent-core/types/agentActions/items';
+import { itemActionExternalId } from '@beaver/agent-core/agents/agentActionTypes';
 import {
     AgentAction,
     ackAgentActionsAtom,
@@ -14,6 +16,7 @@ import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '.
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
+import { executeImportItemActions, undoImportItemActions } from '../../utils/importItemActions';
 import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/createNoteActions';
 import { executeManageTagsAction, undoManageTagsAction } from '../../utils/manageTagsActions';
 import { executeManageCollectionsAction, undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
@@ -76,6 +79,7 @@ const APPLY_EXECUTORS = new Map<string, (action: AgentAction, runId: string) => 
     ['edit_note_batch', (action) => executeEditNoteOrBatchAction(action)],
     ['create_collection', (action) => executeCreateCollectionAction(action)],
     ['organize_items', (action) => executeOrganizeItemsAction(action)],
+    ['merge_items', (action) => executeMergeItemsAction(action)],
     ['manage_tags', (action) => executeManageTagsAction(action)],
     ['manage_collections', (action) => executeManageCollectionsAction(action)],
     ['create_note', (action, runId) => executeCreateNoteAction(action, runId)],
@@ -90,6 +94,7 @@ const UNDO_EXECUTORS = new Map<string, (action: AgentAction) => Promise<void>>([
     ['edit_note_batch', undoEditNoteOrBatchAction],
     ['create_collection', undoCreateCollectionAction],
     ['organize_items', undoOrganizeItemsAction],
+    ['merge_items', undoMergeItemsAction],
     ['manage_tags', undoManageTagsAction],
     ['manage_collections', undoManageCollectionsAction],
     ['create_note', undoCreateNoteAction],
@@ -198,7 +203,7 @@ function unsupportedActionTypeFailures(
 
 /**
  * Apply a tool call's actions. Single-action types apply `actions[0]`; only
- * create_item is a batch. An action type this executor does not handle comes
+ * create_item and import_item are batches. An action type this executor does not handle comes
  * back as a per-action failure, never as an empty success.
  */
 export const applyAgentActionsAtom = atom(
@@ -222,37 +227,43 @@ export const applyAgentActionsAtom = atom(
 async function applyClaimedActions(
     get: Getter,
     set: Setter,
-    actions: AgentAction[],
+    claimed: AgentAction[],
     runId: string,
 ): Promise<ApplyAgentActionsResult> {
     const applied: string[] = [];
     const failed: AgentActionFailure[] = [];
-    const action = actions[0];
-    const actionType = normalizeActionType(action.action_type);
+    let actions = claimed;
+    const actionType = normalizeActionType(actions[0].action_type);
     try {
+        // The reviewed merge choices replace the proposal the backend sent.
+        // Folding them in here, inside the try, reports an inconsistent record
+        // on the action card instead of throwing through the caller's click
+        // handler.
+        actions = actions.map((candidate) => withMergeChoices(candidate, get(mergeItemsChoicesAtom)[candidate.id]));
+        const action = actions[0];
         if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
             await dismissActiveEditNotePreview();
         }
-        if (actionType === 'create_item') {
+        if (actionType === 'create_item' || actionType === 'import_item') {
             const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
             if (actionsToApply.length === 0) return { applied, failed };
 
-            const batchResult = await executeCreateItemActions(actionsToApply, {
-                runId,
-                threadId: get(currentThreadIdAtom) ?? undefined,
-            });
+            const options = { runId, threadId: get(currentThreadIdAtom) ?? undefined };
+            const batchResult = actionType === 'import_item'
+                ? await executeImportItemActions(actionsToApply, options)
+                : await executeCreateItemActions(actionsToApply, options);
             if (batchResult.successes.length > 0) {
                 await set(ackAgentActionsAtom, runId, batchResult.successes.map((success) => ({
                     action_id: success.action.id,
                     result_data: success.result,
                 })));
-                logger(`agentActionExecution: Applied ${batchResult.successes.length} create_item actions`, 1);
+                logger(`agentActionExecution: Applied ${batchResult.successes.length} ${actionType} actions`, 1);
 
                 for (const success of batchResult.successes) {
                     applied.push(success.action.id);
-                    const proposedData = success.action.proposed_data as CreateItemProposedData;
-                    if (proposedData?.item?.source_id) {
-                        set(markExternalReferenceImportedAtom, proposedData.item.source_id, {
+                    const externalId = itemActionExternalId(success.action);
+                    if (externalId) {
+                        set(markExternalReferenceImportedAtom, externalId, {
                             library_id: success.result.library_id,
                             zotero_key: success.result.zotero_key,
                             library_ref: success.result.library_ref,
@@ -266,7 +277,7 @@ async function applyClaimedActions(
                 failed.push({ actionId: failure.action.id, error: failure.error, errorDetails: failure.errorDetails });
             }
             if (batchResult.failures.length > 0) {
-                logger(`agentActionExecution: Failed to apply ${batchResult.failures.length} create_item actions`, 1);
+                logger(`agentActionExecution: Failed to apply ${batchResult.failures.length} ${actionType} actions`, 1);
             }
         } else {
             const executeAction = APPLY_EXECUTORS.get(actionType);
@@ -297,7 +308,7 @@ async function applyClaimedActions(
 
 /**
  * Undo a tool call's actions. Single-action types undo `actions[0]`; only
- * create_item is a batch. An action type this executor does not handle comes
+ * create_item and import_item are batches. An action type this executor does not handle comes
  * back as a per-action failure, never as an empty success.
  */
 export const undoAgentActionsAtom = atom(
@@ -327,29 +338,31 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[], window?: 
         if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
             await dismissActiveEditNotePreview();
         }
-        if (actionType === 'create_item') {
+        if (actionType === 'create_item' || actionType === 'import_item') {
             // Includes the actions whose undo failed earlier: a retry of a
             // partially undone batch has nothing else left to work on.
             const actionsToUndo = actions.filter(isUndoable);
             if (actionsToUndo.length === 0) return { undone, failed };
 
-            const batchResult = await undoCreateItemActions(actionsToUndo);
+            const batchResult = actionType === 'import_item'
+                ? await undoImportItemActions(actionsToUndo)
+                : await undoCreateItemActions(actionsToUndo);
             for (const actionId of batchResult.successes) {
                 set(undoAgentActionAtom, actionId);
                 undone.push(actionId);
                 const undoneAction = actionsToUndo.find((candidate) => candidate.id === actionId);
-                const proposedData = undoneAction?.proposed_data as CreateItemProposedData | undefined;
-                if (proposedData?.item?.source_id) {
-                    set(markExternalReferenceDeletedAtom, proposedData.item.source_id);
+                const externalId = undoneAction ? itemActionExternalId(undoneAction) : undefined;
+                if (externalId) {
+                    set(markExternalReferenceDeletedAtom, externalId);
                 }
             }
             for (const failure of batchResult.failures) {
                 set(setAgentActionsToErrorAtom, [failure.actionId], failure.error, failure.errorDetails);
                 failed.push({ actionId: failure.actionId, error: failure.error, errorDetails: failure.errorDetails });
             }
-            logger(`agentActionExecution: Undone ${batchResult.successes.length} create_item actions`, 1);
+            logger(`agentActionExecution: Undone ${batchResult.successes.length} ${actionType} actions`, 1);
             if (batchResult.failures.length > 0) {
-                logger(`agentActionExecution: Failed to undo ${batchResult.failures.length} create_item actions`, 1);
+                logger(`agentActionExecution: Failed to undo ${batchResult.failures.length} ${actionType} actions`, 1);
             }
         } else if (actionType === 'edit_metadata' || actionType === 'edit_annotations') {
             const isMetadata = actionType === 'edit_metadata';

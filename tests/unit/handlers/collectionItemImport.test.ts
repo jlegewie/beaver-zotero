@@ -6,7 +6,7 @@ vi.mock('../../../src/utils/pdfResolvers', () => ({ buildPdfResolvers: vi.fn() }
 vi.mock('../../../src/services/pdfAttachmentFetch', () => ({ fetchPdfAttachment: vi.fn() }));
 vi.mock('../../../src/utils/batchFindExistingReferences', () => ({ batchFindExistingReferences: async () => ({ results: [], timing: { total_ms: 0 } }) }));
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({ getDeferredToolPreference: () => 'always_ask', checkLibraryExcluded: () => null, excludedLibraryMessage: () => 'Unavailable' }));
-import { applyCreateItemData, createZoteroItem } from '../../../src/services/itemImport';
+import { applyCreateItemData, createZoteroItem } from '../../../src/services/itemImport/legacy';
 import { validateCreateItemAction, executeCreateItemAction } from '../../../src/services/agentDataProvider/actions/createItems';
 import { executeCreateItemAction as manualExecute, undoCreateItemAction } from '../../../src/services/manualActions/createItemActions';
 

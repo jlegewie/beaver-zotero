@@ -8,6 +8,7 @@ import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUp
 import { disposeMuPDFWorker } from "./beaver-extract";
 import { cleanupReaderIntegration, initReaderIntegration } from "./modules/readerIntegration";
 import { cleanupReaderToolbarMenu, initReaderToolbarMenu } from "./modules/readerToolbarMenu";
+import { cleanupNoteEditorExportMenu, initNoteEditorExportMenu } from "./modules/noteEditorExportMenu";
 import { cleanupContextMenus, initContextMenus } from "./modules/zoteroContextMenu";
 import {
     registerTablesApi,
@@ -398,6 +399,9 @@ async function onStartup() {
         // -------- Register reader toolbar dropdown menu --------
         await initReaderToolbarMenu();
 
+        // -------- "Export with Beaver" in the note editor's More menu --------
+        initNoteEditorExportMenu();
+
         // -------- Enhance stored tables opened in the reader --------
         // The reader is the only surface a stored table has, so every way of
         // opening one — double-click, `zotero://open`, the item pane — arrives
@@ -738,8 +742,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         cleanupReaderTableViews();
         cleanupTableItemPane();
 
-        // 13. Unregister reader toolbar menu
+        // 13. Unregister reader toolbar menu and the note editor export entry
         cleanupReaderToolbarMenu();
+        cleanupNoteEditorExportMenu();
 
         // 14. Unregister protocol handler
         unregisterBeaverProtocolHandler();
@@ -938,6 +943,7 @@ async function disposeAppServices(): Promise<void> {
     });
     await attempt('citationService.dispose', () => addon.citationService?.dispose());
     addon.citationService = undefined;
+    await attempt('exporter.dispose', () => addon.exporter.dispose());
 }
 
 let instanceDisposal: Promise<void> | undefined;
@@ -949,6 +955,7 @@ function onShutdown(): Promise<void> {
 
 async function disposePlugin(): Promise<void> {
     stopLocalIngress();
+    addon.itemImport.dispose();
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
     Zotero.__beaverShuttingDown = true;
@@ -1020,6 +1027,7 @@ async function disposePlugin(): Promise<void> {
         cleanupReaderTableViews();
         cleanupTableItemPane();
         cleanupReaderToolbarMenu();
+        cleanupNoteEditorExportMenu();
         unregisterBeaverProtocolHandler();
 
         ztoolkit.unregisterAll();
@@ -1027,9 +1035,7 @@ async function disposePlugin(): Promise<void> {
         addon.data.alive = false;
 
         // Drop React-bundle cross-bundle globals so plugin disable doesn't
-        // leak the Jotai store (dead atom-keyed entries) or leave a stale
-        // shutdown flag that would short-circuit the next onStartup().
-        Zotero.__beaverShuttingDown = undefined;
+        // leak the Jotai store (dead atom-keyed entries).
         Zotero.__beaverWrittenAnnotationItems = undefined;
         Zotero.__beaverWrittenAnnotationKeys = undefined;
         // Note: the singleton is removed from Zotero in addon/bootstrap.js's
@@ -1043,6 +1049,9 @@ async function disposePlugin(): Promise<void> {
         } catch (e) {
             ztoolkit.log("onShutdown: disposeMuPDFWorker failed:", e);
         }
+        // Cleared even when cleanup threw: a stale flag would short-circuit
+        // the next onStartup() after a reload.
+        Zotero.__beaverShuttingDown = undefined;
     }
 }
 

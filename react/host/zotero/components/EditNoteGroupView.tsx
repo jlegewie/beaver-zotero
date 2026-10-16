@@ -33,11 +33,11 @@ import {
     type ActionStatus,
 } from './agentActionViewHelpers';
 import {
+    AlertIcon,
     ArrowDownIcon,
     ArrowRightIcon,
     ArrowUpRightIcon,
     CancelIcon,
-    ChevronIcon,
     EditIcon,
     FileDiffIcon,
     Icon,
@@ -62,6 +62,7 @@ import {
 } from './useEditNoteActions';
 import { buildPreviewableEditOperations } from '../../../utils/editNotePreviewOperations';
 import { getEditNoteRetryOrder } from './editNoteRetryOrder';
+import { isStaleNoteEdit, STALE_NOTE_EDIT_MESSAGE } from './editNoteErrors';
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
@@ -241,10 +242,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         () => allActions.filter((a) => a.status === 'pending' || a.status === 'rejected' || a.status === 'undone'),
         [allActions],
     );
+    // An edit whose target is gone from the note fails the same way on every
+    // retry, so it is reported instead of offered for Retry.
     const errorActions = useMemo(
-        () => allActions.filter((a) => a.status === 'error'),
+        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a)),
         [allActions],
     );
+    const hasStaleEdit = useMemo(() => allActions.some(isStaleNoteEdit), [allActions]);
     const rowStatuses = useMemo(
         () => partStates.map((state) => state.effectiveStatus),
         [partStates],
@@ -757,6 +761,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         && (hasPendingApprovals || reapplicableActions.length > 0)
         );
 
+    const showFooter =
+        showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview || hasPendingApprovals;
+
     return (
         <div
             className="agent-action-view agent-action-group rounded-card flex flex-col min-w-0 border-card mb-2"
@@ -791,28 +798,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         </div>
                         <div className="two-line-header">
                             <span className="font-color-primary font-medium">{groupLabel}</span>
-                            {noteTitle && (
-                                <>
-                                    <span className="font-color-secondary ml-15">{noteTitle}</span>
-                                    {'\u00A0'}
-                                    {isOpenableEditNoteTarget(resolvedTarget) && (
-                                        <Tooltip content="Open note" singleLine>
-                                            <span
-                                                className="font-color-secondary scale-10"
-                                                style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
-                                                role="button"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    e.preventDefault();
-                                                    openNoteByKey(resolvedTarget.libraryId, resolvedTarget.zoteroKey);
-                                                }}
-                                            >
-                                                <Icon icon={ArrowUpRightIcon} />
-                                            </span>
-                                        </Tooltip>
-                                    )}
-                                </>
-                            )}
+                            {noteTitle && <span className="font-color-secondary ml-15">{noteTitle}</span>}
                             {progressMessage && (
                                 <span className="font-color-tertiary ml-15 shimmer-text">{progressMessage}</span>
                             )}
@@ -822,49 +808,44 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
                 <div className="flex-1" />
 
-                <div
-                    className="display-flex flex-row items-center gap-25 mr-2 mt-015"
-                    style={{ visibility: !(aggregateStatus === 'awaiting' || aggregateStatus === 'pending') ? 'visible' : 'hidden' }}
-                >
-                    <Tooltip content={isExpanded ? 'Collapse' : 'Expand'} showArrow singleLine>
-                        <IconButton
-                            icon={ChevronIcon}
-                            variant="ghost-secondary"
-                            iconClassName="scale-12"
-                            onClick={toggleExpanded}
-                            disabled={hasStreamingChild}
-                        />
-                    </Tooltip>
-                </div>
-
-                {showCollapsedHeaderActions && (
-                    <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
-                        {(!isProcessing || clickedButton === 'reject') && (
+                {/* Header actions, right-aligned: Apply / Reject all alone while
+                    the collapsed group awaits a decision, otherwise the open link.
+                    Folding is the header button itself. */}
+                <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
+                    {showCollapsedHeaderActions && (
+                        <>
                             <Tooltip content="Reject all" showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-red"
                                     onClick={handleRejectAll}
-                                    disabled={isProcessing}
-                                    loading={isProcessing && clickedButton === 'reject'}
+                                    ariaLabel="Reject all"
                                 />
                             </Tooltip>
-                        )}
-                        {(!isProcessing || clickedButton === 'approve') && (
                             <Tooltip content="Apply all" showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
                                     onClick={handleApplyAll}
-                                    disabled={isProcessing}
-                                    loading={isProcessing && clickedButton === 'approve'}
+                                    ariaLabel="Apply all"
                                 />
                             </Tooltip>
-                        )}
-                    </div>
-                )}
+                        </>
+                    )}
+                    {isOpenableEditNoteTarget(resolvedTarget) && !showCollapsedHeaderActions && (
+                        <Tooltip content="Open note" showArrow singleLine>
+                            <IconButton
+                                icon={ArrowUpRightIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={() => openNoteByKey(resolvedTarget.libraryId, resolvedTarget.zoteroKey)}
+                                ariaLabel="Open note"
+                            />
+                        </Tooltip>
+                    )}
+                </div>
             </div>
 
             {isExpanded && (
@@ -899,7 +880,17 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         })}
                     </div>
 
-                    {(showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview || hasPendingApprovals) && (
+                    {hasStaleEdit && (
+                        <div
+                            className={`display-flex flex-row items-start gap-2 text-sm font-color-secondary px-3 pt-2${showFooter ? '' : ' pb-2'}`}
+                            role="status"
+                        >
+                            <Icon icon={AlertIcon} className="font-color-red flex-shrink-0 mt-010" />
+                            <span>{STALE_NOTE_EDIT_MESSAGE}</span>
+                        </div>
+                    )}
+
+                    {showFooter && (
                         <div ref={footer.ref} className="display-flex flex-row items-center gap-2 px-2 py-2">
                             {/* Only while the run is waiting on this card: once
                                 it is not, there is no run left to grant. */}

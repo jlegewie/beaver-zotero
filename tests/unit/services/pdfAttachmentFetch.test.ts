@@ -34,6 +34,7 @@ beforeEach(() => {
     vi.stubGlobal('Zotero', {
         Beaver: { mutations, account: { getGeneration: () => generation } },
         Attachments: {
+            LINK_MODE_LINKED_URL: 3,
             createTemporaryStorageDirectory: vi.fn().mockResolvedValue({ path: '/tmp/pdf-fetch-test' }),
             downloadFirstAvailableFile: download,
             FIND_AVAILABLE_FILE_TYPES: ['application/pdf'],
@@ -102,7 +103,7 @@ it.each(['scope', 'account', 'deleted', 'cancelled'])('rechecks %s after waiting
 });
 
 it('uses a PDF attached during download instead of saving a duplicate', async () => {
-    const existing = { key: 'EXISTING', deleted: false, isPDFAttachment: () => true };
+    const existing = { key: 'EXISTING', deleted: false, isAttachment: () => true, attachmentContentType: 'application/pdf' };
     parent.getAttachments.mockReturnValue([2]);
     vi.mocked(Zotero.Items.getAsync).mockResolvedValue(existing as any);
     await expect(fetchPdf()).resolves.toEqual({ attachment: existing });

@@ -39,13 +39,8 @@ export interface BeaverEvents {
     readerVisualizerAction: {
         readerInstanceID: string;
         action:
-            | 'columns'
-            | 'lines'
             | 'items'
             | 'sentences'
-            | 'columns-graphics'
-            | 'items-graphics'
-            | 'sentences-graphics'
             | 'clear'
             | 'copy-extract-fixture-command'
             | 'copy-ocr-fixture-command';

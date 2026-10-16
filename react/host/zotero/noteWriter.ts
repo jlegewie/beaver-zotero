@@ -54,6 +54,18 @@ export const zoteroNoteWriter: NoteWriterHost = {
         return getZoteroTargetContextSync().parentReference !== null;
     },
 
+    childNoteParentTitle(): string | null {
+        const parentReference = getZoteroTargetContextSync().parentReference;
+        if (!parentReference) return null;
+        try {
+            const item = Zotero.Items.getByLibraryAndKey(parentReference.library_id, parentReference.zotero_key);
+            return (item && item.getDisplayTitle()) || null;
+        } catch {
+            // Item data not loaded: the menu names no title rather than failing.
+            return null;
+        }
+    },
+
     async saveNote(request: SaveNoteRequest): Promise<SavedNoteReference | null> {
         const win = getContextWindow();
         const context = getZoteroTargetContextSync(win);

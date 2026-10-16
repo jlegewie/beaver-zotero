@@ -73,13 +73,19 @@ export function formatPageRangesWithLabels(
     const labelKind = (label: string): 'digit' | 'other' =>
         /^\d+$/.test(label) ? 'digit' : 'other';
 
+    // Arabic labels must also follow each other: consecutive pages printed
+    // "12" and "15" are two pages, not the range 12-15.
+    const labelsContinue = (a: string, b: string): boolean =>
+        labelKind(a) === labelKind(b)
+        && (labelKind(a) === 'other' || Number(b) === Number(a) + 1);
+
     const parts: string[] = [];
     let startIdx = 0;
     for (let i = 1; i <= dedup.length; i++) {
         const continues =
             i < dedup.length &&
             dedup[i].page === dedup[i - 1].page + 1 &&
-            labelKind(dedup[i].label) === labelKind(dedup[i - 1].label);
+            labelsContinue(dedup[i - 1].label, dedup[i].label);
         if (continues) continue;
 
         const startLabel = dedup[startIdx].label;

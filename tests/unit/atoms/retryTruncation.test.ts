@@ -27,6 +27,7 @@ const {
     truncateMock,
     loadThreadRunsMock,
     undoEditMetadataMock,
+    undoMergeItemsMock,
     cleanupAnnotationsMock,
     cancelMock,
     historyMock,
@@ -38,6 +39,7 @@ const {
     truncateMock: vi.fn(),
     loadThreadRunsMock: vi.fn(),
     undoEditMetadataMock: vi.fn().mockResolvedValue(undefined),
+    undoMergeItemsMock: vi.fn().mockResolvedValue(undefined),
     // The last await before a replacement writes anything — and on the
     // new-thread path, the only one.
     cleanupAnnotationsMock: vi.fn().mockResolvedValue(undefined),
@@ -62,6 +64,9 @@ vi.mock('@beaver/agent-core/run-state/loadThreadRuns', () => ({
 }));
 vi.mock('../../../react/utils/editMetadataActions', () => ({
     undoEditMetadataAction: undoEditMetadataMock,
+}));
+vi.mock('../../../react/utils/mergeItemsActions', () => ({
+    undoMergeItemsAction: undoMergeItemsMock,
 }));
 vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({
     resolveClientIdentity: vi.fn(() => ({
@@ -143,6 +148,16 @@ function makeRun(id: string, overrides: Partial<AgentRun> = {}): AgentRun {
     } as AgentRun;
 }
 
+function makeAppliedMerge(id: string, runId: string, createdAt = new Date().toISOString()) {
+    return {
+        id,
+        run_id: runId,
+        action_type: 'merge_items',
+        status: 'applied',
+        created_at: createdAt,
+    } as any;
+}
+
 function makeAppliedMetadataEdit(id: string, runId: string) {
     return {
         id,
@@ -218,6 +233,7 @@ describe('retry via synchronous truncation', () => {
             agentActions: [],
         });
         undoEditMetadataMock.mockResolvedValue(undefined);
+        undoMergeItemsMock.mockResolvedValue(undefined);
         cleanupAnnotationsMock.mockResolvedValue(undefined);
         cancelMock.mockResolvedValue(undefined);
         // 'Undo && Retry' = 0, cancel = 1, 'Retry' (skip undo) = 2.
@@ -820,6 +836,36 @@ describe('retry via synchronous truncation', () => {
         expect(popupTitles()).toContain('Chat changed elsewhere');
         expect(loadThreadRunsMock).not.toHaveBeenCalled();
         expect(threadRunIds()).toEqual(['a', 'b']);
+    });
+
+    it('offers to undo an applied duplicate merge and undoes it on confirm', async () => {
+        store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
+        const merge = makeAppliedMerge('merge-1', 'b');
+        store.set(threadAgentActionsAtom, [merge]);
+        promptConfirmMock.mockReturnValue(0); // Undo && Retry
+        truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+        expect(promptConfirmMock).toHaveBeenCalledOnce();
+        expect(promptConfirmMock.mock.calls[0][0].text).toContain('1 duplicate merge');
+        expect(undoMergeItemsMock).toHaveBeenCalledWith(merge);
+        expect(threadRunIds()).toEqual(['a']);
+    });
+
+    it('undoes a merge in reverse order with the other applied actions', async () => {
+        store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
+        const edit = { ...makeAppliedMetadataEdit('edit-1', 'b'), created_at: '2026-10-02T10:00:01Z' };
+        store.set(threadAgentActionsAtom, [makeAppliedMerge('merge-1', 'b', '2026-10-02T10:00:00Z'), edit]);
+        promptConfirmMock.mockReturnValue(0); // Undo && Retry
+        truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+        const order: string[] = [];
+        undoEditMetadataMock.mockImplementation(async () => { order.push('edit'); });
+        undoMergeItemsMock.mockImplementation(async () => { order.push('merge'); });
+
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+        expect(order).toEqual(['edit', 'merge']);
     });
 
     it('on success the order is POST, undo, local removal, then send', async () => {

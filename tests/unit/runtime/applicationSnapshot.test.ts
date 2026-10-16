@@ -111,3 +111,40 @@ it('reports the Zotero interface language when the host exposes one', async () =
     vi.stubGlobal('Zotero', { Libraries: { get: () => null } });
     expect(await buildZoteroApplicationState(createStore().get)).not.toHaveProperty('interface_language');
 });
+
+it('reports selected Duplicate Items and Unfiled Items rows, skipping other special views and excluded libraries', async () => {
+    const row = (type: string, libraryID: number) => ({ type, ref: { libraryID } });
+    mocks.win = { ZoteroPane: {
+        getSelectedItems: () => [],
+        getSelectedLibraryID: () => 1,
+        getSelectedCollections: () => [],
+        getSelectedSavedSearches: () => [],
+        getCollectionTreeRows: () => [
+            row('duplicates', 1),
+            row('unfiled', 1),
+            row('trash', 1),
+            row('recentlyRead', 1),
+            row('unfiled', 2),
+        ],
+    } };
+    vi.stubGlobal('Zotero', { Libraries: { get: () => ({ libraryID: 1, name: 'Library', editable: true }) } });
+    mocks.counts.mockResolvedValue(new Map());
+    const state = await buildZoteroApplicationState(createStore().get);
+    expect(state.current_special_collections).toEqual([
+        { type: 'duplicates', library_id: 1, library_ref: 'u' },
+        { type: 'unfiled', library_id: 1, library_ref: 'u' },
+    ]);
+});
+
+it('omits special collections when only regular rows are selected', async () => {
+    mocks.win = { ZoteroPane: {
+        getSelectedItems: () => [],
+        getSelectedLibraryID: () => 1,
+        getSelectedCollections: () => [],
+        getSelectedSavedSearches: () => [],
+        getCollectionTreeRows: () => [{ type: 'library', ref: { libraryID: 1 } }],
+    } };
+    vi.stubGlobal('Zotero', { Libraries: { get: () => ({ libraryID: 1, name: 'Library', editable: true }) } });
+    mocks.counts.mockResolvedValue(new Map());
+    expect(await buildZoteroApplicationState(createStore().get)).not.toHaveProperty('current_special_collections');
+});

@@ -39,6 +39,33 @@ export async function getFileSignature(filePath: string): Promise<FileSignature>
     };
 }
 
+/** Local file location and signature recorded in a source identity. */
+export interface LocalSourceLocation {
+    filePath: string;
+    mtimeMs: number;
+    sizeBytes: number;
+}
+
+/**
+ * Parse a local processing source identity, `[kind, schema, path, mtimeMs,
+ * sizeBytes]` as built by `observeAttachmentSource`. Remote and missing-file
+ * identities return `null`.
+ */
+export function parseLocalSourceIdentity(
+    identity: string,
+): { kind: unknown; schema: unknown; location: LocalSourceLocation } | null {
+    try {
+        const parts = JSON.parse(identity);
+        if (!Array.isArray(parts) || parts.length !== 5) return null;
+        const [kind, schema, filePath, mtimeMs, sizeBytes] = parts;
+        if (typeof filePath !== 'string' || filePath === 'remote') return null;
+        if (typeof mtimeMs !== 'number' || typeof sizeBytes !== 'number') return null;
+        return { kind, schema, location: { filePath, mtimeMs, sizeBytes } };
+    } catch {
+        return null;
+    }
+}
+
 export interface RemoteFileVersion {
     md5: string | null;
     mtime: number | null;

@@ -282,6 +282,103 @@ describe('FulltextUpsertExecutor', () => {
         expect(api.untag).toHaveBeenCalledWith('OLDDEVICE', [{ scope_ref: 'g123', zotero_key: record.zoteroKey, doc_hash: 'a'.repeat(64) }]);
     });
 
+    describe('batched cleanup', () => {
+        const cleanupJob = (id: number, zoteroKey: string, hash: string): BackgroundJobRecord => ({
+            ...record, id, jobType: 'fulltext_untag', zoteroKey,
+            payload: { ...record.payload!, doc_hash: hash, index_account_id: 'account-a',
+                index_scope_ref: 'g123', index_local_id: 'OLDDEVICE' },
+        });
+        const jobs = () => [cleanupJob(101, 'KEYAAAA1', 'b'.repeat(64)), cleanupJob(102, 'KEYBBBB2', 'c'.repeat(64))];
+
+        beforeEach(() => {
+            (Zotero.Beaver as any).account = { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: 'account-a' } } }) };
+        });
+
+        it('shares one delete request between concurrent cleanup jobs', async () => {
+            api.untag.mockImplementation(async (_localId: string, refs: any[]) => ({
+                results: refs.map((ref) => ({ ...ref, outcome: 'untagged' })),
+            }));
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+
+            const outcomes = await Promise.all(jobs().map((job) => executor.execute(job, ctx)));
+
+            expect(outcomes).toEqual([
+                { kind: 'complete', reason: 'index_untagged' },
+                { kind: 'complete', reason: 'index_untagged' },
+            ]);
+            expect(api.untag).toHaveBeenCalledTimes(1);
+            expect(api.untag).toHaveBeenCalledWith('OLDDEVICE', [
+                { scope_ref: 'g123', zotero_key: 'KEYAAAA1', doc_hash: 'b'.repeat(64) },
+                { scope_ref: 'g123', zotero_key: 'KEYBBBB2', doc_hash: 'c'.repeat(64) },
+            ]);
+        });
+
+        it('pauses the lane for a failed ref only when its whole batch failed', async () => {
+            api.untag.mockImplementationOnce(async (_localId: string, refs: any[]) => ({
+                results: refs.map((ref, index) => ({ ...ref, outcome: index === 0 ? 'failed' : 'untagged' })),
+            }));
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+            const [failed, untagged] = await Promise.all(jobs().map((job) => executor.execute(job, ctx)));
+            expect(failed).toMatchObject({ kind: 'retry', error: 'index_untag_failed', countsAsAttempt: false });
+            expect(failed).not.toHaveProperty('laneCooldownMs');
+            expect(untagged).toEqual({ kind: 'complete', reason: 'index_untagged' });
+
+            api.untag.mockImplementationOnce(async (_localId: string, refs: any[]) => ({
+                results: refs.map((ref) => ({ ...ref, outcome: 'failed' })),
+            }));
+            const outcomes = await Promise.all(jobs().map((job) => executor.execute(job, ctx)));
+            for (const outcome of outcomes) {
+                expect(outcome).toMatchObject({ kind: 'retry', error: 'index_untag_failed', laneCooldownMs: expect.any(Number) });
+            }
+        });
+
+        it('keeps valid cleanups when another ref in their batch is rejected', async () => {
+            api.untag.mockImplementation(async (_localId: string, refs: any[]) => {
+                if (refs.some((entry) => entry.zotero_key === 'KEYAAAA1')) {
+                    throw new ApiError(400, 'invalid ref', 'invalid ref', 'invalid_scope_ref');
+                }
+                return { results: refs.map((entry) => ({ ...entry, outcome: 'untagged' })) };
+            });
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+
+            const [rejected, valid] = await Promise.all(jobs().map((job) => executor.execute(job, ctx)));
+
+            expect(rejected).toEqual({ kind: 'complete', reason: 'terminal:invalid_scope_ref' });
+            expect(valid).toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(api.untag).toHaveBeenCalledTimes(3);
+        });
+
+        it('does not send the ref of a job aborted while it waited for its batch', async () => {
+            api.untag.mockImplementation(async (_localId: string, refs: any[]) => ({
+                results: refs.map((entry) => ({ ...entry, outcome: 'untagged' })),
+            }));
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+            const abort = new AbortController();
+            const [first, second] = jobs();
+
+            const aborted = executor.execute(first, { ...ctx, externalAbortSignal: abort.signal });
+            const kept = executor.execute(second, ctx);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            abort.abort();
+
+            expect(await aborted).toEqual({ kind: 'release', reason: 'access_changed' });
+            expect(await kept).toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(api.untag).toHaveBeenCalledTimes(1);
+            expect(api.untag).toHaveBeenCalledWith('OLDDEVICE', [
+                { scope_ref: 'g123', zotero_key: 'KEYBBBB2', doc_hash: 'c'.repeat(64) },
+            ]);
+        });
+
+        it('releases waiting cleanup jobs when the executor is disposed', async () => {
+            const executor = new FulltextUpsertExecutor(api as any, 'fulltext_untag');
+            const pending = executor.execute(jobs()[0], ctx);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            executor.dispose();
+            expect(await pending).toEqual({ kind: 'release', reason: 'access_changed' });
+            expect(api.untag).not.toHaveBeenCalled();
+        });
+    });
+
     it.each([false, true])('transfers unchanged content to another account after an ambiguous upload: %s', async (ambiguous) => {
         let accountId = 'account-a';
         Zotero.Beaver.account = { getGeneration: () => 1,
@@ -1148,6 +1245,46 @@ describe('FulltextUpsertExecutor', () => {
             retryAfterMs: hint * 1_000 });
         if (pausesLane) expect(outcome).toMatchObject({ laneCooldownMs: hint * 1_000 });
         else expect(outcome).not.toHaveProperty('laneCooldownMs');
+    });
+
+    describe('cleanup against a failing server', () => {
+        beforeEach(() => {
+            Zotero.Beaver.account = { getGeneration: () => 1,
+                getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+            record.jobType = 'fulltext_untag';
+            record.payload = { ...record.payload!, index_action: 'untag', doc_hash: 'a'.repeat(64),
+                index_account_id: 'owner', index_scope_ref: 'g123', index_local_id: 'OLDDEVICE' };
+        });
+
+        it('retries a ref the server failed to process without spending attempts', async () => {
+            api.untag.mockResolvedValue({ results: [{ outcome: 'failed' }] });
+            expect(await new FulltextUpsertExecutor(api as any, 'fulltext_untag').execute(record, ctx))
+                .toEqual({ kind: 'retry', error: 'index_untag_failed', countsAsAttempt: false,
+                    retryAfterMs: 5_000, laneCooldownMs: 5_000 });
+        });
+
+        it.each([
+            new ApiError(503, 'Unavailable', 'retry shortly', 'upstream_unavailable', { retry_after_seconds: 5 }),
+            ...[500, 502, 504].map((status) => new ApiError(status, 'Unavailable')),
+            new ApiError(429, 'busy', 'busy', 'too_many_requests'), new ServerError(),
+        ])('pauses the cleanup lane without spending attempts on %s', async (error) => {
+            api.untag.mockRejectedValue(error);
+            const outcome = await new FulltextUpsertExecutor(api as any, 'fulltext_untag').execute(record, ctx);
+            expect(outcome).toMatchObject({ kind: 'retry', countsAsAttempt: false, laneCooldownMs: expect.any(Number) });
+            if (error instanceof ApiError && error.code === 'upstream_unavailable') {
+                expect(outcome).toMatchObject({ retryAfterMs: 5_000, laneCooldownMs: 5_000 });
+            }
+        });
+    });
+
+    it('keeps a bounded number of probe hints', () => {
+        const hints = (FulltextUpsertExecutor as any).probeFirstHashes as Set<string>;
+        hints.clear();
+        for (let i = 0; i <= 1_000; i += 1) (FulltextUpsertExecutor as any).markProbeFirst(`hash-${i}`);
+        expect(hints.size).toBe(1_000);
+        expect(hints.has('hash-0')).toBe(false);
+        expect(hints.has('hash-1000')).toBe(true);
+        hints.clear();
     });
 
     describe('attachments sharing one document hash', () => {

@@ -147,6 +147,18 @@ describe('model-facing recovery guidance', () => {
             expect(error.message).not.toContain('Private research');
         }
     });
+    it.each(['7-MISSING1', '7_MISSING1'])('quotes a numeric reference %s in the portable grammar', input => {
+        expect(() => resolveCollection(input)).toThrow(/"g12345-MISSING1"/);
+        expect(() => resolveCollection(input)).not.toThrow(/7[-_]MISSING1/);
+        expect(() => resolveCollection('1-MISSING1')).toThrow(/"u-MISSING1"/);
+        expect(() => resolveCollection(input, { libraryID: 1 })).toThrow(/"g12345-MISSING1" from library "g12345"/);
+    });
+    it('keeps a numeric reference into an excluded library numeric', () => {
+        zotero.Beaver.searchableLibraryIds = [1];
+        expectCode(() => resolveCollection('7-ABCD2345'), 'library_not_searchable');
+        expect(() => resolveCollection('7-ABCD2345')).toThrow(/"7-ABCD2345"/);
+        expect(() => resolveCollection('7-ABCD2345')).not.toThrow(/g12345/);
+    });
     it('lists permitted identities and gives operation-specific single-library guidance', () => {
         const targets = resolveCollectionList(['u-ABCD2345', 'g12345-ABCD2345']).collections;
         for (const operation of ['search', 'note'] as const) {

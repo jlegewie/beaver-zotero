@@ -2,10 +2,11 @@ import { FileStatusSummary } from "./fileStatus";
 import { FeatureStep, VersionAlsoNew, VersionShowcaseId, VersionUpdateAction } from "../constants/versionUpdateMessages";
 import { ButtonVariant } from "@beaver/agent-ui/primitives/Button";
 import type { FeatureTipId } from "../constants/featureTips";
+import type { FileExportFormat } from "@beaver/agent-ui/host/types";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 
-export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'indexing_complete' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip' | 'feature_tip' | 'cloud_consent';
+export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'indexing_complete' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip' | 'feature_tip' | 'cloud_consent' | 'file_export';
 
 export interface PopupMessageFeature {
     title: string;
@@ -18,6 +19,19 @@ export interface PopupMessageButton {
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement;
     variant?: ButtonVariant;
+}
+
+/** A finished file export, shown by `file_export` messages. */
+export interface FileExportPopupData {
+    format: FileExportFormat;
+    fileName: string;
+    /** The folder it was saved in. */
+    folderName: string;
+    /** Files written beside it (a LaTeX export's .bib file). */
+    companionFileNames: string[];
+    warnings: string[];
+    onReveal?: () => Promise<void>;
+    onOpen?: () => Promise<void>;
 }
 
 export interface PopupMessage {
@@ -37,6 +51,8 @@ export interface PopupMessage {
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     buttonOnClick?: () => void
     fileStatusSummary?: FileStatusSummary;
+    /** The exported file a `file_export` message reports. */
+    fileExport?: FileExportPopupData;
     planName?: string;
     showProgress?: boolean;
     progress?: number; // 0-100 for progress bar

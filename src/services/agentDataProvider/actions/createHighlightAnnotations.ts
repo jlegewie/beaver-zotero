@@ -11,10 +11,11 @@ import type {
     FailedAnnotationResult,
     HighlightAnnotationItem,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
-import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/createAnnotations';
+import { normalizeAnnotationTags, textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
+import { getParentItemAsync } from '../../../utils/zoteroDataLoading';
 import {
     createEpubHighlightAnnotation,
     createPdfHighlightForItem,
@@ -27,6 +28,7 @@ import {
     SnapshotAnnotationError,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
+import { canUseReaderContentType } from '../../attachmentContentType';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
 import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
@@ -75,6 +77,8 @@ function getActionData(request: ActionValidateRequest | WSAgentActionExecuteRequ
         resolved_ref: normalizeRef(raw.resolved_ref ?? raw.resolvedRef ?? {}),
         items: Array.isArray(raw.items) ? raw.items.map(normalizeItem) : [],
         tags: normalizeAnnotationTags(raw.tags),
+        // Absent for highlights, so a normalized payload matches what was sent.
+        ...(textAnnotationStyle(raw.style) === 'underline' ? { style: 'underline' } : {}),
     } as CreateHighlightAnnotationsProposedData;
 }
 
@@ -106,7 +110,7 @@ async function resolveAttachment(ref: ZoteroItemReference): Promise<Zotero.Item 
 
 async function getAttachmentTitle(attachment: Zotero.Item): Promise<string> {
     try {
-        const parent = attachment.parentItem;
+        const parent = await getParentItemAsync(attachment);
         if (parent) {
             await parent.loadDataType('itemData');
             return await shortItemTitle(parent);
@@ -245,6 +249,18 @@ export async function validateCreateHighlightAnnotationsAction(
             preference: 'always_ask',
         };
     }
+    // Zotero only annotates attachments with a canonical content type; a
+    // mislabelled PDF/EPUB is corrected at execution once its file confirms it.
+    if (!await canUseReaderContentType(attachment)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Zotero cannot annotate this attachment: it is stored as '${attachment.attachmentContentType || 'unknown'}' and its file could not be confirmed as a PDF or EPUB.`,
+            error_code: 'invalid_attachment',
+            preference: 'always_ask',
+        };
+    }
 
     // EPUB annotations parse the section on demand (no document-cache geometry),
     // so extraction is never a prerequisite. PDFs need cached page geometry.
@@ -288,6 +304,7 @@ export async function executeCreateHighlightAnnotationsAction(
 ): Promise<WSAgentActionExecuteResponse> {
     const data = getActionData(request);
     const { requested_ref, resolved_ref, items, tags } = data;
+    const style = textAnnotationStyle(data.style);
 
     // TOCTOU guard: never annotate an attachment in a library the user excluded
     // from Beaver, even if validation passed earlier or the request skipped it.
@@ -358,9 +375,10 @@ export async function executeCreateHighlightAnnotationsAction(
                         anchorId: item.anchor_id ?? undefined,
                         text: item.text ?? '',
                         color: item.color,
-                        comment: item.comment ?? item.title,
+                        comment: item.comment ?? '',
                         pageLabel: item.page_label ?? null,
                         tags,
+                        style,
                     });
                     created.push({
                         client_item_id: item.client_item_id,
@@ -388,8 +406,9 @@ export async function executeCreateHighlightAnnotationsAction(
                         anchorId: item.anchor_id ?? undefined,
                         text: item.text ?? '',
                         color: item.color,
-                        comment: item.comment ?? item.title,
+                        comment: item.comment ?? '',
                         tags,
+                        style,
                     }, snapshotDoc);
                     created.push({
                         client_item_id: item.client_item_id,
@@ -423,7 +442,7 @@ export async function executeCreateHighlightAnnotationsAction(
             }
 
             try {
-                created.push(await createPdfHighlightForItem(attachment, item, tags));
+                created.push(await createPdfHighlightForItem(attachment, item, tags, style));
             } catch (error: any) {
                 failed.push({
                     client_item_id: item.client_item_id,

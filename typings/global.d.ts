@@ -84,6 +84,9 @@ declare namespace Zotero {
         let documents: import("../src/services/instanceDocuments").InstanceDocuments | undefined;
         let notePreviews: import("../src/services/notePreviews").NotePreviews;
         let libraryOperations: import("../src/services/libraryOperations").LibraryOperations;
+        const deferredCommits: import("../src/services/committedTransaction").DeferredCommits | undefined;
+        let itemImport: import("../src/services/itemImport/service").ItemImportService;
+        let exporter: import("../src/services/export/instanceExport").InstanceExport;
         let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;
         let mutations: import("../src/services/libraryMutations").LibraryMutations;
         let syncPause: ReturnType<typeof import("../src/services/syncPause").createSyncPauseService>;
@@ -525,6 +528,7 @@ declare namespace Zotero {
             markAttachmentOcrFailed(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<void>;
             markAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<boolean>;
             clearAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string): Promise<boolean>;
+            touchAttachmentOcrUnavailable(libraryId: number, zoteroKey: string): Promise<void>;
             getOcrUnavailableAttachments(libraryIds: number[]): Promise<Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }>>;
             recordAttachmentIndexIdentity: import('../src/services/database').BeaverDB['recordAttachmentIndexIdentity'];
             markAttachmentUpsertDone: import('../src/services/database').BeaverDB['markAttachmentUpsertDone'];
@@ -660,6 +664,12 @@ declare namespace Zotero {
              */
             formatBibliography(items: Zotero.Item | Zotero.Item[], format?: "text" | "html"): string;
 
+            /** Format a whole document's citations as one sequence (export). */
+            formatCitationSequence: import("../src/services/CitationService").CitationService["formatCitationSequence"];
+
+            /** The installed style and locale an export formats with. */
+            resolveStyle: import("../src/services/CitationService").CitationService["resolveStyle"];
+
             /**
              * Force recreation of the CSL engine on next use
              * Call this when preferences change
@@ -681,6 +691,15 @@ declare namespace Zotero {
          * @return {Boolean}
          */
         isInTrash(): boolean;
+
+        /**
+         * Returns child annotation IDs for a file attachment. Requires the
+         * attachment's `childItems` data, but unlike the item-returning form it
+         * does not look the annotations up in the object cache, so it works in
+         * libraries whose items have not been loaded yet. The array is Zotero's
+         * internal cache: copy it before mutating.
+         */
+        getAnnotations(includeTrashed: boolean | undefined, asIDs: true): readonly number[];
     }
 
     interface Utilities {

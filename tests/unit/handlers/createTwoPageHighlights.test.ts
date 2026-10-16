@@ -37,7 +37,8 @@ import { convertHighlightBoxesToRects } from "../../../src/services/annotations/
 import type { PageGeometry } from "@beaver/agent-core/extract/types";
 
 const attachment = {
-  isPDFAttachment: () => true,
+  isAttachment: () => true,
+  attachmentContentType: "application/pdf",
   libraryID: 1,
   id: 42,
   key: "ATT00001",
@@ -57,6 +58,7 @@ let nextKey = 0;
 
 class MockAnnotationItem {
   key = `ANNOT${String(nextKey++).padStart(3, "0")}`;
+  annotationType?: string;
   annotationComment?: string;
   annotationPosition?: string;
   annotationPageLabel?: string;
@@ -123,6 +125,7 @@ describe("two-page PDF highlights", () => {
     previousZotero = (globalThis as any).Zotero;
     (globalThis as any).Zotero = {
       Item: MockAnnotationItem,
+      Attachments: { LINK_MODE_LINKED_URL: 3 },
       DB: { inTransaction: () => false },
       Prefs: { get: vi.fn() },
       Beaver: {
@@ -171,6 +174,48 @@ describe("two-page PDF highlights", () => {
       }),
     ]);
     expect(response.result_data.failed).toEqual([]);
+  });
+
+  it("writes an underline with the same placement when the action asks for one", async () => {
+    const response = await executeCreateHighlightAnnotationsAction(
+      request({ ...actionData([location(4), location(5)]), style: "underline" }),
+      timeoutContext(),
+    );
+
+    expect(response.success).toBe(true);
+    expect(savedItems).toHaveLength(1);
+    expect(savedItems[0].annotationType).toBe("underline");
+    expect(JSON.parse(savedItems[0].annotationPosition!)).toHaveProperty("nextPageRects");
+  });
+
+  it("writes a highlight when the action names no style", async () => {
+    await executeCreateHighlightAnnotationsAction(
+      request(actionData([location(4)])),
+      timeoutContext(),
+    );
+
+    expect(savedItems[0].annotationType).toBe("highlight");
+  });
+
+  it("writes an underline when the user applies the action from the card", async () => {
+    await executeManually({
+      id: "action-1",
+      proposed_data: { ...actionData([location(4)]), style: "underline" },
+    } as any);
+
+    expect(savedItems[0].annotationType).toBe("underline");
+  });
+
+  it("keeps an underline style in the normalized action data, and adds none for highlights", async () => {
+    const underline = await validateCreateHighlightAnnotationsAction(
+      request({ ...actionData([location(4)]), style: "underline" }),
+    );
+    const highlight = await validateCreateHighlightAnnotationsAction(
+      request(actionData([location(4)])),
+    );
+
+    expect(underline.normalized_action_data?.style).toBe("underline");
+    expect(highlight.normalized_action_data).not.toHaveProperty("style");
   });
 
   it("keeps a one-page highlight's position without nextPageRects", async () => {
@@ -239,6 +284,27 @@ describe("two-page PDF highlights", () => {
     );
 
     expect(response.valid).toBe(true);
+  });
+
+  it("rejects a mislabelled attachment whose file is not a PDF at validation", async () => {
+    attachment.attachmentContentType = "application/octet-stream";
+    attachment.attachmentFilename = "paper.pdf";
+    Object.assign((globalThis as any).Zotero, {
+      File: { getSample: vi.fn(async () => "PK\u0003\u0004") },
+      MIME: { sniffForMIMEType: vi.fn(() => false) },
+    });
+    try {
+      const response = await validateCreateHighlightAnnotationsAction(
+        request(actionData([location(4)])),
+      );
+
+      expect(response.valid).toBe(false);
+      expect(response.error_code).toBe("invalid_attachment");
+      expect(response.error).toContain("application/octet-stream");
+    } finally {
+      attachment.attachmentContentType = "application/pdf";
+      delete attachment.attachmentFilename;
+    }
   });
 
   it("creates one annotation from the manual apply path too", async () => {

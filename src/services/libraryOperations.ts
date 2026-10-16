@@ -1,13 +1,16 @@
+import * as duplicates from './duplicates/merge';
 import { executeRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
+import { ensureReaderContentTypeForItem } from './attachmentContentType';
 import type { OperationContext } from './agentDataProvider/operationContext';
 import { hydrateOperationRendering } from './agentDataProvider/prepareOperationRendering';
 import * as tables from './artifacts/tableStore';
 import { handleArtifactRequestUncoordinated } from './artifacts/artifactProvider';
-import * as imports from './itemImport';
+import * as imports from './itemImport/legacy';
 import { coordinateLibraryMutation, type MutationOptions } from './libraryMutations';
 import * as createAnnotations from './manualActions/createAnnotationsActions';
 import * as createCollection from './manualActions/createCollectionActions';
 import * as createItem from './manualActions/createItemActions';
+import * as importItem from './manualActions/importItemActions';
 import * as createNote from './manualActions/createNoteActions';
 import * as editAnnotations from './manualActions/editAnnotationsActions';
 import * as editMetadata from './manualActions/editMetadataActions';
@@ -18,9 +21,12 @@ import * as organizeItems from './manualActions/organizeItemsActions';
 import { savePreparedNote } from './savePreparedNote';
 
 const operations = {
+    executeMergeItemsAction: duplicates.executeMergeItemsAction,
+    undoMergeItemsAction: duplicates.undoMergeItemsAction,
     artifact_request: handleArtifactRequestUncoordinated,
     executeRequest,
     savePreparedNote,
+    ensureReaderContentType: ensureReaderContentTypeForItem,
     createZoteroItem: imports.createZoteroItem,
     applyCreateItemData: imports.applyCreateItemData,
     deleteAddedItem: imports.deleteAddedItem,
@@ -28,6 +34,10 @@ const operations = {
     undoCreateItemAction: createItem.undoCreateItemAction,
     executeCreateItemActions: createItem.executeCreateItemActions,
     undoCreateItemActions: createItem.undoCreateItemActions,
+    executeImportItemAction: importItem.executeImportItemAction,
+    undoImportItemAction: importItem.undoImportItemAction,
+    executeImportItemActions: importItem.executeImportItemActions,
+    undoImportItemActions: importItem.undoImportItemActions,
     executeCreateNoteAction: createNote.executeCreateNoteAction,
     undoCreateNoteAction: createNote.undoCreateNoteAction,
     executeEditNoteAction: editNote.executeEditNoteAction,

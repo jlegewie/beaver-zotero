@@ -39,10 +39,37 @@ jobs:
       - name: Typecheck agent-ui
         run: npm run typecheck:ui
 
+      # The export pipeline package: ECMAScript-only lib, agent-core as its
+      # only in-repo dependency, closure verified like the other two.
+      - name: Typecheck agent-export
+        run: npm run typecheck:export
+
       # eslint directly rather than lint:check — the prettier half of that
       # script is a separate, repo-wide formatting decision.
       - name: Lint
         run: npx eslint .
 
+  # Runs alongside the typecheck/lint job, split across shards so the slowest
+  # shard, not the whole suite, sets the wall time.
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    name: unit-tests (${{ matrix.shard }}/3)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Unit tests
-        run: npm test
+        run: npx vitest run --shard=${{ matrix.shard }}/3

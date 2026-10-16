@@ -1,6 +1,6 @@
 /**
  * Unit tests for `metadata.timings` and `metadata.engine` populated by
- * `runExtractFromIndices`.
+ * `runExtraction`.
  *
  * Hermetic — same synthetic-page mock pattern as `extractParagraphEngine.test.ts`.
  * `docOpenMs` is only populated by `opExtract` (which has the doc-cache call);
@@ -28,7 +28,12 @@ vi.mock("../../../src/beaver-extract/worker/docHelpers", async () => {
     };
 });
 
-import { runExtractFromIndices } from "../../../src/beaver-extract/worker/ops";
+import {
+    runExtraction,
+    type ExtractionEngine,
+} from "../../../src/beaver-extract/pipeline/extract";
+import { PageWalkCache } from "../../../src/beaver-extract/pipeline/documentAnalysis";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "../../../src/beaver-extract/schema/presets";
 import type { DocumentLike } from "../../../src/beaver-extract/worker/mupdfApi";
 
 const PAGE_W = 612;
@@ -97,7 +102,28 @@ function makeDocStub(): DocumentLike {
     };
 }
 
-describe("runExtractFromIndices: metadata.timings + metadata.engine", () => {
+/** `runExtraction` over the synthetic pages with the current schema's preset. */
+function extractPages(
+    engine: ExtractionEngine,
+    targetIndices: number[],
+    pageCount: number,
+) {
+    const doc = makeDocStub();
+    const preset = CURRENT_PDF_EXTRACTION_PRESET;
+    return runExtraction(doc, {
+        engine,
+        preset,
+        pageCache: new PageWalkCache(doc, undefined, preset),
+        opts: { ...DEFAULT_EXTRACTION_SETTINGS },
+        requestedRepeatThreshold: undefined,
+        targetIndices,
+        analysisIndices: targetIndices,
+        pageCount,
+        pageLabels: {},
+    });
+}
+
+describe("runExtraction: metadata.timings + metadata.engine", () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
@@ -108,35 +134,13 @@ describe("runExtractFromIndices: metadata.timings + metadata.engine", () => {
     ] as const)(
         "records engine=%s → metadata.engine=%s",
         (engine, expectedEngine) => {
-            const doc = makeDocStub();
-            const opts = { ...DEFAULT_EXTRACTION_SETTINGS };
-            const result = runExtractFromIndices(
-                doc,
-                opts as any,
-                undefined,
-                [0],
-                [0],
-                1,
-                {},
-                engine,
-            );
+            const result = extractPages(engine, [0], 1);
             expect(result.metadata.engine).toBe(expectedEngine);
         },
     );
 
     it("populates metadata.timings with non-negative phase deltas", () => {
-        const doc = makeDocStub();
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS };
-        const result = runExtractFromIndices(
-            doc,
-            opts as any,
-            undefined,
-            [0],
-            [0],
-            1,
-            {},
-            "paragraph",
-        );
+        const result = extractPages("paragraph", [0], 1);
         const t = result.metadata.timings!;
         expect(t).toBeDefined();
         expect(t.totalMs).toBeGreaterThanOrEqual(0);
@@ -147,18 +151,7 @@ describe("runExtractFromIndices: metadata.timings + metadata.engine", () => {
     });
 
     it("perPageMs has one entry per emitted page", () => {
-        const doc = makeDocStub();
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS };
-        const result = runExtractFromIndices(
-            doc,
-            opts as any,
-            undefined,
-            [0, 1, 2],
-            [0, 1, 2],
-            3,
-            {},
-            "paragraph",
-        );
+        const result = extractPages("paragraph", [0, 1, 2], 3);
         expect(result.pages).toHaveLength(3);
         expect(result.metadata.timings!.perPageMs).toHaveLength(3);
         for (const ms of result.metadata.timings!.perPageMs) {
@@ -167,18 +160,7 @@ describe("runExtractFromIndices: metadata.timings + metadata.engine", () => {
     });
 
     it("totalMs is at least the sum of helper-owned phases", () => {
-        const doc = makeDocStub();
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS };
-        const result = runExtractFromIndices(
-            doc,
-            opts as any,
-            undefined,
-            [0, 1],
-            [0, 1],
-            2,
-            {},
-            "paragraph",
-        );
+        const result = extractPages("paragraph", [0, 1], 2);
         const t = result.metadata.timings!;
         const phasesSum =
             t.walkMs +

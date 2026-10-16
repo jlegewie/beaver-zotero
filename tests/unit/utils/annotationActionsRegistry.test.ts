@@ -133,6 +133,17 @@ describe("applyAnnotation write registry", () => {
     expect(wasWrittenByBeaver(savedAnnotation(1, "OTHERKEY"))).toBe(false);
   });
 
+  it("passes the page label to the reader as a string", async () => {
+    // Zotero's Edit Page Number popup calls trim() on the stored label.
+    const addHighlight = syncAddAnnotation("HLKEY001");
+    await applyAnnotation(highlightAction, mockReader(READER_LIBRARY_ID, addHighlight));
+    const addNote = syncAddAnnotation("NOTEKEY2");
+    await applyAnnotation(noteAction, mockReader(READER_LIBRARY_ID, addNote));
+
+    expect(typeof addHighlight.mock.calls[0][0].pageLabel).toBe("string");
+    expect(typeof addNote.mock.calls[0][0].pageLabel).toBe("string");
+  });
+
   it("records a note annotation the same way", async () => {
     const reader = mockReader(
       READER_LIBRARY_ID,

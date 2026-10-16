@@ -72,6 +72,10 @@ function installZoteroItems(byKey: Map<string, ItemStub>) {
             if (!libId) throw new Error('Library ID not provided');
             return byKey.get(`${libId}-${key}`) ?? false;
         }),
+        getIDFromLibraryAndKey: vi.fn((libId: number, key: string) => {
+            if (!libId) throw new Error('Library ID not provided');
+            return byKey.has(`${libId}-${key}`) ? 1 : false;
+        }),
     };
 }
 
@@ -710,6 +714,7 @@ describe('checkNewCitationItemsExist (portable ids)', () => {
         expect(error).toContain('not available on this computer');
         expect(error).toContain('g999-ABCD1234');
         expect((globalThis as any).Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+        expect((globalThis as any).Zotero.Items.getIDFromLibraryAndKey).not.toHaveBeenCalled();
     });
 
     it('reports a genuinely missing item in an available library as nonexistent', () => {
@@ -747,6 +752,7 @@ describe('checkNewCitationItemsExist (portable ids)', () => {
         // reveal whether the item exists in the excluded library.
         expect(error).toContain('excluded from Beaver');
         expect((globalThis as any).Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+        expect((globalThis as any).Zotero.Items.getIDFromLibraryAndKey).not.toHaveBeenCalled();
     });
 });
 

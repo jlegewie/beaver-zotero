@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AttachmentFileUnavailableError, openReader, openNote, viewAttachment } from '../../../react/runtime/navigation';
+import {
+    AttachmentFileUnavailableError, openReader, openNote, showAttachmentInFilesystem, viewAttachment,
+} from '../../../react/runtime/navigation';
+import { runWindowOperation } from '../../../react/runtime/libraryMutation';
 vi.mock('../../../react/utils/navigationNotice', () => ({ notifyNavigationUnavailable: vi.fn() }));
+vi.mock('../../../react/runtime/libraryMutation', () => ({ runWindowOperation: vi.fn() }));
 let a: any, b: any;
 beforeEach(() => {
     const main = () => ({ closed: false, focus: vi.fn(), ZoteroPane: { itemsView: { waitForLoad: vi.fn(async () => {}) }, collectionsView: { waitForLoad: vi.fn(async () => {}) } }, Zotero_Tabs: { _tabs: [], select: vi.fn(), isOwnTabEvent: vi.fn() } });
@@ -221,6 +225,8 @@ describe('file availability before opening the reader', () => {
         item = {
             libraryID: 1,
             attachmentSyncState: TO_DOWNLOAD,
+            attachmentContentType: 'application/pdf',
+            isAttachment: () => true,
             isFileAttachment: () => true,
             isStoredFileAttachment: () => true,
             getFilePath: () => '/storage/ABC/file.pdf',
@@ -243,6 +249,7 @@ describe('file availability before opening the reader', () => {
                 },
             },
             Notifier: { trigger: vi.fn() },
+            Attachments: { LINK_MODE_LINKED_URL: 3 },
             logError: vi.fn(),
         });
     });
@@ -298,5 +305,92 @@ describe('file availability before opening the reader', () => {
         await openReader(42, undefined, {}, a);
         expect(Zotero.Reader.open).toHaveBeenCalledOnce();
         expect((Zotero.Sync.Runner as any).alert).not.toHaveBeenCalled();
+    });
+});
+
+describe('content type before opening the reader', () => {
+    let item: any;
+
+    beforeEach(() => {
+        vi.mocked(runWindowOperation).mockReset();
+        item = {
+            libraryID: 1,
+            attachmentSyncState: 0,
+            attachmentContentType: 'application/pdf',
+            attachmentFilename: 'paper.pdf',
+            isAttachment: () => true,
+            isFileAttachment: () => true,
+            isStoredFileAttachment: () => true,
+            getFilePath: () => '/storage/ABC/paper.pdf',
+            getFilePathAsync: vi.fn(async () => '/storage/ABC/paper.pdf'),
+        };
+        vi.stubGlobal('IOUtils', { exists: vi.fn(async () => true) });
+        Object.assign(Zotero as any, {
+            Items: { getAsync: vi.fn(async () => item) },
+            Sync: { Storage: { Local: {
+                getEnabledForLibrary: vi.fn(() => true),
+                SYNC_STATE_TO_DOWNLOAD: 2,
+                SYNC_STATE_FORCE_DOWNLOAD: 5,
+            } } },
+            Attachments: { LINK_MODE_LINKED_URL: 3 },
+        });
+    });
+
+    it('corrects a mislabelled PDF in the plugin realm before the reader opens it', async () => {
+        item.attachmentContentType = 'application/octet-stream';
+        await openReader(42, undefined, {}, a);
+        expect(runWindowOperation).toHaveBeenCalledWith('ensureReaderContentType', [42]);
+        expect(vi.mocked(runWindowOperation).mock.invocationCallOrder[0])
+            .toBeLessThan(vi.mocked(Zotero.Reader.open).mock.invocationCallOrder[0]);
+    });
+
+    it('opens a correctly typed PDF without a library write', async () => {
+        await openReader(42, undefined, {}, a);
+        expect(runWindowOperation).not.toHaveBeenCalled();
+        expect(Zotero.Reader.open).toHaveBeenCalledOnce();
+    });
+
+    it('still opens the reader when the correction fails', async () => {
+        item.attachmentContentType = '';
+        vi.mocked(runWindowOperation).mockRejectedValue(new Error('library locked') as never);
+        await openReader(42, undefined, {}, a);
+        expect(Zotero.Reader.open).toHaveBeenCalledOnce();
+    });
+});
+describe('showing an attachment file', () => {
+    const reveal = vi.fn();
+    const attachment = (path: string | false) => ({
+        id: 42, isFileAttachment: () => true, getFilePathAsync: vi.fn(async () => path),
+    });
+    beforeEach(() => {
+        reveal.mockReset();
+        Object.assign(Zotero, {
+            File: { pathToFile: vi.fn((path: string) => ({ path, reveal, parent: { path: '/Dropbox' } })) },
+            Notifier: { trigger: vi.fn(async () => undefined) },
+            launchFile: vi.fn(),
+            openMainWindow: vi.fn(),
+        });
+        a.ZoteroPane.showAttachmentInFilesystem = vi.fn(async () => undefined);
+    });
+
+    it('reveals an existing file without opening a main window when none is open', async () => {
+        vi.mocked(Zotero.getMainWindow).mockReturnValue(null as any);
+        vi.mocked(Zotero.Items.getAsync).mockResolvedValue(attachment('/Dropbox/paper.pdf') as any);
+
+        await showAttachmentInFilesystem(42);
+
+        expect(Zotero.File.pathToFile).toHaveBeenCalledWith('/Dropbox/paper.pdf');
+        expect(reveal).toHaveBeenCalledOnce();
+        expect(Zotero.Notifier.trigger).toHaveBeenCalledWith('reveal', 'file', 42);
+        expect((Zotero as any).openMainWindow).not.toHaveBeenCalled();
+    });
+
+    it("leaves a missing file to Zotero's not-found dialog in a main window", async () => {
+        vi.mocked(Zotero.Items.getAsync).mockResolvedValue(attachment(false) as any);
+
+        await showAttachmentInFilesystem(42, a);
+
+        expect(reveal).not.toHaveBeenCalled();
+        expect(a.ZoteroPane.showAttachmentInFilesystem).toHaveBeenCalledWith(42);
     });
 });

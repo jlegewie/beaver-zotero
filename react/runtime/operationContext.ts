@@ -7,8 +7,7 @@ import { grantCreatedNoteEditsForRunAtom, isActionApprovedForCurrentRun, isFullA
 import { currentThreadIdAtom } from '../atoms/threads';
 import { store } from '../store';
 import { captureAttachmentCompletion } from './attachmentCompletion';
-import { prepareCitationRenderContext } from '../utils/citationRenderContext';
-import { renderToHTML } from '../utils/citationRenderers';
+import { renderNoteMarkdownToHTML } from '../utils/noteMarkdownRender';
 import { tryGetWindowRuntime } from './windowRuntime';
 
 /** Originless requests receive empty citation/grant state and an explicit render seam. */
@@ -38,8 +37,7 @@ export function captureOperationContext(local = false): OperationContext {
         },
         externalRefs: renderContext.externalReferencesMap,
         externalItemMapping: renderContext.externalMapping,
-        renderMarkdown: async content => renderToHTML(content, 'markdown',
-            await prepareCitationRenderContext(content, renderContext)),
+        renderMarkdown: content => renderNoteMarkdownToHTML(content, renderContext),
         grantCreatedNote: (libraryId, zoteroKey) => {
             if (runtime?.status !== 'closing' && runId && generation === Zotero.Beaver.account?.getGeneration() && store.get(activeRunAtom)?.id === runId) {
                 store.set(grantCreatedNoteEditsForRunAtom, { runId, libraryId, zoteroKey });

@@ -3,11 +3,15 @@ import { defineConfig } from 'vitest/config';
 
 const agentCoreSrc = fileURLToPath(new URL('./packages/agent-core/src', import.meta.url));
 const agentUiSrc = fileURLToPath(new URL('./packages/agent-ui/src', import.meta.url));
+const agentExportSrc = fileURLToPath(new URL('./packages/agent-export/src', import.meta.url));
 
 export default defineConfig({
     test: {
         globals: true,
         environment: 'node',
+        // Worker threads start far faster than forked processes, and module
+        // collection dominates this suite's runtime.
+        pool: 'threads',
         include: ['tests/unit/**/*.test.ts'],
         setupFiles: ['tests/setup.ts'],
         testTimeout: 10000,
@@ -16,6 +20,7 @@ export default defineConfig({
         alias: {
             '@beaver/agent-core': agentCoreSrc,
             '@beaver/agent-ui': agentUiSrc,
+            '@beaver/agent-export': agentExportSrc,
         },
     },
 });

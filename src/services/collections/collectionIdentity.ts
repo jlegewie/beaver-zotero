@@ -120,11 +120,29 @@ function ambiguity(input: string | number, collections: Zotero.Collection[]): Co
     return new CollectionResolutionError('ambiguous_collection', `Ambiguous collection "${input}". Use a collection ID: ${candidates.join('; ')}.`);
 }
 
+/**
+ * Spell a caller's numeric (`7-KEY`) or native (`7_KEY`) reference in the
+ * portable grammar (`g12345-KEY`) so errors never teach the model a
+ * device-local id. Only for libraries accessible independently of the request's
+ * narrower scope, so an excluded library's mapping is never revealed.
+ */
+function portableLabel(label: string | number, access: CollectionScope['access']): string | number {
+    if (typeof label !== 'string') return label;
+    const value = label.trim();
+    const parsed = parseItemReference(value);
+    const native = parsed ? null : /^(\d+)_([A-Z0-9]{8})$/.exec(value);
+    const libraryID = parsed ? parsed.library_id : native ? Number(native[1]) : undefined;
+    const key = parsed ? parsed.zotero_key : native?.[2];
+    if (libraryID === undefined || !key || !allowedLibraries({ access }).includes(libraryID)) return label;
+    const ref = libraryRefForLibraryID(libraryID);
+    return ref ? `${ref}-${key}` : label;
+}
+
 /** Resolve exactly one collection within the permitted scope, excluding trash. */
 export function resolveCollection(input: string | number, scope: CollectionScope = {}): ResolvedCollection {
     // Every message quotes what the caller supplied, never a reference this
     // module qualified for it.
-    const label = scope.displayReference ?? input;
+    const label = portableLabel(scope.displayReference ?? input, scope.access);
     const allowed = allowedLibraries(scope);
     if (!allowed.length) {
         const recovery = scope.access !== 'local' && !Zotero.Beaver?.libraryScopeInitialized

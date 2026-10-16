@@ -26,14 +26,15 @@ import {
     resolveToImageAttachment,
     resolveToPdfAttachment,
 } from '../documentExtraction/attachmentResolution';
-import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
+import { isLinkedUrlAttachment, isPdfDocument } from '../../utils/attachmentFiles';
 import {
     preflightZoteroAttachmentRequest,
     validateZoteroItemReference,
 } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
-import { resolveExternalFile } from '../externalFiles';
+import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
+import { loadPageLabelsForMetadata } from '../documentExtraction/pageLabels';
 import {
     externalFileMissingMessage,
     getResolvedAttachmentParentStub,
@@ -135,7 +136,7 @@ async function resolveViewTarget(
         if (children.length > 0) {
             await Zotero.Items.loadDataTypes(children, ['itemData']);
         }
-        const hasPdf = children.some((a) => a.isPDFAttachment());
+        const hasPdf = children.some((a) => isPdfDocument(a));
         // Mirror resolveToImageAttachment's filter (linked URLs excluded) so
         // the pre-scan and the resolver agree on which children count.
         const hasImage = children.some(
@@ -632,7 +633,13 @@ async function handleExternalFileViewRequest(
         }, signal);
         throwIfTimedOut('pdf_render');
 
-        const pageLabels = renderResult.pageLabels ?? {};
+        // Printed labels of an extracted copy; a file never extracted has none.
+        const cachedMeta = await Zotero.Beaver?.documentCache?.getMetadata(
+            { libraryId: EXTERNAL_LIBRARY_ID, zoteroKey: extKey },
+            record.storedPath,
+        ).catch(() => null);
+        const pageLabels = await loadPageLabelsForMetadata(cachedMeta, 'printed', record.storedPath) ?? {};
+        throwIfTimedOut('page_label_lookup');
         const images: WSViewImage[] = renderResult.pages.map((page) => ({
             image_data: uint8ToBase64(page.data),
             format: page.format,

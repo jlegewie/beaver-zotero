@@ -1,3 +1,4 @@
+import { mergeItemsChoicesAtom } from './mergeItemsChoices';
 import { getSearchIndexState } from '../../src/services/searchIndexState';
 import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
 import {
@@ -130,8 +131,10 @@ import {
     isAnnotationAgentAction,
     isEditAnnotationsAgentAction,
     isEditMetadataAgentAction,
-    isZoteroNoteAgentAction,
     isCreateItemAgentAction,
+    isImportItemAgentAction,
+    isItemCreatingAgentAction,
+    itemActionExternalId,
     isCreateCollectionAgentAction,
     isOrganizeItemsAgentAction,
     isManageTagsAgentAction,
@@ -172,10 +175,12 @@ import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQu
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
+import { undoImportItemAction } from '../utils/importItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
+import { undoMergeItemsAction } from '../utils/mergeItemsActions';
 import { undoEditNoteAction, undoEditNoteBatchAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
@@ -187,7 +192,7 @@ import { selectLiveBatchProgress } from '@beaver/agent-core/run-state/batchProgr
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom, threadNavigationSeqAtom } from './threads';
-import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
+import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
     clearRunApprovalPolicyAtom,
@@ -208,7 +213,7 @@ import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from 
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
-import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
+import type { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { appendRunIfMissing, continuationOfferFor, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
@@ -993,7 +998,7 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
             if (isCreateAnnotationsAgentAction(action)) {
                 return hasAppliedBulkAnnotations(action);
             }
-            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+            if (isAnnotationAgentAction(action)) {
                 return hasAppliedZoteroItem(action);
             }
             return action.status === 'applied';
@@ -1016,7 +1021,7 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 // Preserve fields the user manually modified after apply, as
                 // the other edit-action retry paths do.
                 await undoEditAnnotationsAction(action, false);
-            } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+            } else if (isAnnotationAgentAction(action)) {
                 const ref = action.result_data as ZoteroItemReference | undefined;
                 if (!ref) continue;
                 const resolved = await resolveItemReference(ref);
@@ -1030,6 +1035,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 await undoEditNoteBatchAction(action);
             } else if (isCreateItemAgentAction(action)) {
                 await undoCreateItemAction(action);
+            } else if (isImportItemAgentAction(action)) {
+                await undoImportItemAction(action);
             } else if (isCreateCollectionAgentAction(action)) {
                 await undoCreateCollectionAction(action);
             } else if (isOrganizeItemsAgentAction(action)) {
@@ -1040,6 +1047,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 await undoManageCollectionsAction(action);
             } else if (isCreateNoteAgentAction(action)) {
                 await undoCreateNoteAction(action);
+            } else if (action.action_type === 'merge_items') {
+                await undoMergeItemsAction(action);
             }
         } catch (error) {
             logger(`undoAppliedActionsInReverse: Failed to undo action ${action.id} (${action.action_type}): ${error}`, 1);
@@ -1053,7 +1062,6 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
 interface ActionsToUndo {
     annotations: AgentAction[];
     annotationEdits: AgentAction[];
-    zoteroNotes: AgentAction[];
     metadataEdits: AgentAction[];
     noteEdits: AgentAction[];
     createItems: AgentAction[];
@@ -1062,6 +1070,7 @@ interface ActionsToUndo {
     manageTags: AgentAction[];
     manageCollections: AgentAction[];
     createNotes: AgentAction[];
+    mergeItems: AgentAction[];
 }
 
 type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
@@ -1073,10 +1082,10 @@ type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
  * or 'cancel' to abort regeneration entirely.
  */
 function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoConfirmResult {
-    const { annotations, annotationEdits, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes } = actions;
-    const totalActions = annotations.length + annotationEdits.length + zoteroNotes.length + metadataEdits.length +
+    const { annotations, annotationEdits, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes, mergeItems } = actions;
+    const totalActions = annotations.length + annotationEdits.length + metadataEdits.length +
                          noteEdits.length + createItems.length + createCollections.length + organizeItems.length +
-                         manageTags.length + manageCollections.length + createNotes.length;
+                         manageTags.length + manageCollections.length + createNotes.length + mergeItems.length;
 
     if (totalActions === 0) return 'skip';
 
@@ -1102,9 +1111,6 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
         }, 0);
         changeLines.push(`• ${annotationCount} PDF annotation change${annotationCount === 1 ? '' : 's'}`);
     }
-    if (zoteroNotes.length > 0) {
-        changeLines.push(`• ${zoteroNotes.length} Zotero note${zoteroNotes.length === 1 ? '' : 's'}`);
-    }
     if (metadataEdits.length > 0) {
         changeLines.push(`• ${metadataEdits.length} metadata edit${metadataEdits.length === 1 ? '' : 's'}`);
     }
@@ -1128,6 +1134,9 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
     }
     if (createNotes.length > 0) {
         changeLines.push(`• ${createNotes.length} created note${createNotes.length === 1 ? '' : 's'}`);
+    }
+    if (mergeItems.length > 0) {
+        changeLines.push(`• ${mergeItems.length} duplicate merge${mergeItems.length === 1 ? '' : 's'}`);
     }
 
     const title = 'Retry?';
@@ -1517,9 +1526,16 @@ function applyRunCitations(
     // Preload PDF page labels for cited attachments so the rendering path can
     // resolve page numbers from explicit render state. Runs after metadata is
     // exposed to avoid blocking the UI on PDF extraction.
+    //
+    // The preload usually settles after the run, when this window no longer
+    // holds the thread writer and the callback setter drops writes. The labels
+    // are render state keyed by attachment, not thread history, so they go to
+    // this renderer's store directly (still scoped to the account).
+    const generation = getCredentialGeneration();
     preloadPageLabelsForCitations(citations)
         .then((labelsByAttachmentId) => {
-            set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
+            if (generation !== getCredentialGeneration()) return;
+            store.set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
         })
         .catch((err) =>
             logger(`WS: Failed to preload page labels: ${err}`, 1)
@@ -1757,10 +1773,6 @@ export function createWSCallbacks(
                 );
                 // Auto-apply annotations if enabled
                 autoApplyAnnotationAgentActions(event.run_id, actions);
-                // Auto-create notes if enabled
-                await autoCreateNoteAgentActions(event.run_id, actions, set).catch(err =>
-                    logger(`WS onRunComplete: Failed to auto-create notes: ${err}`, 1)
-                );
             }
 
             // Surface an OS-native notification if the user can't currently see
@@ -1983,24 +1995,20 @@ export function createWSCallbacks(
             const actions = event.actions.map(toAgentAction);
             set(upsertAgentActionsAtom, actions);
 
-            // Mark external references as imported for applied create_items actions
+            // Mark external references as imported for applied item-creating actions
             // This handles cases where actions are applied via PendingActionsBar
             for (const action of actions) {
-                if (
-                    action.action_type === 'create_item' &&
-                    action.status === 'applied' &&
-                    action.result_data
-                ) {
-                    const proposedData = action.proposed_data as CreateItemProposedData;
+                if (isItemCreatingAgentAction(action) && action.status === 'applied' && action.result_data) {
+                    const externalId = itemActionExternalId(action);
                     const resultData = action.result_data as CreateItemResultData;
 
-                    if (proposedData?.item?.source_id && resultData.library_id && resultData.zotero_key) {
-                        set(markExternalReferenceImportedAtom, proposedData.item.source_id, {
+                    if (externalId && resultData.library_id && resultData.zotero_key) {
+                        set(markExternalReferenceImportedAtom, externalId, {
                             library_id: resultData.library_id,
                             zotero_key: resultData.zotero_key,
                             library_ref: resultData.library_ref,
                         });
-                        logger(`WS onAgentActions: Marked external reference ${proposedData.item.source_id} as imported`, 1);
+                        logger(`WS onAgentActions: Marked external reference ${externalId} as imported`, 1);
                     }
                 }
             }
@@ -3035,14 +3043,11 @@ async function startRegenerateRunOwned(
         const annotationEditsToUndo = actionsInRemovedRuns
             .filter(isEditAnnotationsAgentAction)
             .filter(a => a.status === 'applied');
-        const zoteroNotesToDelete = actionsInRemovedRuns
-            .filter(isZoteroNoteAgentAction)
-            .filter(hasAppliedZoteroItem);
         const metadataEditsToUndo = actionsInRemovedRuns
             .filter(isEditMetadataAgentAction)
             .filter(a => a.status === 'applied');
         const createItemsToUndo = actionsInRemovedRuns
-            .filter(isCreateItemAgentAction)
+            .filter(isItemCreatingAgentAction)
             .filter(a => a.status === 'applied');
         const createCollectionsToUndo = actionsInRemovedRuns
             .filter(isCreateCollectionAgentAction)
@@ -3062,6 +3067,8 @@ async function startRegenerateRunOwned(
         const createNotesToUndo = actionsInRemovedRuns
             .filter(isCreateNoteAgentAction)
             .filter(a => a.status === 'applied');
+        const mergeItemsToUndo = actionsInRemovedRuns
+            .filter(a => a.action_type === 'merge_items' && a.status === 'applied');
 
         // Prompt the user to confirm undoing applied actions. The dialog is
         // the consent and must precede the truncate POST: a user who cancels
@@ -3069,17 +3076,15 @@ async function startRegenerateRunOwned(
         // backend confirms, so a failed POST changes nothing.
         let confirmResult: UndoConfirmResult = 'skip';
         const hasActionsToUndo = annotationsToDelete.length > 0 || annotationEditsToUndo.length > 0 ||
-                                 zoteroNotesToDelete.length > 0 ||
                                  metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                  createItemsToUndo.length > 0 ||
                                  createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
                                  manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
-                                 createNotesToUndo.length > 0;
+                                 createNotesToUndo.length > 0 || mergeItemsToUndo.length > 0;
         if (hasActionsToUndo) {
             confirmResult = confirmUndoAppliedActions({
                 annotations: annotationsToDelete,
                 annotationEdits: annotationEditsToUndo,
-                zoteroNotes: zoteroNotesToDelete,
                 metadataEdits: metadataEditsToUndo,
                 noteEdits: noteEditsToUndo,
                 createItems: createItemsToUndo,
@@ -3088,6 +3093,7 @@ async function startRegenerateRunOwned(
                 manageTags: manageTagsToUndo,
                 manageCollections: manageCollectionsToUndo,
                 createNotes: createNotesToUndo,
+                mergeItems: mergeItemsToUndo,
             }, options.window ?? getHostWindow());
             if (confirmResult === 'cancel') {
                 return;
@@ -3587,7 +3593,7 @@ export const sendApprovalResponseAtom = atom(
             return next;
         });
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
-        const delivered = agentService.sendApprovalResponse(actionId, approved, userInstructions);
+        const delivered = agentService.sendApprovalResponse(actionId, approved, userInstructions, approved ? _get(mergeItemsChoicesAtom)[actionId] : undefined);
         if (!delivered) {
             logger(`sendApprovalResponseAtom: Approval response for ${actionId} was not sent; marking stale`, 1);
             set(markApprovalStaleAtom, actionId);

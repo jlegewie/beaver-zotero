@@ -1,3 +1,4 @@
+export type { DuplicatesRequest, DuplicatesResponse } from './duplicates';
 export { validateArtifactRequest } from './artifactProtocol';
 import type { ArtifactRequest } from './artifactProtocol';
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../types/profile';
@@ -535,8 +536,8 @@ export interface ItemSearchFrontendResultItem {
  * Used for backend diagnostics to understand where time is spent during search operations.
  */
 export interface FrontendTimingMetadata {
-    /** Allow additional timing keys from TimingAccumulator */
-    [key: string]: number | undefined;
+    /** Allow additional timing keys from TimingAccumulator, plus string diagnostics such as `active_addons` */
+    [key: string]: number | string | undefined;
     /** Total operation time in milliseconds */
     total_ms?: number;
     /** Time spent in search/query phase */
@@ -598,6 +599,16 @@ export interface FrontendTimingMetadata {
     pdf_check_ms?: number;
     /** Total time inside applyCreateItemData (createZoteroItem + post-processing) */
     apply_ms?: number;
+
+    // Committed-transaction timings (summed over an action's writes)
+    /** Time from starting a write transaction to its commit */
+    tx_commit_ms?: number;
+    /** Time from the commit until the write returned (Notifier observers, capped by the grace period) */
+    post_commit_ms?: number;
+    /** Writes that returned while their Notifier observers were still running */
+    observers_deferred?: number;
+    /** Active non-system add-ons (`id@version`, comma separated), sent only when observers were slow */
+    active_addons?: string;
 
     // Reference check specific timings
     /** Time spent in phase 1: identifier (DOI/ISBN) lookup */
@@ -1030,6 +1041,56 @@ export interface ServedAttachmentDiagnostics {
 }
 
 /** Response to whole-document extraction request */
+/**
+ * Where a document request spent its time in the plugin, in whole
+ * milliseconds. Sent on PDF success responses so backend traces can split a
+ * fetch's latency between the plugin and the rest of the round trip. Stages
+ * that did not run are absent.
+ */
+export interface WSDocumentTimings {
+    /** From receiving the request to building the response. */
+    total_ms: number;
+    /**
+     * How the document was obtained: `cache` (the plugin's document cache had
+     * it), `extracted` (this request ran the extraction), or `shared` (another
+     * request's extraction of the same document, or a cache entry written
+     * meanwhile).
+     */
+    source: 'cache' | 'extracted' | 'shared';
+    /** Resolving the attachment's file (local path, size, remote availability). */
+    resolve_ms?: number;
+    /** Document-cache lookups before extracting. */
+    cache_lookup_ms?: number;
+    /** Reading (or downloading) the PDF bytes. */
+    file_read_ms?: number;
+    /** Page-count worker op, on a cache miss without stored metadata. */
+    page_count_ms?: number;
+    /** Extraction worker op, round trip as seen by the plugin. */
+    extract_ms?: number;
+    /**
+     * Waiting for other work, summed over the request's worker ops (page count
+     * and extraction, so part of `page_count_ms` and `extract_ms`): in the
+     * plugin's worker queue behind other requests' operations.
+     */
+    client_queue_ms?: number;
+    /** Likewise: waiting for the worker to start (spawn, MuPDF load, recycle). */
+    worker_start_ms?: number;
+    /** Likewise: sent to the worker, waiting while an earlier operation ran there. */
+    worker_queue_ms?: number;
+    /** Of `extract_ms`: the worker running the extraction. */
+    worker_op_ms?: number;
+    /**
+     * The worker when this request used it: `starting` (it waited for the
+     * worker to spawn and load), `first_extract` (no extraction had run on
+     * this worker yet, so its code was not yet optimised), or `warm`.
+     */
+    worker_state?: 'starting' | 'first_extract' | 'warm';
+    /** Writing the extracted result to the document cache. */
+    cache_write_ms?: number;
+    /** Waiting for `attachment_diagnostics` before responding. */
+    diagnostics_wait_ms?: number;
+}
+
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
     request_id: string;
@@ -1057,6 +1118,8 @@ export interface WSZoteroDocumentResponse {
     error_code?: ZoteroDocumentErrorCode | null;
     /** Worker health snapshot, attached to timeout error responses. */
     worker_diagnostics?: WSWorkerDiagnostics | null;
+    /** Where the request spent its time in the plugin (PDF success responses). */
+    timings?: WSDocumentTimings | null;
 }
 
 /** Error codes for attachment page image rendering failures */
@@ -1068,6 +1131,7 @@ export type AttachmentPageImagesErrorCode =
     | 'is_linked_url'       // Attachment is a linked URL, not a stored file
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'empty_document'      // PDF opened but has no readable pages
@@ -1109,6 +1173,7 @@ export type AttachmentImageErrorCode =
     | 'unsupported_image_format'   // Image format the runtime cannot decode (TIFF, HEIC, SVG, ...)
     | 'file_missing'               // Image file not available locally
     | 'file_too_large'             // Image file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'download_failed'            // Remote file download failed
     | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
     | 'timeout'                    // Processing timed out
@@ -1220,6 +1285,7 @@ export type AttachmentSearchErrorCode =
     | 'not_pdf'             // Attachment is not a PDF
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'empty_document'      // PDF opened but has no readable pages
@@ -2119,7 +2185,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -2253,6 +2319,7 @@ export interface WSDeferredApprovalRequest extends WSBaseEvent {
 
 /** Response to deferred approval request (user's decision) */
 export interface WSDeferredApprovalResponse {
+    action_changes?: import('./duplicates').MergeItemsChoices;
     type: 'deferred_approval_response';
     action_id: string;
     approved: boolean;
@@ -2613,6 +2680,7 @@ export type WSEvent =
     | WSListTagsRequest
     | WSGetMetadataRequest
     | WSGetAnnotationsRequest
+    | import('./duplicates').DuplicatesRequest
     | WSFindAnnotationsRequest
     | WSListLibrariesRequest
     // Note tools
@@ -2725,6 +2793,7 @@ export interface ZoteroInstanceWire {
  * values MUST match the backend's `FEAT_*` constants exactly.
  */
 export const CLIENT_FEATURES = {
+    ZOTERO_DUPLICATES: 'zotero_duplicates',
     LIBRARY_MANAGEMENT: 'library_management',
     MANAGE_LIBRARY_STRUCTURE: 'manage_library_structure',
     NOTE_SUPPORT: 'note_support',
@@ -2835,6 +2904,21 @@ export const CLIENT_FEATURES = {
      */
     PDF_CANDIDATES: 'pdf_candidates',
     /**
+     * `create_items` v2: items are created from identifiers, URLs, attached
+     * files and model-written metadata. The client resolves every source to
+     * Zotero item JSON while validating an `import_item` action, renders and
+     * approves `import_item` actions, and writes the approved JSON on execute.
+     * Citation "Import" proposals arrive as unresolved `import_item` actions.
+     */
+    ITEM_IMPORT_V2: 'item_import_v2',
+    /**
+     * `book_chapters` capability (`find_book_chapters`), offered together with
+     * ITEM_IMPORT_V2. Declare it only while the import duplicate check matches
+     * ISBNs book-to-book: a chapter resolved from its DOI carries its book's
+     * ISBN.
+     */
+    BOOK_CHAPTERS: 'book_chapters',
+    /**
      * Chat markdown follows `[label](u-KEY)` (and `zotero://select/...`) as a
      * link that reveals the named library object. Without it those hrefs render
      * as ordinary relative links, so the backend must not instruct the model to
@@ -2848,6 +2932,12 @@ export const CLIENT_FEATURES = {
      * relocation targets, which an older client refuses.
      */
     TWO_PAGE_HIGHLIGHTS: 'two_page_highlights',
+    /**
+     * `create_highlight_annotations` actions may carry `style: 'underline'`,
+     * written as Zotero underline annotations. Without it the backend never
+     * offers the style, since an older client would write highlights instead.
+     */
+    UNDERLINE_ANNOTATIONS: 'underline_annotations',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2950,6 +3040,29 @@ export interface CurrentSavedSearch {
 }
 
 /**
+ * Zotero special collections Beaver reports in application state: built-in,
+ * per-library views in the collections pane rather than user-created
+ * collections.
+ *
+ * - `duplicates`: "Duplicate Items", Zotero's duplicate candidates.
+ * - `unfiled`: "Unfiled Items", items that belong to no collection.
+ */
+export type SpecialCollectionType = 'duplicates' | 'unfiled';
+
+/**
+ * A special collection selected in the collections pane. Reported only for
+ * kinds the agent can act on; other special views are left out.
+ */
+export interface CurrentSpecialCollection {
+    /** Which special collection is selected */
+    type: SpecialCollectionType;
+    /** Library ID the special collection belongs to */
+    library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
+}
+
+/**
  * Application state sent with messages.
  * Contains current view state and reader state if in reader view.
  */
@@ -2983,6 +3096,12 @@ export interface ApplicationStateInput {
      * `current_collections`.
      */
     current_searches?: CurrentSavedSearch[];
+    /**
+     * Special collections in the current selection, in collections-list order.
+     * A selection can mix them with collections and saved searches, so this
+     * list is independent of `current_collections` and `current_searches`.
+     */
+    current_special_collections?: CurrentSpecialCollection[];
     /**
      * Currently selected library items, truncated to a client-defined maximum.
      */

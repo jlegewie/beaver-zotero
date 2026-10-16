@@ -17,6 +17,31 @@ const restrictedGlobals = [
     "Zotero_Tabs",
 ];
 
+/**
+ * Firefox 153 (Zotero 11) regressions that must keep working on Zotero 7-10 too.
+ * Flat config replaces rule options instead of merging them, so every block
+ * that sets its own `no-restricted-syntax` spreads these in as well.
+ */
+const firefox153SyntaxBans = [
+    {
+        // Before Firefox 153, ="false" meant off. Firefox 153 treats these as
+        // presence-based, so ="false" turns them on.
+        selector:
+            "CallExpression[callee.property.name='setAttribute'][arguments.0.value=/^(hidden|collapsed|selected|disabled|checked)$/][arguments.1.value='false']",
+        message: "Boolean XUL attributes are presence-based on Firefox 153: use removeAttribute() or toggleAttribute().",
+    },
+    {
+        selector: "CallExpression[callee.property.name='setAttribute'][arguments.0.value=/^on[a-z]+$/i]",
+        message: "Inline event handlers are blocked by the chrome CSP on Firefox 153: use addEventListener().",
+    },
+];
+const firefox153PropertyBans = [
+    {
+        property: "ownerGlobal",
+        message: "Firefox 153 renamed ownerGlobal (it reads as undefined): use ownerDocument.defaultView.",
+    },
+];
+
 const l1CoreGlobals = [
     ...restrictedGlobals,
     {
@@ -248,6 +273,8 @@ export default tseslint.config(
         },
         rules: {
             "no-restricted-globals": ["error", ...restrictedGlobals],
+            "no-restricted-syntax": ["error", ...firefox153SyntaxBans],
+            "no-restricted-properties": ["error", ...firefox153PropertyBans],
 
             "@typescript-eslint/ban-ts-comment": [
                 "warn",
@@ -324,6 +351,9 @@ export default tseslint.config(
     // `../StyleAnalyzer`, and the extract types via
     // `@beaver/agent-core/extract/*`.
     //
+    // The structured pipeline (`src/beaver-extract/pipeline/`) runs in the
+    // worker too, at the same depth, so the same rules apply.
+    //
     // Path math reminder — relative specifiers from a file at
     // `src/beaver-extract/worker/<file>.ts`:
     //   ../X            → src/beaver-extract/X    (package internals — OK)
@@ -333,7 +363,7 @@ export default tseslint.config(
     // Bare `@beaver/agent-core/...` specifiers also leave the directory; only
     // its extract/* subpaths are worker-safe (enforced below).
     {
-        files: ["src/beaver-extract/worker/**/*.ts"],
+        files: ["src/beaver-extract/worker/**/*.ts", "src/beaver-extract/pipeline/**/*.ts"],
         rules: {
             "no-restricted-imports": [
                 "error",
@@ -609,7 +639,32 @@ export default tseslint.config(
                 "error",
                 { paths: l1CorePackageBans, patterns: l1CoreImportBans },
             ],
-            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
+            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan, ...firefox153SyntaxBans],
+        },
+    },
+    // The export pipeline (source building, parsing, citation data, writers)
+    // is client-agnostic like the core: no Zotero, no React, no app graph, and
+    // no agent-ui. Zotero specifics (citation lookup and formatting, files) are
+    // implemented by the host in src/services/export. `npm run typecheck:export`
+    // is the stronger gate; this block covers every file as you write it.
+    {
+        files: ["packages/agent-export/src/**/*.ts"],
+        rules: {
+            "no-restricted-globals": ["error", ...l1CoreGlobals],
+            "no-restricted-imports": [
+                "error",
+                {
+                    paths: l1CorePackageBans,
+                    patterns: [
+                        ...l1CoreImportBans,
+                        {
+                            group: ["@beaver/agent-ui", "@beaver/agent-ui/**"],
+                            message: "The export pipeline must not import the shared React layer.",
+                        },
+                    ],
+                },
+            ],
+            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan, ...firefox153SyntaxBans],
         },
     },
     // The shared React layer (theme, icons, primitives, render components) is
@@ -625,7 +680,7 @@ export default tseslint.config(
         rules: {
             "no-restricted-globals": ["error", ...l2UiGlobals],
             "no-restricted-imports": ["error", { patterns: l2UiImportBans }],
-            "no-restricted-syntax": ["error", ...l2UiAmbientTypeBan],
+            "no-restricted-syntax": ["error", ...l2UiAmbientTypeBan, ...firefox153SyntaxBans],
         },
     },
 );

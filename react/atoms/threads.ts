@@ -27,7 +27,8 @@ import { logger } from "@beaver/agent-core/platform/logger";
 import { isApiError } from "@beaver/agent-core/types/apiErrors";
 import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom } from "./externalReferences";
-import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
+import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom, externalReferenceMappingAtom } from "@beaver/agent-core/citations/externalReferences";
+import { importActionReference } from "../utils/importItemDisplay";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
@@ -36,6 +37,7 @@ import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom, 
     isCreateItemAgentAction, 
+    isImportItemAgentAction,
     AgentAction, 
     validateAppliedAgentAction, 
     undoAgentActionAtom,
@@ -657,11 +659,23 @@ export const loadThreadAtom = atom(
                 if (!isCurrent()) return false;
                 // Check for create_item agent actions and populate external reference cache
                 const createItemActions = (agent_actions || []).filter(isCreateItemAgentAction);
-                if (createItemActions.length > 0) {
+                // import_item actions carry no ExternalReference; the mapping is filled
+                // from search results, and only references missing from it are derived
+                // from the action's own metadata so citation cards can render.
+                const mapping = get(externalReferenceMappingAtom);
+                const importReferences = (agent_actions || [])
+                    .filter(isImportItemAgentAction)
+                    .filter((action) => action.proposed_data?.source?.external_id
+                        && !mapping[action.proposed_data.source.external_id])
+                    .map((action) => importActionReference(action.proposed_data, mapping));
+                if (createItemActions.length > 0 || importReferences.length > 0) {
                     logger(`loadThreadAtom: Adding external references from agent actions to mapping`, 1);
-                    const references = createItemActions
-                        .map((action: AgentAction) => action.proposed_data?.item)
-                        .filter(Boolean) as ExternalReference[];
+                    const references = [
+                        ...(createItemActions
+                            .map((action: AgentAction) => action.proposed_data?.item)
+                            .filter(Boolean) as ExternalReference[]),
+                        ...importReferences,
+                    ];
                     set(addExternalReferencesToMappingAtom, references);
                     set(checkExternalReferencesAtom, references);
                 }

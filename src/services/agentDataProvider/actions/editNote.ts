@@ -31,10 +31,10 @@ import {
     detectPartialSimplifiedTag,
     validateNewString,
 } from '../../../utils/editNoteValidation';
-import { preloadExternalFileCitations } from '../../../utils/externalFileCitation';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import {
     buildUnresolvedLocatorWarning,
+    ensureCitedLibrariesLoaded,
     expandToRawHtml,
     preloadNotePageLabels,
     preloadPageLabelsForNewCitations,
@@ -63,11 +63,14 @@ import {
     rebuildDataCitationItems,
     stripDataCitationItems,
 } from '../../../utils/noteWrapper';
-import { preloadStandaloneAttachmentLinks } from '../../../utils/zoteroLinkCitation';
+import { maskRenderedCitationTags, unmaskNoteCitationTags } from '../../../utils/noteCitationMask';
 import { dismissNotePreviews } from '../../notePreviews';
 import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } from '../operationContext';
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { getExternalRefContext } from './noteCitationRendering';
+
+export { getExternalRefContext };
 
 /** Combine optional warning strings into a `warnings` array, or undefined when empty. */
 function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
@@ -106,7 +109,14 @@ export async function buildMarkdownRenderFields(
 
     try {
         if (!context?.renderMarkdown) return {};
-        const render = async (content: string) => simplifyNoteHtml(await context.renderMarkdown!(content), libraryId).simplified;
+        // The renderer leaves citations as the tags the model wrote, so the
+        // strategy expands them like any other edit (old_string tags resolve
+        // by `ref`, new ones are built from the model's page numbers). They
+        // are masked while the HTML is simplified.
+        const render = async (content: string) => {
+            const masked = maskRenderedCitationTags(await context.renderMarkdown!(content));
+            return unmaskNoteCitationTags(simplifyNoteHtml(masked.text, libraryId).simplified, masked);
+        };
 
         const renderedOldSimplified = (await render(oldString));
         let renderedNewSimplified: string;
@@ -146,20 +156,6 @@ async function findMarkdownRenderFallbackMatch(
         libraryId, context);
     if (!rendered.renderedOldSimplified) return null;
     return findMarkdownRenderMatch({ ...matchInput, ...rendered });
-}
-
-/** Preload citation labels and files, and snapshot external-work mappings. */
-export async function getExternalRefContext(content: string, context?: OperationContext): Promise<ExternalRefContext> {
-    const [{ files, warnings }] = await Promise.all([
-        preloadExternalFileCitations(content),
-        preloadStandaloneAttachmentLinks(content, libraryID => !checkLibraryExcluded(libraryID)),
-    ]);
-    return {
-        externalFiles: files,
-        externalFileWarnings: warnings,
-        externalRefs: context?.externalRefs ?? {},
-        externalItemMapping: context?.externalItemMapping ?? {},
-    };
 }
 
 /**
@@ -383,11 +379,11 @@ async function validateEditNoteAction(
             preference: 'always_ask',
         } as WSAgentActionValidateResponse;
         if (item.isRegularItem()) {
-            resp.error = `Item ${itemId} is a regular item and not a note. To create a new zotero note that is attached to the regular item ${itemId}, use the the <note title="..." item_id="${itemId}">...</note> tag in your response.`;
+            resp.error = `Item ${itemId} is a regular item and not a note. To create a new note attached to it, use create_note with parent_item_id="${itemId}".`;
         } else if (item.isAttachment()) {
-            resp.error = `Item ${itemId} is an attachment and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+            resp.error = `Item ${itemId} is an attachment and not a note. To create a new note, use create_note. To edit a note, use edit_note with an existing note id.`;
         } else if (item.isAnnotation()) {
-            resp.error = `Item ${itemId} is an annotation and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+            resp.error = `Item ${itemId} is an annotation and not a note. To create a new note, use create_note. To edit a note, use edit_note with an existing note id.`;
         }
         return resp;
     }
@@ -416,7 +412,12 @@ async function validateEditNoteAction(
         rawHtml = stripPreviewMarkers(rawHtml);
     }
 
-    // 8. Simplify note (needed for both modes)
+    // 8. Simplify note (needed for both modes). Load every library the note
+    //    and the edit cite first: simplification, prechecks and expansion
+    //    resolve cited items synchronously.
+    await ensureCitedLibrariesLoaded([rawHtml, new_string, old_string], [resolvedLibraryId], {
+        externalItemMapping: request.operation?.externalItemMapping,
+    });
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
     const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
@@ -686,6 +687,7 @@ async function validateEditNoteAction(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
     if (locatorWarning) warnings.push(locatorWarning);
     if (operation === 'insert_after' || operation === 'insert_before') {
@@ -824,6 +826,12 @@ async function executeEditNoteAction(
 
     const externalRefContext = await getExternalRefContext(new_string, request.operation);
 
+    // Load every library the edit cites: expansion resolves cited items
+    // synchronously.
+    await ensureCitedLibrariesLoaded([new_string, old_string], [resolvedLibraryId], {
+        externalItemMapping: request.operation?.externalItemMapping,
+    });
+
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.
     const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
@@ -834,6 +842,7 @@ async function executeEditNoteAction(
     const locatorWarning = buildUnresolvedLocatorWarning(
         structuralLocators.unresolved,
         structuralLocators.unavailable,
+        structuralLocators.missing,
     );
 
     // 4. Pre-seed page labels before the final note snapshot. The final
@@ -932,7 +941,7 @@ async function executeEditNoteAction(
         invalidateSimplificationCache(noteId);
 
         // Check for duplicate citation warnings
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
         const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         return {
@@ -1027,7 +1036,7 @@ async function executeEditNoteAction(
         clearNoteEditorSelection(resolvedLibraryId, zotero_key);
         invalidateSimplificationCache(noteId);
 
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
         const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
         const undoData = {
             undo_new_html: expandedNew,
@@ -1313,7 +1322,7 @@ async function executeEditNoteAction(
     invalidateSimplificationCache(noteId);
 
     // 17. Check for duplicate citation warnings
-    const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+    const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
     const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
     // 18. Wait for ProseMirror to normalize the note and update undo data.

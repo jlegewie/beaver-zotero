@@ -23,6 +23,7 @@ import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { parseAnalysisScope, type AnalysisScope } from "./analysisScope";
 import type { Fingerprints } from "./fingerprints";
 import { pdfExtractionPreset } from "../../schema/presets";
+import { ITEM_KINDS, kindCarriesSentences } from "../../schema/itemKinds";
 
 export const FIXTURE_SCHEMA_VERSION = 5 as const;
 
@@ -281,39 +282,10 @@ function validateMarkdownPage(value: unknown, source: string): MarkdownPage {
     return out;
 }
 
-const allowedKinds = new Set<DocumentItemKind>([
-    "text",
-    "section_header",
-    "list_item",
-    "caption",
-    "footnote",
-    "formula",
-    "table",
-    "picture",
-    "margin",
-]);
-
-const textBearingKinds = new Set<DocumentItemKind>([
-    "text",
-    "section_header",
-    "list_item",
-    "caption",
-    "footnote",
-    "formula",
-    "margin",
-]);
-
-const sentenceBearingKinds = new Set<DocumentItemKind>([
-    "text",
-    "list_item",
-    "caption",
-    "footnote",
-]);
-
 function validateDocumentItem(value: unknown, source: string): DocumentItem {
     const v = expectObject(value, source);
     const kind = expectString(v.kind, `${source}.kind`) as DocumentItemKind;
-    if (!allowedKinds.has(kind)) {
+    if (!Object.prototype.hasOwnProperty.call(ITEM_KINDS, kind)) {
         throw new FixtureValidationError(
             `${source}.kind: unexpected item kind "${kind}"`,
         );
@@ -325,15 +297,12 @@ function validateDocumentItem(value: unknown, source: string): DocumentItem {
         bbox: validateRect(v.bbox, `${source}.bbox`),
     };
 
-    if (textBearingKinds.has(kind)) {
-        if (v.text === undefined) {
-            throw new FixtureValidationError(`${source}.text: expected string`);
-        }
-    } else if (v.text !== undefined) {
-        throw new FixtureValidationError(`${source}.text: forbidden for ${kind}`);
+    const { hasText } = ITEM_KINDS[kind];
+    if (hasText && v.text === undefined) {
+        throw new FixtureValidationError(`${source}.text: expected string`);
     }
 
-    if (sentenceBearingKinds.has(kind)) {
+    if (kindCarriesSentences(kind)) {
         const sentences = v.sentences === undefined
             ? undefined
             : expectArray(v.sentences, `${source}.sentences`).map((s, i) =>
@@ -367,12 +336,17 @@ function validateDocumentItem(value: unknown, source: string): DocumentItem {
         throw new FixtureValidationError(`${source}.level: forbidden for ${kind}`);
     }
 
-    if (textBearingKinds.has(kind)) {
+    if (hasText) {
         return {
             ...base,
             kind,
             text: expectString(v.text, `${source}.text`),
         } as DocumentItem;
+    }
+
+    // A picture's text is its label rows, absent when it has none.
+    if (kind === "picture" && v.text !== undefined) {
+        return { ...base, kind, text: expectString(v.text, `${source}.text`) };
     }
 
     return { ...base, kind } as DocumentItem;

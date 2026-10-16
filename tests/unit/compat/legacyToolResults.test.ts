@@ -96,7 +96,7 @@ function makeItem(spec: MockItemSpec): any {
         firstCreator,
         parentItemID: parentItemID ?? false,
         attachmentFilename,
-        attachmentContentType,
+        attachmentContentType: attachmentContentType || (isPDF ? 'application/pdf' : isEPUB ? 'application/epub+zip' : ''),
         getField: vi.fn((f: string) => fields[f] ?? ''),
         getDisplayTitle: vi.fn(() => displayTitle ?? title ?? ''),
         getNoteTitle: vi.fn(() => noteTitle),

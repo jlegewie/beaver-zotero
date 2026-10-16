@@ -195,6 +195,52 @@ describe('batchFindExistingReferences — identifier match', () => {
         expect(results[0].item).not.toBeNull();
         expect(timing.matches_by_identifier).toBe(1);
     });
+
+    it('does not match a book section that carries the ISBN of its book', async () => {
+        await seedZoteroItem(conn, ctx, {
+            title: 'A Chapter',
+            isbn: '978-0-13-468599-1',
+            itemType: 'bookSection',
+            creators: ['Author'],
+        });
+
+        const items = [makeItem('a', { title: 'A Book', ISBN: '9780134685991' })];
+        const { results, timing } = await batchFindExistingReferences(items, [1]);
+
+        expect(results[0].item).toBeNull();
+        expect(timing.matches_by_identifier).toBe(0);
+    });
+
+    it('does not match a book by the ISBN of a reference that is part of it', async () => {
+        await seedZoteroItem(conn, ctx, {
+            title: 'A Book',
+            isbn: '978-0-13-468599-1',
+            itemType: 'book',
+            creators: ['Editor'],
+        });
+
+        const items = [{ ...makeItem('a', { title: 'A Chapter', ISBN: '9780134685991' }), matchByISBN: false }];
+        const { results } = await batchFindExistingReferences(items, [1]);
+
+        expect(results[0].item).toBeNull();
+    });
+
+    it('tells apart same-titled chapters of different volumes by their ISBN', async () => {
+        await seedZoteroItem(conn, ctx, {
+            title: 'Introduction',
+            isbn: '978-0-13-468599-1',
+            itemType: 'bookSection',
+            date: '2020',
+            creators: ['Smith'],
+        });
+        const chapter = (isbn: string) => ({
+            ...makeItem('a', { title: 'Introduction', date: '2020', creators: ['Smith'], ISBN: isbn }),
+            matchByISBN: false,
+        });
+
+        expect((await batchFindExistingReferences([chapter('9780262033848')], [1])).results[0].item).toBeNull();
+        expect((await batchFindExistingReferences([chapter('9780134685991')], [1])).results[0].item).not.toBeNull();
+    });
 });
 
 describe('batchFindExistingReferences — phase ordering', () => {

@@ -13,15 +13,17 @@ import {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import type { ServedAttachmentDiagnostics, ZoteroDocumentErrorCode } from '@beaver/agent-core/protocol/agentProtocol';
+import type { ServedAttachmentDiagnostics, WSDocumentTimings, ZoteroDocumentErrorCode } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AttachmentStub, ItemStub } from '@beaver/agent-core/types/zotero';
 import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
     extractAndCacheSnapshotDocument,
+    type PdfDocumentTimings,
 } from '../documentExtractionCore';
 import {
     extractTextDocument,
+    fileAccessDeniedMessage,
     loadAttachmentData,
     resolveToReadableAttachment,
     resolveAttachmentFileSource,
@@ -118,6 +120,40 @@ function buildSerializedPdfSuccessResponse(
     );
     if (oversized) return oversized;
     return createPreparedJsonMessage(envelope, { result: serializedPdfResultToWireJson(jsonBytes) });
+}
+
+const WIRE_TIMING_KEYS: readonly [keyof PdfDocumentTimings, keyof WSDocumentTimings][] = [
+    ['resolveMs', 'resolve_ms'],
+    ['cacheLookupMs', 'cache_lookup_ms'],
+    ['fileReadMs', 'file_read_ms'],
+    ['pageCountMs', 'page_count_ms'],
+    ['extractMs', 'extract_ms'],
+    ['clientQueueMs', 'client_queue_ms'],
+    ['workerStartMs', 'worker_start_ms'],
+    ['workerQueueMs', 'worker_queue_ms'],
+    ['workerOpMs', 'worker_op_ms'],
+    ['cacheWriteMs', 'cache_write_ms'],
+];
+
+/**
+ * The `timings` envelope field of a PDF success response: the request's
+ * plugin timings, its total since `startedAt`, and the wait for
+ * `attachment_diagnostics`.
+ */
+function documentTimingsField(
+    timings: PdfDocumentTimings | undefined,
+    startedAt: number,
+    diagnosticsWaitMs: number | undefined,
+): { timings?: WSDocumentTimings } {
+    if (!timings) return {};
+    const wire: WSDocumentTimings = { total_ms: Date.now() - startedAt, source: timings.source };
+    for (const [from, to] of WIRE_TIMING_KEYS) {
+        const ms = timings[from];
+        if (typeof ms === 'number') (wire as unknown as Record<string, number>)[to] = Math.round(ms);
+    }
+    if (timings.workerState) wire.worker_state = timings.workerState;
+    if (diagnosticsWaitMs !== undefined) wire.diagnostics_wait_ms = diagnosticsWaitMs;
+    return { timings: wire };
 }
 
 /**
@@ -308,7 +344,7 @@ export async function resolveServedAttachmentDiagnostics(
         const [bestAttachmentByParent] = await Promise.all([bestAttachments, childItems]);
         return {
             is_primary: parentID !== null && bestAttachmentByParent.get(parentID) === attachment.id,
-            annotations_count: attachment.getAnnotations().length,
+            annotations_count: attachment.numAnnotations(),
         };
     } catch (error) {
         logger(`handleZoteroDocumentRequest: attachment diagnostics failed for ${attachment.libraryID}-${attachment.key}: ${error}`, 1);
@@ -348,6 +384,7 @@ export async function handleZoteroDocumentRequest(
     // `max_file_size_mb` on the request is deliberately ignored: the file-size
     // ceiling is a client-side preference (see attachmentLimits.ts).
     const { attachment, external_file_key, mode, max_pages, request_id, timeout_seconds } = request;
+    const requestStartedAt = Date.now();
 
     // Populated once the attachment resolves so post-resolution error responses
     // carry the same view-row metadata as success responses (best-effort:
@@ -357,9 +394,13 @@ export async function handleZoteroDocumentRequest(
     // Started once the attachment resolves so the DB reads overlap extraction;
     // success responses collect it under a short budget.
     let pendingDiagnostics: Promise<ServedAttachmentDiagnostics | null> | null = null;
+    // Time spent waiting for them, reported in the response's `timings`.
+    let diagnosticsWaitMs: number | undefined;
     const diagnosticsField = async (): Promise<{ attachment_diagnostics?: ServedAttachmentDiagnostics }> => {
         if (!pendingDiagnostics) return {};
+        const waitStartedAt = Date.now();
         const diagnostics = await settleWithinBudget(pendingDiagnostics, SERVED_ATTACHMENT_DIAGNOSTICS_BUDGET_MS);
+        diagnosticsWaitMs = Date.now() - waitStartedAt;
         return diagnostics ? { attachment_diagnostics: diagnostics } : {};
     };
 
@@ -498,6 +539,14 @@ export async function handleZoteroDocumentRequest(
                     return errorResponse(
                         `Attachment ${resolvedKey} file is missing. ${detail}`,
                         'file_missing',
+                        null,
+                        'text',
+                    );
+                }
+                if (source.code === 'file_permission_denied') {
+                    return errorResponse(
+                        fileAccessDeniedMessage('text', resolvedKey),
+                        'file_permission_denied',
                         null,
                         'text',
                     );
@@ -678,6 +727,7 @@ export async function handleZoteroDocumentRequest(
                 const { libraryId, zoteroKey } = result.resolvedAttachment;
                 logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} mode=${mode}`, 3);
             }
+            const diagnostics = await diagnosticsField();
             const envelope: Omit<WSZoteroDocumentResponse, 'result'> = {
                 type: 'zotero_document',
                 request_id,
@@ -690,7 +740,8 @@ export async function handleZoteroDocumentRequest(
                 content_kind: 'pdf',
                 ...(parentItem ? { parent_item: parentItem } : {}),
                 ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
-                ...(await diagnosticsField()),
+                ...diagnostics,
+                ...documentTimingsField(result.timings, requestStartedAt, diagnosticsWaitMs),
             };
             if (result.serializedResult) {
                 return buildSerializedPdfSuccessResponse(
@@ -809,6 +860,7 @@ async function handleExternalFileDocumentRequest(
 ): Promise<WSZoteroDocumentResponse | PreparedJsonMessage> {
     const { mode, max_pages, request_id, timeout_seconds } = request;
     const requestKey = `ext-${extKey}`;
+    const requestStartedAt = Date.now();
 
     // Attach the served-file stub to post-resolution error responses too (it is
     // null until the registry resolves the key, so the early file_missing error
@@ -953,6 +1005,7 @@ async function handleExternalFileDocumentRequest(
                 content_type: result.contentType,
                 content_kind: 'pdf',
                 served_attachment: servedExternal,
+                ...documentTimingsField(result.timings, requestStartedAt, undefined),
             };
             if (result.serializedResult) {
                 return buildSerializedPdfSuccessResponse(
