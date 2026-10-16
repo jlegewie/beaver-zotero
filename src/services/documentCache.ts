@@ -220,6 +220,23 @@ interface ExtractionLockEntry<T extends CacheablePayload = BeaverExtractResult> 
     sharedTimer: ReturnType<typeof setTimeout> | null;
     /** Wall-clock time the in-flight lock was created; anchors waiter deadlines. */
     createdAt: number;
+    /** The extracted result while its deferred cache write runs (`writeAfterResolve`). */
+    unwritten?: T;
+    /** The deferred cache write; the lock stays registered until it settles. */
+    pendingWrite?: Promise<void>;
+}
+
+/** How `getOrCreateResult` / `getOrCreateSerializedResult` store a fresh result. */
+interface SharedResultWriteOptions {
+    /**
+     * Resolve the waiters as soon as the result exists and write the cache
+     * entry afterwards. Until the write settles, callers that join the
+     * extraction (or ask `getUnwrittenResult`) get the in-memory result. A
+     * failed write is logged, not surfaced.
+     */
+    writeAfterResolve?: boolean;
+    /** Called with the cache write's duration, ms, once it settles. */
+    onCacheWrite?: (ms: number) => void;
 }
 
 /** Full-document PDF extraction cache backed by SQLite metadata and gzip payload files. */
@@ -651,7 +668,7 @@ export class DocumentCache {
         readCached?: (ref: DocumentRef) => Promise<T | null>;
         create: (signal: AbortSignal) => Promise<T>;
         metadata: (result: T) => CacheMetadataInput;
-    }): Promise<T | null> {
+    } & SharedResultWriteOptions): Promise<T | null> {
         if (this.clearing) return null;
         const generation = this.extractionGeneration(input.item);
         const ref = {
@@ -671,8 +688,7 @@ export class DocumentCache {
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
         const contentKind = input.contentKind ?? 'pdf';
         const suffix = contentKind === 'pdf' ? '' : `/${contentKind}`;
-        const lockScope = input.lockScope ?? 'default';
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}${suffix}/scope:${lockScope}/generation:${generation}`;
+        const lockKey = this.extractionLockKey(ref, payloadKind, source, suffix, input.lockScope, generation);
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
         if (existing) {
             return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
@@ -709,7 +725,7 @@ export class DocumentCache {
                 this.clearSharedExtractionTimer(entry);
             }
             if (controller.signal.aborted || generation !== this.extractionGeneration(input.item)) return null;
-            await this.putResult({
+            return this.storeSharedResult(entry, result, () => this.putResult({
                 item: input.item,
                 filePath: input.filePath,
                 mode: input.mode,
@@ -718,8 +734,7 @@ export class DocumentCache {
                 result,
                 metadata: input.metadata(result),
                 expectedSourceIdentity: source,
-            });
-            return result;
+            }), input);
         })()
             .catch((error) => {
                 logger(`DocumentCache.getOrCreateResult error: ${error}`, 1);
@@ -728,9 +743,7 @@ export class DocumentCache {
             .finally(() => {
                 entry.settled = true;
                 this.clearSharedExtractionTimer(entry);
-                if (this.extractionLocks.get(lockKey) === entry) {
-                    this.extractionLocks.delete(lockKey);
-                }
+                this.releaseExtractionLock(lockKey, entry);
             });
 
         this.extractionLocks.set(lockKey, entry);
@@ -751,7 +764,7 @@ export class DocumentCache {
         abortSignal?: AbortSignal;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
         create: (signal: AbortSignal) => Promise<SerializedBeaverExtractResult>;
-    }): Promise<SerializedDocumentCacheResult | null> {
+    } & SharedResultWriteOptions): Promise<SerializedDocumentCacheResult | null> {
         if (this.clearing) return null;
         const generation = this.extractionGeneration(input.item);
         const ref = {
@@ -771,8 +784,7 @@ export class DocumentCache {
         }
         if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const lockScope = input.lockScope ?? 'default';
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}/serialized/scope:${lockScope}/generation:${generation}`;
+        const lockKey = this.extractionLockKey(ref, payloadKind, source, '/serialized', input.lockScope, generation);
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
         if (existing) {
             return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
@@ -822,7 +834,7 @@ export class DocumentCache {
                     pages: created.cacheMetadata.pages,
                 },
             };
-            await this.putSerializedResult({
+            return this.storeSharedResult(entry, stored, () => this.putSerializedResult({
                 item: input.item,
                 filePath: input.filePath,
                 mode: input.mode,
@@ -831,8 +843,7 @@ export class DocumentCache {
                 result: stored,
                 metadata: stored.metadata,
                 expectedSourceIdentity: source,
-            });
-            return stored;
+            }), input);
         })()
             .catch((error) => {
                 logger(`DocumentCache.getOrCreateSerializedResult error: ${error}`, 1);
@@ -841,13 +852,86 @@ export class DocumentCache {
             .finally(() => {
                 entry.settled = true;
                 this.clearSharedExtractionTimer(entry);
-                if (this.extractionLocks.get(lockKey) === entry) {
-                    this.extractionLocks.delete(lockKey);
-                }
+                this.releaseExtractionLock(lockKey, entry);
             });
 
         this.extractionLocks.set(lockKey, entry);
         return this.waitForSharedExtraction(entry, input.abortSignal, input.sharedTimeoutMs);
+    }
+
+    /**
+     * The result of a finished shared extraction whose deferred cache write
+     * (`writeAfterResolve`) is still running, or null. Lets a caller that
+     * missed the cache take the result before doing the work that precedes
+     * `getOrCreateResult` / `getOrCreateSerializedResult`. `source` is the
+     * identity the extraction was keyed by (`getSourceIdentitySnapshot`).
+     */
+    getUnwrittenResult<T extends CacheablePayload>(input: {
+        item: DocumentCacheItemRef;
+        mode: ExtractionMode;
+        source: DocumentCacheSourceIdentity;
+        serialized: boolean;
+        lockScope?: string;
+    }): T | null {
+        if (this.clearing) return null;
+        const lockKey = this.extractionLockKey(
+            { libraryId: input.item.libraryID, zoteroKey: input.item.key },
+            DocumentCache.payloadKindForMode(input.mode),
+            input.source,
+            input.serialized ? '/serialized' : '',
+            input.lockScope,
+            this.extractionGeneration(input.item),
+        );
+        return (this.extractionLocks.get(lockKey)?.unwritten as T | undefined) ?? null;
+    }
+
+    /** Key of a shared extraction: attachment, payload, source identity, result form, scope, generation. */
+    private extractionLockKey(
+        ref: DocumentRef,
+        payloadKind: PayloadKind,
+        source: DocumentCacheSourceIdentity,
+        variant: string,
+        lockScope: string | undefined,
+        generation: string,
+    ): string {
+        return `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}${variant}`
+            + `/scope:${lockScope ?? 'default'}/generation:${generation}`;
+    }
+
+    /**
+     * Write a shared extraction's result to the cache and return it: after the
+     * write, or at once with `writeAfterResolve` (the lock entry then holds the
+     * result until the write settles; see `releaseExtractionLock`).
+     */
+    private async storeSharedResult<T extends CacheablePayload>(
+        entry: ExtractionLockEntry<T>,
+        result: T,
+        write: () => Promise<void>,
+        options: SharedResultWriteOptions,
+    ): Promise<T> {
+        const startedAt = Date.now();
+        const written = write().finally(() => options.onCacheWrite?.(Date.now() - startedAt));
+        if (!options.writeAfterResolve) {
+            await written;
+            return result;
+        }
+        entry.unwritten = result;
+        entry.pendingWrite = written.catch((error) => {
+            logger(`DocumentCache: cache write after responding failed: ${error}`, 1);
+        });
+        return result;
+    }
+
+    /** Unregister a settled shared extraction, after its deferred cache write if one runs. */
+    private releaseExtractionLock<T extends CacheablePayload>(lockKey: string, entry: ExtractionLockEntry<T>): void {
+        const release = () => {
+            entry.unwritten = undefined;
+            if (this.extractionLocks.get(lockKey) === entry) {
+                this.extractionLocks.delete(lockKey);
+            }
+        };
+        if (entry.pendingWrite) void entry.pendingWrite.then(release);
+        else release();
     }
 
     /**

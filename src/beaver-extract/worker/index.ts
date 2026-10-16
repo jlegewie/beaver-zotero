@@ -61,6 +61,7 @@ import {
     opRenderPages,
     opSearch,
     opStructuredExtractWithDebug,
+    opWarmup,
     type OpReply,
 } from "./ops";
 import { requireWorkerSelf } from "./workerScope";
@@ -86,6 +87,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         case "__init":
             await ensureApi();
             return { result: {} };
+        case "__warmup":
+            return await opWarmup(a as Parameters<typeof opWarmup>[0]);
         case "__cacheStats":
             return { result: getCacheStats() };
         case "__cacheClear": {

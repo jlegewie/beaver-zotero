@@ -171,7 +171,9 @@ describe('handleZoteroDocumentRequest (external files)', () => {
                 workerStartMs: 0,
                 workerQueueMs: 12.4,
                 workerOpMs: 230.6,
-                workerState: 'first_extract',
+                workerState: 'warmed',
+                workerHeapMb: 96,
+                workerPeakHeapMb: 310,
                 cacheWriteMs: 15,
             },
         });
@@ -189,7 +191,9 @@ describe('handleZoteroDocumentRequest (external files)', () => {
             worker_start_ms: 0,
             worker_queue_ms: 12,
             worker_op_ms: 231,
-            worker_state: 'first_extract',
+            worker_state: 'warmed',
+            worker_heap_mb: 96,
+            worker_peak_heap_mb: 310,
             cache_write_ms: 15,
         });
         expect(response.timings?.total_ms).toBeGreaterThanOrEqual(0);

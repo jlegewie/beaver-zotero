@@ -50,7 +50,7 @@ export {
     getExistingMuPDFWorkerClient,
     disposeMuPDFWorker,
 } from "./MuPDFWorkerClient";
-export type { WorkerCallTiming } from "./MuPDFWorkerClient";
+export type { WorkerCallTiming, WorkerState } from "./MuPDFWorkerClient";
 export { prewarmMuPDFWorker } from "./prewarm";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
