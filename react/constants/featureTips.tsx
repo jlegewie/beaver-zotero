@@ -1,17 +1,19 @@
 /**
  * The one-time feature tips: what each says, how it looks, and where it goes.
  *
- * A tip is a registry entry here plus a trigger (see `useRunStatusTip`) that
- * asks `showFeatureTipAtom` for it at the right moment. Showing, pacing and
- * rendering are shared — see `react/atoms/featureTips.ts` and
+ * A tip is a registry entry here plus a trigger (see `useRunStatusTip`,
+ * `useNoteExportTip`) that asks `showFeatureTipAtom` for it at the right
+ * moment. Showing, pacing and rendering are shared — see
+ * `react/atoms/featureTips.ts` and
  * `FeatureTipContent` — so a new tip is an entry, a trigger, and at most a
  * showcase of its own.
  */
 import React from 'react';
-import { BubbleChatQuestionIcon } from '../components/icons/icons';
+import { BubbleChatQuestionIcon, IdeaIcon } from '../components/icons/icons';
 import RunStatusTipShowcase, { RunStatusTipActions } from '../components/ui/popup/featureTips/RunStatusTipShowcase';
+import NoteExportTipShowcase from '../components/ui/popup/featureTips/NoteExportTipShowcase';
 
-export type FeatureTipId = 'run-status-popup';
+export type FeatureTipId = 'run-status-popup' | 'note-export';
 
 export interface FeatureTipActionsProps {
     /** Retires the tip. */
@@ -45,5 +47,13 @@ export const FEATURE_TIPS: Record<FeatureTipId, FeatureTipDefinition> = {
         inPanel: true,
         Showcase: RunStatusTipShowcase,
         Actions: RunStatusTipActions,
+    },
+    'note-export': {
+        id: 'note-export',
+        title: 'Export notes to Word, PDF and more',
+        text: 'Save a note, a response or a whole chat as Word, PDF, Markdown or LaTeX, with formatted citations. In Word, they stay live Zotero citations.',
+        icon: IdeaIcon,
+        inPanel: true,
+        Showcase: NoteExportTipShowcase,
     },
 };

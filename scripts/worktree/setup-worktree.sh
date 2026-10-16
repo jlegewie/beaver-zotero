@@ -207,8 +207,10 @@ bootstrap_lite_worktree() {
     dst="$hooks_dir/post-checkout"
 
     [[ -f "$src" ]] || return 0
-    if [[ -e "$dst" ]] && ! cmp -s "$src" "$dst"; then
-      echo "    (skip) post-checkout hook exists and differs; not overwriting"
+    # Replace an earlier copy of this hook (it carries the marker); leave any
+    # other post-checkout hook alone.
+    if [[ -e "$dst" ]] && ! cmp -s "$src" "$dst" && ! grep -q "beaver-worktree-hook" "$dst"; then
+      echo "    (skip) post-checkout hook exists and is not ours; not overwriting"
       return 0
     fi
     mkdir -p "$hooks_dir"
@@ -251,6 +253,11 @@ bootstrap_lite_worktree() {
   # never runs this script) get the same links. The hook dir is shared by every
   # worktree, so installing it once covers all of them.
   install_post_checkout_hook
+
+  # Skills are linked by the hook itself; run it here because the hook may not
+  # have been installed yet when this worktree was created.
+  echo "==> Linking skills"
+  (cd "$WT" && bash "$MAIN/scripts/worktree/hooks/post-checkout") | sed 's/^/    /'
 
   # npm install — require a real install, not just a stray cache dir.
   if [[ -d "$WT/node_modules/.bin" || -f "$WT/node_modules/.package-lock.json" ]]; then

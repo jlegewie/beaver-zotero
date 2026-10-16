@@ -1213,6 +1213,8 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/run-status-popup'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-status-popup', request));
 
+        endpoints['/beaver/test/feature-tip'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/feature-tip', request));
+
         endpoints['/beaver/test/quick-prompt'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/quick-prompt', request));
 
         endpoints['/beaver/test/version-popup'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/version-popup', request));

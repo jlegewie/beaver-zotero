@@ -19,6 +19,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
         currentMessageItemsAtom: atom<unknown[]>([]),
         currentMessageCollectionsAtom: atom<unknown[]>([]),
         pendingPillInsertsAtom: atom<unknown[]>([]),
+        messageItemDataRevisionAtom: atom(0),
     };
 });
 

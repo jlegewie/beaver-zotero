@@ -6,6 +6,8 @@ import {
     buildZoteroCitationLinkLabel,
     buildZoteroCitationLinkURI,
     parseZoteroCitationLinkHref,
+    parseZoteroCitationLinkPage,
+    parseZoteroCitationLinkPages,
 } from '../../../src/utils/zoteroLinkCitation';
 
 describe('zoteroLinkCitation', () => {
@@ -290,5 +292,22 @@ describe('zoteroLinkCitation', () => {
     it('rejects Beaver and unrelated Zotero links', () => {
         expect(parseZoteroCitationLinkHref('zotero://beaver/thread/abc')).toBeNull();
         expect(parseZoteroCitationLinkHref('zotero://select/library/collections/COLL123')).toBeNull();
+    });
+
+    it('reads the physical page a link citation opens', () => {
+        expect(parseZoteroCitationLinkPage('zotero://open/library/items/ATTACH12?page=6')).toBe(6);
+        expect(parseZoteroCitationLinkPage('zotero://open/groups/42/items/ATTACH12?foo=1&amp;page=12')).toBe(12);
+        expect(parseZoteroCitationLinkPage('zotero://open/library/items/ATTACH12')).toBeNull();
+        expect(parseZoteroCitationLinkPage('zotero://open/library/items/ATTACH12?page=0')).toBeNull();
+        expect(parseZoteroCitationLinkPage('zotero://open/library/items/ATTACH12?page=xii')).toBeNull();
+        expect(parseZoteroCitationLinkPage('zotero://select/library/items/NOTE1234')).toBeNull();
+    });
+
+    it('reads the physical pages a link records in its fragment', () => {
+        expect(parseZoteroCitationLinkPages('zotero://open/library/items/ATTACH12?page=1#beaver-pages=1-4')).toBe('1-4');
+        expect(parseZoteroCitationLinkPages('zotero://select/library/items/ATTACH12#beaver-pages=2%2C%209')).toBe('2, 9');
+        expect(parseZoteroCitationLinkPages('zotero://open/library/items/ATTACH12?page=1')).toBeNull();
+        expect(parseZoteroCitationLinkPages('zotero://open/library/items/ATTACH12#beaver-pages=xii')).toBeNull();
+        expect(parseZoteroCitationLinkPages('zotero://open/library/items/ATTACH12#other')).toBeNull();
     });
 });

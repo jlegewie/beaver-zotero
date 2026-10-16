@@ -22,7 +22,7 @@ const getPluginPreferences = () => {
     // Get all plugin preferences defined in prefs.d.ts
     const prefKeys = [
         'userId', 'userEmail', 'currentPlanId', 'installedVersion', 
-        'showIndexingCompleteMessage', 'keyboardShortcut',
+        'keyboardShortcut',
         'statefulChat', 'addSelectedItemsOnOpen', 'addSelectedItemsOnNewThread',
         'customInstructions', 'googleGenerativeAiApiKey',
         'openAiApiKey', 'anthropicApiKey', 'lastUsedModel', 'recentItems',

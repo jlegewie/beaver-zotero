@@ -214,6 +214,7 @@ const entryPaths = [
   "src/layouts/table.ts",
   "src/layouts/tableMutations.ts",
   "src/identity/itemLinks.ts",
+  "src/extract/pageLabels/printedPageLabels.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

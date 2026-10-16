@@ -14,7 +14,6 @@ import {
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { applyCreateItemData } from '../../../utils/addItemActions';
-import { ensureItemSynced, ensureItemsSynced } from '../../../../src/utils/sync';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveItemReference } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
@@ -346,9 +345,6 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
             logger(`handleApplyItem: created item ${action.id}: ${JSON.stringify(result)}`, 1);
 
-            // Sync the newly created item to backend
-            await ensureItemSynced(result.library_id, result.zotero_key);
-
             // Acknowledge the action with result data
             await ackAgentActions(runId, [{
                 action_id: action.id,
@@ -469,23 +465,6 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             const successfulResults = applyResults.filter((result): result is AckActionLink => result !== null);
             if (successfulResults.length > 0) {
                 await ackAgentActions(runId, successfulResults);
-                
-                // Batch sync all successfully created items
-                const itemsByLibrary = new Map<number, string[]>();
-                for (const result of successfulResults) {
-                    const data = result.result_data as CreateItemResultData;
-                    if (!itemsByLibrary.has(data.library_id)) {
-                        itemsByLibrary.set(data.library_id, []);
-                    }
-                    itemsByLibrary.get(data.library_id)!.push(data.zotero_key);
-                }
-                
-                // Sync each library's items (fire-and-forget to not block UI)
-                for (const [libraryId, keys] of itemsByLibrary) {
-                    ensureItemsSynced(libraryId, keys).catch(err => {
-                        logger(`handleApplyAll: Failed to sync items in library ${libraryId}: ${err.message}`, 2);
-                    });
-                }
                 
                 // If only one item was imported, select it in Zotero
                 if (successfulResults.length === 1) {

@@ -4,9 +4,7 @@ import { PopupMessage } from '../types/popupMessage';
 import { popupMessagesAtom } from '../atoms/ui';
 import { localZoteroLibrariesAtom } from '../atoms/profile';
 import { v4 as uuidv4 } from 'uuid';
-import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { RepeatIcon, CSSItemTypeIcon } from '../components/icons/icons';
-import { retryUploads } from '../../src/services/FileUploader';
+import { CSSItemTypeIcon } from '../components/icons/icons';
 import { RegularItemsSummaryContent } from '../components/ui/popup/RegularItemsSummaryContent';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
@@ -70,41 +68,6 @@ export const updatePopupMessageAtom = atom(
         );
     },
 );
-
-export const addOrUpdateFailedUploadMessageAtom = atom(
-    null,
-    async (get, set, itemRef: ZoteroItemReference) => {
-        const messageTitle = "File Upload Failed";
-        const messages = get(popupMessagesAtom);
-        const existingMessage = messages.find((msg) => msg.title?.includes(messageTitle));
-        
-        // Update existing message
-        if (existingMessage) {
-            set(updatePopupMessageAtom, {
-                messageId: existingMessage.id,
-                updates: {
-                    count: (existingMessage.count || 0) + 1,
-                },
-            });
-        // Create new message
-        } else {
-            // const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(itemRef.library_id, itemRef.zotero_key);
-            // const zoteroItemTitle = zoteroItem?.attachmentFilename;
-            set(addPopupMessageAtom, {
-                type: 'error',
-                title: messageTitle,
-                text: `Failed to upload file(s). Please retry manually.`,
-                expire: false,
-                buttonIcon: RepeatIcon,
-                buttonOnClick: async () => {
-                    await retryUploads();
-                },
-                count: 1
-            });
-        }
-    }
-);
-
 
 /**
  * Removes a popup message by its ID.

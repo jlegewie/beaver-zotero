@@ -36,6 +36,17 @@ export interface WSReadyEvent extends WSBaseEvent {
     supports_request_acks?: boolean;
     /** Backend accepts `request_keepalive` messages for in-flight requests */
     supports_request_keepalive?: boolean;
+    /** Backend answers the client's `ping` heartbeat with a `pong` */
+    supports_heartbeat?: boolean;
+}
+
+/**
+ * Connection heartbeat sent periodically after `ready`. The backend replies
+ * with a `pong`, so a silent socket means the connection is gone even when
+ * the browser has not noticed. Gated on `WSReadyEvent.supports_heartbeat`.
+ */
+export interface WSPingMessage {
+    type: 'ping';
 }
 
 /**
@@ -190,6 +201,11 @@ export interface WSRunCitationsEvent extends WSBaseEvent {
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
 export interface WSDoneEvent extends WSBaseEvent {
     event: 'done';
+}
+
+/** Reply to a client `ping` (see WSPingMessage) */
+export interface WSPongEvent extends WSBaseEvent {
+    event: 'pong';
 }
 
 /** Streaming done event: all LLM tokens sent, post-processing (citations) still in progress */
@@ -1209,10 +1225,20 @@ export interface WSDocumentTimings {
     /**
      * The worker when this request used it: `starting` (it waited for the
      * worker to spawn and load), `first_extract` (no extraction had run on
-     * this worker yet, so its code was not yet optimised), or `warm`.
+     * this worker yet, so its code was not yet optimised), `warmed` (no
+     * extraction had run yet, but the worker had run its warm-up extraction),
+     * or `warm`.
      */
-    worker_state?: 'starting' | 'first_extract' | 'warm';
-    /** Writing the extracted result to the document cache. */
+    worker_state?: 'starting' | 'first_extract' | 'warmed' | 'warm';
+    /** The worker's WASM heap after the request's last worker operation, MB. */
+    worker_heap_mb?: number;
+    /** The largest WASM heap a worker of this slot has reported so far, MB. */
+    worker_peak_heap_mb?: number;
+    /**
+     * Writing the extracted result to the document cache. The plugin writes
+     * after responding, so this is present only when the write had already
+     * finished when the response was built; it is not part of `total_ms`.
+     */
     cache_write_ms?: number;
     /** Waiting for `attachment_diagnostics` before responding. */
     diagnostics_wait_ms?: number;
@@ -2779,6 +2805,7 @@ export type WSEvent =
     | WSRunCitationsEvent
     | WSStreamingDoneEvent
     | WSDoneEvent
+    | WSPongEvent
     | WSThreadEvent
     | WSThreadNameEvent
     | WSErrorEvent
@@ -3066,6 +3093,12 @@ export const CLIENT_FEATURES = {
      * request. Without it the backend must not send the request.
      */
     ZOTERO_FULLTEXT_SEARCH: 'zotero_fulltext_search',
+    /**
+     * `create_highlight_annotations` actions may carry `style: 'underline'`,
+     * written as Zotero underline annotations. Without it the backend never
+     * offers the style, since an older client would write highlights instead.
+     */
+    UNDERLINE_ANNOTATIONS: 'underline_annotations',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

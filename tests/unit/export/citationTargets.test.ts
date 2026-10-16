@@ -34,6 +34,20 @@ describe('resolveCitationTarget', () => {
         if (target.kind === 'zotero') expect(formatLocator(target.locator!)).toBe('iii-iv');
     });
 
+    it('leaves the locator without labels when the metadata labels are all empty', () => {
+        const citation: Citation = {
+            citation_id: 'c1',
+            requested_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'AAAAAAAA', loc: { kind: 'sentence', value: '5', raw: 's5' } },
+            resolved_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'AAAAAAAA' },
+            pages: [11],
+            page_labels: { 10: '' },
+            display_name: 'Smith 2004',
+        };
+        const target = resolveCitationTarget(occurrence('<citation id="u-AAAAAAAA" loc="s5"/>'),
+            snapshot({ citationsByKey: { 'zotero:u-AAAAAAAA:s5': citation } }));
+        expect(target.kind === 'zotero' && target.locator?.labels).toBeNull();
+    });
+
     it('does not give a locator-free citation the pages of a page-specific alias', () => {
         // The only metadata for the work is page-specific; lookup maps also file it under the base key.
         const citation: Citation = {
@@ -138,6 +152,37 @@ describe('formatLocator', () => {
         expect(formatLocator(spec, { 0: 'iv', 1: 'v', 2: 'S1', 3: '10', 4: '12' })).toBe('iv-v, S1, 10, 12');
     });
 
+    it('writes an inclusive span as a range only when its labels span the cited pages', () => {
+        const spec = { pages: [5, 7], labels: null, inclusiveRange: true, labelsOnly: false };
+        expect(formatLocator(spec)).toBe('5-7');
+        expect(formatLocator(spec, { 4: '1205', 6: '1207' })).toBe('1205-1207');
+        expect(formatLocator(spec, { 4: 'iv', 6: 'vi' })).toBe('iv-vi');
+        // One end has no printed label: cite the printed end.
+        expect(formatLocator(spec, { 4: '1205' })).toBe('1205');
+        expect(formatLocator(spec, { 6: '1207' })).toBe('1207');
+        // Two numberings: no invented range.
+        expect(formatLocator(spec, { 4: 'xii', 6: '1' })).toBe('xii');
+    });
+
+    it('lists only printed pages when some cited pages have printed labels', () => {
+        const spec = { pages: [11, 12], labels: null, inclusiveRange: false, labelsOnly: false };
+        // Physical page 12 has no printed label; "12, 12" would mix numberings.
+        expect(formatLocator(spec, { 10: '12' })).toBe('12');
+        expect(formatLocator({ ...spec, pages: [12, 13] }, { 11: '12' })).toBe('12');
+        expect(formatLocator(spec)).toBe('11-12');
+    });
+
+    it('keeps spans and runs of prefixed labels that share a prefix', () => {
+        const span = { pages: [5, 7], labels: null, inclusiveRange: true, labelsOnly: false };
+        expect(formatLocator(span, { 4: 'S12', 6: 'S14' })).toBe('S12-S14');
+        expect(formatLocator(span, { 4: 'A-3', 6: 'A-5' })).toBe('A-3-A-5');
+        expect(formatLocator(span, { 4: 'S12', 6: 'T14' })).toBe('S12');
+        expect(formatLocator(span, { 4: 'S12', 6: '14' })).toBe('S12');
+
+        const run = { pages: [5, 6, 7], labels: null, inclusiveRange: false, labelsOnly: false };
+        expect(formatLocator(run, { 4: 'S12', 5: 'S13', 6: 'S14' })).toBe('S12-S14');
+    });
+
     it('shows only labelled pages for EPUB-like locators', () => {
         expect(formatLocator({ pages: [4], labels: null, inclusiveRange: false, labelsOnly: true })).toBeUndefined();
     });
@@ -146,6 +191,20 @@ describe('formatLocator', () => {
         const target = resolveCitationTarget(occurrence('<citation id="u-AAAAAAAA" loc="page1-150,200"/>'), snapshot());
         const spec = target.kind === 'zotero' ? target.locator! : null;
         expect(formatLocator(spec!)).toBe('1-150, 200');
-        expect(formatLocator(spec!, { 0: 'i', 199: '190' })).toBe('i-150, 190');
+        // Page 150 has no label: the range cites its printed start rather
+        // than mixing numberings ("i-150").
+        expect(formatLocator(spec!, { 0: 'i', 199: '190' })).toBe('i, 190');
+    });
+
+    it('writes an explicit range with labels only when they span the written pages', () => {
+        const written = (loc: string) => {
+            const target = resolveCitationTarget(occurrence(`<citation id="u-AAAAAAAA" loc="${loc}"/>`), snapshot());
+            return target.kind === 'zotero' ? target.locator! : null;
+        };
+        // An unnumbered cover before printed page 1201.
+        expect(formatLocator(written('page1-2')!, { 1: '1201' })).toBe('1201');
+        expect(formatLocator(written('page2-3')!, { 1: '1201', 2: '1202' })).toBe('1201-1202');
+        expect(formatLocator(written('page2-4')!, { 1: '1201', 3: '1205' })).toBe('1201');
+        expect(formatLocator(written('page5-6')!, { 1: '1201' })).toBe('5-6');
     });
 });

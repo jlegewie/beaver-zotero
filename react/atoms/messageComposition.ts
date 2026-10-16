@@ -22,6 +22,7 @@ import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
 import type { SlashCommandDescriptor } from "@beaver/agent-ui/composer/slashCommands";
 import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
+import { hasUnloadedDisplayData, loadItemDisplayData } from "../../src/utils/zoteroDataLoading";
 
 
 /**
@@ -106,6 +107,13 @@ export const automaticMessageItemKeysAtom = atom<Set<string>>(new Set<string>())
 export const automaticMessageCollectionsAtom = atom<CollectionReference[]>([]);
 
 const messageItemsAtom = atom<Zotero.Item[]>([]);
+
+/**
+ * Bumped when attached items finish loading data their labels read. Label
+ * consumers subscribe to it to re-render; it is deliberately not part of the
+ * draft (`readComposerDraft`), because loading data does not edit the draft.
+ */
+export const messageItemDataRevisionAtom = atom(0);
 export const currentMessageItemsAtom = atom(
     get => get(messageItemsAtom),
     (get, set, update: Zotero.Item[] | ((previous: Zotero.Item[]) => Zotero.Item[])) => {
@@ -116,6 +124,18 @@ export const currentMessageItemsAtom = atom(
         const nextOrigins = new Set([...origins].filter(key => retained.has(key)));
         if (nextOrigins.size !== origins.size) set(automaticMessageItemKeysAtom, nextOrigins);
         set(messageItemsAtom, items);
+
+        // Items from a library not opened this session carry only primary
+        // data, so their labels render a placeholder until it is loaded.
+        // Bump the revision (not the item list) once loaded so labels pick up
+        // the real title without the draft reading as edited.
+        const unloaded = items.filter(hasUnloadedDisplayData);
+        if (unloaded.length > 0) {
+            void loadItemDisplayData(unloaded).then(() => {
+                const current = get(messageItemsAtom);
+                if (unloaded.some(item => current.includes(item))) set(messageItemDataRevisionAtom, revision => revision + 1);
+            });
+        }
     },
 );
 

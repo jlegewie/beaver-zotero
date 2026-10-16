@@ -56,12 +56,12 @@ import {
     opExtract,
     opExtractSerialized,
     opExtractRawPageDetailed,
-    opExtractSentenceDebug,
     opGetMetadata,
     opGetPageCount,
     opRenderPages,
     opSearch,
     opStructuredExtractWithDebug,
+    opWarmup,
     type OpReply,
 } from "./ops";
 import { requireWorkerSelf } from "./workerScope";
@@ -87,6 +87,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         case "__init":
             await ensureApi();
             return { result: {} };
+        case "__warmup":
+            return await opWarmup(a as Parameters<typeof opWarmup>[0]);
         case "__cacheStats":
             return { result: getCacheStats() };
         case "__cacheClear": {
@@ -117,8 +119,6 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opAnalyzeOCRNeeds(a as Parameters<typeof opAnalyzeOCRNeeds>[0]);
         case "search":
             return await opSearch(a as Parameters<typeof opSearch>[0]);
-        case "extractSentenceDebug":
-            return await opExtractSentenceDebug(a as Parameters<typeof opExtractSentenceDebug>[0]);
         case "analyzeLayout":
             return await opAnalyzeLayout(a as Parameters<typeof opAnalyzeLayout>[0]);
         default:

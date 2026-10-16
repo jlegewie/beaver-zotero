@@ -119,6 +119,19 @@ describe("hasFailedUndo", () => {
     });
 });
 
+describe("underline labels", () => {
+    it("names underlines by their count", () => {
+        expect(getActionLabel("create_highlight_annotations", { items: [1, 2], style: "underline" }))
+            .toBe("2 Underlines");
+        expect(getActionLabel("create_highlight_annotations", { items: [1], style: "underline" }))
+            .toBe("Underline");
+    });
+
+    it("keeps highlights the default when no style is set", () => {
+        expect(getActionLabel("create_highlight_annotations", { items: [1, 2] })).toBe("2 Highlights");
+    });
+});
+
 describe("completed action labels", () => {
     it("puts the verb-only labels into the past tense", () => {
         expect(getActionLabel("organize_items", {}, true)).toBe("Organized");

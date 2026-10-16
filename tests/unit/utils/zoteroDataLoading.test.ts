@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     ensureLibraryItemsLoaded,
     getParentItemAsync,
+    hasUnloadedDisplayData,
     isInTrashAsync,
+    loadItemDisplayData,
+    readOrFallback,
     readWithDataReload,
 } from '../../../src/utils/zoteroDataLoading';
 
@@ -111,5 +114,85 @@ describe('readWithDataReload', () => {
 
         await expect(readWithDataReload({ id: 1 } as any, ['creators'], read)).rejects.toThrow('not loaded');
         expect(read).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('readOrFallback', () => {
+    it('returns the fallback when the data is not loaded', () => {
+        expect(readOrFallback(() => { throw unloadedDataError(); }, 'Attachment')).toBe('Attachment');
+    });
+
+    it('returns the read value and rethrows other errors', () => {
+        expect(readOrFallback(() => 'Title', 'Attachment')).toBe('Title');
+        expect(() => readOrFallback(() => { throw new Error('boom'); }, 'x')).toThrow('boom');
+    });
+});
+
+describe('hasUnloadedDisplayData / loadItemDisplayData', () => {
+    let nextId = 1;
+    function makeItem(overrides: Record<string, unknown> = {}): any {
+        return {
+            id: nextId++,
+            libraryID: 3,
+            key: 'ITEMKEY1',
+            parentID: false,
+            getDisplayTitle: vi.fn(() => 'Title'),
+            ...overrides,
+        };
+    }
+
+    beforeEach(() => {
+        (globalThis as any).Zotero.Items = {
+            getAsync: vi.fn(),
+            loadDataTypes: vi.fn().mockResolvedValue(undefined),
+        };
+    });
+
+    it('flags an item whose field data is not loaded', () => {
+        const item = makeItem({ getDisplayTitle: vi.fn(() => { throw unloadedDataError("Item data not loaded and field 'title' not set"); }) });
+        expect(hasUnloadedDisplayData(item)).toBe(true);
+    });
+
+    it('flags an item whose parent is not loaded', () => {
+        const item = makeItem();
+        Object.defineProperty(item, 'parentItem', { get: () => { throw unloadedDataError('Item 7 not yet loaded'); } });
+        expect(hasUnloadedDisplayData(item)).toBe(true);
+    });
+
+    it('does not flag loaded items or unrelated errors', () => {
+        expect(hasUnloadedDisplayData(makeItem({ parentItem: null }))).toBe(false);
+        expect(hasUnloadedDisplayData(makeItem({ getDisplayTitle: vi.fn(() => { throw new Error('boom'); }) }))).toBe(false);
+    });
+
+    it('loads items and their deduplicated parents in one batch', async () => {
+        // The batch loader skips data types that are already loaded, so a
+        // cached parent with unsaved edits is not reloaded from the database.
+        const Items = (globalThis as any).Zotero.Items;
+        const parent = makeItem({ key: 'PARENT01' });
+        Items.getAsync.mockResolvedValue([parent]);
+        const first = makeItem({ parentID: parent.id });
+        const second = makeItem({ parentID: parent.id });
+        const topLevel = makeItem();
+
+        await loadItemDisplayData([first, second, topLevel, first]);
+
+        expect(Items.getAsync).toHaveBeenCalledExactlyOnceWith([parent.id]);
+        expect(Items.loadDataTypes).toHaveBeenCalledExactlyOnceWith([first, second, topLevel, parent]);
+    });
+
+    it('skips the parent lookup when no item has a parent', async () => {
+        const Items = (globalThis as any).Zotero.Items;
+        const item = makeItem();
+
+        await loadItemDisplayData([item]);
+
+        expect(Items.getAsync).not.toHaveBeenCalled();
+        expect(Items.loadDataTypes).toHaveBeenCalledExactlyOnceWith([item]);
+    });
+
+    it('does not throw when loading fails', async () => {
+        (globalThis as any).Zotero.Items.loadDataTypes.mockRejectedValue(new Error('database locked'));
+
+        await expect(loadItemDisplayData([makeItem()])).resolves.toBeUndefined();
     });
 });

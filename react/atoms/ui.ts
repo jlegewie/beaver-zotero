@@ -110,7 +110,6 @@ export const mcpWriteToolsEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled')
 export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));
 export const requestPlusToolsAtom = atom(getPref('requestPlusTools'));
 export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));
-export const showFileStatusDetailsAtom = atom(false);
 
 /**
  * Serializable descriptor of a Zotero item used to filter the thread list
@@ -160,32 +159,22 @@ export const isErrorReportDialogVisibleAtom = atom(false);
 export const errorReportTextAtom = atom('');
 export const isErrorReportSendingAtom = atom(false);
 
-// Skipped Files Dialog
-export const isSkippedFilesDialogVisibleAtom = atom(false);
-
 // External Reference Details Dialog
 export const isExternalReferenceDetailsDialogVisibleAtom = atom(false);
 export const selectedExternalReferenceAtom = atom<ExternalReference | null>(null);
 
 // Active dialog
-export type DialogType = 'errorReport' | 'skippedFiles' | 'externalReferenceDetails' | null;
+export type DialogType = 'errorReport' | 'externalReferenceDetails' | null;
 
 export const activeDialogAtom = atom<DialogType>((get) => {
     if (get(isErrorReportDialogVisibleAtom)) {
         return 'errorReport';
-    }
-    if (get(isSkippedFilesDialogVisibleAtom)) {
-        return 'skippedFiles';
     }
     if (get(isExternalReferenceDetailsDialogVisibleAtom)) {
         return 'externalReferenceDetails';
     }
     return null;
 });
-
-// Zotero server download error
-export const zoteroServerDownloadErrorAtom = atom(false);
-export const zoteroServerCredentialsErrorAtom = atom(false);
 
 // UI behavior and elements
 // Shared scroll state for library and reader sidebars

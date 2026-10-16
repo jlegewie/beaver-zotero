@@ -1,7 +1,8 @@
 import {
+    citationPageLocator,
     firstPageNumber,
     formatCitationPages,
-    normalizePageLocator,
+    normalizePageRange,
     translatePageNumberToLabel,
 } from '../../../src/utils/pageLabelTranslation';
 import { buildNoteCitation, encodeNoteCitationData } from '../../../src/utils/zoteroUtils';
@@ -15,8 +16,6 @@ import { buildBeaverCitationMeta, locatorToken } from '../../../src/utils/noteCi
 import { formatExternalFileCitationHTML } from '../../../src/utils/externalFileCitation';
 import { getPageLabelsForItem } from './itemData';
 import { getPageLocator, isRecordIdRange } from '@beaver/agent-core/citations/citationGrammar';
-import { translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
-import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -40,7 +39,7 @@ function citationRender({ citation, formatted }: BuiltNoteCitation): CitationExp
  * Pre-formatted "link" citation items are returned as raw HTML.
  */
 function renderCitation(request: CitationExportRequest): CitationExportRender | null {
-    const { effectiveLibraryID, effectiveItemKey, effectiveLibraryRef, requestedRef, pages, metadata, pageLabelsByAttachmentId } = request;
+    const { effectiveLibraryID, effectiveItemKey, effectiveLibraryRef, requestedRef, pages, pageLabelsByAttachmentId } = request;
     if (!effectiveItemKey) return null;
     // `library_ref` is the portable identity and must win over a device-local
     // libraryID when both are present. The numeric id may be 0 (unresolved) or
@@ -57,43 +56,50 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
             const annotationCitation = buildAnnotationNoteCitation(item);
             if (annotationCitation) return citationRender(annotationCitation);
         }
+        // A note's locators are Zotero locator labels, preloaded into the
+        // export store. The citation's own `page_labels` are display labels
+        // persisted with the run and do not fill pages without a printed
+        // label, so they do not reach a note.
         if (isLinkCitationItem(item)) {
-            const labels = getPageLabelsForItem(item, pageLabelsByAttachmentId) ?? metadata?.page_labels;
+            const labels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
             const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
+            const inclusiveRange = !!requestedRef?.loc && isRecordIdRange(requestedRef.loc);
             const page = requestedPage
                 ? translatePageNumberToLabel(labels, requestedPage)
-                : formatCitationPages(pages, labels, {
-                    inclusiveRange: !!requestedRef?.loc && isRecordIdRange(requestedRef.loc),
-                });
+                : formatCitationPages(pages, labels, { inclusiveRange });
             // The visible locator is a display label; the link navigates by
-            // physical page, which is what the cited pages already are.
+            // physical page, which is what the cited pages already are, and
+            // records them all.
             const navPage = requestedPage
                 ? firstPageNumber(requestedPage)
                 : (pages.length > 0 ? Math.min(...pages) : undefined);
+            const physicalPages = requestedPage ?? formatCitationPages(pages, null, { inclusiveRange });
             return { kind: 'html', html: buildZoteroCitationLinkHTML(item, page
                 ? { kind: 'page', value: page, raw: `page${page}` }
-                : undefined, navPage) };
+                : undefined, navPage, physicalPages) };
         }
-        // Native citations store a single page label, the same rule note writes
-        // use: Zotero opens a citation by matching its locator exactly against
-        // the PDF's page labels, so a range would never navigate. Metadata pages
-        // are physical pages; a requested locator is a physical page too.
+        // The same rule note writes use: a page range or list the model wrote
+        // is kept, translated to labels; a structural locator (a sentence,
+        // paragraph, …) cites the page it starts on. Metadata pages and a
+        // requested locator are both physical pages.
         const startPage = pages.length > 0 ? Math.min(...pages) : undefined;
-        const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
+        const requestedPage = requestedRef ? normalizePageRange(getPageLocator(requestedRef) ?? '') || undefined : undefined;
         // Labels come from the active render store (passed in) so note export
         // respects the isolated store populated by renderToHTML.
-        const loadedLabels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
-        const exportLabels = loadedLabels ?? metadata?.page_labels;
+        const exportLabels = getPageLabelsForItem(item, pageLabelsByAttachmentId);
         // Only a PDF page is a printed page; for other attachments the
         // citation carries no page and the private metadata keeps the locator.
+        // Pages without a label in a labelled document are left out
+        // (`citationPageLocator`).
         let locator: string | undefined;
-        if (citesPrintedPages(item)) {
-            locator = startPage
-                ? resolvePageLabelFromLabels(exportLabels, startPage)
-                : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, normalizePageLocator(requestedPage)) : undefined);
+        const citedPages = requestedPage ?? (startPage ? String(startPage) : undefined);
+        if (citesPrintedPages(item) && citedPages) {
+            locator = citationPageLocator(exportLabels, citedPages);
         }
+        // The metadata records the physical page whenever it is known, so the
+        // citation reads back exactly although its locator is a printed label.
         const meta = buildBeaverCitationMeta({
-            loc: locatorToken(requestedRef?.loc),
+            loc: locatorToken(requestedRef?.loc) ?? (startPage ? `page${startPage}` : undefined),
             att: item.isAttachment() ? item.key : undefined,
         });
         return citationRender(buildNoteCitation(item, locator, {}, meta));

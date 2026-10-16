@@ -128,10 +128,6 @@ const BLOCKED_COPY: Record<ChatAccessGate, { title: string; detail: string }> = 
         title: 'Your plan has changed',
         detail: 'Open Beaver to review what changed before starting a chat.',
     },
-    'upgrade-consent': {
-        title: 'Review your new plan',
-        detail: 'Your account moved to a plan that syncs data with Beaver. Open Beaver to review and agree before starting a chat.',
-    },
     onboarding: {
         title: 'Finish setting up Beaver',
         detail: 'Open Beaver to complete setup before starting a chat.',

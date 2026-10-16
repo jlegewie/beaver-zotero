@@ -559,21 +559,22 @@ describe("annotateColumnContinuations", () => {
     });
 });
 
-describe("annotateColumnContinuations past footnotes (PDF schema 5)", () => {
-    function footnote(text: string, idx: number): DocItem {
-        const bbox = bboxFromXYWH(50, 700, 250, 12, "top-left");
+describe("annotateColumnContinuations past inserts (PDF schema 5)", () => {
+    function insert(kind: "footnote" | "caption", text: string, idx: number, columnIndex = 0): DocItem {
+        const bbox = bboxFromXYWH(columnIndex === 0 ? 50 : 300, 700, 250, 12, "top-left");
         return {
             id: `p0:i${idx}`,
             pageIndex: 0,
             index: idx,
             bbox,
-            columnIndex: 0,
+            columnIndex,
             text,
             lines: [{ text, bbox }],
-            kind: "footnote",
+            kind,
             sentences: [makeSentence(text, { bboxes: [bbox] })],
         };
     }
+    const footnote = (text: string, idx: number) => insert("footnote", text, idx);
 
     function page() {
         const left = makeParagraph(0, [makeSentence("we examine changes in violent and property")], { idx: 0 });
@@ -584,8 +585,64 @@ describe("annotateColumnContinuations past footnotes (PDF schema 5)", () => {
 
     it("joins a body sentence to its continuation in the next column after the column's notes", () => {
         const { left, items } = page();
-        annotateColumnContinuations(items, simpleRegexSentenceSplit, new Set(), { skipFootnotes: true });
+        annotateColumnContinuations(items, simpleRegexSentenceSplit, new Set(), { skipInserts: true });
         expect(left.kind === "text" && left.sentences![0].joinWithNext).toBe(true);
+    });
+
+    it("joins a body sentence to its continuation past a figure caption", () => {
+        // A captioned figure closes the left column; the sentence goes on at the
+        // top of the right column.
+        const left = makeParagraph(0, [makeSentence("we examine changes in violent and property")], { idx: 0 });
+        const caption = insert("caption", "Figure 1. Crime rates by year.", 1);
+        const note = footnote("1 Crime data come from the city.", 2);
+        const right = makeParagraph(1, [makeSentence("crime before, during, and after.")], { idx: 3 });
+        annotateColumnContinuations([left, caption, note, right], simpleRegexSentenceSplit, new Set(), {
+            skipInserts: true,
+        });
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBe(true);
+        expect(caption.kind === "caption" && caption.sentences![0].joinWithNext).toBeUndefined();
+    });
+
+    it("does not join figure text left as a text item to the body past its caption", () => {
+        // A figure label above the caption is the last text item of the column.
+        const label = makeParagraph(0, [makeSentence("Number at risk")], { idx: 0 });
+        const caption = insert("caption", "Figure 2. Survival by group.", 1);
+        const right = makeParagraph(1, [makeSentence("pp 9–10).")], { idx: 2 });
+        annotateColumnContinuations([label, caption, right], simpleRegexSentenceSplit, new Set(), { skipInserts: true });
+        expect(label.kind === "text" && label.sentences![0].joinWithNext).toBeUndefined();
+
+        // Past footnotes alone, a short item still joins.
+        const short = makeParagraph(0, [makeSentence("It follows that")], { idx: 0 });
+        const note = footnote("1 See the appendix.", 1);
+        const after = makeParagraph(1, [makeSentence("the bound holds.")], { idx: 2 });
+        annotateColumnContinuations([short, note, after], simpleRegexSentenceSplit, new Set(), { skipInserts: true });
+        expect(short.kind === "text" && short.sentences![0].joinWithNext).toBe(true);
+    });
+
+    it("reads past columns that only the inserts take up", () => {
+        // The caption under the left column is a block of its own, so the
+        // right column is the block after it.
+        const left = makeParagraph(0, [makeSentence("we examine changes in violent and property")], { idx: 0 });
+        const caption = insert("caption", "Figure 1. Crime rates by year.", 1, 1);
+        const right = makeParagraph(2, [makeSentence("crime before, during, and after.")], { idx: 2 });
+        annotateColumnContinuations([left, caption, right], simpleRegexSentenceSplit, new Set(), { skipInserts: true });
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBe(true);
+
+        // A column with no insert in it still separates the two.
+        const far = makeParagraph(3, [makeSentence("crime before, during, and after.")], { idx: 2 });
+        annotateColumnContinuations([left, caption, far], simpleRegexSentenceSplit, new Set(), { skipInserts: true });
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBeUndefined();
+    });
+
+    it("stops at a heading between the columns", () => {
+        const left = makeParagraph(0, [makeSentence("we examine changes in violent and property")], { idx: 0 });
+        const caption = insert("caption", "Figure 1. Crime rates by year.", 1);
+        const heading = makeParagraph(1, [makeSentence("Results")], { idx: 2, type: "header" });
+        const right = makeParagraph(1, [makeSentence("crime before, during, and after.")], { idx: 3 });
+        annotateColumnContinuations([left, caption, heading, right], simpleRegexSentenceSplit, new Set(), {
+            skipInserts: true,
+        });
+        expect(left.kind === "text" && left.sentences![0].joinWithNext).toBeUndefined();
     });
 
     it("stops at the notes without the switch", () => {
@@ -602,7 +659,7 @@ describe("annotateColumnContinuations past footnotes (PDF schema 5)", () => {
         const right = makeParagraph(2, [makeSentence("crime before, during, and after.")], { idx: 2 });
         annotateColumnContinuations([left, note, right], simpleRegexSentenceSplit, new Set(), {
             endColumns: [1, 1, 2],
-            skipFootnotes: true,
+            skipInserts: true,
         });
         expect(left.kind === "text" && left.sentences![0].joinWithNext).toBe(true);
     });

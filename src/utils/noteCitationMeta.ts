@@ -138,8 +138,10 @@ export function citedChildKey(meta: BeaverCitationMeta | undefined): string | un
 
 /**
  * How a single native citation item reads back from Beaver's metadata, or null
- * when it reads back as a citation without metadata: it has none, or the
- * annotation or attachment it records no longer exists (`childExists`).
+ * when it reads back as a citation of the parent item: it has no metadata, or
+ * the annotation or attachment it records no longer exists (`childExists`).
+ * In the second case the simplifier still takes the physical page the
+ * metadata records, since the stored locator may be a printed label.
  *
  * An annotation citation reads back without a locator (its page is the
  * annotation's), and others with the locator Beaver recorded. A citation whose

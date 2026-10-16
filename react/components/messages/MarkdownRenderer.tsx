@@ -121,6 +121,73 @@ function transformMathNodes(node: any) {
     }
 }
 
+function hasProperty(node: any, name: string): boolean {
+    return node?.type === 'element' && node.properties?.[name] !== undefined;
+}
+
+/**
+ * Rehype plugin that rewrites GFM footnotes as endnotes a Zotero note can
+ * hold. The note editor has no footnotes and drops in-note anchors, so the
+ * chat's footnote markup would leave a "Footnotes" heading, dead links and
+ * "↩" back-references in the note. Instead:
+ *   - a reference `<sup><a href="#fn-1">1</a></sup>` becomes `<sup>1</sup>`;
+ *   - the definitions section becomes a "Notes" heading followed by its
+ *     numbered list, without the back-references.
+ */
+function rehypeZoteroNoteFootnotes() {
+    return (tree: any) => {
+        transformFootnotes(tree);
+    };
+}
+
+function transformFootnotes(node: any) {
+    if (!node.children) return;
+    const children: any[] = [];
+    let removedBackref = false;
+    // A removed back-reference leaves the space that preceded it.
+    const trimTrailingSpace = () => {
+        while (children.length > 0) {
+            const last = children[children.length - 1];
+            if (last.type !== 'text') return;
+            last.value = last.value.replace(/\s+$/, '');
+            if (last.value) return;
+            children.pop();
+        }
+    };
+    for (const child of node.children) {
+        if (hasProperty(child, 'dataFootnoteRef')) {
+            // The reference's number, without the in-note link.
+            children.push(...(child.children ?? []));
+            continue;
+        }
+        if (hasProperty(child, 'dataFootnoteBackref')) {
+            trimTrailingSpace();
+            removedBackref = true;
+            continue;
+        }
+        // Whitespace between removed back-references.
+        if (removedBackref && child.type === 'text' && !child.value.trim()) continue;
+        if (child.type === 'element' && child.tagName === 'section' && hasProperty(child, 'dataFootnotes')) {
+            const list = (child.children ?? []).find((grandchild: any) => grandchild.type === 'element' && grandchild.tagName === 'ol');
+            if (!list) continue;
+            transformFootnotes(list);
+            for (const item of list.children ?? []) {
+                if (item.type === 'element') item.properties = {};
+            }
+            children.push(
+                { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Notes' }] },
+                { type: 'text', value: '\n' },
+                list,
+            );
+            continue;
+        }
+        transformFootnotes(child);
+        children.push(child);
+    }
+    if (removedBackref) trimTrailingSpace();
+    node.children = children;
+}
+
 /** Allow zotero:// URLs through react-markdown's URL sanitization */
 function urlTransform(url: string): string {
     if (url.startsWith('zotero://')) return url;
@@ -211,6 +278,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
             [rehypeSanitize, customSchema],
             exportRendering ? rehypeZoteroMath : rehypeKatex,
         ];
+        if (exportRendering) plugins.push(rehypeZoteroNoteFootnotes);
         // Always last. The transformer inserts markup the sanitize schema does
         // not allow, so sanitizing after it would strip the highlights, and it
         // can only recognize (and skip) KaTeX output once KaTeX has produced it.

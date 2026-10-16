@@ -10,5 +10,4 @@ export * from '@beaver/agent-ui/icons';
 export { CSSItemTypeIcon, CSSIcon } from './zotero';
 
 // Status icons for the database-sync surface, which is Zotero-only.
-export { default as DatabaseStatusIcon } from './DatabaseStatusIcon';
 export { default as CircleStatusIcon } from './CircleStatusIcon';

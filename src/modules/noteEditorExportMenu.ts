@@ -12,8 +12,7 @@
  * Lives in the esbuild bundle — must NOT import from react/store or Jotai.
  */
 
-import type { ExportFormat } from '../services/export/instanceExport';
-import { exportErrorMessage } from '../services/export/exportErrors';
+import { exportNoteWithProgress, NOTE_EXPORT_FORMATS } from './noteExportCommand';
 import { getEditorNoteHtml } from '../utils/noteEditorIO';
 
 const NOTE_EDITOR_URL = 'resource://zotero/note-editor/editor.html';
@@ -29,14 +28,6 @@ const MENU_PADDING = 5;
  * button (Arrow Down, Enter), and a key release (Space).
  */
 const OPENING_EVENTS = ['mousedown', 'click', 'keydown', 'keyup'];
-
-/** Export formats in menu order, as the chat's export menus name them. */
-const FORMATS: Array<{ format: ExportFormat; name: string }> = [
-    { format: 'docx', name: 'Word' },
-    { format: 'pdf', name: 'PDF' },
-    { format: 'markdown', name: 'Markdown' },
-    { format: 'latex', name: 'LaTeX' },
-];
 
 /** Windows with the capture listeners. */
 const attachedWindows = new Set<Window>();
@@ -194,14 +185,14 @@ function openFormatMenu(dropdown: Element, dropdownPopup: HTMLElement, entry: HT
         entry.style.removeProperty('background-color');
         closeDropdown(dropdown);
     });
-    for (const { format, name } of FORMATS) {
+    for (const { format, name } of NOTE_EXPORT_FORMATS) {
         const menuitem = xulDoc.createXULElement('menuitem');
         menuitem.setAttribute('label', `${name}\u2026`);
         menuitem.addEventListener('command', () => {
             // The note as this editor shows it when the format is chosen; other
             // editors of the same note may not have caught up yet.
             const note = noteOf(editor);
-            if (note) void exportNote(note, getEditorNoteHtml(note, doc.defaultView), format, name, win);
+            if (note) void exportNoteWithProgress(note, getEditorNoteHtml(note, doc.defaultView), format, name, win, 'note_editor');
         });
         popup.appendChild(menuitem);
     }
@@ -224,42 +215,6 @@ function openFormatMenu(dropdown: Element, dropdownPopup: HTMLElement, entry: HT
         popup.openPopupAtScreenRect('end_before', rect.x, rect.y, rect.width, rect.height, false, false);
     } else {
         popup.openPopupAtScreen(rect.x + rect.width, rect.y, false);
-    }
-}
-
-/** Export the note, asking where to save, and say how it went. */
-async function exportNote(note: Zotero.Item, html: string | null, format: ExportFormat, name: string, win: Window): Promise<void> {
-    try {
-        const result = await addon.exporter.exportNote(
-            { note: { key: note.key, libraryID: note.libraryID }, html: html ?? undefined, format },
-            { window: win },
-        );
-        if (result.status !== 'saved') return;
-        const progress = new Zotero.ProgressWindow({ window: win.closed ? undefined : win, closeOnClick: true });
-        progress.changeHeadline(`Exported to ${name}`);
-        // The document, a LaTeX export's .bib file, and the folder of images
-        // that Markdown and LaTeX exports write beside the document. Icons are
-        // Zotero's item type icons.
-        const [documentPath, ...others] = result.files;
-        const bibliographies = others.filter(path => /\.bib$/i.test(path));
-        const images = others.filter(path => !/\.bib$/i.test(path));
-        for (const path of [documentPath, ...bibliographies]) {
-            const line = new progress.ItemProgress(path === documentPath && format === 'pdf' ? 'attachmentPDF' : 'document', PathUtils.filename(path));
-            line.setProgress(100);
-        }
-        if (images.length > 0) {
-            const folder = PathUtils.filename(PathUtils.parent(images[0]) ?? '');
-            const line = new progress.ItemProgress('attachmentImage', `${images.length} image${images.length === 1 ? '' : 's'} in ${folder}`);
-            line.setProgress(100);
-        }
-        for (const warning of result.warnings) {
-            progress.addDescription(warning.message);
-        }
-        progress.show();
-        progress.startCloseTimer(result.warnings.length > 0 ? 10000 : 5000);
-    } catch (error: any) {
-        Zotero.logError(error);
-        Services.prompt.alert((win.closed ? null : win) as any, 'Could not export', exportErrorMessage(error));
     }
 }
 

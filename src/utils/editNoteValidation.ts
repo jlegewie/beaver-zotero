@@ -24,9 +24,9 @@ import {
     extractAttr,
     isCitationRefNotFoundError,
     matchesStoredLocator,
-    normalizePageLocator,
     translatePageNumberToLabel,
 } from './noteCitationExpand';
+import { normalizePageRange } from './pageLabelTranslation';
 import {
     baseCitationKey,
     getPageLocator,
@@ -306,7 +306,7 @@ function translateAttIdPageLocator(
     pageLabels?: PageLabelsByAttachmentId,
 ): string | undefined {
     if (!page) return undefined;
-    const normalized = normalizePageLocator(page);
+    const normalized = normalizePageRange(page);
     try {
         if (attachmentItem?.id != null) {
             return translatePageNumberToLabel(pageLabels?.[attachmentItem.id] ?? null, normalized);

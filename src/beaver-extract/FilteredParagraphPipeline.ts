@@ -35,6 +35,7 @@ import {
     type StyleProfile,
 } from "@beaver/agent-core/extract/types";
 import { buildPageAnalysisContext } from "./PageAnalysisContext";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "./schema/presets";
 import {
     detectDominantTextOrientation,
     inverseRotateBBox,
@@ -84,12 +85,15 @@ export interface FilteredParagraphContext {
     totalPageCount?: number;
     /** Whether to detect ascending page-number sequences in margins. */
     detectPageSequences?: boolean;
-    /** Match margin text rows rather than single lines (`ExtractionSettings.marginTextRows`). */
+    /**
+     * Match margin text rows rather than single lines
+     * (`PdfExtractionPreset.marginTextRows`). Defaults to the current schema's.
+     */
     marginTextRows?: boolean;
     /**
      * Keep the words of justified prose rows when filtering the target page
      * (`MarginFilter.filterPageWithSmartRemoval`'s `proseRows`). Follows
-     * `marginTextRows` when omitted, and is off when both are.
+     * `marginTextRows` when omitted.
      */
     marginProseRows?: boolean;
     /** Forwarded to `detectParagraphs`. */
@@ -241,6 +245,7 @@ export function detectFilteredParagraphs(
 
     const margins = ctx.margins ?? DEFAULT_MARGINS;
     const marginZone = ctx.marginZone ?? DEFAULT_MARGIN_ZONE;
+    const marginTextRows = ctx.marginTextRows ?? CURRENT_PDF_EXTRACTION_PRESET.marginTextRows;
 
     // Compute defaults for any missing overrides via the shared
     // PageAnalysisContext helper so extract and the sentence pipeline
@@ -264,7 +269,7 @@ export function detectFilteredParagraphs(
             marginZone,
             repeatThreshold: ctx.repeatThreshold,
             detectPageSequences: ctx.detectPageSequences,
-            marginTextRows: ctx.marginTextRows,
+            marginTextRows,
         });
         analysisContextMs = performance.now() - tAnalysis;
         styleProfile = styleProfile ?? computed.styleProfile;
@@ -290,8 +295,8 @@ export function detectFilteredParagraphs(
         marginRemoval,
         styleProfile.bodyStyles,
         styleProfile.primaryBodyStyle,
-        ctx.marginTextRows ?? true,
-        ctx.marginProseRows ?? ctx.marginTextRows ?? false,
+        marginTextRows,
+        ctx.marginProseRows ?? marginTextRows,
     );
     const marginFilterMs = performance.now() - tMarginFilter;
     const uprightMarginItems = collectMarginItemsFromFilteredPage(
@@ -421,7 +426,7 @@ export function detectFilteredParagraphs(
     if (columnResult.columns.length > 0) {
         const tLineDetect = performance.now();
         lineResult = detectLinesOnPage(filteredPage, columnResult.columns, {
-            exclusiveColumns: ctx.paragraphSettings?.exclusiveColumnLines ?? false,
+            exclusiveColumns: ctx.paragraphSettings?.exclusiveColumnLines ?? CURRENT_PDF_EXTRACTION_PRESET.exclusiveColumnLines,
             textRotation: pageRotation,
         });
         lineDetectMs = performance.now() - tLineDetect;
@@ -513,8 +518,8 @@ export function marginFilteredLines(
         ctx.marginRemoval,
         ctx.styleProfile.bodyStyles,
         ctx.styleProfile.primaryBodyStyle,
-        ctx.marginTextRows ?? true,
-        ctx.marginTextRows ?? false,
+        ctx.marginTextRows ?? CURRENT_PDF_EXTRACTION_PRESET.marginTextRows,
+        ctx.marginTextRows ?? CURRENT_PDF_EXTRACTION_PRESET.marginTextRows,
     );
     const marginZone = ctx.marginZone ?? DEFAULT_MARGIN_ZONE;
     const kept = new Set<RawLine>();
@@ -670,7 +675,7 @@ export function runningMarginLines(
     const band = (line: RawLine) => line.bbox.t < zone.top || line.bbox.b > page.height - zone.bottom;
     const lines = page.blocks.flatMap((b) => (b.type === "text" ? (b.lines ?? []).filter(band) : []));
     const bandPage: RawPageData = { ...page, blocks: lines.length ? [{ type: "text", bbox: lines[0].bbox, lines }] : [] };
-    const texts = MarginFilter.marginTexts(bandPage, zone, ctx.marginTextRows ?? true);
+    const texts = MarginFilter.marginTexts(bandPage, zone, ctx.marginTextRows ?? CURRENT_PDF_EXTRACTION_PRESET.marginTextRows);
     for (const position of ["top", "bottom"] as const) {
         if (!exact[position].size && !numbered[position].size) continue;
         const found = texts.filter((t) => {
@@ -713,8 +718,8 @@ export function documentBodyExtents(
             ctx.marginRemoval,
             ctx.styleProfile.bodyStyles,
             ctx.styleProfile.primaryBodyStyle,
-            ctx.marginTextRows ?? true,
-            ctx.marginTextRows ?? false,
+            ctx.marginTextRows ?? CURRENT_PDF_EXTRACTION_PRESET.marginTextRows,
+            ctx.marginTextRows ?? CURRENT_PDF_EXTRACTION_PRESET.marginTextRows,
         );
         let top = Infinity;
         let bottom = -Infinity;

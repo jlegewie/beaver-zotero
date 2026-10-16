@@ -60,7 +60,8 @@ async function citationSnapshotFor(
     citationContext: ReturnType<typeof captureThreadState>['citationContext'],
 ) {
     const content = blocks.map(block => (block.type === 'activity' || block.type === 'user' ? '' : block.markdown)).join('\n\n');
-    const context = await prepareCitationRenderContext(content, citationContext);
+    // File exports show the printed page numbers.
+    const context = await prepareCitationRenderContext(content, citationContext, 'printed');
     // Key the merged metadata exactly as the chat looks it up.
     const keyStore = createStore();
     keyStore.set(citationsAtom, Object.values(context?.citationDataMap ?? {}));

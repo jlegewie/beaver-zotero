@@ -70,10 +70,10 @@ src/beaver-extract/
 ├── config.ts                      # Cross-bundle config (worker URLs, log sink, client slot)
 ├── logging.ts                     # Cross-bundle log sink for analyzer modules
 ├── MuPDFWorkerClient.ts           # Main-thread worker proxy (postMessage RPC)
-├── prewarm.ts                     # Eager worker spawn helper
+├── prewarm.ts                     # Eager worker spawn + warm-up helper
 ├── worker/
 │   ├── index.ts                   # Worker entry point + dispatcher
-│   ├── ops.ts                     # Worker-side op handlers
+│   ├── ops.ts                     # Worker-side op handlers (argument checks, doc lifecycle, result projection)
 │   ├── opQueue.ts                 # Per-worker op serialization queue
 │   ├── apiCache.ts                # Module-level cache for MuPDF + sentencex handles (shared by worker + Node CLI)
 │   ├── config.ts                  # Worker-side URL/config storage
@@ -86,8 +86,10 @@ src/beaver-extract/
 │   ├── errors.ts                  # Worker-side error envelopes
 │   ├── sentenceExtraction.ts      # Per-page structured phases (paragraphs, sentence mapping)
 │   ├── sentencexInit.ts           # sentencex bootstrap (lazy, with fallback)
-│   └── splitterResolver.ts        # Resolves SentenceSplitterConfig → splitter fn
+│   ├── splitterResolver.ts        # Resolves SentenceSplitterConfig → splitter fn
+│   └── warmupPdf.ts               # Generated article the `__warmup` op extracts on a fresh worker
 ├── pipeline/                      # Extraction pipeline (runs in the worker)
+│   ├── extract.ts                 # `runExtraction`: document study + paragraph, block or structured engine
 │   ├── documentAnalysis.ts        # Page-walk cache + cross-page analysis context
 │   ├── structured.ts              # Structured extraction phases (analyze → segment → item passes → sentences → project)
 │   ├── draftItems.ts              # Draft items between segmentation and sentence mapping
@@ -227,9 +229,6 @@ LayoutAnalysisResult; // Result of BeaverExtractor.analyzeLayout — pre-extract
                       // shared prefix structured extract runs, so the analysis
                       // context is byte-identical for the same settings /
                       // pageIndices / analysisWindow.
-SentenceTraceResult; // Result of getMuPDFWorkerClient().extractSentenceDebug
-                     // — single-page debug envelope { result, trace } used by
-                     // fixture capture and the extract-trace endpoint.
 PDFSearchResult; // Result of BeaverExtractor.search
 PageImageResult; // Per-page entry in BeaverExtractor.renderPages result.pages
 ```
@@ -426,14 +425,15 @@ export interface InternalProcessedPage {
 3. **Integrate in the worker pipeline**:
 
 The fused `extract` op runs inside the worker. Wire new analyzers into
-`worker/ops.ts` (markdown engines), `pipeline/structured.ts` (structured
-extraction) or `PageExtractor.ts` so they execute alongside the existing
-column/line/paragraph passes:
+`pipeline/extract.ts` (markdown engines), `pipeline/structured.ts`
+(structured extraction) or `PageExtractor.ts` so they execute alongside the
+existing column/line/paragraph passes. A change to extracted text or ids
+belongs behind a switch of the schema preset (`schema/presets.ts`):
 
 ```typescript
 import { detectSections } from "../SectionDetector";
 
-// Inside the per-page loop in worker/ops.ts → opExtract
+// Inside an engine's per-page loop in pipeline/extract.ts
 for (const rawPage of rawPages) {
   // ... existing column/line/paragraph detection
   const sectionResult = detectSections(lineResult, styleProfile);
@@ -777,20 +777,6 @@ console.log(layout.analysis.styleProfile.primaryBodyStyle);
 for (const c of layout.analysis.marginRemoval.candidates) {
   console.log(c.text, c.reason, c.pageIndices);
 }
-
-// Single-page debug surface (fixture capture / extract-trace endpoint).
-// Returns `{ result, trace }` with all pipeline intermediates (raw doc,
-// detailed page, font-bridged pagesForFilter, margin analysis/removal,
-// filtered-paragraph result). Not a parity oracle for the production
-// multi-page structured path — see worker/sentenceExtraction.ts for
-// the divergence rationale. For analysis-context parity, prefer
-// `analyzeLayout` above.
-import { getMuPDFWorkerClient } from "../../src/beaver-extract";
-const debug = await getMuPDFWorkerClient().extractSentenceDebug(
-  pdfData,
-  0,
-  { splitterConfig: { type: "sentencex", language: "en" } },
-);
 ```
 
 ### Page Image Rendering

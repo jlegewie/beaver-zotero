@@ -20,6 +20,7 @@ import {
     type CitationRef,
 } from '@beaver/agent-core/citations/citationGrammar';
 import { getCitationPages, getContentKind, type Citation } from '@beaver/agent-core/types/citations';
+import { labelsSpanPages } from '@beaver/agent-core/extract/pageLabels/printedPageLabels';
 import type { CitationOccurrence, CitationSnapshot, CitationTarget, LocatorSpec } from '../types';
 
 /** Metadata for an occurrence, by the same key precedence the chat uses. */
@@ -33,6 +34,10 @@ export function findCitationMetadata(occurrence: CitationOccurrence, snapshot: C
     return occurrence.invalidKey ? byKey[occurrence.invalidKey] : undefined;
 }
 
+function hasPrintedLabel(labels: Record<number, string> | undefined): labels is Record<number, string> {
+    return !!labels && Object.values(labels).some(label => typeof label === 'string' && label.trim() !== '');
+}
+
 /**
  * `metadata` describes exactly this passage (its pages are the cited pages);
  * `workMetadata` is any metadata of the cited work, which still tells what
@@ -42,8 +47,9 @@ function locatorFor(ref: CitationRef, metadata: Citation | undefined, workMetada
     const contentKind = workMetadata ? getContentKind(workMetadata) : null;
     // Snapshot "pages" are a navigation coordinate, not something a reader can look up.
     if (contentKind === 'snapshot') return null;
-    const labelSource = metadata?.page_labels ?? workMetadata?.page_labels;
-    const labels = labelSource && Object.keys(labelSource).length > 0 ? labelSource : null;
+    // A map whose labels are all empty says nothing, so it leaves the caller
+    // free to fall back to the attachment's labels.
+    const labels = [metadata?.page_labels, workMetadata?.page_labels].find(hasPrintedLabel) ?? null;
     const labelsOnly = contentKind === 'epub';
 
     const metadataPages = metadata ? getCitationPages(metadata) : [];
@@ -145,10 +151,24 @@ export function formatLocator(spec: LocatorSpec, labels?: Record<number, string>
     if (spec.written) {
         // Labels-only documents (EPUB section ordinals) show nothing without a printed label.
         let unlabelled = false;
-        const written = spec.written.replace(/\d+/g, number => {
-            const label = pageLabels?.[Number(number) - 1]?.trim();
-            if (!label) unlabelled = true;
-            return label || number;
+        const labelOfNumber = (number: string) => pageLabels?.[Number(number) - 1]?.trim() || undefined;
+        const written = spec.written.replace(/(\d+)-(\d+)|\d+/g, (match, start?: string, end?: string) => {
+            if (start === undefined || end === undefined) {
+                const label = labelOfNumber(match);
+                if (!label) unlabelled = true;
+                return label || match;
+            }
+            const first = labelOfNumber(start);
+            const last = labelOfNumber(end);
+            if (!first && !last) {
+                unlabelled = true;
+                return match;
+            }
+            if (labelsSpanPages(first, last, Number(end) - Number(start))) return `${first}-${last}`;
+            // The ends are not one printed sequence (an unnumbered cover, a
+            // gap, two numberings): cite a printed end rather than mix
+            // printed and physical numbers in one range.
+            return first ?? last!;
         });
         return spec.labelsOnly && unlabelled ? undefined : written;
     }
@@ -160,31 +180,31 @@ export function formatLocator(spec: LocatorSpec, labels?: Record<number, string>
     const pages = spec.pages.filter(page => labelOf(page) !== undefined);
     if (pages.length === 0) return undefined;
     if (spec.inclusiveRange && pages.length > 1) {
-        return `${labelOf(pages[0])}-${labelOf(pages[pages.length - 1])}`;
+        const first = pages[0];
+        const last = pages[pages.length - 1];
+        const printedFirst = pageLabels?.[first - 1]?.trim() || undefined;
+        const printedLast = pageLabels?.[last - 1]?.trim() || undefined;
+        if (!printedFirst && !printedLast) return `${first}-${last}`;
+        // Only a range whose labels span exactly the cited pages; otherwise
+        // (an unnumbered end, a gap, two numberings) cite a printed end
+        // rather than mix printed and physical numbers.
+        return labelsSpanPages(printedFirst, printedLast, last - first)
+            ? `${printedFirst}-${printedLast}`
+            : printedFirst ?? printedLast;
     }
+    // A page list with any printed label cites printed labels only: an
+    // unlabelled page is left out rather than shown as a physical number that
+    // reads as a printed one ("12, 12").
+    const printedPages = pages.filter(page => pageLabels?.[page - 1]?.trim());
+    const listed = printedPages.length > 0 ? printedPages : pages;
     const ranges: string[] = [];
-    for (let i = 0; i < pages.length; i++) {
-        const start = pages[i];
+    for (let i = 0; i < listed.length; i++) {
+        const start = listed[i];
         let end = start;
-        while (pages[i + 1] === end + 1 && consecutiveLabels(labelOf(end), labelOf(end + 1))) end = pages[++i];
+        while (listed[i + 1] === end + 1 && consecutiveLabels(labelOf(end), labelOf(end + 1))) end = listed[++i];
         ranges.push(start === end ? labelOf(start)! : `${labelOf(start)}-${labelOf(end)}`);
     }
     return ranges.join(', ');
-}
-
-const ROMAN_VALUES: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
-
-/** The value of a Roman numeral label (`xiv` → 14), or null. */
-function romanValue(label: string): number | null {
-    const lower = label.toLowerCase();
-    if (!/^[ivxlcdm]+$/.test(lower)) return null;
-    let total = 0;
-    for (let i = 0; i < lower.length; i++) {
-        const value = ROMAN_VALUES[lower[i]];
-        const next = ROMAN_VALUES[lower[i + 1]] ?? 0;
-        total += value < next ? -value : value;
-    }
-    return total > 0 ? total : null;
 }
 
 /**
@@ -193,9 +213,5 @@ function romanValue(label: string): number | null {
  * `iv`→`v`; not `10`→`12` or `iv`→`S1`).
  */
 function consecutiveLabels(a: string | undefined, b: string | undefined): boolean {
-    if (!a || !b) return false;
-    if (/^\d+$/.test(a) && /^\d+$/.test(b)) return Number(b) === Number(a) + 1;
-    const romanA = romanValue(a);
-    const romanB = romanValue(b);
-    return romanA !== null && romanB !== null && romanB === romanA + 1;
+    return labelsSpanPages(a, b, 1);
 }

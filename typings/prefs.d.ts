@@ -11,7 +11,6 @@ declare namespace _ZoteroTypes {
       "userEmail": string;
       "currentPlanId": string;
       "installedVersion": string;
-      "showIndexingCompleteMessage": boolean;
       "showHighTokenUsageWarningMessage": boolean;
       "authMethod": string;
       "voice.helperExplained": boolean;
@@ -84,9 +83,6 @@ declare namespace _ZoteroTypes {
       "backgroundProcessingSearchInitialized": boolean;
       "backgroundProcessingWelcomeAck": boolean;
       "backgroundProcessingWelcomeDeferred": boolean;
-      "runConsistencyCheck": boolean;
-      "runCollectionSync": boolean;
-      "runWebDAVSync": boolean;
       "runEmbeddingFullDiff": boolean;
       "pendingVersionNotifications": string;
       "librarySuggestions": string;

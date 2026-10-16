@@ -21,6 +21,9 @@ import { getLatestNoteHtml } from '../../utils/noteEditorIO';
 import { printHtmlToPdf } from './printPdf';
 import { BIB_FILE_MARKER, buildBibliographyFile } from './bibliographyFile';
 import { CitationService } from '../CitationService';
+import { exportErrorCode, exportWarningCodes, noteOriginFromHtml, type ExportReport, type ExportSurface } from './exportTelemetry';
+// Usage telemetry is disabled
+// import { reportExport } from './exportTelemetry';
 
 export type ExportFormat = 'docx' | 'pdf' | 'markdown' | 'latex';
 
@@ -109,6 +112,13 @@ export interface ExportContext {
     windowId?: string;
     /** A window with no Beaver runtime (such as a note window); takes precedence over `windowId`. */
     window?: Window;
+    /** Where the export was started, for usage telemetry. */
+    surface?: ExportSurface;
+    /**
+     * The caller exports another version of a note that is not in the
+     * library; that export is the one reported, not the missing note.
+     */
+    fallsBackWhenNoteMissing?: boolean;
 }
 
 function windowUnavailable(): Error {
@@ -378,6 +388,14 @@ export class InstanceExport {
      * given; the requesting window parents the dialog.
      */
     async run(request: ExportRequest, context: ExportContext = {}): Promise<ExportResult> {
+        // A note source holds what `create_note` wrote: the note itself is gone.
+        const report: Partial<ExportReport> = request.source.kind === 'note'
+            ? { note_origin: 'created', note_fallback: true }
+            : {};
+        return this.reported(request, context, request.source.kind, report, () => this.runExport(request, context));
+    }
+
+    private async runExport(request: ExportRequest, context: ExportContext): Promise<ExportResult> {
         if (!FORMATS[request.format]) throw new Error(`Unsupported export format: ${request.format}`);
         const citationService = this.citationService();
         const path = await this.outputPath(request.format, request.source.title, request.path, context);
@@ -402,6 +420,59 @@ export class InstanceExport {
      * parents the dialog.
      */
     async exportNote(request: NoteExportRequest, context: ExportContext = {}): Promise<ExportResult> {
+        const report: Partial<ExportReport> = {};
+        return this.reported(request, context, 'note', report, () => this.exportNoteFile(request, context, report));
+    }
+
+    /**
+     * Run an export and report it for usage telemetry once it is saved or has
+     * failed. Exports to a given path (development endpoints) are not reported.
+     * Sending the report is currently disabled.
+     */
+    private async reported(
+        request: Pick<ExportRequest, 'format' | 'path'>,
+        context: ExportContext,
+        kind: ExportReport['kind'],
+        report: Partial<ExportReport>,
+        perform: () => Promise<ExportResult>,
+    ): Promise<ExportResult> {
+        const started = Date.now();
+        const send = (fields: Pick<ExportReport, 'outcome'> & Partial<ExportReport>) => {
+            if (request.path) return;
+            const event: ExportReport = {
+                ...report,
+                ...fields,
+                kind,
+                format: request.format,
+                ...(context.surface ? { surface: context.surface } : {}),
+                duration_ms: Date.now() - started,
+            };
+            // Usage telemetry is disabled; the report is built but not sent.
+            // reportExport(event);
+            return event;
+        };
+        let result: ExportResult;
+        try {
+            result = await perform();
+        } catch (error) {
+            const code = exportErrorCode(error);
+            if (!(code === 'note_not_found' && context.fallsBackWhenNoteMissing)) {
+                send({ outcome: 'failed', ...(code ? { error_code: code } : {}) });
+            }
+            throw error;
+        }
+        if (result.status === 'saved') {
+            send({
+                outcome: 'saved',
+                citation_count: result.stats.clusters,
+                bibliography_entries: result.stats.bibliographyEntries,
+                warning_codes: exportWarningCodes(result.warnings),
+            });
+        }
+        return result;
+    }
+
+    private async exportNoteFile(request: NoteExportRequest, context: ExportContext, report: Partial<ExportReport>): Promise<ExportResult> {
         if (!FORMATS[request.format]) throw new Error(`Unsupported export format: ${request.format}`);
         let note: Zotero.Item | null = null;
         let html: string;
@@ -420,6 +491,7 @@ export class InstanceExport {
             // An open editor may hold edits Zotero has not saved yet.
             html = typeof request.html === 'string' ? request.html : getLatestNoteHtml(note);
             title = note.getNoteTitle() || 'Note';
+            report.note_origin = noteOriginFromHtml(html);
         } else if (typeof request.html === 'string') {
             html = request.html;
             title = request.title?.trim() || 'Note';

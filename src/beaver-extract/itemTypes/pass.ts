@@ -18,6 +18,7 @@ import { isNonEntryLabel } from "../references/entries";
 import { buildTypedDocument } from "./input";
 import { argmax, classifyItemTypes, type ItemTypeClass, type ItemTypeModel } from "./model";
 import { ITEM_TYPE_MODEL } from "./weights";
+import { CURRENT_PDF_EXTRACTION_PRESET } from "../schema/presets";
 
 export const ITEM_TYPE_PASS = "itemTypes";
 
@@ -70,7 +71,7 @@ export function itemTypePass({ model = ITEM_TYPE_MODEL }: ItemTypePassOptions = 
             const inputMs = performance.now() - t0;
             const { probs, timings } = classifyItemTypes(input, model);
             // Copies: `items export` keeps the step-2 items as its units.
-            const noteMarkers = ctx.paragraphSettings?.noteMarkers ?? false;
+            const noteMarkers = ctx.paragraphSettings?.noteMarkers ?? CURRENT_PDF_EXTRACTION_PRESET.noteMarkers;
             doc.pages.forEach((page, k) => {
                 page.items = page.items.map((item, i) => {
                     const kind = model.publicKind[passClass(model, probs[k][i], item.text)];

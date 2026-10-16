@@ -175,13 +175,6 @@ declare namespace Zotero {
             // --- Sync Logs Methods ---
 
             /**
-             * Insert a new sync log record.
-             * @param syncLog The sync log data to insert (without id, which will be generated)
-             * @returns The complete SyncLogsRecord with generated id
-             */
-            insertSyncLog(syncLog: Omit<import("../src/services/database").SyncLogsRecord, 'id' | 'timestamp'>): Promise<import("../src/services/database").SyncLogsRecord>;
-
-            /**
              * Get sync log record for library_id and user_id with the highest library_version.
              * @param user_id The user_id to filter by
              * @param library_id The library_id to filter by
@@ -196,46 +189,6 @@ declare namespace Zotero {
              * @returns The SyncLogsRecord with most recent library_date_modified, or null if not found
              */
             getSyncLogWithMostRecentDate(user_id: string, library_id: number): Promise<import("../src/services/database").SyncLogsRecord | null>;
-
-            /**
-             * Get all sync log records for specific library_id and user_id.
-             * @param user_id The user_id to filter by
-             * @param library_id The library_id to filter by
-             * @param orderBy Optional ordering field ('timestamp', 'library_version', 'library_date_modified')
-             * @param orderDirection Optional order direction ('ASC' or 'DESC')
-             * @returns Array of SyncLogsRecord objects
-             */
-            getAllSyncLogsForLibrary(
-                user_id: string, 
-                library_id: number,
-                orderBy?: 'timestamp' | 'library_version' | 'library_date_modified',
-                orderDirection?: 'ASC' | 'DESC'
-            ): Promise<import("../src/services/database").SyncLogsRecord[]>;
-
-            /**
-             * Get the most recent sync log record for specific library_ids and user_id.
-             * @param user_id The user_id to filter by
-             * @param library_ids The library_ids to filter by
-             * @returns The SyncLogsRecord with most recent timestamp, or null if not found
-             */
-            getMostRecentSyncLogForLibraries(
-                user_id: string,
-                library_ids: number[]
-            ): Promise<import("../src/services/database").SyncLogsRecord | null>;
-
-            /**
-             * Deletes all sync log records for a specific library.
-             * @param user_id The user_id to filter by
-             * @param library_id The library_id to delete logs for
-             */
-            deleteSyncLogsForLibraryIds(user_id: string, library_ids: number[]): Promise<void>;
-
-            /**
-             * Deletes all sync log records for a user.
-             * Used during onboarding to ensure fresh sync state (e.g., after plan transitions).
-             * @param user_id The user_id to delete logs for
-             */
-            deleteAllSyncLogsForUser(user_id: string): Promise<void>;
 
             // --- Embedding Methods ---
 

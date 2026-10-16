@@ -80,6 +80,7 @@ const documentCacheMock = {
     getSerializedResult: vi.fn(),
     getOrCreateResult: vi.fn(),
     getOrCreateSerializedResult: vi.fn(),
+    getUnwrittenResult: vi.fn(),
 };
 
 const runPdf = (overrides: Partial<ExtractAndCacheResolvedPdfArgs> = {}) =>

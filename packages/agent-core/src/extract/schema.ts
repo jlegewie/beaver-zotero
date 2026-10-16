@@ -49,6 +49,8 @@ export type BeaverExtractResult =
 export interface SerializedExtractCacheMetadata {
     pageCount: number;
     pageLabels: Record<string, string>;
+    /** See `CachedDocumentMetadata.derivedPageLabels`. */
+    derivedPageLabels?: Record<string, string> | null;
     pages: (PageGeometry | null)[];
 }
 
@@ -79,7 +81,16 @@ export interface MarkdownPage {
 
 export interface StructuredDocument {
     pageCount: number;
+    /** Page labels the PDF declares (its `/PageLabels`), keyed by page index. */
     pageLabels?: Record<string, string>;
+    /**
+     * Page numbers printed in the page margins, keyed by page index. Derived
+     * from the text, independent of `pageLabels`: pages inside a run of
+     * printed numbers are labeled even when unnumbered; pages outside one are
+     * absent. Omitted when derivation found nothing. Source of the printed
+     * page labels (`resolvePrintedPageLabels`).
+     */
+    derivedPageLabels?: Record<string, string>;
     /**
      * Origin for all public extraction rects on `pages[].items[].bbox` and
      * `pages[].items[].sentences[].bboxes`.
@@ -245,8 +256,9 @@ export interface Sentence {
     /** Sentence fragment rects in the document's public extraction bbox frame. */
     bboxes: Rect[];
     /**
-     * The sentence continues in the next sentence of body text in reading
-     * order; `footnote` items between the two don't count.
+     * The sentence continues in the first sentence of the next `text` item in
+     * reading order; items of other kinds between the two (footnotes,
+     * captions, tables, figures, display equations) don't count.
      */
     joinWithNext?: boolean;
 }

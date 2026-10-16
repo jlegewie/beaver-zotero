@@ -1,5 +1,7 @@
 import { SCHEMA_VERSION } from "@beaver/agent-core/extract/schema";
 import type { ExtractIdScheme } from "@beaver/agent-core/extract/ids";
+import type { ParagraphDetectionSettings } from "../ParagraphDetector";
+import type { RegionItemSettings } from "../regions/regionItems";
 
 /**
  * Extraction switches selected by PDF schema version. Anything that changes
@@ -53,8 +55,9 @@ export interface PdfExtractionPreset {
      */
     captionLabels: boolean;
     /**
-     * Smart margin removal matches text rows rather than single MuPDF lines
-     * (`ExtractionSettings.marginTextRows`).
+     * Smart margin removal matches text rows rather than single MuPDF lines,
+     * and keeps the words of justified prose rows on the page being filtered
+     * (`MarginFilter.collectMarginElements`, `filterPageWithSmartRemoval`).
      */
     marginTextRows: boolean;
     /**
@@ -127,16 +130,49 @@ export interface PdfExtractionPreset {
      * Needs region weights trained on them (`REGION_GRID_FEATURES`).
      */
     gridTableCandidates: boolean;
+    /**
+     * Structured extraction reports the page numbers printed in the margins
+     * as `document.derivedPageLabels` (see `derivedPageLabels.ts`).
+     */
+    derivedPageLabels: boolean;
 }
 
 const PDF_EXTRACTION_PRESETS: Record<string, PdfExtractionPreset> = {
-    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, exclusiveColumnLines: false, lineJoins: false, noteMarkers: false, learnedBoundaries: false, tableRowEvidence: false, gridTableCandidates: false },
-    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, exclusiveColumnLines: true, lineJoins: true, noteMarkers: true, learnedBoundaries: true, tableRowEvidence: true, gridTableCandidates: true },
+    "4": { schemaVersion: "4", textRepair: false, styleRuns: false, hangingIndentBlocks: false, headingLabelFilters: false, isolatedHeadings: false, pageBodyStyles: false, captionLabels: false, marginTextRows: false, itemPasses: [], idScheme: "document", regions: false, pageNumberRuns: false, exclusiveColumnLines: false, lineJoins: false, noteMarkers: false, learnedBoundaries: false, tableRowEvidence: false, gridTableCandidates: false, derivedPageLabels: false },
+    "5": { schemaVersion: "5", textRepair: true, styleRuns: true, hangingIndentBlocks: true, headingLabelFilters: true, isolatedHeadings: true, pageBodyStyles: true, captionLabels: true, marginTextRows: true, itemPasses: ["itemTypes", "references"], idScheme: "page", regions: true, pageNumberRuns: true, exclusiveColumnLines: true, lineJoins: true, noteMarkers: true, learnedBoundaries: true, tableRowEvidence: true, gridTableCandidates: true, derivedPageLabels: true },
 };
 
 /** Preset for a PDF schema version, or `undefined` when it can't be produced. */
 export function pdfExtractionPreset(schemaVersion: string): PdfExtractionPreset | undefined {
     return PDF_EXTRACTION_PRESETS[schemaVersion];
+}
+
+/**
+ * Paragraph detection settings with the preset's switches applied. The caller
+ * may override `hangingIndentBlocks`; `headingLabelFilters`,
+ * `isolatedHeadings`, `pageBodyStyles`, `exclusiveColumnLines`, `lineJoins`,
+ * `noteMarkers` and `learnedBoundaries` always follow the preset.
+ */
+export function presetParagraphSettings(
+    preset: PdfExtractionPreset,
+    settings?: ParagraphDetectionSettings,
+): ParagraphDetectionSettings {
+    return {
+        hangingIndentBlocks: preset.hangingIndentBlocks,
+        ...settings,
+        headingLabelFilters: preset.headingLabelFilters,
+        isolatedHeadings: preset.isolatedHeadings,
+        pageBodyStyles: preset.pageBodyStyles,
+        exclusiveColumnLines: preset.exclusiveColumnLines,
+        lineJoins: preset.lineJoins,
+        noteMarkers: preset.noteMarkers,
+        learnedBoundaries: preset.learnedBoundaries,
+    };
+}
+
+/** Settings of the region pass's items (`regionItemsForPage`) for the preset. */
+export function presetRegionSettings(preset: PdfExtractionPreset): RegionItemSettings {
+    return { tableRowEvidence: preset.tableRowEvidence };
 }
 
 /**

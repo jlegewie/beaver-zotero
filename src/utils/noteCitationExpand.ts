@@ -46,6 +46,7 @@ import {
     buildZoteroCitationLinkHTML,
     isLinkCitationItem,
     isStandaloneAttachment,
+    linkCitationPageLabelNamespace,
     parseLinkCitationPageSuffix,
     parseZoteroCitationLinkHref,
     zoteroLinkCitationPattern,
@@ -68,7 +69,12 @@ import {
 import type { PageLabels } from '../services/documentCache';
 import type { ExternalFileRecord } from '../services/database';
 import type { StructuredExtractResult } from '@beaver/agent-core/extract/schema';
+import {
+    loadStoredLocatorPageLabels,
+    loadPageLabelsForMetadata,
+} from '../services/documentExtraction/pageLabels';
 import { getCitationIndex } from '../beaver-extract/schema/citationIndex';
+import { resolveZoteroLocatorPageLabels } from '@beaver/agent-core/extract/pageLabels/printedPageLabels';
 import {
     locatorSchemaVersion,
     structuredPdfResultForSchema,
@@ -77,9 +83,11 @@ import { isCurrentExtractionSchemaVersion, producibleExtractionSchemaVersions } 
 import {
     firstPageNumber,
     formatCitationPages,
-    normalizePageLocator,
+    normalizePageRange,
+    citationPageLocator,
     translatePageLabelToNumber,
     translatePageNumberToLabel,
+    type StoredLocatorPageLabels,
 } from './pageLabelTranslation';
 import { citationItemRefFromUri } from './zoteroUri';
 import { isPdfDocument } from './attachmentFiles';
@@ -92,7 +100,7 @@ import {
     UNRESOLVED_LIBRARY_ID,
 } from './libraryIdentity';
 
-export { normalizePageLocator, translatePageNumberToLabel } from './pageLabelTranslation';
+export { translatePageNumberToLabel } from './pageLabelTranslation';
 
 /** The page a structural locator was resolved to, for display and navigation. */
 export interface ResolvedLocatorPage {
@@ -100,6 +108,14 @@ export interface ResolvedLocatorPage {
     label: string;
     /** First physical 1-based page, for links that navigate the reader. */
     page?: number;
+    /** The physical pages behind `label` ("4", "4-7", "2, 9"), recorded in links. */
+    pages?: string;
+    /**
+     * Locator for a native citation (`citationPageLocator`): the cited pages in
+     * Zotero locator labels without the pages that print none; absent when no
+     * cited page has a label in a labelled document.
+     */
+    locator?: string;
 }
 
 /**
@@ -219,16 +235,22 @@ async function attachmentCacheFilePath(attachmentItem: any): Promise<{ filePath:
 }
 
 /**
- * Resolve page labels for citations in a string that carry page locators.
+ * Resolve Zotero locator page labels for citations in a string that carry
+ * page locators.
  *
  * Returns a `PageLabelsByAttachmentId` map (attachment item ID → 0-based page
  * index → label). Callers thread the returned map into `expandToRawHtml` so
  * expansion can translate model-provided 1-based page numbers to display
  * labels without reading mutable cache state synchronously.
  *
- * On a metadata cache miss a full extraction is run via
- * `getAttachmentFileStatus`; the freshly written labels are then read back.
- * Remote-only attachments use cached labels only.
+ * On a metadata cache miss the PDF is analyzed via `getAttachmentFileStatus`
+ * and its labels are read back. That analysis does not derive printed labels,
+ * so a citation written before the PDF's first full extraction takes the
+ * label the PDF declares (or the physical page), and one written after it the
+ * printed label. Accepted: both are labels Zotero can resolve, the citation's
+ * private metadata keeps the physical page for Beaver, and a full extraction
+ * here would hold up the note write. Remote-only attachments use cached labels
+ * only.
  */
 export async function preloadPageLabelsForNewCitations(str: string): Promise<PageLabelsByAttachmentId> {
     const labelsByAttachmentId: PageLabelsByAttachmentId = {};
@@ -273,16 +295,19 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
                 zoteroKey: attachmentItem.key,
             }, filePath);
             if (!record && !isRemoteOnly) {
-                // Cache miss — run a full extraction, then read labels back.
+                // Cache miss — analyze the PDF, then read its labels back.
                 await getAttachmentFileStatus(attachmentItem, false);
                 record = await cache.getMetadata({
                     libraryId: attachmentItem.libraryID,
                     zoteroKey: attachmentItem.key,
                 }, filePath);
             }
-            if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
-                labelsByAttachmentId[attachmentItem.id] = { ...record.pageLabels };
-            }
+            const labels = await loadPageLabelsForMetadata(
+                record,
+                linkCitationPageLabelNamespace(attachmentItem),
+                filePath,
+            );
+            if (labels) labelsByAttachmentId[attachmentItem.id] = labels;
         } catch {
             // Skip items that can't be resolved
         }
@@ -304,8 +329,9 @@ async function itemExists(libraryID: number, key: string): Promise<boolean> {
 }
 
 /**
- * Load cached page labels for citations already stored in a raw Zotero note,
- * both native ones and the plain links used for standalone attachments.
+ * Load the label maps citations already stored in a raw Zotero note are read
+ * back through (`StoredLocatorPageLabels`), for both native citations and the
+ * plain links used for standalone attachments.
  *
  * This path is cache-first. Warm-cache reads only consult `documentCache`
  * metadata; callers can opt into local metadata seeding on a cache miss when
@@ -322,8 +348,8 @@ export async function preloadNotePageLabels(
         extractOnCacheMiss = false,
         allowRemoteDownloads = false,
     }: { extractOnCacheMiss?: boolean; allowRemoteDownloads?: boolean } = {},
-): Promise<Record<string, PageLabels>> {
-    const labelsByItemId: Record<string, PageLabels> = {};
+): Promise<Record<string, StoredLocatorPageLabels>> {
+    const labelsByItemId: Record<string, StoredLocatorPageLabels> = {};
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return labelsByItemId;
     await ensureCitedLibrariesLoaded([rawHtml], [libraryID]);
@@ -355,9 +381,8 @@ export async function preloadNotePageLabels(
                     zoteroKey: attachmentItem.key,
                 }, filePath);
             }
-            if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
-                labelsByItemId[itemId] = { ...record.pageLabels };
-            }
+            const labels = await loadStoredLocatorPageLabels(record, filePath);
+            if (labels) labelsByItemId[itemId] = labels;
         } catch {
             // Skip attachments whose file or metadata cannot be read.
         }
@@ -417,11 +442,26 @@ export async function preloadNotePageLabels(
     return labelsByItemId;
 }
 
+/** Zotero locator labels of a structured document, per 0-based page index. */
+function documentLocatorLabels(document: StructuredExtractResult['document']): Record<number, string> {
+    const embedded: Record<number, string> = {};
+    for (const page of document.pages) {
+        if (page.label) embedded[page.index] = page.label;
+    }
+    return resolveZoteroLocatorPageLabels({
+        pageCount: document.pageCount ?? null,
+        derived: document.derivedPageLabels,
+        embedded,
+    });
+}
+
 /**
  * Map a non-page (structural) locator to the page it appears on, using the
- * document's structured citation index. The label is the page's display label
- * when available, otherwise the 1-based page number; null when the locator is
- * not indexed. With `includeRange`, every page the locator names is kept; they
+ * document's structured citation index. The label is the page's label in
+ * `labelNamespace` when it has one (Zotero locator labels from the index, or
+ * the labels the PDF declares, for a link that cannot carry its page; see
+ * `linkCitationPageLabelNamespace`), otherwise the 1-based page number; null
+ * when the locator is not indexed. With `includeRange`, every page the locator names is kept; they
  * read as one first–last span only when the locator is a contiguous run, so a
  * sentence list that skips pages (`s2.1,s9.1`) reads "2, 9".
  */
@@ -429,24 +469,35 @@ function resolvePageFromStructuredResult(
     result: StructuredExtractResult,
     locator: Locator,
     includeRange = false,
+    labelNamespace: 'locator' | 'declared' = 'locator',
 ): ResolvedLocatorPage | null {
     const index = getCitationIndex(result.document);
+    const declared = labelNamespace === 'declared'
+        ? new Map(result.document.pages.map((page) => [page.index, page.label]))
+        : null;
     const pages: number[] = [];
     const labels: PageLabels = {};
     for (const id of citationIndexCandidateIdsForLocator(locator)) {
         const entry = index[id];
         if (!entry || !Number.isInteger(entry.pageIndex) || entry.pageIndex < 0) continue;
         pages.push(entry.pageIndex + 1);
-        if (entry.pageLabel) labels[entry.pageIndex] = entry.pageLabel;
+        const label = declared ? declared.get(entry.pageIndex) : entry.pageLabel;
+        if (label) labels[entry.pageIndex] = label;
         if (!includeRange) break;
     }
-    const label = formatCitationPages(pages, labels, {
-        inclusiveRange: includeRange && isRecordIdRange(locator),
-    });
-    // The physical page is kept alongside the label: a label cannot be
+    const inclusiveRange = includeRange && isRecordIdRange(locator);
+    const label = formatCitationPages(pages, labels, { inclusiveRange });
+    if (!label) return null;
+    // The physical pages are kept alongside the label: a label cannot be
     // translated back once the extraction result is out of scope, and link
-    // citations navigate the reader by physical page.
-    return label ? { label, page: Math.min(...pages) } : null;
+    // citations navigate the reader by physical page and record the pages.
+    const physical = formatCitationPages(pages, null, { inclusiveRange })!;
+    return {
+        label,
+        page: Math.min(...pages),
+        pages: physical,
+        locator: citationPageLocator(documentLocatorLabels(result.document), physical),
+    };
 }
 
 /**
@@ -587,7 +638,13 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
                 resultsByAttachment.set(resultKey, resultPromise);
             }
             const result = await resultPromise;
-            const resolved = result && resolvePageFromStructuredResult(result, loc, isStandaloneAttachment(item));
+            // Resolving the file path primed the file state, so this matches the link built later.
+            const resolved = result && resolvePageFromStructuredResult(
+                result,
+                loc,
+                isStandaloneAttachment(item),
+                linkCitationPageLabelNamespace(attachmentItem),
+            );
             if (resolved) pages[citationKey] = resolved;
             else if (citesPdf) (result ? missing : unresolved).push(describe);
         } catch {
@@ -698,6 +755,13 @@ interface SimplifiedCitationAttrs {
      * so link citations can still navigate the reader to it.
      */
     navPage?: number;
+    /** All physical pages behind a resolved label, recorded in link citations. */
+    navPages?: string;
+    /**
+     * Locator a native citation stores for a resolved structural locator
+     * (`ResolvedLocatorPage.locator`); absent when it cites no labelled page.
+     */
+    citationPage?: string;
     /** The locator as written, recorded in the citation's private metadata. */
     loc?: Locator;
 }
@@ -712,13 +776,21 @@ interface SimplifiedCitationAttrs {
 function resolveLocatorPageAttr(
     ref: CitationRef,
     resolvedLocatorPages?: ResolvedLocatorPages,
-): { page?: string; pageIsResolvedLabel?: boolean; navPage?: number } {
+): { page?: string; pageIsResolvedLabel?: boolean; navPage?: number; navPages?: string; citationPage?: string } {
     const page = getPageLocator(ref);
     if (page) return { page };
 
     if (ref.loc && ref.loc.kind !== 'page' && resolvedLocatorPages) {
         const resolved = resolvedLocatorPages[requestedCitationKey(ref)];
-        if (resolved) return { page: resolved.label, pageIsResolvedLabel: true, navPage: resolved.page };
+        if (resolved) {
+            return {
+                page: resolved.label,
+                pageIsResolvedLabel: true,
+                navPage: resolved.page,
+                navPages: resolved.pages,
+                citationPage: resolved.locator,
+            };
+        }
     }
     return {};
 }
@@ -738,10 +810,10 @@ function parseSimplifiedCitationAttrs(
         throw new Error('Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
     }
     const item_id = modelObjectIdFromReference(normalized.ref);
-    const { page, pageIsResolvedLabel, navPage } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
+    const { page, pageIsResolvedLabel, navPage, navPages, citationPage } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
     return {
         item_id,
-        ...(page ? { page, pageIsResolvedLabel, navPage } : {}),
+        ...(page ? { page, pageIsResolvedLabel, navPage, navPages, citationPage } : {}),
         ...(normalized.ref.loc ? { loc: normalized.ref.loc } : {}),
     };
 }
@@ -788,18 +860,13 @@ function resolvePageForCitation(
     pageLabels?: PageLabelsByAttachmentId,
 ): string | undefined {
     if (!page) return undefined;
-    let resolved = normalizePageLocator(page);
-    if (shouldTranslate && resolved) {
-        if (item.isAttachment()) {
-            resolved = translatePageNumberToLabel(pageLabels?.[item.id] ?? null, resolved);
-        } else {
-            const att = getBestPDFAttachment(item);
-            if (att) {
-                resolved = translatePageNumberToLabel(pageLabels?.[att.id] ?? null, resolved);
-            }
-        }
-    }
-    return resolved;
+    // A range or list the model wrote is kept: the citation claims those pages,
+    // in labels, without pages that print none (`citationPageLocator`).
+    const resolved = normalizePageRange(page);
+    if (!shouldTranslate || !resolved) return resolved;
+    const attachment = item.isAttachment() ? item : getBestPDFAttachment(item);
+    if (!attachment) return resolved;
+    return citationPageLocator(pageLabels?.[attachment.id] ?? null, resolved);
 }
 
 /**
@@ -816,6 +883,8 @@ function buildCitation({
     page,
     pageIsResolvedLabel,
     navPage,
+    navPages,
+    citationPage,
     loc,
     attrName = 'item_id',
     shouldTranslatePage = true,
@@ -848,7 +917,6 @@ function buildCitation({
         if (annotationCitation) return stripInlineItemDataFromDataCitations(noteCitationHTML(annotationCitation));
     }
     if (isLinkCitationItem(item)) {
-        // Item links can display full ranges; native CSL navigation needs a single page.
         const labels = pageLabels?.[item.id];
         // `page` is a physical page number from the model, but a page already
         // resolved from a structural locator — or read back from a note, where
@@ -863,9 +931,14 @@ function buildCitation({
         const linkPage = displayPage
             ? navPage ?? firstPageNumber(pageIsLabel ? translatePageLabelToNumber(labels, displayPage) : page)
             : undefined;
+        // The physical pages behind the label, recorded in the link: the
+        // model's own page, or those a structural locator resolved to.
+        const physicalPages = displayPage
+            ? pageIsResolvedLabel === true ? navPages : pageIsLabel ? undefined : page
+            : undefined;
         return buildZoteroCitationLinkHTML(item, displayPage
             ? { kind: 'page', value: displayPage, raw: `page${displayPage}` }
-            : undefined, linkPage);
+            : undefined, linkPage, physicalPages);
     }
     // Only a PDF page is a printed page. For other attachments a page locator
     // is left out of the CSL citation; the private metadata keeps it. A
@@ -873,9 +946,9 @@ function buildCitation({
     const isPageLocator = !citationOptions?.label || citationOptions.label === 'page';
     let resolvedPage: string | undefined;
     if (!isPageLocator || citesPrintedPages(item)) {
-        // Structural locators already resolve to final labels; do not translate twice.
+        // Structural locators already resolve to their locator; do not translate twice.
         resolvedPage = pageIsResolvedLabel
-            ? page
+            ? citationPage
             : resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
     }
     // A page locator kept in the convention it was read in is a printed label,
@@ -1200,9 +1273,9 @@ export function expandNoteCitationTags(
             if (attId) {
                 // Resolve structural locators on legacy att_id/attachment_id
                 // citations the same way as the unified id path.
-                const { page, pageIsResolvedLabel, navPage } = normalizedCitation.ok
+                const { page, pageIsResolvedLabel, navPage, navPages, citationPage } = normalizedCitation.ok
                     ? resolveLocatorPageAttr(normalizedCitation.ref, resolvedLocatorPages)
-                    : { page: extractAttr(attrStr, 'page'), pageIsResolvedLabel: false, navPage: undefined };
+                    : { page: extractAttr(attrStr, 'page'), pageIsResolvedLabel: false, navPage: undefined, navPages: undefined, citationPage: undefined };
                 return buildCitation({
                     item_id: attId,
                     attrName: 'att_id',
@@ -1210,6 +1283,8 @@ export function expandNoteCitationTags(
                     pageLabels,
                     pageIsResolvedLabel,
                     navPage,
+                    navPages,
+                    citationPage,
                     loc: normalizedCitation.ok ? normalizedCitation.ref.loc : undefined,
                 });
             }

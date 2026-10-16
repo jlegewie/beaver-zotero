@@ -130,27 +130,32 @@ describe('MuPDFWorkerClient idle recycling and standby', () => {
             expect(MockWorker.instances).toHaveLength(2);
             const standby = MockWorker.instances[1];
             expect(standby.configureMessages).toHaveLength(1);
-            expect(opsPosted(standby)).toEqual(['__init']);
+            expect(opsPosted(standby)).toEqual(['__warmup']);
             expect(client.getStats()).toMatchObject({
                 hasWorker: true,
                 spawnCount: 2,
                 proactiveRecycleCount: 1,
                 idleRecycleCount: 1,
                 standbySpawnCount: 1,
+                warmupCount: 1,
                 lastProactiveRecycleReason: 'data_operation_limit',
                 lastProactiveRecycleDataOperations: 2,
                 completedDataOperationsSinceSpawn: 0,
                 dispatchCounts: { getPageCount: 2 },
             });
 
-            // The standby's init does not count as a data operation, and the
-            // next call runs on it without another spawn.
-            standby.replyToLast({ ok: true, result: {}, heapBytes: 64 });
+            // The standby's warm-up does not count as a data operation, and
+            // the next call runs on it without another spawn.
+            standby.replyToLast({ ok: true, result: { mupdfMs: 1, sentencexMs: 1, extractMs: 1 }, heapBytes: 64 });
             await vi.advanceTimersByTimeAsync(0);
-            expect(client.getStats().completedDataOperationsSinceSpawn).toBe(0);
+            expect(client.getStats()).toMatchObject({
+                completedDataOperationsSinceSpawn: 0,
+                warmedUp: true,
+                warmupInFlight: false,
+            });
             await runOp(client);
             expect(MockWorker.instances).toHaveLength(2);
-            expect(opsPosted(standby)).toEqual(['__init', 'getPageCount']);
+            expect(opsPosted(standby)).toEqual(['__warmup', 'getPageCount']);
         } finally {
             client.dispose();
         }
@@ -228,7 +233,7 @@ describe('MuPDFWorkerClient idle recycling and standby', () => {
         }
     });
 
-    it('a call during standby startup waits for the handshake and runs after the standby init', async () => {
+    it('a call during standby startup waits for the handshake and the warm-up, then runs', async () => {
         const client = idleClient();
         try {
             await runOp(client);
@@ -242,11 +247,12 @@ describe('MuPDFWorkerClient idle recycling and standby', () => {
             expect(client.inFlight).toBe(1);
             standby.sendReady();
             await vi.advanceTimersByTimeAsync(0);
-            expect(opsPosted(standby)).toEqual(['__init', 'getPageCount']);
+            expect(opsPosted(standby)).toEqual(['__warmup']);
+            expect(client.inFlight).toBe(2);
 
-            standby.onmessage?.({
-                data: { id: standby.posted[0].message.id, ok: true, result: {} },
-            });
+            standby.replyToLast({ ok: true, result: { mupdfMs: 1, sentencexMs: 1, extractMs: 1 } });
+            await vi.advanceTimersByTimeAsync(0);
+            expect(opsPosted(standby)).toEqual(['__warmup', 'getPageCount']);
             standby.replyToLast({ ok: true, result: { count: 4 }, heapBytes: 64 });
             await expect(op).resolves.toBe(4);
             expect(MockWorker.instances).toHaveLength(2);

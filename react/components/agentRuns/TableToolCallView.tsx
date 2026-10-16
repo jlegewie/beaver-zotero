@@ -13,7 +13,6 @@ import {
     ArrowDownIcon,
     ArrowRightIcon,
     ArrowUpRightIcon,
-    ChevronIcon,
     Icon,
     Spinner,
     TableIcon,
@@ -43,8 +42,8 @@ function requestedTitle(part: ToolCallPart): string | null {
 /**
  * A table write (`create_table`, `edit_rows`, `edit_table`, `fill_table`) as a
  * card in the run, shaped like the agent-action cards for notes: a bordered
- * header carrying the tool label and the table title, an open control beside
- * the fold toggle, and a body with the call's summary and any recovery notice.
+ * header carrying the tool label and the table title, an open control on the
+ * right, and a body with the call's summary and any recovery notice.
  *
  * The header opens the current snapshot through the navigation host; the body
  * is the ordinary tool-result view, so the outcome copy is defined once.
@@ -153,17 +152,6 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
                                 iconClassName="font-color-secondary scale-10"
                                 onClick={handleOpen}
                                 ariaLabel="Open table"
-                            />
-                        </Tooltip>
-                    )}
-                    {canExpand && (
-                        <Tooltip content={isExpanded ? 'Collapse' : 'Expand'} showArrow singleLine>
-                            <IconButton
-                                icon={ChevronIcon}
-                                variant="ghost-secondary"
-                                iconClassName="scale-12"
-                                onClick={toggleExpanded}
-                                ariaLabel={isExpanded ? 'Collapse' : 'Expand'}
                             />
                         </Tooltip>
                     )}

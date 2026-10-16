@@ -12,6 +12,7 @@ import {
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
     FailedAnnotationResult,
+    textAnnotationStyle,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
@@ -90,6 +91,7 @@ export async function executeCreateHighlightAnnotationsAction(
 ): Promise<CreateHighlightAnnotationsResultData> {
     const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
     const { requested_ref, resolved_ref, items, tags } = data;
+    const style = textAnnotationStyle(data.style);
     const { attachment, contentKind } = await getAnnotationAttachment(resolved_ref);
 
     await getAttachmentFileStatus(attachment, false);
@@ -109,6 +111,7 @@ export async function executeCreateHighlightAnnotationsAction(
                     comment: item.comment ?? '',
                     pageLabel: item.page_label ?? null,
                     tags,
+                    style,
                 });
                 created.push({
                     client_item_id: item.client_item_id,
@@ -142,7 +145,7 @@ export async function executeCreateHighlightAnnotationsAction(
         }
 
         try {
-            created.push(await createPdfHighlightForItem(attachment, item, tags));
+            created.push(await createPdfHighlightForItem(attachment, item, tags, style));
         } catch (error: any) {
             failed.push({
                 client_item_id: item.client_item_id,

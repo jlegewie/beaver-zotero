@@ -51,6 +51,10 @@ import {
     AgentService,
     AgentRunService,
     ConnectTimeoutError,
+    HEARTBEAT_INTERVAL_MS,
+    HEARTBEAT_TIMEOUT_CLOSE_CODE,
+    HEARTBEAT_TIMEOUT_MS,
+    HEARTBEAT_UPLOAD_TIMEOUT_MS,
 } from '@beaver/agent-core/transport/agentService';
 import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import type { AgentRunRequest, WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
@@ -64,6 +68,7 @@ class MockWebSocket {
 
     readonly url: string;
     readyState = MockWebSocket.CONNECTING;
+    bufferedAmount = 0;
     onopen: ((event: Event) => void) | null = null;
     onmessage: ((event: MessageEvent) => void) | null = null;
     onerror: ((event: Event) => void) | null = null;
@@ -1052,5 +1057,199 @@ it("keeps admission metadata across the history REST adapter", async () => {
         agent_actions: null,
         tail_run_id: "hidden-tail",
         activity: { state: "active", run_id: "reserved" },
+    });
+});
+
+describe('AgentService connection heartbeat', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        MockWebSocket.instances = [];
+        vi.stubGlobal('WebSocket', MockWebSocket);
+
+        mockSupabase.auth.getSession.mockReset();
+        mockSupabase.auth.refreshSession.mockReset();
+        mockSupabase.auth.getSession.mockResolvedValue({
+            data: {
+                session: {
+                    access_token: 'token',
+                    expires_at: Math.floor(Date.now() / 1000) + 3600,
+                },
+            },
+            error: null,
+        });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    async function connect(
+        service: AgentService,
+        callbacks: WSCallbacks,
+        supportsHeartbeat: boolean,
+    ): Promise<MockWebSocket> {
+        const initialCount = MockWebSocket.instances.length;
+        const connectPromise = service.connect({ type: 'chat' } as AgentRunRequest, callbacks);
+        for (let i = 0; i < 20 && MockWebSocket.instances.length === initialCount; i++) {
+            await Promise.resolve();
+        }
+        const socket = MockWebSocket.instances[initialCount];
+        if (!socket) throw new Error('Expected AgentService.connect() to create a WebSocket');
+        socket.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        socket.emitMessage({
+            event: 'ready',
+            subscription_status: 'active',
+            processing_mode: 'fast',
+            indexing_complete: true,
+            ...(supportsHeartbeat ? { supports_heartbeat: true } : {}),
+        });
+        await connectPromise;
+        return socket;
+    }
+
+    const pings = (socket: MockWebSocket) =>
+        socket.send.mock.calls
+            .map(([raw]) => JSON.parse(raw as string))
+            .filter((m) => m.type === 'ping');
+
+    it('sends no pings and never times out against a backend without heartbeat support', async () => {
+        const callbacks = createCallbacks();
+        const socket = await connect(new AgentService('https://api.example.com', {}), callbacks, false);
+
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+        expect(pings(socket)).toHaveLength(0);
+        expect(callbacks.onClose).not.toHaveBeenCalled();
+        expect(socket.close).not.toHaveBeenCalled();
+    });
+
+    it('keeps a quiet connection open while the server answers its pings', async () => {
+        const callbacks = createCallbacks();
+        const socket = await connect(new AgentService('https://api.example.com', {}), callbacks, true);
+
+        // An approval card waits for minutes with no run traffic; only pongs arrive.
+        for (let i = 0; i < 20; i++) {
+            await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+            socket.emitMessage({ event: 'pong' });
+            await flushMicrotasks();
+        }
+
+        expect(pings(socket)).toHaveLength(20);
+        expect(callbacks.onClose).not.toHaveBeenCalled();
+        expect(callbacks.onError).not.toHaveBeenCalled();
+    });
+
+    it('reports a lost connection once the server stops answering, without waiting for the browser', async () => {
+        const callbacks = createCallbacks();
+        const service = new AgentService('https://api.example.com', {});
+        const socket = await connect(service, callbacks, true);
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_TIMEOUT_MS - 1);
+        expect(callbacks.onClose).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+        const [code, reason, wasClean, evidence] = vi.mocked(callbacks.onClose!).mock.calls[0];
+        expect(code).toBe(1006);
+        expect(reason).toBe('heartbeat_timeout');
+        expect(wasClean).toBe(false);
+        expect(evidence).toMatchObject({ stage: 'mid_run', readyReceived: true, closeCode: 1006 });
+        expect(evidence?.msSinceLastWsMessageMs).toBeGreaterThanOrEqual(HEARTBEAT_TIMEOUT_MS);
+        expect(socket.close).toHaveBeenCalledTimes(1);
+        expect(socket.close).toHaveBeenCalledWith(HEARTBEAT_TIMEOUT_CLOSE_CODE, 'Heartbeat timeout');
+        expect(service.isConnected()).toBe(false);
+
+        // The browser's own close event, when it finally fires, is not reported twice.
+        socket.emitClose({ code: 1006, wasClean: false });
+        const pingCount = pings(socket).length;
+        await vi.advanceTimersByTimeAsync(5 * HEARTBEAT_INTERVAL_MS);
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+        expect(pings(socket)).toHaveLength(pingCount);
+    });
+
+    it('waits longer while a large outbound message is still uploading', async () => {
+        const callbacks = createCallbacks();
+        const socket = await connect(new AgentService('https://api.example.com', {}), callbacks, true);
+
+        socket.bufferedAmount = 8 * 1024 * 1024;
+        await vi.advanceTimersByTimeAsync(2 * HEARTBEAT_TIMEOUT_MS);
+        expect(callbacks.onClose).not.toHaveBeenCalled();
+
+        // Once the upload drains, the server gets a full timeout to answer.
+        socket.bufferedAmount = 0;
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_TIMEOUT_MS - HEARTBEAT_INTERVAL_MS);
+        expect(callbacks.onClose).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(2 * HEARTBEAT_INTERVAL_MS);
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a lost connection when queued outbound data stops draining', async () => {
+        const callbacks = createCallbacks();
+        const socket = await connect(new AgentService('https://api.example.com', {}), callbacks, true);
+
+        socket.bufferedAmount = 8 * 1024 * 1024;
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_UPLOAD_TIMEOUT_MS - HEARTBEAT_INTERVAL_MS);
+        expect(callbacks.onClose).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(2 * HEARTBEAT_INTERVAL_MS);
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(callbacks.onClose!).mock.calls[0][1]).toBe('heartbeat_timeout');
+    });
+
+    it('keeps a connection open while queued messages keep finishing', async () => {
+        const callbacks = createCallbacks();
+        const socket = await connect(new AgentService('https://api.example.com', {}), callbacks, true);
+
+        // Several large responses written back to back, one finishing per window.
+        socket.bufferedAmount = 64 * 1024 * 1024;
+        for (let i = 0; i < 2 * HEARTBEAT_UPLOAD_TIMEOUT_MS / HEARTBEAT_INTERVAL_MS; i++) {
+            await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+            socket.bufferedAmount -= 1024 * 1024;
+        }
+        expect(callbacks.onClose).not.toHaveBeenCalled();
+    });
+
+    it("does not count its own ping draining as upload progress", async () => {
+        const callbacks = createCallbacks();
+        const socket = await connect(new AgentService('https://api.example.com', {}), callbacks, true);
+        // Each ping sits in the buffer briefly and has drained by the next tick.
+        socket.send.mockImplementation(() => { socket.bufferedAmount = 16; });
+        const drain = setInterval(() => { socket.bufferedAmount = 0; }, 1_000);
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_TIMEOUT_MS + HEARTBEAT_INTERVAL_MS);
+        clearInterval(drain);
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives pongs a full timeout after the timers were starved', async () => {
+        const callbacks = createCallbacks();
+        const socket = await connect(new AgentService('https://api.example.com', {}), callbacks, true);
+
+        // A blocked main thread or system sleep: the clock moves, timers do not.
+        vi.setSystemTime(Date.now() + 5 * 60_000);
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+        expect(callbacks.onClose).not.toHaveBeenCalled();
+
+        socket.emitMessage({ event: 'pong' });
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+        expect(callbacks.onClose).not.toHaveBeenCalled();
+    });
+
+    it('stops pinging once the client closes the connection', async () => {
+        const callbacks = createCallbacks();
+        const service = new AgentService('https://api.example.com', {});
+        const socket = await connect(service, callbacks, true);
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+        expect(pings(socket)).toHaveLength(1);
+
+        service.close();
+        await vi.advanceTimersByTimeAsync(5 * HEARTBEAT_TIMEOUT_MS);
+        expect(pings(socket)).toHaveLength(1);
+        // Only the client's own close notification, never a heartbeat loss.
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(callbacks.onClose!).mock.calls[0][0]).toBe(1000);
     });
 });

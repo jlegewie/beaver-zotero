@@ -58,6 +58,7 @@ let nextKey = 0;
 
 class MockAnnotationItem {
   key = `ANNOT${String(nextKey++).padStart(3, "0")}`;
+  annotationType?: string;
   annotationComment?: string;
   annotationPosition?: string;
   annotationPageLabel?: string;
@@ -173,6 +174,48 @@ describe("two-page PDF highlights", () => {
       }),
     ]);
     expect(response.result_data.failed).toEqual([]);
+  });
+
+  it("writes an underline with the same placement when the action asks for one", async () => {
+    const response = await executeCreateHighlightAnnotationsAction(
+      request({ ...actionData([location(4), location(5)]), style: "underline" }),
+      timeoutContext(),
+    );
+
+    expect(response.success).toBe(true);
+    expect(savedItems).toHaveLength(1);
+    expect(savedItems[0].annotationType).toBe("underline");
+    expect(JSON.parse(savedItems[0].annotationPosition!)).toHaveProperty("nextPageRects");
+  });
+
+  it("writes a highlight when the action names no style", async () => {
+    await executeCreateHighlightAnnotationsAction(
+      request(actionData([location(4)])),
+      timeoutContext(),
+    );
+
+    expect(savedItems[0].annotationType).toBe("highlight");
+  });
+
+  it("writes an underline when the user applies the action from the card", async () => {
+    await executeManually({
+      id: "action-1",
+      proposed_data: { ...actionData([location(4)]), style: "underline" },
+    } as any);
+
+    expect(savedItems[0].annotationType).toBe("underline");
+  });
+
+  it("keeps an underline style in the normalized action data, and adds none for highlights", async () => {
+    const underline = await validateCreateHighlightAnnotationsAction(
+      request({ ...actionData([location(4)]), style: "underline" }),
+    );
+    const highlight = await validateCreateHighlightAnnotationsAction(
+      request(actionData([location(4)])),
+    );
+
+    expect(underline.normalized_action_data?.style).toBe("underline");
+    expect(highlight.normalized_action_data).not.toHaveProperty("style");
   });
 
   it("keeps a one-page highlight's position without nextPageRects", async () => {

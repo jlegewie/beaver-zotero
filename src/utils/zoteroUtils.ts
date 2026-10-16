@@ -1,6 +1,5 @@
 import { logger } from "@beaver/agent-core/platform/logger";
 import type { CreatorJSON } from "@beaver/agent-core/types/agentActions/base";
-import { safeAttachmentFilename } from "./attachmentFiles";
 import { getItemDisplayName as getDisplayNameFromItem } from "./itemDisplayName";
 import { UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
 import type { BeaverCitationMeta } from "./noteCitationMeta";
@@ -219,66 +218,6 @@ export function isLibraryEditable(libraryId: number): boolean {
     return library.editable && library.filesEditable;
 }
 
-export function isLibrarySynced(libraryID: number): boolean {
-    try {
-        // Check if sync is enabled globally first
-        if (!Zotero.Sync.Runner.enabled) {
-            return false;
-        }
-        
-        // Get the library object
-        const library = Zotero.Libraries.get(libraryID);
-        if (!library) {
-            return false;
-        }
-        
-        // Check if library type supports syncing (excludes feed libraries)
-        if (!library.syncable) {
-            return false;
-        }
-        
-        // Check if this specific library is skipped from sync
-        if (isLibrarySkipped(library)) {
-            return false;
-        }
-        
-        // Check if library has actually been synced before
-        // This indicates it's connected to Zotero sync infrastructure
-        if (!library.lastSync) {
-            return false;
-        }
-        
-        // Check if library has a version (indicates modern sync setup)
-        if (!library.libraryVersion || library.libraryVersion === 0) {
-            return false;
-        }
-        
-        return true;
-
-    } catch (e) {
-        Zotero.logError(e as Error);
-        return false;
-    }
-}
-
-export function isLibrarySkipped(library: _ZoteroTypes.Library.LibraryLike): boolean {;
-    try {
-        const pref = 'sync.librariesToSkip';
-        const librariesToSkip = (Zotero.Prefs.get(pref) || []) as string[];
-        
-        // Check based on library type
-        if (library.libraryType === 'group') {
-            // @ts-ignore Zotero.Library.groupID is defined
-            return librariesToSkip.includes("G" + library.groupID);
-        } else {
-            return librariesToSkip.includes("L" + library.libraryID);
-        }
-    } catch (e) {
-        Zotero.logError(e as Error);
-        return false;
-    }
-}
-
 /**
  * Determines the MIME type for a Zotero attachment
  * Falls back to file detection if stored type is missing/generic
@@ -311,50 +250,6 @@ export async function getMimeType(attachment: Zotero.Item, filePath?: string): P
 
     return mimeType;
 }
-
-
-/**
- * Detects the MIME type from in-memory file data.
- * This replicates the logic of Zotero.MIME.getMIMETypeFromFile without needing a file on disk.
- *
- * @param {Zotero.Item} attachment - The attachment item, used for the filename extension hint.
- * @param {Uint8Array|ArrayBuffer} fileData - The binary content of the file.
- * @returns {string} The detected MIME type, or the stored MIME type if detection fails.
- */
-export function getMimeTypeFromData(attachment: Zotero.Item, fileData: Uint8Array | ArrayBuffer): string {
-    if (!attachment.isAttachment()) return '';
-
-    const mimeType = attachment.attachmentContentType;
-
-
-    // Validate/correct MIME type by checking actual file if needed
-    if (!mimeType || mimeType === 'application/octet-stream' || mimeType === '') {
-        // File data check
-        if (!fileData) return mimeType;
-
-        // Ensure we have a Uint8Array to work with
-        const data = (fileData instanceof Uint8Array) ? fileData : new Uint8Array(fileData);
-
-        // Take a sample from the beginning of the file for sniffing.
-        const sampleSize = 512;
-        const sampleBytes = data.slice(0, sampleSize);
-
-        // Convert the binary sample to a string
-        let sampleString = '';
-        for (let i = 0; i < sampleBytes.length; i++) {
-            sampleString += String.fromCharCode(sampleBytes[i]);
-        }
-
-        // Get the file extension from the attachment's filename as a hint.
-        const extension = ((safeAttachmentFilename(attachment) ?? '').split('.').pop() || '').toLowerCase();
-
-        // Use Zotero's internal data-based MIME type detection
-        return Zotero.MIME.getMIMETypeFromData(sampleString, extension);
-    }
-
-    return mimeType;
-}
-
 
 
 export async function shortItemTitle(item: Zotero.Item): Promise<string> {
@@ -515,9 +410,10 @@ export interface NoteCitationData {
  * - An attachment cites its parent; a standalone attachment, a note or an
  *   annotation cannot be a native citation (callers cite an annotation's
  *   parent item, or write a link).
- * - `locator` must already be the single page label to store. Zotero opens a
- *   citation by matching its locator exactly against the PDF's page labels,
- *   so a range would display but never navigate.
+ * - `locator` must already be the page label(s) to store. A range or list is
+ *   kept when the citation claims those pages, although Zotero's "Go to Page"
+ *   matches the locator exactly against the PDF's page labels and so only
+ *   navigates for a single page.
  * - `label` is omitted unless `options` preserves one: Zotero prints a label
  *   verbatim ("page 12"), while no label renders the standard "p. 12", the
  *   form Zotero itself writes for citations added from annotations.

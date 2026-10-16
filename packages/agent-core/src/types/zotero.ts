@@ -45,12 +45,6 @@ export interface ZoteroItemReference {
     library_ref?: string;
 }
 
-export interface FileHashReference {
-    file_hash: string;
-    library_id: number;
-    zotero_key: string;
-}
-
 /**
  * CollectionReference is a reference to a Zotero collection.
  *
@@ -129,12 +123,6 @@ export interface BibliographicIdentifier {
     pmcid?: string;
     arXivID?: string;
     archiveID?: string;
-}
-
-export interface DeleteData extends ZoteroItemReference {
-    zotero_version: number | null;
-    zotero_synced: boolean | null;
-    date_modified: string | null;
 }
 
 /** Minimal bibliographic anchor for a regular item */

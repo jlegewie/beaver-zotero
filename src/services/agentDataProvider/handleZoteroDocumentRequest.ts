@@ -133,6 +133,8 @@ const WIRE_TIMING_KEYS: readonly [keyof PdfDocumentTimings, keyof WSDocumentTimi
     ['workerQueueMs', 'worker_queue_ms'],
     ['workerOpMs', 'worker_op_ms'],
     ['cacheWriteMs', 'cache_write_ms'],
+    ['workerHeapMb', 'worker_heap_mb'],
+    ['workerPeakHeapMb', 'worker_peak_heap_mb'],
 ];
 
 /**

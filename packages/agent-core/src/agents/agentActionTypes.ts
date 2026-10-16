@@ -24,7 +24,7 @@ import type {
     HighlightAnnotationItem,
     NoteAnnotationItem,
 } from '../types/agentActions/createAnnotations';
-import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
+import { normalizeAnnotationTags, textAnnotationStyle } from '../types/agentActions/createAnnotations';
 import type {
     AnnotationPlacementSnapshot,
     AnnotationPreviewSnapshot,
@@ -519,6 +519,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 ? proposedData.items.map(normalizeHighlightAnnotationItem)
                 : [],
             tags: normalizeAnnotationTags(proposedData.tags),
+            ...(textAnnotationStyle(proposedData.style) === 'underline' ? { style: 'underline' } : {}),
         } as CreateHighlightAnnotationsProposedData;
     } else if (actionType === 'create_note_annotations') {
         proposedData = {

@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
 import { ThreadData } from '../../react/atoms/threads';
 import { getPref } from '../utils/prefs';
-import { SyncMethod, SyncType } from '../../react/atoms/sync';
 import {
     isExtractContentKind,
     parseCachedDocumentMetadata,
@@ -184,6 +183,8 @@ export interface DocumentCacheMetadataRecord {
     documentMetadata: CachedDocumentMetadata | null;
     pageCount: number | null;
     pageLabels: DocumentCachePageLabels | null;
+    /** See `CachedDocumentMetadata.derivedPageLabels`; `undefined` = not known. */
+    derivedPageLabels: DocumentCachePageLabels | null | undefined;
     pages: PdfCachedDocumentMetadata['pages'];
     errorCode: DocumentCacheErrorCode | null;
     extractionSchemaVersion: string;
@@ -229,6 +230,7 @@ export type DocumentCacheMetadataInput = Omit<
     | 'documentMetadata'
     | 'pageCount'
     | 'pageLabels'
+    | 'derivedPageLabels'
     | 'pages'
 > & {
     documentMetadata: CachedDocumentMetadata;
@@ -518,6 +520,9 @@ export interface ThreadRecord {
     created_at: string;
     updated_at: string;
 }
+
+type SyncType = 'initial' | 'incremental' | 'consistency' | 'verification';
+type SyncMethod = 'version' | 'date_modified';
 
 /* 
  * Interface for the 'sync_logs' table row
@@ -1387,50 +1392,6 @@ export class BeaverDB {
     // --- Sync Logs Methods ---
 
     /**
-     * Insert a new sync log record.
-     * @param syncLog The sync log data to insert (without id, which will be generated)
-     * @returns The complete SyncLogsRecord with generated id
-     */
-    public async insertSyncLog(syncLog: Omit<SyncLogsRecord, 'id' | 'timestamp'>): Promise<SyncLogsRecord> {
-        // Validate required fields
-        const requiredFields = ['session_id', 'user_id', 'sync_type', 'method', 'zotero_local_id', 'library_id', 'library_version', 'library_date_modified'] as const;
-        for (const field of requiredFields) {
-            if (syncLog[field] === undefined || syncLog[field] === null) {
-                throw new Error(`insertSyncLog: Required field '${field}' is ${syncLog[field]}. Full syncLog: ${JSON.stringify(syncLog)}`);
-            }
-        }
-        
-        const id = uuidv4();
-        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-        
-        await this.queryAsync(
-            `INSERT INTO sync_logs (id, session_id, user_id, sync_type, method, zotero_local_id, zotero_user_id, library_id, total_upserts, total_deletions, library_version, library_date_modified, timestamp) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                id,
-                syncLog.session_id,
-                syncLog.user_id,
-                syncLog.sync_type,
-                syncLog.method,
-                syncLog.zotero_local_id,
-                syncLog.zotero_user_id ?? null,
-                syncLog.library_id,
-                syncLog.total_upserts,
-                syncLog.total_deletions,
-                syncLog.library_version,
-                syncLog.library_date_modified,
-                now
-            ]
-        );
-        
-        return {
-            id,
-            ...syncLog,
-            timestamp: now,
-        };
-    }
-
-    /**
      * Get sync log record for library_id and user_id with the highest library_version.
      * @param user_id The user_id to filter by
      * @param library_id The library_id to filter by
@@ -1472,88 +1433,6 @@ export class BeaverDB {
         }
         
         return BeaverDB.rowToSyncLogsRecord(rows[0]);
-    }
-
-    /**
-     * Get all sync log records for specific library_id and user_id.
-     * @param user_id The user_id to filter by
-     * @param library_id The library_id to filter by
-     * @param orderBy Optional ordering field ('timestamp', 'library_version', 'library_date_modified')
-     * @param orderDirection Optional order direction ('ASC' or 'DESC')
-     * @returns Array of SyncLogsRecord objects
-     */
-    public async getAllSyncLogsForLibrary(
-        user_id: string, 
-        library_id: number,
-        orderBy: 'timestamp' | 'library_version' | 'library_date_modified' = 'timestamp',
-        orderDirection: 'ASC' | 'DESC' = 'DESC'
-    ): Promise<SyncLogsRecord[]> {
-        const validOrderBy = ['timestamp', 'library_version', 'library_date_modified'];
-        const validDirection = ['ASC', 'DESC'];
-        
-        if (!validOrderBy.includes(orderBy)) {
-            throw new Error(`Invalid orderBy field: ${orderBy}`);
-        }
-        
-        if (!validDirection.includes(orderDirection)) {
-            throw new Error(`Invalid order direction: ${orderDirection}`);
-        }
-        
-        const rows = await this.queryAsync(
-            `SELECT * FROM sync_logs 
-             WHERE user_id = ? AND library_id = ? 
-             ORDER BY ${orderBy} ${orderDirection}`,
-            [user_id, library_id]
-        );
-        
-        return rows.map((row: any) => BeaverDB.rowToSyncLogsRecord(row));
-    }
-
-    public async getMostRecentSyncLogForLibraries(user_id: string, library_ids: number[]): Promise<SyncLogsRecord | null> {
-        if (!library_ids || library_ids.length === 0) return null;
-
-        const placeholders = library_ids.map(() => '?').join(',');
-        const rows = await this.queryAsync(
-            `SELECT * FROM sync_logs
-             WHERE user_id = ? AND library_id IN (${placeholders})
-             ORDER BY timestamp DESC
-             LIMIT 1`,
-            [user_id, ...library_ids]
-        );
-
-        if (rows.length === 0) {
-            return null;
-        }
-        return BeaverDB.rowToSyncLogsRecord(rows[0]);
-    }
-
-    /**
-     * Deletes all sync log records for a specific library.
-     * @param user_id The user_id to filter by
-     * @param library_ids The library_ids to delete logs for
-     */
-    public async deleteSyncLogsForLibraryIds(user_id: string, library_ids: number[]): Promise<void> {
-        if (library_ids.length === 0) {
-            return;
-        }
-
-        const placeholders = library_ids.map(() => '?').join(',');
-        await this.queryAsync(
-            `DELETE FROM sync_logs WHERE user_id = ? AND library_id IN (${placeholders})`,
-            [user_id, ...library_ids]
-        );
-    }
-
-    /**
-     * Deletes all sync log records for a user.
-     * Used during onboarding to ensure fresh sync state (e.g., after plan transitions).
-     * @param user_id The user_id to delete logs for
-     */
-    public async deleteAllSyncLogsForUser(user_id: string): Promise<void> {
-        await this.queryAsync(
-            `DELETE FROM sync_logs WHERE user_id = ?`,
-            [user_id]
-        );
     }
 
     // --- Embedding Methods ---
@@ -3558,6 +3437,7 @@ export class BeaverDB {
             documentMetadata,
             pageCount: pdfMetadata?.pageCount ?? null,
             pageLabels: pdfMetadata?.pageLabels ?? null,
+            derivedPageLabels: pdfMetadata?.derivedPageLabels,
             pages: pdfMetadata?.pages ?? null,
             errorCode: row.error_code ?? null,
             extractionSchemaVersion: row.extraction_schema_version,
@@ -4154,6 +4034,28 @@ export class BeaverDB {
             );
         });
         return deletedPayloads;
+    }
+
+    /**
+     * Replace a row's document metadata when the row is still exactly the one
+     * inspected. Leaves `updated_at` alone: the content is unchanged, only a
+     * field the row was written without is filled in. Returns whether it wrote.
+     */
+    public async updateDocumentCacheDocumentMetadataIfUnchanged(
+        metadata: DocumentCacheMetadataRecord,
+        documentMetadata: CachedDocumentMetadata,
+    ): Promise<boolean> {
+        let updated = false;
+        await this.conn.executeTransaction(async () => {
+            const current = await this.getDocumentCacheMetadataById(metadata.id);
+            if (!current || !BeaverDB.documentCacheMetadataMatches(current, metadata)) return;
+            await this.queryAsync(
+                `UPDATE document_cache_metadata SET document_metadata_json = ? WHERE id = ?`,
+                [JSON.stringify(documentMetadata), metadata.id],
+            );
+            updated = true;
+        });
+        return updated;
     }
 
     /** Delete metadata rows for a library and return payload rows for file cleanup. */

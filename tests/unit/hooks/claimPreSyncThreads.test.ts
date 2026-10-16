@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Module mocks — useProfileSync's import chain reaches supabase-backed services
 // =============================================================================
 
-vi.mock('../../../src/services/FileUploader', () => ({ fileUploader: {} }));
 vi.mock('@beaver/agent-core/transport/clients/accountService', () => ({ accountService: {} }));
 
 const claimThreadsMock = vi.fn();
@@ -64,7 +63,6 @@ vi.mock('../../../react/atoms/profile', async () => {
         requiredDataVersionAtom: atom(0),
         localZoteroLibrariesAtom: atom([]),
         minimumFrontendVersionAtom: atom(null),
-        syncDeniedForPlanAtom: atom(false),
         prefWindowFocusRefreshAtom: atom(0),
         errorCreditCheckAtom: atom(0),
         profileSyncStatusAtom: atom({ kind: 'ok' }),

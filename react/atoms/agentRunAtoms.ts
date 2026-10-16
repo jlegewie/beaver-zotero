@@ -72,9 +72,7 @@ import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import { toMessageAttachment, toValidatedMessageAttachment, externalFileRecordToAttachment } from '../types/attachments/converters';
 import { promptEditDraftsAtom } from './promptEdits';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
-import { SubscriptionStatus, ProcessingMode } from '@beaver/agent-core/types/profile';
 import {
-    isDatabaseSyncSupportedAtom,
     profileSyncStatusAtom,
     searchableLibraryIdsAtom,
     syncWithZoteroAtom,
@@ -1527,9 +1525,16 @@ function applyRunCitations(
     // Preload PDF page labels for cited attachments so the rendering path can
     // resolve page numbers from explicit render state. Runs after metadata is
     // exposed to avoid blocking the UI on PDF extraction.
+    //
+    // The preload usually settles after the run, when this window no longer
+    // holds the thread writer and the callback setter drops writes. The labels
+    // are render state keyed by attachment, not thread history, so they go to
+    // this renderer's store directly (still scoped to the account).
+    const generation = getCredentialGeneration();
     preloadPageLabelsForCitations(citations)
         .then((labelsByAttachmentId) => {
-            set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
+            if (generation !== getCredentialGeneration()) return;
+            store.set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
         })
         .catch((err) =>
             logger(`WS: Failed to preload page labels: ${err}`, 1)
@@ -1575,20 +1580,6 @@ export function createWSCallbacks(
             // promptly instead of lingering until the next backoff tick.
             if (store.get(profileSyncStatusAtom).kind !== 'ok') {
                 triggerProfileRefresh();
-            }
-
-            // Show popup if subscription is active but using frontend processing
-            if (data.subscriptionStatus === SubscriptionStatus.ACTIVE &&
-                store.get(isDatabaseSyncSupportedAtom) &&
-                data.processingMode === ProcessingMode.FRONTEND
-            ) {
-                set(addPopupMessageAtom, {
-                    type: 'info',
-                    title: 'Indexing your library',
-                    text: 'We are processing your library to enable Beta features. You can use standard features in the meantime.',
-                    expire: true,
-                    duration: 10000
-                });
             }
         },
 
@@ -3895,7 +3886,12 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
         return (set as any)(...args);
     }) as Setter;
     try {
-        if (
+        if (writer?.admission) {
+            // A second submission while the first is still reading admission
+            // (a repeated click or Enter) must not fall back to the cached
+            // tail: after a stopped or failed run that tail is stale.
+            if (!(await writer.admission.catch(() => false))) return;
+        } else if (
             presence &&
             id &&
             writer?.preparing === 1 &&
@@ -3903,22 +3899,31 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
                 !!get(threadAdmissionAtom)?.unconfirmedRunId)) &&
             !get(retryPendingRunIdAtom)
         ) {
-            const generation = getCredentialGeneration();
-            const snapshot = await readAdmission(id);
-            assertCredentialGeneration(generation);
-            assertWriter(writer);
-            if (nav !== get(threadNavigationSeqAtom)) return;
-            const previous = get(threadAdmissionAtom);
-            guardedSet(threadAdmissionAtom, snapshot);
-            if (
-                snapshot.activity.state === "active" ||
-                (previous?.threadId === id &&
-                    previous.tailRunId !== snapshot.tailRunId &&
-                    previous.unconfirmedRunId !== snapshot.tailRunId)
-            ) {
-                if (snapshot.activity.state !== "active")
-                    guardedSet(threadConflictAtom, "thread_tail_mismatch");
-                return;
+            const admission = (async () => {
+                const generation = getCredentialGeneration();
+                const snapshot = await readAdmission(id);
+                assertCredentialGeneration(generation);
+                assertWriter(writer);
+                if (nav !== get(threadNavigationSeqAtom)) return false;
+                const previous = get(threadAdmissionAtom);
+                guardedSet(threadAdmissionAtom, snapshot);
+                if (
+                    snapshot.activity.state === "active" ||
+                    (previous?.threadId === id &&
+                        previous.tailRunId !== snapshot.tailRunId &&
+                        previous.unconfirmedRunId !== snapshot.tailRunId)
+                ) {
+                    if (snapshot.activity.state !== "active")
+                        guardedSet(threadConflictAtom, "thread_tail_mismatch");
+                    return false;
+                }
+                return true;
+            })();
+            writer.admission = admission;
+            try {
+                if (!(await admission)) return;
+            } finally {
+                if (writer.admission === admission) writer.admission = undefined;
             }
         }
         return await operation(guardedSet);

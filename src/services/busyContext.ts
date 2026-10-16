@@ -39,8 +39,15 @@ export type BusyContext = {
     busy_indexing: number;
     /** 1 if Beaver's MuPDF worker has in-flight operations */
     busy_extracting: number;
-    /** Number of operations running or queued on the user-facing MuPDF worker */
+    /**
+     * Operations the user-facing MuPDF worker client has accepted: sent to the
+     * worker, or waiting for it to start or warm up
+     */
     extracting_hot_pending: number;
+    /** Calls waiting in the user-facing worker client's queue behind `extracting_hot_pending` */
+    extracting_hot_queued: number;
+    /** WASM heap of the user-facing worker after its latest operation, MB (0 when unknown) */
+    extracting_hot_heap_mb: number;
     /** Number of operations running or queued on the background MuPDF worker */
     extracting_background_pending: number;
     /** Age in ms of the oldest hot-worker operation, or 0 while idle */
@@ -170,6 +177,8 @@ export function getBusyContext(): BusyContext {
     let busyLocked = 0;
     let busyExtracting = 0;
     let extractingHotPending = 0;
+    let extractingHotQueued = 0;
+    let extractingHotHeapMb = 0;
     let extractingBackgroundPending = 0;
     let extractingHotOldestMs = 0;
     let extractingBackgroundOldestMs = 0;
@@ -196,6 +205,9 @@ export function getBusyContext(): BusyContext {
         const hot = Z.__beaverMuPDFWorkerClient_hot;
         const background = Z.__beaverMuPDFWorkerClient_background;
         extractingHotPending = hot?.inFlight ?? 0;
+        extractingHotQueued = hot?.queued ?? 0;
+        const hotHeapBytes = hot?.heapBytes;
+        extractingHotHeapMb = typeof hotHeapBytes === 'number' ? Math.round(hotHeapBytes / (1024 * 1024)) : 0;
         extractingBackgroundPending = background?.inFlight ?? 0;
         busyExtracting = extractingHotPending + extractingBackgroundPending > 0 ? 1 : 0;
 
@@ -252,6 +264,8 @@ export function getBusyContext(): BusyContext {
         busy_indexing: busyIndexing,
         busy_extracting: busyExtracting,
         extracting_hot_pending: extractingHotPending,
+        extracting_hot_queued: extractingHotQueued,
+        extracting_hot_heap_mb: extractingHotHeapMb,
         extracting_background_pending: extractingBackgroundPending,
         extracting_hot_oldest_ms: extractingHotOldestMs,
         extracting_background_oldest_ms: extractingBackgroundOldestMs,

@@ -17,6 +17,7 @@ import type {
     SerializedBeaverExtractResult,
 } from '../beaver-extract/schema';
 import type { PageGeometry } from '@beaver/agent-core/extract/types';
+import { derivedPageLabelsForCache } from '../beaver-extract/pipeline/output';
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -27,6 +28,7 @@ import {
     isWorkerDeadlineError,
     type PDFWorkerSlotName,
     type WorkerCallTiming,
+    type WorkerState,
 } from '../beaver-extract';
 import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
@@ -281,6 +283,7 @@ export type ExtractAndCacheSnapshotResult =
 export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResult): {
     pageCount: number;
     pageLabels: Record<string, string>;
+    derivedPageLabels?: Record<string, string> | null;
     pages: (PageGeometry | null)[];
 } {
     const doc = extracted.document;
@@ -300,9 +303,11 @@ export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResu
             rotation: page.rotation,
         };
     }
+    const derivedPageLabels = derivedPageLabelsForCache(extracted);
     return {
         pageCount: doc.pageCount,
         pageLabels: extractedPageLabels,
+        ...(derivedPageLabels !== undefined ? { derivedPageLabels } : {}),
         pages,
     };
 }
@@ -319,6 +324,7 @@ function serializedWorkerResultToCacheResult(
         metadata: {
             pageCount: extracted.cacheMetadata.pageCount,
             pageLabels: extracted.cacheMetadata.pageLabels,
+            derivedPageLabels: extracted.cacheMetadata.derivedPageLabels,
             pages: extracted.cacheMetadata.pages,
         },
     };
@@ -357,8 +363,16 @@ export interface PdfDocumentTimings {
     /** The worker running the extraction. */
     workerOpMs?: number;
     /** The worker when this request used it (see `WorkerCallTiming.workerState`). */
-    workerState?: 'starting' | 'first_extract' | 'warm';
-    /** Writing the extracted result to the document cache. */
+    workerState?: WorkerState;
+    /** The worker's WASM heap after this request's last worker op, MB. */
+    workerHeapMb?: number;
+    /** The largest WASM heap any worker of the slot has reported so far, MB. */
+    workerPeakHeapMb?: number;
+    /**
+     * Writing this request's extraction to the document cache. On the hot
+     * slot the write runs after the result is returned, so this is set only
+     * once it finishes (and is not part of the request's own time).
+     */
     cacheWriteMs?: number;
 }
 
@@ -1070,8 +1084,8 @@ async function extractAndCacheResolvedPdfDocumentImpl(
     const timings: PdfDocumentTimings = { source: 'extracted' };
     const pageCountTiming: WorkerCallTiming = {};
     const extractTiming: WorkerCallTiming = {};
-    /** When this request's own extraction settled (for `cacheWriteMs`). */
-    let extractSettledAt: number | null = null;
+    /** Whether this request ran the extraction itself (`timings.source`). */
+    let extractedHere = false;
     const elapsed = (from: number) => Date.now() - from;
     const readFile = async (load: () => ReturnType<typeof loadAttachmentData>) => {
         const t = Date.now();
@@ -1091,9 +1105,17 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         try {
             return await run();
         } finally {
-            extractSettledAt = Date.now();
-            timings.extractMs = extractSettledAt - t;
+            extractedHere = true;
+            timings.extractMs = Date.now() - t;
         }
+    };
+    // Interactive requests respond before their result is written to the
+    // document cache; requests that join meanwhile share the in-memory result.
+    const cacheWrite = {
+        writeAfterResolve: workerName === 'hot',
+        onCacheWrite: (ms: number) => {
+            timings.cacheWriteMs = ms;
+        },
     };
 
     // Budget for the shared (single-flight) extraction on the document cache.
@@ -1289,25 +1311,37 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             ).catch(() => null)
             : null;
         throwIfTimedOut('payload_cache_lookup');
+        // An extraction that finished moments ago and is still being written
+        // to the cache: take its result instead of reading the file again.
+        const unwrittenResult = !cachedResult && cache && initialSourceIdentity
+            ? cache.getUnwrittenResult<SerializedDocumentCacheResult | BeaverExtractResult>({
+                item: cacheItemRef,
+                mode,
+                source: initialSourceIdentity,
+                serialized: args.serializedResult === true,
+                lockScope: workerName,
+            })
+            : null;
+        const availableResult = cachedResult ?? unwrittenResult;
         timings.cacheLookupMs = elapsed(cacheLookupStartedAt);
-        if (cachedResult) {
-            timings.source = 'cache';
-            if (cachedResult.document.pageCount > maxPages) {
+        if (availableResult) {
+            timings.source = cachedResult ? 'cache' : 'shared';
+            if (availableResult.document.pageCount > maxPages) {
                 return {
                     kind: 'response_error',
                     code: 'too_many_pages',
-                    message: `The PDF file for ${resolvedKeyStr} has ${cachedResult.document.pageCount} pages, which exceeds the ${maxPages}-page limit.`,
-                    pageCount: cachedResult.document.pageCount,
+                    message: `The PDF file for ${resolvedKeyStr} has ${availableResult.document.pageCount} pages, which exceeds the ${maxPages}-page limit.`,
+                    pageCount: availableResult.document.pageCount,
                     resolvedAttachment,
                 };
             }
             return {
                 kind: 'ok',
-                cached: true,
+                cached: cachedResult !== null,
                 ...(args.serializedResult
-                    ? { serializedResult: cachedResult as SerializedDocumentCacheResult }
-                    : { result: cachedResult as BeaverExtractResult }),
-                totalPages: cachedResult.document.pageCount,
+                    ? { serializedResult: availableResult as SerializedDocumentCacheResult }
+                    : { result: availableResult as BeaverExtractResult }),
+                totalPages: availableResult.document.pageCount,
                 resolvedAttachment,
                 contentType: zoteroItem?.attachmentContentType || cachedMeta?.contentType || args.contentType || 'application/pdf',
                 timings,
@@ -1504,6 +1538,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     abortSignal: signal,
                     expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                     create: createSharedResult as (extractSignal: AbortSignal) => ReturnType<typeof client.extractSerialized>,
+                    ...cacheWrite,
                 })
                 : cache.getOrCreateResult({
                 item: cacheItemRef,
@@ -1518,6 +1553,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                 create: createSharedResult as (extractSignal: AbortSignal) => Promise<BeaverExtractResult>,
                 metadata: buildExtractedDocumentCacheMetadata,
+                ...cacheWrite,
             })
             : uncachedSchemaVersion !== null && documentCache
                 ? documentCache.getOrCreateUncachedResult<SerializedDocumentCacheResult | BeaverExtractResult>({
@@ -1539,11 +1575,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             ? await awaitWithRequestAbort(resultPromise, signal, throwIfTimedOut, 'pdf_extract')
             : await resultPromise;
         throwIfTimedOut('document_result_ready');
-        if (extractSettledAt === null) {
-            timings.source = 'shared';
-        } else if (cache) {
-            timings.cacheWriteMs = elapsed(extractSettledAt);
-        }
+        if (!extractedHere) timings.source = 'shared';
         const waits = [pageCountTiming, extractTiming];
         const sum = (part: 'clientQueueMs' | 'startMs' | 'queueMs') =>
             waits.some((t) => t[part] !== undefined)
@@ -1556,6 +1588,10 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         if (workerStartMs !== undefined) timings.workerStartMs = workerStartMs;
         if (workerQueueMs !== undefined) timings.workerQueueMs = workerQueueMs;
         if (extractTiming.opMs !== undefined) timings.workerOpMs = Math.round(extractTiming.opMs);
+        const heapTiming = extractTiming.heapBytes !== undefined ? extractTiming : pageCountTiming;
+        const toMb = (bytes: number) => Math.round(bytes / (1024 * 1024));
+        if (heapTiming.heapBytes !== undefined) timings.workerHeapMb = toMb(heapTiming.heapBytes);
+        if (heapTiming.peakHeapBytes !== undefined) timings.workerPeakHeapMb = toMb(heapTiming.peakHeapBytes);
         const state = workerState();
         if (state) timings.workerState = state;
 

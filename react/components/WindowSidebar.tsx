@@ -11,6 +11,7 @@ import { chatAccessGateAtom } from '../atoms/chatAccess';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 import { whereToStartVisibleAtom } from '../atoms/whereToStart';
 import { useReportBeaverUIVisibility } from '../hooks/useProfileSync';
+import { NoteExportTipTrigger } from '../hooks/useNoteExportTip';
 
 /**
  * WindowSidebar is rendered in the separate Beaver window.
@@ -40,8 +41,16 @@ const WindowSidebar = () => {
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
     const isWhereToStartVisible = useAtomValue(whereToStartVisibleAtom);
 
+    // The main windows' tip triggers live in GlobalContextInitializer; this
+    // renderer's runs are its own, so it asks for the export tip itself. First
+    // in both branches, so showing a table does not unmount it.
     if (surface.kind === 'table') {
-        return <TableWindowView surface={surface} />;
+        return (
+            <>
+                <NoteExportTipTrigger />
+                <TableWindowView surface={surface} />
+            </>
+        );
     }
 
     // The history sidebar only exists once there is a chat to stand beside:
@@ -53,18 +62,21 @@ const WindowSidebar = () => {
     const navCollapsed = collapsed || !hasHistory;
 
     return (
-        <div className={`beaver-window-app ${navCollapsed ? 'beaver-window-app-nav-collapsed' : ''}`}>
-            <aside className="beaver-window-nav" aria-label="Chat history sidebar">
-                {hasHistory && <WindowNav collapsed={navCollapsed} />}
-            </aside>
-            <div className="beaver-window-main">
-                <Sidebar
-                    location="library"
-                    isWindow={true}
-                    header={<WindowHeader showChat={hasHistory} />}
-                />
+        <>
+            <NoteExportTipTrigger />
+            <div className={`beaver-window-app ${navCollapsed ? 'beaver-window-app-nav-collapsed' : ''}`}>
+                <aside className="beaver-window-nav" aria-label="Chat history sidebar">
+                    {hasHistory && <WindowNav collapsed={navCollapsed} />}
+                </aside>
+                <div className="beaver-window-main">
+                    <Sidebar
+                        location="library"
+                        isWindow={true}
+                        header={<WindowHeader showChat={hasHistory} />}
+                    />
+                </div>
             </div>
-        </div>
+        </>
     );
 };
 

@@ -14,8 +14,8 @@
  *     margin items.
  *  5. `project` — the public structured result: projection and ids.
  *
- * `runExtractFromIndices` (`worker/ops.ts`) runs steps 1–4; the op wrappers
- * run step 5 on its result.
+ * `runExtraction` (`extract.ts`) runs steps 1–4; the op wrappers run step 5
+ * on its result.
  *
  * Worker code: import package internals directly, never the `../index`
  * barrel (see `worker/ops.ts`).
@@ -41,6 +41,7 @@ import { bboxFromXYWH } from "@beaver/agent-core/extract/types";
 import {
     ITEM_KINDS,
     assignDocumentIds,
+    presetRegionSettings,
     projectStructuredPage,
     type ExtractionDebug,
     type PdfExtractionPreset,
@@ -54,8 +55,7 @@ import type { RegionDocContext } from "../regions/features";
 import { regionItemsForPage, type PageRegionItems, type RegionItemDraft, type RegionItemSettings } from "../regions/regionItems";
 import { REGION_MODEL } from "../regions/weights";
 import { postLog } from "../worker/errors";
-import { extractRawPageDetailedFromDoc } from "../worker/docHelpers";
-import type { DocumentLike, FontApi } from "../worker/mupdfApi";
+import type { DocumentLike } from "../worker/mupdfApi";
 import type { GraphicsSummary } from "../worker/graphicsSummary";
 import { DEFAULT_REGION_CONTEXT_PAGES } from "../worker/regionOps";
 import {
@@ -67,6 +67,7 @@ import {
 import {
     buildAnalysisFromDoc,
     type DocumentAnalysisContext,
+    type DocumentStudyInput,
     type PageWalkCache,
     type ResolvedExtractionSettings,
 } from "./documentAnalysis";
@@ -89,16 +90,15 @@ export function createItemPasses(preset: PdfExtractionPreset): ItemPass[] {
 /** Inputs shared by the per-page phases of one structured run. */
 export interface StructuredRunContext {
     doc: DocumentLike;
+    /** The schema preset; selects regions, grid candidates and margin matching. */
+    preset: PdfExtractionPreset;
     opts: ResolvedExtractionSettings;
     requestedRepeatThreshold: number | undefined;
     pageCount: number;
-    pageCache: PageWalkCache | undefined;
-    paragraphSettings: ParagraphDetectionSettings | undefined;
+    pageCache: PageWalkCache;
+    /** Paragraph settings with the preset's switches applied (`presetParagraphSettings`). */
+    paragraphSettings: ParagraphDetectionSettings;
     splitter: SentenceSplitter;
-    /** Switches of the region pass (from the preset). */
-    regionSettings?: RegionItemSettings;
-    /** Region detection proposes grid candidates (`PdfExtractionPreset.gridTableCandidates`). */
-    gridCandidates?: boolean;
     /** Receives each page's region pass; absent in production. */
     regionObserver?: RegionPassObserver;
     /** Receives each page's item-boundary input; absent in production. */
@@ -194,19 +194,13 @@ export interface MappedPages {
  * engines use, so profilers see a single "walk" total.
  */
 export function analyzeDocument(
-    doc: DocumentLike,
-    opts: ResolvedExtractionSettings,
-    requestedRepeatThreshold: number | undefined,
+    input: DocumentStudyInput,
     targetIndices: number[],
-    analysisIndices: number[],
-    pageCount: number,
-    fontApi: FontApi | undefined,
-    pageCache: PageWalkCache | undefined,
-    pageNumberRuns: boolean,
 ): StructuredDocumentStudy {
-    if (!fontApi) {
+    const { pageCache } = input;
+    if (!pageCache.fontApi) {
         throw new Error(
-            "runExtractFromIndices: engine='structured' requires a `fontApi` argument so the detailed walker can populate line fonts",
+            "runExtraction: engine='structured' requires a page cache with a `fontApi` so the detailed walker can populate line fonts",
         );
     }
     const tPreWalk = performance.now();
@@ -215,14 +209,12 @@ export function analyzeDocument(
     const preWalkedTargets = new Map<number, RawPageData>();
     for (const i of targetIndices) {
         const tTargetPreWalk = performance.now();
-        // Reuse the OCR gate's walk of this page when the shared cache is
-        // present; otherwise walk it fresh. The pipeline never needs image
-        // blocks, so a page the gate did not already sample is walked
-        // without them. Structured extraction is full-document canonical
-        // output, so a page that fails to walk fails the extraction.
-        const detailed = pageCache
-            ? pageCache.getDetailed(i, false)
-            : extractRawPageDetailedFromDoc(doc, i, false, fontApi);
+        // Reuse the OCR gate's walk of this page when it sampled it. The
+        // pipeline never needs image blocks, so a page the gate did not
+        // sample is walked without them. Structured extraction is
+        // full-document canonical output, so a page that fails to walk
+        // fails the extraction.
+        const detailed = pageCache.getDetailed(i, false);
         detailedMsByTarget.set(i, performance.now() - tTargetPreWalk);
         detailedTargets.set(i, detailed);
         // `RawPageDataDetailed` is structurally a `RawPageData` (readonly
@@ -232,16 +224,7 @@ export function analyzeDocument(
     }
     const preWalkMs = performance.now() - tPreWalk;
 
-    const analysis = buildAnalysisFromDoc(
-        doc,
-        opts,
-        requestedRepeatThreshold,
-        analysisIndices,
-        pageCount,
-        preWalkedTargets,
-        pageCache,
-        pageNumberRuns,
-    );
+    const analysis = buildAnalysisFromDoc(input, preWalkedTargets);
     return {
         ...analysis,
         walkMs: analysis.walkMs + preWalkMs,
@@ -259,12 +242,14 @@ export function segmentPages(
     study: StructuredDocumentStudy,
     targetIndices: number[],
 ): SegmentedPage[] {
-    const { opts, pageCache, pageCount } = ctx;
+    const { opts, preset, pageCache, pageCount } = ctx;
+    const { marginTextRows } = preset;
     const { analysisPages, analysisPageByIndex, marginRemoval, marginAnalysis, styleProfile, compoundVocabulary } = study;
-    const regionImages = pageCache?.regions ? new Map<number, Set<number>>() : undefined;
+    const regionImages = preset.regions ? new Map<number, Set<number>>() : undefined;
+    const regionSettings = presetRegionSettings(preset);
     // Region detection keeps the document's running headers and footers out of regions.
     const bodyExtents = regionImages
-        ? documentBodyExtents(analysisPages, { marginRemoval, styleProfile, margins: opts.margins, marginZone: opts.marginZone, marginTextRows: opts.marginTextRows })
+        ? documentBodyExtents(analysisPages, { marginRemoval, styleProfile, margins: opts.margins, marginZone: opts.marginZone, marginTextRows })
         : new Map<string, { top: number; bottom: number }>();
     const runningRepeat = getEffectiveRepeatThreshold({
         requested: ctx.requestedRepeatThreshold,
@@ -273,7 +258,7 @@ export function segmentPages(
     }).topBottom;
     if (regionImages) {
         for (const i of targetIndices) {
-            const graphics = pageCache!.graphicsFor(i);
+            const graphics = pageCache.graphicsFor(i);
             if (graphics) regionImages.set(i, pageImageHashes(graphics));
         }
     }
@@ -301,24 +286,24 @@ export function segmentPages(
                 styleProfile,
                 margins: opts.margins,
                 marginZone: opts.marginZone,
-                marginTextRows: opts.marginTextRows,
+                marginTextRows,
                 pageRotation: rotation,
                 repeat: runningRepeat,
                 bodyExtents,
             });
             // Grid candidates end their rows at running headers and footers.
-            const running = ctx.gridCandidates
+            const running = preset.gridTableCandidates
                 ? runningMarginLines(detailed, {
                       marginAnalysis,
                       marginZone: opts.marginZone,
-                      marginTextRows: opts.marginTextRows,
+                      marginTextRows,
                       pageRotation: rotation,
                       repeat: runningRepeat,
                       bodyExtents,
                   })
                 : undefined;
-            const graphics = pageCache!.graphicsFor(i);
-            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, ctx.regionSettings, ctx.gridCandidates ?? false, !!ctx.regionObserver, running);
+            const graphics = pageCache.graphicsFor(i);
+            const pass = pageRegions(detailed, graphics, regionImages, pageCount, compoundVocabulary, margin, regionSettings, preset.gridTableCandidates, !!ctx.regionObserver, running);
             const regions = pass.result;
             if (regions.page !== detailed) {
                 // The target without absorbed lines replaces the walked page, so
@@ -357,11 +342,15 @@ export function segmentPages(
             compoundVocabulary,
             margins: opts.margins,
             marginZone: opts.marginZone,
-            marginProseRows: opts.marginTextRows,
+            // The target page's margin text is matched by rows in every
+            // schema, even where the analysis matched single lines (schema 4):
+            // its output depends on it.
+            marginTextRows: true,
+            marginProseRows: marginTextRows,
             graphicsLayerMode: opts.graphicsLayerMode,
             // Reuse the detailed walk done in `analyzeDocument` so we don't pay
             // a second walk per target page.
-            preWalkedDetailed: detailed,
+            preWalkedDetailed: detailed!,
             preWalkedDetailedMs,
             regionItems,
             regionMargin,
@@ -399,7 +388,7 @@ export function runItemPasses(
     study: Pick<StructuredDocumentStudy, "styleProfile" | "marginAnalysis" | "analysisPages" | "compoundVocabulary">,
     pageCount: number,
     passes: readonly ItemPass[],
-    paragraphSettings: ParagraphDetectionSettings | undefined,
+    paragraphSettings: ParagraphDetectionSettings,
 ): PagePassTimings[] {
     const doc = {
         pages: pages.map(({ paragraphs }) => paragraphs.draft),
@@ -521,6 +510,9 @@ export function project(
         document: {
             pageCount: result.analysis.pageCount,
             pageLabels: pageLabelsToStringKeys(result.pageLabels),
+            ...(result.derivedPageLabels
+                ? { derivedPageLabels: pageLabelsToStringKeys(result.derivedPageLabels) }
+                : {}),
             bboxOrigin: "top-left",
             bboxPrecision,
             pages,
@@ -541,7 +533,7 @@ function pageRegions(
     pageCount: number,
     vocabulary: ReadonlySet<string>,
     margin: ReadonlySet<RawLine>,
-    settings: RegionItemSettings | undefined,
+    settings: RegionItemSettings,
     gridCandidates: boolean,
     allGridFeatures: boolean,
     running?: ReadonlySet<RawLine>,
