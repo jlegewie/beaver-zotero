@@ -70,7 +70,7 @@ src/beaver-extract/
 ├── config.ts                      # Cross-bundle config (worker URLs, log sink, client slot)
 ├── logging.ts                     # Cross-bundle log sink for analyzer modules
 ├── MuPDFWorkerClient.ts           # Main-thread worker proxy (postMessage RPC)
-├── prewarm.ts                     # Eager worker spawn helper
+├── prewarm.ts                     # Eager worker spawn + warm-up helper
 ├── worker/
 │   ├── index.ts                   # Worker entry point + dispatcher
 │   ├── ops.ts                     # Worker-side op handlers (argument checks, doc lifecycle, result projection)
@@ -86,7 +86,8 @@ src/beaver-extract/
 │   ├── errors.ts                  # Worker-side error envelopes
 │   ├── sentenceExtraction.ts      # Per-page structured phases (paragraphs, sentence mapping)
 │   ├── sentencexInit.ts           # sentencex bootstrap (lazy, with fallback)
-│   └── splitterResolver.ts        # Resolves SentenceSplitterConfig → splitter fn
+│   ├── splitterResolver.ts        # Resolves SentenceSplitterConfig → splitter fn
+│   └── warmupPdf.ts               # Generated article the `__warmup` op extracts on a fresh worker
 ├── pipeline/                      # Extraction pipeline (runs in the worker)
 │   ├── extract.ts                 # `runExtraction`: document study + paragraph, block or structured engine
 │   ├── documentAnalysis.ts        # Page-walk cache + cross-page analysis context

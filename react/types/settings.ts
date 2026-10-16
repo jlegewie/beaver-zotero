@@ -1,7 +1,7 @@
 import { getPref, setPref } from "../../src/utils/prefs";
 import { store } from "../store";
 import { addPopupMessageAtom } from "../utils/popupMessageUtils";
-import { CustomChatModel, isCustomChatModel, OPENROUTER_API_BASE } from "@beaver/agent-core/types/customChatModel";
+import { CustomChatModel, isCustomChatModel, normalizeCustomModelFormat, OPENROUTER_API_BASE } from "@beaver/agent-core/types/customChatModel";
 
 export * from "@beaver/agent-core/types/customChatModel";
 
@@ -88,7 +88,7 @@ export const getCustomChatModelsForEditing = (): CustomChatModel[] => {
                 }
                 return {
                     api_base,
-                    format: e.format === 'anthropic' ? 'anthropic' : 'openai',
+                    format: normalizeCustomModelFormat(e.format),
                     api_key: typeof e.api_key === 'string' ? e.api_key : '',
                     name: typeof e.name === 'string' ? e.name : '',
                     snapshot: typeof e.snapshot === 'string' ? e.snapshot : '',
@@ -113,7 +113,7 @@ export const saveCustomChatModelsToPreferences = (models: CustomChatModel[]): vo
     const cleaned = models.map((model) => {
         const entry: CustomChatModel = {
             api_base: model.api_base?.trim() || undefined,
-            format: model.format === 'anthropic' ? 'anthropic' : 'openai',
+            format: normalizeCustomModelFormat(model.format),
             api_key: model.api_key?.trim() ?? '',
             name: model.name?.trim() ?? '',
             snapshot: model.snapshot?.trim() ?? '',

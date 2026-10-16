@@ -65,7 +65,9 @@ import { ERROR_CODES, postLog, workerError } from "./errors";
 import { isRecoverablePageError } from "../wasmFatal";
 import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
+import { ensureSentencex } from "./sentencexInit";
 import { resolveSplitter } from "./splitterResolver";
+import { buildWarmupPdf } from "./warmupPdf";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
 import { buildInputPage, type InputPage } from "../features/itemInput";
 import type { ItemPass } from "../pipeline/itemPasses";
@@ -80,6 +82,7 @@ import {
     extractRawPageDetailedFromDoc,
     assertDocumentHasPages,
     extractRawPageFromDoc,
+    openDocUncached,
     rawPageProviderFromDoc,
     renderOnePage,
     resolveExplicitPageIndicesOrThrow,
@@ -511,6 +514,8 @@ interface StructuredRunOptions {
     itemPasses?: (preset: PdfExtractionPreset) => ItemPass[];
     /** Observe the region pass or the item-boundary input of every page (training exports). */
     observers?: StructuredRunObservers;
+    /** Open the document outside the worker's document cache and destroy it afterwards. */
+    uncachedDoc?: boolean;
 }
 
 /**
@@ -535,7 +540,9 @@ async function withExtractionRun<T>(
     const itemPasses = isStructured && structuredRun.itemPasses ? structuredRun.itemPasses(preset) : undefined;
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
-    const doc = await acquireDoc(args.pdfData);
+    const doc = structuredRun.uncachedDoc
+        ? await openDocUncached(args.pdfData)
+        : await acquireDoc(args.pdfData);
     const docOpenMs = performance.now() - tDocOpenStart;
     let docFailed = false;
     try {
@@ -642,7 +649,8 @@ async function withExtractionRun<T>(
         docFailed = true;
         throw e;
     } finally {
-        releaseDoc(doc, docFailed);
+        if (structuredRun.uncachedDoc) doc.destroy();
+        else releaseDoc(doc, docFailed);
     }
 }
 
@@ -720,6 +728,61 @@ export async function opExtractSerialized(
         result: serialized,
         transfer: [serialized.jsonBytes.buffer],
     };
+}
+
+/**
+ * Pages of the warm-up document (`buildWarmupPdf`). One page recovers little
+ * of a fresh worker's first-extraction penalty, which is mostly code the
+ * engine has not optimized yet; eight recover about half to two thirds of it
+ * for a few hundred ms of warm-up, and more pages add little.
+ */
+const WARMUP_PAGES = 8;
+
+/** Where the `__warmup` op spent its time, ms. */
+export interface WarmupResult {
+    /** Loading MuPDF (a no-op when an earlier op loaded it). */
+    mupdfMs: number;
+    /** Loading sentencex; null when it failed (extractions then fall back to the regex splitter). */
+    sentencexMs: number | null;
+    /** The structured extraction of the warm-up document. */
+    extractMs: number;
+}
+
+/**
+ * Prepare a fresh worker for its first request: load MuPDF and sentencex,
+ * then run one structured extraction of a generated article
+ * (`buildWarmupPdf`) the way backend requests run it (text-layer check,
+ * projection, serialization), and discard the result.
+ *
+ * A worker's first extractions are slower than later ones: they decode the
+ * learned layout models, fill module-level caches, and run pipeline code the
+ * engine has not optimized yet. Doing that here moves part of the cost off
+ * the first real request. The document bypasses the worker's document cache.
+ * `pages` overrides the warm-up document's length.
+ */
+export async function opWarmup(args: { pages?: number }): Promise<OpReply<WarmupResult>> {
+    let t = performance.now();
+    await ensureApi();
+    const mupdfMs = performance.now() - t;
+
+    t = performance.now();
+    let sentencexMs: number | null = null;
+    try {
+        await ensureSentencex();
+        sentencexMs = performance.now() - t;
+    } catch (e) {
+        postLog("warn", `[mupdf-worker] warm-up could not load sentencex: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    t = performance.now();
+    await withExtractionRun(
+        { pdfData: buildWarmupPdf(args.pages ?? WARMUP_PAGES), settings: { checkTextLayer: true } },
+        "structured",
+        (internal, preset) => serializeExtractResult(project(internal, preset, 1, false)),
+        { uncachedDoc: true },
+    );
+    const extractMs = performance.now() - t;
+    return { result: { mupdfMs, sentencexMs, extractMs } };
 }
 
 /** Arguments of the full-document structured debug and export ops. */
