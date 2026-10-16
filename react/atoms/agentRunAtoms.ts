@@ -3896,7 +3896,12 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
         return (set as any)(...args);
     }) as Setter;
     try {
-        if (
+        if (writer?.admission) {
+            // A second submission while the first is still reading admission
+            // (a repeated click or Enter) must not fall back to the cached
+            // tail: after a stopped or failed run that tail is stale.
+            if (!(await writer.admission.catch(() => false))) return;
+        } else if (
             presence &&
             id &&
             writer?.preparing === 1 &&
@@ -3904,22 +3909,31 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
                 !!get(threadAdmissionAtom)?.unconfirmedRunId)) &&
             !get(retryPendingRunIdAtom)
         ) {
-            const generation = getCredentialGeneration();
-            const snapshot = await readAdmission(id);
-            assertCredentialGeneration(generation);
-            assertWriter(writer);
-            if (nav !== get(threadNavigationSeqAtom)) return;
-            const previous = get(threadAdmissionAtom);
-            guardedSet(threadAdmissionAtom, snapshot);
-            if (
-                snapshot.activity.state === "active" ||
-                (previous?.threadId === id &&
-                    previous.tailRunId !== snapshot.tailRunId &&
-                    previous.unconfirmedRunId !== snapshot.tailRunId)
-            ) {
-                if (snapshot.activity.state !== "active")
-                    guardedSet(threadConflictAtom, "thread_tail_mismatch");
-                return;
+            const admission = (async () => {
+                const generation = getCredentialGeneration();
+                const snapshot = await readAdmission(id);
+                assertCredentialGeneration(generation);
+                assertWriter(writer);
+                if (nav !== get(threadNavigationSeqAtom)) return false;
+                const previous = get(threadAdmissionAtom);
+                guardedSet(threadAdmissionAtom, snapshot);
+                if (
+                    snapshot.activity.state === "active" ||
+                    (previous?.threadId === id &&
+                        previous.tailRunId !== snapshot.tailRunId &&
+                        previous.unconfirmedRunId !== snapshot.tailRunId)
+                ) {
+                    if (snapshot.activity.state !== "active")
+                        guardedSet(threadConflictAtom, "thread_tail_mismatch");
+                    return false;
+                }
+                return true;
+            })();
+            writer.admission = admission;
+            try {
+                if (!(await admission)) return;
+            } finally {
+                if (writer.admission === admission) writer.admission = undefined;
             }
         }
         return await operation(guardedSet);
