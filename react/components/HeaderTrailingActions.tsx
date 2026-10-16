@@ -1,14 +1,11 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import {
-    hasCompletedOnboardingAtom,
-    isDatabaseSyncSupportedAtom,
     isProfileLoadedAtom,
     profileSyncStatusAtom,
     updateRequiredAtom,
@@ -17,16 +14,15 @@ import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
 
 /**
- * Whether the header shows its status controls: only for an onboarded account
- * whose profile has arrived, outside the update and first-run pages.
+ * Whether the header shows its status controls: only once the profile has
+ * arrived, outside the update and first-run pages.
  */
 export function useShowHeaderStatus(): boolean {
-    const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
     const isWaitingForProfile = useAtomValue(isWaitingForProfileAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
-    return hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !isFirstRunVisible;
+    return !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !isFirstRunVisible;
 }
 
 /**
@@ -71,23 +67,19 @@ interface HeaderTrailingActionsProps {
 }
 
 /**
- * The right-hand end of a Beaver header: the reconnecting indicator, the index
- * or database status, the development tools and the account menu. Shared by
+ * The right-hand end of a Beaver header: the reconnecting indicator, the search
+ * index status, the development tools and the account menu. Shared by
  * the pane header and the separate window's header, which differ only in what
  * they slot in before the account menu.
  */
 const HeaderTrailingActions: React.FC<HeaderTrailingActionsProps> = ({ children }) => {
-    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const showStatus = useShowHeaderStatus();
 
     return (
         <>
             <ReconnectingIndicator />
-            {/* Embedding index status for users without databaseSync */}
-            {showStatus && !isDatabaseSyncSupported && <EmbeddingIndexStatusButton />}
-            {/* Database status for users with databaseSync */}
-            {showStatus && isDatabaseSyncSupported && <DatabaseStatusButton />}
+            {showStatus && <EmbeddingIndexStatusButton />}
             {/* Development tools */}
             {process.env.NODE_ENV === 'development' && (
                 <DevToolsMenuButton

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState, useEffect, type ReactNode } from 'react';
+import React, { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
 import BatchApprovalPanel from "./input/BatchApprovalPanel"
@@ -16,16 +16,15 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
 import { scrollAtoms, publishScrollPosition } from '../utils/scrollPosition';
-import { isSkippedFilesDialogVisibleAtom, isThreadListViewAtom } from '../atoms/ui';
+import { isThreadListViewAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import ProfileLoadingPage from './pages/ProfileLoadingPage';
-import OnboardingRouter from './pages/OnboardingRouter';
+import FreeOnboardingPage from './pages/FreeOnboardingPage';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
 import ThreadListView from './ThreadListView';
 import CreditInfoBar from './input/CreditInfoBar';
-import UpgradeConsentPage from './pages/UpgradeConsentPage';
 import DowngradeAcknowledgmentPage from './pages/DowngradeAcknowledgmentPage';
 import { store } from '../store';
 import { chatAccessGateAtom } from '../atoms/chatAccess';
@@ -194,7 +193,6 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
         setMessagesContainer(node);
     }, []);
     const chatAccessGate = useAtomValue(chatAccessGateAtom);
-    const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
     const isMigratingData = useAtomValue(isMigratingDataAtom);
     const isThreadListView = useAtomValue(isThreadListViewAtom);
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
@@ -234,10 +232,6 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
     // the sidebars and the separate Beaver window, so an atom would put every
     // surface on the same query and the same current match.
     const find = useFindInChat({ container: messagesContainer });
-
-    useEffect(() => {
-        setIsSkippedFilesDialogVisible(false);
-    }, []);
 
     // Focus textarea when focusInput event is dispatched (e.g. reader "Ask..." button)
     useEventSubscription('focusInput', () => {
@@ -334,24 +328,12 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
         );
     }
 
-    {/* Plan transition: Upgrade consent page (Free → Pro) */}
-    if (chatAccessGate === 'upgrade-consent') {
-        return (
-            <SidebarShell isWindow={isWindow}>
-                {header}
-                <UpgradeConsentPage />
-                <DialogContainer />
-            </SidebarShell>
-        );
-    }
-
-    {/* Onboarding page: free users need to have authorized free access;
-        Pro users need authorized access, completed onboarding, and a library. */}
+    {/* Onboarding page: shown until the account has authorized access. */}
     if (chatAccessGate === 'onboarding') {
         return (
             <SidebarShell isWindow={isWindow}>
                 {header}
-                <OnboardingRouter />
+                <FreeOnboardingPage />
                 <DialogContainer />
             </SidebarShell>
         );

@@ -12,9 +12,6 @@ vi.mock("../../../src/utils/backgroundTasks", () => ({
   deduplicatedSync: vi.fn(),
 }));
 
-vi.mock("../../../src/utils/sync", () => ({
-  ensureItemSynced: vi.fn(),
-}));
 
 vi.mock("../../../src/utils/prefs", () => ({
   getPref: vi.fn(() => false),

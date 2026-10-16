@@ -208,29 +208,10 @@ async function handleUpgrade(lastVersion: string, currentVersion: string) {
         });
     }
 
-    // Upgrade to 0.5.0 or newer from a version before 0.5.0
-    if (compareVersions(lastVersion, '0.5.0') < 0 && compareVersions(currentVersion, '0.5.0') >= 0) {
-        setPref('runConsistencyCheck', true);
-        ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for consistency check.`);
-    }
-
-    // Upgrade to 0.6.2 or newer from a version before 0.6.2
-    if (compareVersions(lastVersion, '0.6.2') < 0 && compareVersions(currentVersion, '0.6.2') >= 0) {
-        setPref('runCollectionSync', true);
-        ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for collection sync.`);
-    }
-
-    // Upgrade to 0.8.3 or newer
-    if (compareVersions(lastVersion, '0.8.3') < 0 && compareVersions(currentVersion, '0.8.3') >= 0) {
-        setPref('runWebDAVSync', true);
-        ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for WebDAV sync.`);
-    }
-
-    // Upgrade to 0.11.2 or newer: re-sync items with corrected title/date field mappings
+    // Upgrade to 0.11.2 or newer: re-embed items with corrected title/date field mappings
     if (compareVersions(lastVersion, '0.11.2') < 0 && compareVersions(currentVersion, '0.11.2') >= 0) {
-        setPref('runConsistencyCheck', true);
         setPref('runEmbeddingFullDiff', true);
-        ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flags set for consistency check and embedding full diff.`);
+        ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for embedding full diff.`);
     }
 }
 
@@ -591,7 +572,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         const shouldRunGlobalCleanup = isLastWindow && (isAppQuitting || isAppShuttingDown);
 
         // If this is a full shutdown, signal it BEFORE React unmount.
-        // React cleanup effects (useZoteroSync, useEmbeddingIndex, etc.)
+        // React cleanup effects (useEmbeddingIndex, etc.)
         // check this flag to skip fire-and-forget async operations that
         // would otherwise outlive the plugin and cause segfaults.
         if (shouldRunGlobalCleanup) {

@@ -1,7 +1,6 @@
 import { getPref, setPref } from "../../src/utils/prefs";
 import { store } from "../store";
 import { addPopupMessageAtom } from "../utils/popupMessageUtils";
-import { ProcessingMode } from "@beaver/agent-core/types/profile";
 import { CustomChatModel, isCustomChatModel, normalizeCustomModelFormat, OPENROUTER_API_BASE } from "@beaver/agent-core/types/customChatModel";
 
 export * from "@beaver/agent-core/types/customChatModel";
@@ -133,7 +132,6 @@ export interface CustomPrompt {
     title: string;
     text: string;
     requiresAttachment: boolean;
-    requiresDatabaseSync?: boolean;
     id_model?: string;
     shortcut?: number;
     index?: number;
@@ -150,7 +148,6 @@ export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
         typeof obj.title === 'string' &&
         typeof obj.text === 'string' &&
         typeof obj.requiresAttachment === 'boolean' &&
-        (obj.requiresDatabaseSync === undefined || typeof obj.requiresDatabaseSync === 'boolean') &&
         (obj.id === undefined || typeof obj.id === 'string') &&
         (obj.id_model === undefined || typeof obj.id_model === 'string') &&
         (obj.shortcut === undefined || (typeof obj.shortcut === 'number' && obj.shortcut >= 1 && obj.shortcut <= 9)) &&
@@ -259,31 +256,4 @@ export const savePromptLastUsed = (id: string, timestamp: string): void => {
     const map = getPromptLastUsedMap();
     map[id] = timestamp;
     setPref('customPromptsLastUsed', JSON.stringify(map));
-};
-
-export interface CustomPromptAvailabilityContext {
-    isDatabaseSyncSupported: boolean;
-    processingMode: ProcessingMode;
-}
-
-const isCustomPromptAvailable = (
-    prompt: CustomPrompt,
-    context: CustomPromptAvailabilityContext
-): boolean => {
-    if (prompt.requiresDatabaseSync && (!context.isDatabaseSyncSupported || context.processingMode === ProcessingMode.FRONTEND)) {
-        return false;
-    }
-    return true;
-};
-
-export const getCustomPromptsForContext = (
-    context: CustomPromptAvailabilityContext
-): CustomPrompt[] => {
-    const prompts = getCustomPromptsFromPreferences();
-    return prompts
-        .filter((prompt) => isCustomPromptAvailable(prompt, context))
-        .map((prompt, index) => ({
-            ...prompt,
-            index: index + 1,
-        }));
 };
