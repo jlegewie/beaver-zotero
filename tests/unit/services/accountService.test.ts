@@ -89,9 +89,7 @@ describe('AccountService identity payloads', () => {
     });
 
     const IDENTITY_METHODS: [string, () => Promise<unknown>][] = [
-        ['authorizeAccess', () => accountService.authorizeAccess(true, [], false, false, false)],
         ['authorizeFreeAccess', () => accountService.authorizeFreeAccess()],
-        ['completeUpgradeConsent', () => accountService.completeUpgradeConsent()],
         ['acknowledgeDowngrade', () => accountService.acknowledgeDowngrade()],
     ];
 
@@ -114,11 +112,5 @@ describe('AccountService identity payloads', () => {
         const body = sentBody();
         expect(body.zotero_local_id).toBe('local-key-1');
         expect('zotero_user_id' in body).toBe(false);
-    });
-
-    it('returns no models rather than throwing when the model list fails', async () => {
-        fetchMock.mockResolvedValue(new Response('nope', { status: 500, statusText: 'Server Error' }));
-
-        await expect(accountService.getModelList('plan-1')).resolves.toEqual([]);
     });
 });

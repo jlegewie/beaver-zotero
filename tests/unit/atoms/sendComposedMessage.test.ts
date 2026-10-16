@@ -96,9 +96,8 @@ vi.mock('../../../react/types/actionStorage', () => ({
     isBuiltinAction: vi.fn((id: string) => id.startsWith('builtin-')),
 }));
 
-// actions.ts imports searchableLibraryIdsAtom from ./profile; mock it to avoid
-// pulling the real profile → files → attachmentsService → supabaseClient chain,
-// and to make the test items' library (1) searchable so the exclusion gate passes.
+// actions.ts imports searchableLibraryIdsAtom from ./profile; mock it to make
+// the test items' library (1) searchable so the exclusion gate passes.
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
     return {

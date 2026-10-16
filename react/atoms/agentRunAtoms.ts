@@ -71,9 +71,7 @@ import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import { toMessageAttachment, toValidatedMessageAttachment, externalFileRecordToAttachment } from '../types/attachments/converters';
 import { promptEditDraftsAtom } from './promptEdits';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
-import { SubscriptionStatus, ProcessingMode } from '@beaver/agent-core/types/profile';
 import {
-    isDatabaseSyncSupportedAtom,
     profileSyncStatusAtom,
     searchableLibraryIdsAtom,
     syncWithZoteroAtom,
@@ -1581,20 +1579,6 @@ export function createWSCallbacks(
             // promptly instead of lingering until the next backoff tick.
             if (store.get(profileSyncStatusAtom).kind !== 'ok') {
                 triggerProfileRefresh();
-            }
-
-            // Show popup if subscription is active but using frontend processing
-            if (data.subscriptionStatus === SubscriptionStatus.ACTIVE &&
-                store.get(isDatabaseSyncSupportedAtom) &&
-                data.processingMode === ProcessingMode.FRONTEND
-            ) {
-                set(addPopupMessageAtom, {
-                    type: 'info',
-                    title: 'Indexing your library',
-                    text: 'We are processing your library to enable Beta features. You can use standard features in the meantime.',
-                    expire: true,
-                    duration: 10000
-                });
             }
         },
 

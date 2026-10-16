@@ -1,4 +1,3 @@
-import { FileStatusSummary } from "./fileStatus";
 import { FeatureStep, VersionAlsoNew, VersionShowcaseId, VersionUpdateAction } from "../constants/versionUpdateMessages";
 import { ButtonVariant } from "@beaver/agent-ui/primitives/Button";
 import type { FeatureTipId } from "../constants/featureTips";
@@ -6,7 +5,7 @@ import type { FileExportFormat } from "@beaver/agent-ui/host/types";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 
-export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'indexing_complete' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip' | 'feature_tip' | 'cloud_consent' | 'file_export';
+export type PopupMessageType = 'info' | 'warning' | 'error' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip' | 'feature_tip' | 'cloud_consent' | 'file_export';
 
 export interface PopupMessageFeature {
     title: string;
@@ -50,12 +49,8 @@ export interface PopupMessage {
     expire?: boolean; // Defaults to true
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     buttonOnClick?: () => void
-    fileStatusSummary?: FileStatusSummary;
     /** The exported file a `file_export` message reports. */
     fileExport?: FileExportPopupData;
-    planName?: string;
-    showProgress?: boolean;
-    progress?: number; // 0-100 for progress bar
     count?: number;   // Count message occurrences
     duration?: number; // Duration in milliseconds, defaults to POPUP_MESSAGE_DURATION
     /** Optional action button displayed at the bottom of the message */

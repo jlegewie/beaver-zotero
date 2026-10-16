@@ -5,7 +5,6 @@ pref("userId", "");
 pref("userEmail", "");
 pref("currentPlanId", "");
 pref("installedVersion", "");
-pref("showIndexingCompleteMessage", false);
 pref("showHighTokenUsageWarningMessage", true);
 pref("authMethod", "otp");
 
@@ -163,10 +162,7 @@ pref("backgroundProcessingSearchInitialized", false);
 pref("backgroundProcessingWelcomeAck", false);
 pref("backgroundProcessingWelcomeDeferred", false);
 
-// Flags to show notifications, run consistency check and collection sync on upgrade
-pref("runConsistencyCheck", false);
-pref("runCollectionSync", false);
-pref("runWebDAVSync", false);
+// Upgrade flags and pending version notifications
 pref("runEmbeddingFullDiff", false);
 pref("pendingVersionNotifications", "[]");
 

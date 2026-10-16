@@ -1,9 +1,12 @@
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { SkippedItem } from '../../react/types/fileStatus';
 import { getPref, setPref } from '../utils/prefs';
 import { libraryRefForLibraryID } from '../utils/libraryIdentity';
 
 const SKIPPED_ITEMS_PREF = 'skippedItems';
+
+export interface SkippedItem extends ZoteroItemReference {
+    reason: string;
+}
 
 /**
  * Manages items that are skipped during synchronization.

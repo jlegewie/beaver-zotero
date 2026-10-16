@@ -14,7 +14,6 @@ vi.mock('../../../react/store', () => ({
 
 vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: Symbol('searchableLibraryIdsAtom'),
-    isDatabaseSyncSupportedAtom: Symbol('isDatabaseSyncSupportedAtom'),
     syncWithZoteroAtom: Symbol('syncWithZoteroAtom'),
 }));
 
@@ -61,12 +60,6 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
     ensureCitedLibrariesLoaded: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('../../../src/utils/sync', () => ({
-    syncingItemFilter: vi.fn(),
-    syncingItemFilterAsync: vi.fn(),
-    isSupportedItem: vi.fn(),
-    isLibraryValidForSync: vi.fn(),
-}));
 
 vi.mock('../../../react/utils/selectItem', () => ({
     selectItemById: vi.fn(),

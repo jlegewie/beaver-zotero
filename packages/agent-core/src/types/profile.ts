@@ -5,40 +5,6 @@ export interface ExcludedLibrary {
     group_id?: number | null;
 }
 
-/**
- * Plan model interface based on backend SafePlanModel
- */
-interface SafePlanModel {
-    id: string; // UUID
-    name: string;
-    display_name: string;
-    price_monthly: number;
-    active: boolean;
-    // Grants
-    monthly_chat_credits: number;
-    initial_page_grant: number;
-    monthly_page_grant: number;
-    // Features
-    sync_database: boolean;
-    upload_files: boolean;
-    mcp_server: boolean;
-    supported_file_types: string[];
-
-    // Limits
-    max_file_size_mb: number;
-    max_page_count: number;
-    max_storage_gb: number;
-    max_user_attachments: number;
-}
-
-export interface PlanFeatures {
-    databaseSync: boolean;
-    uploadFiles: boolean;
-    maxUserAttachments: number;
-    uploadFileSizeLimit: number;
-    maxPageCount: number;
-}
-
 export type CreditPlanStatus = "none" | "active" | "past_due" | "canceled";
 
 export interface ProfileBalance {
@@ -57,7 +23,7 @@ export interface ProfileBalance {
 
 /**
  * Subscription status enum (based on SubscriptionStatus)
- * @deprecated Still used by WS protocol in agentProtocol.ts / agentRunAtoms.ts
+ * @deprecated Still used by the WS protocol in agentProtocol.ts
  */
 export enum SubscriptionStatus {
     FREE = "free",
@@ -99,9 +65,6 @@ export interface CreditPlan {
     cancelAtPeriodEnd: boolean; // whether to cancel at period end
     pendingDowngrade: boolean; // whether a downgrade is pending at period end
 }
-
-/** Aggregate sync outcome reported to the backend when onboarding completes. */
-export type OverallSyncStatus = 'in_progress' | 'completed' | 'partially_completed' | 'failed';
 
 /**
  * Processing mode determines where document processing happens
@@ -197,6 +160,8 @@ export interface SafeProfileModel {
     indexing_plan_label: 'pro' | 'search' | null;
 }
 
-export interface SafeProfileWithPlan extends SafeProfileModel {
-    plan: SafePlanModel;
-}
+/**
+ * Profile payload returned by the backend. The backend still attaches a frozen
+ * legacy `plan` object for older clients; this client does not read it.
+ */
+export type SafeProfileWithPlan = SafeProfileModel;

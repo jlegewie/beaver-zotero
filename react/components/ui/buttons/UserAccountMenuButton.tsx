@@ -4,7 +4,7 @@ import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { SettingsIcon, UserIcon, LogoutIcon, BugIcon, InformationCircleIcon, IdeaIcon } from '../../icons/icons';
 import { isErrorReportDialogVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { hasCompletedOnboardingAtom, updateRequiredAtom, profileWithPlanAtom } from '../../../atoms/profile';
+import { updateRequiredAtom, profileWithPlanAtom } from '../../../atoms/profile';
 import { logoutAtom, userAtom } from '../../../atoms/auth';
 import { firstRunReturnRequestedAtom, firstRunSuggestionsModeAtom } from '../../../atoms/firstRun';
 import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
@@ -19,7 +19,6 @@ interface UserAccountMenuButtonProps {
  * window's account footer, so the two surfaces offer the same actions.
  */
 export function useAccountMenuItems(): MenuItem[] {
-    const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
     const profile = useAtomValue(profileWithPlanAtom);
     const setErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
@@ -40,7 +39,7 @@ export function useAccountMenuItems(): MenuItem[] {
             label: "Settings",
             onClick: () => openPreferencesWindow(),
             icon: SettingsIcon,
-            disabled: !hasCompletedOnboarding,
+            disabled: false,
         }] : []),
         {
             label: "Manage Account",
@@ -48,7 +47,7 @@ export function useAccountMenuItems(): MenuItem[] {
             icon: UserIcon,
             disabled: false,
         },
-        ...(!updateRequired && hasCompletedOnboarding && hasCompletedFirstRun ? [{
+        ...(!updateRequired && hasCompletedFirstRun ? [{
             label: "Get ideas",
             onClick: handleShowIdeas,
             icon: IdeaIcon,

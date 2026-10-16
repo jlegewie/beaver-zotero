@@ -69,7 +69,6 @@ import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
-import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useZoteroContext } from './hooks/useZoteroContext';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { registerZoteroHost } from './host/zotero';
@@ -168,18 +167,11 @@ const GlobalContextInitializer = () => {
     // Handle plugin upgrade tasks
     useUpgradeHandler();
 
-    // Handle Zotero sync (legacy cloud processing beta)
-    // useZoteroSync();
-
     // Suppress Zotero auto-sync while mutating agent runs are active.
     useSyncSuppression();
 
     // Realtime listener for user profile
     useProfileSync();
-
-    // Validate sync libraries against local Zotero (once per session)
-    // Also initializes global useLibraryDeletions hook via useValidateSyncLibraries
-    useValidateSyncLibraries();
 
     // Control visibility of the sidebar (e.g., setup global listeners/state)
     useToggleSidebar();

@@ -589,12 +589,9 @@ source Zotero). `fix-db` applies the same treatment to an already-created clone.
 
 ## Deprecated — do not build on
 
-These paths are inert and should not be extended or used as a pattern:
-
-- `isDatabaseSyncSupportedAtom` and everything gated behind it: database sync
-  (`useZoteroSync.ts`, `sync.ts`), file upload (`FileUploader.ts`), file status reporting
-  (`FileStatusDisplay.tsx`).
-- `profile.plan` and derived atoms such as `PlanFeatures`. (`profile.credit_plan` is current.)
+- The backend still attaches a frozen legacy `plan` object to the profile for older
+  clients. This client neither types nor reads it: use `profile.credit_plan` and the
+  backend-computed entitlements (`has_ocr_access`, `has_search_index_access`).
 
 
 ### Independent chat windows and admission

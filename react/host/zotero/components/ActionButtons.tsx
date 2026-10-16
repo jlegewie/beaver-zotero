@@ -29,7 +29,6 @@ import {
 } from '@beaver/agent-core/citations/externalReferences';
 import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/addItemActions';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { ensureItemSynced } from '../../../../src/utils/sync';
 import { getPref } from '../../../../src/utils/prefs';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { createProvenanceNote } from '../../../utils/noteActions';
@@ -209,12 +208,6 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                     });
                 }
             }
-
-            // Sync the newly created item to backend immediately
-            // This ensures it's available for follow-up AI queries
-            ensureItemSynced(libraryId, newItem.key).catch(err => {
-                logger(`ActionButtons: Failed to sync imported item: ${err.message}`, 2);
-            });
 
             // Update local state to switch from Import to Reveal button
             setZoteroItemRef(newZoteroRef);
