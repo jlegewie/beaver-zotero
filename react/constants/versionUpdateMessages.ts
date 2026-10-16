@@ -627,7 +627,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0" target='_blank'>Full changelog</a>`,
     },
     {
-        version: "0.26.0-beta.2",
+        version: "0.26.0",
         title: "Export to Word, PDF, and LaTeX",
         featureList: [
             {
@@ -643,7 +643,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "Create items from DOIs, URLs, or files.",
             },
         ],
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.26.0-beta.4" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.26.0" target='_blank'>Full changelog</a>`,
     },
 ];
 
