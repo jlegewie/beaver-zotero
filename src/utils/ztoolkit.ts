@@ -1,15 +1,16 @@
-import { ZoteroToolkit } from "zotero-plugin-toolkit";
+import {
+  BasicTool,
+  makeHelperTool,
+  ProgressWindowHelper,
+  UITool,
+  unregister,
+} from "zotero-plugin-toolkit";
 import { config } from "../../package.json";
 
 export { createZToolkit };
 
 function createZToolkit() {
-  const _ztoolkit = new ZoteroToolkit();
-  /**
-   * Alternatively, import toolkit modules you use to minify the plugin size.
-   * You can add the modules under the `MyToolkit` class below and uncomment the following line.
-   */
-  // const _ztoolkit = new MyToolkit();
+  const _ztoolkit = new MyToolkit();
   initZToolkit(_ztoolkit);
   return _ztoolkit;
 }
@@ -31,17 +32,25 @@ function initZToolkit(_ztoolkit: ReturnType<typeof createZToolkit>) {
   );
 }
 
-import { BasicTool, unregister } from "zotero-plugin-toolkit";
-import { UITool } from "zotero-plugin-toolkit";
-
+/**
+ * The toolkit modules Beaver uses. The full `ZoteroToolkit` is avoided on
+ * purpose: it eagerly constructs every manager, and some install global side
+ * effects on construction (`FieldHookManager` patches
+ * `Zotero.Item.prototype.getField`/`setField`/`isFieldOfBase`;
+ * `KeyboardManager` adds key listeners to every main window). Beaver has its
+ * own keyboard manager and registers no field hooks.
+ */
 class MyToolkit extends BasicTool {
   UI: UITool;
+  ProgressWindow: typeof ProgressWindowHelper;
 
   constructor() {
     super();
     this.UI = new UITool(this);
+    this.ProgressWindow = makeHelperTool(ProgressWindowHelper, this);
   }
 
+  /** Unregister everything created by the toolkit modules above. */
   unregisterAll() {
     unregister(this);
   }
