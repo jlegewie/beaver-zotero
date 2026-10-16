@@ -116,6 +116,8 @@ declare class WebSocket {
   static readonly CLOSED: number;
   constructor(url: string);
   readonly readyState: number;
+  /** Bytes queued by `send()` but not yet written; the heartbeat treats a draining upload as activity. */
+  readonly bufferedAmount: number;
   /** Negotiated on open; logged to tell proxy interference apart. */
   readonly extensions: string;
   readonly protocol: string;

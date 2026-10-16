@@ -36,6 +36,17 @@ export interface WSReadyEvent extends WSBaseEvent {
     supports_request_acks?: boolean;
     /** Backend accepts `request_keepalive` messages for in-flight requests */
     supports_request_keepalive?: boolean;
+    /** Backend answers the client's `ping` heartbeat with a `pong` */
+    supports_heartbeat?: boolean;
+}
+
+/**
+ * Connection heartbeat sent periodically after `ready`. The backend replies
+ * with a `pong`, so a silent socket means the connection is gone even when
+ * the browser has not noticed. Gated on `WSReadyEvent.supports_heartbeat`.
+ */
+export interface WSPingMessage {
+    type: 'ping';
 }
 
 /**
@@ -190,6 +201,11 @@ export interface WSRunCitationsEvent extends WSBaseEvent {
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
 export interface WSDoneEvent extends WSBaseEvent {
     event: 'done';
+}
+
+/** Reply to a client `ping` (see WSPingMessage) */
+export interface WSPongEvent extends WSBaseEvent {
+    event: 'pong';
 }
 
 /** Streaming done event: all LLM tokens sent, post-processing (citations) still in progress */
@@ -2638,6 +2654,7 @@ export type WSEvent =
     | WSRunCitationsEvent
     | WSStreamingDoneEvent
     | WSDoneEvent
+    | WSPongEvent
     | WSThreadEvent
     | WSThreadNameEvent
     | WSErrorEvent
