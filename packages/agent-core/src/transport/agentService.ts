@@ -120,6 +120,12 @@ export const HEARTBEAT_TIMEOUT_MS = 45_000;
 export const HEARTBEAT_UPLOAD_TIMEOUT_MS = 180_000;
 /** Close reason recorded when the heartbeat, not the browser, detected the loss. */
 export const HEARTBEAT_TIMEOUT_REASON = 'heartbeat_timeout';
+/**
+ * Close code sent when the heartbeat gives up. Scripts may only send 1000 or
+ * 3000-4999, and the server reads 1000/1001 as the user leaving on purpose;
+ * any other code is recorded as a lost connection.
+ */
+export const HEARTBEAT_TIMEOUT_CLOSE_CODE = 4000;
 
 interface ConnectionAttemptState {
     stage: ConnectionFailureStage;
@@ -529,7 +535,7 @@ export class AgentService {
                         // close event is ignored as stale.
                         reportClose(1006, HEARTBEAT_TIMEOUT_REASON, false);
                         try {
-                            wsInstance.close(1000, 'Heartbeat timeout');
+                            wsInstance.close(HEARTBEAT_TIMEOUT_CLOSE_CODE, 'Heartbeat timeout');
                         } catch (error) {
                             logger(`AgentService: Error closing lost connection: ${error}`, 1);
                         }

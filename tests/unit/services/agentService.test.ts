@@ -51,6 +51,7 @@ import {
     AgentRunService,
     ConnectTimeoutError,
     HEARTBEAT_INTERVAL_MS,
+    HEARTBEAT_TIMEOUT_CLOSE_CODE,
     HEARTBEAT_TIMEOUT_MS,
     HEARTBEAT_UPLOAD_TIMEOUT_MS,
 } from '@beaver/agent-core/transport/agentService';
@@ -1156,6 +1157,7 @@ describe('AgentService connection heartbeat', () => {
         expect(evidence).toMatchObject({ stage: 'mid_run', readyReceived: true, closeCode: 1006 });
         expect(evidence?.msSinceLastWsMessageMs).toBeGreaterThanOrEqual(HEARTBEAT_TIMEOUT_MS);
         expect(socket.close).toHaveBeenCalledTimes(1);
+        expect(socket.close).toHaveBeenCalledWith(HEARTBEAT_TIMEOUT_CLOSE_CODE, 'Heartbeat timeout');
         expect(service.isConnected()).toBe(false);
 
         // The browser's own close event, when it finally fires, is not reported twice.
