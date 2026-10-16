@@ -25,6 +25,7 @@ import { isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { PreviewData, STATUS_CONFIGS, buildPreviewData, hasFailedUndo } from './agentActionViewHelpers';
 import { useApprovalRecovery } from './useApprovalRecovery';
+import { isStaleNoteEdit } from './editNoteErrors';
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
@@ -320,7 +321,7 @@ export function useEditNoteActions({
     const showApply = config.showApply && (!!pendingApproval || !!action);
     const showReject = config.showReject && (!!pendingApproval || !!action);
     const showUndo = config.showUndo && !!action;
-    const showRetry = config.showRetry && !!action;
+    const showRetry = config.showRetry && !!action && !isStaleNoteEdit(action);
 
     const runApply = useCallback(async (button: 'approve' | 'retry') => {
         if (!action || isProcessing) return;

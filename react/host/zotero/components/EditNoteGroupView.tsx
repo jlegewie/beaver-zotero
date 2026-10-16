@@ -33,6 +33,7 @@ import {
     type ActionStatus,
 } from './agentActionViewHelpers';
 import {
+    AlertIcon,
     ArrowDownIcon,
     ArrowRightIcon,
     ArrowUpRightIcon,
@@ -61,6 +62,7 @@ import {
 } from './useEditNoteActions';
 import { buildPreviewableEditOperations } from '../../../utils/editNotePreviewOperations';
 import { getEditNoteRetryOrder } from './editNoteRetryOrder';
+import { isStaleNoteEdit, STALE_NOTE_EDIT_MESSAGE } from './editNoteErrors';
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
@@ -240,10 +242,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         () => allActions.filter((a) => a.status === 'pending' || a.status === 'rejected' || a.status === 'undone'),
         [allActions],
     );
+    // An edit whose target is gone from the note fails the same way on every
+    // retry, so it is reported instead of offered for Retry.
     const errorActions = useMemo(
-        () => allActions.filter((a) => a.status === 'error'),
+        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a)),
         [allActions],
     );
+    const hasStaleEdit = useMemo(() => allActions.some(isStaleNoteEdit), [allActions]);
     const rowStatuses = useMemo(
         () => partStates.map((state) => state.effectiveStatus),
         [partStates],
@@ -756,6 +761,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         && (hasPendingApprovals || reapplicableActions.length > 0)
         );
 
+    const showFooter =
+        showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview || hasPendingApprovals;
+
     return (
         <div
             className="agent-action-view agent-action-group rounded-card flex flex-col min-w-0 border-card mb-2"
@@ -872,7 +880,17 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         })}
                     </div>
 
-                    {(showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview || hasPendingApprovals) && (
+                    {hasStaleEdit && (
+                        <div
+                            className={`display-flex flex-row items-start gap-2 text-sm font-color-secondary px-3 pt-2${showFooter ? '' : ' pb-2'}`}
+                            role="status"
+                        >
+                            <Icon icon={AlertIcon} className="font-color-red flex-shrink-0 mt-010" />
+                            <span>{STALE_NOTE_EDIT_MESSAGE}</span>
+                        </div>
+                    )}
+
+                    {showFooter && (
                         <div ref={footer.ref} className="display-flex flex-row items-center gap-2 px-2 py-2">
                             {/* Only while the run is waiting on this card: once
                                 it is not, there is no run left to grant. */}
