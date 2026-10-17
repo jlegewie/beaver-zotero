@@ -219,6 +219,9 @@ export async function describeGroup(
     };
 }
 
+/** Hex characters of the population hash returned as `snapshot_id`. */
+const SNAPSHOT_ID_LENGTH = 12;
+
 /** Use Zotero's detector and release the temporary search table even on failure. */
 async function nativeGroups(libraryID: number): Promise<number[][]> {
     const detector = new (Zotero as any).Duplicates(libraryID);
@@ -301,7 +304,13 @@ export async function handleDuplicatesRequest(
             collectionKey,
             groups.map((g) => g.map((i) => i.key)),
         ]);
-        const snapshot_id = Zotero.Utilities.Internal.md5(signature);
+        // The model copies this id into every continuation request, so keep it
+        // short: 48 bits detects a changed population, and a full 32-char hash
+        // invites transcription errors.
+        const snapshot_id = Zotero.Utilities.Internal.md5(signature).slice(
+            0,
+            SNAPSHOT_ID_LENGTH,
+        );
         const offset = Math.max(0, Math.trunc(request.offset || 0));
         const limit = Math.max(
             1,
@@ -314,7 +323,11 @@ export async function handleDuplicatesRequest(
             );
         if (request.snapshot_id && request.snapshot_id !== snapshot_id)
             throw duplicateError(
-                "Duplicate groups changed. Restart find_duplicates at offset 0.",
+                "snapshot_id does not match the current duplicate groups. Either it " +
+                    "was not copied exactly from the previous page, or the groups " +
+                    "changed (for example after a merge). Retry with the exact " +
+                    "snapshot_id from the previous page; if that also fails, restart " +
+                    "find_duplicates at offset 0.",
                 "stale_snapshot",
             );
         const page = await Promise.all(
