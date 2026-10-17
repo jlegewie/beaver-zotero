@@ -13,9 +13,10 @@
  * caller has already limited to searchable libraries.
  */
 
-import type { ZoteroFulltextEngine } from '@beaver/agent-core/protocol/agentProtocol';
+import type { ZoteroFulltextEngine, ZoteroFulltextLibraryState } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { processableAttachmentSql, processableKindFromStoredFields } from '../../utils/attachmentFiles';
+import { withDeadline } from './deadline';
 import { ftsExpression, type QueryTerm } from './text';
 
 export type ContentKind = 'pdf' | 'epub' | 'snapshot';
@@ -102,60 +103,92 @@ function scopeConditions(scope: SearchScope): { sql: string; params: unknown[] }
 }
 
 /**
- * PDF, EPUB and snapshot attachments in scope, with Zotero's index state.
+ * Joins and 0/1 expressions for an attachment's state in Zotero's index, for
+ * queries over the scope (`I` is `items`).
  *
- * `fts5` counts an attachment as indexed only once it is in Zotero's FTS5
- * content index: after an upgrade to Zotero 10, Zotero rebuilds that index in
- * the background from text it had already extracted, and until then the
- * attachment cannot be found.
+ * Progress is counted the way Zotero's own index statistics count it: in pages
+ * when Zotero recorded pages (PDFs), otherwise in characters. A row whose file
+ * was missing at sync, or that has nothing indexed yet (queued or unavailable),
+ * holds no searchable text. `fts5` counts an attachment as indexed only once it
+ * is in Zotero's FTS5 content index: after an upgrade to Zotero 10, Zotero
+ * rebuilds that index in the background from text it had already extracted,
+ * and until then the attachment cannot be found.
  */
+function indexStateSql(engine: ZoteroFulltextEngine): { joins: string; indexed: string; partial: string } {
+    const fts5 = engine === 'fts5';
+    const done = 'COALESCE(FI.indexedPages, FI.indexedChars, 0)';
+    const total = 'COALESCE(CASE WHEN FI.indexedPages IS NOT NULL THEN FI.totalPages ELSE FI.totalChars END, 0)';
+    const indexed = `(FI.itemID IS NOT NULL${fts5 ? ' AND S.itemID IS NOT NULL' : ''}`
+        + ` AND COALESCE(FI.synced, 0) != ${SYNC_STATE_MISSING} AND ${done} > 0)`;
+    return {
+        joins: `LEFT JOIN fulltextItems FI ON FI.itemID = I.itemID
+                ${fts5 ? 'LEFT JOIN ftindex.fulltextIndexState S ON S.itemID = I.itemID' : ''}`,
+        indexed,
+        partial: `(${indexed} AND ${done} < ${total})`,
+    };
+}
+
+/** PDF, EPUB and snapshot attachments in scope, with Zotero's index state. */
 export async function listScopeAttachments(scope: SearchScope, engine: ZoteroFulltextEngine): Promise<ScopeAttachment[]> {
     if (!scope.libraryIds.length || (scope.itemIDs && !scope.itemIDs.length)) return [];
-    const fts5 = engine === 'fts5';
     const conditions = scopeConditions(scope);
+    const state = indexStateSql(engine);
     const rows: ScopeAttachment[] = [];
     await Zotero.DB.queryAsync(
         `SELECT I.itemID, I.libraryID, I.key, IA.contentType, IA.path,
-                FI.itemID IS NOT NULL, FI.indexedPages, FI.totalPages, FI.indexedChars, FI.totalChars,
-                ${fts5 ? 'S.itemID IS NOT NULL' : '1'}, IA.storageHash, FI.synced
+                ${state.indexed}, ${state.partial}, IA.storageHash
          FROM items I
          JOIN itemAttachments IA ON IA.itemID = I.itemID
-         LEFT JOIN fulltextItems FI ON FI.itemID = I.itemID
-         ${fts5 ? 'LEFT JOIN ftindex.fulltextIndexState S ON S.itemID = I.itemID' : ''}
+         ${state.joins}
          WHERE ${conditions.sql}`,
         conditions.params,
         {
             onRow: (row: any) => {
                 const contentKind = processableKindFromStoredFields(row.getResultByIndex(3), row.getResultByIndex(4));
                 if (!contentKind) return;
-                const indexedPages = row.getResultByIndex(6);
-                const totalPages = row.getResultByIndex(7);
-                const indexedChars = row.getResultByIndex(8);
-                const totalChars = row.getResultByIndex(9);
-                // Same rule as Zotero.Fulltext.getIndexedState: pages for PDFs, characters
-                // otherwise. A row whose file was missing at sync, or that has nothing
-                // indexed yet (queued or unavailable), holds no searchable text.
-                const usePages = contentKind === 'pdf' && indexedPages != null;
-                const done = Number(usePages ? indexedPages : indexedChars) || 0;
-                const total = Number(usePages ? totalPages : totalChars) || 0;
-                const indexed = !!row.getResultByIndex(5)
-                    && !!row.getResultByIndex(10)
-                    && row.getResultByIndex(12) !== SYNC_STATE_MISSING
-                    && done > 0;
-                const partial = indexed && done < total;
                 rows.push({
                     itemID: row.getResultByIndex(0),
                     libraryID: row.getResultByIndex(1),
                     key: row.getResultByIndex(2),
                     contentKind: contentKind as ContentKind,
-                    indexed,
-                    partial,
-                    storageHash: row.getResultByIndex(11) || null,
+                    indexed: !!row.getResultByIndex(5),
+                    partial: !!row.getResultByIndex(6),
+                    storageHash: row.getResultByIndex(7) || null,
                 });
             },
         },
     );
     return rows;
+}
+
+/** Index coverage of one library's PDF, EPUB and snapshot attachments. */
+export type LibraryCoverage = Omit<ZoteroFulltextLibraryState, 'library_ref'>;
+
+/** Coverage per library, counted in one aggregate query; libraries without attachments are absent. */
+export async function countLibraryCoverage(libraryIds: number[], engine: ZoteroFulltextEngine): Promise<Map<number, LibraryCoverage>> {
+    const counts = new Map<number, LibraryCoverage>();
+    if (!libraryIds.length) return counts;
+    const conditions = scopeConditions({ libraryIds });
+    const state = indexStateSql(engine);
+    await Zotero.DB.queryAsync(
+        `SELECT I.libraryID, COUNT(*), SUM(${state.indexed}), SUM(${state.partial})
+         FROM items I
+         JOIN itemAttachments IA ON IA.itemID = I.itemID
+         ${state.joins}
+         WHERE ${conditions.sql}
+         GROUP BY I.libraryID`,
+        conditions.params,
+        {
+            onRow: (row: any) => {
+                counts.set(row.getResultByIndex(0), {
+                    total: Number(row.getResultByIndex(1)) || 0,
+                    indexed: Number(row.getResultByIndex(2)) || 0,
+                    partial: Number(row.getResultByIndex(3)) || 0,
+                });
+            },
+        },
+    );
+    return counts;
 }
 
 /** Rank the scope's attachments by FTS5 BM25 against one content table, best first. */
@@ -240,21 +273,14 @@ export async function rankWithWordIndex(
         }
         const hits = new Set<number>();
         for (const libraryID of libraries) {
-            const remaining = deadline - Date.now();
-            if (remaining <= 0) {
+            if (Date.now() >= deadline) {
                 timedOut = true;
                 break;
             }
             try {
                 // A slow search is abandoned at the deadline; its result is ignored
-                const search = searchContent(libraryID, term.original);
-                search.catch(() => undefined);
-                let timer: ReturnType<typeof setTimeout> | undefined;
-                const ids = await Promise.race([
-                    search,
-                    new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), remaining); }),
-                ]).finally(() => clearTimeout(timer));
-                if (!ids) {
+                const ids = await withDeadline(searchContent(libraryID, term.original), deadline);
+                if (ids === 'timeout') {
                     timedOut = true;
                     break;
                 }

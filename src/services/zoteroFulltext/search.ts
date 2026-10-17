@@ -36,7 +36,7 @@ import {
 } from '../documentExtractionCore';
 import { DEFAULT_PAGES_TIMEOUT_SECONDS } from '../agentDataProvider/timeout';
 import { enqueuePdfExtractionRetry } from '../agentDataProvider/pdfExtractionRetry';
-import { handleResolveSearchFiltersRequest } from '../agentDataProvider/handleResolveSearchFiltersRequest';
+import { handleResolveSearchFiltersRequest, hasItemLevelFilters } from '../agentDataProvider/handleResolveSearchFiltersRequest';
 import {
     getSearchableLibraryIds,
     isLibraryAccessReady,
@@ -44,6 +44,7 @@ import {
     resolveLibrariesFilter,
 } from '../agentDataProvider/utils';
 import { domDocumentPassages, structuredDocumentPassages, type BeaverPassage } from './beaverPassages';
+import { withDeadline } from './deadline';
 import { buildQueryTerms, selectPassages, termDisplay } from './text';
 import {
     detectEngine,
@@ -76,12 +77,6 @@ const clamp = (value: number | undefined, fallback: number, max: number) =>
 
 function reference(libraryID: number, key: string): ZoteroItemReference {
     return { library_id: libraryID, library_ref: libraryRefForLibraryID(libraryID) ?? undefined, zotero_key: key };
-}
-
-function hasItemFilters(request: WSZoteroFulltextSearchRequest): boolean {
-    const year = request.year;
-    return !!(request.collections?.length || request.tags?.length || request.authors?.length
-        || (year && ((year.min ?? 0) > 0 || (year.max ?? 0) > 0 || (year.exact ?? 0) > 0)));
 }
 
 /**
@@ -215,11 +210,10 @@ async function extractPassages(item: Zotero.Item, kind: ScopeAttachment['content
     return result.kind === 'ok' ? domDocumentPassages(result.document, kind) : dropReason(result.code);
 }
 
-/** One candidate's passages: Beaver's cached extraction, else (with `extract`) a new one. */
-async function readCandidate(
-    attachment: ScopeAttachment,
-    extract: boolean,
-): Promise<CandidateText | ZoteroFulltextDropReason | null> {
+type CandidateOutcome = CandidateText | ZoteroFulltextDropReason;
+
+/** One candidate from Beaver's document cache, or its loaded item when the cache has no extraction. */
+async function readCachedCandidate(attachment: ScopeAttachment): Promise<CandidateOutcome | { uncached: Zotero.Item }> {
     const item = await Zotero.Items.getAsync(attachment.itemID);
     if (!item) return 'file_missing';
     try {
@@ -228,31 +222,17 @@ async function readCandidate(
     } catch (error) {
         logger(`zoteroFulltext: cached extraction unreadable for ${item.libraryID}/${item.key}: ${error}`, 2);
     }
-    if (!extract) return null;
+    return { uncached: item };
+}
+
+/** One candidate extracted by this search. */
+async function extractCandidate(attachment: ScopeAttachment, item: Zotero.Item): Promise<CandidateOutcome> {
     const passages = await extractPassages(item, attachment.contentKind);
     if (typeof passages === 'string') return passages;
     return passages.length ? { attachment, item, cached: false, passages } : 'no_text';
 }
 
-async function withDeadline<T>(promise: Promise<T>, deadline: number): Promise<T | 'timeout'> {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) return 'timeout';
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    // Work that outlives the deadline finishes unobserved: an extraction runs
-    // on to its own timeout and is cached, or queued for background extraction
-    // if it times out. Keep its failure from going unhandled
-    promise.catch(() => undefined);
-    try {
-        return await Promise.race([
-            promise,
-            new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), remaining); }),
-        ]);
-    } finally {
-        if (timer) clearTimeout(timer);
-    }
-}
-
-async function documentMetadata(candidate: CandidateText, rank: number): Promise<ZoteroFulltextDocument> {
+async function documentMetadata(candidate: CandidateText): Promise<ZoteroFulltextDocument> {
     const { attachment, item } = candidate;
     let parentStub;
     if (item.parentItemID) {
@@ -263,22 +243,18 @@ async function documentMetadata(candidate: CandidateText, rank: number): Promise
         }
     }
     await Zotero.Items.loadDataTypes([item], ['itemData']);
+    const attachmentStub = safeStub(() => serializeAttachmentStub(item, attachment.contentKind));
     return {
         attachment: reference(attachment.libraryID, attachment.key),
         content_kind: attachment.contentKind,
         ...(parentStub ? { parent_item: parentStub } : {}),
-        ...(() => {
-            const stub = safeStub(() => serializeAttachmentStub(item, attachment.contentKind));
-            return stub ? { served_attachment: stub } : {};
-        })(),
-        stage1_rank: rank,
+        ...(attachmentStub ? { served_attachment: attachmentStub } : {}),
     };
 }
 
 /**
  * Remove everything from libraries excluded while the search ran: their
- * documents and passages, dropped or unindexed attachments, and the scope's
- * coverage counts, which would describe them.
+ * documents and passages, and dropped or unindexed attachments.
  */
 export function withoutRevokedLibraries(
     response: WSZoteroFulltextSearchResponse,
@@ -299,7 +275,7 @@ export function withoutRevokedLibraries(
     const passages = response.passages
         .filter((passage) => remap.has(passage.document))
         .map((passage, index) => ({ ...passage, document: remap.get(passage.document)!, rank: index + 1 }));
-    const { coverage: _coverage, dropped, unindexed_attachments: unindexed, ...rest } = response;
+    const { dropped, unindexed_attachments: unindexed, ...rest } = response;
     const keptDropped = dropped?.filter((entry) => allowed(entry.attachment)) ?? [];
     const keptUnindexed = unindexed?.filter(allowed) ?? [];
     return {
@@ -357,7 +333,7 @@ export async function runZoteroFulltextSearch(
     scopeLibraryIds = libraryIds;
 
     let itemIDs: number[] | undefined;
-    if (hasItemFilters(request)) {
+    if (hasItemLevelFilters(request)) {
         const resolved = await handleResolveSearchFiltersRequest({
             event: 'resolve_search_filters_request',
             request_id: request.request_id,
@@ -394,40 +370,35 @@ export async function runZoteroFulltextSearch(
 
     const searchScope = { libraryIds, itemIDs };
     const scope = await listScopeAttachments(searchScope, engine);
+    // Every requested attachment is read when they all fit; Zotero's index is
+    // not needed to find them
+    const readAllExplicit = !!explicit && scope.length <= maxDocuments;
     if (explicit) {
         // Requested attachments that are not PDFs, EPUBs or snapshots, or were filtered out
         const inScope = new Set(scope.map((attachment) => attachment.itemID));
         for (const [id, ref] of explicitIDs) if (!inScope.has(id)) unindexedAttachments.push(ref);
+        if (!readAllExplicit) {
+            // Too many requested attachments to read them all: Zotero's index ranks them, so
+            // the ones it has not indexed cannot be searched
+            for (const attachment of scope) {
+                if (!attachment.indexed) unindexedAttachments.push(explicitIDs.get(attachment.itemID)!);
+            }
+        }
     }
-    const coverage = {
-        total: scope.length,
-        indexed: scope.filter((attachment) => attachment.indexed).length,
-        partial: scope.filter((attachment) => attachment.partial).length,
-    };
     lap('scope', scopeStart);
-    let unindexedField = unindexedAttachments.length ? { unindexed_attachments: unindexedAttachments } : {};
-    if (!scope.length) return respond({ status: 'unavailable', unavailable_reason: 'scope_empty', coverage, ...unindexedField });
-    if (!terms.length) return respond({ status: 'unavailable', unavailable_reason: 'no_terms', coverage, ...unindexedField });
+    const unindexedField = unindexedAttachments.length ? { unindexed_attachments: unindexedAttachments } : {};
+    if (!scope.length) return respond({ status: 'unavailable', unavailable_reason: 'scope_empty', ...unindexedField });
+    if (!terms.length) return respond({ status: 'unavailable', unavailable_reason: 'no_terms', ...unindexedField });
 
     // ---- stage 1: candidates from Zotero's index ----------------------------
     const stage1Start = Date.now();
     let candidates: ScopeAttachment[];
     let incompleteSearch = false;
     const byId = new Map(scope.map((attachment) => [attachment.itemID, attachment]));
-    if (explicit && scope.length <= maxDocuments) {
-        // Every requested attachment is read; Zotero's index is not needed to find them
-        const order = [...explicitIDs.keys()];
-        candidates = order.map((id) => byId.get(id)).filter((a): a is ScopeAttachment => !!a);
+    if (readAllExplicit) {
+        candidates = [...explicitIDs.keys()].map((id) => byId.get(id)).filter((a): a is ScopeAttachment => !!a);
     } else {
-        if (explicit) {
-            // Too many requested attachments to read them all: Zotero's index ranks them, so
-            // the ones it has not indexed cannot be searched
-            for (const attachment of scope) {
-                if (!attachment.indexed) unindexedAttachments.push(explicitIDs.get(attachment.itemID)!);
-            }
-            unindexedField = unindexedAttachments.length ? { unindexed_attachments: unindexedAttachments } : {};
-        }
-        if (engine === 'none') return respond({ status: 'unavailable', unavailable_reason: 'no_index', coverage, ...unindexedField });
+        if (engine === 'none') return respond({ status: 'unavailable', unavailable_reason: 'no_index', ...unindexedField });
         const indexed = scope.filter((attachment) => attachment.indexed);
         let ranked: number[] = [];
         if (engine === 'fts5') {
@@ -447,7 +418,6 @@ export async function runZoteroFulltextSearch(
                 lap('stage1', stage1Start);
                 return respond({
                     status: 'unavailable',
-                    coverage,
                     ...unindexedField,
                     error: result.timedOut
                         ? "Zotero's full-text search did not finish in time."
@@ -462,44 +432,52 @@ export async function runZoteroFulltextSearch(
     }
     lap('stage1', stage1Start);
     timing.candidates = candidates.length;
-    if (!candidates.length) return respond({ status: 'no_matches', coverage, ...unindexedField });
+    if (!candidates.length) return respond({ status: 'no_matches', ...unindexedField });
     const incompleteField = incompleteSearch ? { incomplete_search: true } : {};
 
     // ---- stage 2: passages ---------------------------------------------------
     const readStart = Date.now();
     const deadline = readStart + timeoutMs;
-    // Cached candidates first, so a slow extraction never costs one that is
-    // ready; then the others are extracted in stage-1 order. Past the budget,
-    // no further candidate is read or extracted.
-    const outcomes: (CandidateText | ZoteroFulltextDropReason | null)[] = candidates.map(() => null);
-    for (const extract of [false, true]) {
-        for (const [i, candidate] of candidates.entries()) {
-            if (outcomes[i] !== null) continue;
-            try {
-                outcomes[i] = Date.now() >= deadline ? 'timeout' : await withDeadline(readCandidate(candidate, extract), deadline);
-            } catch (error) {
-                logger(`zoteroFulltext: reading ${candidate.libraryID}/${candidate.key} failed: ${error}`, 1);
-                outcomes[i] = 'error';
-            }
+    // Work that outlives the deadline finishes unobserved: an extraction runs on
+    // to its own timeout and is cached, or queued for background extraction if
+    // it times out. Past the deadline, no further candidate is read.
+    const attempt = async <T>(candidate: ScopeAttachment, work: () => Promise<T>): Promise<T | ZoteroFulltextDropReason> => {
+        if (Date.now() >= deadline) return 'timeout';
+        try {
+            return await withDeadline(work(), deadline);
+        } catch (error) {
+            logger(`zoteroFulltext: reading ${candidate.libraryID}/${candidate.key} failed: ${error}`, 1);
+            return 'error';
         }
+    };
+    // Cached candidates first, so a slow extraction never costs one that is
+    // ready; then the others are extracted in stage-1 order.
+    const outcomes: CandidateOutcome[] = [];
+    const uncached: { index: number; item: Zotero.Item }[] = [];
+    for (const [index, candidate] of candidates.entries()) {
+        const outcome = await attempt(candidate, () => readCachedCandidate(candidate));
+        if (typeof outcome === 'object' && 'uncached' in outcome) uncached.push({ index, item: outcome.uncached });
+        else outcomes[index] = outcome;
     }
-    const texts: CandidateText[] = [];
+    for (const { index, item } of uncached) {
+        outcomes[index] = await attempt(candidates[index], () => extractCandidate(candidates[index], item));
+    }
+    const read: CandidateText[] = [];
     const dropped: { attachment: ZoteroItemReference; reason: ZoteroFulltextDropReason }[] = [];
-    for (const [i, outcome] of outcomes.entries()) {
-        if (outcome === null || typeof outcome === 'string') {
-            dropped.push({ attachment: reference(candidates[i].libraryID, candidates[i].key), reason: outcome ?? 'error' });
+    for (const [index, outcome] of outcomes.entries()) {
+        if (typeof outcome === 'string') {
+            dropped.push({ attachment: reference(candidates[index].libraryID, candidates[index].key), reason: outcome });
         } else {
-            texts.push(outcome);
+            read.push(outcome);
         }
     }
     lap('read', readStart);
-    timing.cached_documents = texts.filter((text) => text.cached).length;
-    timing.extracted_documents = texts.length - timing.cached_documents;
-    const distinctTexts = withoutDuplicateTexts(texts);
-    timing.duplicate_documents = texts.length - distinctTexts.length;
-    texts.splice(0, texts.length, ...distinctTexts);
+    timing.cached_documents = read.filter((text) => text.cached).length;
+    timing.extracted_documents = read.length - timing.cached_documents;
+    const texts = withoutDuplicateTexts(read);
+    timing.duplicate_documents = read.length - texts.length;
     const droppedField = dropped.length ? { dropped } : {};
-    if (!texts.length) return respond({ status: 'no_matches', coverage, ...droppedField, ...unindexedField, ...incompleteField });
+    if (!texts.length) return respond({ status: 'no_matches', ...droppedField, ...unindexedField, ...incompleteField });
 
     const rankStart = Date.now();
     const selected = selectPassages(texts, terms, maxPassages);
@@ -514,7 +492,7 @@ export async function runZoteroFulltextSearch(
         const text = texts[entry.candidate];
         if (!docIndex.has(entry.candidate)) {
             docIndex.set(entry.candidate, documents.length);
-            documents.push(await documentMetadata(text, candidates.indexOf(text.attachment) + 1));
+            documents.push(await documentMetadata(text));
         }
         const passage = text.passages[entry.passage];
         passages.push({
@@ -534,7 +512,6 @@ export async function runZoteroFulltextSearch(
         status: passages.length ? 'ok' : 'no_matches',
         documents,
         passages,
-        coverage,
         ...droppedField,
         ...unindexedField,
     });

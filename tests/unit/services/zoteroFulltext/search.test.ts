@@ -33,8 +33,8 @@ function response(): WSZoteroFulltextSearchResponse {
         engine: 'fts5',
         terms: ['x'],
         documents: [
-            { attachment: ref(2, 'BBBB'), content_kind: 'pdf', stage1_rank: 1 },
-            { attachment: ref(1, 'AAAA'), content_kind: 'pdf', stage1_rank: 2 },
+            { attachment: ref(2, 'BBBB'), content_kind: 'pdf' },
+            { attachment: ref(1, 'AAAA'), content_kind: 'pdf' },
         ],
         passages: [
             { document: 0, rank: 1, text: 'from group', locator: { content_kind: 'pdf' } },
@@ -42,7 +42,6 @@ function response(): WSZoteroFulltextSearchResponse {
         ],
         dropped: [{ attachment: ref(2, 'CCCC'), reason: 'timeout' }],
         unindexed_attachments: [ref(2, 'DDDD'), ref(1, 'EEEE')],
-        coverage: { total: 10, indexed: 9, partial: 0 },
     };
 }
 
@@ -61,7 +60,6 @@ describe('withoutRevokedLibraries', () => {
         expect(filtered.passages).toEqual([{ document: 0, rank: 1, text: 'from user', locator: { content_kind: 'pdf' } }]);
         expect(filtered.dropped).toBeUndefined();
         expect(filtered.unindexed_attachments).toEqual([ref(1, 'EEEE')]);
-        expect(filtered.coverage).toBeUndefined();
     });
 
     it('reports no matches when nothing searchable is left', () => {

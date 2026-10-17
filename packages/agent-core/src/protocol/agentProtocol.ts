@@ -841,8 +841,6 @@ export interface ZoteroFulltextDocument {
     content_kind: 'pdf' | 'epub' | 'snapshot';
     parent_item?: ItemStub;
     served_attachment?: AttachmentStub;
-    /** 1-based rank from Zotero's index. */
-    stage1_rank: number;
 }
 
 /** One passage of a candidate document, cut from Beaver's extraction. */
@@ -867,15 +865,6 @@ export interface ZoteroFulltextPassage {
  */
 export type ZoteroFulltextDropReason = 'timeout' | 'no_text' | 'file_missing' | 'too_large' | 'error';
 
-/** Index coverage of the searched scope (PDF, EPUB and snapshot attachments). */
-export interface ZoteroFulltextCoverage {
-    total: number;
-    /** Attachments with any text in Zotero's index. */
-    indexed: number;
-    /** Indexed attachments that hit Zotero's page or character limit. */
-    partial: number;
-}
-
 export interface WSZoteroFulltextSearchResponse {
     type: 'zotero_fulltext_search';
     request_id: string;
@@ -895,7 +884,6 @@ export interface WSZoteroFulltextSearchResponse {
     unindexed_attachments?: ZoteroItemReference[];
     /** Zotero's search did not finish for every term, so candidates may be missing. */
     incomplete_search?: boolean;
-    coverage?: ZoteroFulltextCoverage;
     unresolved?: ResolveSearchFiltersUnresolved;
     error?: string | null;
     error_code?: ItemSearchErrorCode | null;
@@ -907,7 +895,9 @@ export interface ZoteroFulltextLibraryState {
     library_ref: string;
     /** PDF, EPUB and snapshot attachments (not in the trash). */
     total: number;
+    /** Attachments with any text in Zotero's index. */
     indexed: number;
+    /** Indexed attachments that hit Zotero's page or character limit. */
     partial: number;
 }
 
