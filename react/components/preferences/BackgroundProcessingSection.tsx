@@ -230,7 +230,7 @@ const MetadataIndexProblemRow: React.FC<{ indexState: EmbeddingIndexState }> = (
                 : 'Metadata search index needs attention'}
             description={errored
                 ? `The last index update failed: ${indexState.error}`
-                : 'These items could not be added to the local index that powers searching by title and abstract.'}
+                : 'These items could not be added to the local index that powers searching by topic.'}
             control={
                 <Button
                     variant="outline"

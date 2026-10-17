@@ -31,6 +31,7 @@ import { createAbortController } from '../utils/abortController';
 import { UNRESOLVED_LIBRARY_ID } from '../utils/libraryIdentity';
 import { getPref } from '../utils/prefs';
 import { getSystemIdleTimeMs, registerIdleObserver } from '../utils/idleService';
+import { LOCAL_EXTRACT_PRIORITY_CEILING } from './backgroundProcessing/constants';
 
 const IDLE_INTERVAL_MS = 30_000;
 /** Re-tick delay after a pass that launched work, so a backlog keeps draining. */
@@ -592,14 +593,15 @@ export class BackgroundExtractor {
         const db = Zotero.Beaver?.db;
         if (!db || this.executors.size === 0) return inactive('empty');
 
-        const idleMs = getSystemIdleTimeMs();
+        const idle = getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;
         const processBacklog = getPref(PREF_PROCESSING_ENABLED) === true;
         const drainNow = processBacklog && this.drainNowRequested;
 
         const launched = await this.dispatchPass({
             db,
             processBacklog,
-            backlogGateOpen: processBacklog && (drainNow || idleMs >= IDLE_THRESHOLD_MS),
+            backlogGateOpen: processBacklog && (drainNow || idle),
+            idle,
             awaitLaunchedJobs: options.awaitLaunchedJobs === true,
             awaitExtraction: options.awaitExtraction !== false,
         });
@@ -628,6 +630,7 @@ export class BackgroundExtractor {
         db: QueueDB;
         processBacklog: boolean;
         backlogGateOpen: boolean;
+        idle: boolean;
         awaitLaunchedJobs: boolean;
         awaitExtraction: boolean;
     }): Promise<number> {
@@ -639,11 +642,15 @@ export class BackgroundExtractor {
             // Lanes with an active-use capacity keep draining their backlog
             // while the user works, at that reduced width. Every other lane
             // takes only low-priority-ceiling work until the system is idle.
+            // Idle with processing off still admits the local extraction band
+            // and leaves backlog work such as OCR queued.
             const runsWhileActive = !options.backlogGateOpen && options.processBacklog
                 && registration.activeMaxInFlight !== undefined;
             const maxPriority = options.backlogGateOpen || runsWhileActive
                 ? undefined
-                : LOW_PRIORITY_CEILING;
+                : options.idle && !options.processBacklog
+                    ? LOCAL_EXTRACT_PRIORITY_CEILING
+                    : LOW_PRIORITY_CEILING;
             const capacity = runsWhileActive
                 ? registration.activeMaxInFlight!
                 : registration.maxInFlight;
