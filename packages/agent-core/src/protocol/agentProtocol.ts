@@ -792,6 +792,131 @@ export interface WSResolveSearchFiltersResponse {
 }
 
 // =============================================================================
+// Full-text search on Zotero's own index
+// =============================================================================
+
+/** How the client searched Zotero's full-text index. */
+export type ZoteroFulltextEngine =
+    /** Zotero 10+: ranked BM25 over the FTS5 content index. */
+    | 'fts5'
+    /** Zotero 7–9 (or FTS5 unusable): one `fulltextContent` search per term, ranked by summed IDF. */
+    | 'word_index'
+    /** No usable full-text index. */
+    | 'none';
+
+/**
+ * Request from the backend to find passages for a full-text search.
+ *
+ * The client finds candidate attachments with Zotero's full-text index (stage 1),
+ * cuts passages from Beaver's extraction of each candidate (from the document
+ * cache, or extracted now), ranks them with BM25 (stage 2), and returns the top
+ * passages for the backend to rerank. Filters have the same semantics as
+ * {@link WSResolveSearchFiltersRequest}.
+ */
+export interface WSZoteroFulltextSearchRequest extends WSBaseEvent {
+    event: 'zotero_fulltext_search_request';
+    request_id: string;
+    /** The agent's information need, as written. */
+    query: string;
+    /** Additional terms and synonyms, OR-ed with the query's own terms. */
+    keywords?: string[];
+    /** Restrict the search to these attachments (portable or numeric references). */
+    attachments?: ZoteroItemReference[];
+    libraries?: (string | number)[];
+    collections?: (string | number)[];
+    tags?: string[];
+    authors?: string[];
+    year?: ResolveSearchFiltersYear;
+    /** Candidate attachments taken from stage 1. Default 16. */
+    max_documents?: number;
+    /** Passages returned for reranking. Default 160. */
+    max_passages?: number;
+    /** Budget for reading and extracting candidates, in milliseconds. Default 30000. */
+    timeout_ms?: number;
+}
+
+/** One candidate attachment of a full-text search. */
+export interface ZoteroFulltextDocument {
+    attachment: ZoteroItemReference;
+    content_kind: 'pdf' | 'epub' | 'snapshot';
+    parent_item?: ItemStub;
+    served_attachment?: AttachmentStub;
+}
+
+/** One passage of a candidate document, cut from Beaver's extraction. */
+export interface ZoteroFulltextPassage {
+    /** Index into the response's `documents`. */
+    document: number;
+    /** 1-based BM25 rank among all returned passages. */
+    rank: number;
+    text: string;
+    /**
+     * Sentence locator in the backend's chunk-locator shape (`content_kind`
+     * pdf | epub | snapshot, `spans` with code-point offsets).
+     */
+    locator: Record<string, unknown>;
+}
+
+/**
+ * Why a candidate was not searched: extraction did not finish in time (it
+ * continues in the background), the document has no extractable text, its
+ * file is not on this device, it exceeds Beaver's size or page limits, or
+ * extraction failed.
+ */
+export type ZoteroFulltextDropReason = 'timeout' | 'no_text' | 'file_missing' | 'too_large' | 'error';
+
+export interface WSZoteroFulltextSearchResponse {
+    type: 'zotero_fulltext_search';
+    request_id: string;
+    status: 'ok' | 'no_matches' | 'unavailable';
+    engine: ZoteroFulltextEngine;
+    /** Why nothing could be searched, when status is `unavailable`. */
+    unavailable_reason?: 'no_index' | 'no_searchable_libraries' | 'scope_empty' | 'no_terms';
+    /** The OR-ed terms that were searched, phrases quoted. */
+    terms: string[];
+    /** Terms dropped by the term cap. */
+    terms_truncated?: number;
+    documents: ZoteroFulltextDocument[];
+    passages: ZoteroFulltextPassage[];
+    /** Candidates that could not be extracted. */
+    dropped?: { attachment: ZoteroItemReference; reason: ZoteroFulltextDropReason }[];
+    /** Requested attachments that Zotero has not indexed. */
+    unindexed_attachments?: ZoteroItemReference[];
+    /** Zotero's search did not finish for every term, so candidates may be missing. */
+    incomplete_search?: boolean;
+    unresolved?: ResolveSearchFiltersUnresolved;
+    error?: string | null;
+    error_code?: ItemSearchErrorCode | null;
+    timing?: FrontendTimingMetadata;
+}
+
+/** Index coverage of one searchable library, reported with each agent run. */
+export interface ZoteroFulltextLibraryState {
+    library_ref: string;
+    /** PDF, EPUB and snapshot attachments (not in the trash). */
+    total: number;
+    /** Attachments with any text in Zotero's index. */
+    indexed: number;
+    /** Indexed attachments that hit Zotero's page or character limit. */
+    partial: number;
+}
+
+/**
+ * Whether full-text search on Zotero's index can run, sent with each agent run.
+ * The backend owns the eligibility policy.
+ */
+export interface ZoteroFulltextState {
+    version: 1;
+    engine: ZoteroFulltextEngine;
+    libraries: ZoteroFulltextLibraryState[];
+    /**
+     * ISO 639-1 codes of the languages that make up a noticeable share of the
+     * searchable libraries' items, most common first.
+     */
+    languages: string[];
+}
+
+// =============================================================================
 // Zotero Item Quick Search (one string, ORed across title / creators / year)
 // =============================================================================
 
@@ -2683,6 +2808,7 @@ export type WSEvent =
     | WSItemSearchByMetadataRequest
     | WSItemSearchByTopicRequest
     | WSResolveSearchFiltersRequest
+    | WSZoteroFulltextSearchRequest
     | WSItemQuickSearchRequest
     // Library management tools
     | WSZoteroSearchRequest
@@ -2946,6 +3072,12 @@ export const CLIENT_FEATURES = {
      */
     TWO_PAGE_HIGHLIGHTS: 'two_page_highlights',
     /**
+     * `zotero_fulltext_search_request`: passages for `fulltext_search` from
+     * Zotero's own full-text index, and `zotero_fulltext_state` on each run
+     * request. Without it the backend must not send the request.
+     */
+    ZOTERO_FULLTEXT_SEARCH: 'zotero_fulltext_search',
+    /**
      * `create_highlight_annotations` actions may carry `style: 'underline'`,
      * written as Zotero underline annotations. Without it the backend never
      * offers the style, since an older client would write highlights instead.
@@ -3200,6 +3332,8 @@ export interface SearchIndexState {
 export interface AgentRunRequest {
     /** Fresh local preparation snapshot, omitted without search access. */
     search_index_state?: SearchIndexState;
+    /** Zotero full-text index coverage, omitted when it could not be read. */
+    zotero_fulltext_state?: ZoteroFulltextState;
     /** Request type discriminator */
     type: 'chat';
     /** Client-generated run ID for this agent run */
