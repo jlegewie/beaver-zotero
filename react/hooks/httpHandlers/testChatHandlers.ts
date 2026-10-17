@@ -21,6 +21,7 @@ import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
  *   /beaver/test/approve-action approve or reject a pending write approval
  *   /beaver/test/confirm-credits continue or skip a pending credit confirmation
  *   /beaver/test/undo-action    undo an applied action
+ *   /beaver/test/chat-drop-connection  lose the chat socket mid-run, to exercise run reattach
  *
  * All are gated behind the same authenticated-only registration as the rest of
  * the dev endpoints, and only registered in development builds.
@@ -34,7 +35,8 @@ import {
     currentThreadIdAtom,
     currentThreadNameAtom,
 } from '../../atoms/threads';
-import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { activeRunAtom, threadRunsAtom, wsReconnectingAtom } from '@beaver/agent-core/run-state/atoms';
+import { agentService } from '@beaver/agent-core/transport/agentService';
 import { flushPendingPartEvents } from '../../utils/streamingPartQueue';
 import {
     isWSChatPendingAtom,
@@ -119,7 +121,19 @@ function currentIds() {
         threadName: store.get(currentThreadNameAtom),
         activeRunId: activeRun?.id ?? null,
         activeRunStatus: activeRun?.status ?? null,
+        activeRunError: activeRun?.error
+            ? {
+                type: activeRun.error.type,
+                isRetryable: activeRun.error.is_retryable ?? null,
+                isResumable: activeRun.error.is_resumable ?? null,
+            }
+            : null,
         isPending: store.get(isWSChatPendingAtom),
+        isReconnecting: store.get(wsReconnectingAtom) !== null,
+        transport: {
+            connected: agentService.isConnected(),
+            run: agentService.runLinkState(),
+        },
         runCount: runs.length,
         lastRunId: runs.length ? runs[runs.length - 1].id : null,
         pendingApprovals: Array.from(approvals.values()).map(serializeApproval),
@@ -518,4 +532,40 @@ export async function handleTestUndoActionHttpRequest(request: any) {
         status: updated?.status ?? null,
         reverted,
     };
+}
+
+/**
+ * Lose the chat socket mid-run the way a network failure would, to exercise run
+ * reattach. Test-only: reaches into the transport's live socket.
+ *
+ * Body:
+ *   mode      'close' (default): close the socket with `code` (default 4000,
+ *             which client and server both read as a lost connection).
+ *             'half_open': stop reading the socket and never close it, as if
+ *             the network went silent. The heartbeat notices within ~45 s and
+ *             the server only learns of the loss when the new socket takes the
+ *             run over.
+ *   code      close code for mode 'close'.
+ *   badToken  corrupt the reattach token first, so the server refuses the
+ *             reattach (`reattach_unavailable: bad_token`).
+ */
+export async function handleTestChatDropConnectionHttpRequest(request: any) {
+    const service = agentService as any;
+    const ws: WebSocket | null = service.ws ?? null;
+    const before = agentService.runLinkState();
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return { ok: false, error: 'No open chat connection', run: before };
+    }
+    if (request?.badToken && service.run) {
+        service.run.token = 'invalid-reattach-token';
+    }
+    const mode = request?.mode === 'half_open' ? 'half_open' : 'close';
+    if (mode === 'half_open') {
+        ws.onmessage = null;
+        ws.close = () => {};
+    } else {
+        const code = typeof request?.code === 'number' ? request.code : 4000;
+        ws.close(code, 'Simulated connection loss');
+    }
+    return { ok: true, mode, run: before };
 }

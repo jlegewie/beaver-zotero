@@ -472,8 +472,9 @@ export const allUserAttachmentKeysAtom = atom((get) => {
  * thing shares their name:
  *
  * - `wsReconnectingAtom` — *this client* is quietly retrying a connect attempt
- *   that failed before the run started. Nothing has been reported to the reader,
- *   and if the next attempt succeeds nothing ever will be.
+ *   that failed before the run started, or picking up a running run whose
+ *   connection was lost. Nothing has been reported to the reader, and if the
+ *   next attempt succeeds nothing ever will be.
  * - `wsRetryAtom` — the *backend* is retrying a failed model request and keeping
  *   the run alive. The connection is fine; the run is waiting on the server.
  * - The Retry button a reader presses on a run that already failed is neither of
@@ -510,11 +511,13 @@ export const wsRetryAtom = atom<RetryState | null>(null);
 
 /**
  * This client is retrying its own failed connect attempt, before the run has
- * started and before anything reaches the reader as an error.
+ * started and before anything reaches the reader as an error — or reattaching
+ * a run whose connection was lost mid-run, which the server keeps going.
  *
  * Written from the shared connect-retry loop's `onRetrying` callback, which
  * reports every attempt it is about to make and then clears the state as it
- * exits.
+ * exits; a reattach sets it when the connection is lost and clears it when the
+ * reattach succeeds or fails.
  *
  * One loop can outlive its own run by a backoff while another is already
  * running, and this state describes the connection rather than any one run — so

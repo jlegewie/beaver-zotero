@@ -24,6 +24,12 @@ export { isRenderableMessage } from '../agents/messageVisibility';
 /** Base interface for all WebSocket events from the server */
 export interface WSBaseEvent {
     event: string;
+    /**
+     * Position of a run event in its run, on a backend that can reattach runs
+     * (see `WSReadyEvent.supports_run_reattach`). Requests and prompts, which
+     * are re-sent by id rather than replayed, carry none.
+     */
+    seq?: number;
 }
 
 /** Ready event sent after connection validation completes */
@@ -38,6 +44,14 @@ export interface WSReadyEvent extends WSBaseEvent {
     supports_request_keepalive?: boolean;
     /** Backend answers the client's `ping` heartbeat with a `pong` */
     supports_heartbeat?: boolean;
+    /**
+     * A run whose socket is lost abnormally keeps going on the server for
+     * `reattach_grace_s` seconds, and a client that declared
+     * CLIENT_FEATURES.RUN_REATTACH can open a new socket and send
+     * `WSReattachRequest` to pick it up.
+     */
+    supports_run_reattach?: boolean;
+    reattach_grace_s?: number | null;
 }
 
 /**
@@ -47,6 +61,59 @@ export interface WSReadyEvent extends WSBaseEvent {
  */
 export interface WSPingMessage {
     type: 'ping';
+    /**
+     * Highest run-event `seq` this client has handled, sent to a backend that
+     * reattaches runs so it can stop holding those events for replay.
+     */
+    last_seq?: number;
+}
+
+/**
+ * Pick up a run that lost its socket, sent after `ready` instead of a chat
+ * request. Answered with `reattached` (then the events after `last_seq`, then
+ * every request still waiting on the client, with its original id) or with
+ * `reattach_unavailable`.
+ */
+export interface WSReattachRequest {
+    type: 'reattach';
+    run_id: string;
+    /** From the run's `request_ack`. */
+    reattach_token: string;
+    /** Highest `seq` handled for this run; 0 if none. */
+    last_seq: number;
+}
+
+/** The first message a connection sends after `ready`. */
+export type AgentConnectRequest = AgentRunRequest | WSReattachRequest;
+
+/** Whether a connect request picks up an existing run rather than starting one. */
+export function isReattachRequest(request: AgentConnectRequest): request is WSReattachRequest {
+    return request.type === 'reattach';
+}
+
+/** A `reattach` succeeded: the run continues on this socket. */
+export interface WSReattachedEvent extends WSBaseEvent {
+    event: 'reattached';
+    run_id: string;
+    /** Highest `seq` the run has produced so far. */
+    last_seq: number;
+    /** Number of buffered events about to be replayed. */
+    replayed: number;
+}
+
+/** Why the backend refused a `reattach`. */
+export type WSReattachUnavailableReason =
+    | 'not_found'
+    | 'expired'
+    | 'wrong_install'
+    | 'bad_token'
+    | 'unsupported';
+
+/** A `reattach` was refused; the client falls back to its usual error handling. */
+export interface WSReattachUnavailableEvent extends WSBaseEvent {
+    event: 'reattach_unavailable';
+    run_id: string;
+    reason: WSReattachUnavailableReason;
 }
 
 /**
@@ -89,6 +156,11 @@ export interface WSRequestAckEvent extends WSBaseEvent {
     model_id: string | null;
     model_name: string | null;
     charge_type: ChargeType;
+    /**
+     * Proof of ownership the client presents to reattach to this run after
+     * losing its socket. Only for runs the backend lets outlive their socket.
+     */
+    reattach_token?: string;
 }
 
 /** Part event for streaming content (text, thinking, tool calls) */
@@ -2665,6 +2737,8 @@ export type WSEvent =
     | WSStreamingDoneEvent
     | WSDoneEvent
     | WSPongEvent
+    | WSReattachedEvent
+    | WSReattachUnavailableEvent
     | WSThreadEvent
     | WSThreadNameEvent
     | WSErrorEvent
@@ -2951,6 +3025,15 @@ export const CLIENT_FEATURES = {
      * offers the style, since an older client would write highlights instead.
      */
     UNDERLINE_ANNOTATIONS: 'underline_annotations',
+    /**
+     * After an abnormal socket loss the client reconnects and sends
+     * `WSReattachRequest` to pick its run back up, reports `last_seq` on
+     * heartbeat pings, and ignores a run event whose `seq` it has handled.
+     * Declaring it commits the client to answering a re-sent request or prompt
+     * id from memory: a request whose reply was lost with the socket is sent
+     * again on reattach, and an action may already have been applied.
+     */
+    RUN_REATTACH: 'run_reattach',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -3265,6 +3348,53 @@ export interface WSRequestAckData {
     chargeType: ChargeType;
 }
 
+/** A run lost its socket and is waiting on the server to be reattached. */
+export interface WSReattachingInfo {
+    runId: string;
+    /** How the socket was lost: what a fallback reports if the reattach fails. */
+    evidence: ConnectionFailureEvidence;
+    /** `Date.now()` after which the client stops trying. */
+    deadline: number;
+    /**
+     * The user stopped the run while it was reattaching: the new socket only
+     * delivers the cancel, so the server stops the run instead of waiting out
+     * the grace period.
+     */
+    cancelRequested: boolean;
+}
+
+/** A run was picked up on a new socket. */
+export interface WSReattachedInfo {
+    runId: string;
+    /** How the socket was lost. */
+    evidence: ConnectionFailureEvidence;
+    /** Milliseconds between noticing the loss and the server confirming the reattach. */
+    gapMs: number;
+    /** Events the server is replaying. */
+    replayed: number;
+}
+
+/**
+ * Why a run could not be reattached: a reason the server gave, or one of the
+ * client's own — it ran out of time (`gave_up`), the new socket closed before
+ * the server answered (`connection_closed`), or the server no longer offers
+ * reattach (`unsupported`).
+ */
+export type ReattachFailureReason =
+    | WSReattachUnavailableReason
+    | 'gave_up'
+    | 'connection_closed';
+
+/** A run could not be reattached; it ends the way any lost connection does. */
+export interface WSReattachFailedInfo {
+    runId: string;
+    reason: ReattachFailureReason;
+    /** How the socket was lost. */
+    evidence: ConnectionFailureEvidence;
+    /** Milliseconds spent trying. */
+    gapMs: number;
+}
+
 export interface WSCallbacks {
     /**
      * Called when the server is ready to accept chat requests.
@@ -3451,4 +3581,22 @@ export interface WSCallbacks {
         wasClean: boolean,
         evidence?: ConnectionFailureEvidence,
     ) => void;
+
+    /**
+     * Called instead of `onClose` when the socket was lost abnormally while
+     * the run can still be picked up on a new one. The run keeps going on the
+     * server; the client should keep its state, show that it is reconnecting
+     * and start `reattachWithRetry`. Without this callback a lost socket ends
+     * the run through `onClose`, as it always has.
+     */
+    onReattaching?: (info: WSReattachingInfo) => void;
+
+    /** Called when the server confirms the run continues on the new socket. */
+    onReattached?: (info: WSReattachedInfo) => void;
+
+    /**
+     * Called when a run that was being reattached cannot be. The client should
+     * end the run as `onClose` would have for the original loss.
+     */
+    onReattachFailed?: (info: WSReattachFailedInfo) => void;
 }

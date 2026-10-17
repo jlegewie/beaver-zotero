@@ -1,6 +1,6 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
+import { AgentRun, ToolCallPart, isRunActive } from '@beaver/agent-core/agents/types';
 import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
 import { wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
@@ -11,7 +11,7 @@ import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
-import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom, threadRunsAtom, wsReconnectingAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
@@ -99,7 +99,10 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // the card with a suppressed error, no spinner, and nothing to say the
     // client is working. The run's own status is terminal, so this is the one
     // wait `shouldShowRunStatus` cannot see.
-    const showStatusIndicator = isLastRun && (runHasNothingToShow || autoReplacementPending);
+    // A run whose connection is being recovered says so wherever it is,
+    // mid-answer or waiting on a card, since nothing else on screen moves.
+    const isReconnecting = useAtomValue(wsReconnectingAtom) !== null && isRunActive(run);
+    const showStatusIndicator = isLastRun && (runHasNothingToShow || autoReplacementPending || isReconnecting);
 
     // Where the visible wait started, so the indicator can count it up. Null
     // while the run has produced nothing yet: there is no event to count from,

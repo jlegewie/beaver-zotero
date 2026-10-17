@@ -602,3 +602,37 @@ describe('table batch approval', () => {
         expect(submit).toHaveBeenCalledWith(expect.objectContaining({ approved: false, user_instructions: 'Replace the question with sample size' }));
     });
 });
+
+describe('BatchApprovalCard while the run reconnects', () => {
+    beforeEach(() => {
+        hookState.slots = [];
+        hookState.index = 0;
+    });
+
+    function renderHeld(onSubmit: (response: BatchApprovalDecision) => void, onStop: () => void, disabled: boolean) {
+        hookState.index = 0;
+        return BatchApprovalCard({ approval: approval(), onSubmit, onStop, disabled }) as React.ReactNode;
+    }
+
+    it('holds both answers back and offers Stop instead', () => {
+        const onSubmit = vi.fn();
+        const onStop = vi.fn();
+        const tree = renderHeld(onSubmit, onStop, true);
+
+        expect(findOne(tree, byAriaLabel('Approve batch job')).props.disabled).toBe(true);
+        expect(findOne(tree, byAriaLabel('Cancel batch job')).props.disabled).toBe(true);
+        findOne(tree, byAriaLabel('Approve batch job')).props.onClick();
+        expect(onSubmit).not.toHaveBeenCalled();
+
+        const stop = findOne(tree, byAriaLabel('Stop generating'));
+        expect(stop.props.disabled).toBeFalsy();
+        stop.props.onClick();
+        expect(onStop).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers no Stop while both answers are available', () => {
+        const tree = renderHeld(vi.fn(), vi.fn(), false);
+
+        expect(findAll(tree, byAriaLabel('Stop generating'))).toHaveLength(0);
+    });
+});

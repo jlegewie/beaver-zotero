@@ -22,6 +22,7 @@ import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/con
 import {
     CONNECT_MAX_ATTEMPTS,
     connectWithRetry,
+    reattachWithRetry,
     type ConnectRetryProgress,
     type ConnectableAgentService,
 } from '@beaver/agent-core/transport/connectWithRetry';
@@ -310,5 +311,73 @@ describe('connectWithRetry', () => {
         expect(result.evidence.stage).toBe('opening');
         expect(result.evidence.errorName).toBe('TypeError');
         expect(h.connect).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('reattachWithRetry', () => {
+    beforeEach(() => {
+        setClientIdentityProvider(() => ({
+            frontendVersion: '0.99.0',
+            clientType: 'zotero-plugin',
+            clientFeatures: [],
+        }));
+    });
+
+    function reattachService(isReattaching: () => boolean) {
+        return {
+            connect: vi.fn(async () => {
+                // A failure no single round retries: the session check broke.
+                throw new AgentConnectionError('offline', evidence({ stage: 'auth', closeCode: null }));
+            }),
+            close: vi.fn(),
+            isReattaching: vi.fn(isReattaching),
+            reattachRequest: vi.fn(() => ({
+                type: 'reattach' as const,
+                run_id: 'run-1',
+                reattach_token: 'token',
+                last_seq: 4,
+            })),
+            reattachCallbacks: vi.fn(() => callbacks),
+        };
+    }
+
+    it('keeps trying in rounds for as long as the run waits to be reattached', async () => {
+        let rounds = 0;
+        const service = reattachService(() => rounds < 3);
+        service.connect.mockImplementation(async () => {
+            rounds += 1;
+            throw new AgentConnectionError('offline', evidence({ stage: 'auth', closeCode: null }));
+        });
+        const sleep = vi.fn(() => Promise.resolve());
+
+        const outcome = await reattachWithRetry({
+            service,
+            runId: 'run-1',
+            isStillWanted: () => true,
+            sleep,
+            random: () => 0,
+        });
+
+        expect(outcome).toBe('stopped');
+        expect(service.connect).toHaveBeenCalledTimes(3);
+        expect(service.connect.mock.calls[0][0]).toMatchObject({ type: 'reattach', last_seq: 4 });
+        // A reattach attempt's teardown never gives up the run it is for.
+        for (const call of service.close.mock.calls) {
+            expect(call[2]).toMatchObject({ keepDetachedRun: true });
+        }
+    });
+
+    it('stops without connecting once the caller no longer wants the run', async () => {
+        const service = reattachService(() => true);
+
+        const outcome = await reattachWithRetry({
+            service,
+            runId: 'run-1',
+            isStillWanted: () => false,
+            sleep: () => Promise.resolve(),
+        });
+
+        expect(outcome).toBe('stopped');
+        expect(service.connect).not.toHaveBeenCalled();
     });
 });
