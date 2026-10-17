@@ -17,7 +17,7 @@ import Tooltip from '../primitives/Tooltip';
 import PermissionMenu from '../primitives/PermissionMenu';
 import InstructionsDisclosure from '../primitives/InstructionsDisclosure';
 import type { PermissionMenuOption } from '../primitives/PermissionMenu';
-import { DollarCircleIcon, HandIcon, Icon, LayersIcon, SecurityWarningIcon } from '../icons';
+import { DollarCircleIcon, HandIcon, Icon, LayersIcon, SecurityWarningIcon, StopStrokeIcon } from '../icons';
 import { useOverflowCollapse } from '../utils/useOverflowCollapse';
 
 /**
@@ -63,6 +63,13 @@ export interface BatchApprovalCardProps {
     approval: PendingBatchApproval;
     /** The user's decision, ready for the wire. */
     onSubmit: (response: BatchApprovalDecision) => void;
+    /** Hold the decision back for now (the run's connection is being recovered). */
+    disabled?: boolean;
+    /**
+     * Stop the whole run. Offered only while the card is `disabled`: both
+     * answers are unavailable then, and this is the one way out.
+     */
+    onStop?: () => void;
 }
 
 /**
@@ -105,6 +112,8 @@ export interface BatchApprovalCardProps {
 export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     approval,
     onSubmit,
+    disabled = false,
+    onStop,
 }) => {
     const [draft, setDraft] = useState<BatchApprovalDraft>(
         () => initialDraft(approval.defaultMode, approval.userInstructionsPrefill),
@@ -132,7 +141,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     const hasDecidedRef = useRef(false);
 
     const decide = useCallback((approved: boolean) => {
-        if (hasDecidedRef.current) return;
+        if (hasDecidedRef.current || disabled) return;
         hasDecidedRef.current = true;
         setIsDecided(true);
         onSubmit(buildResponse(
@@ -142,7 +151,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
             approved,
             approval.table,
         ));
-    }, [draft, authoredInstructions, onSubmit, approval.table]);
+    }, [draft, authoredInstructions, onSubmit, approval.table, disabled]);
 
     const handleApprove = useCallback(() => decide(true), [decide]);
     const handleDecline = useCallback(() => decide(false), [decide]);
@@ -351,6 +360,20 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                             />
                         </div>
                     )}
+                    {disabled && onStop && (
+                        <Tooltip content="Stop the agent run" showArrow singleLine>
+                            <Button
+                                variant="outline"
+                                rightIcon={StopStrokeIcon}
+                                ariaLabel="Stop generating"
+                                style={{ padding: '2px 5px' }}
+                                onClick={onStop}
+                                className="flex-none"
+                            >
+                                Stop
+                            </Button>
+                        </Tooltip>
+                    )}
                     <div className="flex-1" />
                     {/* Typed instructions turn a decline into a request for
                         different work, and the button says so. */}
@@ -358,7 +381,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         variant="ghost"
                         ariaLabel={hasInstructions ? 'Cancel batch job and send instructions' : 'Cancel batch job'}
                         onClick={handleDecline}
-                        disabled={isDecided}
+                        disabled={isDecided || disabled}
                         className="mr-1 flex-none whitespace-nowrap"
                     >
                         {hasInstructions ? approval.declineWithInstructionsLabel : approval.declineLabel}
@@ -368,7 +391,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         ariaLabel="Approve batch job"
                         style={{ padding: '3px 5px' }}
                         onClick={handleApprove}
-                        disabled={isDecided || Boolean(approval.table && hasInstructions)}
+                        disabled={isDecided || disabled || Boolean(approval.table && hasInstructions)}
                         className="flex-none whitespace-nowrap"
                     >
                         {approval.approveLabel}

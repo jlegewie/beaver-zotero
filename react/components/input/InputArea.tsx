@@ -6,7 +6,7 @@ import { MicIcon, StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/i
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
-import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
 import RunPermissionButton, { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
@@ -190,7 +190,11 @@ const InputArea: React.FC<InputAreaProps> = ({
     const showVerdictButtons = isAwaitingApproval && messageContent.trim().length > 0;
     // Held from the click until the decision is delivered, so a second click
     // cannot overtake the first while a note preview is being torn down.
-    const isVerdictInFlight = useAtomValue(approvalVerdictInFlightAtom);
+    // Also held while the run's connection is being recovered: the decision
+    // could only be queued until then.
+    const verdictClaimed = useAtomValue(approvalVerdictInFlightAtom);
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const isVerdictInFlight = verdictClaimed || isReconnecting;
     const beginApprovalVerdict = useSetAtom(beginApprovalVerdictAtom);
     const releaseApprovalVerdict = useSetAtom(releaseApprovalVerdictAtom);
     // Note: while an ask_user_question request is pending (and no approval is),

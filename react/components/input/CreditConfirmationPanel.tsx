@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import type { PendingCreditConfirmation } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { removePendingCreditConfirmationAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import {
     closeWSConnectionAtom,
+    isRunReconnectingAtom,
     sendCreditConfirmationResponseAtom,
 } from '../../atoms/agentRunAtoms';
 import CreditConfirmationCard, {
@@ -37,6 +38,7 @@ export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = (
     const sendResponse = useSetAtom(sendCreditConfirmationResponseAtom);
     const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const removeConfirmation = useSetAtom(removePendingCreditConfirmationAtom);
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
 
     // Drives the disabled styling in the instant before the panel unmounts.
     // The one-shot guard lives in the handlers, not here.
@@ -83,7 +85,7 @@ export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = (
     return (
         <CreditConfirmationCard
             confirmation={confirmation}
-            disabled={isSubmitted}
+            disabled={isSubmitted || isReconnecting}
             onApprove={handlers.approve}
             onDecline={handlers.decline}
             onStop={handleStop}

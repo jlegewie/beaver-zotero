@@ -13,6 +13,7 @@ import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
     setRunPermissionModeAtom,
     approvalResponseIntentsAtom,
+    isRunReconnectingAtom,
     isWSChatPendingAtom,
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
@@ -124,6 +125,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const actionInFinalState = action && action.status !== 'pending';
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
     const isAwaitingApproval = pendingApproval !== null;
+    // An answer to the run waits while its connection is being recovered.
+    const isRunReconnecting = useAtomValue(isRunReconnectingAtom);
+    const isAnswerHeld = isAwaitingApproval && isRunReconnecting;
 
     const runIsStreamable = runStatus === undefined || runStatus === 'in_progress';
     const isStreaming = !action
@@ -687,6 +691,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     iconClassName="font-color-red"
                                     onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                     ariaLabel="Reject"
+                                    disabled={isAnswerHeld}
                                 />
                             </Tooltip>
                             <Tooltip content="Apply" showArrow singleLine>
@@ -696,6 +701,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     iconClassName="font-color-green scale-14"
                                     onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                     ariaLabel="Apply"
+                                    disabled={isAnswerHeld}
                                 />
                             </Tooltip>
                         </>
@@ -789,7 +795,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 variant="outline"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
-                                disabled={isProcessing}
+                                disabled={isProcessing || isAnswerHeld}
                                 className="flex-none whitespace-nowrap"
                             >
                                 Reject
@@ -836,7 +842,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 variant="solid"
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                 loading={isProcessing && clickedButton === 'approve'}
-                                disabled={isProcessing}
+                                disabled={isProcessing || isAnswerHeld}
                                 className="flex-none whitespace-nowrap"
                             >
                                 <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>

@@ -12,6 +12,7 @@ import {
 } from './httpHandlers/testBatchProgressHandlers';
 import {
     handleTestApproveActionHttpRequest,
+    handleTestChatDropConnectionHttpRequest,
     handleTestChatSendHttpRequest,
     handleTestConfirmCreditsHttpRequest,
     handleTestCurrentIdsHttpRequest,
@@ -89,6 +90,7 @@ export function registerWindowTestCommands(
         '/beaver/test/approve-action': handleTestApproveActionHttpRequest,
         '/beaver/test/confirm-credits': handleTestConfirmCreditsHttpRequest,
         '/beaver/test/undo-action': handleTestUndoActionHttpRequest,
+        '/beaver/test/chat-drop-connection': handleTestChatDropConnectionHttpRequest,
         '/beaver/test/application-state': handleTestApplicationStateHttpRequest,
         'application-state': handleTestApplicationStateHttpRequest,
         '/beaver/test/beaver-window': handleTestBeaverWindowHttpRequest,
