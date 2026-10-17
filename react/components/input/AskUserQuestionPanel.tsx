@@ -3,12 +3,11 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
 import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
 import {
-    closeWSConnectionAtom,
     isRunReconnectingAtom,
     sendAskUserQuestionResponseAtom,
 } from '../../atoms/agentRunAtoms';
+import { useStopRun } from '../../hooks/useStopRun';
 import AskUserQuestionCard from '@beaver/agent-ui/chat/AskUserQuestionCard';
-import { logger } from '@beaver/agent-core/platform/logger';
 
 interface AskUserQuestionPanelProps {
     pendingQuestion: PendingQuestion;
@@ -31,7 +30,6 @@ interface AskUserQuestionPanelProps {
  */
 export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pendingQuestion }) => {
     const sendResponse = useSetAtom(sendAskUserQuestionResponseAtom);
-    const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
 
     const handleSubmit = useCallback((answers: AskUserQuestionAnswer[]) => {
@@ -43,10 +41,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
         });
     }, [sendResponse, pendingQuestion]);
 
-    const handleStop = useCallback(() => {
-        logger('AskUserQuestionPanel: Stopping run while question pending');
-        closeWSConnection(); // Also clears pending questions -> panel unmounts
-    }, [closeWSConnection]);
+    const handleStop = useStopRun('AskUserQuestionPanel');
 
     return (
         <AskUserQuestionCard

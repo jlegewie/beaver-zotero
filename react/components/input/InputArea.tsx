@@ -6,7 +6,7 @@ import { MicIcon, StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/i
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
-import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom } from '../../atoms/agentRunAtoms';
+import { sendWSMessageAtom, isWSChatPendingAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
 import RunPermissionButton, { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
@@ -40,6 +40,7 @@ import { useSlashMenu } from '../../hooks/useSlashMenu';
 import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
+import { useStopRun } from '../../hooks/useStopRun';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 import { dismissActiveEditNotePreview } from '../../host/zotero/editNotePreviewLifecycle';
 
@@ -131,7 +132,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
-    const closeWSConnection = useSetAtom(closeWSConnectionAtom);
+    const stopRun = useStopRun('InputArea');
     const isPending = useAtomValue(isWSChatPendingAtom);
 
     // A file staged for THIS composition is still being attached, so sending is
@@ -515,8 +516,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             e.stopPropagation();
         }
-        logger('Stopping chat completion');
-        closeWSConnection(); // Also clears all pending approvals
+        stopRun();
     };
 
     /**

@@ -14,12 +14,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/connectionFailure';
 
-const { connectMock, closeMock, failReattachMock, isReattachingMock, resolveClientIdentityMock, reportConnectionFailureMock } =
+const {
+    connectMock,
+    closeMock,
+    failReattachMock,
+    isReattachingMock,
+    reattachAttemptMock,
+    resolveClientIdentityMock,
+    reportConnectionFailureMock,
+} =
     vi.hoisted(() => ({
         connectMock: vi.fn(),
         closeMock: vi.fn(),
         failReattachMock: vi.fn(),
         isReattachingMock: vi.fn(() => false),
+        reattachAttemptMock: vi.fn((): unknown => null),
         resolveClientIdentityMock: vi.fn(),
         reportConnectionFailureMock: vi.fn().mockResolvedValue(undefined),
     }));
@@ -30,8 +39,7 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
         close: closeMock,
         failReattach: failReattachMock,
         isReattaching: isReattachingMock,
-        reattachRequest: vi.fn(() => null),
-        reattachCallbacks: vi.fn(() => null),
+        reattachAttempt: reattachAttemptMock,
         cancel: vi.fn(),
     },
     AgentConnectionError: class AgentConnectionError extends Error {
@@ -111,8 +119,6 @@ async function startRun(): Promise<WSCallbacks> {
 function dropConnection(callbacks: WSCallbacks): void {
     callbacks.onReattaching?.({
         runId: store.get(activeRunAtom)!.id,
-        evidence: DROP,
-        deadline: Date.now() + 120_000,
         cancelRequested: false,
     });
 }
@@ -121,6 +127,7 @@ describe('a run reattaching after its connection dropped', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         isReattachingMock.mockReturnValue(false);
+        reattachAttemptMock.mockReturnValue(null);
         reportConnectionFailureMock.mockResolvedValue(undefined);
         resolveClientIdentityMock.mockReturnValue({
             frontendVersion: '0.99.1-test',
@@ -221,6 +228,38 @@ describe('a run reattaching after its connection dropped', () => {
             expect.objectContaining({ run_id: runId, reattach_outcome: 'reattached' }),
         );
         expect(store.get(isWSReadyAtom)).toBe(false);
+    });
+
+    it('still reports a failed reattach of a run the user stopped', async () => {
+        const callbacks = await startRun();
+        const runId = store.get(activeRunAtom)!.id;
+        dropConnection(callbacks);
+        store.set(abandonActiveRunLocallyAtom);
+        reportConnectionFailureMock.mockClear();
+
+        callbacks.onReattachFailed?.({ runId, reason: 'not_found', evidence: DROP, gapMs: 700 });
+
+        expect(reportConnectionFailureMock).toHaveBeenCalledWith(
+            expect.objectContaining({ run_id: runId, reattach_outcome: 'fallback:not_found', reattach_gap_ms: 700 }),
+        );
+    });
+
+    it('keeps reaching a stopped run so the server hears the cancel', async () => {
+        const callbacks = await startRun();
+        const runId = store.get(activeRunAtom)!.id;
+        store.set(abandonActiveRunLocallyAtom);
+        isReattachingMock.mockReturnValue(true);
+        reattachAttemptMock.mockReturnValue({
+            request: { type: 'reattach', run_id: runId, reattach_token: 'token', last_seq: 0 },
+            callbacks,
+        });
+        connectMock.mockClear();
+        connectMock.mockResolvedValue(undefined);
+
+        callbacks.onReattaching?.({ runId, cancelRequested: true });
+
+        await vi.waitFor(() => expect(connectMock.mock.calls[0]?.[0]).toMatchObject({ type: 'reattach', run_id: runId }));
+        isReattachingMock.mockReturnValue(false);
     });
 
     it('gives the run up when the reattach loop stops without reaching the server', async () => {

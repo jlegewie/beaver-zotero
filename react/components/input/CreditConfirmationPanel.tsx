@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import type { PendingCreditConfirmation } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { removePendingCreditConfirmationAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import {
-    closeWSConnectionAtom,
     isRunReconnectingAtom,
     sendCreditConfirmationResponseAtom,
 } from '../../atoms/agentRunAtoms';
@@ -11,6 +10,7 @@ import CreditConfirmationCard, {
     createCreditDecisionHandlers,
     type CreditDecisionHandlers,
 } from '@beaver/agent-ui/chat/CreditConfirmationCard';
+import { useStopRun } from '../../hooks/useStopRun';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 interface CreditConfirmationPanelProps {
@@ -36,7 +36,6 @@ interface CreditConfirmationPanelProps {
  */
 export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = ({ confirmation }) => {
     const sendResponse = useSetAtom(sendCreditConfirmationResponseAtom);
-    const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const removeConfirmation = useSetAtom(removePendingCreditConfirmationAtom);
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
 
@@ -77,10 +76,7 @@ export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = (
         return () => clearTimeout(timer);
     }, [confirmationId, expiresAt, removeConfirmation]);
 
-    const handleStop = useCallback(() => {
-        logger('CreditConfirmationPanel: Stopping run while credit confirmation pending');
-        closeWSConnection(); // Also clears pending confirmations -> panel unmounts
-    }, [closeWSConnection]);
+    const handleStop = useStopRun('CreditConfirmationPanel');
 
     return (
         <CreditConfirmationCard

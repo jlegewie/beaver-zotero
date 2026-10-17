@@ -434,7 +434,7 @@ describe('AgentService run reattach', () => {
 
         first.readyState = MockWebSocket.CLOSING;
         expect(service.sendApprovalResponse('action-1', true)).toBe(false);
-        expect((service as any).run.notePrompt('deferred_approval:action-1')?.answer).toBeNull();
+        expect((service as any).run.notePrompt('deferred_approval_request:action-1')?.answer).toBeNull();
     });
 
     it('re-sends an answer the lost socket swallowed when the server asks again', async () => {

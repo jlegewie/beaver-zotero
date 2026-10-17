@@ -2,13 +2,9 @@ import React, { useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import type { PendingBatchApproval } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import type { BatchApprovalDecision } from '@beaver/agent-core/run-state/batchApprovalAnswers';
-import {
-    closeWSConnectionAtom,
-    isRunReconnectingAtom,
-    sendBatchApprovalResponseAtom,
-} from '../../atoms/agentRunAtoms';
+import { isRunReconnectingAtom, sendBatchApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+import { useStopRun } from '../../hooks/useStopRun';
 import BatchApprovalCard from '@beaver/agent-ui/chat/BatchApprovalCard';
-import { logger } from '@beaver/agent-core/platform/logger';
 
 interface BatchApprovalPanelProps {
     approval: PendingBatchApproval;
@@ -58,12 +54,7 @@ export function useBatchApprovalSubmit(approvalId: string | null): (decision: Ba
 export const BatchApprovalPanel: React.FC<BatchApprovalPanelProps> = ({ approval }) => {
     const handleSubmit = useBatchApprovalSubmit(approval.approvalId);
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
-    const closeWSConnection = useSetAtom(closeWSConnectionAtom);
-
-    const handleStop = useCallback(() => {
-        logger('BatchApprovalPanel: Stopping run while batch approval pending');
-        closeWSConnection();
-    }, [closeWSConnection]);
+    const handleStop = useStopRun('BatchApprovalPanel');
 
     return (
         <BatchApprovalCard

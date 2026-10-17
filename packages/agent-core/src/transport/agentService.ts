@@ -852,25 +852,20 @@ export class AgentService {
         reportClose: (code: number, reason: string, wasClean: boolean) => void,
         finish: (error?: Error) => void,
     ): void {
-        const run = this.run;
-        if (!run || run.runId !== request.run_id || run.state !== 'reattaching') {
+        // Built now rather than taken from `request`, so `last_seq` is current.
+        const message = this.reattachAttempt(request.run_id)?.request;
+        if (!message) {
             // The run was given up while this socket was connecting.
             finish();
             this.closeSocket(1000, 'Run no longer reattaching', { notifyClose: false });
             return;
         }
-        if (!this.serverSupportsRunReattach || !run.token) {
+        if (!this.serverSupportsRunReattach) {
             finish();
-            this.failReattach(run.runId, 'unsupported');
+            this.failReattach(message.run_id, 'unsupported');
             return;
         }
-        logger(`AgentService: Server ready, reattaching run ${run.runId} from seq ${run.lastSeq}`, 1);
-        const message: WSReattachRequest = {
-            type: 'reattach',
-            run_id: run.runId,
-            reattach_token: run.token,
-            last_seq: run.lastSeq,
-        };
+        logger(`AgentService: Server ready, reattaching run ${message.run_id} from seq ${message.last_seq}`, 1);
         if (!this.send(message)) {
             finish(new AgentConnectionError(
                 'Connection closed before the reattach could be sent',
@@ -890,9 +885,10 @@ export class AgentService {
      */
     private detachRun(code: number, evidence: ConnectionFailureEvidence): boolean {
         const run = this.run;
+        const graceMs = run?.graceMs ?? null;
         if (
             !run ||
-            !run.reattachable ||
+            graceMs === null ||
             !run.token ||
             run.terminal ||
             !run.callbacks.onReattaching ||
@@ -905,8 +901,7 @@ export class AgentService {
             run.state = 'reattaching';
             run.detachedAt = now;
             run.dropEvidence = evidence;
-            run.deadline = now + (run.graceMs ?? 0);
-            run.clearDeadline();
+            run.deadline = now + graceMs;
             run.deadlineTimer = setTimeout(() => {
                 if (this.run === run && run.state === 'reattaching') {
                     logger(`AgentService: Reattach of run ${run.runId} ran out of time`, 1);
@@ -922,8 +917,6 @@ export class AgentService {
         this.resetConnectionState({ keepRunQueues: true });
         run.callbacks.onReattaching?.({
             runId: run.runId,
-            evidence: run.dropEvidence ?? evidence,
-            deadline: run.deadline ?? now,
             cancelRequested: run.cancelRequested,
         });
         return true;
@@ -956,18 +949,17 @@ export class AgentService {
     }
 
     /**
-     * What a new socket sends to reattach `runId`, or null when that run is not
-     * waiting to be reattached. The `last_seq` is refreshed when it is sent.
+     * What a new socket needs to reattach `runId`: the request it sends and the
+     * callbacks the run was started with. Null when that run is not waiting to
+     * be reattached.
      */
-    reattachRequest(runId: string): WSReattachRequest | null {
+    reattachAttempt(runId: string): { request: WSReattachRequest; callbacks: WSCallbacks } | null {
         const run = this.run;
         if (!run || run.runId !== runId || run.state !== 'reattaching' || !run.token) return null;
-        return { type: 'reattach', run_id: runId, reattach_token: run.token, last_seq: run.lastSeq };
-    }
-
-    /** The callbacks `runId` was started with, for the socket that reattaches it. */
-    reattachCallbacks(runId: string): WSCallbacks | null {
-        return this.run?.runId === runId ? this.run.callbacks : null;
+        return {
+            request: { type: 'reattach', run_id: runId, reattach_token: run.token, last_seq: run.lastSeq },
+            callbacks: run.callbacks,
+        };
     }
 
     /**
@@ -1032,23 +1024,21 @@ export class AgentService {
     private sendDecision(message: Record<string, any>): boolean {
         const run = this.reattachableRun();
         const key = answeredPromptKey(message);
-        const hold = () => {
-            logger(`AgentService: Holding "${message.type}" until run ${run!.runId} is reattached`, 1);
-            run!.hold(message);
-            if (key) run!.recordAnswer(key, message, null);
-            return true;
-        };
-        if (run?.state === 'reattaching') return hold();
-        if (this.send(message)) {
+        if (run?.state !== 'reattaching' && this.send(message)) {
             if (run && key) run.recordAnswer(key, message, this.connectionId);
             return true;
         }
-        // The socket refused the write before its close was noticed. A run
-        // that can still be reattached keeps the decision and delivers it
-        // then. Otherwise the caller is told it was not delivered, and it is
-        // not kept: replaying it later could apply an action the user has
-        // since applied locally.
-        if (run?.token && !run.terminal && run.callbacks.onReattaching) return hold();
+        // Reattaching, or the socket refused the write before its close was
+        // noticed. A run that can still be reattached keeps the decision and
+        // delivers it then. Otherwise the caller is told it was not delivered,
+        // and it is not kept: replaying it later could apply an action the
+        // user has since applied locally.
+        if (run?.token && !run.terminal && run.callbacks.onReattaching) {
+            logger(`AgentService: Holding "${message.type}" until run ${run.runId} is reattached`, 1);
+            run.hold(message);
+            if (key) run.recordAnswer(key, message, null);
+            return true;
+        }
         return false;
     }
 
@@ -1367,6 +1357,9 @@ export class AgentService {
         if (!this.callbacks) return;
 
         try {
+            // A prompt re-sent after a reattach is not shown again.
+            if (this.isRepeatedPrompt(promptKey(event))) return;
+
             switch (event.event) {
                 case 'ready': {
                     this.serverSupportsRequestAcks = event.supports_request_acks === true;
@@ -1376,7 +1369,7 @@ export class AgentService {
                     // The grace period is the run's: a reattach socket's own
                     // `ready` does not change what the run was offered.
                     const run = this.run;
-                    if (run && run.state === 'live' && !this.connectingReattach) {
+                    if (run && run.state === 'live') {
                         const graceS = event.reattach_grace_s;
                         run.graceMs = this.serverSupportsRunReattach && typeof graceS === 'number' && graceS > 0
                             ? graceS * 1000
@@ -1511,7 +1504,6 @@ export class AgentService {
 
                 case 'deferred_approval_request':
                     logger("AgentService: Received deferred_approval_request", event, 1);
-                    if (this.isRepeatedPrompt(promptKey('deferred_approval', event.action_id))) break;
                     // This event is handled by the UI via callback
                     if (this.callbacks?.onDeferredApprovalRequest) {
                         this.callbacks.onDeferredApprovalRequest(event);
@@ -1533,7 +1525,6 @@ export class AgentService {
 
                 case 'credit_confirmation_request':
                     logger("AgentService: Received credit_confirmation_request", event, 1);
-                    if (this.isRepeatedPrompt(promptKey('credit_confirmation', event.confirmation_id))) break;
                     // This event is handled by the UI via callback
                     if (this.callbacks?.onCreditConfirmationRequest) {
                         this.callbacks.onCreditConfirmationRequest(event);
@@ -1556,7 +1547,6 @@ export class AgentService {
 
                 case 'batch_approval_request':
                     logger("AgentService: Received batch_approval_request", event, 1);
-                    if (this.isRepeatedPrompt(promptKey('batch_approval', event.approval_id))) break;
                     // This event is handled by the UI via callback
                     if (this.callbacks?.onBatchApprovalRequest) {
                         this.callbacks.onBatchApprovalRequest(event);
@@ -1585,7 +1575,6 @@ export class AgentService {
 
                 case 'ask_user_question_request':
                     logger("AgentService: Received ask_user_question_request", event, 1);
-                    if (this.isRepeatedPrompt(promptKey('ask_user_question', event.question_id))) break;
                     // This event is handled by the UI via callback
                     if (this.callbacks?.onAskUserQuestionRequest) {
                         this.callbacks.onAskUserQuestionRequest(event);

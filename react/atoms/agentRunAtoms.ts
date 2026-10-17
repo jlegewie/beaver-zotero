@@ -1675,17 +1675,22 @@ export function createWSCallbacks(
     };
 
     /**
-     * Report a connection loss the run recovered from. Still a dropped
-     * connection, and still counted as one; the outcome says the user never
-     * saw it.
+     * Report how a lost connection's reattach ended. A recovered drop is still
+     * a dropped connection and still counted as one; the outcome says the user
+     * never saw it. A failed reattach of the run this window still shows is
+     * reported by `endRunOnLostConnection` instead, which also refines the
+     * error card.
      */
-    const reportReattached = (info: WSReattachedInfo) => {
+    const reportReattachOutcome = (info: WSReattachedInfo | WSReattachFailedInfo) => {
+        const outcome: ReattachOutcome = 'reason' in info
+            ? reattachFailureOutcome(info)
+            : { outcome: 'reattached', gapMs: info.gapMs };
         void reportConnectionFailure({
             evidence: info.evidence,
             run_id: info.runId,
             connect_attempts: connectAttempts(),
-            reattach_outcome: 'reattached',
-            reattach_gap_ms: info.gapMs,
+            reattach_outcome: outcome.outcome,
+            reattach_gap_ms: outcome.gapMs,
         });
     };
 
@@ -2310,6 +2315,8 @@ export function createWSCallbacks(
             set(isWSReadyAtom, false);
             // The wait is the connection's, not the model's.
             streamActivity.reset();
+            // Attempt 1 renders as a plain "Reconnecting…": the reattach
+            // retries until the grace period ends, with no count to show.
             set(wsReconnectingAtom, { attempt: 1, maxAttempts: CONNECT_MAX_ATTEMPTS });
             startReattach(info.runId);
         },
@@ -2319,7 +2326,7 @@ export function createWSCallbacks(
             set(wsReconnectingAtom, null);
             set(isWSConnectedAtom, true);
             set(isWSReadyAtom, true);
-            reportReattached(info);
+            reportReattachOutcome(info);
         },
 
         // The run could not be picked up again: it ends exactly as the
@@ -2330,30 +2337,25 @@ export function createWSCallbacks(
             endRunOnLostConnection(info.evidence, true, reattachFailureOutcome(info));
         },
     });
+    // What still happens for a run this window has left, e.g. one the user
+    // stopped while it was reconnecting: it is still reattached, so the server
+    // hears the cancel, and its connection loss is still reported once the
+    // outcome is known. Nothing else of it reaches this window.
+    const forLeftRun: Partial<WSCallbacks> = {
+        onReattaching: (info) => {
+            if (info.cancelRequested) startReattach(info.runId);
+        },
+        onReattached: reportReattachOutcome,
+        onReattachFailed: reportReattachOutcome,
+    };
     const guarded: Record<string, unknown> = { ...callbacks };
     for (const [name, callback] of Object.entries(callbacks)) {
         if (typeof callback !== 'function') continue;
         guarded[name] = (...args: unknown[]) => {
             if (generation !== getCredentialGeneration()) return;
             if (!ownsWriter(writer) || callbackEpoch !== writerCallbackEpoch) {
-                // A run the user stopped while it was reconnecting is still
-                // reattached, so the server hears the cancel. Nothing else of
-                // it reaches this window any more.
-                const info = name === 'onReattaching' ? args[0] as WSReattachingInfo : null;
-                if (info?.cancelRequested) startReattach(info.runId);
-                // Its connection loss is still reported, once the outcome is known.
-                if (name === 'onReattached') reportReattached(args[0] as WSReattachedInfo);
-                if (name === 'onReattachFailed') {
-                    const failed = args[0] as WSReattachFailedInfo;
-                    const outcome = reattachFailureOutcome(failed);
-                    void reportConnectionFailure({
-                        evidence: failed.evidence,
-                        run_id: failed.runId,
-                        connect_attempts: connectAttempts(),
-                        reattach_outcome: outcome.outcome,
-                        reattach_gap_ms: outcome.gapMs,
-                    });
-                }
+                const left = forLeftRun[name as keyof WSCallbacks] as ((...leftArgs: unknown[]) => unknown) | undefined;
+                left?.(...args);
                 return;
             }
             const result = (callback as (...callbackArgs: unknown[]) => unknown)(...args);

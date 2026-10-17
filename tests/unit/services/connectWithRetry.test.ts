@@ -325,29 +325,27 @@ describe('reattachWithRetry', () => {
 
     function reattachService(isReattaching: () => boolean) {
         return {
-            connect: vi.fn(async () => {
-                // A failure no single round retries: the session check broke.
+            connect: vi.fn(async (..._args: unknown[]) => {
+                // Not retried by a bounded connect: the session check broke,
+                // as it does when the token cannot be refreshed offline.
                 throw new AgentConnectionError('offline', evidence({ stage: 'auth', closeCode: null }));
             }),
             close: vi.fn(),
             isReattaching: vi.fn(isReattaching),
-            reattachRequest: vi.fn(() => ({
-                type: 'reattach' as const,
-                run_id: 'run-1',
-                reattach_token: 'token',
-                last_seq: 4,
+            reattachAttempt: vi.fn(() => ({
+                request: {
+                    type: 'reattach' as const,
+                    run_id: 'run-1',
+                    reattach_token: 'token',
+                    last_seq: 4,
+                },
+                callbacks,
             })),
-            reattachCallbacks: vi.fn(() => callbacks),
         };
     }
 
-    it('keeps trying in rounds for as long as the run waits to be reattached', async () => {
-        let rounds = 0;
-        const service = reattachService(() => rounds < 3);
-        service.connect.mockImplementation(async () => {
-            rounds += 1;
-            throw new AgentConnectionError('offline', evidence({ stage: 'auth', closeCode: null }));
-        });
+    it('keeps trying past the usual attempt budget for as long as the run waits', async () => {
+        const service = reattachService(() => service.connect.mock.calls.length < CONNECT_MAX_ATTEMPTS + 2);
         const sleep = vi.fn(() => Promise.resolve());
 
         const outcome = await reattachWithRetry({
@@ -359,8 +357,11 @@ describe('reattachWithRetry', () => {
         });
 
         expect(outcome).toBe('stopped');
-        expect(service.connect).toHaveBeenCalledTimes(3);
+        expect(service.connect).toHaveBeenCalledTimes(CONNECT_MAX_ATTEMPTS + 2);
         expect(service.connect.mock.calls[0][0]).toMatchObject({ type: 'reattach', last_seq: 4 });
+        // The backend sees one count across the whole wait.
+        expect(service.connect.mock.calls.map((call) => (call[6] as { connect_attempts: number }).connect_attempts))
+            .toEqual([1, 2, 3, 4, 5, 6]);
         // A reattach attempt's teardown never gives up the run it is for.
         for (const call of service.close.mock.calls) {
             expect(call[2]).toMatchObject({ keepDetachedRun: true });

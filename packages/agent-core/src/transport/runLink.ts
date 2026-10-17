@@ -40,8 +40,6 @@ export interface RunReply {
     sentOn: number | null;
     /** Pings already written on `sentOn` when the response was. */
     pingMark: number;
-    /** The server has read the response; only the record that it ran remains. */
-    confirmed: boolean;
 }
 
 /** A prompt the server sent (approval, question, confirmation) and its answer. */
@@ -111,7 +109,7 @@ export class RunLink {
     trackReply(requestId: string): { reply: RunReply; settle: (response: RunReply['response']) => void } {
         let resolve!: () => void;
         const settled = new Promise<void>((r) => { resolve = r; });
-        const reply: RunReply = { response: null, settled, sentOn: null, pingMark: 0, confirmed: false };
+        const reply: RunReply = { response: null, settled, sentOn: null, pingMark: 0 };
         this.replies.set(requestId, reply);
         return {
             reply,
@@ -133,7 +131,6 @@ export class RunLink {
         for (const reply of this.replies.values()) {
             if (reply.response !== null && reply.sentOn === connectionId && pongsReceived > reply.pingMark) {
                 reply.response = null;
-                reply.confirmed = true;
             }
         }
     }
@@ -180,23 +177,30 @@ export class RunLink {
     }
 }
 
-/** Key a prompt and its answer share, from the field that correlates them. */
-export function promptKey(kind: string, id: unknown): string | null {
-    return typeof id === 'string' && id.length > 0 ? `${kind}:${id}` : null;
+/**
+ * The prompts a server sends and the decisions that answer them. Each pair is
+ * correlated on one id field, which both messages carry.
+ */
+const PROMPTS = [
+    { request: 'deferred_approval_request', response: 'deferred_approval_response', idField: 'action_id' },
+    { request: 'credit_confirmation_request', response: 'credit_confirmation_response', idField: 'confirmation_id' },
+    { request: 'batch_approval_request', response: 'batch_approval_response', idField: 'approval_id' },
+    { request: 'ask_user_question_request', response: 'ask_user_question_response', idField: 'question_id' },
+] as const;
+
+function keyFor(prompt: (typeof PROMPTS)[number], message: Record<string, unknown>): string | null {
+    const id = message[prompt.idField];
+    return typeof id === 'string' && id.length > 0 ? `${prompt.request}:${id}` : null;
+}
+
+/** Key a prompt event shares with its answer, or null for any other event. */
+export function promptKey(event: { event: string }): string | null {
+    const prompt = PROMPTS.find((p) => p.request === event.event);
+    return prompt ? keyFor(prompt, event as unknown as Record<string, unknown>) : null;
 }
 
 /** The prompt an outbound decision answers, or null for any other message. */
 export function answeredPromptKey(message: Record<string, any>): string | null {
-    switch (message.type) {
-        case 'deferred_approval_response':
-            return promptKey('deferred_approval', message.action_id);
-        case 'credit_confirmation_response':
-            return promptKey('credit_confirmation', message.confirmation_id);
-        case 'batch_approval_response':
-            return promptKey('batch_approval', message.approval_id);
-        case 'ask_user_question_response':
-            return promptKey('ask_user_question', message.question_id);
-        default:
-            return null;
-    }
+    const prompt = PROMPTS.find((p) => p.response === message.type);
+    return prompt ? keyFor(prompt, message) : null;
 }

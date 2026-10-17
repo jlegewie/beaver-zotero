@@ -3351,10 +3351,6 @@ export interface WSRequestAckData {
 /** A run lost its socket and is waiting on the server to be reattached. */
 export interface WSReattachingInfo {
     runId: string;
-    /** How the socket was lost: what a fallback reports if the reattach fails. */
-    evidence: ConnectionFailureEvidence;
-    /** `Date.now()` after which the client stops trying. */
-    deadline: number;
     /**
      * The user stopped the run while it was reattaching: the new socket only
      * delivers the cancel, so the server stops the run instead of waiting out

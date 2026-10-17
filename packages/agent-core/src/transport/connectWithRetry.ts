@@ -116,6 +116,14 @@ export interface ConnectWithRetryOptions {
      * cannot be tied to the run that paid for them.
      */
     logLabel?: string;
+    /**
+     * Keep retrying until `isStillWanted` turns false, instead of stopping
+     * after `CONNECT_MAX_ATTEMPTS`. Every connection failure is retried, since
+     * the caller has a deadline of its own, and the backoff stays at its last
+     * range. With no attempt budget there is no progress to report:
+     * `onAttempt` is not called and `onRetrying` only gets the final `null`.
+     */
+    untilStopped?: boolean;
     /** Test seam for the backoff wait. */
     sleep?: (ms: number) => Promise<void>;
     /** Test seam for the backoff jitter. */
@@ -144,14 +152,17 @@ export async function connectWithRetry(
         isAlreadyReported,
         isStillWanted,
         logLabel,
+        untilStopped = false,
         sleep = defaultSleep,
         random = Math.random,
     } = options;
 
     // Not an option: the budget and the backoff table below are one policy, and
     // a caller that could raise the count without extending the table would
-    // silently reuse the last range for every extra attempt.
+    // silently reuse the last range for every extra attempt. `untilStopped`
+    // drops the budget instead, and reuses the last range on purpose.
     const maxAttempts = CONNECT_MAX_ATTEMPTS;
+    const attemptLabel = (attempt: number) => (untilStopped ? `${attempt}` : `${attempt}/${maxAttempts}`);
     const prefix = logLabel ? `connectWithRetry (${logLabel}):` : 'connectWithRetry:';
     let lastFailure: unknown = null;
     let attemptsMade = 0;
@@ -160,11 +171,11 @@ export async function connectWithRetry(
     const connectStartedAtMs = Date.now();
 
     try {
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        for (let attempt = 1; untilStopped || attempt <= maxAttempts; attempt++) {
             attemptsMade = attempt;
             try {
-                logger(`${prefix} connect attempt ${attempt}/${maxAttempts}`);
-                onAttempt?.({ attempt, maxAttempts });
+                logger(`${prefix} connect attempt ${attemptLabel(attempt)}`);
+                if (!untilStopped) onAttempt?.({ attempt, maxAttempts });
                 // Resolved fresh for this attempt (not cached) — the identity a
                 // handshake reports can change between reconnects.
                 const identity = resolveClientIdentity();
@@ -188,7 +199,7 @@ export async function connectWithRetry(
                 logger(`${prefix} connect settled`);
                 return { kind: 'connected', attemptsMade };
             } catch (error: unknown) {
-                logger(`${prefix} connect attempt ${attempt}/${maxAttempts} failed:`, error, 1);
+                logger(`${prefix} connect attempt ${attemptLabel(attempt)} failed:`, error, 1);
                 lastFailure = error;
 
                 // Both abandon paths are left for the caller to log: it knows
@@ -199,9 +210,9 @@ export async function connectWithRetry(
                 }
 
                 const retryable =
-                    attempt < maxAttempts &&
                     error instanceof AgentConnectionError &&
-                    isRetryablePreReadyConnectFailure(error.evidence);
+                    (untilStopped ||
+                        (attempt < maxAttempts && isRetryablePreReadyConnectFailure(error.evidence)));
                 if (!retryable) break;
 
                 // Fully tear down the failed attempt so AgentService's overlap
@@ -212,7 +223,7 @@ export async function connectWithRetry(
                     notifyClose: false,
                     ...(isReattachRequest(request) ? { keepDetachedRun: true } : {}),
                 });
-                onRetrying({ attempt: attempt + 1, maxAttempts });
+                if (!untilStopped) onRetrying({ attempt: attempt + 1, maxAttempts });
 
                 const backoffRange = CONNECT_RETRY_BACKOFF_MS[
                     Math.min(attempt - 1, CONNECT_RETRY_BACKOFF_MS.length - 1)
@@ -249,19 +260,8 @@ export async function connectWithRetry(
  */
 export interface ReattachableAgentService extends ConnectableAgentService {
     isReattaching(runId: string): boolean;
-    reattachRequest(runId: string): WSReattachRequest | null;
-    reattachCallbacks(runId: string): WSCallbacks | null;
+    reattachAttempt(runId: string): { request: WSReattachRequest; callbacks: WSCallbacks } | null;
 }
-
-/**
- * Pauses between rounds of connect attempts while a run waits to be
- * reattached. The last one repeats until the service gives the run up.
- */
-const REATTACH_ROUND_PAUSE_MS = [
-    { min: 250, max: 750 },
-    { min: 750, max: 1500 },
-    { min: 1500, max: 3000 },
-];
 
 export interface ReattachWithRetryOptions {
     service: ReattachableAgentService;
@@ -282,49 +282,33 @@ export interface ReattachWithRetryOptions {
  * Open a new socket for a run that lost its old one and ask the server to
  * reattach it.
  *
- * Runs `connectWithRetry` in rounds until a socket reaches `ready` and the
- * reattach is sent, or the run stops waiting: the service gives it up at the
- * grace period the backend advertised, when it is closed on purpose, or when
- * the server answers. Returns `connected` once the request is sent — the
- * outcome then arrives through the run's callbacks (`onReattached` or
- * `onReattachFailed`) — and `stopped` otherwise. A caller that gets `stopped`
- * for a run still reattaching should give it up.
+ * Retries until a socket reaches `ready` and the reattach is sent, or the run
+ * stops waiting: the service gives it up at the grace period the backend
+ * advertised, when it is closed on purpose, or when the server answers.
+ * Returns `connected` once the request is sent — the outcome then arrives
+ * through the run's callbacks (`onReattached` or `onReattachFailed`) — and
+ * `stopped` otherwise. A caller that gets `stopped` for a run still
+ * reattaching should give it up.
  */
 export async function reattachWithRetry(
     options: ReattachWithRetryOptions,
 ): Promise<'connected' | 'stopped'> {
-    const {
-        service,
-        runId,
-        isStillWanted,
-        logLabel,
-        sleep = defaultSleep,
-        random = Math.random,
-    } = options;
-    const prefix = logLabel ? `reattachWithRetry (${logLabel}):` : 'reattachWithRetry:';
+    const { service, runId, isStillWanted, logLabel, sleep, random } = options;
     const waiting = () => service.isReattaching(runId) && isStillWanted();
-
-    for (let round = 0; waiting(); round++) {
-        const request = service.reattachRequest(runId);
-        const callbacks = service.reattachCallbacks(runId);
-        if (!request || !callbacks) break;
-        const result = await connectWithRetry({
-            service,
-            request,
-            callbacks,
-            logLabel,
-            // The run's own "reconnecting" state covers every round.
-            onRetrying: () => {},
-            isAlreadyReported: () => !service.isReattaching(runId),
-            isStillWanted: waiting,
-            sleep,
-            random,
-        });
-        if (result.kind === 'connected') return 'connected';
-        if (!waiting()) break;
-        const pause = REATTACH_ROUND_PAUSE_MS[Math.min(round, REATTACH_ROUND_PAUSE_MS.length - 1)];
-        logger(`${prefix} round ${round + 1} failed (${result.kind}); trying again`, 1);
-        await sleep(pause.min + random() * (pause.max - pause.min));
-    }
-    return 'stopped';
+    const attempt = waiting() ? service.reattachAttempt(runId) : null;
+    if (!attempt) return 'stopped';
+    const result = await connectWithRetry({
+        service,
+        request: attempt.request,
+        callbacks: attempt.callbacks,
+        logLabel,
+        untilStopped: true,
+        // The run's own "reconnecting" state covers the whole wait.
+        onRetrying: () => {},
+        isAlreadyReported: () => !service.isReattaching(runId),
+        isStillWanted: waiting,
+        sleep,
+        random,
+    });
+    return result.kind === 'connected' ? 'connected' : 'stopped';
 }
