@@ -11,7 +11,15 @@ const cancelMock = vi.fn();
 const getThreadRunsMock = vi.fn();
 const getThreadMock = vi.fn();
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentRunService: { getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args) },
+    agentRunService: {
+        getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args),
+        // Reads the tail and activity through the history mock, as the real
+        // service does on a server without the activity endpoint.
+        getThreadActivity: async (threadId: string) => {
+            const history = await getThreadRunsMock(threadId, false);
+            return { tail_run_id: history.tail_run_id, activity: history.activity };
+        },
+    },
     agentService: { cancel: (...args: unknown[]) => cancelMock(...args) },
 }));
 

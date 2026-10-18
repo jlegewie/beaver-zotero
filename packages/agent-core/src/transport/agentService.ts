@@ -14,6 +14,7 @@ import { AgentRun } from '../agents/types';
 import type { AgentAction } from '../agents/agentActionTypes';
 import { toAgentAction } from '../agents/agentActionTypes';
 import { ApiService } from './apiService';
+import { isApiError } from '../types/apiErrors';
 import {
     AgentDataProviderMap,
     resolveDefaultAgentDataProvider,
@@ -1933,6 +1934,12 @@ export interface ThreadRunsResponse {
     agent_actions: AgentAction[] | null;
 }
 
+/** A thread's last persisted run and reservation activity, without history. */
+export interface ThreadActivityResponse {
+    tail_run_id?: string | null;
+    activity?: ThreadActivity;
+}
+
 /** Response for getting a single run with optional actions */
 export interface AgentRunWithActionsResponse {
     run: AgentRun;
@@ -1955,6 +1962,9 @@ export interface PaginatedRunsResponse {
  * Handles fetching runs, run details, and associated actions.
  */
 export class AgentRunService extends ApiService {
+    /** Set once the server answers the thread activity endpoint with 404. */
+    private activityEndpointMissing = false;
+
     constructor(baseUrl?: string) {
         super(baseUrl);
     }
@@ -1985,6 +1995,30 @@ export class AgentRunService extends ApiService {
             activity: response.activity,
             agent_actions: response.agent_actions?.map(toAgentAction) ?? null
         };
+    }
+
+    /**
+     * Gets a thread's tail run and reservation activity without its history,
+     * e.g. to poll a run that is still settling on the server. Servers without
+     * this endpoint answer 404; from then on this reads the same fields from
+     * the history endpoint instead.
+     */
+    async getThreadActivity(threadId: string): Promise<ThreadActivityResponse> {
+        if (!this.activityEndpointMissing) {
+            try {
+                return await this.get<ThreadActivityResponse>(
+                    `/api/v1/agents/beaver/threads/${threadId}/activity`,
+                    { timeoutMs: 15000 },
+                );
+            } catch (error) {
+                // The endpoint answers a missing thread as empty, never 404.
+                if (!isApiError(error) || error.status !== 404) throw error;
+                this.activityEndpointMissing = true;
+                logger('AgentRunService: Server has no thread activity endpoint; reading history instead', 1);
+            }
+        }
+        const history = await this.getThreadRuns(threadId, false);
+        return { tail_run_id: history.tail_run_id, activity: history.activity };
     }
 
     /**

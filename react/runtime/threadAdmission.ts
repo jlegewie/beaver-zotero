@@ -164,8 +164,22 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
             if (!current()) return;
             running = true;
             try {
-                if (!currentWriter())
-                    await reconcileThread(store.get, store.set, current);
+                // Poll the cheap activity read, and load the history only
+                // once the server no longer reports the thread active.
+                if (!currentWriter() && id) {
+                    const snapshot = await readAdmission(id);
+                    if (current() && !currentWriter()) {
+                        if (snapshot.activity.state === "active")
+                            setAdmission(
+                                store.set,
+                                id,
+                                snapshot.tailRunId,
+                                snapshot.activity,
+                            );
+                        else
+                            await reconcileThread(store.get, store.set, current);
+                    }
+                }
             } catch {
                 /* An unavailable server has not settled. */
             } finally {
@@ -217,6 +231,9 @@ type AdmissionHistory = ThreadRunsResponse & {
     activity: ThreadActivity;
 };
 
+const ADMISSION_UNSUPPORTED_MESSAGE =
+    "This server does not support safe concurrent chats. Update the server before continuing.";
+
 /** Validate raw capability metadata before normalizing history for presentation. */
 export async function readAdmissionHistory(
     threadId: string,
@@ -227,20 +244,22 @@ export async function readAdmissionHistory(
         includeActions,
     );
     if (history.tail_run_id === undefined || !history.activity) {
-        throw new Error(
-            "This server does not support safe concurrent chats. Update the server before continuing.",
-        );
+        throw new Error(ADMISSION_UNSUPPORTED_MESSAGE);
     }
     return history as AdmissionHistory;
 }
 
+/** Read a thread's tail and activity without loading its history. */
 export async function readAdmission(
     threadId: string,
 ): Promise<AdmissionSnapshot> {
-    const history = await readAdmissionHistory(threadId);
+    const snapshot = await agentRunService.getThreadActivity(threadId);
+    if (snapshot.tail_run_id === undefined || !snapshot.activity) {
+        throw new Error(ADMISSION_UNSUPPORTED_MESSAGE);
+    }
     return {
         threadId,
-        tailRunId: history.tail_run_id,
-        activity: history.activity,
+        tailRunId: snapshot.tail_run_id,
+        activity: snapshot.activity,
     };
 }

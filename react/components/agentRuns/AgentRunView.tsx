@@ -104,7 +104,8 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const isReconnecting = useAtomValue(wsReconnectingAtom) !== null && isRunActive(run);
     const showStatusIndicator = isLastRun && (runHasNothingToShow || autoReplacementPending || isReconnecting);
     // A tool call still waiting on its result already spins for the same
-    // wait; the reconnect line under it only says why.
+    // wait; the reconnect line under it drops its own spinner and only says
+    // why.
     const reconnectUnderToolCall = useMemo(
         () => isReconnecting && hasInProgressToolCall(run, resultsMap),
         [isReconnecting, run, resultsMap],
@@ -178,7 +179,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 // replacement in the same synchronous batch, so the failed run
                 // has stopped being the last one before anything renders.
                 statusIdleLabel={autoReplacementPending ? 'Retrying' : undefined}
-                statusStillIcon={reconnectUnderToolCall}
+                statusHideIcon={reconnectUnderToolCall}
             />
 
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}

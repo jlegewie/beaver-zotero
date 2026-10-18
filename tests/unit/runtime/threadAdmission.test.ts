@@ -4,6 +4,7 @@ const state = vi.hoisted(() => ({
     store: undefined as any,
     cleanup: undefined as any,
     history: vi.fn(),
+    activity: vi.fn(),
     generation: 0,
 }));
 vi.mock("../../../react/store", () => ({
@@ -41,7 +42,7 @@ vi.mock("@beaver/agent-core/run-state/loadThreadRuns", () => ({
     loadThreadRuns: state.history,
 }));
 vi.mock("@beaver/agent-core/transport/agentService", () => ({
-    agentRunService: { getThreadRuns: state.history },
+    agentRunService: { getThreadActivity: state.activity },
 }));
 import {
     attachThreadAdmission,
@@ -59,6 +60,7 @@ beforeEach(() => {
     state.store = createStore();
     state.generation = 0;
     state.history.mockReset();
+    state.activity.mockReset();
     (Zotero as any).Beaver = {
         runtime: {
             addWindowCleanup: (_r: any, fn: any) => {
@@ -83,43 +85,96 @@ afterEach(() => {
     state.cleanup();
     vi.useRealTimers();
 });
-it("backs off through busy activity and reconciles only after settlement", async () => {
-    state.history.mockResolvedValueOnce({
-        runs: [],
-        citations: [],
-        agentActions: [],
-        tailRunId: "old",
-        activity: { state: "active", run_id: "reserved" },
-    });
-    state.history.mockResolvedValueOnce({
-        runs: [],
-        citations: [],
-        agentActions: [],
-        tailRunId: "new",
-        activity: { state: "idle", run_id: null },
-    });
+const busy = { tail_run_id: "old", activity: { state: "active", run_id: "reserved" } };
+const settled = {
+    runs: [],
+    citations: [],
+    agentActions: [],
+    tailRunId: "new",
+    activity: { state: "idle", run_id: null },
+};
+it("polls activity with backoff and loads the history once after settlement", async () => {
+    state.activity
+        .mockResolvedValueOnce(busy)
+        .mockResolvedValueOnce({ tail_run_id: "new", activity: { state: "idle", run_id: null } });
+    state.history.mockResolvedValueOnce(settled);
     await vi.advanceTimersByTimeAsync(500);
+    expect(state.activity).toHaveBeenCalledWith("thread");
     expect(state.store.get(serverThreadBlockedAtom)).toBe(true);
-    expect(state.history).toHaveBeenCalledTimes(1);
+    expect(state.history).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(999);
-    expect(state.history).toHaveBeenCalledTimes(1);
+    expect(state.activity).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
+    expect(state.activity).toHaveBeenCalledTimes(2);
+    expect(state.history).toHaveBeenCalledTimes(1);
     expect(state.store.get(serverThreadBlockedAtom)).toBe(false);
     expect(state.store.get(threadAdmissionAtom).tailRunId).toBe("new");
     await vi.advanceTimersByTimeAsync(10000);
-    expect(state.history).toHaveBeenCalledTimes(2);
-});
-it("does not treat a failed read as idle and stops all timers on detach", async () => {
-    state.history.mockRejectedValue(new Error("offline"));
-    await vi.advanceTimersByTimeAsync(500);
-    expect(state.store.get(serverThreadBlockedAtom)).toBe(true);
-    state.cleanup();
-    await vi.advanceTimersByTimeAsync(20000);
+    expect(state.activity).toHaveBeenCalledTimes(2);
     expect(state.history).toHaveBeenCalledTimes(1);
 });
+it("records the busy tail without loading history", async () => {
+    state.activity.mockResolvedValueOnce({ ...busy, tail_run_id: "running" });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(state.store.get(threadAdmissionAtom)).toMatchObject({
+        threadId: "thread",
+        tailRunId: "running",
+        activity: { state: "active", run_id: "reserved" },
+    });
+    expect(state.history).not.toHaveBeenCalled();
+});
+it("keeps polling when the history load finds the thread active again", async () => {
+    state.activity.mockResolvedValue({ tail_run_id: "old", activity: { state: "idle", run_id: null } });
+    state.history
+        .mockResolvedValueOnce({ ...settled, tailRunId: "old", activity: { state: "active", run_id: "next" } })
+        .mockResolvedValueOnce(settled);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(state.store.get(serverThreadBlockedAtom)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(state.history).toHaveBeenCalledTimes(2);
+    expect(state.store.get(serverThreadBlockedAtom)).toBe(false);
+});
+it("does not treat a failed read as idle and stops all timers on detach", async () => {
+    state.activity.mockRejectedValue(new Error("offline"));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(state.store.get(serverThreadBlockedAtom)).toBe(true);
+    expect(state.history).not.toHaveBeenCalled();
+    state.cleanup();
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(state.activity).toHaveBeenCalledTimes(1);
+});
+it("treats a server without admission metadata as unsettled", async () => {
+    state.activity.mockResolvedValue({});
+    await vi.advanceTimersByTimeAsync(500);
+    expect(state.store.get(serverThreadBlockedAtom)).toBe(true);
+    expect(state.history).not.toHaveBeenCalled();
+});
 it.each(["navigation", "account"])(
-    "rejects a late response after %s changes",
+    "ignores a late activity read after %s changes",
     async (change) => {
+        let finish!: (data: any) => void;
+        state.activity.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        await vi.advanceTimersByTimeAsync(500);
+        if (change === "navigation")
+            state.store.set(threadNavigationSeqAtom, 1);
+        else state.generation++;
+        finish({ tail_run_id: "late", activity: { state: "active", run_id: "late" } });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(state.history).not.toHaveBeenCalled();
+        expect(state.store.get(threadAdmissionAtom)?.tailRunId).not.toBe(
+            "late",
+        );
+    },
+);
+it.each(["navigation", "account"])(
+    "rejects a late history response after %s changes",
+    async (change) => {
+        state.activity.mockResolvedValue({ tail_run_id: "old", activity: { state: "idle", run_id: null } });
         let finish!: (data: any) => void;
         state.history.mockImplementationOnce(
             () =>

@@ -49,7 +49,15 @@ const {
 vi.mock('../../../src/services/searchIndexState', () => ({ getSearchIndexState: vi.fn() }));
 import { getSearchIndexState } from '../../../src/services/searchIndexState';
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentRunService: { getThreadRuns: historyMock },
+    agentRunService: {
+        getThreadRuns: historyMock,
+        // Reads the tail and activity through the history mock, as the real
+        // service does on a server without the activity endpoint.
+        getThreadActivity: async (threadId: string) => {
+            const history = await historyMock(threadId, false);
+            return { tail_run_id: history.tail_run_id, activity: history.activity };
+        },
+    },
     agentService: { connect: connectMock, close: vi.fn(), cancel: cancelMock },
     AgentConnectionError: class AgentConnectionError extends Error {},
 }));

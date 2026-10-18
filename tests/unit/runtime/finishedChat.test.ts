@@ -4,7 +4,7 @@ import { BeaverUIFactory } from '../../../src/ui/ui';
 
 const state = vi.hoisted(() => ({ history: vi.fn(), claims: [] as any[], generation: 1 }));
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentRunService: { getThreadRuns: (...args: unknown[]) => state.history(...args) },
+    agentRunService: { getThreadActivity: (...args: unknown[]) => state.history(...args) },
 }));
 vi.mock('../../../src/utils/prefs', () => ({ getPref: vi.fn() }));
 vi.mock('../../../src/utils/locale', () => ({ getString: vi.fn(), getLocaleID: vi.fn() }));

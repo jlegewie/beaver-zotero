@@ -36,6 +36,12 @@ vi.mock("@beaver/agent-core/transport/agentService", () => ({
                 tail_run_id: null,
                 activity: { state: "idle", run_id: null },
             }),
+        // Reads the tail and activity through the history mock, as the real
+        // service does on a server without the activity endpoint.
+        async getThreadActivity(this: any, threadId: string) {
+            const history = await this.getThreadRuns(threadId, false);
+            return { tail_run_id: history.tail_run_id, activity: history.activity };
+        },
     },
     agentService: {
         connect: connectMock,

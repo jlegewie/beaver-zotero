@@ -20,8 +20,8 @@ interface ModelMessagesViewProps {
     waitingSince?: number | null;
     /** What the status indicator says while nothing more specific applies. */
     statusIdleLabel?: string;
-    /** Draw the status indicator without its spinner; see `RunStatusIndicator`. */
-    statusStillIcon?: boolean;
+    /** Leave the status indicator's spinner slot empty; see `RunStatusIndicator`. */
+    statusHideIcon?: boolean;
 }
 
 /**
@@ -40,7 +40,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(fu
     status,
     waitingSince,
     statusIdleLabel,
-    statusStillIcon,
+    statusHideIcon,
 }) {
     // Don't render anything if there's no content to show
     if (messages.length === 0 && !showStatusIndicator) {
@@ -107,7 +107,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(fu
                     followsText={followsText}
                     waitingSince={waitingSince}
                     idleLabel={statusIdleLabel}
-                    stillIcon={statusStillIcon}
+                    hideIcon={statusHideIcon}
                 />
             )}
         </div>
