@@ -14,6 +14,7 @@ import {
     WSListItemsRequest,
     WSListItemsResponse,
     ListItemsResultItem,
+    LISTABLE_SPECIAL_COLLECTION_NAMES,
     ListableSpecialCollectionType,
     RegularListResultItem,
     AttachmentRowResult,
@@ -48,12 +49,6 @@ const LISTABLE_SPECIAL_COLLECTIONS: ReadonlySet<string> = new Set<ListableSpecia
     'publications',
     'retracted',
 ]);
-
-const SPECIAL_COLLECTION_NAMES: Record<ListableSpecialCollectionType, string> = {
-    unfiled: 'Unfiled Items',
-    publications: 'My Publications',
-    retracted: 'Retracted Items',
-};
 
 type ListItemsError = Pick<WSListItemsResponse, 'error' | 'error_code'>;
 
@@ -112,7 +107,7 @@ export async function handleListItemsRequest(
 
         if (specialCollection === 'publications' && library.libraryID !== Zotero.Libraries.userLibraryID) {
             return listItemsError(request, {
-                error: `${SPECIAL_COLLECTION_NAMES.publications} exists only in the personal library, not in '${library.name}'. Omit the library or pass library='u'.`,
+                error: `${LISTABLE_SPECIAL_COLLECTION_NAMES.publications} exists only in the personal library, not in '${library.name}'. Omit the library or pass library='u'.`,
                 error_code: 'special_collection_unavailable',
             });
         }

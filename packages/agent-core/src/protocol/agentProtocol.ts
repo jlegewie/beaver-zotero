@@ -3081,6 +3081,13 @@ export type SpecialCollectionType = 'duplicates' | 'unfiled' | 'publications' | 
 /** Special collections `list_items` can list via `special_collection`. */
 export type ListableSpecialCollectionType = 'unfiled' | 'publications' | 'retracted';
 
+/** Zotero's English names for the listable special collections. */
+export const LISTABLE_SPECIAL_COLLECTION_NAMES: Readonly<Record<ListableSpecialCollectionType, string>> = {
+    unfiled: 'Unfiled Items',
+    publications: 'My Publications',
+    retracted: 'Retracted Items',
+};
+
 /**
  * A special collection selected in the collections pane. Reported only for
  * kinds the agent knows how to handle; other special views are left out.
@@ -3114,6 +3121,17 @@ export interface ApplicationStateInput {
     /** Current library context */
     current_library?: CurrentLibrary;
     /**
+     * True when the library behind the open tab (the selected collections-pane
+     * row, or the open attachment or note) is one the user excluded from
+     * Beaver. Nothing else about that library is sent.
+     */
+    current_library_excluded?: boolean;
+    /**
+     * True when some selected collections-pane rows or items were left out
+     * because they belong to a library the user excluded from Beaver.
+     */
+    selection_partially_excluded?: boolean;
+    /**
      * First selected collection.
      *
      * Superseded by `current_collections`, which carries the whole selection.
@@ -3128,6 +3146,12 @@ export interface ApplicationStateInput {
      * libraries — each entry carries its own `library_id`/`library_ref`.
      */
     current_collections?: CurrentCollection[];
+    /**
+     * Library rows (My Library, group libraries) in the current selection, in
+     * collections-list order. `current_library` names only the first selected
+     * library, so this list is what tells several selected libraries apart.
+     */
+    current_libraries?: CurrentLibrary[];
     /**
      * Saved searches in the current selection, in selection order. A selection
      * can mix collections and saved searches, so this list is independent of
