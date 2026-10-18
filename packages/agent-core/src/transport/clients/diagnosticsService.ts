@@ -25,6 +25,7 @@ import {
     ConnectionDiagnosticResult,
     ConnectionFailureEvidence,
     presentConnectionFailure,
+    REATTACH_FAILED_MESSAGE,
 } from '../connectionFailure';
 
 const DIAGNOSTICS_ENDPOINT = '/api/v1/diagnostics/connection-failure';
@@ -161,7 +162,9 @@ async function executeReport(
             ? Math.max(0, startedAt - priorSuccess.at)
             : null,
         client_time: new Date().toISOString(),
-        user_message: shownToUser ? presentation.message.slice(0, 200) : '',
+        user_message: !shownToUser
+            ? ''
+            : (report.reattach_outcome ? REATTACH_FAILED_MESSAGE : presentation.message).slice(0, 200),
         user_details: userDetails.slice(0, 600),
     };
 

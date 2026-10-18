@@ -9,6 +9,7 @@ import {
     readAdmissionHistory,
     setAdmission,
     reconcileThread,
+    keepLocalFailuresOnSettle,
 } from "../runtime/threadAdmission";
 import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
@@ -31,6 +32,7 @@ import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/di
 import {
     ConnectionFailureEvidence,
     presentConnectionFailure,
+    REATTACH_FAILED_MESSAGE,
 } from '@beaver/agent-core/transport/connectionFailure';
 import {
     WSCallbacks,
@@ -1472,6 +1474,23 @@ function reattachFailureOutcome(info: WSReattachFailedInfo): ReattachOutcome {
     };
 }
 
+/**
+ * Make the open chat wait for the server to finish with a run this window lost
+ * track of. Marking its admission unknown blocks new sends and starts the
+ * admission poller, which loads the saved history once the server is idle, so
+ * the run ends up shown as the server finished it (completed, or interrupted
+ * with Continue) rather than as this window last saw it.
+ */
+function awaitServerSettlement(set: Setter): void {
+    const threadId = store.get(currentThreadIdAtom);
+    if (!threadId) return;
+    const admission = store.get(threadAdmissionAtom);
+    const known = admission?.threadId === threadId ? admission : null;
+    // Failed and stopped requests the server never saved stay on screen.
+    keepLocalFailuresOnSettle(threadId);
+    setAdmission(set, threadId, known?.tailRunId ?? null, 'unknown', known?.unconfirmedRunId);
+}
+
 function surfaceAndDiagnoseConnectionFailure(
     set: Setter,
     runId: string,
@@ -1483,6 +1502,7 @@ function surfaceAndDiagnoseConnectionFailure(
         diagnostic?: Awaited<ReturnType<typeof reportConnectionFailure>>,
     ) => {
         const presentation = presentConnectionFailure(evidence, diagnostic);
+        const message = reattach ? REATTACH_FAILED_MESSAGE : presentation.message;
         // The diagnostic POST can take several seconds; if the user retried in
         // the meantime, this run is no longer active and the refined
         // presentation must not resurface its error over the new run's state.
@@ -1496,7 +1516,7 @@ function surfaceAndDiagnoseConnectionFailure(
                   : {
                         event: 'error',
                         type: 'connection_error',
-                        message: presentation.message,
+                        message,
                         run_id: runId,
                         is_retryable: true,
                     },
@@ -1511,7 +1531,7 @@ function surfaceAndDiagnoseConnectionFailure(
                       status: 'error',
                       error: {
                           type: 'connection_error',
-                          message: presentation.message,
+                          message,
                           user_facing_details: presentation.details,
                           is_retryable: true,
                           ...(reattach?.resumable ? { is_resumable: true } : {}),
@@ -2335,18 +2355,41 @@ export function createWSCallbacks(
             logger(`WS onReattachFailed: run ${info.runId} (${info.reason}) after ${info.gapMs}ms`, 1);
             set(wsReconnectingAtom, null);
             endRunOnLostConnection(info.evidence, true, reattachFailureOutcome(info));
+            // The server may still finish the run, or has saved it already.
+            if (navigation === store.get(threadNavigationSeqAtom)) awaitServerSettlement(set);
         },
     });
+    /**
+     * A run the user stopped while it was reconnecting may still have finished
+     * on the server, or still be running there. Once the reattach is over, the
+     * chat still showing it waits for the server and loads what it saved.
+     */
+    const settleLeftRun = (runId: string) => {
+        if (
+            navigation !== store.get(threadNavigationSeqAtom) ||
+            currentWriter() ||
+            isRunActive(store.get(activeRunAtom)) ||
+            !store.get(threadRunsAtom).some((run) => run.id === runId)
+        ) return;
+        awaitServerSettlement(store.set);
+    };
     // What still happens for a run this window has left, e.g. one the user
     // stopped while it was reconnecting: it is still reattached, so the server
-    // hears the cancel, and its connection loss is still reported once the
-    // outcome is known. Nothing else of it reaches this window.
+    // hears the cancel, its connection loss is still reported once the
+    // outcome is known, and the chat waits for the server to settle it. None
+    // of its events reach this window.
     const forLeftRun: Partial<WSCallbacks> = {
         onReattaching: (info) => {
             if (info.cancelRequested) startReattach(info.runId);
         },
-        onReattached: reportReattachOutcome,
-        onReattachFailed: reportReattachOutcome,
+        onReattached: (info) => {
+            reportReattachOutcome(info);
+            settleLeftRun(info.runId);
+        },
+        onReattachFailed: (info) => {
+            reportReattachOutcome(info);
+            settleLeftRun(info.runId);
+        },
     };
     const guarded: Record<string, unknown> = { ...callbacks };
     for (const [name, callback] of Object.entries(callbacks)) {
@@ -3119,7 +3162,26 @@ async function startRegenerateRunOwned(
                 set(threadConflictAtom, "thread_tail_mismatch");
                 return;
             }
+            const localTarget = targetRun;
             targetRun = threadRuns[runIndex];
+            // The server finished a response this window had shown as failed
+            // or stopped, e.g. after its connection was lost. The saved answer
+            // now shows in its place; retrying would discard what was paid for.
+            if (
+                !editedPrompt &&
+                activeRun?.id !== localTarget.id &&
+                (localTarget.status === 'error' || localTarget.status === 'canceled') &&
+                targetRun.status === 'completed'
+            ) {
+                logger(`${logPrefix}: Run ${targetRun.id} completed on the server; not retrying it`, 1);
+                set(addPopupMessageAtom, {
+                    type: 'info',
+                    title: 'Response finished',
+                    text: 'Beaver finished this response after all, so it was not retried.',
+                    expire: true,
+                });
+                return;
+            }
         }
 
         // If the target is a resume run, walk the resume chain back to the

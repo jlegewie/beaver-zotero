@@ -28,11 +28,13 @@ import { pendingQuestionsAtom, type PendingQuestion } from '@beaver/agent-core/r
 import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import { pendingApprovalsAtom } from '../../agents/agentActions';
+import { useStopRun } from '../../hooks/useStopRun';
 import {
     answerPendingApprovalsAtom,
     approvalVerdictInFlightAtom,
     autoReplacementPendingRunIdsAtom,
     beginApprovalVerdictAtom,
+    isRunReconnectingAtom,
     releaseApprovalVerdictAtom,
     sendAskUserQuestionResponseAtom,
     sendCreditConfirmationResponseAtom,
@@ -221,6 +223,7 @@ interface ApprovalControls {
 function useApprovalControls(runId: string | null, approvals: readonly PendingApproval[]): ApprovalControls {
     const policy = useAtomValue(runApprovalPolicyAtom);
     const isVerdictInFlight = useAtomValue(approvalVerdictInFlightAtom);
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
     const beginVerdict = useSetAtom(beginApprovalVerdictAtom);
     const releaseVerdict = useSetAtom(releaseApprovalVerdictAtom);
     const answerPendingApprovals = useSetAtom(answerPendingApprovalsAtom);
@@ -233,7 +236,7 @@ function useApprovalControls(runId: string | null, approvals: readonly PendingAp
     );
 
     const onDecide = useCallback((approved: boolean) => {
-        if (approvals.length === 0) return;
+        if (approvals.length === 0 || isReconnecting) return;
         if (!beginVerdict()) return;
         // Taken now: an approval arriving while the preview is torn down was
         // not on the card the user answered.
@@ -246,7 +249,7 @@ function useApprovalControls(runId: string | null, approvals: readonly PendingAp
                 releaseVerdict();
             }
         })();
-    }, [approvals, beginVerdict, releaseVerdict, answerPendingApprovals]);
+    }, [approvals, isReconnecting, beginVerdict, releaseVerdict, answerPendingApprovals]);
 
     const onPermissionChange = useCallback(async (next: RunPermissionMode) => {
         if (!runId) return;
@@ -263,7 +266,14 @@ function useApprovalControls(runId: string | null, approvals: readonly PendingAp
         }
     }, [runId, setRunPermissionMode]);
 
-    return { mode, pendingCoveredCount, onDecide, onPermissionChange, decideDisabled: isVerdictInFlight };
+    return {
+        mode,
+        pendingCoveredCount,
+        onDecide,
+        onPermissionChange,
+        // A verdict sent while the run reconnects would wait for the new socket.
+        decideDisabled: isVerdictInFlight || isReconnecting,
+    };
 }
 
 /** The question card's answers, sent the way the composer panel sends them. */
@@ -280,14 +290,15 @@ function useQuestionControls(question: PendingQuestion | null) {
 /** The credit card's decision, one-shot per confirmation like the composer panel's. */
 function useCreditControls(confirmation: PendingCreditConfirmation | null) {
     const sendResponse = useSetAtom(sendCreditConfirmationResponseAtom);
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
     const [decidedId, setDecidedId] = useState<string | null>(null);
     const confirmationId = confirmation?.confirmationId ?? null;
     const onDecide = useCallback((approved: boolean) => {
-        if (!confirmationId || decidedId === confirmationId) return;
+        if (!confirmationId || decidedId === confirmationId || isReconnecting) return;
         setDecidedId(confirmationId);
         sendResponse({ confirmationId, approved });
-    }, [confirmationId, decidedId, sendResponse]);
-    return { onDecide, decideDisabled: confirmationId !== null && decidedId === confirmationId };
+    }, [confirmationId, decidedId, isReconnecting, sendResponse]);
+    return { onDecide, decideDisabled: (confirmationId !== null && decidedId === confirmationId) || isReconnecting };
 }
 
 /** The row's label and title, worded as the sidebar's artifacts list words them. */
@@ -392,6 +403,14 @@ function useLiveCard(): RunStatusPopupCard | null {
     const question = questions.values().next().value ?? null;
 
     const statusLine = useRunStatusLine(liveRun);
+    // Decision cards stay up while the run's connection is recovered, held
+    // back the way the composer's are, and say why.
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const reconnect = useAtomValue(wsReconnectingAtom);
+    const reconnectingLine = isReconnecting
+        ? runStatusText({ reconnect, backendRetry: null, idleLabel: '' })
+        : null;
+    const onStop = useStopRun('RunStatusPopup');
     const singleTitle = useSingleApprovalTitle(approvals.length === 1 ? approvals[0] : null);
     const approvalControls = useApprovalControls(liveRun?.id ?? null, approvals);
     const creditControls = useCreditControls(credit);
@@ -450,10 +469,11 @@ function useLiveCard(): RunStatusPopupCard | null {
                 rejectLabel: plural ? 'Reject All' : 'Reject',
                 onDecide: approvalControls.onDecide,
                 decideDisabled: approvalControls.decideDisabled,
+                reconnectingLine,
             };
         }
         if (batch) {
-            return { ...base, kind: 'batch', approval: batch, onSubmit: onSubmitBatch };
+            return { ...base, kind: 'batch', approval: batch, onSubmit: onSubmitBatch, disabled: isReconnecting, onStop };
         }
         if (credit) {
             return {
@@ -465,10 +485,11 @@ function useLiveCard(): RunStatusPopupCard | null {
                 declineLabel: credit.declineLabel,
                 onDecide: creditControls.onDecide,
                 decideDisabled: creditControls.decideDisabled,
+                reconnectingLine,
             };
         }
         if (question) {
-            return { ...base, kind: 'question', question, onSubmit: onSubmitQuestion };
+            return { ...base, kind: 'question', question, onSubmit: onSubmitQuestion, disabled: isReconnecting };
         }
         return { ...base, kind: 'running', statusLine: isAutoRetrying ? 'Retrying' : statusLine };
     }

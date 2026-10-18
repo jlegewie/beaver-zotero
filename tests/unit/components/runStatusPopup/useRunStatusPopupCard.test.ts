@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     sendCreditConfirmation: vi.fn(),
     sendQuestionResponse: vi.fn(),
     sendBatchApproval: vi.fn(),
+    stopRun: vi.fn(),
     dismissPreview: vi.fn(async () => {}),
     openNoteByKey: vi.fn(),
     artifactRows: [] as any[],
@@ -57,6 +58,8 @@ vi.mock('../../../../react/atoms/agentRunAtoms', async () => {
         sendCreditConfirmationResponseAtom: atom(null, (_get, _set, args: unknown) => mocks.sendCreditConfirmation(args)),
         sendAskUserQuestionResponseAtom: atom(null, (_get, _set, args: unknown) => mocks.sendQuestionResponse(args)),
         sendBatchApprovalResponseAtom: atom(null, (_get, _set, args: unknown) => mocks.sendBatchApproval(args)),
+        isRunReconnectingAtom: atom(false),
+        closeWSConnectionAtom: atom(null, () => mocks.stopRun()),
     };
 });
 vi.mock('../../../../react/host/zotero/editNotePreviewLifecycle', () => ({
@@ -81,12 +84,13 @@ import {
     activeRunAtom,
     currentThreadNameAtom,
     threadRunsAtom,
+    wsReconnectingAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import { pendingApprovalsAtom } from '../../../../react/agents/agentActions';
-import { autoReplacementPendingRunIdsAtom } from '../../../../react/atoms/agentRunAtoms';
+import { autoReplacementPendingRunIdsAtom, isRunReconnectingAtom } from '../../../../react/atoms/agentRunAtoms';
 import { isSidebarVisibleAtom } from '../../../../react/atoms/ui';
 import { annotationPanelStateAtom } from '../../../../react/atoms/messageUIState';
 import { runStatusPopupCompletionAtom, runStatusPopupPreviewAtom } from '../../../../react/atoms/runStatusPopup';
@@ -293,6 +297,46 @@ describe('while a run waits on the user', () => {
         act(() => { (latest as any).onDecide(true); });
         expect(mocks.sendCreditConfirmation).toHaveBeenCalledExactlyOnceWith({ confirmationId: 'c', approved: false });
         expect((latest as any).decideDisabled).toBe(true);
+    });
+
+    it('holds every decision back while the run reconnects, and says so', async () => {
+        store.set(activeRunAtom, run({ status: 'awaiting_deferred' }));
+        store.set(pendingApprovalsAtom as any, new Map([['a', approval('a')]]));
+        store.set(wsReconnectingAtom, { attempt: 1, maxAttempts: 4 });
+        store.set(isRunReconnectingAtom as any, true);
+        mount();
+
+        expect(latest).toMatchObject({ kind: 'approval', decideDisabled: true, reconnectingLine: 'Reconnecting…' });
+        await act(async () => { (latest as any).onDecide(true); });
+        expect(mocks.answerPendingApprovals).not.toHaveBeenCalled();
+
+        set(pendingApprovalsAtom as any, new Map());
+        set(pendingCreditConfirmationsAtom, new Map([['c', {
+            confirmationId: 'c', runId: 'run-1', title: 'T', message: 'M', approveLabel: 'Continue', declineLabel: 'Wrap up',
+            pendingCredits: 1, projectedTotalCredits: 2, threshold: 1, timeoutSeconds: 300, expiresAt: Date.now() + 300_000,
+        }]]));
+        expect(latest).toMatchObject({ kind: 'credit', decideDisabled: true, reconnectingLine: 'Reconnecting…' });
+        act(() => { (latest as any).onDecide(true); });
+        expect(mocks.sendCreditConfirmation).not.toHaveBeenCalled();
+
+        set(pendingCreditConfirmationsAtom, new Map());
+        set(pendingQuestionsAtom, new Map([['tc-q', { questionId: 'q', toolcallId: 'tc-q', title: 'Which years?', questions: [] }]]));
+        expect(latest).toMatchObject({ kind: 'question', disabled: true });
+
+        set(pendingBatchApprovalsAtom, new Map([['b', batchApproval('b')]]));
+        expect(latest).toMatchObject({ kind: 'batch', disabled: true });
+        act(() => { (latest as any).onStop(); });
+        expect(mocks.stopRun).toHaveBeenCalledOnce();
+
+        set(isRunReconnectingAtom as any, false);
+        set(wsReconnectingAtom, null);
+        expect(latest).toMatchObject({ kind: 'batch', disabled: false });
+        set(pendingBatchApprovalsAtom, new Map());
+        set(pendingCreditConfirmationsAtom, new Map([['c2', {
+            confirmationId: 'c2', runId: 'run-1', title: 'T', message: 'M', approveLabel: 'Continue', declineLabel: 'Wrap up',
+            pendingCredits: 1, projectedTotalCredits: 2, threshold: 1, timeoutSeconds: 300, expiresAt: Date.now() + 300_000,
+        }]]));
+        expect(latest).toMatchObject({ kind: 'credit', decideDisabled: false, reconnectingLine: null });
     });
 });
 

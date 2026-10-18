@@ -140,6 +140,13 @@ const Header: React.FC<{
     </div>
 );
 
+/** Why a decision card's buttons are held back: the run's connection is being recovered. */
+const ReconnectingLine: React.FC<{ text: string }> = ({ text }) => (
+    <div className="beaver-run-status-popup__reconnecting font-color-secondary">
+        <StatusLine text={text} />
+    </div>
+);
+
 /** Live batch progress, drawn under the header of the cards that keep the run's work visible. */
 interface WithBatchProgress {
     batchProgress: React.ReactNode;
@@ -171,7 +178,9 @@ const ApprovalView: React.FC<{ card: ApprovalCard } & WithBatchProgress> = ({ ca
         />
         {batchProgress}
         <div className="beaver-run-status-popup__footer">
-            {card.permission && (
+            {card.reconnectingLine ? (
+                <ReconnectingLine text={card.reconnectingLine} />
+            ) : card.permission && (
                 <div className="beaver-run-status-popup__permission">
                     <RunPermissionButton
                         mode={card.permission.mode}
@@ -213,6 +222,7 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
         />
         <div className="beaver-run-status-popup__body font-color-secondary">{card.message}</div>
         <div className="beaver-run-status-popup__footer">
+            {card.reconnectingLine && <ReconnectingLine text={card.reconnectingLine} />}
             <div className="flex-1" />
             <Button
                 variant="outline"
@@ -240,8 +250,10 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
  * for it: the backend's title, scope, goal and warnings, the coverage choice,
  * and a field for instructions. The card names the batch itself, so it
  * stands without the popup's header — and without a close button: the run
- * is blocked on this decision, and Cancel is the way out of it. Keyed on the
- * request so a new one starts from a fresh draft.
+ * is blocked on this decision, and Cancel is the way out of it. While the
+ * run's connection is recovered both answers are held back, and the card
+ * offers Stop instead. Keyed on the request so a new one starts from a fresh
+ * draft.
  *
  * Its controls are all buttons, links and fields, which the card's click
  * handler leaves alone on its own, so the copy around them still opens
@@ -253,6 +265,8 @@ const BatchView: React.FC<{ card: BatchCard }> = ({ card }) => (
             key={card.approval.approvalId}
             approval={card.approval}
             onSubmit={card.onSubmit}
+            disabled={card.disabled}
+            onStop={card.onStop}
         />
     </div>
 );
@@ -273,6 +287,7 @@ const QuestionView: React.FC<{ card: QuestionCard }> = ({ card }) => (
                 key={card.question.questionId}
                 pendingQuestion={card.question}
                 onSubmit={card.onSubmit}
+                disabled={card.disabled}
             />
         </div>
     </>

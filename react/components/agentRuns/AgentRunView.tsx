@@ -1,7 +1,7 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart, isRunActive } from '@beaver/agent-core/agents/types';
-import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
+import { hasInProgressToolCall, shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
 import { wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
@@ -103,6 +103,12 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // mid-answer or waiting on a card, since nothing else on screen moves.
     const isReconnecting = useAtomValue(wsReconnectingAtom) !== null && isRunActive(run);
     const showStatusIndicator = isLastRun && (runHasNothingToShow || autoReplacementPending || isReconnecting);
+    // A tool call still waiting on its result already spins for the same
+    // wait; the reconnect line under it only says why.
+    const reconnectUnderToolCall = useMemo(
+        () => isReconnecting && hasInProgressToolCall(run, resultsMap),
+        [isReconnecting, run, resultsMap],
+    );
 
     // Where the visible wait started, so the indicator can count it up. Null
     // while the run has produced nothing yet: there is no event to count from,
@@ -172,6 +178,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 // replacement in the same synchronous batch, so the failed run
                 // has stopped being the last one before anything renders.
                 statusIdleLabel={autoReplacementPending ? 'Retrying' : undefined}
+                statusStillIcon={reconnectUnderToolCall}
             />
 
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}

@@ -413,6 +413,14 @@
     white-space: nowrap;
 }
 
+/* Stands in for the permission menu while the run reconnects, and gives
+ * way the same way. */
+.beaver-run-status-popup__reconnecting {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 0.875rem;
+}
+
 /* The permission menu gives way first: its label truncates before a
  * decision button wraps. */
 .beaver-run-status-popup__permission {

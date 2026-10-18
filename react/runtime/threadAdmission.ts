@@ -8,6 +8,7 @@ import {
     type ThreadRunsResponse,
 } from "@beaver/agent-core/transport/agentService";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
+import type { AgentRun } from "@beaver/agent-core/agents/types";
 import {
     currentThreadIdAtom,
     activeRunAtom,
@@ -44,6 +45,42 @@ export const serverThreadBlockedAtom = atom((get) => {
     );
 });
 
+/**
+ * Chats whose next reconcile settles a run this window lost track of. Their
+ * local history may hold failed or stopped runs the server never saved.
+ */
+const settlingThreads = new Set<string>();
+
+/**
+ * Keep this window's unsaved failed and stopped runs in a chat through its
+ * next reconcile, e.g. one stopped while it was reconnecting.
+ */
+export function keepLocalFailuresOnSettle(threadId: string): void {
+    settlingThreads.add(threadId);
+}
+
+/**
+ * Saved history with the local failed and stopped runs the server does not
+ * have kept where they sit. Runs present in both take the saved copy.
+ */
+function mergeLocalFailures(local: AgentRun[], saved: AgentRun[]): AgentRun[] {
+    const savedIds = new Set(saved.map((run) => run.id));
+    const merged: AgentRun[] = [];
+    let next = 0;
+    for (const run of local) {
+        if (savedIds.has(run.id)) {
+            while (next < saved.length) {
+                const savedRun = saved[next++];
+                merged.push(savedRun);
+                if (savedRun.id === run.id) break;
+            }
+        } else if (run.status === "error" || run.status === "canceled") {
+            merged.push(run);
+        }
+    }
+    return [...merged, ...saved.slice(next)];
+}
+
 /** Refresh only persisted history. Composer state and navigation are untouched. */
 export async function reconcileThread(
     get: Getter,
@@ -68,8 +105,21 @@ export async function reconcileThread(
     setAdmission(set, id, loaded.tailRunId, activity);
     if (activity.state === "active" || activity.state === "unknown")
         return false;
-    set(threadRunsAtom, loaded.runs);
-    set(activeRunAtom, null);
+    // A request whose connection failed before the server saved it exists
+    // only here, and keeps its error card and Retry.
+    const local = get(activeRunAtom);
+    const keepLocal =
+        local?.status === "error" &&
+        local.error?.type === "connection_error" &&
+        !loaded.runs.some((run) => run.id === local.id);
+    const settling = settlingThreads.delete(id);
+    set(
+        threadRunsAtom,
+        settling
+            ? mergeLocalFailures(get(threadRunsAtom), loaded.runs)
+            : loaded.runs,
+    );
+    if (!keepLocal) set(activeRunAtom, null);
     set(threadAgentActionsAtom, loaded.agentActions ?? []);
     set(citationsAtom, loaded.citations);
     set(processCitationsAtom);
@@ -128,6 +178,7 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
     const reset = () => {
         stop();
         delay = 500;
+        settlingThreads.clear();
         store.set(threadAdmissionAtom, null);
         store.set(threadConflictAtom, null);
     };

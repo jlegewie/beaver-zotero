@@ -1,10 +1,11 @@
 import {
+    reconcileThread,
     threadAdmissionAtom,
     threadConflictAtom,
 } from "../../../react/runtime/threadAdmission";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ConnectionFailureEvidence } from "@beaver/agent-core/transport/connectionFailure";
+import { REATTACH_FAILED_MESSAGE, type ConnectionFailureEvidence } from "@beaver/agent-core/transport/connectionFailure";
 
 const {
     connectMock,
@@ -567,5 +568,146 @@ describe('terminal cleanup before writer revocation', () => {
         expect(store.get(activeRunAtom)).toBeNull();
         expect(store.get(threadRunsAtom)).toEqual([expect.objectContaining({ id: run.id, status: 'completed' })]);
         expect(store.get(streamingDoneRunIdsAtom).size).toBe(0);
+    });
+});
+
+describe('a run whose connection was lost for good', () => {
+    const DROP: ConnectionFailureEvidence = {
+        stage: 'mid_run',
+        closeCode: 1006,
+        closeReason: '',
+        wasClean: false,
+        socketOpened: true,
+        readyReceived: true,
+        timedOut: false,
+        navigatorOnline: true,
+    };
+    const saved = (runs: unknown[]) => loadThreadRunsMock.mockResolvedValue({
+        runs,
+        citations: [],
+        agentActions: [],
+        tailRunId: null,
+        activity: { state: 'idle', run_id: null },
+    });
+
+    async function startRun() {
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, 'hello');
+        store.set(isWSReadyAtom, true);
+        return { callbacks, run: store.get(activeRunAtom)! };
+    }
+
+    it('blocks the chat until the server settles the run, then shows what it saved', async () => {
+        const { callbacks, run } = await startRun();
+
+        callbacks.onReattachFailed({ runId: run.id, reason: 'gave_up', evidence: DROP, gapMs: 120_000 });
+
+        expect(store.get(activeRunAtom)).toMatchObject({
+            id: run.id,
+            status: 'error',
+            error: { type: 'connection_error', message: REATTACH_FAILED_MESSAGE },
+        });
+        expect(store.get(threadAdmissionAtom)).toMatchObject({ threadId: 't', activity: { state: 'unknown' } });
+        expect(store.get(threadReadOnlyAtom)).toBe(true);
+        expect(presence.getSnapshot().claims).toHaveLength(0);
+
+        // The server finished the run while this window could not reach it.
+        const completed = { ...run, status: 'completed', model_messages: [] };
+        saved([completed]);
+        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(store.get(threadRunsAtom)).toEqual([completed]);
+        expect(store.get(threadReadOnlyAtom)).toBe(false);
+    });
+
+    it('keeps the error card and Retry when the server never saved the run', async () => {
+        const { callbacks, run } = await startRun();
+        callbacks.onReattachFailed({ runId: run.id, reason: 'not_found', evidence: DROP, gapMs: 400 });
+
+        saved([]);
+        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+
+        expect(store.get(activeRunAtom)).toMatchObject({ id: run.id, status: 'error', error: { type: 'connection_error' } });
+        expect(store.get(threadReadOnlyAtom)).toBe(false);
+    });
+
+    it('does not keep a local failure that is not a lost connection', async () => {
+        store.set(activeRunAtom, {
+            id: 'refused', thread_id: 't', status: 'error', model_messages: [],
+            error: { type: 'thread_busy', message: 'Busy', is_retryable: false },
+        } as any);
+        saved([]);
+        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(store.get(activeRunAtom)).toBeNull();
+    });
+
+    it('waits for the server to settle a run the user stopped while it was reconnecting', async () => {
+        const { callbacks, run } = await startRun();
+        await store.set(closeWSConnectionAtom);
+        expect(store.get(threadRunsAtom)).toEqual([expect.objectContaining({ id: run.id, status: 'canceled' })]);
+        expect(store.get(threadAdmissionAtom)?.activity.state).not.toBe('unknown');
+
+        // The reattach delivered the cancel, but the server had already finished.
+        callbacks.onReattached({ runId: run.id, evidence: DROP, gapMs: 900, replayed: 3 });
+        expect(store.get(threadAdmissionAtom)).toMatchObject({ threadId: 't', activity: { state: 'unknown' } });
+
+        const completed = { ...run, status: 'completed', model_messages: [] };
+        saved([completed]);
+        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(store.get(threadRunsAtom)).toEqual([completed]);
+    });
+
+    it('keeps a stopped response the server never saved', async () => {
+        const earlier = { id: 'earlier', thread_id: 't', status: 'completed', model_messages: [] } as any;
+        store.set(threadRunsAtom, [earlier]);
+        const { callbacks, run } = await startRun();
+        await store.set(closeWSConnectionAtom);
+
+        callbacks.onReattachFailed({ runId: run.id, reason: 'not_found', evidence: DROP, gapMs: 700 });
+        expect(store.get(threadAdmissionAtom)).toMatchObject({ threadId: 't', activity: { state: 'unknown' } });
+
+        saved([earlier]);
+        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(store.get(threadRunsAtom).map((kept) => [kept.id, kept.status])).toEqual([
+            ['earlier', 'completed'],
+            [run.id, 'canceled'],
+        ]);
+
+        // Kept through that reconcile only: the next one shows the server's history.
+        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(store.get(threadRunsAtom).map((kept) => kept.id)).toEqual(['earlier']);
+    });
+
+    it('keeps an earlier unsaved failure in place when a later run is settled', async () => {
+        const first = { id: 'first', thread_id: 't', status: 'completed', model_messages: [] } as any;
+        const unsaved = { id: 'unsaved', thread_id: 't', status: 'error', model_messages: [],
+            error: { type: 'connection_error', message: 'Lost', is_retryable: true } } as any;
+        store.set(threadRunsAtom, [first, unsaved]);
+        const { callbacks, run } = await startRun();
+        callbacks.onReattachFailed({ runId: run.id, reason: 'gave_up', evidence: DROP, gapMs: 120_000 });
+
+        const completed = { ...run, status: 'completed', model_messages: [] };
+        saved([first, completed]);
+        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+
+        expect(store.get(threadRunsAtom).map((kept) => [kept.id, kept.status])).toEqual([
+            ['first', 'completed'],
+            ['unsaved', 'error'],
+            [run.id, 'completed'],
+        ]);
+        expect(store.get(activeRunAtom)).toBeNull();
+    });
+
+    it('leaves a chat the user has moved on from alone', async () => {
+        const { callbacks, run } = await startRun();
+        await store.set(closeWSConnectionAtom);
+        await store.set(newThreadAtom, { skipAutoPopulate: true, skipActiveRunConfirm: true });
+        const before = store.get(threadAdmissionAtom);
+
+        callbacks.onReattachFailed({ runId: run.id, reason: 'gave_up', evidence: DROP, gapMs: 120_000 });
+
+        expect(store.get(threadAdmissionAtom)).toBe(before);
     });
 });

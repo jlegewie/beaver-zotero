@@ -309,6 +309,13 @@ function standardCloseDetails(code: number): string | null {
     }
 }
 
+/**
+ * The headline for a run whose connection was lost and could not be picked up
+ * again. The details still describe the original loss.
+ */
+export const REATTACH_FAILED_MESSAGE =
+    'The connection was lost and Beaver could not reconnect to the response.';
+
 /** Build truthful, actionable copy from the evidence currently available. */
 export function presentConnectionFailure(
     evidence: ConnectionFailureEvidence,
