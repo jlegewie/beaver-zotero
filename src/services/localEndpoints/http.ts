@@ -443,6 +443,7 @@ async function handleLibraryListHttpRequest(request: any) {
         request_id: generateRequestId(),
         library_id: request.library_id,
         collection_key: request.collection_key,
+        special_collection: request.special_collection,
         tag: request.tag,
         item_category: request.item_category ?? 'regular',
         recursive: request.recursive ?? true,

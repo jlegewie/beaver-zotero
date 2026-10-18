@@ -1585,6 +1585,12 @@ export interface WSListItemsRequest extends WSBaseEvent {
     request_id: string;
     library_id?: number | string | null;
     collection_key?: string | null;
+    /**
+     * Built-in view to list instead of a collection. Typed as a string because
+     * the backend may send a view this client does not know; the handler
+     * rejects anything outside `ListableSpecialCollectionType`.
+     */
+    special_collection?: string | null;
     tag?: string | null;
     item_category: ZoteroItemCategory;
     include_children?: boolean;
@@ -2834,6 +2840,13 @@ export const CLIENT_FEATURES = {
     /** Scoped collection resolution, stable mutation targets, and portable result readers. */
     COLLECTION_IDS: 'collection_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
+    /**
+     * `list_items` honors `special_collection`, listing a built-in view
+     * (Unfiled Items, My Publications, Retracted Items) instead of a
+     * collection. A client without it drops the field and lists the whole
+     * library, so the backend only sends it to declaring clients.
+     */
+    LIST_ITEMS_SPECIAL_COLLECTIONS: 'list_items_special_collections',
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */
     EDIT_NOTE_BATCH: 'edit_note_batch',
@@ -3055,16 +3068,29 @@ export interface CurrentSavedSearch {
 /**
  * Zotero special collections Beaver reports in application state: built-in,
  * per-library views in the collections pane rather than user-created
- * collections.
+ * collections. Values are Zotero's collection-tree row types.
  *
  * - `duplicates`: "Duplicate Items", Zotero's duplicate candidates.
  * - `unfiled`: "Unfiled Items", items that belong to no collection.
+ * - `publications`: "My Publications", personal library only.
+ * - `retracted`: "Retracted Items", items Zotero flagged as retracted.
+ * - `trash`: "Trash". Reported so the agent can explain it cannot read it.
  */
-export type SpecialCollectionType = 'duplicates' | 'unfiled';
+export type SpecialCollectionType = 'duplicates' | 'unfiled' | 'publications' | 'retracted' | 'trash';
+
+/** Special collections `list_items` can list via `special_collection`. */
+export type ListableSpecialCollectionType = 'unfiled' | 'publications' | 'retracted';
+
+/** Zotero's English names for the listable special collections. */
+export const LISTABLE_SPECIAL_COLLECTION_NAMES: Readonly<Record<ListableSpecialCollectionType, string>> = {
+    unfiled: 'Unfiled Items',
+    publications: 'My Publications',
+    retracted: 'Retracted Items',
+};
 
 /**
  * A special collection selected in the collections pane. Reported only for
- * kinds the agent can act on; other special views are left out.
+ * kinds the agent knows how to handle; other special views are left out.
  */
 export interface CurrentSpecialCollection {
     /** Which special collection is selected */
@@ -3073,6 +3099,12 @@ export interface CurrentSpecialCollection {
     library_id: number;
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
+    /** Regular items in the view. Omitted for views that are not counted (Duplicate Items). */
+    item_count?: number;
+    /** Attachments in the view without a parent item. */
+    standalone_attachment_count?: number;
+    /** Notes in the view without a parent item. */
+    note_count?: number;
 }
 
 /**
@@ -3089,6 +3121,17 @@ export interface ApplicationStateInput {
     /** Current library context */
     current_library?: CurrentLibrary;
     /**
+     * True when the library behind the open tab (the selected collections-pane
+     * row, or the open attachment or note) is one the user excluded from
+     * Beaver. Nothing else about that library is sent.
+     */
+    current_library_excluded?: boolean;
+    /**
+     * True when some selected collections-pane rows or items were left out
+     * because they belong to a library the user excluded from Beaver.
+     */
+    selection_partially_excluded?: boolean;
+    /**
      * First selected collection.
      *
      * Superseded by `current_collections`, which carries the whole selection.
@@ -3103,6 +3146,12 @@ export interface ApplicationStateInput {
      * libraries — each entry carries its own `library_id`/`library_ref`.
      */
     current_collections?: CurrentCollection[];
+    /**
+     * Library rows (My Library, group libraries) in the current selection, in
+     * collections-list order. `current_library` names only the first selected
+     * library, so this list is what tells several selected libraries apart.
+     */
+    current_libraries?: CurrentLibrary[];
     /**
      * Saved searches in the current selection, in selection order. A selection
      * can mix collections and saved searches, so this list is independent of

@@ -4,6 +4,7 @@ import { getToolBaseLabel, parseArgs } from './toolCallRequest';
 import { textAnnotationStyle } from '../types/agentActions/createAnnotations';
 import { isExternalReferenceListView, isItemRow, type ToolResultView } from './toolResultViews';
 import { extractAuthorLastName, type ExternalReference } from '../types/externalReferences';
+import { LISTABLE_SPECIAL_COLLECTION_NAMES } from '../protocol/agentProtocol';
 
 // The request-side reference extraction lives in `toolCallRequest`; re-exported
 // here so label consumers can take it from this module.
@@ -506,6 +507,14 @@ function computeMainLabel(
             // Collection scope (host-resolved name)
             if (opts?.enrich?.collectionName) {
                 parts.push(`"${opts.enrich.collectionName}"`);
+            }
+
+            // Built-in view scope (Unfiled Items, My Publications, ...)
+            const specialCollectionName = typeof args.special_collection === 'string'
+                ? LISTABLE_SPECIAL_COLLECTION_NAMES[args.special_collection as keyof typeof LISTABLE_SPECIAL_COLLECTION_NAMES]
+                : undefined;
+            if (specialCollectionName) {
+                parts.push(`"${specialCollectionName}"`);
             }
 
             // Tag parameter (pure, arg-derived)

@@ -91,3 +91,18 @@ describe('getToolCallLabel for create_items', () => {
         expect(getToolCallLabel(importCall([{ id: '10.1/a' }]), 'completed')).not.toMatch(/looking up/);
     });
 });
+
+describe('getToolCallLabel for list_items', () => {
+    const listCall = (args: Record<string, unknown>) => toolCall({ tool_name: 'list_items', args });
+
+    it('names a built-in view instead of the library', () => {
+        expect(getToolCallLabel(listCall({ special_collection: 'unfiled', library: 'u' }), 'completed'))
+            .toBe('List items: "Unfiled Items"');
+        expect(getToolCallLabel(listCall({ special_collection: 'publications' }), 'completed'))
+            .toBe('List items: "My Publications"');
+    });
+
+    it('ignores an unknown view', () => {
+        expect(getToolCallLabel(listCall({ special_collection: 'trash' }), 'completed')).toBe('List items');
+    });
+});
