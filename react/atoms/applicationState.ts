@@ -37,6 +37,7 @@ import {
     getCollectionItemCounts,
     getSubcollectionCounts,
 } from '../../src/services/agentDataProvider/collectionCounts';
+import { getSpecialCollectionItemCounts } from '../../src/services/agentDataProvider/specialCollectionCounts';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
 import { ProcessingMode } from '@beaver/agent-core/types/profile';
 import { isLibraryTabAtom } from './ui';
@@ -57,12 +58,17 @@ const MAX_LIBRARY_SELECTION = 30;
 
 /**
  * Collections-tree row types reported as `current_special_collections`. Only
- * views the agent can act on are listed: Duplicate Items maps onto duplicate
- * discovery and merging, Unfiled Items onto the `unfiled` search filter.
+ * views the agent knows how to handle are listed: Duplicate Items maps onto
+ * duplicate discovery and merging; Unfiled Items, My Publications and
+ * Retracted Items onto listing and search filters; the Trash is reported so
+ * the agent can explain that it cannot read it.
  */
 const REPORTED_SPECIAL_COLLECTION_TYPES: ReadonlySet<string> = new Set<SpecialCollectionType>([
     'duplicates',
     'unfiled',
+    'publications',
+    'retracted',
+    'trash',
 ]);
 
 /**
@@ -251,16 +257,28 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 }));
 
             // Special-collection rows carry their library on `ref.libraryID`
-            // (a Zotero.Duplicates or Zotero.Search for the two reported kinds).
-            currentSpecialCollections = selectedTreeRows
+            // (a Zotero.Duplicates, a Zotero.Search, or a plain `{ libraryID }`
+            // for My Publications and the Trash). Counts are left out for
+            // Duplicate Items, which Zotero computes with a full-library scan.
+            const specialRows = selectedTreeRows
                 .filter((row: any) => REPORTED_SPECIAL_COLLECTION_TYPES.has(row?.type)
                     && typeof row.ref?.libraryID === 'number'
-                    && searchableLibrarySet.has(row.ref.libraryID))
-                .map((row: any) => ({
-                    type: row.type as SpecialCollectionType,
-                    library_id: row.ref.libraryID,
-                    library_ref: libraryRefForLibraryID(row.ref.libraryID) ?? undefined,
-                }));
+                    && searchableLibrarySet.has(row.ref.libraryID));
+            currentSpecialCollections = await Promise.all(specialRows.map(async (row: any) => {
+                const type = row.type as SpecialCollectionType;
+                const libraryID: number = row.ref.libraryID;
+                const counts = await getSpecialCollectionItemCounts(type, libraryID);
+                return {
+                    type,
+                    library_id: libraryID,
+                    library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
+                    ...(counts ? {
+                        item_count: counts.itemCount,
+                        standalone_attachment_count: counts.standaloneAttachmentCount,
+                        note_count: counts.standaloneNoteCount,
+                    } : {}),
+                };
+            }));
 
             // Drop any selected items that belong to an excluded library.
             const selectedItems = selectedPaneItems

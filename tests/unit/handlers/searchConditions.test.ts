@@ -179,3 +179,88 @@ describe('addSearchCondition: the value checks wait on the operator', () => {
         expect(warnings[0]).not.toContain('no item type has that name');
     });
 });
+
+describe('addSearchCondition: savedSearch validation', () => {
+    let warnings: string[];
+    let addCondition: ReturnType<typeof vi.fn>;
+    const savedSearches = new Map<string, { deleted?: boolean }>();
+
+    const add = (condition: ZoteroSearchCondition, libraryID: number | undefined = 1) =>
+        addSearchCondition({ addCondition } as any, condition, warnings, LOG_LABEL, libraryID);
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        warnings = [];
+        addCondition = vi.fn(() => 0);
+        savedSearches.clear();
+        (globalThis as any).Zotero.Searches = {
+            getByLibraryAndKey: vi.fn((libraryID: number, key: string) => savedSearches.get(`${libraryID}/${key}`) ?? false),
+        };
+    });
+
+    it('adds a condition naming a saved search in the searched library', () => {
+        savedSearches.set('1/SRCH0001', {});
+
+        expect(add({ field: 'savedSearch', operator: 'is', value: 'SRCH0001' })).toBe(true);
+        expect(addCondition).toHaveBeenCalledWith('savedSearch', 'is', 'SRCH0001');
+        expect(warnings).toEqual([]);
+    });
+
+    it('drops an unknown saved search key and names it', () => {
+        expect(add({ field: 'savedSearch', operator: 'is', value: 'MISSING1' })).toBe(false);
+        expect(addCondition).not.toHaveBeenCalled();
+        expect(warnings[0]).toContain("field='savedSearch'");
+        expect(warnings[0]).toContain("value='MISSING1'");
+    });
+
+    it('drops a saved search that is in the trash', () => {
+        savedSearches.set('1/SRCH0001', { deleted: true });
+
+        expect(add({ field: 'savedSearch', operator: 'isNot', value: 'SRCH0001' })).toBe(false);
+        expect(warnings).toHaveLength(1);
+    });
+
+    it('accepts Zotero\'s legacy library-prefixed spelling', () => {
+        savedSearches.set('1/SRCH0001', {});
+
+        expect(add({ field: 'savedSearch', operator: 'is', value: '1_SRCH0001' })).toBe(true);
+    });
+
+    it('lets the condition through when the lookup itself fails', () => {
+        (globalThis as any).Zotero.Searches.getByLibraryAndKey = vi.fn(() => { throw new Error('not loaded'); });
+
+        expect(add({ field: 'savedSearch', operator: 'is', value: 'SRCH0001' })).toBe(true);
+        expect(warnings).toEqual([]);
+    });
+});
+
+describe('addSearchCondition: publications library check', () => {
+    let warnings: string[];
+    let addCondition: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        warnings = [];
+        addCondition = vi.fn(() => 0);
+        (globalThis as any).Zotero.Libraries.userLibraryID = 1;
+    });
+
+    const add = (libraryID: number | undefined) => addSearchCondition(
+        { addCondition } as any,
+        { field: 'publications', operator: 'true' } as ZoteroSearchCondition,
+        warnings,
+        LOG_LABEL,
+        libraryID,
+    );
+
+    it('adds the condition in the personal library', () => {
+        expect(add(1)).toBe(true);
+        expect(warnings).toEqual([]);
+    });
+
+    it('refuses the condition in a group library instead of matching nothing', () => {
+        expect(add(5)).toBe(false);
+        expect(addCondition).not.toHaveBeenCalled();
+        expect(warnings[0]).toContain('personal library');
+    });
+});

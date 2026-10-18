@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { createStore } from 'jotai';
-const mocks = vi.hoisted(() => ({ win: undefined as any, reader: undefined as any, counts: vi.fn() }));
+const mocks = vi.hoisted(() => ({ win: undefined as any, reader: undefined as any, counts: vi.fn(), specialCounts: vi.fn() }));
 vi.mock('../../../react/runtime/windowRuntime', () => ({ getContextWindow: () => mocks.win }));
 vi.mock('../../../react/utils/readerUtils', () => ({ getCurrentReader: () => mocks.reader, getCurrentPage: () => null, getEpubReaderPage: () => null }));
 vi.mock('../../../react/atoms/messageComposition', async () => {
@@ -28,6 +28,9 @@ vi.mock('../../../src/services/agentDataProvider/libraryCounts', () => ({ getLib
 vi.mock('../../../src/services/agentDataProvider/collectionCounts', () => ({
     getCollectionItemCounts: mocks.counts, getSubcollectionCounts: async () => new Map(),
     countsFor: () => ({ itemCount: 1, standaloneAttachmentCount: 0, standaloneNoteCount: 0 }),
+}));
+vi.mock('../../../src/services/agentDataProvider/specialCollectionCounts', () => ({
+    getSpecialCollectionItemCounts: mocks.specialCounts,
 }));
 vi.mock('../../../src/utils/libraryIdentity', () => ({ libraryRefForLibraryID: () => 'u' }));
 import { buildZoteroApplicationState } from '../../../react/atoms/applicationState';
@@ -112,8 +115,11 @@ it('reports the Zotero interface language when the host exposes one', async () =
     expect(await buildZoteroApplicationState(createStore().get)).not.toHaveProperty('interface_language');
 });
 
-it('reports selected Duplicate Items and Unfiled Items rows, skipping other special views and excluded libraries', async () => {
+it('reports selected special collection rows with counts, skipping unknown views and excluded libraries', async () => {
     const row = (type: string, libraryID: number) => ({ type, ref: { libraryID } });
+    mocks.specialCounts.mockImplementation(async (type: string) => (type === 'duplicates'
+        ? null
+        : { itemCount: type === 'trash' ? 4 : 2, standaloneAttachmentCount: 1, standaloneNoteCount: 0 }));
     mocks.win = { ZoteroPane: {
         getSelectedItems: () => [],
         getSelectedLibraryID: () => 1,
@@ -122,6 +128,8 @@ it('reports selected Duplicate Items and Unfiled Items rows, skipping other spec
         getCollectionTreeRows: () => [
             row('duplicates', 1),
             row('unfiled', 1),
+            row('publications', 1),
+            row('retracted', 1),
             row('trash', 1),
             row('recentlyRead', 1),
             row('unfiled', 2),
@@ -130,10 +138,15 @@ it('reports selected Duplicate Items and Unfiled Items rows, skipping other spec
     vi.stubGlobal('Zotero', { Libraries: { get: () => ({ libraryID: 1, name: 'Library', editable: true }) } });
     mocks.counts.mockResolvedValue(new Map());
     const state = await buildZoteroApplicationState(createStore().get);
+    const counted = (itemCount: number) => ({ item_count: itemCount, standalone_attachment_count: 1, note_count: 0 });
     expect(state.current_special_collections).toEqual([
         { type: 'duplicates', library_id: 1, library_ref: 'u' },
-        { type: 'unfiled', library_id: 1, library_ref: 'u' },
+        { type: 'unfiled', library_id: 1, library_ref: 'u', ...counted(2) },
+        { type: 'publications', library_id: 1, library_ref: 'u', ...counted(2) },
+        { type: 'retracted', library_id: 1, library_ref: 'u', ...counted(2) },
+        { type: 'trash', library_id: 1, library_ref: 'u', ...counted(4) },
     ]);
+    expect(mocks.specialCounts).not.toHaveBeenCalledWith('unfiled', 2);
 });
 
 it('omits special collections when only regular rows are selected', async () => {
