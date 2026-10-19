@@ -9,6 +9,7 @@ import { CancelIcon } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { getJotaiState } from '../../utils/getJotaiState';
+import { redactSecrets } from '../../utils/redactSecrets';
 import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 import { getPref } from '../../../src/utils/prefs';
 import { getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
@@ -31,13 +32,7 @@ const getPluginPreferences = () => {
     
     prefKeys.forEach(key => {
         try {
-            // Mask sensitive keys
-            if (key.includes('ApiKey')) {
-                const value = getPref(key);
-                prefs[key] = value ? '[MASKED]' : null;
-            } else {
-                prefs[key] = getPref(key);
-            }
+            prefs[key] = getPref(key);
         } catch (error) {
             prefs[key] = `Error reading pref: ${error}`;
         }
@@ -92,9 +87,10 @@ const ErrorReportDialog: React.FC = () => {
 
         setIsSending(true);
         try {
-            // Collect debugging information
-            const jotaiState = getJotaiState();
-            const preferences = getPluginPreferences();
+            // Collect debugging information. Model atoms and the lastUsedModel
+            // preference carry custom-model API keys.
+            const jotaiState = redactSecrets(getJotaiState());
+            const preferences = redactSecrets(getPluginPreferences());
             
             // Send error report to backend
             await accountService.reportError(
