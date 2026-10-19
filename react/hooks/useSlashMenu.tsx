@@ -4,7 +4,7 @@ import { PlusSignIcon, BookSearchIcon, LayersIcon, HighlighterIcon, ZapIcon, Qui
 import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { actionsAtom, actionContextAtom, resolveActionForStagingAtom } from '../atoms/actions';
-import { computeActionGroups } from '../utils/actionVisibility';
+import { computeActionGroups, withoutViewTargets } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { Action, ActionCategory, ActionTargetType, KnownActionCategory } from '@beaver/agent-core/types/actions';
 import { SlashCommandDescriptor, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
@@ -49,7 +49,11 @@ export function useSlashMenu(
     const attachTargets = options?.attachTargets ?? true;
     const getCaretOffset = options?.getCaretOffset;
     const allActions = useAtomValue(actionsAtom);
-    const ctx = useAtomValue(actionContextAtom);
+    const liveCtx = useAtomValue(actionContextAtom);
+    // A surface with its own attachment list edits an already-sent message,
+    // which keeps that message's application state: a saved search or special
+    // view selected now cannot become a target there.
+    const ctx = useMemo(() => (attachTargets ? liveCtx : withoutViewTargets(liveCtx)), [attachTargets, liveCtx]);
     const resolveActionForStaging = useSetAtom(resolveActionForStagingAtom);
 
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);

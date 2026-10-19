@@ -28,7 +28,7 @@ import { store } from '../store';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
 import { selectedZoteroItemsAtom, currentNoteItemAtom, libraryViewAtom } from '../atoms/zoteroContext';
-import { pureCollectionSelection } from './actionVisibility';
+import { collectionTargetSelection } from './actionVisibility';
 import { ActionTargetType } from '@beaver/agent-core/types/actions';
 import { CollectionReference } from '@beaver/agent-core/types/zotero';
 import { collectionToReference } from './zoteroReferences';
@@ -224,13 +224,14 @@ function isActionableItem(item: Zotero.Item): boolean {
 
 /**
  * The selected collections as wire references, following the shared
- * {@link pureCollectionSelection} rule: empty unless the collections-tree
- * selection is nothing but collections. Collections that no longer resolve
- * (deleted between selection and send) are dropped.
+ * {@link collectionTargetSelection} rule: empty unless the collections-tree
+ * selection is nothing but collections and collection-like views. Selected
+ * views have no reference to attach and are left out. Collections that no
+ * longer resolve (deleted between selection and send) are dropped.
  */
 function selectedCollectionReferences(): CollectionReference[] {
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-    const selected = pureCollectionSelection(store.get(libraryViewAtom))
+    const selected = collectionTargetSelection(store.get(libraryViewAtom)).collections
         .filter(info => searchableLibraryIds.includes(info.libraryId));
     const references: CollectionReference[] = [];
     for (const info of selected) {
@@ -415,8 +416,13 @@ async function resolveActiveItem(): Promise<ResolvedVariable> {
 
 async function resolveCurrentCollection(): Promise<ResolvedVariable> {
     try {
-        const names = selectedCollectionReferences()
-            .map(ref => ref.name)
+        // Saved searches and special views (Unfiled Items, …) selected
+        // alongside or instead of collections are named too.
+        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+        const viewNames = collectionTargetSelection(store.get(libraryViewAtom)).views
+            .filter(view => searchableLibraryIds.includes(view.libraryId))
+            .map(view => view.name);
+        const names = [...selectedCollectionReferences().map(ref => ref.name), ...viewNames]
             .filter(name => !!name);
         if (names.length === 0) return { text: 'None selected', items: [] };
         return { text: names.map(name => `"${name}"`).join(', '), items: [] };

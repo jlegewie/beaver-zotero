@@ -27,6 +27,7 @@ import {
 } from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../../react/types/builtinActions';
 import { getPref } from '../utils/prefs';
+import { isCollectionTargetViewType } from '../utils/zoteroSelection';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { agentItemFilter, isAgentSupportedItem } from '../utils/agentItemSupport';
 import { exportNoteWithProgress, NOTE_EXPORT_FORMATS } from './noteExportCommand';
@@ -74,20 +75,22 @@ function readCollectionTreeRows(context: any): any[] {
 }
 
 /**
- * The collection rows a collection action should act on: every selected row,
- * but only when they are all collections.
+ * The rows a collection action should act on: every selected row, but only
+ * when they are all collections, saved searches, or the special views listed
+ * in `COLLECTION_TARGET_VIEW_TYPES` (never a library root). Mirrors
+ * `collectionTargetSelection` in the React bundle.
  */
-function pureCollectionRows(context: any): any[] {
+function collectionTargetRows(context: any): any[] {
     const rows = readCollectionTreeRows(context);
     if (rows.length === 0) return [];
-    const allCollections = rows.every((row) => {
+    const allTargets = rows.every((row) => {
         try {
-            return row?.isCollection?.() === true;
+            return row?.isCollection?.() === true || isCollectionTargetViewType(row?.type);
         } catch {
             return false;
         }
     });
-    return allCollections ? rows : [];
+    return allTargets ? rows : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -351,7 +354,7 @@ function registerMenus(): void {
             l10nID: 'beaver-context-menu-submenu',
             onShowing: safeOnShowing('collection-submenu', (_event: any, context: any) => {
                 const { setVisible } = context;
-                setVisible(pureCollectionRows(context).length > 0);
+                setVisible(collectionTargetRows(context).length > 0);
             }),
             menus: buildCollectionMenuItems(collectionActions),
         }],
@@ -433,7 +436,7 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
                 filterItemAction(action, context);
             }),
             onCommand: (_event: any, context: any) => {
-                void dispatchAction(action, context, _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
+                void dispatchAction(action, context, 'item', _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
             },
         });
     }
@@ -462,7 +465,7 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
             filterCollectionAction(action, context);
         }),
         onCommand: (_event: any, context: any) => {
-            void dispatchAction(action, context, _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
+            void dispatchAction(action, context, 'collection', _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
         },
     }));
 
@@ -498,14 +501,19 @@ function filterItemAction(action: Action, context: any): void {
 
 function filterCollectionAction(_action: Action, context: any): void {
     const { setVisible } = context;
-    setVisible(pureCollectionRows(context).length > 0);
+    setVisible(collectionTargetRows(context).length > 0);
 }
 
 // ---------------------------------------------------------------------------
 // Event dispatch (onCommand handler)
 // ---------------------------------------------------------------------------
 
-async function dispatchAction(action: Action, context: any, origin?: Window): Promise<void> {
+/**
+ * `menu` is the context menu the command came from. The item menu's context
+ * also carries the collections-tree selection, so only a collection-menu
+ * command binds to the selected collections and views.
+ */
+async function dispatchAction(action: Action, context: any, menu: 'item' | 'collection', origin?: Window): Promise<void> {
     const win = await resolveChatWindow(origin ?? context.window);
     const eventBus = win?.__beaverEventBus;
     if (!eventBus) return;
@@ -526,23 +534,25 @@ async function dispatchAction(action: Action, context: any, origin?: Window): Pr
 
     const itemIds: number[] = filteredItems.map((i: any) => i.id);
 
-    // Carry each collection's library alongside its ID: the receiver gates on
-    // library exclusion, and both are already in hand here.
-    const collections = pureCollectionRows(context)
+    // Carry each row's library alongside it: the receiver gates on library
+    // exclusion, and both are already in hand here. Saved searches and special
+    // views have nothing to attach; the agent reads them from application state.
+    const targetRows = menu === 'collection' ? collectionTargetRows(context) : [];
+    const collections = targetRows
+        .filter((row: any) => row?.type === 'collection')
         .map((row: any) => ({ libraryId: row?.ref?.libraryID, collectionId: row?.ref?.id }))
         .filter((c: any) => typeof c.libraryId === 'number' && typeof c.collectionId === 'number');
+    const views = targetRows
+        .filter((row: any) => isCollectionTargetViewType(row?.type))
+        .map((row: any) => ({ libraryId: row?.ref?.libraryID, type: row.type }))
+        .filter((v: any) => typeof v.libraryId === 'number');
 
-    // Resolve the single wire target type. An action binds to the collection
-    // whenever it accepts a 'collection' target and the selection is
-    // collections; otherwise it binds to the first item-menu kind the action
-    // accepts that is actually present in what we attach.
-    //
-    // Note that the item menu context also carries the collection selection,
-    // so collections can be non-empty for an item-menu dispatch. That stays
-    // unambiguous because no target preset pairs 'collection' with an item
-    // kind (see TARGET_PRESETS) — an action reaching both menus would need an
-    // explicit menu-origin signal to route correctly.
-    const resolvedTarget = (collections.length > 0 && action.targets.includes('collection'))
+    // Resolve the single wire target type. A collection-menu command binds to
+    // the selected collections and views; an item-menu command binds to the
+    // first item-menu kind the action accepts that is actually present in
+    // what we attach. Actions such as `fix-metadata` reach both menus, so the
+    // menu, not the action's targets, decides.
+    const resolvedTarget = ((collections.length > 0 || views.length > 0) && action.targets.includes('collection'))
         ? 'collection'
         : ITEM_MENU_KINDS.find(t =>
             action.targets.includes(t) && filteredItems.some((i: any) =>
@@ -557,6 +567,7 @@ async function dispatchAction(action: Action, context: any, origin?: Window): Pr
             targetType: resolvedTarget,
             itemIds,
             collections,
+            views,
         },
     }));
 }

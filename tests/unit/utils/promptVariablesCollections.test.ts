@@ -49,7 +49,10 @@ const EXCLUDED_LIBRARY = 5;
 
 const collectionsGet = vi.fn();
 
-function libraryViewWith(collections: { collectionId: number; collectionName: string; libraryId: number }[]) {
+function libraryViewWith(
+    collections: { collectionId: number; collectionName: string; libraryId: number }[],
+    views: { type: string; name: string; libraryId: number }[] = [],
+) {
     return {
         treeRowType: 'collection',
         libraryId: collections[0]?.libraryId ?? ALLOWED_LIBRARY,
@@ -57,9 +60,10 @@ function libraryViewWith(collections: { collectionId: number; collectionName: st
         collectionId: collections[0]?.collectionId ?? null,
         collectionName: collections[0]?.collectionName ?? null,
         searchName: null,
-        selectedRowCount: collections.length,
+        selectedRowCount: collections.length + views.length,
         selectedCollections: collections,
-        selectedLibraryIds: [...new Set(collections.map(c => c.libraryId))],
+        selectedViews: views,
+        selectedLibraryIds: [...new Set([...collections, ...views].map(c => c.libraryId))],
     };
 }
 
@@ -133,6 +137,27 @@ describe('collection target context — library exclusion', () => {
         const result = await resolvePromptVariables('In {{current_collection}}.');
         expect(result.text).toContain('Collection 1');
         expect(result.text).not.toContain('Secret');
+    });
+
+    it('attaches nothing for a selected special view', async () => {
+        state.set(LIBRARY_VIEW_ATOM, libraryViewWith([], [
+            { type: 'unfiled', name: 'Unfiled Items', libraryId: ALLOWED_LIBRARY },
+        ]));
+        const result = await resolvePromptVariables('Summarize.', 'collection');
+        expect(result.collections).toEqual([]);
+        expect(collectionsGet).not.toHaveBeenCalled();
+    });
+
+    it('{{current_collection}} names selected views, but not excluded ones', async () => {
+        state.set(LIBRARY_VIEW_ATOM, libraryViewWith(
+            [{ collectionId: 1, collectionName: 'A', libraryId: ALLOWED_LIBRARY }],
+            [
+                { type: 'unfiled', name: 'Unfiled Items', libraryId: ALLOWED_LIBRARY },
+                { type: 'search', name: 'Secret search', libraryId: EXCLUDED_LIBRARY },
+            ],
+        ));
+        const result = await resolvePromptVariables('In {{current_collection}}.');
+        expect(result.text).toBe('In "Collection 1", "Unfiled Items".');
     });
 });
 

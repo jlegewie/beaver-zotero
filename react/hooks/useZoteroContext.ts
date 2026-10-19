@@ -16,8 +16,9 @@ import {
     LibraryTreeRowType,
     LibraryViewInfo,
     SelectedCollectionInfo,
+    SelectedViewInfo,
 } from '../atoms/zoteroContext';
-import { getCollectionTreeRows } from '../../src/utils/zoteroSelection';
+import { getCollectionTreeRows, isCollectionTargetViewType } from '../../src/utils/zoteroSelection';
 import { updateNoteItemAtom } from '../atoms/messageComposition';
 import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from '../atoms/profile';
 
@@ -96,6 +97,17 @@ function readLibraryName(libraryId: number): string {
     return 'My Library';
 }
 
+/** A collections-tree row's display name, e.g. "Unfiled Items" or a saved search's name. */
+function readRowName(row: any): string {
+    try {
+        const name = row.getName?.();
+        if (typeof name === 'string' && name) return name;
+    } catch {
+        // fall through
+    }
+    return typeof row?.ref?.name === 'string' ? row.ref.name : '';
+}
+
 /**
  * Read the collections-tree selection and return LibraryViewInfo.
  *
@@ -112,6 +124,7 @@ function readLibraryView(zp: any): LibraryViewInfo | null {
     const libraryId = primary.ref?.libraryID ?? Zotero.Libraries.userLibraryID;
 
     const selectedCollections: SelectedCollectionInfo[] = [];
+    const selectedViews: SelectedViewInfo[] = [];
     const selectedLibraryIds: number[] = [];
     for (const row of rows) {
         const rowLibraryId = row?.ref?.libraryID;
@@ -124,6 +137,8 @@ function readLibraryView(zp: any): LibraryViewInfo | null {
                 collectionName: row.ref.name ?? '',
                 libraryId: typeof rowLibraryId === 'number' ? rowLibraryId : libraryId,
             });
+        } else if (isCollectionTargetViewType(row?.type) && typeof rowLibraryId === 'number') {
+            selectedViews.push({ type: row.type, name: readRowName(row), libraryId: rowLibraryId });
         }
     }
 
@@ -136,6 +151,7 @@ function readLibraryView(zp: any): LibraryViewInfo | null {
         searchName: type === 'search' ? (primary.ref?.name ?? null) : null,
         selectedRowCount: rows.length,
         selectedCollections,
+        selectedViews,
         selectedLibraryIds,
     };
 }

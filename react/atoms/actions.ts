@@ -16,8 +16,9 @@ import {
     isBuiltinAction,
     isLockedBuiltinAction,
 } from '../types/actionStorage';
-import { zoteroContextAtom } from './zoteroContext';
-import { isActionVisible, ActionContext } from '../utils/actionVisibility';
+import { libraryViewAtom, zoteroContextAtom } from './zoteroContext';
+import { isLibraryTabAtom } from './ui';
+import { isActionVisible, ActionContext, collectionTargetSelection } from '../utils/actionVisibility';
 import {
     resolvePromptVariables,
     resolveTargetContext,
@@ -31,6 +32,7 @@ import {
     pendingPillInsertsAtom,
     addItemsToCurrentMessageItemsAtom,
     messageItemDataRevisionAtom,
+    stagedReaderActionContextAtom,
 } from './messageComposition';
 import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
@@ -270,19 +272,24 @@ export const actionContextAtom = atom<ActionContext>((get) => {
         (item: Zotero.Item) => searchableLibraryIds.includes(item.libraryID),
     );
 
-    // Collection targets are filtered on the same principle, so a label never
-    // promises collections the run will not touch.
+    // Collection targets (collections, saved searches, special views) are
+    // filtered on the same principle, so a label never promises rows the run
+    // will not touch.
     const { libraryView } = zotero;
     const selectedCollections = libraryView.selectedCollections.filter(
         (collection) => searchableLibraryIds.includes(collection.libraryId),
     );
-    const droppedCollections = libraryView.selectedCollections.length - selectedCollections.length;
+    const selectedViews = libraryView.selectedViews.filter(
+        (view) => searchableLibraryIds.includes(view.libraryId),
+    );
+    const droppedRows = libraryView.selectedCollections.length - selectedCollections.length
+        + libraryView.selectedViews.length - selectedViews.length;
     const selectedLibraryIds = libraryView.selectedLibraryIds.filter(
         (libraryId) => searchableLibraryIds.includes(libraryId),
     );
 
     const itemsChanged = selectedItems.length !== zotero.selectedItems.length;
-    const libraryViewChanged = droppedCollections > 0
+    const libraryViewChanged = droppedRows > 0
         || selectedLibraryIds.length !== libraryView.selectedLibraryIds.length;
 
     if (!itemsChanged && !libraryViewChanged) {
@@ -297,8 +304,9 @@ export const actionContextAtom = atom<ActionContext>((get) => {
                 ? {
                     ...libraryView,
                     selectedCollections,
+                    selectedViews,
                     selectedLibraryIds,
-                    selectedRowCount: libraryView.selectedRowCount - droppedCollections,
+                    selectedRowCount: libraryView.selectedRowCount - droppedRows,
                 }
                 : libraryView,
         },
@@ -479,7 +487,8 @@ export const stageActionPillAtom = atom(
 // removed-and-reinserted /command resolves fresh like any new pill.
 //
 // Returns null when a pill's action cannot run right now (empty item variable,
-// rejected item) — a popup has been shown and the send must be aborted.
+// rejected item, collection action with nothing to act on) — a popup has been
+// shown and the send must be aborted.
 // ---------------------------------------------------------------------------
 
 interface ResolvedPillActions {
@@ -497,12 +506,32 @@ export const resolvePillsToPromptActionsAtom = atom(
             pills: SlashCommandDescriptor[];
             persistedActions?: PromptAction[];
             bindTargets?: boolean;
+            /** The message already carries at least one collection. */
+            hasAttachedCollections?: boolean;
+            /** The message's application state is built at send time, so a
+             *  selected saved search or special view can be a collection
+             *  action's target. False when regenerating an edited message,
+             *  which keeps the original message's application state. */
+            allowViewTargets?: boolean;
         },
     ): Promise<ResolvedPillActions | null> => {
-        const { pills, persistedActions, bindTargets } = payload;
+        const { pills, persistedActions, bindTargets, hasAttachedCollections, allowViewTargets } = payload;
         const actions = get(actionsAtom);
         const validationResults = get(itemValidationResultsAtom);
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
+
+        // Saved searches and special views (Unfiled Items, …) have no reference
+        // to attach: the agent reads them from the application state built at
+        // send time, which reports the collections-pane selection only while
+        // the library tab is active and no reader "Ask…" context is staged
+        // (that reports the reader instead). A collection action with no
+        // attached collection therefore needs such a selection when it is sent.
+        const readerContextStaged = get(stagedReaderActionContextAtom) !== null;
+        const hasLiveCollectionTarget = (): boolean => {
+            if (!allowViewTargets || readerContextStaged || !get(isLibraryTabAtom)) return false;
+            const { collections, views } = collectionTargetSelection(get(libraryViewAtom));
+            return [...collections, ...views].some(row => searchableLibraryIds.includes(row.libraryId));
+        };
 
         const accumulatedItems: Zotero.Item[] = [];
         const accumulatedCollections: CollectionReference[] = [];
@@ -553,6 +582,24 @@ export const resolvePillsToPromptActionsAtom = atom(
                     type: 'error',
                     title: 'Action skipped',
                     text: 'This action targets an item in a library you excluded from Beaver. You can change excluded libraries in Beaver Preferences.',
+                    expire: true,
+                    duration: 5000,
+                });
+                return null;
+            }
+
+            if (
+                pill.targetType === 'collection'
+                && !hasAttachedCollections
+                && collections.length === 0
+                && !hasLiveCollectionTarget()
+            ) {
+                set(addPopupMessageAtom, {
+                    type: 'warning',
+                    title: 'Action skipped',
+                    text: allowViewTargets && !readerContextStaged
+                        ? `/${pill.commandName} runs on a collection. Select a collection, a saved search, or a view such as Unfiled Items in your library, then send again.`
+                        : `/${pill.commandName} runs on a collection. Select a collection in your library, then send again — saved searches and views such as Unfiled Items only work in a new message.`,
                     expire: true,
                     duration: 5000,
                 });
@@ -665,7 +712,11 @@ export const sendComposedMessageAtom = atom(
         return (await withThreadWriter(get, set, async set => {
         const { baseText, pills } = payload;
 
-        const resolved = await set(resolvePillsToPromptActionsAtom, { pills });
+        const resolved = await set(resolvePillsToPromptActionsAtom, {
+            pills,
+            hasAttachedCollections: get(currentMessageCollectionsAtom).length > 0,
+            allowViewTargets: true,
+        });
         if (!resolved) return false;
         const { actions: promptActions, items: variableItems, collections: variableCollections } = resolved;
 
@@ -729,6 +780,7 @@ export const buildEditedPromptActionsAtom = atom(
             pills,
             persistedActions,
             bindTargets: true,
+            hasAttachedCollections: (existingAttachments ?? []).some(a => a.type === 'collection'),
         });
         if (!resolved) return null;
 

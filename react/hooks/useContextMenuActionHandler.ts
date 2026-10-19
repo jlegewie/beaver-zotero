@@ -31,12 +31,19 @@ export function useContextMenuActionHandler() {
 
     useEventSubscription('contextMenuAction', async (detail) => {
         const { actionId, actionTitle, targetType, itemIds, collections } = detail;
+        const views = detail.views ?? [];
 
         // Library exclusion is a read boundary: drop excluded collections using
         // the library ID the event carries, before any Zotero lookup, and never
-        // stage them into the composer.
+        // stage them into the composer. Views are checked the same way; they
+        // have nothing to stage, but a run over an excluded view is refused.
         const allowedCollections = collections.filter(c => searchableLibraryIds.includes(c.libraryId));
-        if (targetType === 'collection' && collections.length > 0 && allowedCollections.length === 0) {
+        const allowedViews = views.filter(v => searchableLibraryIds.includes(v.libraryId));
+        if (
+            targetType === 'collection'
+            && collections.length + views.length > 0
+            && allowedCollections.length + allowedViews.length === 0
+        ) {
             addPopupMessage({
                 type: 'error',
                 title: 'Action skipped',
