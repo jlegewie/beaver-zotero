@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Action, ActionTargetType } from '@beaver/agent-core/types/actions';
-import type { LibraryViewInfo, SelectedCollectionInfo, ZoteroContext } from '../../../react/atoms/zoteroContext';
+import type { LibraryViewInfo, SelectedCollectionInfo, SelectedViewInfo, ZoteroContext } from '../../../react/atoms/zoteroContext';
 
 // actionVisibility has Zotero/supabase-coupled value imports that run side
 // effects at module load. Stub the leaf modules so importing the pure rules
@@ -13,7 +13,8 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({ safeIsInTrash: () => false })
 vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: () => 'Mock Item' }));
 
 import {
-    pureCollectionSelection,
+    collectionTargetSelection,
+    withoutViewTargets,
     getActiveTarget,
     isActionVisible,
     computeActionGroups,
@@ -26,15 +27,23 @@ const collection = (id: number, name: string, libraryId = 1): SelectedCollection
     libraryId,
 });
 
+const view = (type: SelectedViewInfo['type'], name: string, libraryId = 1): SelectedViewInfo => ({
+    type,
+    name,
+    libraryId,
+});
+
 /**
  * A collections-tree selection. `rowCount` defaults to the number of
- * collections (a pure collection selection); pass a larger value to model a
- * selection that also contains non-collection rows.
+ * collections and views (a pure collection-target selection); pass a larger
+ * value to model a selection that also contains other rows, such as a library
+ * root or the Trash.
  */
 function libraryView(
     collections: SelectedCollectionInfo[],
     rowCount = collections.length,
     treeRowType: LibraryViewInfo['treeRowType'] = 'collection',
+    views: SelectedViewInfo[] = [],
 ): LibraryViewInfo {
     return {
         treeRowType,
@@ -45,6 +54,7 @@ function libraryView(
         searchName: null,
         selectedRowCount: rowCount,
         selectedCollections: collections,
+        selectedViews: views,
         selectedLibraryIds: [1],
     };
 }
@@ -72,29 +82,53 @@ const action = (id: string, targets: ActionTargetType[]): Action => ({
 
 const COLLECTION_ACTION = action('summarize-collection', ['collection']);
 
-describe('pureCollectionSelection', () => {
+/** A selection of only views (saved searches, special views). */
+function viewSelection(views: SelectedViewInfo[], rowCount = views.length): LibraryViewInfo {
+    return libraryView([], rowCount, views[0]?.type ?? 'library', views);
+}
+
+describe('collectionTargetSelection', () => {
     it('returns the single selected collection', () => {
-        const result = pureCollectionSelection(libraryView([collection(1, 'Methods')]));
-        expect(result.map(c => c.collectionName)).toEqual(['Methods']);
+        const result = collectionTargetSelection(libraryView([collection(1, 'Methods')]));
+        expect(result.collections.map(c => c.collectionName)).toEqual(['Methods']);
+        expect(result.views).toEqual([]);
     });
 
     it('returns every collection when the selection is all collections', () => {
-        const result = pureCollectionSelection(
+        const result = collectionTargetSelection(
             libraryView([collection(1, 'Methods'), collection(2, 'Theory'), collection(3, 'Data')]),
         );
-        expect(result.map(c => c.collectionId)).toEqual([1, 2, 3]);
+        expect(result.collections.map(c => c.collectionId)).toEqual([1, 2, 3]);
     });
 
-    it('returns nothing when the selection mixes collections with other rows', () => {
-        // Two collections selected alongside a saved search: 3 rows, 2 collections
-        const result = pureCollectionSelection(
+    it('returns a selected special view or saved search', () => {
+        expect(collectionTargetSelection(viewSelection([view('unfiled', 'Unfiled Items')])).views)
+            .toEqual([view('unfiled', 'Unfiled Items')]);
+        expect(collectionTargetSelection(viewSelection([view('search', 'To read')])).views)
+            .toEqual([view('search', 'To read')]);
+    });
+
+    it('returns collections and views selected together', () => {
+        const result = collectionTargetSelection(
+            libraryView([collection(1, 'Methods')], 2, 'collection', [view('search', 'To read')]),
+        );
+        expect(result.collections.map(c => c.collectionId)).toEqual([1]);
+        expect(result.views.map(v => v.name)).toEqual(['To read']);
+    });
+
+    it('returns nothing when the selection mixes targets with other rows', () => {
+        // Two collections selected alongside a library root: 3 rows, 2 collections
+        const result = collectionTargetSelection(
             libraryView([collection(1, 'Methods'), collection(2, 'Theory')], 3),
         );
-        expect(result).toEqual([]);
+        expect(result).toEqual({ collections: [], views: [] });
+        // Unfiled Items alongside the Trash
+        expect(collectionTargetSelection(viewSelection([view('unfiled', 'Unfiled Items')], 2)))
+            .toEqual({ collections: [], views: [] });
     });
 
-    it('returns nothing when no collection is selected', () => {
-        expect(pureCollectionSelection(libraryView([], 1, 'library'))).toEqual([]);
+    it('returns nothing when no collection or view is selected', () => {
+        expect(collectionTargetSelection(libraryView([], 1, 'library'))).toEqual({ collections: [], views: [] });
     });
 });
 
@@ -105,6 +139,16 @@ describe('collection target visibility', () => {
             COLLECTION_ACTION,
             ctx(libraryView([collection(1, 'Methods'), collection(2, 'Theory')])),
         )).toBe(true);
+    });
+
+    it('is visible for Unfiled Items and other collection-like views', () => {
+        for (const type of ['unfiled', 'publications', 'retracted', 'search'] as const) {
+            expect(isActionVisible(COLLECTION_ACTION, ctx(viewSelection([view(type, type)])))).toBe(true);
+        }
+    });
+
+    it('is hidden for a library root', () => {
+        expect(isActionVisible(COLLECTION_ACTION, ctx(libraryView([], 1, 'library')))).toBe(false);
     });
 
     it('is hidden for a mixed selection', () => {
@@ -128,6 +172,31 @@ describe('getActiveTarget — collection labels', () => {
         expect(active).toMatchObject({ targetType: 'collection', label: '2 collections selected' });
     });
 
+    it('names a selected special view and uses its icon', () => {
+        const active = getActiveTarget(ctx(viewSelection([view('unfiled', 'Unfiled Items')])));
+        expect(active).toEqual({
+            targetType: 'collection',
+            label: 'Unfiled Items',
+            iconInfo: { type: 'css-icon', name: 'unfiled' },
+        });
+    });
+
+    it('names a selected saved search', () => {
+        const active = getActiveTarget(ctx(viewSelection([view('search', 'To read')])));
+        expect(active).toMatchObject({ targetType: 'collection', label: 'To read', iconInfo: { name: 'search' } });
+    });
+
+    it('counts collections and views selected together', () => {
+        const active = getActiveTarget(ctx(
+            libraryView([collection(1, 'Methods')], 2, 'collection', [view('unfiled', 'Unfiled Items')]),
+        ));
+        expect(active).toMatchObject({
+            targetType: 'collection',
+            label: '2 views selected',
+            iconInfo: { name: 'collection' },
+        });
+    });
+
     it('reports no collection target for a mixed selection', () => {
         const active = getActiveTarget(ctx(libraryView([collection(1, 'Methods')], 2)));
         expect(active).toBeNull();
@@ -142,6 +211,51 @@ describe('computeActionGroups — collection group', () => {
         );
         const group = groups.find(g => g.id === 'collection');
         expect(group).toMatchObject({ label: '3 collections selected', targetType: 'collection' });
+    });
+
+    it('offers collection actions under a special view', () => {
+        const groups = computeActionGroups(
+            [COLLECTION_ACTION],
+            ctx(viewSelection([view('unfiled', 'Unfiled Items')])),
+        );
+        expect(groups.find(g => g.id === 'collection')).toMatchObject({
+            label: 'Unfiled Items',
+            targetType: 'collection',
+            actions: [COLLECTION_ACTION],
+        });
+    });
+
+    it('offers view targets only while the library tab is active', () => {
+        // Views reach the agent through application state, which reports the
+        // collections pane only in the library tab; collections are attached.
+        const readerCtx = (view: LibraryViewInfo): ActionContext => {
+            const base = ctx(view);
+            return { ...base, zotero: { ...base.zotero, type: 'idle', isLibraryTab: false } };
+        };
+        const unfiledOnly = computeActionGroups([COLLECTION_ACTION], readerCtx(viewSelection([view('unfiled', 'Unfiled Items')])));
+        expect(unfiledOnly.find(g => g.id === 'collection')).toBeUndefined();
+        expect(isActionVisible(COLLECTION_ACTION, readerCtx(viewSelection([view('search', 'To read')])))).toBe(false);
+        expect(getActiveTarget(readerCtx(viewSelection([view('unfiled', 'Unfiled Items')])))).toBeNull();
+
+        const mixed = readerCtx(libraryView([collection(1, 'Methods')], 2, 'collection', [view('search', 'To read')]));
+        expect(computeActionGroups([COLLECTION_ACTION], mixed).find(g => g.id === 'collection'))
+            .toMatchObject({ label: 'Methods', iconInfo: { name: 'collection' } });
+    });
+
+    it('drops view targets but keeps collections for the message edit overlay', () => {
+        const viewsOnly = withoutViewTargets(ctx(viewSelection([view('unfiled', 'Unfiled Items')])));
+        expect(computeActionGroups([COLLECTION_ACTION], viewsOnly).find(g => g.id === 'collection')).toBeUndefined();
+
+        const mixed = withoutViewTargets(ctx(
+            libraryView([collection(1, 'Methods')], 2, 'collection', [view('search', 'To read')]),
+        ));
+        expect(computeActionGroups([COLLECTION_ACTION], mixed).find(g => g.id === 'collection'))
+            .toMatchObject({ label: 'Methods' });
+    });
+
+    it('omits the group for a library root', () => {
+        const groups = computeActionGroups([COLLECTION_ACTION], ctx(libraryView([], 1, 'library')));
+        expect(groups.find(g => g.id === 'collection')).toBeUndefined();
     });
 
     it('omits the group entirely for a mixed selection', () => {

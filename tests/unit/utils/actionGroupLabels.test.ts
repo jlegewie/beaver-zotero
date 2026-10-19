@@ -39,7 +39,7 @@ function context(overrides: Partial<ActionContext['zotero']>, manualItems: Zoter
             readerAttachment: null,
             noteItem: null,
             selectedItems: [],
-            libraryView: { selectedCollections: [], selectedRowCount: 0 },
+            libraryView: { selectedCollections: [], selectedViews: [], selectedRowCount: 0 },
             ...overrides,
         } as unknown as ActionContext['zotero'],
         manualItems,

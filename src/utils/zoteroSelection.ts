@@ -170,3 +170,21 @@ export function getSelectedSavedSearches(zp: any): Zotero.Search[] {
         (search) => (search ? [search] : []),
     );
 }
+
+/**
+ * Collections-tree row types, besides collections, that a collection-targeted
+ * action can run on: saved searches and the special views the agent can list
+ * (Unfiled Items, My Publications, Retracted Items). The agent reads which of
+ * them is selected from application state.
+ *
+ * Library roots are deliberately left out — a library-wide run is what global
+ * actions are for — as are Duplicate Items and the Trash, which the agent
+ * cannot list.
+ */
+export const COLLECTION_TARGET_VIEW_TYPES = ['search', 'unfiled', 'publications', 'retracted'] as const;
+
+export type CollectionTargetViewType = typeof COLLECTION_TARGET_VIEW_TYPES[number];
+
+export function isCollectionTargetViewType(type: unknown): type is CollectionTargetViewType {
+    return (COLLECTION_TARGET_VIEW_TYPES as readonly unknown[]).includes(type);
+}

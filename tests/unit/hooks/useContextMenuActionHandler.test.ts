@@ -14,6 +14,7 @@ vi.mock('../../../react/events/eventManager', () => ({ eventManager: { dispatch:
 vi.mock('../../../react/hooks/useEventSubscription', () => ({ useEventSubscription: (_name: any, handler: any) => { mocks.handler = handler; } }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 import { useContextMenuActionHandler } from '../../../react/hooks/useContextMenuActionHandler';
+import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 const detail = { actionId: 'action', actionTitle: 'Action', targetType: 'item', itemIds: [42], collections: [] };
 beforeEach(() => {
     vi.clearAllMocks(); vi.useFakeTimers(); mocks.current = true;
@@ -42,4 +43,21 @@ it('stages the action when its navigation remains current', async () => {
     await mocks.handler(detail); await vi.runAllTimersAsync();
     expect(mocks.items).toHaveBeenCalledOnce();
     expect(mocks.stage).toHaveBeenCalledOnce();
+});
+it('stages a collection action over a special view without attaching anything', async () => {
+    await mocks.handler({ ...detail, targetType: 'collection', itemIds: [], views: [{ libraryId: 1, type: 'unfiled' }] });
+    await vi.runAllTimersAsync();
+    expect(addPopupMessageAtom).not.toHaveBeenCalled();
+    expect(mocks.collections).not.toHaveBeenCalled();
+    expect(mocks.stage).toHaveBeenCalledWith(expect.objectContaining({
+        targetType: 'collection',
+        contextOverride: { items: [], collections: [] },
+    }));
+});
+it('refuses a collection action over a view in an excluded library', async () => {
+    await mocks.handler({ ...detail, targetType: 'collection', itemIds: [], views: [{ libraryId: 3, type: 'unfiled' }] });
+    await vi.runAllTimersAsync();
+    expect(addPopupMessageAtom).toHaveBeenCalledOnce();
+    expect(mocks.begin).not.toHaveBeenCalled();
+    expect(mocks.stage).not.toHaveBeenCalled();
 });

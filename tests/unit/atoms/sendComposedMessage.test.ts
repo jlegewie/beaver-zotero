@@ -28,6 +28,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
         currentMessageItemsAtom,
         currentMessageCollectionsAtom: atom<unknown[]>([]),
         pendingPillInsertsAtom: atom<unknown[]>([]),
+        stagedReaderActionContextAtom: atom<unknown>(null),
         addItemsToCurrentMessageItemsAtom: atom(null, (get, set, items: any[]) => {
             const current = get(currentMessageItemsAtom);
             const added = items.filter((i) => !current.some((c: any) => c.key === i.key));
@@ -38,7 +39,10 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
 
 vi.mock('../../../react/atoms/zoteroContext', async () => {
     const { atom } = await import('jotai');
-    return { zoteroContextAtom: atom({}) };
+    return {
+        zoteroContextAtom: atom({}),
+        libraryViewAtom: atom<any>({ selectedRowCount: 1, selectedCollections: [], selectedViews: [] }),
+    };
 });
 
 vi.mock('../../../react/utils/popupMessageUtils', async () => {
@@ -77,9 +81,13 @@ vi.mock('../../../react/utils/promptVariables', () => ({
 }));
 
 // actionVisibility pulls in sourceUtils → supabaseClient; actions.ts only
-// needs `isActionVisible` from it.
+// needs `isActionVisible` and the collection-target rule from it.
 vi.mock('../../../react/utils/actionVisibility', () => ({
     isActionVisible: vi.fn(() => true),
+    collectionTargetSelection: (view: any) =>
+        view.selectedCollections.length + view.selectedViews.length === view.selectedRowCount
+            ? { collections: view.selectedCollections, views: view.selectedViews }
+            : { collections: [], views: [] },
 }));
 
 // converters pulls in src serializers → supabase-backed services; actions.ts
@@ -121,7 +129,10 @@ import {
     currentMessageCollectionsAtom,
     currentMessageItemsAtom,
     pendingPillInsertsAtom,
+    stagedReaderActionContextAtom,
 } from '../../../react/atoms/messageComposition';
+import { libraryViewAtom } from '../../../react/atoms/zoteroContext';
+import { isLibraryTabAtom } from '../../../react/atoms/ui';
 import { resolvePromptVariables, resolveTargetContext } from '../../../react/utils/promptVariables';
 import { toValidatedMessageAttachment } from '../../../react/types/attachments/converters';
 import type { Action } from '@beaver/agent-core/types/actions';
@@ -384,6 +395,87 @@ describe('sendComposedMessageAtom', () => {
         });
         expect(sendWSMessageMock.mock.calls[0][1].actions).toHaveLength(1);
         expect(resolvePromptVariables).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('collection actions without an attachable target', () => {
+    const findGaps: Action = {
+        id: 'custom-gaps',
+        title: 'Find gaps',
+        text: 'Find gaps in this collection.',
+        targets: ['collection'],
+        category: 'research',
+    };
+    const unfiled = { type: 'unfiled', name: 'Unfiled Items', libraryId: 1 };
+    const pill = { commandName: 'find-gaps', actionId: 'custom-gaps', targetType: 'collection' as const };
+
+    function selectInLibrary(store: ReturnType<typeof createStore>, views: any[], libraryTab = true) {
+        store.set(isLibraryTabAtom, libraryTab);
+        store.set(libraryViewAtom as any, { selectedRowCount: views.length || 1, selectedCollections: [], selectedViews: views });
+    }
+
+    it('sends while a special view is selected in the library tab', async () => {
+        const store = makeStore([findGaps]);
+        selectInLibrary(store, [unfiled]);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(true);
+        expect(sendWSMessageMock).toHaveBeenCalledOnce();
+    });
+
+    it('aborts when the selection no longer has a collection target', async () => {
+        const store = makeStore([findGaps]);
+        // The user picked the action over Unfiled Items, then clicked My Library.
+        selectInLibrary(store, []);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(false);
+        expect(sendWSMessageMock).not.toHaveBeenCalled();
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Action skipped' }));
+    });
+
+    it('aborts when a reader tab is active, since the view is not reported there', async () => {
+        const store = makeStore([findGaps]);
+        selectInLibrary(store, [unfiled], false);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(false);
+        expect(sendWSMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('aborts while a staged reader context replaces the library view in application state', async () => {
+        const store = makeStore([findGaps]);
+        selectInLibrary(store, [unfiled]);
+        store.set(stagedReaderActionContextAtom as any, { item: { id: 7 }, selection: null });
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(false);
+        expect(sendWSMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('aborts when the only selected view is in an excluded library', async () => {
+        const store = makeStore([findGaps]);
+        selectInLibrary(store, [{ ...unfiled, libraryId: 3 }]);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(false);
+    });
+
+    it('sends when the message carries a collection, whatever is selected', async () => {
+        const store = makeStore([findGaps]);
+        selectInLibrary(store, [], false);
+        store.set(currentMessageCollectionsAtom, [{ library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null }]);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(true);
+    });
+
+    it('refuses a selected view as the target of an action added to an edit', async () => {
+        // Regenerating an edit keeps the original message's application
+        // state, so the live view selection would never reach the agent.
+        const store = makeStore([findGaps]);
+        selectInLibrary(store, [unfiled]);
+        const result = await store.set(buildEditedPromptActionsAtom, { pills: [pill], existingAttachments: [] });
+        expect(result).toBeNull();
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Action skipped' }));
+    });
+
+    it('accepts an edited message that already carries a collection', async () => {
+        const store = makeStore([findGaps]);
+        selectInLibrary(store, [], false);
+        const result = await store.set(buildEditedPromptActionsAtom, {
+            pills: [pill],
+            existingAttachments: [{ type: 'collection', library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null } as any],
+        });
+        expect(result).not.toBeNull();
     });
 });
 
