@@ -80,6 +80,9 @@ import {
 } from './enhanceTableDocument';
 import { openTableLink } from './tableLinks';
 import { isTableItem, loadTableItemFields, type TableRef } from '../tableItemIdentity';
+import { getTableLocalCommands, tableLocalCommands } from '../tablesApi';
+import { TABLE_EXPORT_COMMAND } from '../tableDocument';
+import { exportTableCsv, tableActionErrorMessage } from '../../../ui/tableDocumentActions';
 
 /** How long to wait for a view that never finishes initialising. */
 const VIEW_INIT_TIMEOUT_MS = 8000;
@@ -285,7 +288,8 @@ async function initializedView(reader: any, failures: string[]): Promise<any | n
  * of the two, recomputed on every call because both move (the reader sidebar
  * opens, the window resizes).
  */
-function readerHost(reader: any, view: any, mount: Element): TableViewHost {
+function readerHost(reader: any, view: any, mount: Element, ref: TableRef): TableViewHost {
+    const win: Window = reader._window;
     return {
         win: reader._window,
         cardMount: mount,
@@ -300,7 +304,36 @@ function readerHost(reader: any, view: any, mount: Element): TableViewHost {
             };
         },
         openLink: openTableLink,
+        // The renderer owns citation navigation (it is the chat's own) and
+        // navigates in its own window. Only a reader tab has a renderer of its
+        // own window; a reader window would borrow an unrelated window's, so
+        // it follows the marker's link instead.
+        activateCitation: async (citation) => {
+            if (win.closed) return false;
+            const activate = tableLocalCommands().get(win)?.activateCitation;
+            return activate ? activate(citation, win.document) : false;
+        },
+        runCommand: (command) => {
+            if (command === TABLE_EXPORT_COMMAND) void exportFromReader(win, ref);
+        },
     };
+}
+
+/** The reader's Export CSV control, reporting its outcome in a progress window. */
+async function exportFromReader(win: Window, ref: TableRef): Promise<void> {
+    const report = (headline: string, description?: string) => {
+        const progress = new Zotero.ProgressWindow({ window: win.closed ? undefined : win, closeOnClick: true });
+        progress.changeHeadline(headline);
+        if (description) progress.addDescription(description);
+        progress.show();
+        progress.startCloseTimer(4000);
+    };
+    try {
+        const name = await exportTableCsv(win, ref, () => getTableLocalCommands(win));
+        if (name) report(`Exported to ${name}`);
+    } catch (error) {
+        report('Could not export the table', tableActionErrorMessage(error, ref));
+    }
 }
 
 /**
@@ -502,7 +535,7 @@ async function enhanceReader(
         // The card and the link routing — the whole of what is attached. If
         // this throws there is nothing to keep, so the attempt ends here.
         try {
-            undo.push(enhanceTableDocument(doc, readerHost(reader, view, mount)));
+            undo.push(enhanceTableDocument(doc, readerHost(reader, view, mount, { libraryID: item.libraryID, key: item.key })));
             diagnostics.cardMounted = true;
             diagnostics.listenersAttached = true;
         } catch (error) {

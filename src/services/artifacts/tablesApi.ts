@@ -38,6 +38,7 @@
 import type { TableRef } from './tableItemIdentity';
 import type { TableShadowReport, TableShadowObservation } from './recoveryShadow';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import type { Citation } from '@beaver/agent-core/types/citations';
 import type { TableVersionEntry } from './tableItemIdentity';
 import type { TableWriteResult, TableShadowRestoreResult } from './tableStore';
 import type { TableViewSummary } from './view/enhanceTableDocument';
@@ -194,6 +195,11 @@ export interface TableLocalCommands {
     history(ref: TableRef): Promise<TableVersionEntry[]>;
     revert(ref: TableRef, version: number): Promise<TableWriteResult>;
     restoreShadow: TableShadowRestore;
+    /**
+     * Navigates to a cited passage with the renderer's citation activation,
+     * highlighting it in the reader. Resolves false when it cannot.
+     */
+    activateCitation?(citation: Citation, ownerDocument: Document): Promise<boolean>;
 }
 
 /** Seeded by the plugin realm, released as each renderer detaches. */

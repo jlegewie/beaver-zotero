@@ -28,7 +28,9 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { BEAVER_ACTIVE_ATTRIBUTE } from '../tableDocument';
+import { citationsByKey } from '@beaver/agent-core/layouts/table';
+import type { Citation } from '@beaver/agent-core/types/citations';
+import { BEAVER_ACTIVE_ATTRIBUTE, TABLE_SPEC_SCRIPT_ID } from '../tableDocument';
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 
@@ -49,6 +51,14 @@ export interface TableViewHost {
     frameRect(): FrameRect;
     /** Opens a URL the document asked for. */
     openLink(href: string): void;
+    /**
+     * Navigates to a cited passage the way the chat does, highlighting it.
+     * Resolves false when the host could not, so the marker's own link is
+     * followed instead.
+     */
+    activateCitation?(citation: Citation): Promise<boolean>;
+    /** Runs a document command (`data-bt-command`), such as an export. */
+    runCommand?(command: string): void;
 }
 
 /** One enhanced document, for the dev view-state endpoint. */
@@ -72,6 +82,22 @@ const ROUTED_HREF = /^(https:\/\/|zotero:\/\/)/i;
 /** Whether this href is one the host opens rather than the frame. */
 export function isRoutedTableHref(href: string): boolean {
     return ROUTED_HREF.test(href);
+}
+
+/**
+ * The citations embedded in the document's spec, keyed as the markers name
+ * them. Read from the document rather than the store: it is exactly the table
+ * the user is looking at, even when the stored table has since changed.
+ */
+export function documentCitations(doc: Document): Record<string, Citation> {
+    try {
+        const raw = doc.getElementById(TABLE_SPEC_SCRIPT_ID)?.textContent;
+        if (!raw) return {};
+        const spec = JSON.parse(raw) as { citations?: Citation[] };
+        return citationsByKey(Array.isArray(spec?.citations) ? spec.citations : undefined);
+    } catch {
+        return {};
+    }
 }
 
 /** Citation markers in the document, which is also what a host reports. */
@@ -156,6 +182,15 @@ export function enhanceTableDocument(doc: Document, host: TableViewHost): () => 
     // "Reveal in library". Left classified as internal, the same handler calls
     // `_handlePointerOverInternalLink`, which the snapshot view does not
     // override and which does nothing (`dom-view.tsx:888`).
+    let citations: Record<string, Citation> | null = null;
+    const openLink = (href: string) => {
+        try {
+            host.openLink(href);
+        } catch (error) {
+            logger(`enhanceTableDocument: could not open ${href}: ${error}`, 2);
+        }
+    };
+
     on(doc, 'click', (event: Event) => {
         const target = event.target as Element | null;
         const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
@@ -166,16 +201,43 @@ export function enhanceTableDocument(doc: Document, host: TableViewHost): () => 
         // inside the `<summary>` of the `<details>` that expands them.
         event.stopPropagation();
 
+        const command = anchor.getAttribute('data-bt-command');
+        if (command) {
+            event.preventDefault();
+            try {
+                host.runCommand?.(command);
+            } catch (error) {
+                logger(`enhanceTableDocument: command ${command} failed: ${error}`, 2);
+            }
+            return;
+        }
+
         if (!isRoutedTableHref(href)) return;
         // The frame must not navigate: an `https:` link would replace the
         // table, and a `zotero:` link means nothing to the frame. The host
         // opens both.
         event.preventDefault();
-        try {
-            host.openLink(href);
-        } catch (error) {
-            logger(`enhanceTableDocument: could not open ${href}: ${error}`, 2);
+        hide();
+
+        // A citation goes to its passage, highlighted, when the host can do
+        // that; the marker's link only names the page.
+        const key = anchor.getAttribute('data-cite-key');
+        if (key && host.activateCitation) {
+            citations ??= documentCitations(doc);
+            const citation = citations[key];
+            if (citation) {
+                host.activateCitation(citation)
+                    .catch((error) => {
+                        logger(`enhanceTableDocument: citation activation failed: ${error}`, 2);
+                        return false;
+                    })
+                    .then((handled) => {
+                        if (!handled) openLink(href);
+                    });
+                return;
+            }
         }
+        openLink(href);
     });
 
     // Last, so that a throw anywhere above leaves the document saying what is
@@ -231,7 +293,8 @@ function makeCitationCard(host: TableViewHost): HTMLElement {
 
 /**
  * Where the card goes: centred under the marker, then pulled back inside the
- * frame if that would hang it off either edge.
+ * frame if that would hang it off either edge. A card that would run past the
+ * frame's bottom goes above the marker instead, when there is room there.
  *
  * The marker's rectangle is relative to the frame's own viewport and the card
  * is positioned relative to its offset parent, so the frame's position is what
@@ -241,18 +304,22 @@ function makeCitationCard(host: TableViewHost): HTMLElement {
  */
 export function citationCardPosition(
     frame: FrameRect,
-    marker: { left: number; bottom: number; width: number },
+    marker: { left: number; bottom: number; width: number; top?: number },
     origin: { left: number; top: number } | null,
-    cardWidth: number
+    cardWidth: number,
+    cardHeight = 0
 ): { left: number; top: number } {
     const centred = frame.left + marker.left + marker.width / 2 - cardWidth / 2;
     const clamped = Math.min(
         Math.max(frame.left + 8, centred),
         frame.right - cardWidth - 8
     );
+    const below = frame.top + marker.bottom + 6;
+    const above = frame.top + (marker.top ?? marker.bottom) - cardHeight - 6;
+    const flip = below + cardHeight > frame.bottom && above >= frame.top;
     return {
         left: clamped - (origin?.left ?? 0),
-        top: frame.top + marker.bottom - (origin?.top ?? 0) + 6,
+        top: (flip ? above : below) - (origin?.top ?? 0),
     };
 }
 
@@ -322,9 +389,10 @@ export function showCitationCard(
     const origin = (card.offsetParent as HTMLElement | null)?.getBoundingClientRect() ?? null;
     const { left, top } = citationCardPosition(
         host.frameRect(),
-        { left: at.left, bottom: at.bottom, width: at.width },
+        { left: at.left, top: at.top, bottom: at.bottom, width: at.width },
         origin,
-        card.offsetWidth
+        card.offsetWidth,
+        card.offsetHeight
     );
     card.style.left = `${left}px`;
     card.style.top = `${top}px`;
