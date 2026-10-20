@@ -121,6 +121,7 @@ export const CANCEL_HANDOFF_WAIT_MS = 10_000;
 
 /** Interval between `ping` heartbeats on a ready connection. */
 export const HEARTBEAT_INTERVAL_MS = 15_000;
+
 /**
  * Inbound silence after which a ready connection is treated as lost. The
  * server answers every ping, so a healthy socket is never quiet this long.
@@ -132,6 +133,18 @@ export const HEARTBEAT_TIMEOUT_MS = 45_000;
  * an upload stalled past it could not have completed the request anyway.
  */
 export const HEARTBEAT_UPLOAD_TIMEOUT_MS = 180_000;
+
+/** How many run events `recentRunEvents` keeps. */
+const MAX_RUN_EVENTS = 100;
+
+/** A reattach-related event of a run, kept for diagnostics. */
+export interface RunTransportEvent {
+    at: number;
+    runId: string;
+    kind: 'detached' | 'reattached' | 'reattach_failed' | 'reply_from_memory' | 'undelivered_actions';
+    detail?: string;
+}
+
 /** Close reason recorded when the heartbeat, not the browser, detected the loss. */
 export const HEARTBEAT_TIMEOUT_REASON = 'heartbeat_timeout';
 /**
@@ -271,6 +284,9 @@ export class AgentService {
      */
     private dataProvider: AgentDataProviderMap | null;
 
+    /** The latest reattach-related events of the runs this service carried. */
+    private readonly runEvents: RunTransportEvent[] = [];
+
     constructor(baseUrl?: string, dataProvider?: AgentDataProviderMap) {
         this.overrideBaseUrl = baseUrl;
         this.dataProvider = dataProvider ?? null;
@@ -328,9 +344,36 @@ export class AgentService {
     }
 
     /** Stop carrying the current run; nothing will reattach it. */
-    private dropRun(): void {
-        this.run?.end();
+    /**
+     * Stop carrying the current run. `reportUndelivered` is for a run the
+     * server keeps after the client let go of it (a failed reattach): actions
+     * it applied whose results never reached the server are reported to its
+     * owner. A deliberate close (Stop, sign-out, a library exclusion) reports
+     * nothing.
+     */
+    private dropRun(reportUndelivered = false): void {
+        const run = this.run;
+        if (!run) return;
+        run.end();
         this.run = null;
+        if (reportUndelivered) this.reportUndeliveredActions(run);
+    }
+
+    /**
+     * The server keeps an action pending until it reads the result of
+     * executing it, so an applied action whose result was lost with the run
+     * would stay pending and could be applied again. Hand those results to
+     * the run's owner, which records them.
+     */
+    private reportUndeliveredActions(run: RunLink): void {
+        const report = run.callbacks.onUndeliveredActions;
+        if (!report || !run.hasActionReplies) return;
+        void run.unconfirmedAppliedActions().then((actions) => {
+            if (actions.length === 0) return;
+            logger(`AgentService: Run ${run.runId} ended with ${actions.length} applied action(s) the server may not have received`, 1);
+            this.noteRunEvent(run.runId, 'undelivered_actions', actions.map((action) => action.actionId).join(','));
+            report({ runId: run.runId, actions });
+        });
     }
 
     /** The current run, when the backend lets it outlive its socket. */
@@ -924,6 +967,7 @@ export class AgentService {
         // Reset before notifying: the callback starts the reattach, which must
         // find this socket's state already gone.
         this.resetConnectionState({ keepRunQueues: true });
+        this.noteRunEvent(run.runId, 'detached', String(code));
         run.callbacks.onReattaching?.({
             runId: run.runId,
             cancelRequested: run.cancelRequested,
@@ -931,6 +975,16 @@ export class AgentService {
             graceMs,
         });
         return true;
+    }
+
+    /** The latest reattach-related events of the runs this service carried, oldest first. */
+    recentRunEvents(): RunTransportEvent[] {
+        return this.runEvents.map((event) => ({ ...event }));
+    }
+
+    private noteRunEvent(runId: string, kind: RunTransportEvent['kind'], detail?: string): void {
+        this.runEvents.push({ at: Date.now(), runId, kind, ...(detail !== undefined ? { detail } : {}) });
+        if (this.runEvents.length > MAX_RUN_EVENTS) this.runEvents.shift();
     }
 
     /** Where the current run stands with respect to reattach, for diagnostics. */
@@ -952,6 +1006,14 @@ export class AgentService {
             lastSeq: run.lastSeq,
             cancelRequested: run.cancelRequested,
         };
+    }
+
+    /**
+     * Whether the user's answer to the approval of `actionId` waits for the
+     * run to reconnect, rather than having been sent before the drop.
+     */
+    isApprovalAnswerHeld(actionId: string): boolean {
+        return this.run?.isAnswerUnsent(`deferred_approval_request:${actionId}`) ?? false;
     }
 
     /** Whether `runId` lost its socket and is waiting to be reattached. */
@@ -983,6 +1045,8 @@ export class AgentService {
         if (!run || run.runId !== runId || run.cancelRequested || run.hasHeld || run.terminal || !run.token || !run.reattachable) return false;
         logger(`AgentService: Leaving run ${runId} (${run.state}); the server keeps it`, 1);
         this.close(LEFT_RUN_CLOSE_CODE, 'Run left after a lost connection', { notifyClose: false });
+        // The server keeps the run, still waiting on results it never got.
+        this.reportUndeliveredActions(run);
         return true;
     }
 
@@ -1025,9 +1089,10 @@ export class AgentService {
         const run = this.run;
         if (!run || run.runId !== runId || run.state !== 'reattaching') return;
         logger(`AgentService: Could not reattach run ${runId}: ${reason}`, 1);
+        this.noteRunEvent(runId, 'reattach_failed', reason);
         // An expired run was ended by the server, which settles a stop too.
         if (reason === 'expired') run.stopSettled = true;
-        this.dropRun();
+        this.dropRun(true);
         this.closeSocket(1000, 'Reattach failed', { notifyClose: false });
         run.callbacks.onReattachFailed?.({
             runId,
@@ -1047,6 +1112,7 @@ export class AgentService {
         run.deadline = null;
         run.clearDeadline();
         logger(`AgentService: Reattached run ${run.runId} after ${gapMs}ms; ${event.replayed} event(s) replayed`, 1);
+        this.noteRunEvent(run.runId, 'reattached', `${event.replayed} replayed`);
         if (run.cancelRequested) {
             // Stopped while reconnecting. The user has already left the run,
             // so nothing else they decided matters any more.
@@ -1518,7 +1584,7 @@ export class AgentService {
                         // An error on a socket opened to reattach (an auth
                         // failure, say) is reported here; nothing is left
                         // to reattach.
-                        if (this.run.state === 'reattaching') this.dropRun();
+                        if (this.run.state === 'reattaching') this.dropRun(true);
                     }
                     // Call onError callback
                     this.callbacks.onError(event);
@@ -1679,6 +1745,7 @@ export class AgentService {
                         // Re-sent after a reattach: its reply was lost with the
                         // socket, or it is still running. Never run it again.
                         logger(`AgentService: ${eventName} ${requestId} was already received; answering from memory`, 1);
+                        this.noteRunEvent(run.runId, 'reply_from_memory', eventName);
                         keepalive.setPhase('running');
                         void earlier.settled.then(() => {
                             keepalive.stop();
@@ -1703,7 +1770,14 @@ export class AgentService {
                         receivedAt,
                         reportPhase: (phase) => keepalive.setPhase(phase),
                     };
-                    const tracked = run && requestId !== null ? run.trackReply(requestId) : null;
+                    const tracked = run && requestId !== null
+                        ? run.trackReply(
+                            requestId,
+                            eventName === 'agent_action_execute' && typeof dataEvent.action_id === 'string'
+                                ? dataEvent.action_id
+                                : null,
+                        )
+                        : null;
                     const respond = (response: Record<string, any> | PreparedJsonMessage) => {
                         keepalive.stop();
                         if (run && tracked) {
@@ -1730,6 +1804,8 @@ export class AgentService {
                         this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
                             if (!isCurrent()) {
                                 keepalive.stop();
+                                // Never run, so there is no reply to wait for.
+                                tracked?.settle(null);
                                 return;
                             }
                             return runRequest();

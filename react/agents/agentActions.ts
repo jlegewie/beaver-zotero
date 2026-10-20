@@ -1,14 +1,15 @@
 import { atom } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
-import { checkLibraryExcluded } from '../../src/services/agentDataProvider/utils';
+import { checkLibraryExcluded, getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, noteLibraryIdFromActionData, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
 import { agentActionsService, AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
+import { assertCredentialGeneration, getCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ActionStatus } from '@beaver/agent-core/types/agentActions/base';
-import type { WSDeferredApprovalRequest, AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
+import type { WSDeferredApprovalRequest, AgentActionType, WSUndeliveredActionsInfo } from '@beaver/agent-core/protocol/agentProtocol';
 // Declared in the shared host contract, since the render layer hands it to the
 // host's in-stream action UI.
 import type { PendingApproval } from '@beaver/agent-ui/host';
@@ -315,6 +316,89 @@ export const ackAgentActionsAtom = atom(
             return;
         }
         return response;
+    }
+);
+
+/** Delays before re-sending an acknowledgement that did not reach the backend. */
+const UNDELIVERED_ACK_RETRY_MS = [2_000, 5_000, 15_000, 30_000];
+
+/** Bound on one acknowledgement, so a stalled request still reaches its retry. */
+const UNDELIVERED_ACK_TIMEOUT_MS = 20_000;
+
+/**
+ * Record actions a run applied whose results never reached the server, e.g.
+ * because the connection was lost right after the write and the run could not
+ * be reattached. The server would otherwise keep them pending, offering to
+ * apply them again. Retried because the connection is often still down.
+ *
+ * The server records an action only while nothing has decided it since, so an
+ * undo, rejection or newer apply made meanwhile, in any window, stands.
+ */
+export const recordUndeliveredActionsAtom = atom(
+    null,
+    async (_get, set, info: WSUndeliveredActionsInfo, revocationsAtRunStart: number | null) => {
+        // The actions belong to the account that ran them.
+        const generation = getCredentialGeneration();
+        // Results do not say every library they touched. If any library has
+        // been excluded since the run started, none of its data leaves this
+        // computer.
+        const scopeNarrowed = () => {
+            const revocations = getLibraryRevocations();
+            return revocations === null || revocations !== revocationsAtRunStart;
+        };
+        const links: AckActionLink[] = info.actions.map((action) => ({
+            action_id: action.actionId,
+            result_data: action.resultData as AckActionLink['result_data'],
+        }));
+        for (let attempt = 0; ; attempt++) {
+            if (generation !== getCredentialGeneration()) return;
+            if (scopeNarrowed()) {
+                logger(`recordUndeliveredActionsAtom: a library was excluded since run ${info.runId} started; not recording its actions`, 1);
+                return;
+            }
+            try {
+                const response = await agentActionsService.acknowledgeActions(info.runId, links, {
+                    onlyUndecided: true,
+                    timeoutMs: UNDELIVERED_ACK_TIMEOUT_MS,
+                    // Checked again right before each dispatch, since a
+                    // request can wait on authentication.
+                    assertDispatch: () => {
+                        assertCredentialGeneration(generation);
+                        if (scopeNarrowed()) throw new Error('A library was excluded since the run started');
+                    },
+                });
+                if (response.success) {
+                    // Show each action the way the server now has it: applied
+                    // by this request, or as it stood when left alone (e.g.
+                    // applied by an attempt whose response was lost).
+                    const current = new Map<string, { status: ActionStatus; result_data?: Record<string, any> }>(
+                        links.map((link) => [link.action_id, { status: 'applied', result_data: link.result_data }]),
+                    );
+                    for (const skipped of response.skipped ?? []) {
+                        if (skipped.status) {
+                            current.set(skipped.action_id, { status: skipped.status, result_data: skipped.result_data ?? undefined });
+                        } else {
+                            current.delete(skipped.action_id);
+                        }
+                    }
+                    set(threadAgentActionsAtom, (prev: AgentAction[]) => prev.map((action) => {
+                        const state = current.get(action.id);
+                        return state && (action.status === 'pending' || action.status === 'error')
+                            ? { ...action, ...state }
+                            : action;
+                    }));
+                    return;
+                }
+            } catch (error) {
+                logger(`recordUndeliveredActionsAtom: acknowledging run ${info.runId} failed: ${error}`, 1);
+            }
+            const delay = UNDELIVERED_ACK_RETRY_MS[attempt];
+            if (delay === undefined) {
+                logger(`recordUndeliveredActionsAtom: giving up on run ${info.runId}`, 1);
+                return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, delay));
+        }
     }
 );
 

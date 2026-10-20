@@ -238,6 +238,28 @@ it("reports the server unreachable after repeated failed reads, and keeps the ch
     await vi.advanceTimersByTimeAsync(5000);
     expect(state.activity).toHaveBeenCalledTimes(UNREACHABLE_AFTER_FAILURES + 1);
 });
+it("reports a server that never answers as unreachable, one bounded read at a time", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    // Each read hangs until the deadline the poller gives it expires.
+    state.activity.mockImplementation((_id: string, timeoutMs: number) => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return new Promise((_, reject) =>
+            setTimeout(() => {
+                inFlight--;
+                reject(new Error("timed out"));
+            }, timeoutMs),
+        );
+    });
+    // Five reads of 5 s each, with the backoff between them.
+    await vi.advanceTimersByTimeAsync(5 * 5000 + 12500);
+    expect(state.activity.mock.calls.length).toBeGreaterThanOrEqual(UNREACHABLE_AFTER_FAILURES);
+    expect(state.activity.mock.calls.every(([, timeoutMs]) => timeoutMs === 5000)).toBe(true);
+    expect(maxInFlight).toBe(1);
+    expect(state.store.get(admissionUnreachableAtom)).toBe(true);
+    expect(state.store.get(serverThreadBlockedAtom)).toBe(true);
+});
 it("restores the normal state on the first successful read", async () => {
     await failUntilUnreachable();
     expect(state.store.get(admissionUnreachableAtom)).toBe(true);

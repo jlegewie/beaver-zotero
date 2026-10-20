@@ -3395,6 +3395,17 @@ export interface WSReattachFailedInfo {
     gapMs: number;
 }
 
+/** An action a run applied whose result the server may not have received. */
+export interface UndeliveredActionResult {
+    actionId: string;
+    resultData: Record<string, any>;
+}
+
+export interface WSUndeliveredActionsInfo {
+    runId: string;
+    actions: UndeliveredActionResult[];
+}
+
 export interface WSCallbacks {
     /**
      * Called when the server is ready to accept chat requests.
@@ -3599,6 +3610,14 @@ export interface WSCallbacks {
      * end the run as `onClose` would have for the original loss.
      */
     onReattachFailed?: (info: WSReattachFailedInfo) => void;
+
+    /**
+     * Called after a run ended before finishing, with the actions it applied
+     * whose results the server may never have received. The server keeps
+     * those actions pending, so the client records them as applied itself.
+     * Called for a run the client has since left, too.
+     */
+    onUndeliveredActions?: (info: WSUndeliveredActionsInfo) => void;
 
     /**
      * Called on a new run's callbacks when it replaced a run the user stopped

@@ -16,6 +16,7 @@ import { reattachResolutionAtom } from "@beaver/agent-core/run-state/runResoluti
 import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
+import { getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
 /**
  * WebSocket-based message generation atoms
  *
@@ -66,6 +67,7 @@ import {
     WSReattachingInfo,
     WSReattachedInfo,
     WSReattachFailedInfo,
+    WSUndeliveredActionsInfo,
     ChargingPermissions,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { threadService } from '@beaver/agent-core/transport/threadService';
@@ -158,6 +160,7 @@ import {
     removePendingApprovalsAtom,
     pendingApprovalsAtom,
     clearAllPendingApprovalsAtom,
+    recordUndeliveredActionsAtom,
 } from '../agents/agentActions';
 import {
     addPendingQuestionAtom,
@@ -1771,6 +1774,14 @@ export function createWSCallbacks(
             });
     };
 
+    // Applied in Zotero, but the result never reached the server: record it,
+    // whether or not this window still owns the run.
+    const revocationsAtRunStart = getLibraryRevocations();
+    const recordUndeliveredActions = (info: WSUndeliveredActionsInfo) => {
+        logger(`WS onUndeliveredActions: run ${info.runId}: ${info.actions.map((action) => action.actionId).join(', ')}`, 1);
+        void store.set(recordUndeliveredActionsAtom, info, revocationsAtRunStart);
+    };
+
     const callbacks = flushPartsBeforeOtherEvents({
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
@@ -2408,6 +2419,8 @@ export function createWSCallbacks(
             // The server may still finish the run, or has saved it already.
             if (navigation === store.get(threadNavigationSeqAtom)) awaitServerSettlement(set, 'reattach_failed');
         },
+
+        onUndeliveredActions: (info: WSUndeliveredActionsInfo) => recordUndeliveredActions(info),
     });
     /**
      * A run the user stopped while it was reconnecting may still have finished
@@ -2434,6 +2447,7 @@ export function createWSCallbacks(
     // outcome is known, and the chat waits for the server to settle it. None
     // of its events reach this window.
     const forLeftRun: Partial<WSCallbacks> = {
+        onUndeliveredActions: (info) => recordUndeliveredActions(info),
         onReattaching: (info) => {
             if (info.cancelRequested) startReattach(info.runId);
         },

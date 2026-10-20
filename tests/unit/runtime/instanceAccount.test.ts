@@ -507,6 +507,17 @@ describe("instance account ownership", () => {
         pending.resolve({});
         await write;
     });
+    it("counts every revocation of library access, and nothing else", async () => {
+        await load();
+        const before = Zotero.Beaver.libraryRevocations ?? 0;
+        await account.updateExcludedLibraries([{ type: "user" }]);
+        expect(Zotero.Beaver.libraryRevocations).toBe(before + 1);
+        // Restoring access is not a revocation.
+        await account.updateExcludedLibraries([]);
+        expect(Zotero.Beaver.libraryRevocations).toBe(before + 1);
+        await account.updateExcludedLibraries([{ type: "user" }]);
+        expect(Zotero.Beaver.libraryRevocations).toBe(before + 2);
+    });
     it("cannot restore excluded scope from a profile fetch started before the write", async () => {
         await load();
         const pending = deferred<any>();

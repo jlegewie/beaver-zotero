@@ -86,6 +86,7 @@ import {
     runApprovalPolicyAtom,
 } from '../../../atoms/runApprovalPolicy';
 import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
+import { agentService } from '@beaver/agent-core/transport/agentService';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';
@@ -392,8 +393,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // While the run reconnects, a card awaiting a decision says when it can be
     // answered, and one already answered says its answer has yet to be sent.
+    // An answer sent before the connection dropped is not waiting: the
+    // action may already be applied, its result on the way.
+    const answeredActionId = pendingApprovalProp?.actionId ?? action?.id ?? null;
     const isReplyHeld = isRunReconnecting && !actionInFinalState
-        && (isProcessingApproval || isExternallyProcessing);
+        && (isProcessingApproval || isExternallyProcessing)
+        && answeredActionId !== null
+        && agentService.isApprovalAnswerHeld(answeredActionId);
     // Shown only once the reconnect has outlasted a blip.
     const reconnectCaption = !reconnectShown
         ? null

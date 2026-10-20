@@ -1141,6 +1141,9 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/confirm-credits'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/confirm-credits', request));
         endpoints['/beaver/test/undo-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/undo-action', request));
         endpoints['/beaver/test/chat-drop-connection'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-drop-connection', request));
+        endpoints['/beaver/test/run-snapshot'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-snapshot', request));
+        endpoints['/beaver/test/chat-stop'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-stop', request));
+        endpoints['/beaver/test/chat-continue'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-continue', request));
 
         endpoints['/beaver/test/application-state'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/application-state', request));
 

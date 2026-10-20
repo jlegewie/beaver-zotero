@@ -74,6 +74,13 @@ vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
 }));
 vi.mock('../../../src/beaver-extract', () => ({ prewarmMuPDFWorker: vi.fn() }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
+const { libraryRevocationsMock } = vi.hoisted(() => ({
+    libraryRevocationsMock: vi.fn((): number | null => 0),
+}));
+vi.mock('../../../src/services/agentDataProvider/utils', async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    getLibraryRevocations: libraryRevocationsMock,
+}));
 
 import { activeRunAtom, wsReconnectingAtom } from '@beaver/agent-core/run-state/atoms';
 import type { WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
@@ -86,13 +93,20 @@ import {
     sendWSMessageAtom,
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
-import { pendingApprovalsAtom } from '../../../react/agents/agentActions';
+import {
+    pendingApprovalsAtom,
+    recordUndeliveredActionsAtom,
+    threadAgentActionsAtom,
+} from '../../../react/agents/agentActions';
+import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
+import { agentActionsService } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { sessionAtom } from '../../../react/atoms/auth';
 import { agentService } from '@beaver/agent-core/transport/agentService';
 import { currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     closeWSConnectionAtom,
     regenerateFromRunAtom,
+    regenerateWithEditedPromptAtom,
     resumeFromRunAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { threadAdmissionAtom } from '../../../react/runtime/threadAdmission';
@@ -296,7 +310,7 @@ describe('a run reattaching after its connection dropped', () => {
             store.set(threadAdmissionAtom, null);
         });
 
-        it('does not retry or continue a run, which would stop the reconnecting one', async () => {
+        it('does not retry, edit or continue a run, which would stop the reconnecting one', async () => {
             const callbacks = await startRun();
             const run = store.get(activeRunAtom)!;
             isReattachingMock.mockReturnValue(true);
@@ -304,6 +318,10 @@ describe('a run reattaching after its connection dropped', () => {
             expect(store.get(isRunReconnectingAtom)).toBe(true);
 
             await store.set(regenerateFromRunAtom, { runId: run.id });
+            await store.set(regenerateWithEditedPromptAtom, {
+                runId: run.id,
+                editedPrompt: { content: 'edited' } as any,
+            });
             await store.set(resumeFromRunAtom, run.id);
 
             expect(agentService.cancel).not.toHaveBeenCalled();
@@ -398,6 +416,156 @@ describe('a run reattaching after its connection dropped', () => {
             expect(store.get(threadAdmissionAtom)?.reason).toBe('stop_unconfirmed');
             expect(store.get(reattachResolutionAtom)).toBeNull();
             isReattachingMock.mockReturnValue(false);
+        });
+    });
+
+    describe('an action applied whose result never reached the server', () => {
+        it('is recorded as applied, on the card and with the backend', async () => {
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                .mockResolvedValue({ success: true, run_id: 'run', updated: 1, errors: [] } as any);
+            const callbacks = await startRun();
+            const runId = store.get(activeRunAtom)!.id;
+            store.set(threadAgentActionsAtom, [
+                { id: 'action-1', run_id: runId, action_type: 'create_collection', status: 'pending', proposed_data: {} } as any,
+            ]);
+            dropConnection(callbacks);
+            callbacks.onReattachFailed?.({ runId, reason: 'bad_token', evidence: DROP, gapMs: 500 });
+
+            callbacks.onUndeliveredActions?.({
+                runId,
+                actions: [{ actionId: 'action-1', resultData: { collection_key: 'ABCD1234' } }],
+            });
+            await vi.waitFor(() => expect(ack).toHaveBeenCalled());
+
+            // Only while nothing has decided the action since, in any window.
+            expect(ack).toHaveBeenCalledWith(runId, [
+                { action_id: 'action-1', result_data: { collection_key: 'ABCD1234' } },
+            ], { onlyUndecided: true, timeoutMs: 20_000, assertDispatch: expect.any(Function) });
+            expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
+                status: 'applied',
+                result_data: { collection_key: 'ABCD1234' },
+            });
+            ack.mockRestore();
+        });
+
+        it('shows actions the server left alone as the server has them', async () => {
+            store.set(threadAgentActionsAtom, ['action-1', 'action-2', 'action-3', 'action-4'].map((id) => (
+                { id, run_id: 'run-1', action_type: 'create_collection', status: 'pending', proposed_data: {} } as any
+            )));
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions').mockResolvedValue({
+                success: true,
+                run_id: 'run-1',
+                updated: 1,
+                errors: [],
+                skipped: [
+                    // Undone in another window.
+                    { action_id: 'action-2', status: 'undone', result_data: null },
+                    // Applied by an earlier attempt whose response was lost.
+                    { action_id: 'action-3', status: 'applied', result_data: { collection_key: 'SERVER' } },
+                    { action_id: 'action-4', status: null, result_data: null },
+                ],
+            } as any);
+
+            await store.set(recordUndeliveredActionsAtom, {
+                runId: 'run-1',
+                actions: ['action-1', 'action-2', 'action-3', 'action-4'].map((actionId) => (
+                    { actionId, resultData: { collection_key: 'LOCAL' } }
+                )),
+            }, 0);
+
+            expect(store.get(threadAgentActionsAtom).map((action) => [action.status, action.result_data?.collection_key]))
+                .toEqual([['applied', 'LOCAL'], ['undone', undefined], ['applied', 'SERVER'], ['pending', undefined]]);
+            ack.mockRestore();
+        });
+
+        it('does not dispatch for an account that changed while the request waited', async () => {
+            store.set(threadAgentActionsAtom, []);
+            let generation = 1;
+            setCredentialAdapter({ auth: {} as any, getGeneration: () => generation });
+            try {
+                let dispatchError: unknown = null;
+                const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                    .mockImplementation(async (_runId, _links, options) => {
+                        generation = 2;
+                        try { options?.assertDispatch?.(); } catch (error) { dispatchError = error; }
+                        throw dispatchError;
+                    });
+
+                await store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{ actionId: 'action-1', resultData: {} }],
+                }, 0);
+
+                expect(dispatchError).toMatchObject({ code: 'ACCOUNT_CHANGED' });
+                expect(ack).toHaveBeenCalledTimes(1);
+                ack.mockRestore();
+            } finally {
+                setCredentialAdapter(undefined);
+            }
+        });
+
+        it('keeps the data on this computer once a library is excluded after the run started', async () => {
+            store.set(threadAgentActionsAtom, []);
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                .mockResolvedValue({ success: true, run_id: 'run', updated: 1, errors: [] } as any);
+            libraryRevocationsMock.mockReturnValue(1);
+
+            await store.set(recordUndeliveredActionsAtom, {
+                runId: 'run-1',
+                actions: [{ actionId: 'action-1', resultData: {} }],
+            }, 0);
+
+            expect(ack).not.toHaveBeenCalled();
+            ack.mockRestore();
+            libraryRevocationsMock.mockReturnValue(0);
+        });
+
+        it('stops retrying once the account changes', async () => {
+            store.set(threadAgentActionsAtom, []);
+            let generation = 1;
+            setCredentialAdapter({ auth: {} as any, getGeneration: () => generation });
+            vi.useFakeTimers();
+            try {
+                const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                    .mockRejectedValue(new Error('offline'));
+
+                const recording = store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{ actionId: 'action-1', resultData: {} }],
+                }, 0);
+                await vi.advanceTimersByTimeAsync(0);
+                generation = 2;
+                await vi.advanceTimersByTimeAsync(60_000);
+                await recording;
+
+                expect(ack).toHaveBeenCalledTimes(1);
+                ack.mockRestore();
+            } finally {
+                setCredentialAdapter(undefined);
+                vi.useRealTimers();
+            }
+        });
+
+        it('retries an acknowledgement that does not reach the backend', async () => {
+            store.set(threadAgentActionsAtom, []);
+            vi.useFakeTimers();
+            try {
+                const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                    .mockRejectedValueOnce(new Error('offline'))
+                    .mockResolvedValue({ success: true, run_id: 'run', updated: 1, errors: [] } as any);
+
+                const recording = store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{ actionId: 'action-1', resultData: {} }],
+                }, 0);
+                await vi.advanceTimersByTimeAsync(2_000);
+                await recording;
+
+                expect(ack).toHaveBeenCalledTimes(2);
+                ack.mockRestore();
+            } finally {
+                vi.useRealTimers();
+            }
         });
     });
 });

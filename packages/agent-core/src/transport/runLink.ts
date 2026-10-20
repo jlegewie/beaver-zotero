@@ -21,8 +21,8 @@
  */
 
 import type { ConnectionFailureEvidence } from './connectionFailure';
-import type { WSCallbacks } from '../protocol/agentProtocol';
-import type { PreparedJsonMessage } from './preparedJsonMessage';
+import type { UndeliveredActionResult, WSCallbacks } from '../protocol/agentProtocol';
+import { isPreparedJsonMessage, type PreparedJsonMessage } from './preparedJsonMessage';
 
 /**
  * Close codes after which a backend that offers reattach keeps the run going:
@@ -40,6 +40,8 @@ export interface RunReply {
     sentOn: number | null;
     /** Pings already written on `sentOn` when the response was. */
     pingMark: number;
+    /** The agent action an `agent_action_execute` request applies. */
+    actionId: string | null;
 }
 
 /** A prompt the server sent (approval, question, confirmation) and its answer. */
@@ -110,11 +112,17 @@ export class RunLink {
         return this.replies.get(requestId);
     }
 
-    /** Start remembering the reply to `requestId`. Returns the entry and its settle function. */
-    trackReply(requestId: string): { reply: RunReply; settle: (response: RunReply['response']) => void } {
+    /**
+     * Start remembering the reply to `requestId`, which applies `actionId` if
+     * it executes an action. Returns the entry and its settle function.
+     */
+    trackReply(
+        requestId: string,
+        actionId: string | null = null,
+    ): { reply: RunReply; settle: (response: RunReply['response']) => void } {
         let resolve!: () => void;
         const settled = new Promise<void>((r) => { resolve = r; });
-        const reply: RunReply = { response: null, settled, sentOn: null, pingMark: 0 };
+        const reply: RunReply = { response: null, settled, sentOn: null, pingMark: 0, actionId };
         this.replies.set(requestId, reply);
         return {
             reply,
@@ -123,6 +131,32 @@ export class RunLink {
                 resolve();
             },
         };
+    }
+
+    /** Whether any reply executes an action. */
+    get hasActionReplies(): boolean {
+        for (const reply of this.replies.values()) {
+            if (reply.actionId) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The actions this run applied whose results the server is not known to
+     * have read (see `forgetConfirmedReplies`). Waits for actions still
+     * executing.
+     */
+    async unconfirmedAppliedActions(): Promise<UndeliveredActionResult[]> {
+        const executes = [...this.replies.values()].filter((reply) => reply.actionId);
+        await Promise.all(executes.map((reply) => reply.settled));
+        const applied: UndeliveredActionResult[] = [];
+        for (const reply of executes) {
+            const response = reply.response;
+            if (!response || isPreparedJsonMessage(response)) continue;
+            if (response.type !== 'agent_action_execute_response' || response.success !== true) continue;
+            applied.push({ actionId: reply.actionId!, resultData: response.result_data ?? {} });
+        }
+        return applied;
     }
 
     /**
@@ -153,6 +187,12 @@ export class RunLink {
         if (existing) return existing;
         this.prompts.set(key, { answer: null, sentOn: null });
         return null;
+    }
+
+    /** Whether the user answered the prompt `key` and the answer has not been written yet. */
+    isAnswerUnsent(key: string): boolean {
+        const prompt = this.prompts.get(key);
+        return !!prompt?.answer && prompt.sentOn === null;
     }
 
     /** Remember the answer to a prompt and where it was written, if anywhere. */

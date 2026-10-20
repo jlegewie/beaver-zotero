@@ -373,8 +373,10 @@ describe('AgentService run reattach', () => {
         expect(callbacks.onDeferredApprovalRequest).toHaveBeenCalledTimes(1);
 
         first.emitClose(1006);
+        expect(service.isApprovalAnswerHeld('action-1')).toBe(false);
         // The user answers while there is no socket: held, not lost.
         expect(service.sendApprovalResponse('action-1', true)).toBe(true);
+        expect(service.isApprovalAnswerHeld('action-1')).toBe(true);
 
         const { socket: second } = await reattach(service);
         // Nothing goes out before the server confirms the run is carried here.
@@ -387,8 +389,28 @@ describe('AgentService run reattach', () => {
         expect(second.sentOfType('deferred_approval_response')).toEqual([
             expect.objectContaining({ action_id: 'action-1', approved: true }),
         ]);
+        expect(service.isApprovalAnswerHeld('action-1')).toBe(false);
         // The re-sent prompt is not shown a second time.
         expect(callbacks.onDeferredApprovalRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not count an answer sent before the drop as held', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const first = await startRun(service, createCallbacks());
+        first.emitMessage({
+            event: 'deferred_approval_request',
+            action_id: 'action-1',
+            toolcall_id: 'call-1',
+            action_type: 'edit_metadata',
+            action_data: {},
+        });
+        await flush();
+        expect(service.sendApprovalResponse('action-1', true)).toBe(true);
+
+        first.emitClose(1006);
+
+        expect(service.isReattaching(RUN_ID)).toBe(true);
+        expect(service.isApprovalAnswerHeld('action-1')).toBe(false);
     });
 
     it('keeps a decision the dying socket refused and delivers it once after the reattach', async () => {
@@ -534,6 +556,182 @@ describe('AgentService run reattach', () => {
         };
         return { execute, finishes, provider };
     }
+
+    function applied(requestId: string, resultData: Record<string, unknown> = {}): Record<string, unknown> {
+        return { type: 'agent_action_execute_response', request_id: requestId, success: true, result_data: resultData };
+    }
+
+    describe('actions applied whose results the server never read', () => {
+        it('reports an action applied just before the drop when the reattach is refused', async () => {
+            const { finishes, provider } = serializedExecute();
+            const service = new AgentService('https://api.example.com', provider);
+            const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
+            const first = await startRun(service, callbacks);
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            await flush();
+            first.emitClose(1006);
+            finishes[0](applied('req-1', { collection_key: 'ABCD1234' }));
+            await flush();
+
+            const { socket: second } = await reattach(service);
+            second.emitMessage({ event: 'reattach_unavailable', run_id: RUN_ID, reason: 'bad_token' });
+            await flush();
+
+            expect(callbacks.onReattachFailed).toHaveBeenCalled();
+            expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
+                runId: RUN_ID,
+                actions: [{ actionId: 'a1', resultData: { collection_key: 'ABCD1234' } }],
+            });
+        });
+
+        it('waits for an action still being applied when the run is given up', async () => {
+            const { finishes, provider } = serializedExecute();
+            const service = new AgentService('https://api.example.com', provider);
+            const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
+            const first = await startRun(service, callbacks);
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            await flush();
+            first.emitClose(1006);
+            await vi.advanceTimersByTimeAsync(120_000);
+            expect(callbacks.onReattachFailed).toHaveBeenCalledWith(expect.objectContaining({ reason: 'gave_up' }));
+            expect(callbacks.onUndeliveredActions).not.toHaveBeenCalled();
+
+            finishes[0](applied('req-1'));
+            await flush();
+
+            expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
+                runId: RUN_ID,
+                actions: [{ actionId: 'a1', resultData: {} }],
+            });
+        });
+
+        it('reports an applied action of a run the user left while it reconnected', async () => {
+            const { finishes, provider } = serializedExecute();
+            const service = new AgentService('https://api.example.com', provider);
+            const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
+            const first = await startRun(service, callbacks);
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            await flush();
+            first.emitClose(1006);
+            finishes[0](applied('req-1'));
+            await flush();
+
+            expect(service.leaveRun(RUN_ID)).toBe(true);
+            await flush();
+
+            expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
+                runId: RUN_ID,
+                actions: [{ actionId: 'a1', resultData: {} }],
+            });
+        });
+
+        it('reports the applied action without waiting on one queued behind it that never ran', async () => {
+            const { execute, finishes, provider } = serializedExecute();
+            const service = new AgentService('https://api.example.com', provider);
+            const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
+            const first = await startRun(service, callbacks);
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-2', action_id: 'a2' });
+            await flush();
+            first.emitClose(1006);
+            const { socket: second } = await reattach(service);
+            second.emitMessage({ event: 'reattach_unavailable', run_id: RUN_ID, reason: 'bad_token' });
+            await flush();
+
+            finishes[0](applied('req-1'));
+            await flush();
+
+            expect(execute).toHaveBeenCalledTimes(1);
+            expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
+                runId: RUN_ID,
+                actions: [{ actionId: 'a1', resultData: {} }],
+            });
+        });
+
+        it('reports an applied action when the socket opened to reattach fails with an error', async () => {
+            const { finishes, provider } = serializedExecute();
+            const service = new AgentService('https://api.example.com', provider);
+            const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
+            const first = await startRun(service, callbacks);
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            await flush();
+            first.emitClose(1006);
+            finishes[0](applied('req-1'));
+            await flush();
+
+            const { socket: second } = await reattach(service);
+            second.emitMessage({ event: 'error', type: 'auth_failed', message: 'Authentication failed' });
+            await flush();
+
+            expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
+                runId: RUN_ID,
+                actions: [{ actionId: 'a1', resultData: {} }],
+            });
+        });
+
+        it('does not report an applied action when the client closes on purpose', async () => {
+            const { finishes, provider } = serializedExecute();
+            const service = new AgentService('https://api.example.com', provider);
+            const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
+            const first = await startRun(service, callbacks);
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            await flush();
+            first.emitClose(1006);
+            finishes[0](applied('req-1'));
+            await flush();
+
+            // E.g. sign-out or a library exclusion.
+            service.close();
+            await flush();
+
+            expect(callbacks.onUndeliveredActions).not.toHaveBeenCalled();
+        });
+
+        it('does not report an action whose result the server confirmed', async () => {
+            const { finishes, provider } = serializedExecute();
+            const service = new AgentService('https://api.example.com', provider);
+            const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
+            const first = await startRun(service, callbacks);
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            await flush();
+            finishes[0](applied('req-1'));
+            await flush();
+            expect(first.sentOfType('agent_action_execute_response')).toHaveLength(1);
+            // A pong after the reply was written: the server has read it.
+            await vi.advanceTimersByTimeAsync(15_000);
+            first.emitMessage({ event: 'pong' });
+            await flush();
+
+            first.emitClose(1006);
+            const { socket: second } = await reattach(service);
+            second.emitMessage({ event: 'reattach_unavailable', run_id: RUN_ID, reason: 'bad_token' });
+            await flush();
+
+            expect(callbacks.onReattachFailed).toHaveBeenCalled();
+            expect(callbacks.onUndeliveredActions).not.toHaveBeenCalled();
+        });
+
+        it('does not report an action that failed or a run that finished', async () => {
+            const { finishes, provider } = serializedExecute();
+            const service = new AgentService('https://api.example.com', provider);
+            const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
+            const first = await startRun(service, callbacks);
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-2', action_id: 'a2' });
+            await flush();
+            finishes[0]({ type: 'agent_action_execute_response', request_id: 'req-1', success: false });
+            await flush();
+            finishes[1](applied('req-2'));
+            first.emitMessage({ event: 'done', seq: 2 });
+            await flush();
+
+            service.close();
+            await flush();
+
+            expect(callbacks.onDone).toHaveBeenCalled();
+            expect(callbacks.onUndeliveredActions).not.toHaveBeenCalled();
+        });
+    });
 
     it('runs no queued action once the socket closes for good', async () => {
         const { execute, finishes, provider } = serializedExecute();
