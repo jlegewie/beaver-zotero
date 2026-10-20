@@ -206,8 +206,8 @@ export function addSearchCondition(
             logger(`${logLabel}: Unknown saved search '${value}'`, 1);
             warnings.push(
                 `Dropped condition field='savedSearch' value='${value}': no saved search with that key `
-                    + 'exists in the searched library. Use the search_key and library_id shown for the '
-                    + 'saved search in the Zotero state.'
+                    + 'exists in the searched library. Use the search_id shown for the saved search in '
+                    + 'the Zotero state.'
             );
             return false;
         }

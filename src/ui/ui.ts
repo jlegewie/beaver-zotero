@@ -8,6 +8,7 @@ import { PreferencePageTab } from "../../react/atoms/ui";
 import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
 
 import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
+import { attachViewRowDrag, detachViewRowDrag } from "../modules/viewRowDrag";
 
 let keyboardManager: KeyboardManager | null = null;
 
@@ -104,7 +105,10 @@ export class BeaverUIFactory {
         }
 
         // Add toggle button to toolbar
-        if (!standalone) this.addToolbarButton(win);
+        if (!standalone) {
+            this.addToolbarButton(win);
+            attachViewRowDrag(win);
+        }
         ztoolkit.log("registerChatPanel: toolbar button setup finished");
 
         // Load React bundle
@@ -467,6 +471,7 @@ export class BeaverUIFactory {
             if (win.document) {
                 try {
                     this.removeToolbarFocusHandler(win);
+                    detachViewRowDrag(win);
 
                     const elementIds = [
                         "beaver-pane-library",

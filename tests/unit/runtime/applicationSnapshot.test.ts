@@ -58,6 +58,9 @@ it('captures items, searches and collections before database awaits or a focus c
     expect(state.library_selection?.map(item => item.zotero_key)).toEqual(['ORIGINAL']);
     expect(state.current_collections?.map(collection => collection.collection_key)).toEqual(['COLL_A']);
     expect(state.current_searches?.map(search => search.search_key)).toEqual(['SEARCH_A']);
+    // Saved searches are reported by portable library only.
+    expect(state.current_searches?.[0]).not.toHaveProperty('library_id');
+    expect(state.current_searches?.[0].library_ref).toEqual(expect.any(String));
 });
 
 it('uses a staged annotation-action paper instead of the destination reader context', async () => {

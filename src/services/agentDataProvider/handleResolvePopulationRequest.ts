@@ -469,6 +469,23 @@ function conditionsOrGroup(
  * Runs one native Zotero search per filter group, ANDs the groups together and
  * returns ids only.
  */
+/**
+ * Names of the saved searches `savedSearch` conditions point at, keyed by the
+ * condition value as sent, for the approval card.
+ */
+function savedSearchNamesFor(libraryID: number, conditions: ZoteroSearchCondition[]): Record<string, string> {
+    const names: Record<string, string> = {};
+    for (const condition of conditions) {
+        const value = condition.value ?? '';
+        if (condition.field !== 'savedSearch' || !value || value in names) continue;
+        // Zotero also accepts its legacy '<libraryID>_<key>' spelling.
+        const key = value.includes('_') ? value.slice(value.indexOf('_') + 1) : value;
+        const search = Zotero.Searches.getByLibraryAndKey(libraryID, key) as { name?: string } | false;
+        if (search && search.name) names[value] = search.name;
+    }
+    return names;
+}
+
 export async function handleResolvePopulationRequest(
     request: WSResolvePopulationRequest
 ): Promise<WSResolvePopulationResponse> {
@@ -710,6 +727,12 @@ export async function handleResolvePopulationRequest(
             );
         }
 
+        // Every savedSearch condition was checked against this library above,
+        // so each value names a saved search here.
+        const savedSearchNames = savedSearchNamesFor(
+            library.libraryID, [...requestedConditions, ...requestedAnyConditions],
+        );
+
         const [scope, ...extraGroups] = groups;
         if (scope) {
             search.setScope(scope, true);
@@ -814,6 +837,7 @@ export async function handleResolvePopulationRequest(
                 library_name: library.name,
                 collection_names: collectionNames,
                 collection_ids: collectionIds,
+                saved_search_names: savedSearchNames,
                 // Echoed so a caller that asked for 'any' can tell an applied
                 // 'any' from a provider that never knew the field.
                 conditions_join_mode: conditionsJoinMode,
@@ -868,6 +892,7 @@ export async function handleResolvePopulationRequest(
             library_name: library.name,
             collection_names: collectionNames,
             collection_ids: collectionIds,
+            saved_search_names: savedSearchNames,
             // Echoed so a caller that asked for 'any' can tell an applied
             // 'any' from a provider that never knew the field.
             conditions_join_mode: conditionsJoinMode,

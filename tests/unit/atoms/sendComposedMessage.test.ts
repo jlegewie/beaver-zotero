@@ -414,7 +414,7 @@ describe('collection actions over saved searches and views', () => {
     const unfiled = {
         type: 'special_collection', special_collection: 'unfiled', library_id: 1, library_ref: 'u', name: 'Unfiled Items',
     };
-    const search = { type: 'saved_search', library_id: 1, library_ref: 'u', zotero_key: 'SRCH0001', name: 'Beaver' };
+    const search = { type: 'saved_search', library_ref: 'u', zotero_key: 'SRCH0001', name: 'Beaver' };
     const pill = { commandName: 'find-gaps', actionId: 'custom-gaps', targetType: 'collection' as const };
 
     it('attaches the saved searches and views the action binds to when picked', () => {

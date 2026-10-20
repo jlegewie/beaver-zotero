@@ -125,13 +125,16 @@ describe('attachment identity keys', () => {
 
     it('does not treat a saved search as an item or collection sharing its key', () => {
         const search: MessageAttachment = {
-            type: 'saved_search', library_id: 1, library_ref: 'u', zotero_key: 'KEY12345', name: 'Beaver',
+            type: 'saved_search', library_ref: 'u', zotero_key: 'KEY12345', name: 'Beaver',
         };
         const item: MessageAttachment = { type: 'item', library_id: 1, library_ref: 'u', zotero_key: 'KEY12345' };
         expect(messageAttachmentKey(search)).toBe('u-KEY12345');
         expect(messageAttachmentsHaveSameIdentity(search, item)).toBe(false);
         expect(messageAttachmentIdentity(search)).not.toBe(messageAttachmentIdentity(item));
         expect(messageAttachmentsHaveSameIdentity(search, { ...search, name: 'Renamed' })).toBe(true);
+        // Identified by its portable library alone: no local-id alias.
+        expect(messageAttachmentLookupKeys(search)).toEqual(['u-KEY12345']);
+        expect(messageAttachmentsHaveSameIdentity(search, { ...search, library_ref: 'g42' })).toBe(false);
     });
 });
 

@@ -2,8 +2,8 @@ import React, { useState, useRef } from 'react';
 import { getPref } from '../../../src/utils/prefs';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { CSSItemTypeIcon, CSSIcon } from '../icons/zotero';
-import { isValidAnnotationType } from '@beaver/agent-core/types/attachments/apiTypes';
-import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
+import { isValidAnnotationType, type ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom, addViewsToCurrentMessageAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { useAttachExternalFiles } from '../../hooks/useAttachExternalFiles';
@@ -13,18 +13,45 @@ import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { getHost } from '@beaver/agent-ui/host';
 import { SettingsIcon } from '../icons/icons';
+import { VIEW_ROW_DRAG_TYPE } from '../../../src/utils/zoteroSelection';
+import { viewToAttachment, type ViewSelection } from '../../utils/zoteroReferences';
+import { viewChipDisplay } from '../agentRuns/requestChips/RequestChipPrimitives';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
     overlayBorderRadius?: number;
 }
 
+/** True when the drag carries a saved search or a built-in view (Unfiled Items, …). */
+const isViewDrag = (dataTransfer: DataTransfer): boolean =>
+    dataTransfer.types.includes('zotero/search') || dataTransfer.types.includes(VIEW_ROW_DRAG_TYPE);
+
 /** True when the drag carries OS files (not Zotero objects). */
 const isFileDrag = (dataTransfer: DataTransfer): boolean =>
     !dataTransfer.types.includes('zotero/item')
     && !dataTransfer.types.includes('zotero/annotation')
     && !dataTransfer.types.includes('zotero/collection')
+    && !isViewDrag(dataTransfer)
     && (dataTransfer.types.includes('application/x-moz-file') || dataTransfer.types.includes('text/x-moz-url'));
+
+/** The saved searches or built-in views a drag carries, as the rows they came from. */
+const getDraggedViews = (dataTransfer: DataTransfer): ViewSelection[] => {
+    try {
+        if (dataTransfer.types.includes('zotero/search')) {
+            return dataTransfer.getData('zotero/search').split(',')
+                .map(id => Zotero.Searches.get(parseInt(id)) as Zotero.Search | false)
+                .filter((search): search is Zotero.Search => !!search)
+                .map(search => ({ type: 'search', libraryId: search.libraryID, key: search.key, name: search.name }));
+        }
+        const data = JSON.parse(dataTransfer.getData(VIEW_ROW_DRAG_TYPE) || 'null');
+        if (data && typeof data.libraryID === 'number' && typeof data.type === 'string') {
+            return [{ type: data.type, libraryId: data.libraryID, name: String(data.name ?? '') }];
+        }
+    } catch (error) {
+        console.error('Error reading dragged saved searches or views:', error);
+    }
+    return [];
+};
 
 /**
  * Extract dropped OS files as nsIFile objects via Zotero's drag helper, which
@@ -52,7 +79,9 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const [isDragging, setIsDragging] = useState(false);
     const [dragError, setDragError] = useState<string | null>(null);
     const [dragCount, setDragCount] = useState<number>(0);
-    const [dragType, setDragType] = useState<'item' | 'annotation' | 'collection' | 'file' | null>(null);
+    const [dragType, setDragType] = useState<'item' | 'annotation' | 'collection' | 'view' | 'file' | null>(null);
+    // The first dragged saved search or view, for the overlay's icon and name.
+    const [draggedView, setDraggedView] = useState<ViewAttachment | null>(null);
     const dragErrorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const addItemsToCurrentMessageItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
@@ -62,6 +91,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
+    const addViewsToCurrentMessage = useSetAtom(addViewsToCurrentMessageAtom);
 
     const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage') as number || 10;
 
@@ -80,6 +110,40 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             return { valid: false, error: "Collection is not in a synced library" };
         }
         return { valid: true };
+    };
+
+    /**
+     * The dragged saved searches and views that can be attached, plus an
+     * error for the overlay when none can. Excluded libraries are left out.
+     */
+    const resolveDraggedViews = (dataTransfer: DataTransfer): { views: ViewAttachment[]; error?: string } => {
+        const dragged = getDraggedViews(dataTransfer);
+        const searchable = dragged.filter(view => searchableLibraryIds.includes(view.libraryId));
+        const views = searchable
+            .map(viewToAttachment)
+            .filter((view): view is ViewAttachment => view !== null);
+        if (views.length > 0) return { views };
+        if (dragged.length > 0 && searchable.length === 0) {
+            return { views, error: dragged[0].type === 'search'
+                ? 'Saved search is not in a synced library'
+                : 'View is not in a synced library' };
+        }
+        return { views, error: 'Saved search or view not supported' };
+    };
+
+    /** Show the overlay for a saved search or view drag, or an error when none can be added. */
+    const showViewDrag = (e: React.DragEvent<HTMLDivElement>) => {
+        const { views, error } = resolveDraggedViews(e.dataTransfer);
+        if (views.length > 0) {
+            setObjectIcon(null);
+            setIsDragging(true);
+            setDragType('view');
+            setDragCount(views.length);
+            setDraggedView(views[0]);
+        } else {
+            showErrorMessage(error ?? 'Saved search or view not supported');
+            e.dataTransfer.dropEffect = 'none';
+        }
     };
 
     // Show error message temporarily
@@ -138,6 +202,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             e.dataTransfer.types.includes('zotero/annotation') ||
             e.dataTransfer.types.includes('zotero/item') ||
             e.dataTransfer.types.includes('zotero/collection') ||
+            isViewDrag(e.dataTransfer) ||
             isFileDrag(e.dataTransfer)
         ) {
             e.dataTransfer.dropEffect = 'copy';
@@ -201,6 +266,11 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             }
         }
         
+        // Handle saved searches and built-in views (Unfiled Items, …)
+        else if (isViewDrag(e.dataTransfer)) {
+            showViewDrag(e);
+        }
+
         // Handle Zotero items
         else if (e.dataTransfer.types.includes('zotero/item')) {
             try {
@@ -307,6 +377,11 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             }
         }
         
+        // Handle saved searches and built-in views (Unfiled Items, …)
+        else if (isViewDrag(e.dataTransfer)) {
+            showViewDrag(e);
+        }
+
         // Handle Zotero items
         else if (e.dataTransfer.types.includes('zotero/item')) {
             try {
@@ -351,6 +426,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             setDragError(null);
             setDragType(null);
             setDragCount(0);
+            setDraggedView(null);
         }
     };
 
@@ -399,6 +475,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         setDragError(null);
         setDragType(null);
         setDragCount(0);
+        setDraggedView(null);
 
         // Do not proceed if the number of items is too large
         const itemCount = e.dataTransfer.types.includes('zotero/item')
@@ -454,6 +531,19 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                     tagSelections: []
                 }));
             }
+            return;
+        }
+
+        // Handle saved searches and built-in views: attached to the message
+        // like a collection picked for an action, so the request is scoped to
+        // the items they match.
+        if (isViewDrag(e.dataTransfer)) {
+            const { views, error } = resolveDraggedViews(e.dataTransfer);
+            if (views.length === 0) {
+                showErrorMessage(error ?? 'Saved search or view not supported');
+                return;
+            }
+            addViewsToCurrentMessage(views);
             return;
         }
 
@@ -527,6 +617,10 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                         <div className="scale-12 mb-2">
                             <CSSIcon name="collection" className="icon-16" />
                         </div>
+                    ) : dragType === 'view' && draggedView ? (
+                        <div className="scale-12 mb-2">
+                            <CSSIcon name={viewChipDisplay(draggedView).iconName} className="icon-16" />
+                        </div>
                     ) : (
                         <div>
                             <ZoteroIcon 
@@ -541,6 +635,10 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                             ? `Drop here to add ${dragCount} annotation${dragCount !== 1 ? 's' : ''}`
                             : dragType === 'collection'
                             ? `Drop here to filter by ${dragCount} collection${dragCount !== 1 ? 's' : ''}`
+                            : dragType === 'view'
+                            ? (dragCount === 1 && draggedView
+                                ? `Drop here to add ${draggedView.name}`
+                                : `Drop here to add ${dragCount} saved searches`)
                             : dragType === 'file'
                             ? `Drop here to add ${dragCount} file${dragCount !== 1 ? 's' : ''}`
                             : `Drop here to add ${dragCount} item${dragCount !== 1 ? 's' : ''}`}

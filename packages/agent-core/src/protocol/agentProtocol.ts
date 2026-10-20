@@ -1785,6 +1785,12 @@ export interface WSResolvePopulationResponse {
     /** Portable identities aligned with collection_names; legacy keys remain accepted. */
     collection_ids?: string[];
     /**
+     * Display names of the saved searches named by `savedSearch` conditions,
+     * keyed by the condition value as sent. The approval card names a saved
+     * search from these and falls back to its key.
+     */
+    saved_search_names?: Record<string, string> | null;
+    /**
      * The join mode actually applied to the request's `conditions`. Set on
      * every successful resolution, and absent from a failure.
      *
@@ -3059,10 +3065,12 @@ export interface CurrentSavedSearch {
     search_key: string;
     /** Saved search name */
     name: string;
-    /** Library ID this saved search belongs to */
-    library_id: number;
-    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
-    library_ref?: string;
+    /**
+     * Device-portable library identity ("u" | "g<groupID>"). See
+     * `src/utils/libraryIdentity.ts`. Saved searches carry no device-local
+     * library id.
+     */
+    library_ref: string;
 }
 
 /**

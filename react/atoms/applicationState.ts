@@ -293,14 +293,16 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 };
             });
 
+            // Reported by portable library only; a search whose library has no
+            // portable ref cannot be addressed and is left out.
             currentSearches = selectedSearches
                 .filter((search: Zotero.Search) => searchableLibrarySet.has(search.libraryID))
-                .map((search: Zotero.Search) => ({
-                    search_key: search.key,
-                    name: search.name,
-                    library_id: search.libraryID,
-                    library_ref: libraryRefForLibraryID(search.libraryID) ?? undefined,
-                }));
+                .flatMap((search: Zotero.Search) => {
+                    const libraryRef = libraryRefForLibraryID(search.libraryID);
+                    return libraryRef
+                        ? [{ search_key: search.key, name: search.name, library_ref: libraryRef }]
+                        : [];
+                });
 
             // Special-collection rows carry their library on `ref.libraryID`
             // (a Zotero.Duplicates, a Zotero.Search, or a plain `{ libraryID }`

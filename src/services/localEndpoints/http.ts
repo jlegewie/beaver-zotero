@@ -510,6 +510,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         library_name: response.library_name,
         collection_names: response.collection_names,
         collection_ids: response.collection_ids,
+        saved_search_names: response.saved_search_names,
         // The join mode actually applied to `conditions`. Its absence is how the
         // caller detects a provider that predates the field, so it has to be
         // forwarded here too.

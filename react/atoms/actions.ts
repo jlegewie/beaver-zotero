@@ -43,6 +43,7 @@ import type { PromptAction } from '@beaver/agent-core/agents/types';
 import { MessageAttachment, ViewAttachment, isViewAttachment, messageAttachmentIdentityKeys, messageAttachmentKey, messageAttachmentLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
 import { toValidatedMessageAttachment } from '../types/attachments/converters';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { isTargetInLibraries } from '../utils/zoteroReferences';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
@@ -723,7 +724,7 @@ export const sendComposedMessageAtom = atom(
         const resolved = await set(resolvePillsToPromptActionsAtom, {
             pills,
             hasCollectionTarget: [...get(currentMessageCollectionsAtom), ...get(currentMessageViewsAtom)]
-                .some(target => searchableLibraryIds.includes(target.library_id)),
+                .some(target => isTargetInLibraries(target, searchableLibraryIds)),
         });
         if (!resolved) return false;
         const { actions: promptActions, items: variableItems, collections: variableCollections } = resolved;

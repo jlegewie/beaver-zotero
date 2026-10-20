@@ -188,3 +188,10 @@ export type CollectionTargetViewType = typeof COLLECTION_TARGET_VIEW_TYPES[numbe
 export function isCollectionTargetViewType(type: unknown): type is CollectionTargetViewType {
     return (COLLECTION_TARGET_VIEW_TYPES as readonly unknown[]).includes(type);
 }
+
+/**
+ * Drag data type Beaver adds to collections-tree rows for the built-in views
+ * (see `src/modules/viewRowDrag.ts`). The value is a JSON
+ * `{ libraryID, type, name }` object.
+ */
+export const VIEW_ROW_DRAG_TYPE = 'beaver/zotero-view';
