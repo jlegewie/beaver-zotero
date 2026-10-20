@@ -25,7 +25,7 @@ import {
     WSToolCallProgressEvent,
     WSToolCallArgsStreamEvent,
 } from "../protocol/agentProtocol";
-import { MessageAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "../types/attachments/apiTypes";
+import { MessageAttachment, isViewAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "../types/attachments/apiTypes";
 import { isTableToolName, tableResultBody } from './tableResults';
 import { collectResumeChain, continuationOfferFor, shouldOfferResume } from "./runResumeHelpers";
 
@@ -418,8 +418,8 @@ export function resetRunSelectorCaches(): void {
 }
 
 /**
- * Map of user attachments in all runs, keyed by the canonical
- * messageAttachmentKey. Identity comparison falls back to numeric IDs when a
+ * Map of the Zotero objects and files attached to all runs, keyed by the
+ * canonical messageAttachmentKey. Saved searches and views are left out. Identity comparison falls back to numeric IDs when a
  * pre-library_ref record is involved, while distinct portable refs stay apart.
  */
 export const allUserAttachmentsAtom = atom((get) => {
@@ -429,6 +429,9 @@ export const allUserAttachmentsAtom = atom((get) => {
     for (const run of runs) {
         const runAttachments = run.user_prompt.attachments || [];
         for (const attachment of runAttachments) {
+            // Saved searches and views are not items, and a saved-search key
+            // shares the item key format: keep them out of item identity.
+            if (isViewAttachment(attachment)) continue;
             const matchingEntry = Array.from(attachmentsMap.entries()).find(
                 ([, existing]) =>
                     messageAttachmentsHaveSameIdentity(existing, attachment)

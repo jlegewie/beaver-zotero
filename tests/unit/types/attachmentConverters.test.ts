@@ -8,6 +8,7 @@ import type {
     SourceAttachment,
 } from '@beaver/agent-core/types/attachments/apiTypes';
 import {
+    messageAttachmentIdentity,
     messageAttachmentKey,
     messageAttachmentLookupKeys,
     messageAttachmentsHaveSameIdentity,
@@ -105,6 +106,32 @@ describe('attachment identity keys', () => {
             mime_type: 'application/pdf',
             file_size: 123,
         })).toBe('ext-FILE1234');
+    });
+
+    it('keys built-in views by library and view type, with a numeric alias', () => {
+        const unfiled: MessageAttachment = {
+            type: 'special_collection',
+            special_collection: 'unfiled',
+            library_id: 1,
+            library_ref: 'u',
+            name: 'Unfiled Items',
+        };
+        expect(messageAttachmentKey(unfiled)).toBe('u-unfiled');
+        expect(messageAttachmentLookupKeys(unfiled)).toEqual(['u-unfiled', '1-unfiled']);
+        expect(messageAttachmentsHaveSameIdentity(unfiled, { ...unfiled, library_ref: undefined })).toBe(true);
+        expect(messageAttachmentsHaveSameIdentity(unfiled, { ...unfiled, special_collection: 'publications' })).toBe(false);
+        expect(messageAttachmentsHaveSameIdentity(unfiled, { ...unfiled, library_ref: 'g42' })).toBe(false);
+    });
+
+    it('does not treat a saved search as an item or collection sharing its key', () => {
+        const search: MessageAttachment = {
+            type: 'saved_search', library_id: 1, library_ref: 'u', zotero_key: 'KEY12345', name: 'Beaver',
+        };
+        const item: MessageAttachment = { type: 'item', library_id: 1, library_ref: 'u', zotero_key: 'KEY12345' };
+        expect(messageAttachmentKey(search)).toBe('u-KEY12345');
+        expect(messageAttachmentsHaveSameIdentity(search, item)).toBe(false);
+        expect(messageAttachmentIdentity(search)).not.toBe(messageAttachmentIdentity(item));
+        expect(messageAttachmentsHaveSameIdentity(search, { ...search, name: 'Renamed' })).toBe(true);
     });
 });
 

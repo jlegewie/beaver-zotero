@@ -24,9 +24,9 @@ export interface BeaverEvents {
          *  library-exclusion filtering before looking the collection up. */
         collections: { libraryId: number; collectionId: number }[];
         /** Every saved search or special view (Unfiled Items, …) the action
-         *  targets, with its library for the same exclusion filtering. These
-         *  have nothing to attach; the agent reads them from application state. */
-        views: { libraryId: number; type: string }[];
+         *  targets, with its library for the same exclusion filtering. `type`
+         *  is the collections-tree row type; `key` is set for saved searches. */
+        views: { libraryId: number; type: string; name: string; key?: string }[];
     };
     readerSelectionAction: {
         action: 'explain' | 'ask';

@@ -57,8 +57,8 @@ export function isActionableItem(item: Zotero.Item): boolean {
 export interface CollectionTargetSelection {
     /** Selected collections; attached to the message as references. */
     collections: SelectedCollectionInfo[];
-    /** Selected saved searches and special views (Unfiled Items, …). They have
-     *  no attachable reference; the agent reads them from application state. */
+    /** Selected saved searches and special views (Unfiled Items, …); attached
+     *  to the message as view attachments. */
     views: SelectedViewInfo[];
 }
 
@@ -90,39 +90,6 @@ function hasCollectionTarget(selection: CollectionTargetSelection): boolean {
     return selection.collections.length > 0 || selection.views.length > 0;
 }
 
-/**
- * The collection target an action context offers. Views have nothing to attach
- * and reach the agent only through application state, which reports the
- * collections-pane selection only while the library tab is active — so
- * outside it only the attachable collections count.
- */
-function contextCollectionTarget(zotero: ZoteroContext): CollectionTargetSelection {
-    const selection = collectionTargetSelection(zotero.libraryView);
-    if (zotero.isLibraryTab || selection.views.length === 0) return selection;
-    return { collections: selection.collections, views: [] };
-}
-
-/**
- * The context with saved-search and special-view targets removed, leaving any
- * selected collections. For the message edit overlay: regenerating an edit
- * keeps the original message's application state, so a view selected now
- * would never reach the agent.
- */
-export function withoutViewTargets(ctx: ActionContext): ActionContext {
-    const { libraryView } = ctx.zotero;
-    if (libraryView.selectedViews.length === 0) return ctx;
-    return {
-        ...ctx,
-        zotero: {
-            ...ctx.zotero,
-            libraryView: {
-                ...libraryView,
-                selectedViews: [],
-                selectedRowCount: libraryView.selectedRowCount - libraryView.selectedViews.length,
-            },
-        },
-    };
-}
 
 // ---------------------------------------------------------------------------
 // isActionVisible — OR over the action's target set
@@ -165,7 +132,7 @@ function isTargetSatisfied(target: ActionTargetType, ctx: ActionContext): boolea
             }
             return false;
         case 'collection':
-            return hasCollectionTarget(contextCollectionTarget(ctx.zotero));
+            return hasCollectionTarget(collectionTargetSelection(ctx.zotero.libraryView));
         case 'global':
             return true;
     }
@@ -335,7 +302,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     }
 
     // --- 5. Collection group ---
-    const collectionTarget = contextCollectionTarget(ctx.zotero);
+    const collectionTarget = collectionTargetSelection(ctx.zotero.libraryView);
     if (hasCollectionTarget(collectionTarget)) {
         const collectionActions = allActions.filter(a => a.targets.includes('collection'));
         if (collectionActions.length > 0) {
@@ -437,7 +404,7 @@ export function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     }
 
     // 5. Collection (or a collection-like view)
-    const collectionTarget = contextCollectionTarget(zotero);
+    const collectionTarget = collectionTargetSelection(zotero.libraryView);
     if (hasCollectionTarget(collectionTarget)) {
         return {
             targetType: 'collection',

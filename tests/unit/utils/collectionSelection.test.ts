@@ -14,7 +14,6 @@ vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: () 
 
 import {
     collectionTargetSelection,
-    withoutViewTargets,
     getActiveTarget,
     isActionVisible,
     computeActionGroups,
@@ -225,32 +224,16 @@ describe('computeActionGroups — collection group', () => {
         });
     });
 
-    it('offers view targets only while the library tab is active', () => {
-        // Views reach the agent through application state, which reports the
-        // collections pane only in the library tab; collections are attached.
+    it('offers view targets outside the library tab, like collections', () => {
+        // Views are attached to the message when the action is picked, so a
+        // reader tab in front of the library does not hide them.
         const readerCtx = (view: LibraryViewInfo): ActionContext => {
             const base = ctx(view);
             return { ...base, zotero: { ...base.zotero, type: 'idle', isLibraryTab: false } };
         };
-        const unfiledOnly = computeActionGroups([COLLECTION_ACTION], readerCtx(viewSelection([view('unfiled', 'Unfiled Items')])));
-        expect(unfiledOnly.find(g => g.id === 'collection')).toBeUndefined();
-        expect(isActionVisible(COLLECTION_ACTION, readerCtx(viewSelection([view('search', 'To read')])))).toBe(false);
-        expect(getActiveTarget(readerCtx(viewSelection([view('unfiled', 'Unfiled Items')])))).toBeNull();
-
-        const mixed = readerCtx(libraryView([collection(1, 'Methods')], 2, 'collection', [view('search', 'To read')]));
-        expect(computeActionGroups([COLLECTION_ACTION], mixed).find(g => g.id === 'collection'))
-            .toMatchObject({ label: 'Methods', iconInfo: { name: 'collection' } });
-    });
-
-    it('drops view targets but keeps collections for the message edit overlay', () => {
-        const viewsOnly = withoutViewTargets(ctx(viewSelection([view('unfiled', 'Unfiled Items')])));
-        expect(computeActionGroups([COLLECTION_ACTION], viewsOnly).find(g => g.id === 'collection')).toBeUndefined();
-
-        const mixed = withoutViewTargets(ctx(
-            libraryView([collection(1, 'Methods')], 2, 'collection', [view('search', 'To read')]),
-        ));
-        expect(computeActionGroups([COLLECTION_ACTION], mixed).find(g => g.id === 'collection'))
-            .toMatchObject({ label: 'Methods' });
+        expect(computeActionGroups([COLLECTION_ACTION], readerCtx(viewSelection([view('unfiled', 'Unfiled Items')])))
+            .find(g => g.id === 'collection')).toMatchObject({ label: 'Unfiled Items' });
+        expect(isActionVisible(COLLECTION_ACTION, readerCtx(viewSelection([view('search', 'To read')])))).toBe(true);
     });
 
     it('omits the group for a library root', () => {

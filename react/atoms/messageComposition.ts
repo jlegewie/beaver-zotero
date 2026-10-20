@@ -16,7 +16,7 @@ import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/att
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
-import { TextSelection, zoteroReferenceLookupKeys } from "@beaver/agent-core/types/attachments/apiTypes";
+import { TextSelection, zoteroReferenceLookupKeys, messageAttachmentKey, type ViewAttachment } from "@beaver/agent-core/types/attachments/apiTypes";
 import { ZoteroTag, CollectionReference } from "@beaver/agent-core/types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
@@ -147,6 +147,21 @@ export const currentMessageItemsAtom = atom(
 export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
 
 /**
+ * Saved searches and built-in views (Unfiled Items, …) attached to the current
+ * message. Set when a collection action is picked over one, the way a selected
+ * collection is attached; cleared after the message is sent.
+ */
+export const currentMessageViewsAtom = atom<ViewAttachment[]>([]);
+
+/** Attach views to the current message, skipping ones it already carries. */
+export const addViewsToCurrentMessageAtom = atom(null, (get, set, views: ViewAttachment[]) => {
+    const current = get(currentMessageViewsAtom);
+    const existing = new Set(current.map(messageAttachmentKey));
+    const added = views.filter(view => !existing.has(messageAttachmentKey(view)));
+    if (added.length > 0) set(currentMessageViewsAtom, [...current, ...added]);
+});
+
+/**
  * External files (files from disk, not Zotero items) attached to the current
  * message via drag-and-drop or the "Select File" menu. Kept separate from
  * currentMessageItemsAtom, which is deeply coupled to Zotero.Item. Records
@@ -242,6 +257,7 @@ export function readComposerDraft(get: Getter) {
         readerAction: get(readerActionContextAtom),
         items: get(currentMessageItemsAtom),
         collections: get(currentMessageCollectionsAtom),
+        views: get(currentMessageViewsAtom),
         files: get(currentMessageExternalFilesAtom),
         automaticItemKeys: get(automaticMessageItemKeysAtom),
         automaticCollections: get(automaticMessageCollectionsAtom),
@@ -258,7 +274,8 @@ export const hasComposerDraftAtom = atom(get => {
     return !!(draft.content.trim() || draft.pills.length || draft.pendingPills.length ||
         draft.pendingAttachments.includes(draft.resetToken) ||
         draft.items.some(item => !draft.automaticItemKeys.has(messageItemKey(item))) ||
-        (draft.collections.length && draft.collections !== draft.automaticCollections) || draft.files.length);
+        (draft.collections.length && draft.collections !== draft.automaticCollections) || draft.views.length ||
+        draft.files.length);
 });
 
 /** Restore rejected input without overwriting edits made while the request was pending. */
@@ -276,6 +293,7 @@ export function restoreMissingComposerDraft(get: Getter, set: Setter, draft: Ret
         set(currentMessageCollectionsAtom, draft.collections);
         set(automaticMessageCollectionsAtom, draft.automaticCollections);
     }
+    if (!get(currentMessageViewsAtom).length) set(currentMessageViewsAtom, draft.views);
     if (!get(currentMessageExternalFilesAtom).length) set(currentMessageExternalFilesAtom, draft.files);
 }
 
@@ -446,6 +464,7 @@ export const clearMessageContextAtom = atom(
         }
         set(currentMessageItemsAtom, []);
         set(currentMessageCollectionsAtom, []);
+        set(currentMessageViewsAtom, []);
         set(currentMessageExternalFilesAtom, []);
         set(currentMessageFiltersAtom, createDefaultMessageFilters());
         set(readerTextSelectionAtom, null);

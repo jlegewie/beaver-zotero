@@ -1,6 +1,7 @@
 import { getContextWindow } from '../runtime/windowRuntime';
 import { resolveNavigationWindow } from '../../src/runtime/navigation';
 import { logger } from "@beaver/agent-core/platform/logger";
+import type { ViewAttachment } from "@beaver/agent-core/types/attachments/apiTypes";
 
 /**
  * Enhanced item selection that ensures the item is visible before selecting it
@@ -208,6 +209,55 @@ export async function selectCollection(collection: Zotero.Collection, win = getC
         return success;
     } catch (error) {
         logger(`Error selecting collection ${collection.id}: ${error}`, 2);
+        return false;
+    }
+}
+
+// Collections-tree row-id prefixes of the built-in views (see Zotero's
+// CollectionTreeRow.id): each is followed by the library ID.
+const VIEW_ROW_ID_PREFIXES: Record<string, string> = {
+    unfiled: 'U',
+    publications: 'P',
+    retracted: 'R',
+};
+
+/**
+ * Select a saved search or built-in view (Unfiled Items, …) in the collections
+ * pane. `libraryID` is the device-local library. Returns false when the row
+ * does not exist or is not shown.
+ */
+export async function selectView(
+    view: ViewAttachment,
+    libraryID: number,
+    win = getContextWindow(),
+): Promise<boolean> {
+    let rowId: string;
+    if (view.type === 'saved_search') {
+        const search = Zotero.Searches.getByLibraryAndKey(libraryID, view.zotero_key) as Zotero.Search | false;
+        if (!search || search.deleted) return false;
+        rowId = `S${search.id}`;
+    } else {
+        const prefix = VIEW_ROW_ID_PREFIXES[view.special_collection];
+        if (!prefix) return false;
+        rowId = `${prefix}${libraryID}`;
+    }
+
+    win = await resolveNavigationWindow(win);
+    const zoteroPane = win.ZoteroPane;
+    if (!zoteroPane || !zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
+
+    try {
+        if (win.closed) return false;
+        win.Zotero_Tabs.select('zotero-pane');
+        // Views sit inside their library row, which must be open to select them
+        await zoteroPane.collectionsView.expandLibrary?.(libraryID);
+        const success = await zoteroPane.collectionsView.selectByID(rowId);
+        if (success) {
+            await zoteroPane.itemsView.waitForLoad();
+        }
+        return !!success;
+    } catch (error) {
+        logger(`Error selecting view ${rowId}: ${error}`, 2);
         return false;
     }
 }

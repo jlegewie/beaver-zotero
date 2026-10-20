@@ -93,6 +93,17 @@ function collectionTargetRows(context: any): any[] {
     return allTargets ? rows : [];
 }
 
+/** A collections-tree row's display name, e.g. "Unfiled Items" or a saved search's name. */
+function readRowName(row: any): string {
+    try {
+        const name = row?.getName?.();
+        if (typeof name === 'string' && name) return name;
+    } catch {
+        // fall through
+    }
+    return typeof row?.ref?.name === 'string' ? row.ref.name : '';
+}
+
 // ---------------------------------------------------------------------------
 // Selection composition — determined per popup-show by submenu onShowing,
 // consumed by filterItemAction. Safe because submenu onShowing always fires
@@ -535,8 +546,7 @@ async function dispatchAction(action: Action, context: any, menu: 'item' | 'coll
     const itemIds: number[] = filteredItems.map((i: any) => i.id);
 
     // Carry each row's library alongside it: the receiver gates on library
-    // exclusion, and both are already in hand here. Saved searches and special
-    // views have nothing to attach; the agent reads them from application state.
+    // exclusion, and both are already in hand here.
     const targetRows = menu === 'collection' ? collectionTargetRows(context) : [];
     const collections = targetRows
         .filter((row: any) => row?.type === 'collection')
@@ -544,7 +554,12 @@ async function dispatchAction(action: Action, context: any, menu: 'item' | 'coll
         .filter((c: any) => typeof c.libraryId === 'number' && typeof c.collectionId === 'number');
     const views = targetRows
         .filter((row: any) => isCollectionTargetViewType(row?.type))
-        .map((row: any) => ({ libraryId: row?.ref?.libraryID, type: row.type }))
+        .map((row: any) => ({
+            libraryId: row?.ref?.libraryID,
+            type: row.type,
+            name: readRowName(row),
+            ...(row.type === 'search' && typeof row.ref?.key === 'string' ? { key: row.ref.key } : {}),
+        }))
         .filter((v: any) => typeof v.libraryId === 'number');
 
     // Resolve the single wire target type. A collection-menu command binds to

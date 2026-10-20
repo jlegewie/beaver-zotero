@@ -21,7 +21,7 @@ function notifyExternalFileUnavailable(): void {
  * object an in-prose link names) that was rendered from persisted run history
  * but does not exist on this computer.
  */
-export type UnavailableReferenceKind = 'item' | 'collection' | 'annotation' | 'action' | 'tag' | 'link';
+export type UnavailableReferenceKind = 'item' | 'collection' | 'search' | 'view' | 'annotation' | 'action' | 'tag' | 'link';
 export type UnavailableReferenceCause = 'missing' | 'library_unavailable';
 
 const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: string; text: string }> = {
@@ -32,6 +32,14 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
     collection: {
         title: 'Collection Not Available',
         text: 'This collection is no longer in your Zotero library. It may have been deleted.',
+    },
+    search: {
+        title: 'Saved Search Not Available',
+        text: 'This saved search is no longer in your Zotero library. It may have been deleted.',
+    },
+    view: {
+        title: 'View Not Available',
+        text: "This view isn't shown in your Zotero library right now.",
     },
     annotation: {
         title: 'Annotation Not Available',
@@ -61,6 +69,14 @@ const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action
     collection: {
         title: 'Collection Not Available',
         text: "This collection is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
+    },
+    search: {
+        title: 'Saved Search Not Available',
+        text: "This saved search is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
+    },
+    view: {
+        title: 'View Not Available',
+        text: "This view is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
     },
     annotation: {
         title: 'Annotation Not Available',

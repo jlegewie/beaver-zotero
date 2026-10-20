@@ -105,6 +105,16 @@ describe('getToolCallStatus', () => {
 });
 
 describe('allUserAttachmentsAtom', () => {
+    it('keeps saved searches and views out of item identity', () => {
+        const item: MessageAttachment = { type: 'item', library_id: 1, library_ref: 'u', zotero_key: 'KEY12345' };
+        const search: MessageAttachment = {
+            type: 'saved_search', library_id: 1, library_ref: 'u', zotero_key: 'KEY12345', name: 'Beaver',
+        };
+        const store = createStore();
+        store.set(threadRunsAtom, [run('run-1', [item]), run('run-2', [search])]);
+        expect(store.get(allUserAttachmentsAtom)).toEqual(new Map([['u-KEY12345', item]]));
+    });
+
     it('replaces a legacy representative with a later portable attachment', () => {
         const legacy: SourceAttachment = {
             type: 'source',

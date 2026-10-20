@@ -41,6 +41,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
         currentMessageItemsAtom: atom<unknown[]>([]),
         clearComposerAtom: atom(null, () => {}),
         currentMessageCollectionsAtom: atom<unknown[]>([]),
+        currentMessageViewsAtom: atom<unknown[]>([]),
         currentMessageExternalFilesAtom: atom<unknown[]>([]),
         updateMessageCollectionsFromZoteroSelectionAtom: atom(null, () => attachCollectionsMock()),
         updateMessageItemsFromZoteroSelectionAtom: atom(null, () => {}),

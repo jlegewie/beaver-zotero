@@ -263,8 +263,9 @@ async function hydrateAttachments(
             }
             continue;
         }
-        if (a.type === 'external_file') {
-            // External files are not Zotero objects; nothing to hydrate.
+        if (a.type === 'external_file' || a.type === 'saved_search' || a.type === 'special_collection') {
+            // External files and views are not Zotero items or collections;
+            // nothing to hydrate.
             continue;
         }
         // A library_id whose library isn't available on this device resolves
