@@ -16,9 +16,8 @@ import {
     isBuiltinAction,
     isLockedBuiltinAction,
 } from '../types/actionStorage';
-import { libraryViewAtom, zoteroContextAtom } from './zoteroContext';
-import { isLibraryTabAtom } from './ui';
-import { isActionVisible, ActionContext, collectionTargetSelection } from '../utils/actionVisibility';
+import { zoteroContextAtom } from './zoteroContext';
+import { isActionVisible, ActionContext } from '../utils/actionVisibility';
 import {
     resolvePromptVariables,
     resolveTargetContext,
@@ -32,7 +31,8 @@ import {
     pendingPillInsertsAtom,
     addItemsToCurrentMessageItemsAtom,
     messageItemDataRevisionAtom,
-    stagedReaderActionContextAtom,
+    currentMessageViewsAtom,
+    addViewsToCurrentMessageAtom,
 } from './messageComposition';
 import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
@@ -40,8 +40,9 @@ import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValid
 import { searchableLibraryIdsAtom } from './profile';
 import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
 import type { PromptAction } from '@beaver/agent-core/agents/types';
-import { MessageAttachment, messageAttachmentKey, messageAttachmentLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
+import { MessageAttachment, ViewAttachment, isViewAttachment, messageAttachmentIdentityKeys, messageAttachmentKey, messageAttachmentLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
 import { toValidatedMessageAttachment } from '../types/attachments/converters';
+import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
@@ -329,9 +330,10 @@ export const actionsForContextAtom = atom<Action[]>((get) => {
 //
 // Shared by every surface that launches an action: the slash menu, the home
 // launcher, action suggestions, the library context menu, and the reader
-// toolbar. Picking an action attaches the items/collections its target type
-// binds to, so what it will run on is visible in the composer and can be
-// edited — or removed — before sending. Nothing is re-bound at send time.
+// toolbar. Picking an action attaches the items, collections, saved searches
+// or views its target type binds to, so what it will run on is visible in the
+// composer and can be edited — or removed — before sending. Nothing is
+// re-bound at send time.
 //
 // Synchronous on purpose: the pill and its attachments land in the same click,
 // leaving no window in which the draft can change underneath them.
@@ -368,7 +370,7 @@ export const resolveActionForStagingAtom = atom(
             return { commandName: toSlashToken(title), actionId, targetType, title };
         }
 
-        const { items, collections, itemsExcluded, collectionsExcluded } =
+        const { items, collections, views, itemsExcluded, collectionsExcluded } =
             resolveTargetContext(targetType, contextOverride);
 
         // The target exists but sits entirely in an excluded library. Running
@@ -414,6 +416,7 @@ export const resolveActionForStagingAtom = atom(
                 const added = collections.filter(c => !existingKeys.has(collectionReferenceKey(c)));
                 if (added.length > 0) set(currentMessageCollectionsAtom, [...current, ...added]);
             }
+            if (views.length > 0) set(addViewsToCurrentMessageAtom, views);
         }
 
         set(markActionUsedAtom, action.id);
@@ -495,6 +498,7 @@ interface ResolvedPillActions {
     actions: PromptAction[];
     items: Zotero.Item[];
     collections: CollectionReference[];
+    views: ViewAttachment[];
 }
 
 export const resolvePillsToPromptActionsAtom = atom(
@@ -506,37 +510,22 @@ export const resolvePillsToPromptActionsAtom = atom(
             pills: SlashCommandDescriptor[];
             persistedActions?: PromptAction[];
             bindTargets?: boolean;
-            /** The message already carries at least one collection. */
-            hasAttachedCollections?: boolean;
-            /** The message's application state is built at send time, so a
-             *  selected saved search or special view can be a collection
-             *  action's target. False when regenerating an edited message,
-             *  which keeps the original message's application state. */
-            allowViewTargets?: boolean;
+            /** The message already carries a collection, saved search or
+             *  built-in view for a collection action to run on. */
+            hasCollectionTarget?: boolean;
         },
     ): Promise<ResolvedPillActions | null> => {
-        const { pills, persistedActions, bindTargets, hasAttachedCollections, allowViewTargets } = payload;
+        const { pills, persistedActions, bindTargets, hasCollectionTarget } = payload;
         const actions = get(actionsAtom);
         const validationResults = get(itemValidationResultsAtom);
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
 
-        // Saved searches and special views (Unfiled Items, …) have no reference
-        // to attach: the agent reads them from the application state built at
-        // send time, which reports the collections-pane selection only while
-        // the library tab is active and no reader "Ask…" context is staged
-        // (that reports the reader instead). A collection action with no
-        // attached collection therefore needs such a selection when it is sent.
-        const readerContextStaged = get(stagedReaderActionContextAtom) !== null;
-        const hasLiveCollectionTarget = (): boolean => {
-            if (!allowViewTargets || readerContextStaged || !get(isLibraryTabAtom)) return false;
-            const { collections, views } = collectionTargetSelection(get(libraryViewAtom));
-            return [...collections, ...views].some(row => searchableLibraryIds.includes(row.libraryId));
-        };
-
         const accumulatedItems: Zotero.Item[] = [];
         const accumulatedCollections: CollectionReference[] = [];
+        const accumulatedViews: ViewAttachment[] = [];
         const seenItemKeys = new Set<string>();
         const seenCollectionKeys = new Set<string>();
+        const seenViewKeys = new Set<string>();
         // One entry per distinct command. Insertion-time collision handling
         // keeps tokens unique per distinct action, so first-wins dedup here
         // only collapses repeated pills of the same action.
@@ -570,7 +559,7 @@ export const resolvePillsToPromptActionsAtom = atom(
                 continue;
             }
 
-            const { text: resolvedText, items, collections, emptyItemVariables, targetContextExcluded } =
+            const { text: resolvedText, items, collections, views, emptyItemVariables, targetContextExcluded } =
                 await resolvePromptVariables(action.text, bindTargets ? pill.targetType : undefined);
 
             // The action is bound to a target that exists but sits entirely in
@@ -588,18 +577,19 @@ export const resolvePillsToPromptActionsAtom = atom(
                 return null;
             }
 
+            // A collection action binds its target when it is picked. Without
+            // one (the user removed it) the model would be told to act on
+            // "the attached items" with nothing attached.
             if (
                 pill.targetType === 'collection'
-                && !hasAttachedCollections
+                && !hasCollectionTarget
                 && collections.length === 0
-                && !hasLiveCollectionTarget()
+                && views.length === 0
             ) {
                 set(addPopupMessageAtom, {
                     type: 'warning',
                     title: 'Action skipped',
-                    text: allowViewTargets && !readerContextStaged
-                        ? `/${pill.commandName} runs on a collection. Select a collection, a saved search, or a view such as Unfiled Items in your library, then send again.`
-                        : `/${pill.commandName} runs on a collection. Select a collection in your library, then send again — saved searches and views such as Unfiled Items only work in a new message.`,
+                    text: `/${pill.commandName} runs on a collection, but none is attached. Select a collection, a saved search, or a view such as Unfiled Items, then pick the action again.`,
                     expire: true,
                     duration: 5000,
                 });
@@ -668,6 +658,16 @@ export const resolvePillsToPromptActionsAtom = atom(
                 }
             }
 
+            // Views are resolved from searchable libraries only, so they need
+            // no exclusion check of their own.
+            for (const view of views) {
+                const key = messageAttachmentKey(view);
+                if (!seenViewKeys.has(key)) {
+                    seenViewKeys.add(key);
+                    accumulatedViews.push(view);
+                }
+            }
+
             promptActions.push({
                 command: pill.commandName,
                 action_id: pill.actionId,
@@ -682,7 +682,12 @@ export const resolvePillsToPromptActionsAtom = atom(
             });
         }
 
-        return { actions: promptActions, items: accumulatedItems, collections: accumulatedCollections };
+        return {
+            actions: promptActions,
+            items: accumulatedItems,
+            collections: accumulatedCollections,
+            views: accumulatedViews,
+        };
     },
 );
 
@@ -712,10 +717,13 @@ export const sendComposedMessageAtom = atom(
         return (await withThreadWriter(get, set, async set => {
         const { baseText, pills } = payload;
 
+        // Only targets the send path keeps count: a library excluded since
+        // the action was picked is dropped from the message.
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const resolved = await set(resolvePillsToPromptActionsAtom, {
             pills,
-            hasAttachedCollections: get(currentMessageCollectionsAtom).length > 0,
-            allowViewTargets: true,
+            hasCollectionTarget: [...get(currentMessageCollectionsAtom), ...get(currentMessageViewsAtom)]
+                .some(target => searchableLibraryIds.includes(target.library_id)),
         });
         if (!resolved) return false;
         const { actions: promptActions, items: variableItems, collections: variableCollections } = resolved;
@@ -765,7 +773,7 @@ export const sendComposedMessageAtom = atom(
 export const buildEditedPromptActionsAtom = atom(
     null,
     async (
-        _get,
+        get,
         set,
         payload: {
             pills: SlashCommandDescriptor[];
@@ -775,12 +783,19 @@ export const buildEditedPromptActionsAtom = atom(
     ): Promise<{ actions?: PromptAction[]; addedAttachments: MessageAttachment[] } | null> => {
         const { pills, persistedActions, existingAttachments } = payload;
         if (pills.length === 0) return { actions: undefined, addedAttachments: [] };
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
 
         const resolved = await set(resolvePillsToPromptActionsAtom, {
             pills,
             persistedActions,
             bindTargets: true,
-            hasAttachedCollections: (existingAttachments ?? []).some(a => a.type === 'collection'),
+            // History from another device can carry that device's library_id,
+            // so resolve the portable library_ref first.
+            hasCollectionTarget: (existingAttachments ?? []).some(a => {
+                if (a.type !== 'collection' && !isViewAttachment(a)) return false;
+                const libraryId = resolveLibraryRef(a);
+                return libraryId !== null && searchableLibraryIds.includes(libraryId);
+            }),
         });
         if (!resolved) return null;
 
@@ -851,6 +866,18 @@ export const buildEditedPromptActionsAtom = atom(
             if (aliases.some(key => existingCollectionKeys.has(key))) continue;
             aliases.forEach(key => existingCollectionKeys.add(key));
             addedAttachments.push(attachment);
+        }
+
+        // Saved searches and built-in views, keyed against the existing view
+        // attachments for the same reason.
+        const existingViewKeys = new Set(
+            (existingAttachments ?? []).filter(isViewAttachment).flatMap(a => messageAttachmentIdentityKeys(a)),
+        );
+        for (const view of resolved.views) {
+            const aliases = messageAttachmentIdentityKeys(view);
+            if (aliases.some(key => existingViewKeys.has(key))) continue;
+            aliases.forEach(key => existingViewKeys.add(key));
+            addedAttachments.push(view);
         }
 
         return {

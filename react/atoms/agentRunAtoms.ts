@@ -81,7 +81,7 @@ import {
     readComposerDraft,
     restoreMissingComposerDraft,
     currentMessageItemsAtom,
-    currentMessageCollectionsAtom,
+    currentMessageCollectionsAtom, currentMessageViewsAtom,
     currentMessageExternalFilesAtom,
     currentReaderAttachmentAtom,
     stagedReaderActionContextAtom,
@@ -90,7 +90,7 @@ import {
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
+import { isAnnotationAttachment, isViewAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
@@ -2570,6 +2570,10 @@ const sendWSMessage = async (
             });
         }
 
+        // Add saved-search and built-in-view attachments (Unfiled Items, …)
+        attachments.push(...get(currentMessageViewsAtom)
+            .filter(view => searchableLibraryIds.includes(view.library_id)));
+
         // Add external file attachments (metadata only; content stays local and
         // is served on demand through the read/view request paths). Files whose
         // managed copy disappeared since attach are dropped with a popup.
@@ -2597,7 +2601,8 @@ const sendWSMessage = async (
         if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
-                ...attachments.map(messageAttachmentKey),
+                // Saved-search keys share the item key format
+                ...attachments.filter(a => !isViewAttachment(a)).map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
             logger(`sendWSMessageAtom: Handeling reader attachment - existingKeys: ${JSON.stringify(existingKeys)}`, 1);
@@ -2625,7 +2630,8 @@ const sendWSMessage = async (
         if (currentNoteTabItem && searchableLibraryIds.includes(currentNoteTabItem.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
-                ...attachments.map(messageAttachmentKey),
+                // Saved-search keys share the item key format
+                ...attachments.filter(a => !isViewAttachment(a)).map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
             const noteKeys = zoteroReferenceLookupKeys({
@@ -2747,6 +2753,7 @@ const sendWSMessage = async (
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(currentMessageItemsAtom, []);
             set(currentMessageCollectionsAtom, []);
+            set(currentMessageViewsAtom, []);
             set(currentMessageExternalFilesAtom, []);
 
             // Execute the WebSocket request

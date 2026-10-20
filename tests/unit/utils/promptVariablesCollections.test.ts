@@ -51,7 +51,7 @@ const collectionsGet = vi.fn();
 
 function libraryViewWith(
     collections: { collectionId: number; collectionName: string; libraryId: number }[],
-    views: { type: string; name: string; libraryId: number }[] = [],
+    views: { type: string; name: string; libraryId: number; key?: string }[] = [],
 ) {
     return {
         treeRowType: 'collection',
@@ -139,13 +139,51 @@ describe('collection target context — library exclusion', () => {
         expect(result.text).not.toContain('Secret');
     });
 
-    it('attaches nothing for a selected special view', async () => {
+    it('binds a selected special view as a view attachment', async () => {
         state.set(LIBRARY_VIEW_ATOM, libraryViewWith([], [
             { type: 'unfiled', name: 'Unfiled Items', libraryId: ALLOWED_LIBRARY },
         ]));
         const result = await resolvePromptVariables('Summarize.', 'collection');
         expect(result.collections).toEqual([]);
+        expect(result.views).toEqual([{
+            type: 'special_collection',
+            special_collection: 'unfiled',
+            library_id: ALLOWED_LIBRARY,
+            library_ref: 'u',
+            name: 'Unfiled Items',
+        }]);
         expect(collectionsGet).not.toHaveBeenCalled();
+    });
+
+    it('binds a selected saved search by its key, and drops one that no longer exists', async () => {
+        const searches: Record<string, { name: string; deleted?: boolean }> = {
+            SRCH0001: { name: 'Beaver' },
+            SRCH0002: { name: 'Old', deleted: true },
+        };
+        (globalThis as any).Zotero.Searches = {
+            getByLibraryAndKey: (_libraryId: number, key: string) => searches[key] ?? false,
+        };
+        state.set(LIBRARY_VIEW_ATOM, libraryViewWith([], [
+            { type: 'search', name: 'Beaver', libraryId: ALLOWED_LIBRARY, key: 'SRCH0001' },
+            { type: 'search', name: 'Old', libraryId: ALLOWED_LIBRARY, key: 'SRCH0002' },
+            { type: 'search', name: 'Gone', libraryId: ALLOWED_LIBRARY, key: 'SRCH0003' },
+        ]));
+        const result = await resolvePromptVariables('Summarize.', 'collection');
+        expect(result.views).toEqual([{
+            type: 'saved_search',
+            library_id: ALLOWED_LIBRARY,
+            zotero_key: 'SRCH0001',
+            library_ref: 'u',
+            name: 'Beaver',
+        }]);
+    });
+
+    it('never binds a view in an excluded library', async () => {
+        state.set(LIBRARY_VIEW_ATOM, libraryViewWith([], [
+            { type: 'unfiled', name: 'Unfiled Items', libraryId: EXCLUDED_LIBRARY },
+        ]));
+        const result = await resolvePromptVariables('Summarize.', 'collection');
+        expect(result.views).toEqual([]);
     });
 
     it('{{current_collection}} names selected views, but not excluded ones', async () => {

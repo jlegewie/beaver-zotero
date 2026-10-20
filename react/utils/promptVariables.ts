@@ -31,7 +31,8 @@ import { selectedZoteroItemsAtom, currentNoteItemAtom, libraryViewAtom } from '.
 import { collectionTargetSelection } from './actionVisibility';
 import { ActionTargetType } from '@beaver/agent-core/types/actions';
 import { CollectionReference } from '@beaver/agent-core/types/zotero';
-import { collectionToReference } from './zoteroReferences';
+import { collectionToReference, viewToAttachment } from './zoteroReferences';
+import type { ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -65,8 +66,11 @@ export interface PromptResolution {
     /** Zotero items to add as message attachments */
     items: Zotero.Item[];
     /** Collection context when targetType is 'collection' — every selected
-     *  collection, or empty when the selection is not purely collections. */
+     *  collection, or empty when the selection is not purely collections and
+     *  collection-like views. */
     collections: CollectionReference[];
+    /** Saved searches and built-in views bound alongside `collections`. */
+    views: ViewAttachment[];
     /** Item variable names that were present but resolved to zero items */
     emptyItemVariables: string[];
     /**
@@ -102,7 +106,7 @@ export async function resolvePromptVariables(
 
     // Fast path: no variables and no targetType context
     if (matches.length === 0 && !targetType) {
-        return { text, items: [], collections: [], emptyItemVariables: [], targetContextExcluded: false };
+        return { text, items: [], collections: [], views: [], emptyItemVariables: [], targetContextExcluded: false };
     }
 
     // Resolve all unique variables in parallel
@@ -141,6 +145,7 @@ export async function resolvePromptVariables(
 
     // Auto-attach context based on targetType (dedup items with variable-resolved ones)
     let collections: CollectionReference[] = [];
+    let views: ViewAttachment[] = [];
     let targetContextExcluded = false;
     if (targetType) {
         const context = resolveTargetContext(targetType);
@@ -155,6 +160,7 @@ export async function resolvePromptVariables(
             }
         }
         collections = context.collections;
+        views = context.views ?? [];
     }
 
     // Clean up formatting artifacts from empty resolutions
@@ -165,7 +171,7 @@ export async function resolvePromptVariables(
             .trim();
     }
 
-    return { text: result, items: allItems, collections, emptyItemVariables, targetContextExcluded };
+    return { text: result, items: allItems, collections, views, emptyItemVariables, targetContextExcluded };
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +181,9 @@ export async function resolvePromptVariables(
 export interface TargetTypeContext {
     items: Zotero.Item[];
     collections: CollectionReference[];
+    /** Saved searches and built-in views (Unfiled Items, …) a collection
+     *  action runs on. */
+    views?: ViewAttachment[];
 }
 
 /** What an action's target type binds to, with excluded libraries removed. */
@@ -182,8 +191,9 @@ export interface ResolvedTargetContext extends TargetTypeContext {
     /** The target resolved to items, but every one of them was dropped as
      *  belonging to an excluded library. */
     itemsExcluded: boolean;
-    /** Same for collections. */
+    /** Same for collections, saved searches and built-in views. */
     collectionsExcluded: boolean;
+    views: ViewAttachment[];
 }
 
 /**
@@ -202,7 +212,7 @@ export function resolveTargetContext(
     override?: TargetTypeContext,
 ): ResolvedTargetContext {
     if (!targetType) {
-        return { items: [], collections: [], itemsExcluded: false, collectionsExcluded: false };
+        return { items: [], collections: [], views: [], itemsExcluded: false, collectionsExcluded: false };
     }
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
     const context = override ?? resolveTargetTypeContext(targetType);
@@ -210,11 +220,15 @@ export function resolveTargetContext(
     const collections = context.collections.filter(
         (collection) => searchableLibraryIds.includes(collection.library_id),
     );
+    const contextViews = context.views ?? [];
+    const views = contextViews.filter((view) => searchableLibraryIds.includes(view.library_id));
     return {
         items,
         collections,
+        views,
         itemsExcluded: context.items.length > 0 && items.length === 0,
-        collectionsExcluded: context.collections.length > 0 && collections.length === 0,
+        collectionsExcluded: context.collections.length + contextViews.length > 0
+            && collections.length + views.length === 0,
     };
 }
 
@@ -225,9 +239,8 @@ function isActionableItem(item: Zotero.Item): boolean {
 /**
  * The selected collections as wire references, following the shared
  * {@link collectionTargetSelection} rule: empty unless the collections-tree
- * selection is nothing but collections and collection-like views. Selected
- * views have no reference to attach and are left out. Collections that no
- * longer resolve (deleted between selection and send) are dropped.
+ * selection is nothing but collections and collection-like views. Collections
+ * that no longer resolve (deleted between selection and send) are dropped.
  */
 function selectedCollectionReferences(): CollectionReference[] {
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
@@ -239,6 +252,18 @@ function selectedCollectionReferences(): CollectionReference[] {
         if (collection) references.push(collectionToReference(collection));
     }
     return references;
+}
+
+/**
+ * The selected saved searches and built-in views as message attachments,
+ * following the same rule as {@link selectedCollectionReferences}.
+ */
+function selectedViewAttachments(): ViewAttachment[] {
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    return collectionTargetSelection(store.get(libraryViewAtom)).views
+        .filter(view => searchableLibraryIds.includes(view.libraryId))
+        .map(viewToAttachment)
+        .filter((view): view is ViewAttachment => view !== null);
 }
 
 function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeContext {
@@ -267,9 +292,10 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
             return { items: attachments.slice(0, 10), collections: [] };
         }
         case 'collection': {
-            // Attach every selected collection, so an action launched over a
-            // multi-collection selection reaches the model with all of them.
-            return { items: [], collections: selectedCollectionReferences() };
+            // Attach every selected collection, saved search and view, so an
+            // action launched over a multi-row selection reaches the model with
+            // all of them.
+            return { items: [], collections: selectedCollectionReferences(), views: selectedViewAttachments() };
         }
         case 'note': {
             const noteItem = store.get(currentNoteItemAtom);

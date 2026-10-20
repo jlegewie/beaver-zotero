@@ -5,7 +5,7 @@ import {
 } from "../runtime/threadAdmission";
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { atom } from "jotai";
-import { readerActionContextAtom, currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { readerActionContextAtom, currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageViewsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import {
     isAtBottomAtom,
     isLibraryTabAtom,
@@ -301,6 +301,7 @@ export const newThreadAtom = atom(
             set(currentMessageItemsAtom, []);
             set(readerActionContextAtom, null);
             set(currentMessageCollectionsAtom, []);
+            set(currentMessageViewsAtom, []);
             set(currentMessageExternalFilesAtom, []);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationsAtom, []);
@@ -553,12 +554,13 @@ export const loadThreadAtom = atom(
                 // alone (citation v2).
                 const allItemReferences = new Map<string, ZoteroItemReference>();
 
-                // From user attachments in runs (external files have no Zotero
-                // reference to preload)
+                // From user attachments in runs (external files, saved searches
+                // and built-in views have no Zotero item to preload)
                 for (const run of processedRuns) {
                     const attachments = run.user_prompt.attachments || [];
                     attachments
-                        .filter(att => att.type !== 'external_file' && att.type !== 'table')
+                        .filter(att => att.type !== 'external_file' && att.type !== 'table'
+                            && att.type !== 'saved_search' && att.type !== 'special_collection')
                         .filter(att => !!att.zotero_key)
                         .forEach(att => allItemReferences.set(zoteroReferenceKey(att), {
                             library_id: att.library_id,
@@ -741,6 +743,7 @@ export const loadThreadAtom = atom(
         set(currentMessageItemsAtom, []);
         set(readerActionContextAtom, null);
         set(currentMessageCollectionsAtom, []);
+        set(currentMessageViewsAtom, []);
         set(currentMessageExternalFilesAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(clearComposerAtom);

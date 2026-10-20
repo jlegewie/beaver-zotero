@@ -6,7 +6,7 @@ import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ContentKind } from '@beaver/agent-core/types/zotero';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
-import type { ValidAnnotationType, ExternalFileContentKind } from '@beaver/agent-core/types/attachments/apiTypes';
+import type { ValidAnnotationType, ExternalFileContentKind, ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { ChipWithPopup, type ChipPopupContent, type ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
 import { collectionMenuItems } from '@beaver/agent-ui/chat/useItemContextMenu';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
@@ -290,6 +290,44 @@ export function CollectionChip({
             onClick={() => getHost().navigation?.revealCollection(collectionRef)}
             remove={remove}
             menuItems={collectionMenuItems(collectionRef)}
+        />
+    );
+}
+
+/**
+ * Collections-pane icon and description of a saved search or built-in view.
+ * Zotero's collections-tree icon names match the row types.
+ */
+export function viewChipDisplay(view: ViewAttachment): { iconName: string; kindLabel: string } {
+    if (view.type === 'saved_search') return { iconName: 'search', kindLabel: 'Saved search' };
+    return { iconName: view.special_collection, kindLabel: 'Library view' };
+}
+
+export function ViewChip({
+    view,
+    remove,
+}: {
+    view: ViewAttachment;
+    remove?: ChipRemoveConfig;
+}) {
+    const { iconName, kindLabel } = viewChipDisplay(view);
+    const icon = (
+        <span className="scale-90">
+            <CSSIcon name={iconName} className="icon-16" />
+        </span>
+    );
+    return (
+        <ChipShell
+            icon={icon}
+            label={truncateText(view.name, 20)}
+            popup={{
+                icon,
+                title: view.name,
+                subtitle: { text: kindLabel },
+                action: { icon: LibraryIcon, label: 'Reveal in library' },
+            }}
+            onClick={() => void getHost().navigation?.revealView?.(view)}
+            remove={remove}
         />
     );
 }

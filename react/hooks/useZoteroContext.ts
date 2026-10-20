@@ -138,7 +138,12 @@ function readLibraryView(zp: any): LibraryViewInfo | null {
                 libraryId: typeof rowLibraryId === 'number' ? rowLibraryId : libraryId,
             });
         } else if (isCollectionTargetViewType(row?.type) && typeof rowLibraryId === 'number') {
-            selectedViews.push({ type: row.type, name: readRowName(row), libraryId: rowLibraryId });
+            selectedViews.push({
+                type: row.type,
+                name: readRowName(row),
+                libraryId: rowLibraryId,
+                ...(row.type === 'search' && typeof row.ref?.key === 'string' ? { key: row.ref.key } : {}),
+            });
         }
     }
 

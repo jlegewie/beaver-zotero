@@ -42,6 +42,8 @@ export interface SelectedViewInfo {
     /** Name as the collections pane shows it. */
     name: string;
     libraryId: number;
+    /** Search key, for saved searches. */
+    key?: string;
 }
 
 /**

@@ -56,10 +56,12 @@ import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuesti
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
+    currentMessageViewsAtom,
 } from '../../atoms/messageComposition';
 import { userIdAtom, isAuthenticatedAtom } from '../../atoms/auth';
 import { type CollectionReference } from '@beaver/agent-core/types/zotero';
-import { collectionToReference } from '../../utils/zoteroReferences';
+import { collectionToReference, viewToAttachment } from '../../utils/zoteroReferences';
+import type { ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { resolveItemReference } from '../../../src/utils/libraryIdentity';
 import { undoEditMetadataAction } from '../../utils/editMetadataActions';
 import { undoCreateCollectionAction } from '../../utils/createCollectionActions';
@@ -188,6 +190,29 @@ function resolveCollections(
     return { collections, unresolved };
 }
 
+/**
+ * Resolve `{library_id, type, key?, name?}` refs to view attachments. `type` is
+ * a collections-tree row type: 'search' (with the search `key`), 'unfiled',
+ * 'publications' or 'retracted'.
+ */
+function resolveViews(
+    refs: Array<{ library_id: number; type: string; key?: string; name?: string }>,
+): { views: ViewAttachment[]; unresolved: any[] } {
+    const views: ViewAttachment[] = [];
+    const unresolved: any[] = [];
+    for (const ref of refs) {
+        const view = viewToAttachment({
+            type: ref.type,
+            libraryId: ref.library_id,
+            key: ref.key,
+            name: ref.name ?? ref.type,
+        });
+        if (view) views.push(view);
+        else unresolved.push({ ...ref, status: 'not_found' });
+    }
+    return { views, unresolved };
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -212,6 +237,8 @@ export async function handleTestNewThreadHttpRequest(request: any) {
  *   text            required message text
  *   items           optional [{library_id|library_ref, zotero_key}] to attach
  *   collections     optional [{library_id, collection_key}] to attach
+ *   views           optional [{library_id, type, key?, name?}] saved searches
+ *                   ('search' + key) or built-in views ('unfiled', …) to attach
  *   pills           optional SlashCommandDescriptor[] (slash-command tokens)
  *   newThread       if true, start a fresh thread before sending
  *   waitForDone     default true — poll until the run settles
@@ -255,6 +282,7 @@ export async function handleTestChatSendHttpRequest(request: any) {
     // validation the UI runs; the send path still drops excluded-library items).
     let unresolvedItems: any[] = [];
     let unresolvedCollections: any[] = [];
+    let unresolvedViews: any[] = [];
     if (Array.isArray(request?.items) && request.items.length > 0) {
         const { items, unresolved } = await resolveItems(request.items);
         unresolvedItems = unresolved;
@@ -264,6 +292,11 @@ export async function handleTestChatSendHttpRequest(request: any) {
         const { collections, unresolved } = resolveCollections(request.collections);
         unresolvedCollections = unresolved;
         store.set(currentMessageCollectionsAtom, collections);
+    }
+    if (Array.isArray(request?.views) && request.views.length > 0) {
+        const { views, unresolved } = resolveViews(request.views);
+        unresolvedViews = unresolved;
+        store.set(currentMessageViewsAtom, views);
     }
 
     const sent = await store.set(sendComposedMessageAtom, {
@@ -277,6 +310,7 @@ export async function handleTestChatSendHttpRequest(request: any) {
             error: 'Send was aborted (e.g. a staged item was rejected)',
             unresolvedItems,
             unresolvedCollections,
+            unresolvedViews,
             ...currentIds(),
         };
     }
@@ -288,7 +322,7 @@ export async function handleTestChatSendHttpRequest(request: any) {
         );
     }
 
-    return { ok: true, sent, settle, unresolvedItems, unresolvedCollections, ...currentIds() };
+    return { ok: true, sent, settle, unresolvedItems, unresolvedCollections, unresolvedViews, ...currentIds() };
 }
 
 /** Read the current thread/run/approval identity. Poll this to detect completion. */

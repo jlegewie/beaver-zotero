@@ -22,6 +22,7 @@ import {
     NoteChip,
     TagChip,
     TableChip,
+    ViewChip,
 } from './RequestChipPrimitives';
 import type { ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
 
@@ -240,6 +241,15 @@ export function RequestChips({
                             />
                         );
                     }
+                    case 'saved_search':
+                    case 'special_collection':
+                        return (
+                            <ViewChip
+                                key={`view-${messageAttachmentIdentity(att)}`}
+                                view={att}
+                                remove={attachmentRemove}
+                            />
+                        );
                     case 'external_file': {
                         const file = att as ExternalFileAttachment;
                         return (
