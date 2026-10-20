@@ -8,6 +8,7 @@ import {
 } from '../../atoms/agentRunAtoms';
 import { useStopRun } from '../../hooks/useStopRun';
 import AskUserQuestionCard from '@beaver/agent-ui/chat/AskUserQuestionCard';
+import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
 
 interface AskUserQuestionPanelProps {
     pendingQuestion: PendingQuestion;
@@ -49,6 +50,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
             onSubmit={handleSubmit}
             onStop={handleStop}
             disabled={isReconnecting}
+            heldCaption={isReconnecting ? RECONNECT_HELD_CAPTION : undefined}
         />
     );
 };

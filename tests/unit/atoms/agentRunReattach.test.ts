@@ -41,6 +41,9 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
         isReattaching: isReattachingMock,
         reattachAttempt: reattachAttemptMock,
         cancel: vi.fn(),
+        cancelHandoff: () => null,
+        canLeaveRun: () => false,
+        leaveRun: () => false,
     },
     AgentConnectionError: class AgentConnectionError extends Error {
         evidence: ConnectionFailureEvidence;
@@ -85,6 +88,15 @@ import {
 } from '../../../react/atoms/agentRunAtoms';
 import { pendingApprovalsAtom } from '../../../react/agents/agentActions';
 import { sessionAtom } from '../../../react/atoms/auth';
+import { agentService } from '@beaver/agent-core/transport/agentService';
+import { currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import {
+    closeWSConnectionAtom,
+    regenerateFromRunAtom,
+    resumeFromRunAtom,
+} from '../../../react/atoms/agentRunAtoms';
+import { threadAdmissionAtom } from '../../../react/runtime/threadAdmission';
+import { popupMessagesAtom } from '../../../react/atoms/ui';
 
 const DROP: ConnectionFailureEvidence = {
     stage: 'mid_run',
@@ -269,5 +281,103 @@ describe('a run reattaching after its connection dropped', () => {
         // The transport no longer has the run waiting, so the loop stops at once.
         dropConnection(callbacks);
         await vi.waitFor(() => expect(failReattachMock).toHaveBeenCalledWith(runId, 'gave_up'));
+    });
+
+    describe('what the user can do while it reconnects', () => {
+        beforeEach(() => {
+            store.set(currentThreadIdAtom, null);
+            store.set(threadRunsAtom, []);
+            store.set(threadAdmissionAtom, null);
+        });
+
+        it('does not retry or continue a run, which would stop the reconnecting one', async () => {
+            const callbacks = await startRun();
+            const run = store.get(activeRunAtom)!;
+            isReattachingMock.mockReturnValue(true);
+            dropConnection(callbacks);
+            expect(store.get(isRunReconnectingAtom)).toBe(true);
+
+            await store.set(regenerateFromRunAtom, { runId: run.id });
+            await store.set(resumeFromRunAtom, run.id);
+
+            expect(agentService.cancel).not.toHaveBeenCalled();
+            expect(store.get(activeRunAtom)).toMatchObject({ id: run.id, status: 'in_progress' });
+            expect(store.get(isWSChatPendingAtom)).toBe(true);
+            isReattachingMock.mockReturnValue(false);
+        });
+
+        it('waits for the server to confirm a stop made while reconnecting', async () => {
+            const callbacks = await startRun();
+            const run = store.get(activeRunAtom)!;
+            store.set(currentThreadIdAtom, 'thread-1');
+            isReattachingMock.mockReturnValue(true);
+            dropConnection(callbacks);
+
+            await store.set(closeWSConnectionAtom);
+
+            expect(agentService.cancel).toHaveBeenCalled();
+            expect(store.get(threadRunsAtom).at(-1)).toMatchObject({ id: run.id, status: 'canceled' });
+            expect(store.get(threadAdmissionAtom)).toMatchObject({
+                threadId: 'thread-1',
+                activity: { state: 'unknown' },
+                reason: 'stop_unconfirmed',
+            });
+            isReattachingMock.mockReturnValue(false);
+        });
+
+        it('does not wait again once the server settled a stopped run before the reattach', async () => {
+            const callbacks = await startRun();
+            const run = store.get(activeRunAtom)!;
+            store.set(currentThreadIdAtom, 'thread-1');
+            isReattachingMock.mockReturnValue(true);
+            dropConnection(callbacks);
+            await store.set(closeWSConnectionAtom);
+            isReattachingMock.mockReturnValue(false);
+            // The poller found the server idle and loaded what it saved.
+            store.set(threadAdmissionAtom, {
+                threadId: 'thread-1',
+                tailRunId: run.id,
+                activity: { state: 'idle', run_id: null },
+            });
+
+            callbacks.onReattached?.({ runId: run.id, evidence: DROP, gapMs: 900, replayed: 0 });
+
+            expect(store.get(threadAdmissionAtom)?.activity.state).toBe('idle');
+        });
+
+        it('warns when a new message replaced a stopped run before its stop got through', async () => {
+            store.set(popupMessagesAtom, []);
+            const callbacks = await startRun();
+
+            callbacks.onPreviousRunNotStopped?.('stopped-run');
+
+            expect(store.get(popupMessagesAtom)).toEqual([
+                expect.objectContaining({ type: 'warning', title: 'Stop not confirmed' }),
+            ]);
+        });
+
+        it('does not block the chat after an ordinary stop', async () => {
+            await startRun();
+            store.set(currentThreadIdAtom, 'thread-1');
+
+            await store.set(closeWSConnectionAtom);
+
+            expect(store.get(threadAdmissionAtom)).toBeNull();
+        });
+
+        it('checks with the server after a failed reattach', async () => {
+            const callbacks = await startRun();
+            const runId = store.get(activeRunAtom)!.id;
+            store.set(currentThreadIdAtom, 'thread-1');
+            dropConnection(callbacks);
+
+            callbacks.onReattachFailed?.({ runId, reason: 'not_found', evidence: DROP, gapMs: 500 });
+
+            expect(store.get(threadAdmissionAtom)).toMatchObject({
+                threadId: 'thread-1',
+                activity: { state: 'unknown' },
+                reason: 'reattach_failed',
+            });
+        });
     });
 });

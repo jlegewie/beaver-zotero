@@ -51,6 +51,7 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import RunPermissionButton from '../ui/buttons/RunPermissionButton';
 import AskUserQuestionCard from '@beaver/agent-ui/chat/AskUserQuestionCard';
 import BatchApprovalCard from '@beaver/agent-ui/chat/BatchApprovalCard';
+import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import BatchProgressPanel from '../input/BatchProgressPanel';
 import { getAgentActionToolIcon } from '../../host/zotero/components/agentActionViewHelpers';
 import RunPulse from './RunPulse';
@@ -196,6 +197,7 @@ const ApprovalView: React.FC<{ card: ApprovalCard } & WithBatchProgress> = ({ ca
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(false)}
                 disabled={card.decideDisabled}
+                title={card.reconnectingLine ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
             >
                 {card.rejectLabel}
             </Button>
@@ -205,6 +207,7 @@ const ApprovalView: React.FC<{ card: ApprovalCard } & WithBatchProgress> = ({ ca
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(true)}
                 disabled={card.decideDisabled}
+                title={card.reconnectingLine ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
             >
                 {card.approveLabel}
             </Button>
@@ -229,6 +232,7 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(false)}
                 disabled={card.decideDisabled}
+                title={card.reconnectingLine ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
             >
                 {card.declineLabel}
             </Button>
@@ -238,6 +242,7 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(true)}
                 disabled={card.decideDisabled}
+                title={card.reconnectingLine ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
             >
                 {card.approveLabel}
             </Button>
@@ -266,6 +271,7 @@ const BatchView: React.FC<{ card: BatchCard }> = ({ card }) => (
             approval={card.approval}
             onSubmit={card.onSubmit}
             disabled={card.disabled}
+            heldCaption={card.disabled ? RECONNECT_HELD_CAPTION : undefined}
             onStop={card.onStop}
         />
     </div>
@@ -288,6 +294,7 @@ const QuestionView: React.FC<{ card: QuestionCard }> = ({ card }) => (
                 pendingQuestion={card.question}
                 onSubmit={card.onSubmit}
                 disabled={card.disabled}
+                heldCaption={card.disabled ? RECONNECT_HELD_CAPTION : undefined}
             />
         </div>
     </>

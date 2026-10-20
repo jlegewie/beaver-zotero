@@ -58,7 +58,7 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
             return { tail_run_id: history.tail_run_id, activity: history.activity };
         },
     },
-    agentService: { connect: connectMock, close: vi.fn(), cancel: cancelMock },
+    agentService: { connect: connectMock, close: vi.fn(), cancel: cancelMock, cancelHandoff: () => null, canLeaveRun: () => false, leaveRun: () => false, isReattaching: () => false },
     AgentConnectionError: class AgentConnectionError extends Error {},
 }));
 vi.mock('@beaver/agent-core/transport/threadService', () => ({

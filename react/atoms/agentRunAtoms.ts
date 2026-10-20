@@ -10,6 +10,7 @@ import {
     setAdmission,
     reconcileThread,
     keepLocalFailuresOnSettle,
+    type AdmissionWaitReason,
 } from "../runtime/threadAdmission";
 import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
@@ -674,6 +675,11 @@ async function startContinuationRunOwned(
     // A resume overwriting the active slot mid-commit would be clobbered
     // when the retry installs its own replacement shell.
     if (retryCommitInFlight(get, options.logPrefix)) return;
+    // Nor may it take the slot of a run that is reconnecting.
+    if (get(isRunReconnectingAtom)) {
+        logger(`${options.logPrefix}: Blocked — the active run is reconnecting`, 1);
+        return;
+    }
 
     let newRunId: string | null = null;
 
@@ -1371,6 +1377,25 @@ export const isRunReconnectingAtom = atom(
 );
 
 /**
+ * A new run is waiting for the server to stop a run the user stopped while it
+ * was reconnecting (see `agentService.cancelHandoff`).
+ */
+export const stoppingPreviousRunAtom = atom(false);
+let cancelHandoffSeq = 0;
+
+/** Runs stopped while reconnecting, whose chat waits for the server from the stop on. */
+const heldStopRunIds = new Set<string>();
+
+/**
+ * Whether the open chat's run is reconnecting and can be left without being
+ * stopped: switching chats then leaves it to the server rather than stopping it.
+ */
+export function canLeaveReconnectingRun(get: Getter): boolean {
+    const run = get(activeRunAtom);
+    return !!run && isRunActive(run) && agentService.canLeaveRun(run.id);
+}
+
+/**
  * Runs whose automatic replacement — an auto-resume or an auto-retry — has been
  * scheduled and has not finished. Added when `onError` decides to replace the
  * run, removed once the replacement has started or given up.
@@ -1481,14 +1506,14 @@ function reattachFailureOutcome(info: WSReattachFailedInfo): ReattachOutcome {
  * the run ends up shown as the server finished it (completed, or interrupted
  * with Continue) rather than as this window last saw it.
  */
-function awaitServerSettlement(set: Setter): void {
+function awaitServerSettlement(set: Setter, reason: AdmissionWaitReason): void {
     const threadId = store.get(currentThreadIdAtom);
     if (!threadId) return;
     const admission = store.get(threadAdmissionAtom);
     const known = admission?.threadId === threadId ? admission : null;
     // Failed and stopped requests the server never saved stay on screen.
     keepLocalFailuresOnSettle(threadId);
-    setAdmission(set, threadId, known?.tailRunId ?? null, 'unknown', known?.unconfirmedRunId);
+    setAdmission(set, threadId, known?.tailRunId ?? null, 'unknown', known?.unconfirmedRunId, reason);
 }
 
 function surfaceAndDiagnoseConnectionFailure(
@@ -2351,12 +2376,24 @@ export function createWSCallbacks(
 
         // The run could not be picked up again: it ends exactly as the
         // original loss would have ended it without reattach.
+        // This request replaced a run the user stopped while it was
+        // reconnecting, before the stop got through.
+        onPreviousRunNotStopped: (runId: string) => {
+            logger(`WS onPreviousRunNotStopped: run ${runId}`, 1);
+            set(addPopupMessageAtom, {
+                type: 'warning',
+                title: 'Stop not confirmed',
+                text: 'Beaver could not confirm the stop of the previous response before sending this message. It may have finished in its chat and been charged.',
+                expire: false,
+            });
+        },
+
         onReattachFailed: (info: WSReattachFailedInfo) => {
             logger(`WS onReattachFailed: run ${info.runId} (${info.reason}) after ${info.gapMs}ms`, 1);
             set(wsReconnectingAtom, null);
             endRunOnLostConnection(info.evidence, true, reattachFailureOutcome(info));
             // The server may still finish the run, or has saved it already.
-            if (navigation === store.get(threadNavigationSeqAtom)) awaitServerSettlement(set);
+            if (navigation === store.get(threadNavigationSeqAtom)) awaitServerSettlement(set, 'reattach_failed');
         },
     });
     /**
@@ -2365,13 +2402,18 @@ export function createWSCallbacks(
      * chat still showing it waits for the server and loads what it saved.
      */
     const settleLeftRun = (runId: string) => {
+        // A stop made while reconnecting blocked the chat until the server
+        // was idle, so an idle chat has already loaded what the server saved.
+        const settledAfterHeldStop = heldStopRunIds.delete(runId)
+            && store.get(threadAdmissionAtom)?.activity.state === 'idle';
         if (
             navigation !== store.get(threadNavigationSeqAtom) ||
             currentWriter() ||
             isRunActive(store.get(activeRunAtom)) ||
-            !store.get(threadRunsAtom).some((run) => run.id === runId)
+            !store.get(threadRunsAtom).some((run) => run.id === runId) ||
+            settledAfterHeldStop
         ) return;
-        awaitServerSettlement(store.set);
+        awaitServerSettlement(store.set, 'stop_unconfirmed');
     };
     // What still happens for a run this window has left, e.g. one the user
     // stopped while it was reconnecting: it is still reattached, so the server
@@ -2520,6 +2562,20 @@ async function executeWSRequest(
     delete request.search_index_state;
     if (searchIndexState) request.search_index_state = searchIndexState;
 
+    // A run stopped while it was reconnecting holds this one back until the
+    // server has its cancel; say so while the new message waits.
+    // Whether that stop got through is reported by `onPreviousRunNotStopped`
+    // once this request has actually replaced the run.
+    const handoff = agentService.cancelHandoff();
+    const handoffMark = handoff ? ++cancelHandoffSeq : null;
+    const endHandoff = () => {
+        if (handoffMark === cancelHandoffSeq) store.set(stoppingPreviousRunAtom, false);
+    };
+    if (handoff) {
+        store.set(stoppingPreviousRunAtom, true);
+        void handoff.then(endHandoff);
+    }
+
     connectLoopsInFlight++;
     const result = await connectWithRetry({
         service: agentService,
@@ -2557,6 +2613,8 @@ async function executeWSRequest(
         },
     }).finally(() => {
         connectLoopsInFlight--;
+        // Also when the request was abandoned during the wait.
+        endHandoff();
     });
 
     if (!ownsWriter(requestWriter)) return;
@@ -2997,6 +3055,12 @@ async function startRegenerateRunOwned(
     // One retry at a time: retry controls of other runs stay clickable while
     // a commit is in flight, and a second truncation would race the first.
     if (retryCommitInFlight(get, logPrefix)) return;
+    // Replacing a run that is reconnecting would stop it, and that stop is
+    // billed. The retry controls are disabled meanwhile; this covers the rest.
+    if (get(isRunReconnectingAtom)) {
+        logger(`${logPrefix}: Blocked — the active run is reconnecting`, 1);
+        return;
+    }
 
     // Dismiss any open diff preview before regenerating
     dismissDiffPreview();
@@ -3101,7 +3165,11 @@ async function startRegenerateRunOwned(
         const settlementThreadId =
             get(currentThreadIdAtom) || targetRun.thread_id;
         if (settlementThreadId && Zotero.Beaver?.presence) {
-            setAdmission(set, settlementThreadId, get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown');
+            // A retry that stopped the running response says so while the
+            // server ends it; otherwise the retry control shows the wait.
+            const waitReason = activeRun ? 'stopping_previous' : undefined;
+            setAdmission(set, settlementThreadId, get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown',
+                undefined, waitReason);
             const generation = getCredentialGeneration();
             const current = () =>
                 navSeqBeforeAwait === get(threadNavigationSeqAtom) &&
@@ -3113,7 +3181,7 @@ async function startRegenerateRunOwned(
             for (;;) {
                 const history = await readAdmissionHistory(settlementThreadId, true);
                 if (!current()) return;
-                setAdmission(set, settlementThreadId, history.tail_run_id, history.activity);
+                setAdmission(set, settlementThreadId, history.tail_run_id, history.activity, undefined, waitReason);
                 if (history.activity.state !== 'active') {
                     settledHistory = history;
                     break;
@@ -3621,8 +3689,16 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
  * User-initiated close: cancel on the backend, then close.
  * Local bookkeeping is shared with shutdown via `abandonActiveRunLocallyAtom`.
  */
-export const closeWSConnectionAtom = atom(null, async (_get, set) => {
+export const closeWSConnectionAtom = atom(null, async (get, set) => {
+    // A run stopped while it reconnects is stopped once the server has it
+    // back. Until the server confirms, the chat waits for it.
+    const activeRun = get(activeRunAtom);
+    const stopIsHeld = !!activeRun && isRunActive(activeRun) && agentService.isReattaching(activeRun.id);
     set(abandonActiveRunLocallyAtom);
+    if (stopIsHeld) {
+        heldStopRunIds.add(activeRun.id);
+        awaitServerSettlement(set, 'stop_unconfirmed');
+    }
 
     // Send cancel message and close connection
     await agentService.cancel();

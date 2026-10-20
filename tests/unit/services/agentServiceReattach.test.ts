@@ -690,6 +690,165 @@ describe('AgentService run reattach', () => {
         expect(service.isConnected()).toBe(false);
     });
 
+    it('leaves a reconnecting run to the server without cancelling it', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitClose(1006);
+        expect(service.canLeaveRun(RUN_ID)).toBe(true);
+
+        // A reattach socket is already open when the user leaves the chat.
+        const loop = reattachWithRetry({
+            service,
+            runId: RUN_ID,
+            isStillWanted: () => true,
+            sleep: () => Promise.resolve(),
+        });
+        const second = await acceptNextSocket(READY_WITH_REATTACH);
+
+        expect(service.leaveRun(RUN_ID)).toBe(true);
+        await loop;
+
+        // Closed as a lost connection, so the server holds the run instead of
+        // ending it, and no cancel is sent.
+        expect(second.close).toHaveBeenCalledWith(4000, expect.any(String));
+        expect(second.sentOfType('cancel')).toHaveLength(0);
+        expect(service.isReattaching(RUN_ID)).toBe(false);
+        expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
+        // Nothing is waited for by the next chat.
+        expect(service.cancelHandoff()).toBeNull();
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
+    });
+
+    it('does not leave a run the user stopped while it reconnects', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitClose(1006);
+        await service.cancel();
+
+        expect(service.canLeaveRun(RUN_ID)).toBe(false);
+        expect(service.leaveRun(RUN_ID)).toBe(false);
+        expect(service.isReattaching(RUN_ID)).toBe(true);
+    });
+
+    it('lets go of a run reattached after the user chose to leave it', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitClose(1006);
+        const { socket: second } = await reattach(service);
+        second.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 1, replayed: 0 });
+        await flush();
+        expect(service.canLeaveRun(RUN_ID)).toBe(false);
+
+        expect(service.leaveRun(RUN_ID)).toBe(true);
+        expect(second.close).toHaveBeenCalledWith(4000, expect.any(String));
+        expect(second.sentOfType('cancel')).toHaveLength(0);
+    });
+
+    it('waits a bounded time for a stopped run, then warns the run that replaced it', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        expect(service.cancelHandoff()).toBeNull();
+        first.emitClose(1006);
+        expect(service.cancelHandoff()).toBeNull();
+        await service.cancel();
+
+        let waited = false;
+        void service.cancelHandoff()!.then(() => { waited = true; });
+        const nextCallbacks = createCallbacks({ onPreviousRunNotStopped: vi.fn() });
+        void service.connect({ ...CHAT_REQUEST, run_id: 'run-2' } as AgentRunRequest, nextCallbacks);
+        await vi.advanceTimersByTimeAsync(9_999);
+        expect(waited).toBe(false);
+        expect(nextCallbacks.onPreviousRunNotStopped).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(waited).toBe(true);
+        // The cancel never went out, and the new run took its place.
+        expect(nextCallbacks.onPreviousRunNotStopped).toHaveBeenCalledWith(RUN_ID);
+        expect(MockWebSocket.instances[0].sentOfType('cancel')).toHaveLength(0);
+    });
+
+    it('warns the next run when a stopped run could not be reattached to deliver its stop', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitClose(1006);
+        await service.cancel();
+
+        const nextCallbacks = createCallbacks({ onPreviousRunNotStopped: vi.fn() });
+        void service.connect({ ...CHAT_REQUEST, run_id: 'run-2' } as AgentRunRequest, nextCallbacks);
+        // The server refuses the reattach; the run is dropped, not stopped.
+        service.failReattach(RUN_ID, 'bad_token');
+        await flush();
+        expect(nextCallbacks.onPreviousRunNotStopped).toHaveBeenCalledWith(RUN_ID);
+    });
+
+    it('does not warn when the server had already ended the stopped run', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitClose(1006);
+        await service.cancel();
+
+        const nextCallbacks = createCallbacks({ onPreviousRunNotStopped: vi.fn() });
+        void service.connect({ ...CHAT_REQUEST, run_id: 'run-2' } as AgentRunRequest, nextCallbacks);
+        service.failReattach(RUN_ID, 'expired');
+        await flush();
+        expect(nextCallbacks.onPreviousRunNotStopped).not.toHaveBeenCalled();
+    });
+
+    it('does not warn once the stop was delivered', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitClose(1006);
+        await service.cancel();
+
+        const nextCallbacks = createCallbacks({ onPreviousRunNotStopped: vi.fn() });
+        void service.connect({ ...CHAT_REQUEST, run_id: 'run-2' } as AgentRunRequest, nextCallbacks);
+        const { socket: second } = await reattach(service);
+        second.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 1, replayed: 0 });
+        await flush();
+        expect(second.sentOfType('cancel')).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(250);
+        await flush();
+        expect(nextCallbacks.onPreviousRunNotStopped).not.toHaveBeenCalled();
+    });
+
+    it('does not warn when the waiting request is abandoned', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitClose(1006);
+        await service.cancel();
+
+        const nextCallbacks = createCallbacks({ onPreviousRunNotStopped: vi.fn() });
+        const next = service.connect({ ...CHAT_REQUEST, run_id: 'run-2' } as AgentRunRequest, nextCallbacks);
+        await flush();
+        // The user stops the new message while it waits.
+        await service.cancel();
+        await vi.advanceTimersByTimeAsync(10_000);
+        await next;
+        expect(nextCallbacks.onPreviousRunNotStopped).not.toHaveBeenCalled();
+        // The stopped run is still being reached to deliver its cancel.
+        expect(service.isReattaching(RUN_ID)).toBe(true);
+    });
+
+    it('does not leave a run holding an answer the user gave while it reconnects', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitClose(1006);
+        expect(service.sendApprovalResponse('action-1', true)).toBe(true);
+
+        expect(service.canLeaveRun(RUN_ID)).toBe(false);
+        expect(service.leaveRun(RUN_ID)).toBe(false);
+        expect(service.isReattaching(RUN_ID)).toBe(true);
+    });
+
     it('ends the run as before against a backend that does not reattach', async () => {
         const service = new AgentService('https://api.example.com', {});
         const callbacks = createCallbacks();

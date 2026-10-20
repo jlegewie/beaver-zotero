@@ -3595,4 +3595,12 @@ export interface WSCallbacks {
      * end the run as `onClose` would have for the original loss.
      */
     onReattachFailed?: (info: WSReattachFailedInfo) => void;
+
+    /**
+     * Called on a new run's callbacks when it replaced a run the user stopped
+     * while that run was reconnecting, before the stop could be confirmed:
+     * the cancel was never sent and the server did not end the run, so it may
+     * still finish there and be charged.
+     */
+    onPreviousRunNotStopped?: (runId: string) => void;
 }

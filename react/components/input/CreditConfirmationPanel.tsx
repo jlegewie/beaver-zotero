@@ -12,6 +12,7 @@ import CreditConfirmationCard, {
 } from '@beaver/agent-ui/chat/CreditConfirmationCard';
 import { useStopRun } from '../../hooks/useStopRun';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
 
 interface CreditConfirmationPanelProps {
     confirmation: PendingCreditConfirmation;
@@ -82,6 +83,7 @@ export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = (
         <CreditConfirmationCard
             confirmation={confirmation}
             disabled={isSubmitted || isReconnecting}
+            heldCaption={isReconnecting && !isSubmitted ? RECONNECT_HELD_CAPTION : undefined}
             onApprove={handlers.approve}
             onDecline={handlers.decline}
             onStop={handleStop}

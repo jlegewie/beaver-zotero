@@ -609,10 +609,28 @@ describe('BatchApprovalCard while the run reconnects', () => {
         hookState.index = 0;
     });
 
-    function renderHeld(onSubmit: (response: BatchApprovalDecision) => void, onStop: () => void, disabled: boolean) {
+    function renderHeld(onSubmit: (response: BatchApprovalDecision) => void, onStop: () => void, disabled: boolean, heldCaption?: string) {
         hookState.index = 0;
-        return BatchApprovalCard({ approval: approval(), onSubmit, onStop, disabled }) as React.ReactNode;
+        return BatchApprovalCard({ approval: approval(), onSubmit, onStop, disabled, heldCaption }) as React.ReactNode;
     }
+
+    it('says why the answers are held back', () => {
+        const caption = 'You can answer as soon as Beaver reconnects.';
+        const tree = renderHeld(vi.fn(), vi.fn(), true, caption);
+
+        expect(findAll(tree, (el) => el.props.role === 'status')).toHaveLength(1);
+        expect(renderedText(tree)).toContain(caption);
+        expect(findOne(tree, byAriaLabel('Approve batch job')).props.title).toBe(caption);
+        expect(findOne(tree, byAriaLabel('Cancel batch job')).props.title).toBe(caption);
+    });
+
+    it('shows no caption once the answers are available again', () => {
+        const caption = 'You can answer as soon as Beaver reconnects.';
+        const tree = renderHeld(vi.fn(), vi.fn(), false, caption);
+
+        expect(renderedText(tree)).not.toContain(caption);
+        expect(findOne(tree, byAriaLabel('Approve batch job')).props.title).toBeUndefined();
+    });
 
     it('holds both answers back and offers Stop instead', () => {
         const onSubmit = vi.fn();

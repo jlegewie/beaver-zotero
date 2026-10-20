@@ -38,10 +38,12 @@ import {
 import { activeRunAtom, threadRunsAtom, wsReconnectingAtom } from '@beaver/agent-core/run-state/atoms';
 import { agentService } from '@beaver/agent-core/transport/agentService';
 import { flushPendingPartEvents } from '../../utils/streamingPartQueue';
+import { admissionUnreachableAtom, threadAdmissionAtom } from '../../runtime/threadAdmission';
 import {
     isWSChatPendingAtom,
     sendApprovalResponseAtom,
     sendCreditConfirmationResponseAtom,
+    stoppingPreviousRunAtom,
 } from '../../atoms/agentRunAtoms';
 import {
     pendingCreditConfirmationsAtom,
@@ -130,6 +132,19 @@ function currentIds() {
             : null,
         isPending: store.get(isWSChatPendingAtom),
         isReconnecting: store.get(wsReconnectingAtom) !== null,
+        // What the presence bar is showing for the open chat.
+        admission: (() => {
+            const snapshot = store.get(threadAdmissionAtom);
+            return snapshot
+                ? {
+                    threadId: snapshot.threadId,
+                    state: snapshot.activity.state,
+                    reason: snapshot.reason ?? null,
+                    unreachable: store.get(admissionUnreachableAtom),
+                }
+                : null;
+        })(),
+        stoppingPreviousRun: store.get(stoppingPreviousRunAtom),
         transport: {
             connected: agentService.isConnected(),
             run: agentService.runLinkState(),

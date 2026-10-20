@@ -48,6 +48,10 @@ vi.mock("@beaver/agent-core/transport/agentService", () => ({
         close: closeMock,
         cancel: cancelMock,
         isConnected: () => true,
+        cancelHandoff: () => null,
+        canLeaveRun: () => false,
+        leaveRun: () => false,
+        isReattaching: () => false,
     },
     AgentConnectionError: class AgentConnectionError extends Error {
         evidence: ConnectionFailureEvidence;

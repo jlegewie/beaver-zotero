@@ -29,7 +29,7 @@ const { connectMock, closeMock, resolveClientIdentityMock, reportConnectionFailu
 // `instanceof` check still narrows against: the mocked specifier and the loop's
 // own relative import resolve to one module, so both see this same class.
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentService: { connect: connectMock, close: closeMock },
+    agentService: { connect: connectMock, close: closeMock, cancelHandoff: () => null, canLeaveRun: () => false, leaveRun: () => false, isReattaching: () => false },
     AgentConnectionError: class AgentConnectionError extends Error {
         evidence: ConnectionFailureEvidence;
         constructor(message: string, evidence: ConnectionFailureEvidence) {

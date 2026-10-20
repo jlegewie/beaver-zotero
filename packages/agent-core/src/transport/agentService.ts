@@ -140,6 +140,12 @@ export const HEARTBEAT_TIMEOUT_REASON = 'heartbeat_timeout';
  * any other code is recorded as a lost connection.
  */
 export const HEARTBEAT_TIMEOUT_CLOSE_CODE = 4000;
+/**
+ * Close code for the socket of a run the user has left after it lost its
+ * connection. The server holds a run whose socket closes with it, as after
+ * any lost connection, instead of ending it as a deliberate close.
+ */
+const LEFT_RUN_CLOSE_CODE = HEARTBEAT_TIMEOUT_CLOSE_CODE;
 
 interface ConnectionAttemptState {
     stage: ConnectionFailureStage;
@@ -388,16 +394,12 @@ export class AgentService {
         // A run the user stopped while it was reconnecting is still being
         // reattached to deliver the cancel; replacing it now would leave it
         // running on the server. Give that a bounded chance to finish.
-        const stopping = this.run;
-        if (!reattach && stopping?.state === 'reattaching' && stopping.cancelRequested) {
-            logger(`AgentService: Waiting for the cancel of run ${stopping.runId} before connecting`, 1);
+        const handoff = reattach ? null : this.cancelHandoff();
+        const stopping = handoff ? this.run : null;
+        if (handoff) {
+            logger(`AgentService: Waiting for the cancel of run ${stopping?.runId} before connecting`, 1);
             const epoch = this.connectEpoch;
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            await Promise.race([
-                stopping.ended,
-                new Promise<void>((resolve) => { timer = setTimeout(resolve, CANCEL_HANDOFF_WAIT_MS); }),
-            ]);
-            clearTimeout(timer);
+            await handoff;
             // Closed or cancelled while waiting: this connection is no longer
             // wanted. Like any intentional close, that is not a failure.
             if (this.connectEpoch !== epoch) {
@@ -427,6 +429,12 @@ export class AgentService {
             }
         } else {
             this.run = new RunLink(request.run_id, callbacks);
+            // The run this one waited for is gone now, and its stop with it
+            // unless that was settled in time.
+            if (stopping && !stopping.stopSettled) {
+                logger(`AgentService: Run ${request.run_id} replaced run ${stopping.runId} before its stop was confirmed`, 1);
+                callbacks.onPreviousRunNotStopped?.(stopping.runId);
+            }
         }
         this.connecting = true;
         this.connectingReattach = reattach;
@@ -950,6 +958,50 @@ export class AgentService {
     }
 
     /**
+     * Whether `runId` is reconnecting and can be left without stopping it (see
+     * `leaveRun`): it was not stopped, and holds no decision the user made
+     * meanwhile, which leaving would drop.
+     */
+    canLeaveRun(runId: string): boolean {
+        return this.isReattaching(runId) && !this.run!.cancelRequested && !this.run!.hasHeld;
+    }
+
+    /**
+     * Let go of `runId` without cancelling it. The server keeps the run as it
+     * keeps any run whose connection was lost: it finishes and saves it if it
+     * can, or ends it as interrupted once its grace period is over.
+     *
+     * Meant for a run that is reconnecting (`canLeaveRun`). One that has been
+     * picked up again since the user chose to leave is let go the same way.
+     * Returns false, and changes nothing, when the run is not this service's,
+     * was stopped, holds a decision, or cannot be held by the server.
+     */
+    leaveRun(runId: string): boolean {
+        const run = this.run;
+        if (!run || run.runId !== runId || run.cancelRequested || run.hasHeld || run.terminal || !run.token || !run.reattachable) return false;
+        logger(`AgentService: Leaving run ${runId} (${run.state}); the server keeps it`, 1);
+        this.close(LEFT_RUN_CLOSE_CODE, 'Run left after a lost connection', { notifyClose: false });
+        return true;
+    }
+
+    /**
+     * While a run stopped during a reconnect is still being reached to deliver
+     * its cancel, a new run waits for it. Resolves once that run has ended or
+     * `CANCEL_HANDOFF_WAIT_MS` has passed; null when nothing is waited for.
+     * Whether the stop was settled is reported to the run that replaces it
+     * (`onPreviousRunNotStopped`).
+     */
+    cancelHandoff(): Promise<void> | null {
+        const stopping = this.run;
+        if (stopping?.state !== 'reattaching' || !stopping.cancelRequested) return null;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        return Promise.race([
+            stopping.ended,
+            new Promise<void>((resolve) => { timer = setTimeout(resolve, CANCEL_HANDOFF_WAIT_MS); }),
+        ]).finally(() => clearTimeout(timer));
+    }
+
+    /**
      * What a new socket needs to reattach `runId`: the request it sends and the
      * callbacks the run was started with. Null when that run is not waiting to
      * be reattached.
@@ -971,6 +1023,8 @@ export class AgentService {
         const run = this.run;
         if (!run || run.runId !== runId || run.state !== 'reattaching') return;
         logger(`AgentService: Could not reattach run ${runId}: ${reason}`, 1);
+        // An expired run was ended by the server, which settles a stop too.
+        if (reason === 'expired') run.stopSettled = true;
         this.dropRun();
         this.closeSocket(1000, 'Reattach failed', { notifyClose: false });
         run.callbacks.onReattachFailed?.({
@@ -1804,6 +1858,7 @@ export class AgentService {
         // Send cancel message to backend
         logger('AgentService: Sending cancel message', 1);
         this.ws.send(JSON.stringify({ type: 'cancel' }));
+        if (this.run) this.run.stopSettled = true;
 
         // Wait briefly to allow the message to be flushed
         await new Promise((resolve) => setTimeout(resolve, waitMs));
@@ -2003,12 +2058,12 @@ export class AgentRunService extends ApiService {
      * this endpoint answer 404; from then on this reads the same fields from
      * the history endpoint instead.
      */
-    async getThreadActivity(threadId: string): Promise<ThreadActivityResponse> {
+    async getThreadActivity(threadId: string, timeoutMs: number = 15000): Promise<ThreadActivityResponse> {
         if (!this.activityEndpointMissing) {
             try {
                 return await this.get<ThreadActivityResponse>(
                     `/api/v1/agents/beaver/threads/${threadId}/activity`,
-                    { timeoutMs: 15000 },
+                    { timeoutMs },
                 );
             } catch (error) {
                 // The endpoint answers a missing thread as empty, never 404.

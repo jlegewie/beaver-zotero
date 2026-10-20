@@ -65,6 +65,11 @@ export class RunLink {
     state: 'live' | 'reattaching' = 'live';
     /** The user stopped the run while it was reattaching; sent once reattached. */
     cancelRequested = false;
+    /**
+     * The stop is settled: the cancel was sent, or the server ended the run
+     * itself. A stopped run dropped without either may still run on.
+     */
+    stopSettled = false;
     /** When the current loss was noticed. */
     detachedAt: number | null = null;
     /** `Date.now()` after which the client stops trying to reattach. */
@@ -161,6 +166,11 @@ export class RunLink {
 
     hold(message: Record<string, any>): void {
         this.held.push(message);
+    }
+
+    /** Whether a decision waits for the reattach. */
+    get hasHeld(): boolean {
+        return this.held.length > 0;
     }
 
     takeHeld(): Record<string, any>[] {

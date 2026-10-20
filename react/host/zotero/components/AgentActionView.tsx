@@ -31,6 +31,7 @@ import {
     undoAgentActionsAtom,
 } from '../agentActionExecution';
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
+import { RECONNECT_HELD_CAPTION, RECONNECT_SENDING_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import { hasLibraryIdentity, resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
 import {
@@ -379,6 +380,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         && (status === 'awaiting' || status === 'pending'),
     );
 
+    // While the run reconnects, a card awaiting a decision says when it can be
+    // answered, and one already answered says its answer has yet to be sent.
+    const isReplyHeld = isRunReconnecting && !actionInFinalState
+        && (isProcessingApproval || isExternallyProcessing);
+    const reconnectCaption = isAnswerHeld
+        ? RECONNECT_HELD_CAPTION
+        : isReplyHeld ? RECONNECT_SENDING_CAPTION : null;
+
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
@@ -668,7 +677,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
                                 {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
                             </div>
-                            {progressMessage && (
+                            {reconnectCaption ? (
+                                <span className="font-color-secondary text-sm" role="status">{reconnectCaption}</span>
+                            ) : progressMessage && (
                                 <span className="font-color-tertiary shimmer-text">{progressMessage}</span>
                             )}
                         </div>
@@ -684,7 +695,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
                     {showDecisionButtons && (
                         <>
-                            <Tooltip content="Reject" showArrow singleLine>
+                            <Tooltip content={isAnswerHeld ? RECONNECT_UNAVAILABLE_TOOLTIP : 'Reject'} showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
@@ -694,7 +705,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     disabled={isAnswerHeld}
                                 />
                             </Tooltip>
-                            <Tooltip content="Apply" showArrow singleLine>
+                            <Tooltip content={isAnswerHeld ? RECONNECT_UNAVAILABLE_TOOLTIP : 'Apply'} showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
@@ -796,6 +807,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
                                 disabled={isProcessing || isAnswerHeld}
+                                title={isAnswerHeld ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
                                 className="flex-none whitespace-nowrap"
                             >
                                 Reject
@@ -843,6 +855,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                 loading={isProcessing && clickedButton === 'approve'}
                                 disabled={isProcessing || isAnswerHeld}
+                                title={isAnswerHeld ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
                                 className="flex-none whitespace-nowrap"
                             >
                                 <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>

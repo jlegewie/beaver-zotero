@@ -1,4 +1,5 @@
 import { threadReadOnlyAtom } from '../../runtime/threadProjection';
+import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useComposerVoice } from "../../hooks/useComposerVoice";
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -6,7 +7,7 @@ import { MicIcon, StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/i
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
-import { sendWSMessageAtom, isWSChatPendingAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom } from '../../atoms/agentRunAtoms';
+import { sendWSMessageAtom, isWSChatPendingAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom, stoppingPreviousRunAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
 import RunPermissionButton, { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
@@ -196,6 +197,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const verdictClaimed = useAtomValue(approvalVerdictInFlightAtom);
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
     const isVerdictInFlight = verdictClaimed || isReconnecting;
+    // A new message waiting for a stopped response to end says so in the
+    // presence bar.
+    const stoppingPreviousRun = useAtomValue(stoppingPreviousRunAtom);
     const beginApprovalVerdict = useSetAtom(beginApprovalVerdictAtom);
     const releaseApprovalVerdict = useSetAtom(releaseApprovalVerdictAtom);
     // Note: while an ask_user_question request is pending (and no approval is),
@@ -278,7 +282,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     // band takes a place here instead of stacking. Laid out lowest-priority
     // first so the winner sits nearest the composer.
     const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
-        threadReadOnly
+        threadReadOnly || stoppingPreviousRun
             ? 'thread-presence'
             : isAwaitingApproval
                 ? 'approvals'
@@ -698,6 +702,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 <PendingActionsBar
                     onDecide={(approved) => handleApprovalVerdict(approved, true)}
                     disabled={isVerdictInFlight}
+                    heldCaption={isReconnecting ? RECONNECT_HELD_CAPTION : undefined}
                 />
             )}
 
@@ -865,6 +870,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 className="composer-reject"
                                 ariaLabel={rejectVerdictLabel}
                                 disabled={isVerdictInFlight}
+                                title={isReconnecting ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
                                 onClick={() => handleApprovalVerdict(false, true)}
                             >
                                 {rejectVerdictLabel}
@@ -875,6 +881,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 className="composer-approve"
                                 ariaLabel={approveVerdictLabel}
                                 disabled={isVerdictInFlight}
+                                title={isReconnecting ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
                                 onClick={() => handleApprovalVerdict(true, true)}
                             >
                                 {approveVerdictLabel}

@@ -65,6 +65,8 @@ export interface BatchApprovalCardProps {
     onSubmit: (response: BatchApprovalDecision) => void;
     /** Hold the decision back for now (the run's connection is being recovered). */
     disabled?: boolean;
+    /** Why the decision is held back, shown above the footer while `disabled`. */
+    heldCaption?: string;
     /**
      * Stop the whole run. Offered only while the card is `disabled`: both
      * answers are unavailable then, and this is the one way out.
@@ -113,6 +115,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     approval,
     onSubmit,
     disabled = false,
+    heldCaption,
     onStop,
 }) => {
     const [draft, setDraft] = useState<BatchApprovalDraft>(
@@ -334,6 +337,12 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                     autoFocus={(approval.userInstructionsPrefill ?? '').length === 0}
                 />
 
+                {disabled && heldCaption && (
+                    <div className="text-sm font-color-secondary" role="status">
+                        {heldCaption}
+                    </div>
+                )}
+
                 {/* Footer: coverage ... cancel, approve. Both answers leave the
                     run alive, so neither is an escape hatch and the destructive
                     one is not given a leading position. */}
@@ -382,6 +391,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         ariaLabel={hasInstructions ? 'Cancel batch job and send instructions' : 'Cancel batch job'}
                         onClick={handleDecline}
                         disabled={isDecided || disabled}
+                        title={disabled ? heldCaption : undefined}
                         className="mr-1 flex-none whitespace-nowrap"
                     >
                         {hasInstructions ? approval.declineWithInstructionsLabel : approval.declineLabel}
@@ -392,6 +402,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         style={{ padding: '3px 5px' }}
                         onClick={handleApprove}
                         disabled={isDecided || disabled || Boolean(approval.table && hasInstructions)}
+                        title={disabled ? heldCaption : undefined}
                         className="flex-none whitespace-nowrap"
                     >
                         {approval.approveLabel}

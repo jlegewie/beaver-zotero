@@ -43,6 +43,8 @@ export interface AskUserQuestionCardProps {
      * The user can still work through the questions and stop the run.
      */
     disabled?: boolean;
+    /** Why the answer is held back, shown above the footer while `disabled`. */
+    heldCaption?: string;
 }
 
 /**
@@ -68,6 +70,7 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
     onSubmit,
     onStop,
     disabled = false,
+    heldCaption,
 }) => {
     const questions = pendingQuestion.questions;
     const total = questions.length;
@@ -302,6 +305,12 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
                     </div>
                 </div>
 
+                {disabled && heldCaption && (
+                    <div className="text-sm font-color-secondary pt-2" role="status">
+                        {heldCaption}
+                    </div>
+                )}
+
                 {/* Footer: Stop ... Skip Next/Submit */}
                 <div className="display-flex flex-row items-center pt-2 gap-2">
                     {onStop && (
@@ -323,6 +332,7 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
                         ariaLabel={isLast ? 'Skip this question and submit' : 'Skip this question'}
                         onClick={handleSkip}
                         disabled={isSubmitted || (isLast && disabled)}
+                        title={isLast && disabled ? heldCaption : undefined}
                     >
                         Skip
                     </Button>
@@ -332,6 +342,7 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
                         style={{ padding: '2px 5px' }}
                         onClick={handleNext}
                         disabled={!isQuestionAnswered(question, draft) || isSubmitted || (isLast && disabled)}
+                        title={isLast && disabled ? heldCaption : undefined}
                     >
                         {isLast
                             ? (<span>Submit <span className="opacity-50">⏎</span></span>)

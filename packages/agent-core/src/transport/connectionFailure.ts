@@ -316,6 +316,15 @@ function standardCloseDetails(code: number): string | null {
 export const REATTACH_FAILED_MESSAGE =
     'The connection was lost and Beaver could not reconnect to the response.';
 
+/** Tooltip on a control that is unavailable while the run reconnects. */
+export const RECONNECT_UNAVAILABLE_TOOLTIP = 'Available once Beaver reconnects';
+
+/** Caption on a decision card held while the run reconnects. */
+export const RECONNECT_HELD_CAPTION = 'You can answer as soon as Beaver reconnects.';
+
+/** Caption on a decision the user made that waits for the run to reconnect. */
+export const RECONNECT_SENDING_CAPTION = 'Sending when reconnected…';
+
 /** Build truthful, actionable copy from the evidence currently available. */
 export function presentConnectionFailure(
     evidence: ConnectionFailureEvidence,
