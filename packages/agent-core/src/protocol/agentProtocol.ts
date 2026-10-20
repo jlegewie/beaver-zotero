@@ -1785,6 +1785,12 @@ export interface WSResolvePopulationResponse {
     /** Portable identities aligned with collection_names; legacy keys remain accepted. */
     collection_ids?: string[];
     /**
+     * Display names of the saved searches named by `savedSearch` conditions,
+     * keyed by the condition value as sent. The approval card names a saved
+     * search from these and falls back to its key.
+     */
+    saved_search_names?: Record<string, string> | null;
+    /**
      * The join mode actually applied to the request's `conditions`. Set on
      * every successful resolution, and absent from a failure.
      *

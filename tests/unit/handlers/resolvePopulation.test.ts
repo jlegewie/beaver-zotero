@@ -1022,6 +1022,36 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.collection_names).toEqual(['Theory', 'Methods']);
         });
 
+        it('names the saved searches savedSearch conditions point at, keyed by the value sent', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            (globalThis as any).Zotero.Searches = {
+                getByLibraryAndKey: vi.fn((libraryID: number, key: string) =>
+                    (libraryID === LIBRARY_ID && key === 'SRCH0001' ? { name: 'Reading list', deleted: false } : false)),
+            };
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'savedSearch', operator: 'is', value: 'SRCH0001' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(searches[0].addCondition).toHaveBeenCalledWith('savedSearch', 'is', 'SRCH0001');
+            expect(response.saved_search_names).toEqual({ SRCH0001: 'Reading list' });
+        });
+
+        it('refuses a savedSearch condition whose key is not in the library', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            (globalThis as any).Zotero.Searches = { getByLibraryAndKey: vi.fn(() => false) };
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'savedSearch', operator: 'is', value: 'SRCH0001' }],
+            }));
+
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.item_ids).toEqual([]);
+        });
+
         it('names the library alone when the population is not scoped to a collection', async () => {
             searchResultIds = [1];
             seedItem(1);
