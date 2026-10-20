@@ -26,6 +26,12 @@ import { store } from "../store";
 import type { WindowRuntime } from "../../src/runtime/instance";
 import { currentWriter } from "./threadWriter";
 import { viewedHistoryRevisionAtom } from "./threadProjection";
+import {
+    REATTACH_RESOLUTION_WINDOW_MS,
+    reattachResolutionAtom,
+    replacementNotes,
+    runReplacementNotesAtom,
+} from "@beaver/agent-core/run-state/runResolution";
 
 /**
  * Why this window is waiting for the server to settle a chat, when it knows:
@@ -115,6 +121,19 @@ function currentReason(
     return snapshot?.threadId === threadId ? snapshot.reason : undefined;
 }
 
+/**
+ * A failed reattach in `threadId` that has shown "checking" for its whole
+ * window: its card is back to the connection error, so the next failed read
+ * already reports the server unreachable rather than "checking".
+ */
+function resolutionOverdue(threadId: string | null): boolean {
+    const resolution = store.get(reattachResolutionAtom);
+    return (
+        resolution?.threadId === threadId &&
+        Date.now() - resolution.since >= REATTACH_RESOLUTION_WINDOW_MS
+    );
+}
+
 /** Poll the open chat's activity now, set by `attachThreadAdmission`. */
 let pollAdmissionNow: (() => Promise<void>) | null = null;
 
@@ -201,6 +220,21 @@ export async function reconcileThread(
         local.error?.type === "connection_error" &&
         !loaded.runs.some((run) => run.id === local.id);
     const settling = settlingThreads.delete(id);
+    if (settling) {
+        // Say so where the server's copy replaces a run this window showed
+        // as failed or stopped with a completed one.
+        const shown = local
+            ? [...get(threadRunsAtom), local]
+            : get(threadRunsAtom);
+        const notes = replacementNotes(shown, loaded.runs);
+        if (notes.size > 0)
+            set(
+                runReplacementNotesAtom,
+                (previous) => new Map([...previous, ...notes]),
+            );
+    }
+    if (get(reattachResolutionAtom)?.threadId === id)
+        set(reattachResolutionAtom, null);
     set(
         threadRunsAtom,
         settling
@@ -278,7 +312,11 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
                 }
             } catch {
                 /* An unavailable server has not settled. */
-                if (current() && ++failures >= UNREACHABLE_AFTER_FAILURES)
+                if (
+                    current() &&
+                    (++failures >= UNREACHABLE_AFTER_FAILURES ||
+                        resolutionOverdue(id))
+                )
                     store.set(admissionUnreachableThreadAtom, id);
             }
         };
@@ -324,6 +362,8 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
         store.set(threadAdmissionAtom, null);
         store.set(threadConflictAtom, null);
         store.set(admissionUnreachableThreadAtom, null);
+        store.set(reattachResolutionAtom, null);
+        store.set(runReplacementNotesAtom, new Map());
     };
     const removers = [
         store.sub(threadAdmissionAtom, schedule),

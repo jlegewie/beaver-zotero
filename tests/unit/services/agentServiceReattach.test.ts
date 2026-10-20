@@ -249,7 +249,7 @@ describe('AgentService run reattach', () => {
         // The loss is not the end of the run.
         expect(callbacks.onClose).not.toHaveBeenCalled();
         expect(callbacks.onReattaching).toHaveBeenCalledWith(
-            expect.objectContaining({ runId: RUN_ID, cancelRequested: false }),
+            expect.objectContaining({ runId: RUN_ID, cancelRequested: false, graceMs: expect.any(Number), detachedAt: expect.any(Number) }),
         );
         expect(service.isReattaching(RUN_ID)).toBe(true);
 

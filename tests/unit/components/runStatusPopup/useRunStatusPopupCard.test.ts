@@ -82,11 +82,14 @@ vi.mock('../../../../react/host/zotero/components/reviewChanges/useRunActionRows
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     activeRunAtom,
+    currentThreadIdAtom,
     currentThreadNameAtom,
     threadRunsAtom,
     wsReconnectingAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import { reattachResolutionAtom } from '@beaver/agent-core/run-state/runResolution';
+import { REATTACH_CHECKING_SHORT } from '@beaver/agent-core/transport/connectionFailure';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import { pendingApprovalsAtom } from '../../../../react/agents/agentActions';
@@ -413,6 +416,31 @@ describe('when a run finishes', () => {
         });
         expect(latest?.kind).toBe('running');
         expect(latest?.threadName).toBe('Summarize the neighborhood effects literature');
+    });
+});
+
+describe('when a run whose reattach failed is still being checked', () => {
+    it('shows a passing card whose dismissal keeps the outcome report', () => {
+        store.set(currentThreadIdAtom, 'thread-1');
+        store.set(activeRunAtom, run());
+        mount();
+        act(() => {
+            store.set(reattachResolutionAtom, { threadId: 'thread-1', runId: 'run-1', since: Date.now() });
+            store.set(activeRunAtom, run({ status: 'error', error: { type: 'connection_error', message: 'lost' } }));
+        });
+        expect(latest).toMatchObject({ kind: 'running', statusLine: REATTACH_CHECKING_SHORT });
+
+        act(() => { (latest as any).onDismiss(); });
+        expect(latest).toBeNull();
+        expect(store.get(runStatusPopupCompletionAtom)).toMatchObject({ runId: 'run-1' });
+
+        // The server's copy arrives: the run finished while disconnected.
+        act(() => {
+            store.set(reattachResolutionAtom, null);
+            store.set(threadRunsAtom, [run({ status: 'completed' })]);
+            store.set(activeRunAtom, null);
+        });
+        expect(latest).toMatchObject({ kind: 'completed', outcome: 'completed' });
     });
 });
 

@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { Icon, Spinner, RepeatIcon } from '../icons/icons';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
-import { wsReconnectingAtom, wsRetryAtom } from '@beaver/agent-core/run-state/atoms';
+import { wsRetryAtom } from '@beaver/agent-core/run-state/atoms';
 import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
+import { useVisibleReconnect } from '../../hooks/useVisibleReconnect';
 
 /**
  * How long a wait runs before the indicator starts counting it out loud.
@@ -75,7 +76,7 @@ function useElapsedSeconds(since: number | null | undefined): number {
  */
 export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall, followsText, waitingSince, idleLabel = 'Generating', hideIcon = false }) => {
     const retryState = useAtomValue(wsRetryAtom);
-    const reconnectState = useAtomValue(wsReconnectingAtom);
+    const reconnectState = useVisibleReconnect();
     const elapsedSeconds = useElapsedSeconds(waitingSince);
 
     // Check if retry state applies to this run

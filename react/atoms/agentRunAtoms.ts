@@ -12,6 +12,7 @@ import {
     keepLocalFailuresOnSettle,
     type AdmissionWaitReason,
 } from "../runtime/threadAdmission";
+import { reattachResolutionAtom } from "@beaver/agent-core/run-state/runResolution";
 import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
@@ -1513,6 +1514,12 @@ function awaitServerSettlement(set: Setter, reason: AdmissionWaitReason): void {
     const known = admission?.threadId === threadId ? admission : null;
     // Failed and stopped requests the server never saved stay on screen.
     keepLocalFailuresOnSettle(threadId);
+    // The run this window lost shows a neutral "checking" state rather than
+    // its connection error while the server is asked how it ended.
+    const runId = store.get(activeRunAtom)?.id;
+    if (reason === 'reattach_failed' && runId) {
+        set(reattachResolutionAtom, { threadId, runId, since: Date.now() });
+    }
     setAdmission(set, threadId, known?.tailRunId ?? null, 'unknown', known?.unconfirmedRunId, reason);
 }
 
@@ -2361,8 +2368,14 @@ export function createWSCallbacks(
             // The wait is the connection's, not the model's.
             streamActivity.reset();
             // Attempt 1 renders as a plain "Reconnecting…": the reattach
-            // retries until the grace period ends, with no count to show.
-            set(wsReconnectingAtom, { attempt: 1, maxAttempts: CONNECT_MAX_ATTEMPTS });
+            // retries until the grace period ends, with no count to show. It
+            // stays hidden for a blip and escalates from when the loss began.
+            set(wsReconnectingAtom, {
+                attempt: 1,
+                maxAttempts: CONNECT_MAX_ATTEMPTS,
+                since: info.detachedAt,
+                graceMs: info.graceMs,
+            });
             startReattach(info.runId);
         },
 

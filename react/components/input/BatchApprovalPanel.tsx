@@ -6,6 +6,7 @@ import { isRunReconnectingAtom, sendBatchApprovalResponseAtom } from '../../atom
 import { useStopRun } from '../../hooks/useStopRun';
 import BatchApprovalCard from '@beaver/agent-ui/chat/BatchApprovalCard';
 import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 
 interface BatchApprovalPanelProps {
     approval: PendingBatchApproval;
@@ -55,6 +56,7 @@ export function useBatchApprovalSubmit(approvalId: string | null): (decision: Ba
 export const BatchApprovalPanel: React.FC<BatchApprovalPanelProps> = ({ approval }) => {
     const handleSubmit = useBatchApprovalSubmit(approval.approvalId);
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const reconnectShown = useRunReconnectShown();
     const handleStop = useStopRun('BatchApprovalPanel');
 
     return (
@@ -62,7 +64,7 @@ export const BatchApprovalPanel: React.FC<BatchApprovalPanelProps> = ({ approval
             approval={approval}
             onSubmit={handleSubmit}
             disabled={isReconnecting}
-            heldCaption={isReconnecting ? RECONNECT_HELD_CAPTION : undefined}
+            heldCaption={reconnectShown ? RECONNECT_HELD_CAPTION : undefined}
             onStop={handleStop}
         />
     );

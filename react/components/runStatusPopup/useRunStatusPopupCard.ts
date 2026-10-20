@@ -13,7 +13,6 @@ import {
     lastRunSummaryAtom,
     resumeChainAtom,
     toolResultsMapAtom,
-    wsReconnectingAtom,
     wsRetryAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
@@ -29,6 +28,9 @@ import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentPro
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import { pendingApprovalsAtom } from '../../agents/agentActions';
 import { useStopRun } from '../../hooks/useStopRun';
+import { useVisibleReconnect } from '../../hooks/useVisibleReconnect';
+import { useReattachResolutionView } from '../agentRuns/RunResolutionNotices';
+import { REATTACH_CHECKING_SHORT, REATTACH_STILL_RUNNING_SHORT } from '@beaver/agent-core/transport/connectionFailure';
 import {
     answerPendingApprovalsAtom,
     approvalVerdictInFlightAtom,
@@ -147,7 +149,7 @@ function useToolCallLabelEnrich(part: ToolCallPart | null): ToolCallLabelEnrich 
 function useRunStatusLine(run: AgentRun | null): string {
     const toolResults = useAtomValue(toolResultsMapAtom);
     const retry = useAtomValue(wsRetryAtom);
-    const reconnect = useAtomValue(wsReconnectingAtom);
+    const reconnect = useVisibleReconnect();
     const activity = run ? deriveRunActivity(run, toolResults) : null;
     const toolPart = activity?.kind === 'tool' ? activity.part : null;
     const enrich = useToolCallLabelEnrich(toolPart);
@@ -162,6 +164,7 @@ function useRunStatusLine(run: AgentRun | null): string {
         reconnect,
         backendRetry: retry && run && retry.runId === run.id ? retry : null,
         idleLabel,
+        compact: true,
     });
 }
 
@@ -405,10 +408,12 @@ function useLiveCard(): RunStatusPopupCard | null {
     const statusLine = useRunStatusLine(liveRun);
     // Decision cards stay up while the run's connection is recovered, held
     // back the way the composer's are, and say why.
+    // The cards are held at once; the line appears once the reconnect has
+    // outlasted a blip.
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
-    const reconnect = useAtomValue(wsReconnectingAtom);
-    const reconnectingLine = isReconnecting
-        ? runStatusText({ reconnect, backendRetry: null, idleLabel: '' })
+    const reconnect = useVisibleReconnect();
+    const reconnectingLine = isReconnecting && reconnect
+        ? runStatusText({ reconnect, backendRetry: null, idleLabel: '', compact: true })
         : null;
     const onStop = useStopRun('RunStatusPopup');
     const singleTitle = useSingleApprovalTitle(approvals.length === 1 ? approvals[0] : null);
@@ -417,6 +422,9 @@ function useLiveCard(): RunStatusPopupCard | null {
     const onSubmitQuestion = useQuestionControls(question);
     const onSubmitBatch = useBatchApprovalSubmit(batch?.approvalId ?? null);
     const completed = useCompletedDetails(isLive ? null : completion?.runId ?? null);
+    // A run whose reattach failed is reported as still being checked, the
+    // way the sidebar shows it, rather than as failed.
+    const resolutionView = useReattachResolutionView(completion?.runId ?? '', !isLive && completion !== null);
     const setPanelState = useSetAtom(setAnnotationPanelStateAtom);
     // The changes card keys its expansion by the answer's last run, so the
     // card is open by the time the sidebar draws it.
@@ -433,6 +441,10 @@ function useLiveCard(): RunStatusPopupCard | null {
     // What the card is about, so closing it hides exactly that: the working
     // state of this run, this set of approvals, this confirmation. Anything
     // else the run has to say afterwards gets a fresh card.
+    // A failed reattach still being checked is a passing state of its own:
+    // closing it keeps the completion record, so the outcome still gets a card.
+    const resolving = !liveRun && completion !== null
+        && completed.run?.status === 'error' && resolutionView !== null;
     const signature = liveRun
         ? approvals.length > 0
             ? `approval:${approvals.map((approval) => approval.actionId).sort().join(',')}`
@@ -440,11 +452,12 @@ function useLiveCard(): RunStatusPopupCard | null {
                 : credit ? `credit:${credit.confirmationId}`
                     : question ? `question:${question.questionId}`
                         : `running:${liveRun.id}`
-        : completion ? `completed:${completion.runId}` : null;
+        : resolving ? `resolving:${completion.runId}`
+            : completion ? `completed:${completion.runId}` : null;
     if (signature && dismissed.has(signature)) return null;
     const onDismiss = () => {
         if (signature) dismiss(signature);
-        if (!liveRun) setCompletion(null);
+        if (!liveRun && !resolving) setCompletion(null);
     };
 
     if (liveRun) {
@@ -496,6 +509,17 @@ function useLiveCard(): RunStatusPopupCard | null {
 
     if (completion && completed.run) {
         const run = completed.run;
+        if (resolving) {
+            return {
+                runId: run.id,
+                threadName: threadDisplayName(threadName, run),
+                stackDepth: 0,
+                onOpen: openBeaver,
+                onDismiss,
+                kind: 'running',
+                statusLine: resolutionView === 'still_running' ? REATTACH_STILL_RUNNING_SHORT : REATTACH_CHECKING_SHORT,
+            };
+        }
         const outcome = run.status === 'error' ? 'error' : run.status === 'canceled' ? 'canceled' : 'completed';
         return {
             runId: run.id,

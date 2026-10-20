@@ -528,6 +528,14 @@ export interface ReconnectState {
     /** The attempt about to be made, out of `maxAttempts`. */
     attempt: number;
     maxAttempts: number;
+    /**
+     * For a reattach: when the connection was lost (epoch ms). A reattach
+     * stays out of sight for a brief blip and escalates its copy over time,
+     * measured from here (see `reconnectPhase`). Absent for a connect retry.
+     */
+    since?: number;
+    /** For a reattach: how long the server holds the run after the loss, in ms. */
+    graceMs?: number;
 }
 
 /** The connect attempt about to be retried, or null when none is. */

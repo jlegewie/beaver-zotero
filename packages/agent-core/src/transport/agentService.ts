@@ -927,6 +927,8 @@ export class AgentService {
         run.callbacks.onReattaching?.({
             runId: run.runId,
             cancelRequested: run.cancelRequested,
+            detachedAt: run.detachedAt ?? now,
+            graceMs,
         });
         return true;
     }

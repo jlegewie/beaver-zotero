@@ -49,15 +49,25 @@ import {
     admissionUnreachableAtom,
     attachThreadAdmission,
     describeAdmissionWait,
+    keepLocalFailuresOnSettle,
     refreshThreadAdmission,
     threadAdmissionAtom,
     serverThreadBlockedAtom,
     UNREACHABLE_AFTER_FAILURES,
 } from "../../../react/runtime/threadAdmission";
 import {
+    activeRunAtom,
     currentThreadIdAtom,
     threadRunsAtom,
 } from "@beaver/agent-core/run-state/atoms";
+import {
+    reattachResolutionAtom,
+    runReplacementNotesAtom,
+} from "@beaver/agent-core/run-state/runResolution";
+import {
+    RUN_FINISHED_BEFORE_STOP_NOTE,
+    RUN_FINISHED_WHILE_DISCONNECTED_NOTE,
+} from "@beaver/agent-core/transport/connectionFailure";
 import { threadNavigationSeqAtom } from "../../../react/atoms/threads";
 
 beforeEach(() => {
@@ -312,4 +322,83 @@ it("keeps polling after a round skipped while this window writes to the chat", a
     // A refresh still reads at once.
     await refreshThreadAdmission();
     expect(state.activity).toHaveBeenCalledTimes(2);
+});
+describe("settling a run this window lost track of", () => {
+    const settleWith = async (runs: unknown[]) => {
+        state.store.set(threadAdmissionAtom, {
+            threadId: "thread",
+            tailRunId: "old",
+            activity: { state: "unknown", run_id: null },
+            reason: "reattach_failed",
+        });
+        state.activity.mockResolvedValueOnce({ tail_run_id: "run", activity: { state: "idle", run_id: null } });
+        state.history.mockResolvedValueOnce({ ...settled, runs });
+        await vi.advanceTimersByTimeAsync(500);
+    };
+
+    it("notes a run shown as disconnected that the server completed, and ends the resolution", async () => {
+        state.store.set(activeRunAtom, {
+            id: "run",
+            status: "error",
+            error: { type: "connection_error", message: "lost" },
+        } as any);
+        state.store.set(reattachResolutionAtom, { threadId: "thread", runId: "run", since: Date.now() });
+        keepLocalFailuresOnSettle("thread");
+        await settleWith([{ id: "run", status: "completed" }]);
+        expect(state.store.get(activeRunAtom)).toBeNull();
+        expect(state.store.get(runReplacementNotesAtom).get("run")).toBe(RUN_FINISHED_WHILE_DISCONNECTED_NOTE);
+        expect(state.store.get(reattachResolutionAtom)).toBeNull();
+    });
+
+    it("notes a stopped run the server completed before the stop arrived", async () => {
+        state.store.set(threadRunsAtom, [{ id: "run", status: "canceled" }] as any);
+        keepLocalFailuresOnSettle("thread");
+        await settleWith([{ id: "run", status: "completed" }]);
+        expect(state.store.get(runReplacementNotesAtom).get("run")).toBe(RUN_FINISHED_BEFORE_STOP_NOTE);
+    });
+
+    it("adds no note to an ordinary reload, and forgets notes when the chat changes", async () => {
+        state.store.set(threadRunsAtom, [{ id: "run", status: "canceled" }] as any);
+        await settleWith([{ id: "run", status: "completed" }]);
+        expect(state.store.get(runReplacementNotesAtom).size).toBe(0);
+        state.store.set(runReplacementNotesAtom, new Map([["run", "note"]]));
+        state.store.set(reattachResolutionAtom, { threadId: "thread", runId: "run", since: 0 });
+        state.store.set(threadNavigationSeqAtom, 1);
+        expect(state.store.get(runReplacementNotesAtom).size).toBe(0);
+        expect(state.store.get(reattachResolutionAtom)).toBeNull();
+    });
+
+    it("keeps resolving while the server reports the run still active", async () => {
+        state.store.set(reattachResolutionAtom, { threadId: "thread", runId: "run", since: Date.now() });
+        state.store.set(threadAdmissionAtom, {
+            threadId: "thread",
+            tailRunId: "old",
+            activity: { state: "unknown", run_id: null },
+            reason: "reattach_failed",
+        });
+        state.activity.mockResolvedValueOnce(busy);
+        await vi.advanceTimersByTimeAsync(500);
+        expect(state.store.get(reattachResolutionAtom)).not.toBeNull();
+        expect(state.history).not.toHaveBeenCalled();
+    });
+});
+it("reports the server unreachable on the first failed read after a failed reattach stops checking", async () => {
+    state.store.set(reattachResolutionAtom, { threadId: "thread", runId: "run", since: Date.now() });
+    state.store.set(threadAdmissionAtom, {
+        threadId: "thread",
+        tailRunId: "old",
+        activity: { state: "unknown", run_id: null },
+        reason: "reattach_failed",
+    });
+    state.activity.mockRejectedValue(new Error("offline"));
+    // Reads at 0.5, 1.5 and 3.5 s fail inside the checking window.
+    await vi.advanceTimersByTimeAsync(3500);
+    expect(state.activity).toHaveBeenCalledTimes(3);
+    expect(state.store.get(admissionUnreachableAtom)).toBe(false);
+    // The window has passed by the next read, the fourth.
+    state.store.set(reattachResolutionAtom, { threadId: "thread", runId: "run", since: Date.now() - 20_000 });
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(state.activity).toHaveBeenCalledTimes(4);
+    expect(UNREACHABLE_AFTER_FAILURES).toBeGreaterThan(4);
+    expect(state.store.get(admissionUnreachableAtom)).toBe(true);
 });

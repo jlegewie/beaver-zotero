@@ -96,6 +96,7 @@ import {
     resumeFromRunAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { threadAdmissionAtom } from '../../../react/runtime/threadAdmission';
+import { reattachResolutionAtom } from '@beaver/agent-core/run-state/runResolution';
 import { popupMessagesAtom } from '../../../react/atoms/ui';
 
 const DROP: ConnectionFailureEvidence = {
@@ -132,8 +133,12 @@ function dropConnection(callbacks: WSCallbacks): void {
     callbacks.onReattaching?.({
         runId: store.get(activeRunAtom)!.id,
         cancelRequested: false,
+        detachedAt: DETACHED_AT,
+        graceMs: 120_000,
     });
 }
+
+const DETACHED_AT = 1_700_000_000_000;
 
 describe('a run reattaching after its connection dropped', () => {
     beforeEach(() => {
@@ -166,7 +171,8 @@ describe('a run reattaching after its connection dropped', () => {
         expect(store.get(pendingApprovalsAtom).has('action-1')).toBe(true);
         expect(store.get(isWSChatPendingAtom)).toBe(true);
         expect(store.get(wsErrorAtom)).toBeNull();
-        expect(store.get(wsReconnectingAtom)).not.toBeNull();
+        // Timed from the loss, so a blip stays hidden and the copy escalates.
+        expect(store.get(wsReconnectingAtom)).toMatchObject({ since: DETACHED_AT, graceMs: 120_000 });
         expect(store.get(isRunReconnectingAtom)).toBe(true);
         // Nothing has failed yet, so nothing is reported yet.
         expect(reportConnectionFailureMock).not.toHaveBeenCalled();
@@ -378,6 +384,20 @@ describe('a run reattaching after its connection dropped', () => {
                 activity: { state: 'unknown' },
                 reason: 'reattach_failed',
             });
+            // The run shows "checking" rather than its error meanwhile.
+            expect(store.get(reattachResolutionAtom)).toMatchObject({ threadId: 'thread-1', runId });
+        });
+
+        it('does not resolve a stopped run as a failed reattach', async () => {
+            store.set(reattachResolutionAtom, null);
+            const callbacks = await startRun();
+            store.set(currentThreadIdAtom, 'thread-1');
+            isReattachingMock.mockReturnValue(true);
+            dropConnection(callbacks);
+            await store.set(closeWSConnectionAtom);
+            expect(store.get(threadAdmissionAtom)?.reason).toBe('stop_unconfirmed');
+            expect(store.get(reattachResolutionAtom)).toBeNull();
+            isReattachingMock.mockReturnValue(false);
         });
     });
 });

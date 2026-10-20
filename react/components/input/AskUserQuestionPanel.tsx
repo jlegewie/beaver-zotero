@@ -9,6 +9,7 @@ import {
 import { useStopRun } from '../../hooks/useStopRun';
 import AskUserQuestionCard from '@beaver/agent-ui/chat/AskUserQuestionCard';
 import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 
 interface AskUserQuestionPanelProps {
     pendingQuestion: PendingQuestion;
@@ -32,6 +33,7 @@ interface AskUserQuestionPanelProps {
 export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pendingQuestion }) => {
     const sendResponse = useSetAtom(sendAskUserQuestionResponseAtom);
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const reconnectShown = useRunReconnectShown();
 
     const handleSubmit = useCallback((answers: AskUserQuestionAnswer[]) => {
         sendResponse({
@@ -50,7 +52,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
             onSubmit={handleSubmit}
             onStop={handleStop}
             disabled={isReconnecting}
-            heldCaption={isReconnecting ? RECONNECT_HELD_CAPTION : undefined}
+            heldCaption={reconnectShown ? RECONNECT_HELD_CAPTION : undefined}
         />
     );
 };

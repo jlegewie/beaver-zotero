@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart, isRunActive } from '@beaver/agent-core/agents/types';
 import { hasInProgressToolCall, shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
 import { wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { PARTIAL_RESPONSE_NOTE } from '@beaver/agent-core/transport/connectionFailure';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -10,10 +11,13 @@ import { SuggestionsView } from './SuggestionsView';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
+import { ReattachResolutionNotice, RunNotice, useReattachResolutionView } from './RunResolutionNotices';
+import { isCutOffMidText, runReplacementNotesAtom } from '@beaver/agent-core/run-state/runResolution';
 import { threadWarningsAtom } from '../../atoms/warnings';
-import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom, threadRunsAtom, wsReconnectingAtom } from '@beaver/agent-core/run-state/atoms';
+import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { useVisibleReconnect } from '../../hooks/useVisibleReconnect';
 import { getHost } from '@beaver/agent-ui/host';
 import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
 import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
@@ -75,6 +79,18 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // undone, and flashing it up would report a problem the reader never had.
     const autoReplacementPending = useAtomValue(autoReplacementPendingRunIdsAtom).has(run.id);
 
+    // A run whose reattach failed shows a neutral state instead of its error
+    // card while the server reports how it ended.
+    const resolutionView = useReattachResolutionView(run.id, hasError && isLastRun);
+    // The server's copy replaced this run's with a different outcome.
+    const replacementNote = useAtomValue(runReplacementNotesAtom).get(run.id) ?? null;
+    // A response cut off while writing: its last text may stop mid-thought.
+    // Not one cut off at a tool call, whose text above was complete.
+    const isPartialResponse = useMemo(
+        () => isCutOffMidText(run),
+        [run],
+    );
+
     // Don't show user message for resume runs (empty content)
     const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
     
@@ -100,8 +116,9 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // client is working. The run's own status is terminal, so this is the one
     // wait `shouldShowRunStatus` cannot see.
     // A run whose connection is being recovered says so wherever it is,
-    // mid-answer or waiting on a card, since nothing else on screen moves.
-    const isReconnecting = useAtomValue(wsReconnectingAtom) !== null && isRunActive(run);
+    // mid-answer or waiting on a card, since nothing else on screen moves —
+    // once it has lasted longer than a blip.
+    const isReconnecting = useVisibleReconnect() !== null && isRunActive(run);
     const showStatusIndicator = isLastRun && (runHasNothingToShow || autoReplacementPending || isReconnecting);
     // A tool call still waiting on its result already spins for the same
     // wait; the reconnect line under it drops its own spinner and only says
@@ -146,7 +163,9 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // Terminal statuses: the run is done. `awaiting_deferred` is still live (see isRunActive).
     const isTerminal = run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
 
-    const showRunOutcomes = isTerminal && !wasResumed;
+    // Held while a failed reattach is resolved: the server may still be
+    // waiting on a pending change, and may replace the run.
+    const showRunOutcomes = isTerminal && !wasResumed && !resolutionView;
     const showBatchReceipt = showRunOutcomes && hasBatchReceipt(chainRuns);
 
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
@@ -182,10 +201,16 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 statusHideIcon={reconnectUnderToolCall}
             />
 
+            {isPartialResponse && !wasResumed && <RunNotice text={PARTIAL_RESPONSE_NOTE} />}
+
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
             {hasError && run.error && !wasResumed && !autoReplacementPending && (
-                <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
+                resolutionView
+                    ? <ReattachResolutionNotice view={resolutionView} />
+                    : <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
             )}
+
+            {replacementNote && <RunNotice text={replacementNote} />}
 
             {/* Footer with sources and action buttons (only for completed runs, or error runs that were resumed) */}
             {(showAgentRunFooter && !wasResumed) && (

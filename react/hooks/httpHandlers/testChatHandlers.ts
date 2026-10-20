@@ -36,6 +36,7 @@ import {
     currentThreadNameAtom,
 } from '../../atoms/threads';
 import { activeRunAtom, threadRunsAtom, wsReconnectingAtom } from '@beaver/agent-core/run-state/atoms';
+import { reattachResolutionAtom, runReplacementNotesAtom } from '@beaver/agent-core/run-state/runResolution';
 import { agentService } from '@beaver/agent-core/transport/agentService';
 import { flushPendingPartEvents } from '../../utils/streamingPartQueue';
 import { admissionUnreachableAtom, threadAdmissionAtom } from '../../runtime/threadAdmission';
@@ -132,6 +133,10 @@ function currentIds() {
             : null,
         isPending: store.get(isWSChatPendingAtom),
         isReconnecting: store.get(wsReconnectingAtom) !== null,
+        reconnect: store.get(wsReconnectingAtom),
+        // A failed reattach being resolved, and notes on runs the server replaced.
+        reattachResolution: store.get(reattachResolutionAtom),
+        replacementNotes: Object.fromEntries(store.get(runReplacementNotesAtom)),
         // What the presence bar is showing for the open chat.
         admission: (() => {
             const snapshot = store.get(threadAdmissionAtom);

@@ -31,7 +31,9 @@ import {
     undoAgentActionsAtom,
 } from '../agentActionExecution';
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
-import { RECONNECT_HELD_CAPTION, RECONNECT_SENDING_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
+import { RECONNECT_HELD_CAPTION, RECONNECT_SENDING_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP, RESOLVING_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../../hooks/useVisibleReconnect';
+import { useReattachResolutionView } from '../../../components/agentRuns/RunResolutionNotices';
 import { hasLibraryIdentity, resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
 import {
@@ -129,6 +131,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // An answer to the run waits while its connection is being recovered.
     const isRunReconnecting = useAtomValue(isRunReconnectingAtom);
     const isAnswerHeld = isAwaitingApproval && isRunReconnecting;
+    const reconnectShown = useRunReconnectShown();
+    // A run whose reattach failed may still be waiting on the server for this
+    // answer; acting on it locally waits until the server says how it ended.
+    const isRunResolving = useReattachResolutionView(runId, true) !== null;
+    const isDecisionHeld = isAnswerHeld || isRunResolving;
+    const heldTooltip = isAnswerHeld
+        ? RECONNECT_UNAVAILABLE_TOOLTIP
+        : isRunResolving ? RESOLVING_UNAVAILABLE_TOOLTIP : null;
 
     const runIsStreamable = runStatus === undefined || runStatus === 'in_progress';
     const isStreaming = !action
@@ -384,9 +394,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // answered, and one already answered says its answer has yet to be sent.
     const isReplyHeld = isRunReconnecting && !actionInFinalState
         && (isProcessingApproval || isExternallyProcessing);
-    const reconnectCaption = isAnswerHeld
-        ? RECONNECT_HELD_CAPTION
-        : isReplyHeld ? RECONNECT_SENDING_CAPTION : null;
+    // Shown only once the reconnect has outlasted a blip.
+    const reconnectCaption = !reconnectShown
+        ? null
+        : isAnswerHeld
+            ? RECONNECT_HELD_CAPTION
+            : isReplyHeld ? RECONNECT_SENDING_CAPTION : null;
 
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
@@ -695,24 +708,24 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
                     {showDecisionButtons && (
                         <>
-                            <Tooltip content={isAnswerHeld ? RECONNECT_UNAVAILABLE_TOOLTIP : 'Reject'} showArrow singleLine>
+                            <Tooltip content={heldTooltip ?? 'Reject'} showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-red"
                                     onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                     ariaLabel="Reject"
-                                    disabled={isAnswerHeld}
+                                    disabled={isDecisionHeld}
                                 />
                             </Tooltip>
-                            <Tooltip content={isAnswerHeld ? RECONNECT_UNAVAILABLE_TOOLTIP : 'Apply'} showArrow singleLine>
+                            <Tooltip content={heldTooltip ?? 'Apply'} showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
                                     onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                     ariaLabel="Apply"
-                                    disabled={isAnswerHeld}
+                                    disabled={isDecisionHeld}
                                 />
                             </Tooltip>
                         </>
@@ -806,8 +819,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 variant="outline"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
-                                disabled={isProcessing || isAnswerHeld}
-                                title={isAnswerHeld ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
+                                disabled={isProcessing || isDecisionHeld}
+                                title={heldTooltip ?? undefined}
                                 className="flex-none whitespace-nowrap"
                             >
                                 Reject
@@ -854,8 +867,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 variant="solid"
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                 loading={isProcessing && clickedButton === 'approve'}
-                                disabled={isProcessing || isAnswerHeld}
-                                title={isAnswerHeld ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
+                                disabled={isProcessing || isDecisionHeld}
+                                title={heldTooltip ?? undefined}
                                 className="flex-none whitespace-nowrap"
                             >
                                 <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>

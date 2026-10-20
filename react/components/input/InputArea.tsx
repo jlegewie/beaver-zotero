@@ -1,5 +1,6 @@
 import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useComposerVoice } from "../../hooks/useComposerVoice";
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -196,6 +197,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     // could only be queued until then.
     const verdictClaimed = useAtomValue(approvalVerdictInFlightAtom);
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const reconnectShown = useRunReconnectShown();
     const isVerdictInFlight = verdictClaimed || isReconnecting;
     // A new message waiting for a stopped response to end says so in the
     // presence bar.
@@ -702,7 +704,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 <PendingActionsBar
                     onDecide={(approved) => handleApprovalVerdict(approved, true)}
                     disabled={isVerdictInFlight}
-                    heldCaption={isReconnecting ? RECONNECT_HELD_CAPTION : undefined}
+                    heldCaption={reconnectShown ? RECONNECT_HELD_CAPTION : undefined}
                 />
             )}
 

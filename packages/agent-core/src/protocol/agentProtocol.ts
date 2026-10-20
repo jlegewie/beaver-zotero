@@ -3357,6 +3357,10 @@ export interface WSReattachingInfo {
      * the grace period.
      */
     cancelRequested: boolean;
+    /** When the connection was first lost (epoch ms); the same for every attempt. */
+    detachedAt: number;
+    /** How long the server holds the run after losing its connection, in ms. */
+    graceMs: number;
 }
 
 /** A run was picked up on a new socket. */

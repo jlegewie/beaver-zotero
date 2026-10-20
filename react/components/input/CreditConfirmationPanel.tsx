@@ -13,6 +13,7 @@ import CreditConfirmationCard, {
 import { useStopRun } from '../../hooks/useStopRun';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 
 interface CreditConfirmationPanelProps {
     confirmation: PendingCreditConfirmation;
@@ -39,6 +40,7 @@ export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = (
     const sendResponse = useSetAtom(sendCreditConfirmationResponseAtom);
     const removeConfirmation = useSetAtom(removePendingCreditConfirmationAtom);
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const reconnectShown = useRunReconnectShown();
 
     // Drives the disabled styling in the instant before the panel unmounts.
     // The one-shot guard lives in the handlers, not here.
@@ -83,7 +85,7 @@ export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = (
         <CreditConfirmationCard
             confirmation={confirmation}
             disabled={isSubmitted || isReconnecting}
-            heldCaption={isReconnecting && !isSubmitted ? RECONNECT_HELD_CAPTION : undefined}
+            heldCaption={reconnectShown && !isSubmitted ? RECONNECT_HELD_CAPTION : undefined}
             onApprove={handlers.approve}
             onDecline={handlers.decline}
             onStop={handleStop}
