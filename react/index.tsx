@@ -22,6 +22,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import type { WindowRuntime } from '../src/runtime/instance';
 import { registerTableLocalCommands } from '../src/services/artifacts/tableStore';
+import { activateStoredCitation } from './host/zotero/citationActivation';
 import { handleAgentActionExecuteRequest } from '../src/services/agentDataProvider/handleAgentActionExecuteRequest';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
@@ -347,7 +348,7 @@ export function closeAgentConnection(
 export function initializeRuntime(runtime: WindowRuntime) {
     registerWindowTestCommands(runtime, inspectRuntime);
     initializeWindowRuntime(runtime);
-    Zotero.Beaver.runtime.addWindowCleanup(runtime, registerTableLocalCommands(runtime.hostWindow, runtime.id));
+    Zotero.Beaver.runtime.addWindowCleanup(runtime, registerTableLocalCommands(runtime.hostWindow, runtime.id, { activateCitation: activateStoredCitation }));
     runtime.hostWindow.__beaverJotaiStore = store;
     if (!getTransportConfigurationError()) attachAccountProjection(runtime);
     Zotero.Beaver.runtime.subscribeWindow(runtime, 'notification:popup', detail => {

@@ -465,6 +465,67 @@ describe("citations", () => {
         expect(markers.filter((m) => m === "1").length).toBeGreaterThan(1);
     });
 
+    it("gives every passage from one paper that paper's number and lists the paper once", () => {
+        const paper = { kind: "zotero" as const, library_id: 1, zotero_key: "P1" };
+        const pdf = { kind: "zotero" as const, library_id: 1, zotero_key: "A1" };
+        const spec: TableSpec = {
+            id: "s",
+            columns: [{ id: "t", header: "Text", type: "text" }],
+            rows: [
+                {
+                    id: "r",
+                    cells: {
+                        t: {
+                            value: {
+                                kind: "text",
+                                text: 'One <citation id="1-A1" loc="s1"/> two <citation id="1-A1" loc="s9"/> three <citation id="1-P1"/>',
+                            },
+                        },
+                    },
+                },
+            ],
+            citations: [
+                { citation_id: "a", raw_tag: '<citation id="1-A1" loc="s1"/>', parent_ref: paper, resolved_ref: pdf, citation_type: "attachment", content_kind: "pdf", formatted_citation: "Paper One" },
+                { citation_id: "b", raw_tag: '<citation id="1-A1" loc="s9"/>', parent_ref: paper, resolved_ref: pdf, citation_type: "attachment", content_kind: "pdf", formatted_citation: "Paper One" },
+                { citation_id: "c", raw_tag: '<citation id="1-P1"/>', resolved_ref: paper, citation_type: "item", formatted_citation: "Paper One" },
+            ],
+        };
+        const { html } = renderTableHtml(spec, { controls: false });
+        const markers = [...html.matchAll(/data-bt-cite="(\d+)"/g)].map((m) => m[1]);
+        expect(new Set(markers)).toEqual(new Set(["1"]));
+        // Each marker still names its own passage for the host to navigate to.
+        expect(html).toContain('data-cite-key="zotero:1-A1:s1"');
+        expect(html).toContain('data-cite-key="zotero:1-A1:s9"');
+        const sources = html.slice(html.indexOf('class="bt-srcs"'));
+        expect(sources.match(/<li /g)).toHaveLength(1);
+        // The entry reveals the paper; the file it was read from is a separate link.
+        expect(sources).toContain('href="zotero://select/library/items/P1" title="Show in library"');
+        expect(sources).toContain('href="zotero://open/library/items/A1">Open PDF</a>');
+    });
+
+    it("keeps one marker per citation, as the chat does, even for one source", () => {
+        const spec = structuredClone(cited);
+        spec.rows[0].cells.finding.value = {
+            kind: "text",
+            text: 'Rose. <citation id="1-K1" loc="page4"/> <citation id="1-K1" loc="page4"/>',
+        };
+        spec.rows = [spec.rows[0]];
+        const { html } = renderTableHtml(spec, { controls: false });
+        const cell = html.slice(html.indexOf('id="r1/finding"'), html.indexOf("</summary>"));
+        expect(cell.match(/data-bt-cite="1"/g)).toHaveLength(2);
+    });
+
+    it("names the page of a sentence citation and says a click shows the passage", () => {
+        const spec = structuredClone(cited);
+        spec.citations![0].pages = undefined;
+        spec.citations![0].locations = [{ part_id: "s3", page_idx: 2, boxes: [[1, 2, 3, 4]] }];
+        spec.citations![0].page_labels = { 2: "ix" };
+        const { html } = renderTableHtml(spec);
+        expect(html).toContain('data-cite-loc="Page ix"');
+        expect(html).toContain('data-cite-action="Click to show the highlighted passage"');
+        expect(html).toContain('href="zotero://open/library/items/K1?page=3"');
+    });
+
     it("reveals metadata sources instead of asking the reader to open a regular item", () => {
         const metadata = structuredClone(cited);
         metadata.citations![0].citation_type = "item";
@@ -481,7 +542,7 @@ describe("citations", () => {
         expect(html).toContain('data-cite-name="Bloom 2015"');
         expect(html).toContain('data-cite-loc="Page 4"');
         expect(html).toContain("a 13% performance increase");
-        expect(html).toContain("Highlights passage on page 4");
+        expect(html).toContain("Click to open page 4");
         // …and joined into a `title` for a viewer that can show no card.
         const title = /title="([^"]*)"[^>]*data-bt-cite/.exec(html)![1];
         expect(title).toContain("Bloom 2015");
@@ -1065,4 +1126,34 @@ it("preserves not-reported, blank user ownership, uncertainty and cited evidence
     expect(html).toContain('u-ABCD1234-p1-s1');
     expect(html).not.toContain('contenteditable');
     expect(html).not.toMatch(/<script(?![^>]*type="application\/json")/);
+});
+
+describe("reading layout", () => {
+    const spec: TableSpec = {
+        id: "l",
+        columns: [
+            { id: "ref", header: "Paper", type: "reference" },
+            { id: "q", header: "Question", type: "text" },
+        ],
+        rows: [{ id: "r", cells: { ref: { value: { kind: "reference", display_name: "A" } } } }],
+    };
+
+    it("opens on tall rows", () => {
+        const { html } = renderTableHtml(spec);
+        expect(html).toMatch(/id="bt-dt" class="bt-ctl" checked/);
+        expect(html).not.toMatch(/id="bt-dz" class="bt-ctl" checked/);
+    });
+
+    it("shares the frame's width between flexible columns instead of fixing them", () => {
+        const { html } = renderTableHtml(spec);
+        expect(html).toContain("--cols:2.6rem minmax(11rem, 1.3fr) minmax(8rem, 1fr)");
+    });
+
+    it("offers export as a command only a host can run", () => {
+        const { html } = renderTableHtml(spec);
+        expect(html).toContain('data-bt-command="export-csv"');
+        expect(TABLE_CSS).toContain("html[data-beaver-active] .bt-export");
+        // No text of its own: the stored document's text stays the table's.
+        expect(html).not.toMatch(/class="bt-export"[^>]*>[^<]/);
+    });
 });

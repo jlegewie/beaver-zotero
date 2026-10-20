@@ -96,6 +96,18 @@ describe("citationCardPosition", () => {
         expect(top).toBe(76 - 25);
     });
 
+    it("goes above a marker near the frame's bottom", () => {
+        const at = { left: 300, top: 560, bottom: 576, width: 10 };
+        // Below would end at 50 + 576 + 6 + 120 = 752, past the frame's 650.
+        expect(citationCardPosition(frame, at, null, 200, 120).top).toBe(50 + 560 - 120 - 6);
+    });
+
+    it("stays below when there is no room above either", () => {
+        const short = { left: 100, top: 50, right: 900, bottom: 150 };
+        const at = { left: 300, top: 20, bottom: 36, width: 10 };
+        expect(citationCardPosition(short, at, null, 200, 120).top).toBe(50 + 36 + 6);
+    });
+
     it("treats a card with no positioned ancestor as viewport-relative", () => {
         const at = { left: 300, bottom: 20, width: 10 };
         expect(citationCardPosition(frame, at, null, 200)).toEqual(
@@ -292,3 +304,47 @@ describe("countCitationMarkers", () => {
         expect(countCitationMarkers(doc)).toBe(2);
     });
 });
+
+describe("citation and command clicks", () => {
+    const citation = { citation_id: "c", raw_tag: '<citation id="1-K1" loc="s2"/>', preview: "passage" };
+    const page =
+        `<script type="application/json" id="beaver-table-spec">${JSON.stringify({ citations: [citation] })}</script>` +
+        '<a class="bt-cite" data-bt-cite="1" data-cite-key="zotero:1-K1:s2" href="zotero://open/library/items/K1?page=2">1</a>' +
+        '<a class="bt-export" href="#" data-bt-command="export-csv"></a>';
+
+    it("hands a marker's full citation to the host instead of following its link", async () => {
+        const { root, card } = mount(page);
+        const activated: unknown[] = [];
+        const host = { ...hostFor(card), activateCitation: async (c: unknown) => { activated.push(c); return true; } };
+        const dispose = enhanceTableDocument(doc, host);
+        const event = click(root.querySelector(".bt-cite")!);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(event.defaultPrevented).toBe(true);
+        expect(activated).toEqual([citation]);
+        expect(host.opened).toEqual([]);
+        dispose();
+    });
+
+    it("falls back to the marker's link when the host cannot navigate", async () => {
+        const { root, card } = mount(page);
+        const host = { ...hostFor(card), activateCitation: async () => false };
+        const dispose = enhanceTableDocument(doc, host);
+        click(root.querySelector(".bt-cite")!);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(host.opened).toEqual(["zotero://open/library/items/K1?page=2"]);
+        dispose();
+    });
+
+    it("runs a document command without navigating the frame", () => {
+        const { root, card } = mount(page);
+        const commands: string[] = [];
+        const host = { ...hostFor(card), runCommand: (command: string) => commands.push(command) };
+        const dispose = enhanceTableDocument(doc, host);
+        const event = click(root.querySelector(".bt-export")!);
+        expect(event.defaultPrevented).toBe(true);
+        expect(commands).toEqual(["export-csv"]);
+        expect(host.opened).toEqual([]);
+        dispose();
+    });
+});
+

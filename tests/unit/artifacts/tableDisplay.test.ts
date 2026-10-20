@@ -77,6 +77,7 @@ describe("current table display and snapshot navigation", () => {
             title: "Renamed in Zotero",
             rows: 1,
             columns: 1,
+            contentColumns: 1,
         });
         expect(deps.read).toHaveBeenCalledTimes(1);
     });

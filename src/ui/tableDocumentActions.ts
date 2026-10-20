@@ -1,6 +1,6 @@
 /** Local snapshot actions. Store callbacks cross the bundle seam; dialogs use this document. */
 import { toCsv } from "@beaver/agent-core/layouts/table";
-import { getTablesApi } from "../services/artifacts/tablesApi";
+import { getTablesApi, type TableLocalCommands } from "../services/artifacts/tablesApi";
 import type { TableRef } from "../services/artifacts/tableItemIdentity";
 
 import { excludedLibraryUserMessage } from "../utils/libraryMessages";
@@ -12,6 +12,31 @@ export function tableActionErrorMessage(error: unknown, ref: TableRef): string {
         return excludedLibraryUserMessage(ref.libraryID);
     }
     return String(failure?.message ?? failure?.error ?? error);
+}
+
+/**
+ * Asks where to save and writes the table as CSV, with its source and evidence
+ * columns. Reads the table again after the picker closes, so a write that lands
+ * while it is open is exported rather than the version the user first saw.
+ * Resolves the file's name, or null when the user cancelled.
+ */
+export async function exportTableCsv(
+    win: Window,
+    ref: TableRef,
+    commands: () => TableLocalCommands,
+): Promise<string | null> {
+    const current = await commands().read(ref);
+    const { FilePicker } = ChromeUtils.importESModule(
+        "chrome://zotero/content/modules/filePicker.mjs",
+    );
+    const picker = new FilePicker();
+    picker.init(win, "Export table", picker.modeSave);
+    picker.defaultString = `${(current.spec.title || "Table").replace(/[\\/:*?"<>|]/g, "_")}.csv`;
+    picker.appendFilter("CSV", "*.csv");
+    if ((await picker.show()) === picker.returnCancel) return null;
+    const latest = await commands().read(ref);
+    await IOUtils.writeUTF8(picker.file, toCsv(latest.spec));
+    return PathUtils.filename(picker.file);
 }
 
 export function renderTableDocumentActions(
@@ -67,17 +92,8 @@ export function renderTableDocumentActions(
         return button;
     };
     const exportButton = action("export-csv", "Export CSV", async () => {
-        const current = await commands().read(ref);
-        const { FilePicker } = ChromeUtils.importESModule(
-            "chrome://zotero/content/modules/filePicker.mjs",
-        );
-        const picker = new FilePicker();
-        picker.init(win, "Export table", picker.modeSave);
-        picker.defaultString = `${(current.spec.title || "Table").replace(/[\\/:*?"<>|]/g, "_")}.csv`;
-        picker.appendFilter("CSV", "*.csv");
-        if ((await picker.show()) === picker.returnCancel) return;
-        const latest = await commands().read(ref);
-        await IOUtils.writeUTF8(picker.file, toCsv(latest.spec));
+        if (!win) throw new Error("The originating window is closed.");
+        if (!(await exportTableCsv(win, ref, commands))) return;
         status.textContent = "CSV exported with source and evidence columns.";
     });
     const versions = doc.createElement("select");

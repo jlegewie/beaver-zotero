@@ -792,7 +792,15 @@ export interface DialogsHost {
  * {@link setHost}. Slices are optional — check before use.
  */
 export type TableDisplay =
-    | { status: 'available'; title: string; rows: number; columns: number }
+    | {
+          status: 'available';
+          title: string;
+          rows: number;
+          /** Every column in the spec, system ones included. */
+          columns: number;
+          /** Content columns: every column except system metadata (year, DOI, row type). */
+          contentColumns?: number;
+      }
     | { status: 'unavailable'; reason: string };
 
 export interface ClientHost {
