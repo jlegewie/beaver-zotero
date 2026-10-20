@@ -38,7 +38,10 @@ vi.mock('../../../src/utils/agentItemSupport', () => ({
 vi.mock('../../../src/utils/zoteroUtils', () => ({ safeIsInTrash: () => false }));
 vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: () => 'Mock Item' }));
 vi.mock('../../../src/utils/libraryIdentity', () => ({
-    libraryRefForLibraryID: (id: number) => (id === 1 ? 'u' : `group:${id}`),
+    libraryRefForLibraryID: (id: number) => (id === 1 ? 'u' : `g${id}`),
+    // Inverse of the mapping above; the local id when there is no ref.
+    resolveLibraryRef: (ref: { library_ref?: string | null; library_id?: number | null }) =>
+        ref.library_ref ? (ref.library_ref === 'u' ? 1 : Number(ref.library_ref.slice(1))) : (ref.library_id ?? null),
     UNRESOLVED_LIBRARY_ID: -1,
 }));
 
@@ -171,9 +174,8 @@ describe('collection target context — library exclusion', () => {
         const result = await resolvePromptVariables('Summarize.', 'collection');
         expect(result.views).toEqual([{
             type: 'saved_search',
-            library_id: ALLOWED_LIBRARY,
-            zotero_key: 'SRCH0001',
             library_ref: 'u',
+            zotero_key: 'SRCH0001',
             name: 'Beaver',
         }]);
     });

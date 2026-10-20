@@ -209,7 +209,7 @@ import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { createZoteroItemReference } from '../utils/zoteroReferences';
+import { createZoteroItemReference, isTargetInLibraries } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { appendRunIfMissing, continuationOfferFor, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
@@ -2572,7 +2572,7 @@ const sendWSMessage = async (
 
         // Add saved-search and built-in-view attachments (Unfiled Items, …)
         attachments.push(...get(currentMessageViewsAtom)
-            .filter(view => searchableLibraryIds.includes(view.library_id)));
+            .filter(view => isTargetInLibraries(view, searchableLibraryIds)));
 
         // Add external file attachments (metadata only; content stays local and
         // is served on demand through the read/view request paths). Files whose

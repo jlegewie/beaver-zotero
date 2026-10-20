@@ -92,9 +92,16 @@ export interface CollectionAttachment extends BaseMessageAttachment {
 /**
  * "saved_search" type attachment: a saved search attached as the scope of a
  * request (a collection action run on it). `zotero_key` is the search key.
+ *
+ * Identified by its portable library only — no device-local `library_id` —
+ * so the backend and history never carry one. Resolve the local library with
+ * `resolveLibraryRef` where Zotero needs it.
  */
-export interface SavedSearchAttachment extends BaseMessageAttachment {
+export interface SavedSearchAttachment {
     type: "saved_search";
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref: string;
+    zotero_key: string;
     name: string;
 }
 
@@ -288,6 +295,7 @@ export function messageAttachmentKey(attachment: MessageAttachment): string {
     if (attachment.type === 'special_collection') {
         return specialCollectionKey(attachment, attachment.library_ref ?? attachment.library_id);
     }
+    if (attachment.type === 'saved_search') return `${attachment.library_ref}-${attachment.zotero_key}`;
     return attachment.type === 'collection' && attachment.collection_id ? attachment.collection_id : zoteroReferenceKey(attachment);
 }
 
@@ -302,6 +310,7 @@ export function messageAttachmentLookupKeys(attachment: MessageAttachment): stri
         const legacyKey = specialCollectionKey(attachment, attachment.library_id);
         return canonicalKey === legacyKey ? [canonicalKey] : [canonicalKey, legacyKey];
     }
+    if (attachment.type === 'saved_search') return [messageAttachmentKey(attachment)];
     return zoteroReferenceLookupKeys(attachment);
 }
 
@@ -389,10 +398,14 @@ export function messageAttachmentsHaveSameIdentity(
         if (left.type !== right.type) return false;
         if (left.type === 'special_collection' && right.type === 'special_collection'
             && left.special_collection !== right.special_collection) return false;
-        if (left.type === 'saved_search' && right.type === 'saved_search'
-            && left.zotero_key !== right.zotero_key) return false;
-        if (left.library_ref && right.library_ref) return left.library_ref === right.library_ref;
-        return left.library_id === right.library_id;
+        if (left.type === 'saved_search' && right.type === 'saved_search') {
+            return left.zotero_key === right.zotero_key && left.library_ref === right.library_ref;
+        }
+        if (left.type === 'special_collection' && right.type === 'special_collection') {
+            if (left.library_ref && right.library_ref) return left.library_ref === right.library_ref;
+            return left.library_id === right.library_id;
+        }
+        return false;
     }
     if (left.zotero_key !== right.zotero_key) return false;
     if (left.library_ref && right.library_ref) {

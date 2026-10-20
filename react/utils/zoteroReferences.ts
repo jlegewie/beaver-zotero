@@ -5,7 +5,7 @@
  * not next to the DTOs, so that module stays Zotero-free.
  */
 import { serializeCollectionReadIdentity } from '../../src/services/collections/collectionIdentity';
-import { libraryRefForLibraryID, resolveObjectId } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveLibraryRef, resolveObjectId } from '../../src/utils/libraryIdentity';
 import type { CollectionReference, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { SPECIAL_COLLECTION_TYPES, type ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 
@@ -36,14 +36,14 @@ export interface ViewSelection {
 export function viewToAttachment(view: ViewSelection): ViewAttachment | null {
     const libraryRef = libraryRefForLibraryID(view.libraryId) ?? undefined;
     if (view.type === 'search') {
-        if (!view.key) return null;
+        // A saved search is identified by its portable library alone.
+        if (!view.key || !libraryRef) return null;
         const search = Zotero.Searches.getByLibraryAndKey(view.libraryId, view.key) as Zotero.Search | false;
         if (!search || search.deleted) return null;
         return {
             type: 'saved_search',
-            library_id: view.libraryId,
+            library_ref: libraryRef,
             zotero_key: view.key,
-            ...(libraryRef ? { library_ref: libraryRef } : {}),
             name: search.name || view.name,
         };
     }
@@ -55,6 +55,19 @@ export function viewToAttachment(view: ViewSelection): ViewAttachment | null {
         ...(libraryRef ? { library_ref: libraryRef } : {}),
         name: view.name,
     };
+}
+
+/**
+ * Whether a collection or view target is in one of `libraryIds` on this
+ * device. Saved searches carry only their portable library, so the local id is
+ * resolved rather than read.
+ */
+export function isTargetInLibraries(
+    target: { library_ref?: string | null; library_id?: number | null },
+    libraryIds: number[],
+): boolean {
+    const libraryID = resolveLibraryRef(target);
+    return libraryID !== null && libraryIds.includes(libraryID);
 }
 
 /** Build a CollectionReference from a live Zotero collection. */

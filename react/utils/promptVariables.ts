@@ -31,7 +31,7 @@ import { selectedZoteroItemsAtom, currentNoteItemAtom, libraryViewAtom } from '.
 import { collectionTargetSelection } from './actionVisibility';
 import { ActionTargetType } from '@beaver/agent-core/types/actions';
 import { CollectionReference } from '@beaver/agent-core/types/zotero';
-import { collectionToReference, viewToAttachment } from './zoteroReferences';
+import { collectionToReference, isTargetInLibraries, viewToAttachment } from './zoteroReferences';
 import type { ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 
 // ---------------------------------------------------------------------------
@@ -221,7 +221,7 @@ export function resolveTargetContext(
         (collection) => searchableLibraryIds.includes(collection.library_id),
     );
     const contextViews = context.views ?? [];
-    const views = contextViews.filter((view) => searchableLibraryIds.includes(view.library_id));
+    const views = contextViews.filter((view) => isTargetInLibraries(view, searchableLibraryIds));
     return {
         items,
         collections,

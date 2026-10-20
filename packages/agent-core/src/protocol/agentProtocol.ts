@@ -3065,10 +3065,12 @@ export interface CurrentSavedSearch {
     search_key: string;
     /** Saved search name */
     name: string;
-    /** Library ID this saved search belongs to */
-    library_id: number;
-    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
-    library_ref?: string;
+    /**
+     * Device-portable library identity ("u" | "g<groupID>"). See
+     * `src/utils/libraryIdentity.ts`. Saved searches carry no device-local
+     * library id.
+     */
+    library_ref: string;
 }
 
 /**
