@@ -1,4 +1,6 @@
 import { threadReadOnlyAtom } from '../../runtime/threadProjection';
+import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useComposerVoice } from "../../hooks/useComposerVoice";
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -6,7 +8,7 @@ import { MicIcon, StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/i
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
-import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { sendWSMessageAtom, isWSChatPendingAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom, stoppingPreviousRunAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
 import RunPermissionButton, { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
@@ -40,6 +42,7 @@ import { useSlashMenu } from '../../hooks/useSlashMenu';
 import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
+import { useStopRun } from '../../hooks/useStopRun';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 import { dismissActiveEditNotePreview } from '../../host/zotero/editNotePreviewLifecycle';
 
@@ -131,7 +134,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
-    const closeWSConnection = useSetAtom(closeWSConnectionAtom);
+    const stopRun = useStopRun('InputArea');
     const isPending = useAtomValue(isWSChatPendingAtom);
 
     // A file staged for THIS composition is still being attached, so sending is
@@ -190,7 +193,15 @@ const InputArea: React.FC<InputAreaProps> = ({
     const showVerdictButtons = isAwaitingApproval && messageContent.trim().length > 0;
     // Held from the click until the decision is delivered, so a second click
     // cannot overtake the first while a note preview is being torn down.
-    const isVerdictInFlight = useAtomValue(approvalVerdictInFlightAtom);
+    // Also held while the run's connection is being recovered: the decision
+    // could only be queued until then.
+    const verdictClaimed = useAtomValue(approvalVerdictInFlightAtom);
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const reconnectShown = useRunReconnectShown();
+    const isVerdictInFlight = verdictClaimed || isReconnecting;
+    // A new message waiting for a stopped response to end says so in the
+    // presence bar.
+    const stoppingPreviousRun = useAtomValue(stoppingPreviousRunAtom);
     const beginApprovalVerdict = useSetAtom(beginApprovalVerdictAtom);
     const releaseApprovalVerdict = useSetAtom(releaseApprovalVerdictAtom);
     // Note: while an ask_user_question request is pending (and no approval is),
@@ -273,7 +284,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     // band takes a place here instead of stacking. Laid out lowest-priority
     // first so the winner sits nearest the composer.
     const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
-        threadReadOnly
+        threadReadOnly || stoppingPreviousRun
             ? 'thread-presence'
             : isAwaitingApproval
                 ? 'approvals'
@@ -511,8 +522,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             e.stopPropagation();
         }
-        logger('Stopping chat completion');
-        closeWSConnection(); // Also clears all pending approvals
+        stopRun();
     };
 
     /**
@@ -694,6 +704,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 <PendingActionsBar
                     onDecide={(approved) => handleApprovalVerdict(approved, true)}
                     disabled={isVerdictInFlight}
+                    heldCaption={reconnectShown ? RECONNECT_HELD_CAPTION : undefined}
                 />
             )}
 
@@ -861,6 +872,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 className="composer-reject"
                                 ariaLabel={rejectVerdictLabel}
                                 disabled={isVerdictInFlight}
+                                title={isReconnecting ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
                                 onClick={() => handleApprovalVerdict(false, true)}
                             >
                                 {rejectVerdictLabel}
@@ -871,6 +883,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 className="composer-approve"
                                 ariaLabel={approveVerdictLabel}
                                 disabled={isVerdictInFlight}
+                                title={isReconnecting ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
                                 onClick={() => handleApprovalVerdict(true, true)}
                             >
                                 {approveVerdictLabel}

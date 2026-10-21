@@ -12,8 +12,8 @@ export function hasThreadWriter(threadId: string): boolean {
 export async function isFinishedChat(threadId: string): Promise<boolean> {
     if (!threadId || hasThreadWriter(threadId)) return false;
     try {
-        const history = await agentRunService.getThreadRuns(threadId, false);
-        return history.activity?.state === "idle" && !hasThreadWriter(threadId);
+        const snapshot = await agentRunService.getThreadActivity(threadId);
+        return snapshot.activity?.state === "idle" && !hasThreadWriter(threadId);
     } catch {
         return false;
     }

@@ -5,7 +5,14 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ReconnectState, RetryState } from '@beaver/agent-core/run-state/atoms';
-import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
+import {
+    RECONNECT_ESCALATE_AFTER_MS,
+    RECONNECT_SHOW_AFTER_MS,
+    msUntilReconnectPhaseChange,
+    reconnectPhase,
+    runStatusText,
+    stillReconnectingText,
+} from '@beaver/agent-core/run-state/runStatusCopy';
 
 const reconnect = (attempt: number, maxAttempts = 4): ReconnectState => ({
     attempt,
@@ -116,5 +123,68 @@ describe('runStatusText', () => {
                 elapsedSeconds: 12,
             }),
         ).toBe('Retrying…');
+    });
+});
+
+describe('a reattach after a lost connection', () => {
+    const since = 1_000_000;
+    const reattach = (graceMs = 120_000): ReconnectState => ({
+        attempt: 1,
+        maxAttempts: 4,
+        since,
+        graceMs,
+    });
+    const textAt = (elapsed: number, state = reattach(), compact = false) =>
+        runStatusText({
+            reconnect: state,
+            backendRetry: null,
+            idleLabel: 'Generating',
+            now: since + elapsed,
+            compact,
+        });
+
+    it('shows nothing for a blip under a second', () => {
+        expect(reconnectPhase(reattach(), since + 500)).toBe('hidden');
+        expect(textAt(500)).toBe('Generating');
+    });
+
+    it('says it is reconnecting once the loss has lasted a second', () => {
+        expect(reconnectPhase(reattach(), since + RECONNECT_SHOW_AFTER_MS)).toBe('reconnecting');
+        expect(textAt(5_000)).toBe('Reconnecting…');
+    });
+
+    it('escalates after 30 s, naming the grace the server announced', () => {
+        expect(textAt(RECONNECT_ESCALATE_AFTER_MS - 1)).toBe('Reconnecting…');
+        expect(textAt(RECONNECT_ESCALATE_AFTER_MS)).toBe(
+            'Still reconnecting… Beaver keeps your response running for up to 2 minutes.',
+        );
+        expect(textAt(40_000, reattach(600_000))).toBe(
+            'Still reconnecting… Beaver keeps your response running for up to 10 minutes.',
+        );
+    });
+
+    it('never promises more time than the server gives', () => {
+        expect(stillReconnectingText(90_000)).toBe(
+            'Still reconnecting… Beaver keeps your response running for up to 1 minute.',
+        );
+        expect(stillReconnectingText(45_000)).toBe(
+            'Still reconnecting… Beaver keeps your response running for up to 45 seconds.',
+        );
+        expect(stillReconnectingText(undefined)).toBe('Still reconnecting…');
+    });
+
+    it('leaves the grace out of a compact line', () => {
+        expect(textAt(40_000, reattach(), true)).toBe('Still reconnecting…');
+    });
+
+    it('reports when its phase next changes', () => {
+        expect(msUntilReconnectPhaseChange(reattach(), since + 200)).toBe(800);
+        expect(msUntilReconnectPhaseChange(reattach(), since + 10_000)).toBe(20_000);
+        expect(msUntilReconnectPhaseChange(reattach(), since + 31_000)).toBeNull();
+    });
+
+    it('shows a connect retry at once and never escalates it', () => {
+        expect(reconnectPhase(reconnect(2), 0)).toBe('reconnecting');
+        expect(msUntilReconnectPhaseChange(reconnect(2), 0)).toBeNull();
     });
 });

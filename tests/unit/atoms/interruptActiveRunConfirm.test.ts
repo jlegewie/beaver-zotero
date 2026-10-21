@@ -8,11 +8,21 @@ import { createThreadStore as createStore } from '../../helpers/threadRepository
 
 const attachCollectionsMock = vi.fn();
 const cancelMock = vi.fn();
+const leaveRunMock = vi.fn(() => false);
+const canLeaveReconnectingRunMock = vi.fn(() => false);
 const getThreadRunsMock = vi.fn();
 const getThreadMock = vi.fn();
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentRunService: { getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args) },
-    agentService: { cancel: (...args: unknown[]) => cancelMock(...args) },
+    agentRunService: {
+        getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args),
+        // Reads the tail and activity through the history mock, as the real
+        // service does on a server without the activity endpoint.
+        getThreadActivity: async (threadId: string) => {
+            const history = await getThreadRunsMock(threadId, false);
+            return { tail_run_id: history.tail_run_id, activity: history.activity };
+        },
+    },
+    agentService: { cancel: (...args: unknown[]) => cancelMock(...args), cancelHandoff: () => null, canLeaveRun: () => false, leaveRun: (...args: unknown[]) => leaveRunMock(...(args as [])), isReattaching: () => false },
 }));
 
 vi.mock('@beaver/agent-core/transport/threadService', () => ({
@@ -126,6 +136,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     const { atom } = await import('jotai');
     return {
         abandonActiveRunLocallyAtom: atom(null, () => {}),
+        canLeaveReconnectingRun: () => canLeaveReconnectingRunMock(),
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
@@ -207,6 +218,8 @@ describe('interrupt-active-run confirm', () => {
         store = createStore();
         getPrefMock.mockReturnValue(false);
         confirmMock.mockReturnValue(true);
+        leaveRunMock.mockReturnValue(false);
+        canLeaveReconnectingRunMock.mockReturnValue(false);
         getThreadRunsMock.mockResolvedValue({ runs: [], agent_actions: [] });
         getThreadMock.mockResolvedValue({ name: 'Thread', zotero_user_id: '111', zotero_local_id: 'CURKEY' });
     });
@@ -386,6 +399,48 @@ describe('interrupt-active-run confirm', () => {
             // Already incremented by the time the id is written, so nothing can
             // observe the new chat under the old count.
             expect(seenWhenIdChanged).toContain(before + 1);
+        });
+    });
+
+    describe('leaving a run that is reconnecting', () => {
+        beforeEach(() => {
+            canLeaveReconnectingRunMock.mockReturnValue(true);
+            leaveRunMock.mockReturnValue(true);
+        });
+
+        it('starts a new chat without asking or stopping the run', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(leaveRunMock).toHaveBeenCalledWith('run-1');
+            expect(cancelMock).not.toHaveBeenCalled();
+            expect(store.get(activeRunAtom)).toBeNull();
+        });
+
+        it('opens another chat without asking or stopping the run', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(loadThreadAtom, loadArgs);
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(leaveRunMock).toHaveBeenCalledWith('run-1');
+            expect(cancelMock).not.toHaveBeenCalled();
+            expect(store.get(currentThreadIdAtom)).toBe('thread-1');
+        });
+
+        it('stops the run when the server could not hold it', async () => {
+            leaveRunMock.mockReturnValue(false);
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+
+            expect(leaveRunMock).toHaveBeenCalledWith('run-1');
+            expect(cancelMock).toHaveBeenCalledTimes(1);
         });
     });
 });

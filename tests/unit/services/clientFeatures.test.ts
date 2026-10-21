@@ -103,6 +103,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // destination, so the backend keeps rejecting those unless it is declared.
 // underline_annotations is declaration-only because a build that predates it
 // ignores `style` and writes highlights where the user asked for underlines.
+// run_reattach is declaration-only because it commits the client to answering a
+// re-sent request or prompt id from memory after a reattach: a build that
+// predates it would run a re-sent action a second time.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -132,6 +135,7 @@ const DECLARATION_ONLY_FEATURES = [
     'underline_annotations',
     'item_import_v2',
     'book_chapters',
+    'run_reattach',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

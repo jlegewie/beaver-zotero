@@ -44,6 +44,8 @@ export interface CreditConfirmationCardProps {
     confirmation: PendingCreditConfirmation;
     /** Disables every control once a decision has been made */
     disabled: boolean;
+    /** Why the decision is held back (the run is reconnecting), shown above the footer. */
+    heldCaption?: string;
     onApprove: () => void;
     onDecline: () => void;
     onStop: () => void;
@@ -67,6 +69,7 @@ export interface CreditConfirmationCardProps {
 export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
     confirmation,
     disabled,
+    heldCaption,
     onApprove,
     onDecline,
     onStop,
@@ -112,6 +115,12 @@ export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
                 )}
             </div>
 
+            {heldCaption && (
+                <div className="text-sm font-color-secondary" role="status">
+                    {heldCaption}
+                </div>
+            )}
+
             {/* Footer: Stop ... Decline Approve */}
             <div className="display-flex flex-row items-center pt-2 gap-2">
                 <Tooltip content="Stop the agent run" showArrow singleLine>
@@ -130,6 +139,7 @@ export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
                     variant="ghost"
                     onClick={onDecline}
                     disabled={disabled}
+                    title={heldCaption}
                 >
                     {confirmation.declineLabel}
                 </Button>
@@ -138,6 +148,7 @@ export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
                     style={{ padding: '2px 5px' }}
                     onClick={onApprove}
                     disabled={disabled}
+                    title={heldCaption}
                 >
                     {confirmation.approveLabel}
                 </Button>

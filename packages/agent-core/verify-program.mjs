@@ -200,6 +200,7 @@ const entryPaths = [
   "src/run-state/toolResultTypes.ts",
   "src/run-state/toolCallRequest.ts",
   "src/run-state/runResumeHelpers.ts",
+  "src/run-state/runResolution.ts",
   "src/run-state/loadThreadRuns.ts",
   "src/run-state/toolLabels.ts",
   "src/run-state/pendingQuestions.ts",

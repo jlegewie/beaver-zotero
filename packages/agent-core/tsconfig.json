@@ -86,6 +86,7 @@
     // the platform seams and error/model types they need.
     "./src/transport/providerConnection.ts",
     "./src/transport/agentService.ts",
+    "./src/transport/runLink.ts",
     "./src/transport/apiService.ts",
     "./src/transport/supabaseClient.ts",
     "./src/transport/credentials.ts",
@@ -125,6 +126,7 @@
     "./src/run-state/tableResults.ts",
     "./src/run-state/toolCallRequest.ts",
     "./src/run-state/runResumeHelpers.ts",
+    "./src/run-state/runResolution.ts",
     "./src/run-state/loadThreadRuns.ts",
     "./src/run-state/atoms.ts",
     "./src/run-state/pendingQuestions.ts",

@@ -9,10 +9,14 @@ import {
     readAdmissionHistory,
     setAdmission,
     reconcileThread,
+    keepLocalFailuresOnSettle,
+    type AdmissionWaitReason,
 } from "../runtime/threadAdmission";
+import { reattachResolutionAtom } from "@beaver/agent-core/run-state/runResolution";
 import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
+import { getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
 /**
  * WebSocket-based message generation atoms
  *
@@ -25,12 +29,13 @@ import { getHostWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '@beaver/agent-core/transport/agentService';
-import { connectWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
+import { CONNECT_MAX_ATTEMPTS, connectWithRetry, reattachWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
 import {
     ConnectionFailureEvidence,
     presentConnectionFailure,
+    REATTACH_FAILED_MESSAGE,
 } from '@beaver/agent-core/transport/connectionFailure';
 import {
     WSCallbacks,
@@ -59,6 +64,10 @@ import {
     BatchApprovalMode,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
+    WSReattachingInfo,
+    WSReattachedInfo,
+    WSReattachFailedInfo,
+    WSUndeliveredActionsInfo,
     ChargingPermissions,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { threadService } from '@beaver/agent-core/transport/threadService';
@@ -151,6 +160,7 @@ import {
     removePendingApprovalsAtom,
     pendingApprovalsAtom,
     clearAllPendingApprovalsAtom,
+    recordUndeliveredActionsAtom,
 } from '../agents/agentActions';
 import {
     addPendingQuestionAtom,
@@ -669,6 +679,11 @@ async function startContinuationRunOwned(
     // A resume overwriting the active slot mid-commit would be clobbered
     // when the retry installs its own replacement shell.
     if (retryCommitInFlight(get, options.logPrefix)) return;
+    // Nor may it take the slot of a run that is reconnecting.
+    if (get(isRunReconnectingAtom)) {
+        logger(`${options.logPrefix}: Blocked — the active run is reconnecting`, 1);
+        return;
+    }
 
     let newRunId: string | null = null;
 
@@ -1358,6 +1373,33 @@ export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
 /**
+ * The active run lost its connection and is being picked up on a new one.
+ * Decision cards stay up but are disabled meanwhile; Stop still works.
+ */
+export const isRunReconnectingAtom = atom(
+    (get) => get(wsReconnectingAtom) !== null && isRunActive(get(activeRunAtom)),
+);
+
+/**
+ * A new run is waiting for the server to stop a run the user stopped while it
+ * was reconnecting (see `agentService.cancelHandoff`).
+ */
+export const stoppingPreviousRunAtom = atom(false);
+let cancelHandoffSeq = 0;
+
+/** Runs stopped while reconnecting, whose chat waits for the server from the stop on. */
+const heldStopRunIds = new Set<string>();
+
+/**
+ * Whether the open chat's run is reconnecting and can be left without being
+ * stopped: switching chats then leaves it to the server rather than stopping it.
+ */
+export function canLeaveReconnectingRun(get: Getter): boolean {
+    const run = get(activeRunAtom);
+    return !!run && isRunActive(run) && agentService.canLeaveRun(run.id);
+}
+
+/**
  * Runs whose automatic replacement — an auto-resume or an auto-retry — has been
  * scheduled and has not finished. Added when `onError` decides to replace the
  * run, removed once the replacement has started or given up.
@@ -1441,16 +1483,61 @@ function findToolCallArgs(
     return null;
 }
 
+/** How a reattach after a lost connection ended, for the failure report. */
+interface ReattachOutcome {
+    /** `reattached`, `gave_up`, or `fallback:<reason>`. */
+    outcome: string;
+    gapMs: number;
+    /** The server ended the run and saved what it had, so it can be continued. */
+    resumable?: boolean;
+}
+
+/** `gave_up` when the client ran out of time, `fallback:<reason>` otherwise. */
+function reattachFailureOutcome(info: WSReattachFailedInfo): ReattachOutcome {
+    return {
+        outcome: info.reason === 'gave_up' ? 'gave_up' : `fallback:${info.reason}`,
+        gapMs: info.gapMs,
+        // `expired` means the run ended on the server, which saves it the way
+        // any interrupted run is saved.
+        resumable: info.reason === 'expired',
+    };
+}
+
+/**
+ * Make the open chat wait for the server to finish with a run this window lost
+ * track of. Marking its admission unknown blocks new sends and starts the
+ * admission poller, which loads the saved history once the server is idle, so
+ * the run ends up shown as the server finished it (completed, or interrupted
+ * with Continue) rather than as this window last saw it.
+ */
+function awaitServerSettlement(set: Setter, reason: AdmissionWaitReason): void {
+    const threadId = store.get(currentThreadIdAtom);
+    if (!threadId) return;
+    const admission = store.get(threadAdmissionAtom);
+    const known = admission?.threadId === threadId ? admission : null;
+    // Failed and stopped requests the server never saved stay on screen.
+    keepLocalFailuresOnSettle(threadId);
+    // The run this window lost shows a neutral "checking" state rather than
+    // its connection error while the server is asked how it ended.
+    const runId = store.get(activeRunAtom)?.id;
+    if (reason === 'reattach_failed' && runId) {
+        set(reattachResolutionAtom, { threadId, runId, since: Date.now() });
+    }
+    setAdmission(set, threadId, known?.tailRunId ?? null, 'unknown', known?.unconfirmedRunId, reason);
+}
+
 function surfaceAndDiagnoseConnectionFailure(
     set: Setter,
     runId: string,
     evidence: ConnectionFailureEvidence,
     connectAttempts?: number,
+    reattach?: ReattachOutcome,
 ): void {
     const applyPresentation = (
         diagnostic?: Awaited<ReturnType<typeof reportConnectionFailure>>,
     ) => {
         const presentation = presentConnectionFailure(evidence, diagnostic);
+        const message = reattach ? REATTACH_FAILED_MESSAGE : presentation.message;
         // The diagnostic POST can take several seconds; if the user retried in
         // the meantime, this run is no longer active and the refined
         // presentation must not resurface its error over the new run's state.
@@ -1464,7 +1551,7 @@ function surfaceAndDiagnoseConnectionFailure(
                   : {
                         event: 'error',
                         type: 'connection_error',
-                        message: presentation.message,
+                        message,
                         run_id: runId,
                         is_retryable: true,
                     },
@@ -1479,9 +1566,10 @@ function surfaceAndDiagnoseConnectionFailure(
                       status: 'error',
                       error: {
                           type: 'connection_error',
-                          message: presentation.message,
+                          message,
                           user_facing_details: presentation.details,
                           is_retryable: true,
+                          ...(reattach?.resumable ? { is_resumable: true } : {}),
                       },
                   }
                 : prev,
@@ -1494,6 +1582,8 @@ function surfaceAndDiagnoseConnectionFailure(
         evidence,
         run_id: runId,
         connect_attempts: connectAttempts ?? null,
+        reattach_outcome: reattach?.outcome ?? null,
+        reattach_gap_ms: reattach?.gapMs ?? null,
     }).then((diagnostic) => applyPresentation(diagnostic));
 }
 
@@ -1567,6 +1657,131 @@ export function createWSCallbacks(
         if (!ownsWriter(writer) || callbackEpoch !== writerCallbackEpoch) return;
         return originalSet(...args);
     }) as Setter;
+    /**
+     * Retire the live state of a run whose connection is gone and, when the
+     * server never finished it, show the connection error. `reattach` carries
+     * how a failed reattach ended, for a run that tried one.
+     */
+    const endRunOnLostConnection = (
+        transportEvidence: ConnectionFailureEvidence | undefined,
+        hadReachedReady: boolean,
+        reattach?: ReattachOutcome,
+    ) => {
+        set(isWSConnectedAtom, false);
+        set(isWSReadyAtom, false);
+        // A retry commit in flight owns the pending flag: this close
+        // belongs to the failed run the retry is replacing (onError
+        // dispatched it before the server closed the socket), and
+        // clearing here would re-enable the composer mid-commit. The
+        // retry flow clears or re-asserts the flag on every exit.
+        if (!store.get(retryPendingRunIdAtom)) {
+            set(isWSChatPendingAtom, false);
+        }
+        // Clear streaming-done state (connection lost during post-processing)
+        set(streamingDoneRunIdsAtom, new Set<string>());
+        streamActivity.reset();
+        // Clear pending approvals and dismiss diff preview (connection lost)
+        set(clearAllPendingApprovalsAtom);
+        set(clearAllPendingQuestionsAtom);
+        set(clearAllPendingCreditConfirmationsAtom);
+        set(clearAllPendingBatchApprovalsAtom);
+        set(clearRunApprovalPolicyAtom);
+
+        // A run that reached `completed` (run_complete processed) but whose
+        // terminal `done` never arrived — the socket closed while run_complete
+        // post-processing was still draining the message queue, so the queued
+        // `done` was skipped by the connection-generation guard — lingers in
+        // activeRunAtom. Finalize it the way onDone would, so the next send does
+        // not overwrite and drop it from local history. Idempotent: the normal
+        // path nulls activeRunAtom in onDone before close, making this a no-op.
+        set(activeRunAtom, (prev) => {
+            const finalRun = lingeringCompletedRun(prev);
+            if (finalRun) {
+                set(threadRunsAtom, (runs) => appendRunIfMissing(runs, finalRun));
+                return null;
+            }
+            return prev;
+        });
+
+        // A post-ready close that carries transport evidence came from the real
+        // socket (the client's own close()/cancel() paths notify without
+        // evidence). When it lands while the run is still nonterminal the server
+        // never delivered a terminal event — including a clean code-1000 close,
+        // which would otherwise leave the run spinning forever with no error and
+        // no retry. Connect-phase failures (before ready) are reported by
+        // executeWSRequest's catch, so gate on hadReachedReady to avoid
+        // double-reporting them.
+        if (hadReachedReady && transportEvidence) {
+            const activeRun = store.get(activeRunAtom);
+            if (
+                activeRun &&
+                (activeRun.status === 'in_progress' ||
+                    activeRun.status === 'awaiting_deferred')
+            ) {
+                surfaceAndDiagnoseConnectionFailure(
+                    set,
+                    activeRun.id,
+                    transportEvidence,
+                    connectAttempts() ?? undefined,
+                    reattach,
+                );
+            }
+        }
+    };
+
+    /**
+     * Report how a lost connection's reattach ended. A recovered drop is still
+     * a dropped connection and still counted as one; the outcome says the user
+     * never saw it. A failed reattach of the run this window still shows is
+     * reported by `endRunOnLostConnection` instead, which also refines the
+     * error card.
+     */
+    const reportReattachOutcome = (info: WSReattachedInfo | WSReattachFailedInfo) => {
+        const outcome: ReattachOutcome = 'reason' in info
+            ? reattachFailureOutcome(info)
+            : { outcome: 'reattached', gapMs: info.gapMs };
+        void reportConnectionFailure({
+            evidence: info.evidence,
+            run_id: info.runId,
+            connect_attempts: connectAttempts(),
+            reattach_outcome: outcome.outcome,
+            reattach_gap_ms: outcome.gapMs,
+        });
+    };
+
+    /**
+     * Pick up a run whose socket was lost on a new one. The loop belongs to
+     * the run, not to these callbacks: a run the user stops while it is
+     * reconnecting still has to be reached so the server can stop it.
+     */
+    const startReattach = (runId: string) => {
+        connectLoopsInFlight++;
+        void reattachWithRetry({
+            service: agentService,
+            runId,
+            isStillWanted: () => generation === getCredentialGeneration(),
+            logLabel: `run ${runId}`,
+        })
+            .then((outcome) => {
+                if (outcome === 'stopped') agentService.failReattach(runId, 'gave_up');
+            })
+            .catch((error) => {
+                logger(`WS reattach of run ${runId} failed: ${error}`, 1);
+                agentService.failReattach(runId, 'gave_up');
+            })
+            .finally(() => {
+                connectLoopsInFlight--;
+            });
+    };
+
+    // Applied in Zotero, but the result never reached the server: record it,
+    // whether or not this window still owns the run.
+    const revocationsAtRunStart = getLibraryRevocations();
+    const recordUndeliveredActions = (info: WSUndeliveredActionsInfo) => {
+        logger(`WS onUndeliveredActions: run ${info.runId}: ${info.actions.map((action) => action.actionId).join(', ')}`, 1);
+        void store.set(recordUndeliveredActionsAtom, info, revocationsAtRunStart);
+    };
+
     const callbacks = flushPartsBeforeOtherEvents({
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
@@ -1868,6 +2083,8 @@ export function createWSCallbacks(
             // connection UI here while these callbacks still own the request.
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
+            // Including a reattach this error ended.
+            set(wsReconnectingAtom, null);
             // Clear streaming-done state
             set(streamingDoneRunIdsAtom, new Set<string>());
             streamActivity.reset();
@@ -2144,79 +2361,117 @@ export function createWSCallbacks(
         onClose: (code: number, reason: string, wasClean: boolean, transportEvidence) => {
             logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}`, 1);
             // Whether this connection had received the `ready` event, read
-            // before the flag is cleared below. Distinguishes a connect-phase
+            // before the flag is cleared. Distinguishes a connect-phase
             // failure (reported once by executeWSRequest's catch) from a
             // post-ready drop (handled here).
             const hadReachedReady = store.get(isWSReadyAtom);
-            // set(activeRunAtom, null);
+            endRunOnLostConnection(transportEvidence, hadReachedReady);
+        },
+
+        // The socket was lost but the run goes on on the server. Everything
+        // the run is showing stays — streamed text, approval and question
+        // cards, the pending flag and the writer — while a new socket picks
+        // it up; only the connection state changes.
+        onReattaching: (info: WSReattachingInfo) => {
+            logger(`WS onReattaching: run ${info.runId} lost its connection, reattaching`, 1);
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
-            // A retry commit in flight owns the pending flag: this close
-            // belongs to the failed run the retry is replacing (onError
-            // dispatched it before the server closed the socket), and
-            // clearing here would re-enable the composer mid-commit. The
-            // retry flow clears or re-asserts the flag on every exit.
-            if (!store.get(retryPendingRunIdAtom)) {
-                set(isWSChatPendingAtom, false);
-            }
-            // Clear streaming-done state (connection lost during post-processing)
-            set(streamingDoneRunIdsAtom, new Set<string>());
+            // The wait is the connection's, not the model's.
             streamActivity.reset();
-            // Clear pending approvals and dismiss diff preview (connection lost)
-            set(clearAllPendingApprovalsAtom);
-            set(clearAllPendingQuestionsAtom);
-            set(clearAllPendingCreditConfirmationsAtom);
-            set(clearAllPendingBatchApprovalsAtom);
-            set(clearRunApprovalPolicyAtom);
-
-            // A run that reached `completed` (run_complete processed) but whose
-            // terminal `done` never arrived — the socket closed while run_complete
-            // post-processing was still draining the message queue, so the queued
-            // `done` was skipped by the connection-generation guard — lingers in
-            // activeRunAtom. Finalize it the way onDone would, so the next send does
-            // not overwrite and drop it from local history. Idempotent: the normal
-            // path nulls activeRunAtom in onDone before close, making this a no-op.
-            set(activeRunAtom, (prev) => {
-                const finalRun = lingeringCompletedRun(prev);
-                if (finalRun) {
-                    set(threadRunsAtom, (runs) => appendRunIfMissing(runs, finalRun));
-                    return null;
-                }
-                return prev;
+            // Attempt 1 renders as a plain "Reconnecting…": the reattach
+            // retries until the grace period ends, with no count to show. It
+            // stays hidden for a blip and escalates from when the loss began.
+            set(wsReconnectingAtom, {
+                attempt: 1,
+                maxAttempts: CONNECT_MAX_ATTEMPTS,
+                since: info.detachedAt,
+                graceMs: info.graceMs,
             });
+            startReattach(info.runId);
+        },
 
-            // A post-ready close that carries transport evidence came from the real
-            // socket (the client's own close()/cancel() paths notify without
-            // evidence). When it lands while the run is still nonterminal the server
-            // never delivered a terminal event — including a clean code-1000 close,
-            // which would otherwise leave the run spinning forever with no error and
-            // no retry. Connect-phase failures (before ready) are reported by
-            // executeWSRequest's catch, so gate on hadReachedReady to avoid
-            // double-reporting them.
-            if (hadReachedReady && transportEvidence) {
-                const activeRun = store.get(activeRunAtom);
-                if (
-                    activeRun &&
-                    (activeRun.status === 'in_progress' ||
-                        activeRun.status === 'awaiting_deferred')
-                ) {
-                    surfaceAndDiagnoseConnectionFailure(
-                        set,
-                        activeRun.id,
-                        transportEvidence,
-                        connectAttempts() ?? undefined,
-                    );
-                }
-            }
-        }
+        onReattached: (info: WSReattachedInfo) => {
+            logger(`WS onReattached: run ${info.runId} after ${info.gapMs}ms, ${info.replayed} event(s) replayed`, 1);
+            set(wsReconnectingAtom, null);
+            set(isWSConnectedAtom, true);
+            set(isWSReadyAtom, true);
+            reportReattachOutcome(info);
+        },
+
+        // The run could not be picked up again: it ends exactly as the
+        // original loss would have ended it without reattach.
+        // This request replaced a run the user stopped while it was
+        // reconnecting, before the stop got through.
+        onPreviousRunNotStopped: (runId: string) => {
+            logger(`WS onPreviousRunNotStopped: run ${runId}`, 1);
+            set(addPopupMessageAtom, {
+                type: 'warning',
+                title: 'Stop not confirmed',
+                text: 'Beaver could not confirm the stop of the previous response before sending this message. It may have finished in its chat and been charged.',
+                expire: false,
+            });
+        },
+
+        onReattachFailed: (info: WSReattachFailedInfo) => {
+            logger(`WS onReattachFailed: run ${info.runId} (${info.reason}) after ${info.gapMs}ms`, 1);
+            set(wsReconnectingAtom, null);
+            endRunOnLostConnection(info.evidence, true, reattachFailureOutcome(info));
+            // The server may still finish the run, or has saved it already.
+            if (navigation === store.get(threadNavigationSeqAtom)) awaitServerSettlement(set, 'reattach_failed');
+        },
+
+        onUndeliveredActions: (info: WSUndeliveredActionsInfo) => recordUndeliveredActions(info),
     });
+    /**
+     * A run the user stopped while it was reconnecting may still have finished
+     * on the server, or still be running there. Once the reattach is over, the
+     * chat still showing it waits for the server and loads what it saved.
+     */
+    const settleLeftRun = (runId: string) => {
+        // A stop made while reconnecting blocked the chat until the server
+        // was idle, so an idle chat has already loaded what the server saved.
+        const settledAfterHeldStop = heldStopRunIds.delete(runId)
+            && store.get(threadAdmissionAtom)?.activity.state === 'idle';
+        if (
+            navigation !== store.get(threadNavigationSeqAtom) ||
+            currentWriter() ||
+            isRunActive(store.get(activeRunAtom)) ||
+            !store.get(threadRunsAtom).some((run) => run.id === runId) ||
+            settledAfterHeldStop
+        ) return;
+        awaitServerSettlement(store.set, 'stop_unconfirmed');
+    };
+    // What still happens for a run this window has left, e.g. one the user
+    // stopped while it was reconnecting: it is still reattached, so the server
+    // hears the cancel, its connection loss is still reported once the
+    // outcome is known, and the chat waits for the server to settle it. None
+    // of its events reach this window.
+    const forLeftRun: Partial<WSCallbacks> = {
+        onUndeliveredActions: (info) => recordUndeliveredActions(info),
+        onReattaching: (info) => {
+            if (info.cancelRequested) startReattach(info.runId);
+        },
+        onReattached: (info) => {
+            reportReattachOutcome(info);
+            settleLeftRun(info.runId);
+        },
+        onReattachFailed: (info) => {
+            reportReattachOutcome(info);
+            settleLeftRun(info.runId);
+        },
+    };
     const guarded: Record<string, unknown> = { ...callbacks };
     for (const [name, callback] of Object.entries(callbacks)) {
         if (typeof callback !== 'function') continue;
         guarded[name] = (...args: unknown[]) => {
-            if (generation !== getCredentialGeneration() || !ownsWriter(writer) || callbackEpoch !== writerCallbackEpoch) return;
+            if (generation !== getCredentialGeneration()) return;
+            if (!ownsWriter(writer) || callbackEpoch !== writerCallbackEpoch) {
+                const left = forLeftRun[name as keyof WSCallbacks] as ((...leftArgs: unknown[]) => unknown) | undefined;
+                left?.(...args);
+                return;
+            }
             const result = (callback as (...callbackArgs: unknown[]) => unknown)(...args);
-            if (name === 'onDone' || name === 'onError' || name === 'onClose') {
+            if (name === 'onDone' || name === 'onError' || name === 'onClose' || name === 'onReattachFailed') {
                 if (result instanceof Promise) return result.finally(() => settleWriter(store.get, writer));
                 settleWriter(store.get, writer);
             }
@@ -2334,6 +2589,20 @@ async function executeWSRequest(
     delete request.search_index_state;
     if (searchIndexState) request.search_index_state = searchIndexState;
 
+    // A run stopped while it was reconnecting holds this one back until the
+    // server has its cancel; say so while the new message waits.
+    // Whether that stop got through is reported by `onPreviousRunNotStopped`
+    // once this request has actually replaced the run.
+    const handoff = agentService.cancelHandoff();
+    const handoffMark = handoff ? ++cancelHandoffSeq : null;
+    const endHandoff = () => {
+        if (handoffMark === cancelHandoffSeq) store.set(stoppingPreviousRunAtom, false);
+    };
+    if (handoff) {
+        store.set(stoppingPreviousRunAtom, true);
+        void handoff.then(endHandoff);
+    }
+
     connectLoopsInFlight++;
     const result = await connectWithRetry({
         service: agentService,
@@ -2371,6 +2640,8 @@ async function executeWSRequest(
         },
     }).finally(() => {
         connectLoopsInFlight--;
+        // Also when the request was abandoned during the wait.
+        endHandoff();
     });
 
     if (!ownsWriter(requestWriter)) return;
@@ -2818,6 +3089,12 @@ async function startRegenerateRunOwned(
     // One retry at a time: retry controls of other runs stay clickable while
     // a commit is in flight, and a second truncation would race the first.
     if (retryCommitInFlight(get, logPrefix)) return;
+    // Replacing a run that is reconnecting would stop it, and that stop is
+    // billed. The retry controls are disabled meanwhile; this covers the rest.
+    if (get(isRunReconnectingAtom)) {
+        logger(`${logPrefix}: Blocked — the active run is reconnecting`, 1);
+        return;
+    }
 
     // Dismiss any open diff preview before regenerating
     dismissDiffPreview();
@@ -2922,7 +3199,11 @@ async function startRegenerateRunOwned(
         const settlementThreadId =
             get(currentThreadIdAtom) || targetRun.thread_id;
         if (settlementThreadId && Zotero.Beaver?.presence) {
-            setAdmission(set, settlementThreadId, get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown');
+            // A retry that stopped the running response says so while the
+            // server ends it; otherwise the retry control shows the wait.
+            const waitReason = activeRun ? 'stopping_previous' : undefined;
+            setAdmission(set, settlementThreadId, get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown',
+                undefined, waitReason);
             const generation = getCredentialGeneration();
             const current = () =>
                 navSeqBeforeAwait === get(threadNavigationSeqAtom) &&
@@ -2934,7 +3215,7 @@ async function startRegenerateRunOwned(
             for (;;) {
                 const history = await readAdmissionHistory(settlementThreadId, true);
                 if (!current()) return;
-                setAdmission(set, settlementThreadId, history.tail_run_id, history.activity);
+                setAdmission(set, settlementThreadId, history.tail_run_id, history.activity, undefined, waitReason);
                 if (history.activity.state !== 'active') {
                     settledHistory = history;
                     break;
@@ -2983,7 +3264,26 @@ async function startRegenerateRunOwned(
                 set(threadConflictAtom, "thread_tail_mismatch");
                 return;
             }
+            const localTarget = targetRun;
             targetRun = threadRuns[runIndex];
+            // The server finished a response this window had shown as failed
+            // or stopped, e.g. after its connection was lost. The saved answer
+            // now shows in its place; retrying would discard what was paid for.
+            if (
+                !editedPrompt &&
+                activeRun?.id !== localTarget.id &&
+                (localTarget.status === 'error' || localTarget.status === 'canceled') &&
+                targetRun.status === 'completed'
+            ) {
+                logger(`${logPrefix}: Run ${targetRun.id} completed on the server; not retrying it`, 1);
+                set(addPopupMessageAtom, {
+                    type: 'info',
+                    title: 'Response finished',
+                    text: 'Beaver finished this response after all, so it was not retried.',
+                    expire: true,
+                });
+                return;
+            }
         }
 
         // If the target is a resume run, walk the resume chain back to the
@@ -3414,14 +3714,25 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     // Clear streaming-done state (abandoned during post-processing)
     set(streamingDoneRunIdsAtom, new Set<string>());
     streamActivity.reset();
+    // A run abandoned while reconnecting is no longer shown as reconnecting;
+    // its reattach goes on only to deliver the cancel.
+    set(wsReconnectingAtom, null);
 });
 
 /**
  * User-initiated close: cancel on the backend, then close.
  * Local bookkeeping is shared with shutdown via `abandonActiveRunLocallyAtom`.
  */
-export const closeWSConnectionAtom = atom(null, async (_get, set) => {
+export const closeWSConnectionAtom = atom(null, async (get, set) => {
+    // A run stopped while it reconnects is stopped once the server has it
+    // back. Until the server confirms, the chat waits for it.
+    const activeRun = get(activeRunAtom);
+    const stopIsHeld = !!activeRun && isRunActive(activeRun) && agentService.isReattaching(activeRun.id);
     set(abandonActiveRunLocallyAtom);
+    if (stopIsHeld) {
+        heldStopRunIds.add(activeRun.id);
+        awaitServerSettlement(set, 'stop_unconfirmed');
+    }
 
     // Send cancel message and close connection
     await agentService.cancel();

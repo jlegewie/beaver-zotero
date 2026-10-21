@@ -18,7 +18,7 @@ const { connectMock, resolveClientIdentityMock } = vi.hoisted(() => ({
     resolveClientIdentityMock: vi.fn(),
 }));
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentService: { connect: connectMock, close: vi.fn() },
+    agentService: { connect: connectMock, close: vi.fn(), cancelHandoff: () => null, canLeaveRun: () => false, leaveRun: () => false, isReattaching: () => false },
     AgentConnectionError: class AgentConnectionError extends Error {},
 }));
 vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({

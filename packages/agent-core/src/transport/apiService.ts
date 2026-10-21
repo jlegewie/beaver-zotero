@@ -40,6 +40,12 @@ export interface RequestOptions {
      * settle on their own.
      */
     timeoutMs?: number;
+    /**
+     * Called just before each dispatch, including the retry after a token
+     * refresh; throwing stops the request. For a request whose permission can
+     * change while it waits on authentication.
+     */
+    assertDispatch?: () => void;
 }
 
 /** An in-flight call's abort controller plus the deadline that armed it. */
@@ -219,7 +225,7 @@ export class ApiService {
         method: HttpMethod,
         body?: unknown,
         deadline?: RequestDeadline,
-        options?: { rawBody?: Uint8Array; headers?: Record<string, string> },
+        options?: { rawBody?: Uint8Array; headers?: Record<string, string>; assertDispatch?: () => void },
     ): Promise<Response> {
         const generation = getCredentialGeneration();
         const configurationError = getTransportConfigurationError();
@@ -240,7 +246,7 @@ export class ApiService {
         method: HttpMethod,
         body?: unknown,
         deadline?: RequestDeadline,
-        options?: { rawBody?: Uint8Array; headers?: Record<string, string> },
+        options?: { rawBody?: Uint8Array; headers?: Record<string, string>; assertDispatch?: () => void },
     ): Promise<Response> {
         const generation = getCredentialGeneration();
         const bodyText = body === undefined ? undefined : JSON.stringify(body);
@@ -261,6 +267,7 @@ export class ApiService {
         const makeRequest = async (headers: Record<string, string>): Promise<Response> => {
             try {
                 throwIfDeadlineExpired();
+                options?.assertDispatch?.();
                 return await fetch(`${this.baseUrl}${endpoint}`, {
                     method,
                     headers: { ...headers, ...options?.headers },
@@ -437,7 +444,9 @@ export class ApiService {
     */
     async post<T>(endpoint: string, body: any, options?: RequestOptions): Promise<T> {
         return withDeadline(options, async (deadline) => {
-            const response = await this.request(endpoint, 'POST', body, deadline);
+            const response = await this.request(endpoint, 'POST', body, deadline, {
+                assertDispatch: options?.assertDispatch,
+            });
             return await this.parseJsonResponse<T>(response, 'POST');
         });
     }

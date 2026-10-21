@@ -23,7 +23,8 @@ import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
-import { regenerateWithEditedPromptAtom, isWSChatPendingAtom, retryPendingRunIdAtom } from '../../atoms/agentRunAtoms';
+import { regenerateWithEditedPromptAtom, isWSChatPendingAtom, retryPendingRunIdAtom, isRunReconnectingAtom } from '../../atoms/agentRunAtoms';
+import { RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
@@ -162,6 +163,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const regenerateWithEditedPrompt = useSetAtom(regenerateWithEditedPromptAtom);
     const buildEditedPromptActions = useSetAtom(buildEditedPromptActionsAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
+    const isRunReconnecting = useAtomValue(isRunReconnectingAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     // Loading state after an edited prompt was submitted: the edit overlay is
@@ -804,6 +806,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 variant="solid"
                                 className="composer-send"
                                 ariaLabel="Send edited message"
+                                title={isRunReconnecting ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
                                 onClick={handleSubmit}
                                 disabled={
                                     threadReadOnly || editedContent.length === 0

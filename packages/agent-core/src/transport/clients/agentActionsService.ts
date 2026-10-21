@@ -1,4 +1,4 @@
-import { ApiService } from '../apiService';
+import { ApiService, type RequestOptions } from '../apiService';
 import { ActionStatus, ActionResultDataType } from '../../types/agentActions/base';
 import { logger } from '../../platform/logger';
 
@@ -14,6 +14,12 @@ export interface AckActionLink {
 export interface AckActionsRequest {
     run_id: string;
     links: AckActionLink[];
+    /**
+     * Record an action only while nothing has decided it since (still
+     * `pending`), so an undo, rejection, newer apply or failed undo is never
+     * overwritten. Ignored by servers that predate it.
+     */
+    only_undecided?: boolean;
 }
 
 export interface AckActionError {
@@ -22,11 +28,21 @@ export interface AckActionError {
     detail: string;
 }
 
+/** An action an `only_undecided` acknowledgement left alone, as it stands. */
+export interface AckSkippedAction {
+    action_id: string;
+    /** Null when the action was not found. */
+    status: ActionStatus | null;
+    result_data: Record<string, any> | null;
+}
+
 export interface AckActionsResponse {
     success: boolean;
     run_id: string;
     updated: number;
     errors: AckActionError[];
+    /** With `only_undecided`: actions left alone, missing or decided since. */
+    skipped?: AckSkippedAction[];
 }
 
 export interface UpdateActionRequest {
@@ -271,16 +287,18 @@ export class AgentActionsService extends ApiService {
      */
     async acknowledgeActions(
         runId: string,
-        links: AckActionLink[]
+        links: AckActionLink[],
+        options?: RequestOptions & { onlyUndecided?: boolean },
     ): Promise<AckActionsResponse> {
         logger(`acknowledgeActions: Acknowledging ${links.length} actions for run ${runId}`);
 
         const request: AckActionsRequest = {
             run_id: runId,
             links,
+            ...(options?.onlyUndecided ? { only_undecided: true } : {}),
         };
 
-        return this.post<AckActionsResponse>('/api/v1/agent-actions/ack', request);
+        return this.post<AckActionsResponse>('/api/v1/agent-actions/ack', request, options);
     }
 
     /**

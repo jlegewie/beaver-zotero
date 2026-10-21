@@ -1,16 +1,19 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useSetAtom } from 'jotai';
+import React, { useEffect, useRef, useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import type { PendingCreditConfirmation } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { removePendingCreditConfirmationAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import {
-    closeWSConnectionAtom,
+    isRunReconnectingAtom,
     sendCreditConfirmationResponseAtom,
 } from '../../atoms/agentRunAtoms';
 import CreditConfirmationCard, {
     createCreditDecisionHandlers,
     type CreditDecisionHandlers,
 } from '@beaver/agent-ui/chat/CreditConfirmationCard';
+import { useStopRun } from '../../hooks/useStopRun';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 
 interface CreditConfirmationPanelProps {
     confirmation: PendingCreditConfirmation;
@@ -35,8 +38,9 @@ interface CreditConfirmationPanelProps {
  */
 export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = ({ confirmation }) => {
     const sendResponse = useSetAtom(sendCreditConfirmationResponseAtom);
-    const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const removeConfirmation = useSetAtom(removePendingCreditConfirmationAtom);
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const reconnectShown = useRunReconnectShown();
 
     // Drives the disabled styling in the instant before the panel unmounts.
     // The one-shot guard lives in the handlers, not here.
@@ -75,15 +79,13 @@ export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = (
         return () => clearTimeout(timer);
     }, [confirmationId, expiresAt, removeConfirmation]);
 
-    const handleStop = useCallback(() => {
-        logger('CreditConfirmationPanel: Stopping run while credit confirmation pending');
-        closeWSConnection(); // Also clears pending confirmations -> panel unmounts
-    }, [closeWSConnection]);
+    const handleStop = useStopRun('CreditConfirmationPanel');
 
     return (
         <CreditConfirmationCard
             confirmation={confirmation}
-            disabled={isSubmitted}
+            disabled={isSubmitted || isReconnecting}
+            heldCaption={reconnectShown && !isSubmitted ? RECONNECT_HELD_CAPTION : undefined}
             onApprove={handlers.approve}
             onDecline={handlers.decline}
             onStop={handleStop}
