@@ -114,6 +114,17 @@ export async function getWSAuthToken(): Promise<string> {
 export const CONNECT_TIMEOUT_MS = 20_000;
 
 /**
+ * How long a socket opened to reattach a run may take to open. The run lives on
+ * an instance that is already up, so a socket still closed after this is stuck
+ * (sent into a dead network, or held back by the browser after earlier failures)
+ * and a fresh attempt recovers sooner than waiting out `CONNECT_TIMEOUT_MS`.
+ */
+export const REATTACH_OPEN_TIMEOUT_MS = 5_000;
+
+/** How long a reachability probe (see `probeReachable`) waits for an answer. */
+export const REACHABILITY_PROBE_TIMEOUT_MS = 3_000;
+
+/**
  * How long a new run waits for the cancel of a run stopped while it was
  * reconnecting to reach the server, before replacing it anyway.
  */
@@ -382,6 +393,34 @@ export class AgentService {
     }
 
     /**
+     * Whether the backend answers a plain HTTP request, without opening a
+     * socket. Resolves false on a network error, a timeout, or a 5xx (the
+     * server is not serving yet); never rejects.
+     *
+     * A reattach loop waits on this between attempts instead of opening
+     * sockets into a dead network: the browser counts every failed WebSocket
+     * connect and holds back the next one to the same server for longer each
+     * time (up to a minute), so failed attempts during an outage would delay
+     * the first one after it. HTTP requests are not held back.
+     */
+    async probeReachable(timeoutMs: number = REACHABILITY_PROBE_TIMEOUT_MS): Promise<boolean> {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const httpUrl = new URL(this.baseUrl);
+            const response = await fetch(`${httpUrl.protocol}//${httpUrl.host}/health`, {
+                cache: 'no-store',
+                signal: controller.signal,
+            });
+            return response.status < 500;
+        } catch {
+            return false;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
      * Get WebSocket URL from HTTP base URL
      */
     private getWebSocketUrl(): string {
@@ -617,9 +656,11 @@ export class AgentService {
 
         return new Promise<void>((resolve, reject) => {
             let hasResolved = false;
+            let openTimer: ReturnType<typeof setTimeout> | undefined;
             const finish = (error?: Error) => {
                 if (hasResolved) return;
                 hasResolved = true;
+                clearTimeout(openTimer);
                 this.connecting = false;
                 if (this.activeConnectFinish === finish) {
                     this.activeConnectFinish = null;
@@ -703,10 +744,24 @@ export class AgentService {
                 return;
             }
 
+            const connId = this.connectionId;
+            if (reattach) {
+                openTimer = setTimeout(() => {
+                    if (attempt.socketOpened || this.connectionId !== connId) return;
+                    // Reject before close(), as on the connect timeout.
+                    finish(new ConnectTimeoutError(attemptEvidence(attempt), REATTACH_OPEN_TIMEOUT_MS));
+                    this.closeSocket(1000, 'Connection attempt timed out', {
+                        notifyClose: false,
+                        keepDetachedRun: true,
+                    });
+                }, REATTACH_OPEN_TIMEOUT_MS);
+            }
+
             // Capture the WebSocket instance to avoid race conditions if connect()
             // is called again before auth completes. The second connect() would call
             // close() which sets this.ws = null, but we need the original instance.
             wsInstance.onopen = () => {
+                clearTimeout(openTimer);
                 attempt.stage = 'authenticating';
                 attempt.socketOpened = true;
                 attempt.openedAt = Date.now();
@@ -740,7 +795,6 @@ export class AgentService {
                 // Note: Don't resolve here - wait for ready event
             };
 
-            const connId = this.connectionId;
             wsInstance.onmessage = (event) => {
                 // A frame buffered on a socket that close() has already
                 // replaced must not be acked, counted or queued against the
