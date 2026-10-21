@@ -1,4 +1,4 @@
-import { atom } from 'jotai';
+import { atom, type Getter, type Setter } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { checkLibraryExcluded, getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
@@ -26,7 +26,9 @@ import {
     hasAppliedZoteroItem,
     hasAppliedBulkAnnotations,
     getZoteroItemReferenceFromAgentAction,
+    toAgentAction,
 } from '@beaver/agent-core/agents/agentActionTypes';
+import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 
 export * from '@beaver/agent-core/agents/agentActionTypes';
 
@@ -326,17 +328,27 @@ const UNDELIVERED_ACK_RETRY_MS = [2_000, 5_000, 15_000, 30_000];
 const UNDELIVERED_ACK_TIMEOUT_MS = 20_000;
 
 /**
+ * How the server holds an action whose execute went out without a result
+ * coming back (see `isUnconfirmedAction`), shown until it has been recorded.
+ */
+const UNCONFIRMED_STATE = {
+    status: 'error' as ActionStatus,
+    error_message: 'Zotero did not report whether this change was applied. Check the item in Zotero before asking for it again.',
+    error_details: { outcome: 'unconfirmed', reason: 'no_result' },
+};
+
+/**
  * Record actions a run applied whose results never reached the server, e.g.
  * because the connection was lost right after the write and the run could not
- * be reattached. The server would otherwise keep them pending, offering to
- * apply them again. Retried because the connection is often still down.
+ * be reattached. The server would otherwise keep them unconfirmed, with the
+ * outcome unknown. Retried because the connection is often still down.
  *
- * The server records an action only while nothing has decided it since, so an
+ * The server records an action only while nothing has settled it since, so an
  * undo, rejection or newer apply made meanwhile, in any window, stands.
  */
 export const recordUndeliveredActionsAtom = atom(
     null,
-    async (_get, set, info: WSUndeliveredActionsInfo, revocationsAtRunStart: number | null) => {
+    async (get, set, info: WSUndeliveredActionsInfo, revocationsAtRunStart: number | null) => {
         // The actions belong to the account that ran them.
         const generation = getCredentialGeneration();
         // Results do not say every library they touched. If any library has
@@ -350,6 +362,14 @@ export const recordUndeliveredActionsAtom = atom(
             action_id: action.actionId,
             result_data: action.resultData as AckActionLink['result_data'],
         }));
+        // Until it is recorded, an approved action's card must not offer to
+        // apply it again.
+        const reported = new Set(links.map((link) => link.action_id));
+        set(threadAgentActionsAtom, (prev: AgentAction[]) => prev.map((action) =>
+            reported.has(action.id) && action.status === 'pending'
+                ? { ...action, ...UNCONFIRMED_STATE }
+                : action,
+        ));
         for (let attempt = 0; ; attempt++) {
             if (generation !== getCredentialGeneration()) return;
             if (scopeNarrowed()) {
@@ -370,13 +390,25 @@ export const recordUndeliveredActionsAtom = atom(
                 if (response.success) {
                     // Show each action the way the server now has it: applied
                     // by this request, or as it stood when left alone (e.g.
-                    // applied by an attempt whose response was lost).
-                    const current = new Map<string, { status: ActionStatus; result_data?: Record<string, any> }>(
-                        links.map((link) => [link.action_id, { status: 'applied', result_data: link.result_data }]),
+                    // applied by an attempt whose response was lost), with
+                    // the server's error fields in place of the unconfirmed
+                    // marker shown meanwhile.
+                    const current = new Map<string, Partial<AgentAction>>(
+                        links.map((link) => [link.action_id, {
+                            status: 'applied',
+                            result_data: link.result_data,
+                            error_message: undefined,
+                            error_details: undefined,
+                        }]),
                     );
                     for (const skipped of response.skipped ?? []) {
                         if (skipped.status) {
-                            current.set(skipped.action_id, { status: skipped.status, result_data: skipped.result_data ?? undefined });
+                            current.set(skipped.action_id, {
+                                status: skipped.status,
+                                result_data: skipped.result_data ?? undefined,
+                                error_message: skipped.error_message ?? undefined,
+                                error_details: skipped.error_details ?? undefined,
+                            });
                         } else {
                             current.delete(skipped.action_id);
                         }
@@ -387,6 +419,7 @@ export const recordUndeliveredActionsAtom = atom(
                             ? { ...action, ...state }
                             : action;
                     }));
+                    await showRecordedActionsMissingFromThread(get, set, info.runId, [...current.keys()]);
                     return;
                 }
             } catch (error) {
@@ -401,6 +434,39 @@ export const recordUndeliveredActionsAtom = atom(
         }
     }
 );
+
+/** Whether `runId` belongs to the thread this window shows. */
+function isRunInThread(get: Getter, runId: string): boolean {
+    return get(activeRunAtom)?.id === runId || get(threadRunsAtom).some((run) => run.id === runId);
+}
+
+/**
+ * Add recorded actions this window never received. An action applied without
+ * asking is sent to the client only once its result arrives, so one recovered
+ * after a lost connection is not yet in the thread's list.
+ */
+async function showRecordedActionsMissingFromThread(
+    get: Getter,
+    set: Setter,
+    runId: string,
+    actionIds: string[],
+): Promise<void> {
+    const known = new Set(get(threadAgentActionsAtom).map((action) => action.id));
+    const missing = new Set(actionIds.filter((id) => !known.has(id)));
+    if (missing.size === 0 || !isRunInThread(get, runId)) return;
+    try {
+        const stored = await agentActionsService.getActionsForRun(runId);
+        // The user may have opened another thread meanwhile.
+        if (!isRunInThread(get, runId)) return;
+        const recovered = stored.filter((action) => missing.has(action.id)).map(toAgentAction);
+        set(threadAgentActionsAtom, (prev: AgentAction[]) => [
+            ...prev,
+            ...recovered.filter((action) => !prev.some((existing) => existing.id === action.id)),
+        ]);
+    } catch (error) {
+        logger(`recordUndeliveredActionsAtom: loading run ${runId}'s actions failed: ${error}`, 1);
+    }
+}
 
 /**
  * Set agent actions to error status.

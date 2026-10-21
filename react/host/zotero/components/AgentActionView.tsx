@@ -64,7 +64,6 @@ import DeferredToolPreferenceButton from '../../../components/ui/buttons/Deferre
 import RunPermissionButton, { RunPermissionMode } from '../../../components/ui/buttons/RunPermissionButton';
 import {
     ActionStatus,
-    STATUS_CONFIGS,
     NEVER_AUTO_COLLAPSE_TOOLS,
     getOverallStatus,
     getActionLabel,
@@ -75,6 +74,7 @@ import {
     getAgentActionToolIcon,
     inFlightProgressMessage,
     hasFailedUndo,
+    getStatusConfig,
 } from './agentActionViewHelpers';
 import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
@@ -356,7 +356,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isConfirmExternalSearch = toolName === 'confirm_external_search';
     const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
     const hasNoActionData = !action && !pendingApproval && !isStreaming;
-    const baseConfig = STATUS_CONFIGS[status];
+    const baseConfig = getStatusConfig(status, actions);
     const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
         : actions.some(isStaleMergeProposal)

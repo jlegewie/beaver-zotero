@@ -63,6 +63,7 @@ import {
 import { buildPreviewableEditOperations } from '../../../utils/editNotePreviewOperations';
 import { getEditNoteRetryOrder } from './editNoteRetryOrder';
 import { isStaleNoteEdit, STALE_NOTE_EDIT_MESSAGE } from './editNoteErrors';
+import { isUnconfirmedAction } from './reviewChangeRows';
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
@@ -243,9 +244,10 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         [allActions],
     );
     // An edit whose target is gone from the note fails the same way on every
-    // retry, so it is reported instead of offered for Retry.
+    // retry, so it is reported instead of offered for Retry. So is one whose
+    // outcome is unknown: it may already be in the note.
     const errorActions = useMemo(
-        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a)),
+        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a) && !isUnconfirmedAction(a)),
         [allActions],
     );
     const hasStaleEdit = useMemo(() => allActions.some(isStaleNoteEdit), [allActions]);

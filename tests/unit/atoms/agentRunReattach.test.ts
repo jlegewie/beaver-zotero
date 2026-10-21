@@ -449,7 +449,7 @@ describe('a run reattaching after its connection dropped', () => {
         });
 
         it('shows actions the server left alone as the server has them', async () => {
-            store.set(threadAgentActionsAtom, ['action-1', 'action-2', 'action-3', 'action-4'].map((id) => (
+            store.set(threadAgentActionsAtom, ['action-1', 'action-2', 'action-3', 'action-4', 'action-5'].map((id) => (
                 { id, run_id: 'run-1', action_type: 'create_collection', status: 'pending', proposed_data: {} } as any
             )));
             const ack = vi.spyOn(agentActionsService, 'acknowledgeActions').mockResolvedValue({
@@ -460,6 +460,14 @@ describe('a run reattaching after its connection dropped', () => {
                 skipped: [
                     // Undone in another window.
                     { action_id: 'action-2', status: 'undone', result_data: null },
+                    // Failed to undo in another window.
+                    {
+                        action_id: 'action-5',
+                        status: 'error',
+                        result_data: { collection_key: 'SERVER' },
+                        error_message: 'Undo failed',
+                        error_details: { error_code: 'stale' },
+                    },
                     // Applied by an earlier attempt whose response was lost.
                     { action_id: 'action-3', status: 'applied', result_data: { collection_key: 'SERVER' } },
                     { action_id: 'action-4', status: null, result_data: null },
@@ -468,14 +476,75 @@ describe('a run reattaching after its connection dropped', () => {
 
             await store.set(recordUndeliveredActionsAtom, {
                 runId: 'run-1',
-                actions: ['action-1', 'action-2', 'action-3', 'action-4'].map((actionId) => (
+                actions: ['action-1', 'action-2', 'action-3', 'action-4', 'action-5'].map((actionId) => (
                     { actionId, resultData: { collection_key: 'LOCAL' } }
                 )),
             }, 0);
 
+            // One the server does not have was still applied in Zotero, so it
+            // stays unconfirmed rather than offered for applying again.
             expect(store.get(threadAgentActionsAtom).map((action) => [action.status, action.result_data?.collection_key]))
-                .toEqual([['applied', 'LOCAL'], ['undone', undefined], ['applied', 'SERVER'], ['pending', undefined]]);
+                .toEqual([
+                    ['applied', 'LOCAL'], ['undone', undefined], ['applied', 'SERVER'], ['error', undefined], ['error', 'SERVER'],
+                ]);
+            const [recorded, , , missing, failedUndo] = store.get(threadAgentActionsAtom);
+            expect(recorded.error_details).toBeUndefined();
+            expect(missing.error_details).toMatchObject({ outcome: 'unconfirmed' });
+            // A failure left alone keeps the server's explanation.
+            expect(failedUndo).toMatchObject({ error_message: 'Undo failed', error_details: { error_code: 'stale' } });
             ack.mockRestore();
+        });
+
+        it('loads a recorded action applied without asking, which the window never received', async () => {
+            store.set(threadAgentActionsAtom, []);
+            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                .mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
+            const load = vi.spyOn(agentActionsService, 'getActionsForRun').mockResolvedValue([
+                { id: 'action-1', run_id: 'run-1', action_type: 'create_note', status: 'applied', proposed_data: {} },
+                { id: 'other', run_id: 'run-1', action_type: 'create_note', status: 'applied', proposed_data: {} },
+            ] as any);
+
+            await store.set(recordUndeliveredActionsAtom, {
+                runId: 'run-1',
+                actions: [{ actionId: 'action-1', resultData: {} }],
+            }, 0);
+
+            expect(load).toHaveBeenCalledWith('run-1');
+            expect(store.get(threadAgentActionsAtom).map((action) => [action.id, action.status]))
+                .toEqual([['action-1', 'applied']]);
+            ack.mockRestore();
+            load.mockRestore();
+            store.set(threadRunsAtom, []);
+        });
+
+        it('shows a pending card as unconfirmed while the action is being recorded', async () => {
+            store.set(threadAgentActionsAtom, [
+                { id: 'action-1', run_id: 'run-1', action_type: 'create_note', status: 'pending', proposed_data: {} } as any,
+            ]);
+            vi.useFakeTimers();
+            try {
+                const ack = vi.spyOn(agentActionsService, 'acknowledgeActions').mockRejectedValue(new Error('offline'));
+                const recording = store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{ actionId: 'action-1', resultData: {} }],
+                }, 0);
+
+                // No Apply while the outcome is being recorded, nor after giving up.
+                expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
+                    status: 'error',
+                    error_details: { outcome: 'unconfirmed' },
+                });
+                await vi.advanceTimersByTimeAsync(60_000);
+                await recording;
+                expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
+                    status: 'error',
+                    error_details: { outcome: 'unconfirmed' },
+                });
+                ack.mockRestore();
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         it('does not dispatch for an account that changed while the request waited', async () => {

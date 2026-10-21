@@ -25,7 +25,7 @@ vi.mock('@beaver/agent-core/transport/clients/agentActionsService', () => ({
 }));
 
 import { executeEditNoteOrBatchAction } from '../../../react/utils/editNoteActions';
-import { undoCreateItemActions } from '../../../react/utils/createItemActions';
+import { executeCreateItemActions, undoCreateItemActions } from '../../../react/utils/createItemActions';
 import { threadAgentActionsAtom } from '../../../react/agents/agentActions';
 import {
     applyAgentActionsAtom,
@@ -128,3 +128,45 @@ describe('create_item undo retry', () => {
         expect(result.undone).toEqual([]);
     });
 });
+
+describe('create_item batch apply', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('leaves an unconfirmed action out, since it may already be in the library', async () => {
+        const store = createStore();
+        const pending = createItemAction('a', { status: 'pending', result_data: undefined });
+        const unconfirmed = createItemAction('b', {
+            status: 'error',
+            result_data: undefined,
+            error_details: { outcome: 'unconfirmed', reason: 'no_result' },
+        });
+        store.set(threadAgentActionsAtom, [pending, unconfirmed]);
+        vi.mocked(executeCreateItemActions).mockResolvedValue({ successes: [], failures: [] } as any);
+
+        await store.set(applyAgentActionsAtom, { actions: [pending, unconfirmed], runId: 'run-1' });
+
+        expect(vi.mocked(executeCreateItemActions).mock.calls[0][0].map((item) => item.id)).toEqual(['a']);
+    });
+
+    it('records a failed batch only on the actions it attempted', async () => {
+        const store = createStore();
+        const pending = createItemAction('a', { status: 'pending', result_data: undefined });
+        const unconfirmed = createItemAction('b', {
+            status: 'error',
+            result_data: undefined,
+            error_details: { outcome: 'unconfirmed', reason: 'no_result' },
+        });
+        store.set(threadAgentActionsAtom, [pending, unconfirmed]);
+        vi.mocked(executeCreateItemActions).mockRejectedValue(new Error('Zotero failed'));
+
+        const result = await store.set(applyAgentActionsAtom, { actions: [pending, unconfirmed], runId: 'run-1' });
+
+        expect(result.failed.map((failure) => failure.actionId)).toEqual(['a']);
+        const stored = store.get(threadAgentActionsAtom);
+        expect(stored.find((item) => item.id === 'a')?.status).toBe('error');
+        expect(stored.find((item) => item.id === 'b')?.error_details).toEqual({ outcome: 'unconfirmed', reason: 'no_result' });
+    });
+});
+

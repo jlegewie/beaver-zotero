@@ -15,7 +15,6 @@ import {
 } from '../../agentActionExecution';
 import {
     ActionStatus,
-    STATUS_CONFIGS,
     getCreateAnnotationsDisplayStatus,
     getOverallStatus,
     hasFailedUndo,
@@ -23,6 +22,7 @@ import {
     getActionTitle,
     buildPreviewData,
     getAgentActionToolIcon,
+    getStatusConfig,
 } from '../agentActionViewHelpers';
 import { ActionPreview } from '../ActionPreview';
 import { getExportNoteTarget, getOpenNoteTarget, type ReviewRow } from '../reviewChangeRows';
@@ -130,9 +130,10 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             : (getCreateAnnotationsDisplayStatus(firstAction) ?? firstAction.status);
     // A merge or note edit refused because its target changed since the
     // proposal fails the same way on every retry; only a new proposal helps.
+    const baseConfig = getStatusConfig(status, row.actions);
     const config = row.actions.some((action) => isStaleMergeProposal(action) || isStaleNoteEdit(action))
-        ? { ...STATUS_CONFIGS[status], showRetry: false }
-        : STATUS_CONFIGS[status];
+        ? { ...baseConfig, showRetry: false }
+        : baseConfig;
     const headerIcon = isBusy
         ? config.icon ?? ClockIcon
         : isHovered

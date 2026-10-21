@@ -3034,6 +3034,14 @@ export const CLIENT_FEATURES = {
      * again on reattach, and an action may already have been applied.
      */
     RUN_REATTACH: 'run_reattach',
+    /**
+     * The client records an action it applied whose result was lost with its
+     * connection (`/agent-actions/ack` with `only_undecided`), and renders an
+     * unconfirmed action (see `isUnconfirmedAction`) without Apply or Retry.
+     * With it, the backend stores each action as unconfirmed before sending
+     * its execute, so a lost result leaves a record to complete.
+     */
+    UNDELIVERED_ACTION_ACK: 'undelivered_action_ack',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

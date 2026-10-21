@@ -34,6 +34,8 @@ export interface AckSkippedAction {
     /** Null when the action was not found. */
     status: ActionStatus | null;
     result_data: Record<string, any> | null;
+    error_message?: string | null;
+    error_details?: Record<string, any> | null;
 }
 
 export interface AckActionsResponse {

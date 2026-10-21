@@ -33,6 +33,7 @@ import type { ExternalReference } from '@beaver/agent-core/types/externalReferen
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { resolveSearchableLibraryId } from '../libraryAccess';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
+import { isUnconfirmedAction } from './reviewChangeRows';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
@@ -296,7 +297,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
                 <Spinner className="scale-12 -mr-1" />
             )}
 
-            {action.status === 'error' && !existingFromError && !isLoading && (
+            {action.status === 'error' && !existingFromError && !isUnconfirmedAction(action) && !isLoading && (
                 <Tooltip content="Retry creating item" singleLine>
                     <IconButton
                         variant={buttonVariant}

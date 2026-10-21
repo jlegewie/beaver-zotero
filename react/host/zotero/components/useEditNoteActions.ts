@@ -23,7 +23,7 @@ import {
 } from '../../../utils/noteEditorDiffPreview';
 import { isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { PreviewData, STATUS_CONFIGS, buildPreviewData, hasFailedUndo } from './agentActionViewHelpers';
+import { PreviewData, STATUS_CONFIGS, buildPreviewData, getStatusConfig, hasFailedUndo } from './agentActionViewHelpers';
 import { useApprovalRecovery } from './useApprovalRecovery';
 import { isStaleNoteEdit } from './editNoteErrors';
 import {
@@ -293,7 +293,7 @@ export function useEditNoteActions({
         pendingApproval,
         toolCallStatus,
     });
-    const config = STATUS_CONFIGS[effectiveStatus];
+    const config = getStatusConfig(effectiveStatus, action ? [action] : []);
 
     // buildPreviewData derives actionType from pendingApproval/action when either
     // is present, so the toolName argument only matters as the pre-action/pre-approval

@@ -44,6 +44,7 @@ import { markExternalReferenceDeletedAtom, markExternalReferenceImportedAtom } f
 import { currentThreadIdAtom } from '../../../atoms/threads';
 import { ToolDisplayFooter } from '../../../components/messages/ToolDisplayFooter';
 import AgentActionItemButtons from './AgentActionItemButtons';
+import { isUnconfirmedAction } from './reviewChangeRows';
 import ReferenceMetadataDisplay from '../../../components/externalReferences/ReferenceMetadataDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
@@ -157,9 +158,12 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
 /**
  * A failed action the user can retry or dismiss. An import that found its work
  * already in the library is settled: the row offers the existing item instead.
+ * One whose outcome is unknown may already be in the library.
  */
 function isRetryable(action: ItemCreatingAgentAction): boolean {
-    return action.status === 'error' && action.error_details?.error_code !== 'already_in_library';
+    return action.status === 'error'
+        && action.error_details?.error_code !== 'already_in_library'
+        && !isUnconfirmedAction(action);
 }
 
 interface CreateItemAgentActionDisplayProps {

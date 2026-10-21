@@ -23,7 +23,7 @@ import {
     EditIcon,
 } from '../../../components/icons/icons';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
-import { countEditAnnotationTargets } from './reviewChangeRows';
+import { countEditAnnotationTargets, isUnconfirmedAction } from './reviewChangeRows';
 import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
@@ -153,6 +153,35 @@ export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
         showRetry: true,
     },
 };
+
+/**
+ * How a card shows an action Zotero received but never reported on (see
+ * `isUnconfirmedAction`). The change may have landed, so the card offers
+ * neither applying it again nor retrying it; its message asks the user to
+ * check the library.
+ */
+const UNCONFIRMED_STATUS_CONFIG: StatusConfig = {
+    icon: AlertIcon,
+    label: 'Unconfirmed',
+    iconClassName: 'font-color-orange',
+    showApply: false,
+    showReject: false,
+    showUndo: false,
+    showRetry: false,
+};
+
+/**
+ * The card config for `status`, with an unconfirmed outcome in place of a
+ * failure when every failed action is unconfirmed. A batch that also holds a
+ * known failure keeps Retry, which leaves its unconfirmed actions alone.
+ */
+export function getStatusConfig(status: ActionStatus | 'awaiting', actions: AgentAction[]): StatusConfig {
+    const failed = actions.filter((action) => action.status === 'error');
+    if (status === 'error' && failed.length > 0 && failed.every(isUnconfirmedAction)) {
+        return UNCONFIRMED_STATUS_CONFIG;
+    }
+    return STATUS_CONFIGS[status];
+}
 
 /** Tool-specific icon shared by Zotero agent-action review surfaces. */
 export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProps<SVGSVGElement>> {
