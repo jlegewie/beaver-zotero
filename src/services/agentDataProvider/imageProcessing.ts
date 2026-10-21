@@ -24,6 +24,14 @@ export const DEFAULT_MAX_IMAGE_DIMENSION = 1568;
 export const HARD_MAX_IMAGE_DIMENSION = 4096;
 
 /**
+ * Longest edge, in pixels, of a PDF page rendered for a model. The render size
+ * is page size times DPI, so a large-format page (an A0 poster at 150 DPI is
+ * ~5000×7000) would exceed vision-API input limits; such pages render at a
+ * reduced DPI instead.
+ */
+export const MAX_PAGE_IMAGE_DIMENSION = HARD_MAX_IMAGE_DIMENSION;
+
+/**
  * Maximum decoded image size in pixels (width × height). Enforced from
  * header-declared dimensions before decode when possible, and from bitmap
  * dimensions after decode as a backstop. The source file-size limit is no

@@ -58,6 +58,7 @@ import {
     HARD_MAX_IMAGE_DIMENSION,
     ImageDecodeError,
     MAX_OUTPUT_IMAGE_BYTES,
+    MAX_PAGE_IMAGE_DIMENSION,
     UnsupportedImageFormatError,
     processImageBytes,
     uint8ToBase64,
@@ -629,6 +630,7 @@ async function handleExternalFileViewRequest(
                 dpi: dpi ?? 0,
                 format: format === 'jpeg' ? 'jpeg' : 'png',
                 jpegQuality: jpeg_quality ?? 85,
+                maxDimension: MAX_PAGE_IMAGE_DIMENSION,
             },
         }, signal);
         throwIfTimedOut('pdf_render');
