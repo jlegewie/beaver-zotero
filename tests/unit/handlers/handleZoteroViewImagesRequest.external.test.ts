@@ -44,6 +44,7 @@ vi.mock('../../../src/services/agentDataProvider/imageProcessing', async () => {
 
 import { handleZoteroViewImagesRequest } from '../../../src/services/agentDataProvider/handleZoteroViewImagesRequest';
 import { resolveExternalFile } from '../../../src/services/externalFiles';
+import { MAX_PAGE_IMAGE_DIMENSION } from '../../../src/services/agentDataProvider/imageProcessing';
 import type { WSZoteroViewImagesRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 const EXT_KEY = 'AB12CD34';
@@ -152,6 +153,8 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
         expect(response.images[0].page_label).toBeNull();
         const renderArgs = renderPagesMock.mock.calls[0];
         expect(renderArgs[1].pageIndices).toEqual([0, 1]);
+        // Large-format pages must render within vision-API input limits.
+        expect(renderArgs[1].options.maxDimension).toBe(MAX_PAGE_IMAGE_DIMENSION);
         expect(response.served_attachment).toMatchObject({
             attachment_id: `ext-${EXT_KEY}`,
             parent_item_id: null,

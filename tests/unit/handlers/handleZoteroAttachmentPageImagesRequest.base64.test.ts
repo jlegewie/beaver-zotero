@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const renderBytesByPage = new Map<number, Uint8Array>();
+const renderOptionsSeen: any[] = [];
 
 vi.mock('../../../src/beaver-extract', () => {
     class MockPDFExtractor {
@@ -16,6 +17,7 @@ vi.mock('../../../src/beaver-extract', () => {
             _pdfData: Uint8Array | ArrayBuffer,
             args: any,
         ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: any[] }> {
+            renderOptionsSeen.push(args?.options);
             const indices: number[] = args?.pageIndices ?? Array.from(renderBytesByPage.keys());
             return {
                 pageCount: renderBytesByPage.size,
@@ -87,6 +89,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', async () => {
 
 import { handleZoteroAttachmentPageImagesRequest } from '../../../src/services/agentDataProvider/handleZoteroAttachmentPageImagesRequest';
 import { resolveToPdfAttachment } from '../../../src/services/agentDataProvider/utils';
+import { MAX_PAGE_IMAGE_DIMENSION } from '../../../src/services/agentDataProvider/imageProcessing';
 
 function nodeBase64(bytes: Uint8Array): string {
     return Buffer.from(bytes).toString('base64');
@@ -137,6 +140,7 @@ describe('handleZoteroAttachmentPageImagesRequest base64 encoding', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         renderBytesByPage.clear();
+        renderOptionsSeen.length = 0;
     });
 
     it('encodes low bytes (ASCII range) correctly', async () => {
@@ -207,5 +211,31 @@ describe('handleZoteroAttachmentPageImagesRequest base64 encoding', () => {
         });
 
         expect(response.pages[0].image_data).toBe(nodeBase64(big));
+    });
+});
+
+describe('handleZoteroAttachmentPageImagesRequest render options', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        renderBytesByPage.clear();
+        renderOptionsSeen.length = 0;
+    });
+
+    it('caps the rendered page size for large-format pages', async () => {
+        renderBytesByPage.set(0, new Uint8Array([1]));
+        setupZoteroEnv(1);
+
+        await handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-cap',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: [1],
+            dpi: 150,
+            skip_local_limits: true,
+        });
+
+        expect(renderOptionsSeen).toHaveLength(1);
+        expect(renderOptionsSeen[0].maxDimension).toBe(MAX_PAGE_IMAGE_DIMENSION);
+        expect(renderOptionsSeen[0].dpi).toBe(150);
     });
 });
