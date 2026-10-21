@@ -342,7 +342,7 @@ describe.sequential('run reattach after a short drop', () => {
         const savedRun = runOf(saved, runId);
         if (savedRun.status === 'completed') {
             // The server finished before the stop reached it.
-            expect(settled.replacementNotes[runId]).toMatch(/charged/);
+            expect(settled.replacementNotes[runId]).toMatch(/before your stop reached it/);
         } else {
             expect(savedRun.status).toBe('canceled');
             expect(savedRun.reasonCode).toBe('client_cancel');

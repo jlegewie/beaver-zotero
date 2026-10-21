@@ -156,19 +156,19 @@ describe('a reattach after a lost connection', () => {
     it('escalates after 30 s, naming the grace the server announced', () => {
         expect(textAt(RECONNECT_ESCALATE_AFTER_MS - 1)).toBe('Reconnecting…');
         expect(textAt(RECONNECT_ESCALATE_AFTER_MS)).toBe(
-            'Still reconnecting… Beaver keeps your response running for up to 2 minutes.',
+            'Still reconnecting… (up to 2 min)',
         );
         expect(textAt(40_000, reattach(600_000))).toBe(
-            'Still reconnecting… Beaver keeps your response running for up to 10 minutes.',
+            'Still reconnecting… (up to 10 min)',
         );
     });
 
     it('never promises more time than the server gives', () => {
         expect(stillReconnectingText(90_000)).toBe(
-            'Still reconnecting… Beaver keeps your response running for up to 1 minute.',
+            'Still reconnecting… (up to 1 min)',
         );
         expect(stillReconnectingText(45_000)).toBe(
-            'Still reconnecting… Beaver keeps your response running for up to 45 seconds.',
+            'Still reconnecting… (up to 45 s)',
         );
         expect(stillReconnectingText(undefined)).toBe('Still reconnecting…');
     });
