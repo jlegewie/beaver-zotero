@@ -51,8 +51,8 @@ export function useReattachResolutionView(runId: string, enabled: boolean): Reat
 export const ReattachResolutionNotice: React.FC<{ view: Exclude<ReattachResolutionView, null> }> = ({ view }) => (
     <div className="px-4">
         <div className="display-flex flex-row gap-2 px-3 py-15 font-color-secondary">
-            <div className="display-flex mt-010 flex-none">
-                <Icon icon={Spinner} />
+            <div className="display-flex mt-020 flex-none">
+                <Spinner size={12} />
             </div>
             <div className="text-base min-w-0">
                 {view === 'still_running' ? REATTACH_STILL_RUNNING_MESSAGE : REATTACH_CHECKING_MESSAGE}

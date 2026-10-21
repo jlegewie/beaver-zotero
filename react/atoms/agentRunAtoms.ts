@@ -161,6 +161,7 @@ import {
     pendingApprovalsAtom,
     clearAllPendingApprovalsAtom,
     recordUndeliveredActionsAtom,
+    retryUnrecordedActionsNow,
 } from '../agents/agentActions';
 import {
     addPendingQuestionAtom,
@@ -1795,6 +1796,8 @@ export function createWSCallbacks(
             if (store.get(profileSyncStatusAtom).kind !== 'ok') {
                 triggerProfileRefresh();
             }
+            // So can an applied action's result that has yet to be recorded.
+            retryUnrecordedActionsNow();
         },
 
         onRequestAck: (data: WSRequestAckData) => {

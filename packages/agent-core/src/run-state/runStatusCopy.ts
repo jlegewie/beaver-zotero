@@ -60,16 +60,16 @@ function graceText(graceMs: number | undefined): string | null {
     if (!graceMs || graceMs <= 0) return null;
     if (graceMs >= 60_000) {
         const minutes = Math.floor(graceMs / 60_000);
-        return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+        return `${minutes} min`;
     }
-    return `${Math.floor(graceMs / 1000)} seconds`;
+    return `${Math.floor(graceMs / 1000)} s`;
 }
 
 /** The copy for a reconnect that has gone on for a while. */
 export function stillReconnectingText(graceMs: number | undefined): string {
     const grace = graceText(graceMs);
     return grace
-        ? `Still reconnecting… Beaver keeps your response running for up to ${grace}.`
+        ? `Still reconnecting… (up to ${grace})`
         : "Still reconnecting…";
 }
 

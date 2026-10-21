@@ -40,6 +40,17 @@ const CONNECT_RETRY_BACKOFF_MS = [
     { min: 500, max: 2500 },
 ];
 
+/** Bounded-jitter spacing between reachability probes (see `probeReachable`). */
+const REACHABILITY_PROBE_INTERVAL_MS = { min: 750, max: 1250 };
+
+/**
+ * Probes without an answer after which the loop makes one attempt anyway, so a
+ * host whose probes cannot succeed (the probed endpoint blocked while sockets
+ * get through) still recovers, only more slowly. Kept far apart because every
+ * failed attempt makes the browser hold back the next one for longer.
+ */
+export const REACHABILITY_PROBES_PER_BLIND_ATTEMPT = 30;
+
 /**
  * The subset of `AgentService` this loop is allowed to touch, declared
  * structurally so the loop cannot reach the rest of the class and a test can
@@ -124,6 +135,16 @@ export interface ConnectWithRetryOptions {
      * `onAttempt` is not called and `onRetrying` only gets the final `null`.
      */
     untilStopped?: boolean;
+    /**
+     * Whether the server can be reached without opening a socket. When given,
+     * an attempt that failed before its socket opened is retried, after the
+     * backoff, only once a probe succeeds: attempts made while the network is
+     * down fail anyway, and each failure makes the browser hold back the next
+     * socket to the same server for longer. Probes overlap, a new one starting
+     * every second or so, so one stuck in a dead network does not delay the
+     * next.
+     */
+    probeReachable?: () => Promise<boolean>;
     /** Test seam for the backoff wait. */
     sleep?: (ms: number) => Promise<void>;
     /** Test seam for the backoff jitter. */
@@ -132,6 +153,56 @@ export interface ConnectWithRetryOptions {
 
 const defaultSleep = (ms: number): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * How a failed attempt ended, for the log: whether the socket never opened,
+ * opened and then closed, or the attempt ran out of time. An attempt that
+ * times out without opening was held back before reaching the server.
+ */
+function describeAttemptEnd(error: unknown): string {
+    if (!(error instanceof AgentConnectionError)) {
+        return error instanceof Error ? error.name : 'unknown error';
+    }
+    const { stage, socketOpened, closeCode, timedOut } = error.evidence;
+    const how = timedOut
+        ? 'timed out'
+        : socketOpened
+          ? 'closed after open'
+          : 'closed before open';
+    return `${how}, stage=${stage}${closeCode !== null ? `, code=${closeCode}` : ''}`;
+}
+
+/**
+ * Resolve once a probe succeeds, the run stops being wanted, or
+ * `REACHABILITY_PROBES_PER_BLIND_ATTEMPT` probes went unanswered.
+ */
+async function waitUntilReachable(
+    probeReachable: () => Promise<boolean>,
+    isStillWanted: () => boolean,
+    sleep: (ms: number) => Promise<void>,
+    random: () => number,
+): Promise<'reachable' | 'blind' | 'unwanted'> {
+    let reachable = false;
+    let wake = () => {};
+    const reached = new Promise<void>((resolve) => {
+        wake = resolve;
+    });
+    for (let probes = 0; probes < REACHABILITY_PROBES_PER_BLIND_ATTEMPT; probes++) {
+        if (!isStillWanted()) return 'unwanted';
+        Promise.resolve().then(probeReachable).then(
+            (ok) => {
+                if (!ok) return;
+                reachable = true;
+                wake();
+            },
+            () => {},
+        );
+        const { min, max } = REACHABILITY_PROBE_INTERVAL_MS;
+        await Promise.race([sleep(min + random() * (max - min)), reached]);
+        if (reachable) return 'reachable';
+    }
+    return 'blind';
+}
 
 /**
  * Connect, retrying a transient pre-`ready` failure with jittered backoff.
@@ -153,6 +224,7 @@ export async function connectWithRetry(
         isStillWanted,
         logLabel,
         untilStopped = false,
+        probeReachable,
         sleep = defaultSleep,
         random = Math.random,
     } = options;
@@ -173,6 +245,7 @@ export async function connectWithRetry(
     try {
         for (let attempt = 1; untilStopped || attempt <= maxAttempts; attempt++) {
             attemptsMade = attempt;
+            const attemptStartedAt = Date.now();
             try {
                 logger(`${prefix} connect attempt ${attemptLabel(attempt)}`);
                 if (!untilStopped) onAttempt?.({ attempt, maxAttempts });
@@ -196,10 +269,14 @@ export async function connectWithRetry(
                     recovery,
                     identity.extractSchemaVersions,
                 );
-                logger(`${prefix} connect settled`);
+                logger(`${prefix} connect attempt ${attemptLabel(attempt)} settled after ${Date.now() - attemptStartedAt}ms`);
                 return { kind: 'connected', attemptsMade };
             } catch (error: unknown) {
-                logger(`${prefix} connect attempt ${attemptLabel(attempt)} failed:`, error, 1);
+                logger(
+                    `${prefix} connect attempt ${attemptLabel(attempt)} failed after ${Date.now() - attemptStartedAt}ms (${describeAttemptEnd(error)}):`,
+                    error,
+                    1,
+                );
                 lastFailure = error;
 
                 // Both abandon paths are left for the caller to log: it knows
@@ -232,6 +309,12 @@ export async function connectWithRetry(
                     backoffRange.min + random() * (backoffRange.max - backoffRange.min),
                 );
 
+                if (probeReachable && !error.evidence.socketOpened && isStillWanted()) {
+                    const waitStartedAt = Date.now();
+                    const reach = await waitUntilReachable(probeReachable, isStillWanted, sleep, random);
+                    logger(`${prefix} waited ${Date.now() - waitStartedAt}ms for the server (${reach})`);
+                }
+
                 if (!isStillWanted()) {
                     return { kind: 'abandoned', reason: 'superseded', attemptsMade };
                 }
@@ -259,6 +342,7 @@ export async function connectWithRetry(
  * declared structurally so a test can drive the loop with a stub.
  */
 export interface ReattachableAgentService extends ConnectableAgentService {
+    probeReachable(): Promise<boolean>;
     isReattaching(runId: string): boolean;
     reattachAttempt(runId: string): { request: WSReattachRequest; callbacks: WSCallbacks } | null;
 }
@@ -283,8 +367,11 @@ export interface ReattachWithRetryOptions {
  * reattach it.
  *
  * Retries until a socket reaches `ready` and the reattach is sent, or the run
- * stops waiting: the service gives it up at the grace period the backend
- * advertised, when it is closed on purpose, or when the server answers.
+ * stops waiting. While the server cannot be reached, it probes over HTTP rather
+ * than opening sockets, so the first attempt after the network returns is not
+ * held back by the browser. The run stops waiting when the service gives it up
+ * at the grace period the backend advertised, when it is closed on purpose, or
+ * when the server answers.
  * Returns `connected` once the request is sent — the outcome then arrives
  * through the run's callbacks (`onReattached` or `onReattachFailed`) — and
  * `stopped` otherwise. A caller that gets `stopped` for a run still
@@ -307,6 +394,7 @@ export async function reattachWithRetry(
         onRetrying: () => {},
         isAlreadyReported: () => !service.isReattaching(runId),
         isStillWanted: waiting,
+        probeReachable: () => service.probeReachable(),
         sleep,
         random,
     });

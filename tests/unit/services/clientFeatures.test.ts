@@ -106,6 +106,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // run_reattach is declaration-only because it commits the client to answering a
 // re-sent request or prompt id from memory after a reattach: a build that
 // predates it would run a re-sent action a second time.
+// undelivered_action_ack is declaration-only because it makes the backend store
+// actions as unconfirmed before executing them: a build that predates it never
+// completes those records and would offer to retry a change already made.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -136,6 +139,7 @@ const DECLARATION_ONLY_FEATURES = [
     'item_import_v2',
     'book_chapters',
     'run_reattach',
+    'undelivered_action_ack',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

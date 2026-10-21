@@ -2380,6 +2380,8 @@ export interface WSAgentActionExecuteRequest extends WSBaseEvent {
     run_id?: string;
     /** Thread ID */
     thread_id?: string;
+    /** Tool call the action belongs to; absent from older backends. */
+    toolcall_id?: string;
 }
 
 /** Response to agent action execution request */
@@ -3053,6 +3055,14 @@ export const CLIENT_FEATURES = {
      * again on reattach, and an action may already have been applied.
      */
     RUN_REATTACH: 'run_reattach',
+    /**
+     * The client records an action it applied whose result was lost with its
+     * connection (`/agent-actions/ack` with `only_undecided`), and renders an
+     * unconfirmed action (see `isUnconfirmedAction`) without Apply or Retry.
+     * With it, the backend stores each action as unconfirmed before sending
+     * its execute, so a lost result leaves a record to complete.
+     */
+    UNDELIVERED_ACTION_ACK: 'undelivered_action_ack',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -3452,10 +3462,25 @@ export interface WSReattachFailedInfo {
     gapMs: number;
 }
 
+/** The action an `agent_action_execute` request applies, as the request describes it. */
+export interface ExecutedAction {
+    actionId: string;
+    actionType: AgentActionType;
+    actionData: Record<string, any>;
+    /** Null when the backend does not name the tool call. */
+    toolcallId: string | null;
+}
+
 /** An action a run applied whose result the server may not have received. */
 export interface UndeliveredActionResult {
     actionId: string;
     resultData: Record<string, any>;
+    /**
+     * The request that applied it. An action applied without asking reaches
+     * the client only with its result, so this is all the client has of one
+     * whose result was lost.
+     */
+    executed?: ExecutedAction;
 }
 
 export interface WSUndeliveredActionsInfo {

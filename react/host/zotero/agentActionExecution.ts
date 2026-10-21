@@ -32,6 +32,7 @@ import {
     undoEditNoteOrBatchAction,
 } from '../../utils/editNoteActions';
 import { confirmOverwriteManualChanges } from './components/agentActionViewHelpers';
+import { isUnconfirmedAction } from './components/reviewChangeRows';
 import { dismissActiveEditNotePreview } from './editNotePreviewLifecycle';
 
 /**
@@ -233,6 +234,8 @@ async function applyClaimedActions(
     const applied: string[] = [];
     const failed: AgentActionFailure[] = [];
     let actions = claimed;
+    // The actions a failure is recorded on: a batch leaves some alone.
+    let attempted = claimed;
     const actionType = normalizeActionType(actions[0].action_type);
     try {
         // The reviewed merge choices replace the proposal the backend sent.
@@ -240,13 +243,19 @@ async function applyClaimedActions(
         // on the action card instead of throwing through the caller's click
         // handler.
         actions = actions.map((candidate) => withMergeChoices(candidate, get(mergeItemsChoicesAtom)[candidate.id]));
+        attempted = actions;
         const action = actions[0];
         if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
             await dismissActiveEditNotePreview();
         }
         if (actionType === 'create_item' || actionType === 'import_item') {
-            const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
+            // An unconfirmed action may already be in the library, so a batch
+            // applied around it leaves it alone.
+            const actionsToApply = actions.filter(
+                (candidate) => candidate.status !== 'applied' && !isUnconfirmedAction(candidate),
+            );
             if (actionsToApply.length === 0) return { applied, failed };
+            attempted = actionsToApply;
 
             const options = { runId, threadId: get(currentThreadIdAtom) ?? undefined };
             const batchResult = actionType === 'import_item'
@@ -299,8 +308,8 @@ async function applyClaimedActions(
             error_name: error?.name,
             ...(error?.code ? { error_code: error.code } : {}),
         };
-        set(setAgentActionsToErrorAtom, actions.map((candidate) => candidate.id), errorMessage, errorDetails);
-        return { applied: [], failed: toFailures(actions, errorMessage, errorDetails), fatalError: errorMessage };
+        set(setAgentActionsToErrorAtom, attempted.map((candidate) => candidate.id), errorMessage, errorDetails);
+        return { applied: [], failed: toFailures(attempted, errorMessage, errorDetails), fatalError: errorMessage };
     }
 
     return { applied, failed };

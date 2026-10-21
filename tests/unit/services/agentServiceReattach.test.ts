@@ -29,7 +29,12 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
-import { AgentService } from '@beaver/agent-core/transport/agentService';
+import {
+    AgentService,
+    CONNECT_TIMEOUT_MS,
+    REACHABILITY_PROBE_TIMEOUT_MS,
+    REATTACH_OPEN_TIMEOUT_MS,
+} from '@beaver/agent-core/transport/agentService';
 import { reattachWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
 import type { AgentDataProviderMap } from '@beaver/agent-core/transport/agentDataDispatch';
@@ -203,6 +208,8 @@ describe('AgentService run reattach', () => {
         vi.useFakeTimers();
         MockWebSocket.instances = [];
         vi.stubGlobal('WebSocket', MockWebSocket);
+        // The reattach loop probes the server between attempts.
+        vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200 })));
         setClientIdentityProvider(() => ({
             frontendVersion: '0.99.0',
             clientType: 'zotero-plugin',
@@ -567,7 +574,14 @@ describe('AgentService run reattach', () => {
             const service = new AgentService('https://api.example.com', provider);
             const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
             const first = await startRun(service, callbacks);
-            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            first.emitMessage({
+                event: 'agent_action_execute',
+                request_id: 'req-1',
+                action_id: 'a1',
+                action_type: 'create_collection',
+                action_data: { name: 'Reading' },
+                toolcall_id: 'call-1',
+            });
             await flush();
             first.emitClose(1006);
             finishes[0](applied('req-1', { collection_key: 'ABCD1234' }));
@@ -580,7 +594,17 @@ describe('AgentService run reattach', () => {
             expect(callbacks.onReattachFailed).toHaveBeenCalled();
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: { collection_key: 'ABCD1234' } }],
+                actions: [{
+                    actionId: 'a1',
+                    resultData: { collection_key: 'ABCD1234' },
+                    // What the client needs to show an action it never received.
+                    executed: {
+                        actionId: 'a1',
+                        actionType: 'create_collection',
+                        actionData: { name: 'Reading' },
+                        toolcallId: 'call-1',
+                    },
+                }],
             });
         });
 
@@ -601,7 +625,7 @@ describe('AgentService run reattach', () => {
 
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: {} }],
+                actions: [{ actionId: 'a1', resultData: {}, executed: expect.objectContaining({ actionId: 'a1' }) }],
             });
         });
 
@@ -621,7 +645,7 @@ describe('AgentService run reattach', () => {
 
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: {} }],
+                actions: [{ actionId: 'a1', resultData: {}, executed: expect.objectContaining({ actionId: 'a1' }) }],
             });
         });
 
@@ -644,7 +668,7 @@ describe('AgentService run reattach', () => {
             expect(execute).toHaveBeenCalledTimes(1);
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: {} }],
+                actions: [{ actionId: 'a1', resultData: {}, executed: expect.objectContaining({ actionId: 'a1' }) }],
             });
         });
 
@@ -665,7 +689,7 @@ describe('AgentService run reattach', () => {
 
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: {} }],
+                actions: [{ actionId: 'a1', resultData: {}, executed: expect.objectContaining({ actionId: 'a1' }) }],
             });
         });
 
@@ -1108,6 +1132,148 @@ describe('AgentService run reattach', () => {
         expect(callbacks.onClose).not.toHaveBeenCalled();
         expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
         expect(second.sentOfType('reattach')).toHaveLength(1);
+    });
+
+    describe('reaching the server again after an outage', () => {
+        /** The reattach loop with real (fake-timer) waits, so time can be stepped. */
+        function reattachLoop(service: AgentService) {
+            return reattachWithRetry({
+                service,
+                runId: RUN_ID,
+                isStillWanted: () => true,
+                sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+                random: () => 0,
+            });
+        }
+
+        async function accept(socket: MockWebSocket): Promise<MockWebSocket> {
+            socket.emitOpen();
+            await vi.advanceTimersByTimeAsync(50);
+            socket.emitMessage(READY_WITH_REATTACH);
+            await flush();
+            return socket;
+        }
+
+        async function nextSocket(count: number): Promise<MockWebSocket | undefined> {
+            for (let i = 0; i < 50 && MockWebSocket.instances.length === count; i++) await Promise.resolve();
+            return MockWebSocket.instances[count];
+        }
+
+        it('opens no socket while the server cannot be reached, and one as soon as it can', async () => {
+            let serverUp = false;
+            const fetchMock = vi.fn(async () => {
+                if (!serverUp) throw new TypeError('NetworkError when attempting to fetch resource.');
+                return { status: 200 };
+            });
+            vi.stubGlobal('fetch', fetchMock);
+            const service = new AgentService('https://api.example.com/api', {});
+            const callbacks = createCallbacks();
+            const first = await startRun(service, callbacks);
+            first.emitClose(1006);
+
+            const loop = reattachLoop(service);
+            const count = MockWebSocket.instances.length;
+            // The first attempt goes straight out, and fails.
+            (await nextSocket(count))!.emitClose(1006);
+
+            await vi.advanceTimersByTimeAsync(10_000);
+            expect(MockWebSocket.instances).toHaveLength(count + 1);
+            expect(fetchMock.mock.calls.length).toBeGreaterThan(5);
+            expect(fetchMock).toHaveBeenCalledWith('https://api.example.com/health', expect.anything());
+
+            serverUp = true;
+            await vi.advanceTimersByTimeAsync(1_000);
+            expect(MockWebSocket.instances).toHaveLength(count + 2);
+            const second = await accept(MockWebSocket.instances[count + 1]);
+            await expect(loop).resolves.toBe('connected');
+            expect(second.sentOfType('reattach')).toHaveLength(1);
+            expect(callbacks.onClose).not.toHaveBeenCalled();
+        });
+
+        it('replaces a reattach socket that does not open in time', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            const callbacks = createCallbacks();
+            const first = await startRun(service, callbacks);
+            first.emitClose(1006);
+
+            const loop = reattachLoop(service);
+            const count = MockWebSocket.instances.length;
+            const stuck = (await nextSocket(count))!;
+
+            await vi.advanceTimersByTimeAsync(REATTACH_OPEN_TIMEOUT_MS - 1);
+            expect(stuck.close).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(stuck.close).toHaveBeenCalledWith(1000, 'Connection attempt timed out');
+            expect(service.isReattaching(RUN_ID)).toBe(true);
+
+            await vi.advanceTimersByTimeAsync(1_000);
+            expect(MockWebSocket.instances).toHaveLength(count + 2);
+            const second = await accept(MockWebSocket.instances[count + 1]);
+            await expect(loop).resolves.toBe('connected');
+            expect(second.sentOfType('reattach')).toHaveLength(1);
+            expect(callbacks.onClose).not.toHaveBeenCalled();
+            expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
+        });
+
+        it('leaves a reattach socket that opened to wait for ready', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            const first = await startRun(service, createCallbacks());
+            first.emitClose(1006);
+
+            const loop = reattachLoop(service);
+            const socket = (await nextSocket(MockWebSocket.instances.length))!;
+            socket.emitOpen();
+            await vi.advanceTimersByTimeAsync(REATTACH_OPEN_TIMEOUT_MS + 1_000);
+            expect(socket.close).not.toHaveBeenCalled();
+
+            socket.emitMessage(READY_WITH_REATTACH);
+            await flush();
+            await expect(loop).resolves.toBe('connected');
+            expect(socket.sentOfType('reattach')).toHaveLength(1);
+        });
+
+        it('gives a new run the full connect timeout to open its socket', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            const connecting = service.connect(CHAT_REQUEST, createCallbacks());
+            const outcome = connecting.then(() => null, (error: Error) => error);
+            const socket = (await nextSocket(0))!;
+
+            await vi.advanceTimersByTimeAsync(REATTACH_OPEN_TIMEOUT_MS + 1_000);
+            expect(socket.close).not.toHaveBeenCalled();
+
+            await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+            await expect(outcome).resolves.toMatchObject({ name: 'ConnectTimeoutError' });
+        });
+
+        it('probes reachability over HTTP, counting any answer below 500', async () => {
+            const service = new AgentService('https://api.example.com/api/v1', {});
+            const fetchMock = vi.fn();
+            vi.stubGlobal('fetch', fetchMock);
+
+            fetchMock.mockResolvedValueOnce({ status: 200 });
+            await expect(service.probeReachable()).resolves.toBe(true);
+            expect(fetchMock).toHaveBeenLastCalledWith('https://api.example.com/health', expect.anything());
+
+            fetchMock.mockResolvedValueOnce({ status: 404 });
+            await expect(service.probeReachable()).resolves.toBe(true);
+
+            fetchMock.mockResolvedValueOnce({ status: 503 });
+            await expect(service.probeReachable()).resolves.toBe(false);
+
+            fetchMock.mockRejectedValueOnce(new TypeError('NetworkError'));
+            await expect(service.probeReachable()).resolves.toBe(false);
+        });
+
+        it('gives up on a probe that gets no answer', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            vi.stubGlobal('fetch', vi.fn((_url: string, init: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+                init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+            })));
+
+            const probe = service.probeReachable();
+            await vi.advanceTimersByTimeAsync(REACHABILITY_PROBE_TIMEOUT_MS);
+            await expect(probe).resolves.toBe(false);
+        });
     });
 
     it('keeps a connection started from inside onClose', async () => {
