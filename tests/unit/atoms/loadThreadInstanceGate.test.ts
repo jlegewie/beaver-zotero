@@ -162,6 +162,8 @@ vi.mock('../../../react/agents/agentActions', async () => {
             undoAgentActionWriteMock(actionId);
         }),
         clearAllPendingApprovalsAtom: atom(null, () => {}),
+        withUnrecordedResults: (_get: unknown, _set: unknown, actions: unknown[]) => actions,
+        resumeUnrecordedResultsAtom: atom(null, () => {}),
     };
 });
 

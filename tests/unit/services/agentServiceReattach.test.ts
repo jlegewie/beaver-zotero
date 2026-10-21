@@ -574,7 +574,14 @@ describe('AgentService run reattach', () => {
             const service = new AgentService('https://api.example.com', provider);
             const callbacks = createCallbacks({ onUndeliveredActions: vi.fn() });
             const first = await startRun(service, callbacks);
-            first.emitMessage({ event: 'agent_action_execute', request_id: 'req-1', action_id: 'a1' });
+            first.emitMessage({
+                event: 'agent_action_execute',
+                request_id: 'req-1',
+                action_id: 'a1',
+                action_type: 'create_collection',
+                action_data: { name: 'Reading' },
+                toolcall_id: 'call-1',
+            });
             await flush();
             first.emitClose(1006);
             finishes[0](applied('req-1', { collection_key: 'ABCD1234' }));
@@ -587,7 +594,17 @@ describe('AgentService run reattach', () => {
             expect(callbacks.onReattachFailed).toHaveBeenCalled();
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: { collection_key: 'ABCD1234' } }],
+                actions: [{
+                    actionId: 'a1',
+                    resultData: { collection_key: 'ABCD1234' },
+                    // What the client needs to show an action it never received.
+                    executed: {
+                        actionId: 'a1',
+                        actionType: 'create_collection',
+                        actionData: { name: 'Reading' },
+                        toolcallId: 'call-1',
+                    },
+                }],
             });
         });
 
@@ -608,7 +625,7 @@ describe('AgentService run reattach', () => {
 
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: {} }],
+                actions: [{ actionId: 'a1', resultData: {}, executed: expect.objectContaining({ actionId: 'a1' }) }],
             });
         });
 
@@ -628,7 +645,7 @@ describe('AgentService run reattach', () => {
 
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: {} }],
+                actions: [{ actionId: 'a1', resultData: {}, executed: expect.objectContaining({ actionId: 'a1' }) }],
             });
         });
 
@@ -651,7 +668,7 @@ describe('AgentService run reattach', () => {
             expect(execute).toHaveBeenCalledTimes(1);
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: {} }],
+                actions: [{ actionId: 'a1', resultData: {}, executed: expect.objectContaining({ actionId: 'a1' }) }],
             });
         });
 
@@ -672,7 +689,7 @@ describe('AgentService run reattach', () => {
 
             expect(callbacks.onUndeliveredActions).toHaveBeenCalledWith({
                 runId: RUN_ID,
-                actions: [{ actionId: 'a1', resultData: {} }],
+                actions: [{ actionId: 'a1', resultData: {}, executed: expect.objectContaining({ actionId: 'a1' }) }],
             });
         });
 

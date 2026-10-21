@@ -9,7 +9,7 @@ import { assertCredentialGeneration, getCredentialGeneration } from '@beaver/age
 import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ActionStatus } from '@beaver/agent-core/types/agentActions/base';
-import type { WSDeferredApprovalRequest, AgentActionType, WSUndeliveredActionsInfo } from '@beaver/agent-core/protocol/agentProtocol';
+import type { WSDeferredApprovalRequest, AgentActionType, ExecutedAction, WSUndeliveredActionsInfo } from '@beaver/agent-core/protocol/agentProtocol';
 // Declared in the shared host contract, since the render layer hands it to the
 // host's in-stream action UI.
 import type { PendingApproval } from '@beaver/agent-ui/host';
@@ -27,6 +27,7 @@ import {
     hasAppliedBulkAnnotations,
     getZoteroItemReferenceFromAgentAction,
     toAgentAction,
+    isUnconfirmedAction,
 } from '@beaver/agent-core/agents/agentActionTypes';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 
@@ -302,7 +303,10 @@ export const ackAgentActionsAtom = atom(
                     ? {
                         ...action,
                         status: 'applied' as ActionStatus,
-                        result_data: actionResultData.find((result) => result.action_id === action.id)?.result_data
+                        result_data: actionResultData.find((result) => result.action_id === action.id)?.result_data,
+                        // A retried apply leaves the failure behind.
+                        error_message: undefined,
+                        error_details: undefined,
                     }
                     : action
             );
@@ -321,119 +325,360 @@ export const ackAgentActionsAtom = atom(
     }
 );
 
-/** Delays before re-sending an acknowledgement that did not reach the backend. */
+/**
+ * Delays before re-sending an acknowledgement that did not reach the backend;
+ * the last one repeats.
+ */
 const UNDELIVERED_ACK_RETRY_MS = [2_000, 5_000, 15_000, 30_000];
+
+/**
+ * How long to keep re-sending one. A load of the thread re-sends at once, so
+ * this only bounds an acknowledgement the backend keeps failing.
+ */
+const UNDELIVERED_ACK_GIVE_UP_MS = 30 * 60_000;
 
 /** Bound on one acknowledgement, so a stalled request still reaches its retry. */
 const UNDELIVERED_ACK_TIMEOUT_MS = 20_000;
 
 /**
- * How the server holds an action whose execute went out without a result
- * coming back (see `isUnconfirmedAction`), shown until it has been recorded.
+ * An action this window applied whose result the server has not recorded:
+ * the run's connection was lost before the result reached it, and the
+ * acknowledgement has not landed yet.
  */
-const UNCONFIRMED_STATE = {
-    status: 'error' as ActionStatus,
-    error_message: 'Zotero did not report whether this change was applied. Check the item in Zotero before asking for it again.',
-    error_details: { outcome: 'unconfirmed', reason: 'no_result' },
-};
+interface UnrecordedResult {
+    runId: string;
+    resultData: Record<string, any>;
+    /** The request that applied it, to show an action the thread never received. */
+    executed?: ExecutedAction;
+    /** Credential generation of the account that ran it. */
+    generation: number;
+    /** `getLibraryRevocations()` when its run started. */
+    revocations: number | null;
+    /**
+     * The server said it has no record of the action, so there is nothing to
+     * acknowledge; kept so the card stays as Zotero has it.
+     */
+    unknownToServer?: boolean;
+}
+
+/**
+ * Results shown in place of the server's record until it has them, by action
+ * id. The server keeps such an action unconfirmed, with no result to undo it
+ * by. Window-local: once the window is gone the server's record stands.
+ */
+const unrecordedResultsAtom = atom<ReadonlyMap<string, UnrecordedResult>>(new Map());
+
+/**
+ * Whether an unrecorded result may leave this computer: it belongs to the
+ * signed-in account, and no library has been excluded since its run started.
+ * A result does not say every library it touched, so after any exclusion
+ * none of it is sent.
+ */
+function mayLeaveComputer(entry: UnrecordedResult): boolean {
+    if (entry.generation !== getCredentialGeneration()) return false;
+    const revocations = getLibraryRevocations();
+    return revocations !== null && revocations === entry.revocations;
+}
+
+/** Wakes each acknowledgement waiting to be re-sent. */
+const ackRetryWakers = new Set<() => void>();
+
+/** Wait `ms`, or less if `retryUnrecordedActionsNow` is called meanwhile. */
+function waitForAckRetry(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        const wake = () => {
+            clearTimeout(timer);
+            ackRetryWakers.delete(wake);
+            resolve();
+        };
+        const timer = setTimeout(wake, ms);
+        ackRetryWakers.add(wake);
+    });
+}
+
+/**
+ * Re-send waiting acknowledgements now, e.g. once a read from the backend
+ * succeeded, which says it can be reached again.
+ */
+export function retryUnrecordedActionsNow(): void {
+    for (const wake of [...ackRetryWakers]) wake();
+}
+
+/** Whether nothing has settled `action` since it was sent to Zotero. */
+function isAwaitingRecord(action: AgentAction): boolean {
+    return action.status === 'pending' || isUnconfirmedAction(action);
+}
+
+function withUnrecordedResult(action: AgentAction, entry: UnrecordedResult): AgentAction {
+    return {
+        ...action,
+        status: 'applied',
+        result_data: entry.resultData,
+        error_message: undefined,
+        error_details: undefined,
+    };
+}
+
+/** The applied action an execute request describes, for a thread that never received it. */
+function actionFromExecute(actionId: string, entry: UnrecordedResult): AgentAction | null {
+    const executed = entry.executed;
+    if (!executed?.toolcallId) return null;
+    return toAgentAction({
+        id: actionId,
+        run_id: entry.runId,
+        toolcall_id: executed.toolcallId,
+        action_type: executed.actionType,
+        status: 'applied',
+        proposed_data: executed.actionData,
+        result_data: entry.resultData,
+    });
+}
+
+/**
+ * `actions`, with each action this window applied and the server has yet to
+ * record shown as applied, so its card offers Undo instead of nothing; and,
+ * for the runs in `runIds`, with one the thread does not have added. An
+ * action applied without asking reaches the client only with its result, so
+ * one whose result was lost is in the thread only as the server stored it
+ * before the execute, or not at all.
+ */
+function overlayUnrecordedResults(
+    actions: AgentAction[],
+    entries: ReadonlyMap<string, UnrecordedResult>,
+    runIds: ReadonlySet<string>,
+): AgentAction[] {
+    const generation = getCredentialGeneration();
+    const current = (id: string) => {
+        const entry = entries.get(id);
+        return entry && entry.generation === generation ? entry : null;
+    };
+    const overlaid = actions.map((action) => {
+        const entry = current(action.id);
+        return entry && isAwaitingRecord(action) ? withUnrecordedResult(action, entry) : action;
+    });
+    const known = new Set(actions.map((action) => action.id));
+    const added: AgentAction[] = [];
+    for (const id of entries.keys()) {
+        const entry = current(id);
+        if (known.has(id) || !entry || !runIds.has(entry.runId)) continue;
+        const action = actionFromExecute(id, entry);
+        if (action) added.push(action);
+    }
+    return [...overlaid, ...added];
+}
+
+/**
+ * The thread's actions as loaded from the server, with this window's
+ * unrecorded results in place (see `overlayUnrecordedResults`). An entry the
+ * server has settled since, or one from another account, is dropped.
+ * `runIds` are the loaded thread's runs. Follow with
+ * `resumeUnrecordedResultsAtom`.
+ */
+export function withUnrecordedResults(
+    get: Getter,
+    set: Setter,
+    actions: AgentAction[],
+    runIds: ReadonlySet<string>,
+): AgentAction[] {
+    const entries = get(unrecordedResultsAtom);
+    if (entries.size === 0) return actions;
+    const generation = getCredentialGeneration();
+    const settled = actions.filter((action) => entries.has(action.id) && !isAwaitingRecord(action));
+    const stale = [...entries].filter(([, entry]) => entry.generation !== generation);
+    if (settled.length > 0 || stale.length > 0) {
+        set(unrecordedResultsAtom, (prev) => {
+            const next = new Map(prev);
+            for (const action of settled) next.delete(action.id);
+            for (const [id] of stale) next.delete(id);
+            return next;
+        });
+    }
+    return overlayUnrecordedResults(actions, get(unrecordedResultsAtom), runIds);
+}
+
+/**
+ * Re-send unrecorded results now, including ones whose acknowledgement gave
+ * up. For after a successful load of the thread, which says the backend can
+ * be reached; a load that stages its writes sets this with the rest at commit.
+ */
+export const resumeUnrecordedResultsAtom = atom(null, (get, set) => {
+    retryUnrecordedActionsNow();
+    for (const runId of new Set([...get(unrecordedResultsAtom).values()].map((entry) => entry.runId))) {
+        void recordRunResults(get, set, runId);
+    }
+});
+
+/** Stop showing `actionIds` in place of the server's record, e.g. once undone. */
+function forgetUnrecordedResults(set: Setter, actionIds: string[]): void {
+    set(unrecordedResultsAtom, (prev) => {
+        if (!actionIds.some((id) => prev.has(id))) return prev;
+        const next = new Map(prev);
+        for (const id of actionIds) next.delete(id);
+        return next;
+    });
+}
 
 /**
  * Record actions a run applied whose results never reached the server, e.g.
  * because the connection was lost right after the write and the run could not
  * be reattached. The server would otherwise keep them unconfirmed, with the
- * outcome unknown. Retried because the connection is often still down.
+ * outcome unknown. Until it has them, the cards show them as applied, since
+ * Zotero has them, and offer Undo. Retried, because the connection is often
+ * still down, and re-sent at once whenever the thread loads.
  *
  * The server records an action only while nothing has settled it since, so an
- * undo, rejection or newer apply made meanwhile, in any window, stands.
+ * undo, rejection or newer apply made meanwhile, in any window, stands. An
+ * action undone here is not recorded at all.
  */
 export const recordUndeliveredActionsAtom = atom(
     null,
     async (get, set, info: WSUndeliveredActionsInfo, revocationsAtRunStart: number | null) => {
         // The actions belong to the account that ran them.
         const generation = getCredentialGeneration();
-        // Results do not say every library they touched. If any library has
-        // been excluded since the run started, none of its data leaves this
-        // computer.
-        const scopeNarrowed = () => {
-            const revocations = getLibraryRevocations();
-            return revocations === null || revocations !== revocationsAtRunStart;
-        };
-        const links: AckActionLink[] = info.actions.map((action) => ({
-            action_id: action.actionId,
-            result_data: action.resultData as AckActionLink['result_data'],
-        }));
-        // Until it is recorded, an approved action's card must not offer to
-        // apply it again.
-        const reported = new Set(links.map((link) => link.action_id));
-        set(threadAgentActionsAtom, (prev: AgentAction[]) => prev.map((action) =>
-            reported.has(action.id) && action.status === 'pending'
-                ? { ...action, ...UNCONFIRMED_STATE }
-                : action,
-        ));
-        for (let attempt = 0; ; attempt++) {
-            if (generation !== getCredentialGeneration()) return;
-            if (scopeNarrowed()) {
-                logger(`recordUndeliveredActionsAtom: a library was excluded since run ${info.runId} started; not recording its actions`, 1);
-                return;
-            }
-            try {
-                const response = await agentActionsService.acknowledgeActions(info.runId, links, {
-                    onlyUndecided: true,
-                    timeoutMs: UNDELIVERED_ACK_TIMEOUT_MS,
-                    // Checked again right before each dispatch, since a
-                    // request can wait on authentication.
-                    assertDispatch: () => {
-                        assertCredentialGeneration(generation);
-                        if (scopeNarrowed()) throw new Error('A library was excluded since the run started');
-                    },
+        set(unrecordedResultsAtom, (prev) => {
+            const next = new Map(prev);
+            for (const action of info.actions) {
+                next.set(action.actionId, {
+                    runId: info.runId,
+                    resultData: action.resultData,
+                    executed: action.executed,
+                    generation,
+                    revocations: revocationsAtRunStart,
                 });
-                if (response.success) {
-                    // Show each action the way the server now has it: applied
-                    // by this request, or as it stood when left alone (e.g.
-                    // applied by an attempt whose response was lost), with
-                    // the server's error fields in place of the unconfirmed
-                    // marker shown meanwhile.
-                    const current = new Map<string, Partial<AgentAction>>(
-                        links.map((link) => [link.action_id, {
-                            status: 'applied',
-                            result_data: link.result_data,
-                            error_message: undefined,
-                            error_details: undefined,
-                        }]),
-                    );
-                    for (const skipped of response.skipped ?? []) {
-                        if (skipped.status) {
-                            current.set(skipped.action_id, {
-                                status: skipped.status,
-                                result_data: skipped.result_data ?? undefined,
-                                error_message: skipped.error_message ?? undefined,
-                                error_details: skipped.error_details ?? undefined,
-                            });
-                        } else {
-                            current.delete(skipped.action_id);
-                        }
-                    }
-                    set(threadAgentActionsAtom, (prev: AgentAction[]) => prev.map((action) => {
-                        const state = current.get(action.id);
-                        return state && (action.status === 'pending' || action.status === 'error')
-                            ? { ...action, ...state }
-                            : action;
-                    }));
-                    await showRecordedActionsMissingFromThread(get, set, info.runId, [...current.keys()]);
-                    return;
-                }
-            } catch (error) {
-                logger(`recordUndeliveredActionsAtom: acknowledging run ${info.runId} failed: ${error}`, 1);
             }
-            const delay = UNDELIVERED_ACK_RETRY_MS[attempt];
-            if (delay === undefined) {
-                logger(`recordUndeliveredActionsAtom: giving up on run ${info.runId}`, 1);
-                return;
-            }
-            await new Promise((resolve) => setTimeout(resolve, delay));
-        }
+            return next;
+        });
+        const reported = new Set(info.actions.map((action) => action.actionId));
+        set(threadAgentActionsAtom, (prev: AgentAction[]) => overlayUnrecordedResults(
+            prev,
+            new Map([...get(unrecordedResultsAtom)].filter(([id]) => reported.has(id))),
+            isRunInThread(get, info.runId) ? new Set([info.runId]) : new Set(),
+        ));
+        await recordRunResults(get, set, info.runId);
     }
 );
+
+/** Runs whose unrecorded results are being sent, and until when. */
+const recordingRuns = new Map<string, Promise<void>>();
+
+/** Send `runId`'s unrecorded results, unless that is already under way. */
+function recordRunResults(get: Getter, set: Setter, runId: string): Promise<void> {
+    const running = recordingRuns.get(runId);
+    if (running) return running;
+    const recording = sendRunResults(get, set, runId).finally(() => recordingRuns.delete(runId));
+    recordingRuns.set(runId, recording);
+    return recording;
+}
+
+/**
+ * Acknowledge `runId`'s unrecorded results, retrying until it lands, and show
+ * each action the way the server then has it. Each attempt sends what is
+ * still unrecorded, so an action undone meanwhile is left as the undo
+ * recorded it.
+ */
+async function sendRunResults(get: Getter, set: Setter, runId: string): Promise<void> {
+    const startedAt = Date.now();
+    for (let attempt = 0; ; attempt++) {
+        const entries = [...get(unrecordedResultsAtom)].filter(([, entry]) => entry.runId === runId);
+        const generation = getCredentialGeneration();
+        const foreign = entries.filter(([, entry]) => entry.generation !== generation).map(([id]) => id);
+        if (foreign.length > 0) forgetUnrecordedResults(set, foreign);
+        const known = entries.filter(([, entry]) => !entry.unknownToServer);
+        const sendable = known.filter(([, entry]) => mayLeaveComputer(entry));
+        if (sendable.length < known.length - foreign.length) {
+            logger(`recordUndeliveredActionsAtom: a library was excluded since run ${runId} started; not recording its actions`, 1);
+        }
+        if (sendable.length === 0) return;
+        const links: AckActionLink[] = sendable.map(([id, entry]) => ({
+            action_id: id,
+            result_data: entry.resultData as AckActionLink['result_data'],
+        }));
+        try {
+            const response = await agentActionsService.acknowledgeActions(runId, links, {
+                onlyUndecided: true,
+                timeoutMs: UNDELIVERED_ACK_TIMEOUT_MS,
+                // Checked again right before each dispatch, since a request
+                // can wait on authentication.
+                assertDispatch: () => {
+                    assertCredentialGeneration(generation);
+                    if (!sendable.every(([, entry]) => mayLeaveComputer(entry))) {
+                        throw new Error('A library was excluded since the run started');
+                    }
+                },
+            });
+            if (response.success) {
+                // Show each action the way the server now has it: applied by
+                // this request, or as it stood when left alone (e.g. applied
+                // by an attempt whose response was lost, or undone in another
+                // window). One the server has no record of stays as Zotero
+                // has it.
+                const current = new Map<string, Partial<AgentAction>>(
+                    links.map((link) => [link.action_id, {
+                        status: 'applied',
+                        result_data: link.result_data,
+                        error_message: undefined,
+                        error_details: undefined,
+                    }]),
+                );
+                for (const skipped of response.skipped ?? []) {
+                    if (skipped.status) {
+                        current.set(skipped.action_id, {
+                            status: skipped.status,
+                            result_data: skipped.result_data ?? undefined,
+                            error_message: skipped.error_message ?? undefined,
+                            error_details: skipped.error_details ?? undefined,
+                        });
+                    } else {
+                        current.delete(skipped.action_id);
+                    }
+                }
+                const missing = new Set((response.skipped ?? [])
+                    .filter((skipped) => !skipped.status)
+                    .map((skipped) => skipped.action_id));
+                // Not over anything done here while the request was out, such
+                // as an undo or a failed one.
+                const stillUnrecorded = get(unrecordedResultsAtom);
+                const untouched = new Set([...current.keys()].filter((id) => stillUnrecorded.has(id)));
+                set(threadAgentActionsAtom, (prev: AgentAction[]) => prev.map((action) => {
+                    const state = current.get(action.id);
+                    const asShown = action.status === 'applied' || isAwaitingRecord(action);
+                    return state && asShown && untouched.has(action.id) ? { ...action, ...state } : action;
+                }));
+                forgetUnrecordedResults(set, links.map((link) => link.action_id).filter((id) => !missing.has(id)));
+                if (missing.size > 0) {
+                    set(unrecordedResultsAtom, (prev) => {
+                        const next = new Map(prev);
+                        for (const id of missing) {
+                            const entry = next.get(id);
+                            if (entry) next.set(id, { ...entry, unknownToServer: true });
+                        }
+                        return next;
+                    });
+                }
+                await showStoredActions(
+                    get,
+                    set,
+                    runId,
+                    [...current.keys()],
+                    sendable
+                        .filter(([id, entry]) => entry.executed?.toolcallId && untouched.has(id))
+                        .map(([id]) => id),
+                );
+                return;
+            }
+        } catch (error) {
+            logger(`recordUndeliveredActionsAtom: acknowledging run ${runId} failed: ${error}`, 1);
+        }
+        if (Date.now() - startedAt >= UNDELIVERED_ACK_GIVE_UP_MS) {
+            // Kept, so the next load of the thread tries again.
+            logger(`recordUndeliveredActionsAtom: giving up on run ${runId} for now`, 1);
+            return;
+        }
+        await waitForAckRetry(
+            UNDELIVERED_ACK_RETRY_MS[Math.min(attempt, UNDELIVERED_ACK_RETRY_MS.length - 1)],
+        );
+    }
+}
 
 /** Whether `runId` belongs to the thread this window shows. */
 function isRunInThread(get: Getter, runId: string): boolean {
@@ -441,28 +686,47 @@ function isRunInThread(get: Getter, runId: string): boolean {
 }
 
 /**
- * Add recorded actions this window never received. An action applied without
- * asking is sent to the client only once its result arrives, so one recovered
- * after a lost connection is not yet in the thread's list.
+ * Show the stored version of recorded actions: add those the thread lacks,
+ * and replace those in `replace`, which were built from their execute
+ * request. An action applied without asking is sent to the client only once
+ * its result arrives, so one recovered after a lost connection is in the
+ * thread at most as this window built it.
  */
-async function showRecordedActionsMissingFromThread(
+async function showStoredActions(
     get: Getter,
     set: Setter,
     runId: string,
     actionIds: string[],
+    replace: string[],
 ): Promise<void> {
-    const known = new Set(get(threadAgentActionsAtom).map((action) => action.id));
-    const missing = new Set(actionIds.filter((id) => !known.has(id)));
-    if (missing.size === 0 || !isRunInThread(get, runId)) return;
+    const shown = get(threadAgentActionsAtom);
+    const known = new Set(shown.map((action) => action.id));
+    const wanted = new Set([...actionIds.filter((id) => !known.has(id)), ...replace]);
+    if (wanted.size === 0 || !isRunInThread(get, runId)) return;
+    // As built here and still applied; one changed since (e.g. a failed
+    // undo, or one undone and applied again while the read was out) is
+    // newer than the stored copy.
+    const built = new Map(shown
+        .filter((action) => replace.includes(action.id) && action.status === 'applied')
+        .map((action) => [action.id, action]));
     try {
         const stored = await agentActionsService.getActionsForRun(runId);
         // The user may have opened another thread meanwhile.
         if (!isRunInThread(get, runId)) return;
-        const recovered = stored.filter((action) => missing.has(action.id)).map(toAgentAction);
-        set(threadAgentActionsAtom, (prev: AgentAction[]) => [
-            ...prev,
-            ...recovered.filter((action) => !prev.some((existing) => existing.id === action.id)),
-        ]);
+        const recovered = new Map(
+            stored.filter((action) => wanted.has(action.id)).map((action) => [action.id, toAgentAction(action)]),
+        );
+        set(threadAgentActionsAtom, (prev: AgentAction[]) => {
+            const replaced = prev.map((action) => {
+                const update = recovered.get(action.id);
+                if (!update) return action;
+                recovered.delete(action.id);
+                // Built here and not changed since: the stored action is the
+                // same change, with the server's own copy of its data.
+                return built.get(action.id) === action ? update : action;
+            });
+            return [...replaced, ...recovered.values()];
+        });
     } catch (error) {
         logger(`recordUndeliveredActionsAtom: loading run ${runId}'s actions failed: ${error}`, 1);
     }
@@ -474,7 +738,8 @@ async function showRecordedActionsMissingFromThread(
  */
 export const setAgentActionsToErrorAtom = atom(
     null,
-    (_, set, actionIds: string[], errorMessage: string, errorDetails?: Record<string, any>) => {
+    (get, set, actionIds: string[], errorMessage: string, errorDetails?: Record<string, any>) => {
+        const unrecorded = get(unrecordedResultsAtom);
         // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             return prev.map((action) => 
@@ -491,6 +756,12 @@ export const setAgentActionsToErrorAtom = atom(
         });
         // Backend: Update each action
         for (const actionId of actionIds) {
+            // One whose result is still unrecorded (e.g. its undo failed) is
+            // left to its acknowledgement, which records it as applied with
+            // the result to retry the undo by. An error recorded first would
+            // leave the server without that result.
+            const entry = unrecorded.get(actionId);
+            if (entry && entry.generation === getCredentialGeneration()) continue;
             agentActionsService.updateAction(actionId, {
                 status: 'error',
                 error_message: errorMessage,
@@ -550,11 +821,15 @@ export const undoAgentActionAtom = atom(
                 return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
             });
         });
+        // Undone before its result was recorded: the undo is all the server
+        // needs to hear.
+        forgetUnrecordedResults(set, [actionId]);
         // Backend: Update action state
         agentActionsService.updateAction(actionId, {
             status: 'undone',
             clear_result_data: true,
             clear_error_message: true,
+            clear_error_details: true,
         }).catch((error) => {
             logger(`undoAgentActionAtom: failed to persist state for action ${actionId}: ${error}`, 1);
         });

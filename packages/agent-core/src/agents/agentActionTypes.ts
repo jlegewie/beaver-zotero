@@ -263,6 +263,26 @@ export type EditAnnotationsAgentAction = AgentAction & {
 };
 
 /**
+ * `error_details.outcome` when the backend closed an action out without an
+ * answer from Zotero: the change was sent and the plugin stopped responding
+ * before it reported what happened.
+ */
+const UNCONFIRMED_OUTCOME = 'unconfirmed';
+
+/**
+ * True when an errored action's effect on the library is unknown, rather than
+ * known to have failed or known to have landed.
+ *
+ * Only the backend can tell these apart — it knows whether the plugin ever
+ * received the request — so it says so explicitly instead of leaving the
+ * client to read it out of `result_data`, which is absent both for a change
+ * that never ran and for one whose outcome never came back.
+ */
+export function isUnconfirmedAction(action: AgentAction): boolean {
+    return action.status === 'error' && action.error_details?.outcome === UNCONFIRMED_OUTCOME;
+}
+
+/**
  * Check if an agent action has been applied and has a Zotero item reference.
  *
  * The library is tested through `hasLibraryIdentity`, not for a truthy rowid:

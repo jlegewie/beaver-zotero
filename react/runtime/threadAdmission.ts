@@ -19,7 +19,11 @@ import {
     processCitationsAtom,
 } from "@beaver/agent-core/citations/atoms";
 import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
-import { threadAgentActionsAtom } from "../agents/agentActions";
+import {
+    resumeUnrecordedResultsAtom,
+    threadAgentActionsAtom,
+    withUnrecordedResults,
+} from "../agents/agentActions";
 import { threadNavigationSeqAtom } from "../atoms/threads";
 import { accountGenerationAtom } from "../atoms/profile";
 import { store } from "../store";
@@ -242,7 +246,19 @@ export async function reconcileThread(
             : loaded.runs,
     );
     if (!keepLocal) set(activeRunAtom, null);
-    set(threadAgentActionsAtom, loaded.agentActions ?? []);
+    set(
+        threadAgentActionsAtom,
+        withUnrecordedResults(
+            get,
+            set,
+            loaded.agentActions ?? [],
+            new Set([
+                ...loaded.runs.map((run) => run.id),
+                ...(keepLocal && local ? [local.id] : []),
+            ]),
+        ),
+    );
+    set(resumeUnrecordedResultsAtom);
     set(citationsAtom, loaded.citations);
     set(processCitationsAtom);
     set(

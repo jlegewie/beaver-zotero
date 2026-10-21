@@ -21,7 +21,7 @@
  */
 
 import type { ConnectionFailureEvidence } from './connectionFailure';
-import type { UndeliveredActionResult, WSCallbacks } from '../protocol/agentProtocol';
+import type { ExecutedAction, UndeliveredActionResult, WSCallbacks } from '../protocol/agentProtocol';
 import { isPreparedJsonMessage, type PreparedJsonMessage } from './preparedJsonMessage';
 
 /**
@@ -30,6 +30,17 @@ import { isPreparedJsonMessage, type PreparedJsonMessage } from './preparedJsonM
  * heartbeat close (4000). A normal close (1000/1001) means the run is over.
  */
 export const REATTACH_CLOSE_CODES: ReadonlySet<number> = new Set([1005, 1006, 1011, 4000]);
+
+/** The action a backend request applies: only an `agent_action_execute` with an action id. */
+export function executedAction(eventName: string, request: Record<string, any>): ExecutedAction | null {
+    if (eventName !== 'agent_action_execute' || typeof request.action_id !== 'string') return null;
+    return {
+        actionId: request.action_id,
+        actionType: request.action_type,
+        actionData: request.action_data ?? {},
+        toolcallId: typeof request.toolcall_id === 'string' ? request.toolcall_id : null,
+    };
+}
 
 /** A reply to a backend request: the response, once the handler settles. */
 export interface RunReply {
@@ -41,7 +52,7 @@ export interface RunReply {
     /** Pings already written on `sentOn` when the response was. */
     pingMark: number;
     /** The agent action an `agent_action_execute` request applies. */
-    actionId: string | null;
+    action: ExecutedAction | null;
 }
 
 /** A prompt the server sent (approval, question, confirmation) and its answer. */
@@ -113,16 +124,16 @@ export class RunLink {
     }
 
     /**
-     * Start remembering the reply to `requestId`, which applies `actionId` if
-     * it executes an action. Returns the entry and its settle function.
+     * Start remembering the reply to `requestId`, which applies `action` if
+     * it executes one. Returns the entry and its settle function.
      */
     trackReply(
         requestId: string,
-        actionId: string | null = null,
+        action: ExecutedAction | null = null,
     ): { reply: RunReply; settle: (response: RunReply['response']) => void } {
         let resolve!: () => void;
         const settled = new Promise<void>((r) => { resolve = r; });
-        const reply: RunReply = { response: null, settled, sentOn: null, pingMark: 0, actionId };
+        const reply: RunReply = { response: null, settled, sentOn: null, pingMark: 0, action };
         this.replies.set(requestId, reply);
         return {
             reply,
@@ -136,7 +147,7 @@ export class RunLink {
     /** Whether any reply executes an action. */
     get hasActionReplies(): boolean {
         for (const reply of this.replies.values()) {
-            if (reply.actionId) return true;
+            if (reply.action) return true;
         }
         return false;
     }
@@ -147,14 +158,14 @@ export class RunLink {
      * executing.
      */
     async unconfirmedAppliedActions(): Promise<UndeliveredActionResult[]> {
-        const executes = [...this.replies.values()].filter((reply) => reply.actionId);
+        const executes = [...this.replies.values()].filter((reply) => reply.action);
         await Promise.all(executes.map((reply) => reply.settled));
         const applied: UndeliveredActionResult[] = [];
         for (const reply of executes) {
             const response = reply.response;
             if (!response || isPreparedJsonMessage(response)) continue;
             if (response.type !== 'agent_action_execute_response' || response.success !== true) continue;
-            applied.push({ actionId: reply.actionId!, resultData: response.result_data ?? {} });
+            applied.push({ actionId: reply.action!.actionId, resultData: response.result_data ?? {}, executed: reply.action! });
         }
         return applied;
     }

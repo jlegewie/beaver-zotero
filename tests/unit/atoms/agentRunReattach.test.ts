@@ -11,6 +11,7 @@
  * started with; the atoms, the store and the retry loop are the real thing.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { atom } from 'jotai';
 
 import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/connectionFailure';
 
@@ -94,9 +95,14 @@ import {
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import {
+    ackAgentActionsAtom,
     pendingApprovalsAtom,
     recordUndeliveredActionsAtom,
+    setAgentActionsToErrorAtom,
     threadAgentActionsAtom,
+    resumeUnrecordedResultsAtom,
+    undoAgentActionAtom,
+    withUnrecordedResults,
 } from '../../../react/agents/agentActions';
 import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
 import { agentActionsService } from '@beaver/agent-core/transport/clients/agentActionsService';
@@ -482,14 +488,14 @@ describe('a run reattaching after its connection dropped', () => {
             }, 0);
 
             // One the server does not have was still applied in Zotero, so it
-            // stays unconfirmed rather than offered for applying again.
+            // stays applied as Zotero has it.
             expect(store.get(threadAgentActionsAtom).map((action) => [action.status, action.result_data?.collection_key]))
                 .toEqual([
-                    ['applied', 'LOCAL'], ['undone', undefined], ['applied', 'SERVER'], ['error', undefined], ['error', 'SERVER'],
+                    ['applied', 'LOCAL'], ['undone', undefined], ['applied', 'SERVER'], ['applied', 'LOCAL'], ['error', 'SERVER'],
                 ]);
             const [recorded, , , missing, failedUndo] = store.get(threadAgentActionsAtom);
             expect(recorded.error_details).toBeUndefined();
-            expect(missing.error_details).toMatchObject({ outcome: 'unconfirmed' });
+            expect(missing.error_details).toBeUndefined();
             // A failure left alone keeps the server's explanation.
             expect(failedUndo).toMatchObject({ error_message: 'Undo failed', error_details: { error_code: 'stale' } });
             ack.mockRestore();
@@ -518,7 +524,7 @@ describe('a run reattaching after its connection dropped', () => {
             store.set(threadRunsAtom, []);
         });
 
-        it('shows a pending card as unconfirmed while the action is being recorded', async () => {
+        it('shows a pending card as applied, with its result, while the action is being recorded', async () => {
             store.set(threadAgentActionsAtom, [
                 { id: 'action-1', run_id: 'run-1', action_type: 'create_note', status: 'pending', proposed_data: {} } as any,
             ]);
@@ -527,24 +533,383 @@ describe('a run reattaching after its connection dropped', () => {
                 const ack = vi.spyOn(agentActionsService, 'acknowledgeActions').mockRejectedValue(new Error('offline'));
                 const recording = store.set(recordUndeliveredActionsAtom, {
                     runId: 'run-1',
-                    actions: [{ actionId: 'action-1', resultData: {} }],
+                    actions: [{ actionId: 'action-1', resultData: { zotero_key: 'NOTE1234' } }],
                 }, 0);
 
-                // No Apply while the outcome is being recorded, nor after giving up.
-                expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
-                    status: 'error',
-                    error_details: { outcome: 'unconfirmed' },
-                });
-                await vi.advanceTimersByTimeAsync(60_000);
+                // Zotero has the change, so the card offers Undo, not Apply.
+                const expected = { status: 'applied', result_data: { zotero_key: 'NOTE1234' }, error_details: undefined };
+                expect(store.get(threadAgentActionsAtom)[0]).toMatchObject(expected);
+                // Still re-sent long after the server could have given the run up.
+                await vi.advanceTimersByTimeAsync(5 * 60_000);
+                expect(ack.mock.calls.length).toBeGreaterThan(8);
+                expect(store.get(threadAgentActionsAtom)[0]).toMatchObject(expected);
+
+                ack.mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
+                await vi.advanceTimersByTimeAsync(30_000);
                 await recording;
-                expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
-                    status: 'error',
-                    error_details: { outcome: 'unconfirmed' },
-                });
                 ack.mockRestore();
             } finally {
                 vi.useRealTimers();
             }
+        });
+
+        it('shows an action applied without asking from its execute request until it is recorded', async () => {
+            store.set(threadAgentActionsAtom, []);
+            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            vi.useFakeTimers();
+            try {
+                const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                    .mockRejectedValueOnce(new Error('offline'))
+                    .mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
+                const load = vi.spyOn(agentActionsService, 'getActionsForRun').mockResolvedValue([
+                    { id: 'action-1', run_id: 'run-1', toolcall_id: 'call-1', action_type: 'create_note', status: 'applied', proposed_data: { title: 'Stored' }, result_data: { zotero_key: 'NOTE1234' } },
+                ] as any);
+                const recording = store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{
+                        actionId: 'action-1',
+                        resultData: { zotero_key: 'NOTE1234' },
+                        executed: { actionId: 'action-1', actionType: 'create_note', actionData: { title: 'Sent' }, toolcallId: 'call-1' },
+                    }],
+                }, 0);
+
+                expect(store.get(threadAgentActionsAtom)).toEqual([expect.objectContaining({
+                    id: 'action-1',
+                    toolcall_id: 'call-1',
+                    status: 'applied',
+                    proposed_data: expect.objectContaining({ title: 'Sent' }),
+                    result_data: { zotero_key: 'NOTE1234' },
+                })]);
+
+                await vi.advanceTimersByTimeAsync(2_000);
+                await recording;
+                // Once recorded, the server's copy takes its place.
+                expect(store.get(threadAgentActionsAtom)).toEqual([expect.objectContaining({
+                    id: 'action-1',
+                    proposed_data: expect.objectContaining({ title: 'Stored' }),
+                })]);
+                ack.mockRestore();
+                load.mockRestore();
+            } finally {
+                vi.useRealTimers();
+                store.set(threadRunsAtom, []);
+            }
+        });
+
+        it('shows the result over the server\'s unconfirmed copy when the thread loads, and records it at once', async () => {
+            store.set(threadAgentActionsAtom, []);
+            const loadThread = atom(null, (get, set, actions: any[]) => {
+                set(threadAgentActionsAtom, withUnrecordedResults(get, set, actions, new Set(['run-1'])));
+                set(resumeUnrecordedResultsAtom);
+            });
+            vi.useFakeTimers();
+            try {
+                const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                    .mockRejectedValueOnce(new Error('offline'))
+                    .mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
+                const recording = store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{ actionId: 'action-1', resultData: { zotero_key: 'NOTE1234' } }],
+                }, 0);
+                await vi.advanceTimersByTimeAsync(0);
+                expect(ack).toHaveBeenCalledTimes(1);
+
+                store.set(loadThread, [{
+                    id: 'action-1',
+                    run_id: 'run-1',
+                    action_type: 'create_note',
+                    status: 'error',
+                    proposed_data: {},
+                    error_message: 'Zotero did not report whether this change was applied.',
+                    error_details: { outcome: 'unconfirmed', reason: 'no_result' },
+                }]);
+
+                expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
+                    status: 'applied',
+                    result_data: { zotero_key: 'NOTE1234' },
+                    error_message: undefined,
+                    error_details: undefined,
+                });
+                // Without waiting out the retry delay.
+                await vi.advanceTimersByTimeAsync(0);
+                await recording;
+                expect(ack).toHaveBeenCalledTimes(2);
+                ack.mockRestore();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('does not record an action undone before its result was recorded', async () => {
+            store.set(threadAgentActionsAtom, [
+                { id: 'action-1', run_id: 'run-1', action_type: 'create_note', status: 'pending', proposed_data: {} } as any,
+            ]);
+            vi.useFakeTimers();
+            try {
+                const ack = vi.spyOn(agentActionsService, 'acknowledgeActions').mockRejectedValue(new Error('offline'));
+                const update = vi.spyOn(agentActionsService, 'updateAction').mockResolvedValue({} as any);
+                const recording = store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{ actionId: 'action-1', resultData: { zotero_key: 'NOTE1234' } }],
+                }, 0);
+                await vi.advanceTimersByTimeAsync(0);
+
+                store.set(undoAgentActionAtom, 'action-1');
+                await vi.advanceTimersByTimeAsync(60_000);
+                await recording;
+
+                expect(ack).toHaveBeenCalledTimes(1);
+                expect(update).toHaveBeenCalledWith('action-1', expect.objectContaining({
+                    status: 'undone',
+                    clear_error_details: true,
+                }));
+                expect(store.get(threadAgentActionsAtom)[0].status).toBe('undone');
+                ack.mockRestore();
+                update.mockRestore();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('keeps the result of an action whose undo failed before its result was recorded', async () => {
+            store.set(threadAgentActionsAtom, [
+                { id: 'action-1', run_id: 'run-1', action_type: 'create_note', status: 'pending', proposed_data: {} } as any,
+            ]);
+            vi.useFakeTimers();
+            try {
+                const ack = vi.spyOn(agentActionsService, 'acknowledgeActions').mockRejectedValue(new Error('offline'));
+                const update = vi.spyOn(agentActionsService, 'updateAction').mockResolvedValue({} as any);
+                const recording = store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{ actionId: 'action-1', resultData: { zotero_key: 'NOTE1234' } }],
+                }, 0);
+                await vi.advanceTimersByTimeAsync(0);
+
+                store.set(setAgentActionsToErrorAtom, ['action-1'], 'Undo failed', { stage: 'undo' });
+
+                // Left to the acknowledgement, which gives the server the
+                // result to retry the undo by.
+                expect(update).not.toHaveBeenCalled();
+                ack.mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
+                await vi.advanceTimersByTimeAsync(2_000);
+                await recording;
+                expect(ack).toHaveBeenLastCalledWith('run-1', [
+                    { action_id: 'action-1', result_data: { zotero_key: 'NOTE1234' } },
+                ], expect.anything());
+                expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
+                    status: 'error',
+                    error_message: 'Undo failed',
+                    result_data: { zotero_key: 'NOTE1234' },
+                });
+                ack.mockRestore();
+                update.mockRestore();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('keeps an action built from its execute request that changed while the stored copy loaded', async () => {
+            store.set(threadAgentActionsAtom, []);
+            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                .mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
+            let respond!: (value: any) => void;
+            const load = vi.spyOn(agentActionsService, 'getActionsForRun')
+                .mockImplementation(() => new Promise((resolve) => { respond = resolve; }));
+            const recording = store.set(recordUndeliveredActionsAtom, {
+                runId: 'run-1',
+                actions: [{
+                    actionId: 'action-1',
+                    resultData: { zotero_key: 'OLD12345' },
+                    executed: { actionId: 'action-1', actionType: 'create_note', actionData: {}, toolcallId: 'call-1' },
+                }],
+            }, 0);
+            await vi.waitFor(() => expect(load).toHaveBeenCalled());
+
+            // Undone and applied again, creating a new note.
+            store.set(threadAgentActionsAtom, (prev) => prev.map((action) => (
+                { ...action, status: 'applied', result_data: { zotero_key: 'NEW12345' } }
+            )));
+            respond([{ id: 'action-1', run_id: 'run-1', toolcall_id: 'call-1', action_type: 'create_note', status: 'applied', proposed_data: {}, result_data: { zotero_key: 'OLD12345' } }]);
+            await recording;
+
+            expect(store.get(threadAgentActionsAtom)[0].result_data).toEqual({ zotero_key: 'NEW12345' });
+            ack.mockRestore();
+            load.mockRestore();
+            store.set(threadRunsAtom, []);
+        });
+
+        it('does not send the result with a failed undo once a library was excluded', async () => {
+            store.set(threadAgentActionsAtom, [
+                { id: 'action-1', run_id: 'run-1', action_type: 'create_note', status: 'pending', proposed_data: {} } as any,
+            ]);
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                .mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
+            const update = vi.spyOn(agentActionsService, 'updateAction').mockResolvedValue({} as any);
+            libraryRevocationsMock.mockReturnValue(1);
+            try {
+                await store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{ actionId: 'action-1', resultData: { zotero_key: 'NOTE1234' } }],
+                }, 0);
+                store.set(setAgentActionsToErrorAtom, ['action-1'], 'Undo failed');
+
+                expect(ack).not.toHaveBeenCalled();
+                expect(update).not.toHaveBeenCalled();
+            } finally {
+                libraryRevocationsMock.mockReturnValue(0);
+                ack.mockRestore();
+                update.mockRestore();
+            }
+        });
+
+        it('keeps an action built from its execute request that was undone while it was being recorded', async () => {
+            store.set(threadAgentActionsAtom, []);
+            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            let respond!: (value: any) => void;
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                .mockImplementation(() => new Promise((resolve) => { respond = resolve; }));
+            const update = vi.spyOn(agentActionsService, 'updateAction').mockResolvedValue({} as any);
+            const load = vi.spyOn(agentActionsService, 'getActionsForRun').mockResolvedValue([
+                { id: 'action-1', run_id: 'run-1', toolcall_id: 'call-1', action_type: 'create_note', status: 'applied', proposed_data: {}, result_data: { zotero_key: 'NOTE1234' } },
+            ] as any);
+            const recording = store.set(recordUndeliveredActionsAtom, {
+                runId: 'run-1',
+                actions: [{
+                    actionId: 'action-1',
+                    resultData: { zotero_key: 'NOTE1234' },
+                    executed: { actionId: 'action-1', actionType: 'create_note', actionData: {}, toolcallId: 'call-1' },
+                }],
+            }, 0);
+            await vi.waitFor(() => expect(ack).toHaveBeenCalled());
+
+            store.set(undoAgentActionAtom, 'action-1');
+            respond({ success: true, run_id: 'run-1', updated: 1, errors: [] });
+            await recording;
+
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('undone');
+            ack.mockRestore();
+            update.mockRestore();
+            load.mockRestore();
+            store.set(threadRunsAtom, []);
+        });
+
+        it('tries again when the thread loads after recording gave up', async () => {
+            store.set(threadAgentActionsAtom, [
+                { id: 'action-1', run_id: 'run-1', action_type: 'create_note', status: 'pending', proposed_data: {} } as any,
+            ]);
+            const loadThread = atom(null, (get, set, actions: any[]) => {
+                set(threadAgentActionsAtom, withUnrecordedResults(get, set, actions, new Set(['run-1'])));
+                set(resumeUnrecordedResultsAtom);
+            });
+            vi.useFakeTimers();
+            try {
+                const ack = vi.spyOn(agentActionsService, 'acknowledgeActions').mockRejectedValue(new Error('offline'));
+                const recording = store.set(recordUndeliveredActionsAtom, {
+                    runId: 'run-1',
+                    actions: [{ actionId: 'action-1', resultData: { zotero_key: 'NOTE1234' } }],
+                }, 0);
+                await vi.advanceTimersByTimeAsync(31 * 60_000);
+                await recording;
+                const attempts = ack.mock.calls.length;
+
+                ack.mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
+                store.set(loadThread, [{
+                    id: 'action-1', run_id: 'run-1', action_type: 'create_note', status: 'error', proposed_data: {},
+                    error_details: { outcome: 'unconfirmed', reason: 'no_result' },
+                }]);
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(ack).toHaveBeenCalledTimes(attempts + 1);
+                expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({ status: 'applied' });
+                ack.mockRestore();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('keeps showing an applied action the server has no record of when the thread loads again', async () => {
+            store.set(threadAgentActionsAtom, []);
+            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions').mockResolvedValue({
+                success: true, run_id: 'run-1', updated: 0, errors: [],
+                skipped: [{ action_id: 'action-1', status: null, result_data: null }],
+            } as any);
+            const load = vi.spyOn(agentActionsService, 'getActionsForRun').mockResolvedValue([]);
+            const loadThread = atom(null, (get, set, actions: any[]) => {
+                set(threadAgentActionsAtom, withUnrecordedResults(get, set, actions, new Set(['run-1'])));
+                set(resumeUnrecordedResultsAtom);
+            });
+            await store.set(recordUndeliveredActionsAtom, {
+                runId: 'run-1',
+                actions: [{
+                    actionId: 'action-1',
+                    resultData: { zotero_key: 'NOTE1234' },
+                    executed: { actionId: 'action-1', actionType: 'create_note', actionData: {}, toolcallId: 'call-1' },
+                }],
+            }, 0);
+
+            store.set(loadThread, []);
+            await vi.waitFor(() => expect(store.get(threadAgentActionsAtom)).toHaveLength(1));
+
+            expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({ id: 'action-1', status: 'applied' });
+            // Nothing more to acknowledge.
+            expect(ack).toHaveBeenCalledTimes(1);
+            ack.mockRestore();
+            load.mockRestore();
+            store.set(threadRunsAtom, []);
+        });
+
+        it('keeps a failed undo made while the action was being recorded', async () => {
+            store.set(threadAgentActionsAtom, []);
+            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            let respond!: (value: any) => void;
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                .mockImplementation(() => new Promise((resolve) => { respond = resolve; }));
+            const load = vi.spyOn(agentActionsService, 'getActionsForRun').mockResolvedValue([
+                { id: 'action-1', run_id: 'run-1', toolcall_id: 'call-1', action_type: 'create_note', status: 'applied', proposed_data: {}, result_data: { zotero_key: 'NOTE1234' } },
+            ] as any);
+            const recording = store.set(recordUndeliveredActionsAtom, {
+                runId: 'run-1',
+                actions: [{
+                    actionId: 'action-1',
+                    resultData: { zotero_key: 'NOTE1234' },
+                    executed: { actionId: 'action-1', actionType: 'create_note', actionData: {}, toolcallId: 'call-1' },
+                }],
+            }, 0);
+            await vi.waitFor(() => expect(ack).toHaveBeenCalled());
+
+            store.set(setAgentActionsToErrorAtom, ['action-1'], 'Undo failed');
+            respond({ success: true, run_id: 'run-1', updated: 1, errors: [] });
+            await recording;
+
+            expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({ status: 'error', error_message: 'Undo failed' });
+            ack.mockRestore();
+            load.mockRestore();
+            store.set(threadRunsAtom, []);
+        });
+
+        it('leaves an undo made while the acknowledgement was out', async () => {
+            store.set(threadAgentActionsAtom, [
+                { id: 'action-1', run_id: 'run-1', action_type: 'create_note', status: 'pending', proposed_data: {} } as any,
+            ]);
+            let respond!: (value: any) => void;
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                .mockImplementation(() => new Promise((resolve) => { respond = resolve; }));
+            const update = vi.spyOn(agentActionsService, 'updateAction').mockResolvedValue({} as any);
+            const recording = store.set(recordUndeliveredActionsAtom, {
+                runId: 'run-1',
+                actions: [{ actionId: 'action-1', resultData: { zotero_key: 'NOTE1234' } }],
+            }, 0);
+            await vi.waitFor(() => expect(ack).toHaveBeenCalled());
+
+            store.set(undoAgentActionAtom, 'action-1');
+            respond({ success: true, run_id: 'run-1', updated: 1, errors: [] });
+            await recording;
+
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('undone');
+            ack.mockRestore();
+            update.mockRestore();
         });
 
         it('does not dispatch for an account that changed while the request waited', async () => {
@@ -613,6 +978,31 @@ describe('a run reattaching after its connection dropped', () => {
                 setCredentialAdapter(undefined);
                 vi.useRealTimers();
             }
+        });
+
+        it('clears the failure from an action applied on a retry', async () => {
+            store.set(threadAgentActionsAtom, [{
+                id: 'action-1',
+                run_id: 'run-1',
+                action_type: 'create_collection',
+                status: 'error',
+                proposed_data: {},
+                error_message: 'Zotero was busy',
+                error_details: { error_code: 'busy' },
+            } as any]);
+            const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
+                .mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
+
+            await store.set(ackAgentActionsAtom, 'run-1', [
+                { action_id: 'action-1', result_data: { collection_key: 'ABCD1234' } as any },
+            ]);
+
+            expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
+                status: 'applied',
+                error_message: undefined,
+                error_details: undefined,
+            });
+            ack.mockRestore();
         });
 
         it('retries an acknowledgement that does not reach the backend', async () => {

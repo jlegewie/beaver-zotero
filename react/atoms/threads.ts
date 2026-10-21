@@ -35,7 +35,9 @@ import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
-    threadAgentActionsAtom, 
+    threadAgentActionsAtom,
+    withUnrecordedResults,
+    resumeUnrecordedResultsAtom,
     isCreateItemAgentAction, 
     isImportItemAgentAction,
     AgentAction, 
@@ -643,8 +645,13 @@ export const loadThreadAtom = atom(
                     reconcileToolcallIds(processedRuns, agent_actions);
                 }
 
-                // Set agent actions
-                set(threadAgentActionsAtom, agent_actions || []);
+                // Set agent actions, with any this window applied whose
+                // results the server has yet to record
+                set(
+                    threadAgentActionsAtom,
+                    withUnrecordedResults(get, set, agent_actions || [], new Set(processedRuns.map((run) => run.id))),
+                );
+                set(resumeUnrecordedResultsAtom);
 
                 // Load item data for agent actions
                 if (agent_actions && agent_actions.length > 0) {

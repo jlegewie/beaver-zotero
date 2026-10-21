@@ -183,6 +183,31 @@ export function getStatusConfig(status: ActionStatus | 'awaiting', actions: Agen
     return STATUS_CONFIGS[status];
 }
 
+/** For an unconfirmed action stored without the server's explanation. */
+const UNCONFIRMED_FALLBACK_MESSAGE =
+    'Zotero did not report whether this change was applied. Check the item in Zotero before asking for it again.';
+
+/**
+ * What a card says about its unconfirmed actions (see `isUnconfirmedAction`).
+ * They offer nothing to click, so this is all that tells the user to check
+ * the library. The server's explanation, which names the cause, when every
+ * action on the card is unconfirmed for the same one; otherwise a count. A
+ * card that can also retry a known failure says the retry leaves them out.
+ * Null when there are none.
+ */
+export function unconfirmedCaption(actions: AgentAction[]): string | null {
+    const unconfirmed = actions.filter(isUnconfirmedAction);
+    if (unconfirmed.length === 0) return null;
+    const messages = new Set(unconfirmed.map((action) => action.error_message || UNCONFIRMED_FALLBACK_MESSAGE));
+    const count = unconfirmed.length;
+    const caption = messages.size === 1 && count === actions.length
+        ? [...messages][0]
+        : `Zotero did not report whether ${count === 1 ? 'one of these changes was' : `${count} of these changes were`} applied. `
+            + `Check ${count === 1 ? 'the item' : 'the items'} in Zotero before asking again.`;
+    const retryable = actions.some((action) => action.status === 'error' && !isUnconfirmedAction(action));
+    return retryable ? `${caption} Retrying leaves ${count === 1 ? 'it' : 'them'} out.` : caption;
+}
+
 /** Tool-specific icon shared by Zotero agent-action review surfaces. */
 export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProps<SVGSVGElement>> {
     if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;

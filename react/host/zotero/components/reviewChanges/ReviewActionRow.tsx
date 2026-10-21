@@ -23,6 +23,7 @@ import {
     buildPreviewData,
     getAgentActionToolIcon,
     getStatusConfig,
+    unconfirmedCaption,
 } from '../agentActionViewHelpers';
 import { ActionPreview } from '../ActionPreview';
 import { getExportNoteTarget, getOpenNoteTarget, type ReviewRow } from '../reviewChangeRows';
@@ -284,6 +285,8 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const label = getActionLabel(row.actionType, firstAction.proposed_data, isInEffect);
     const title = getActionTitle(row.actionType, firstAction.proposed_data, itemTitle, row.actions);
     const previewData = buildPreviewData(row.actionType, null, firstAction);
+    // An unconfirmed change offers nothing to click; this says what to do.
+    const unconfirmedNote = isBusy ? null : unconfirmedCaption(row.actions);
 
     const containerClassName = inGroup
         ? 'display-flex flex-col min-w-0'
@@ -315,19 +318,24 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                     <div className="display-flex items-center scale-11 mt-010" style={{ flexShrink: 0 }}>
                         <Icon icon={headerIcon} className={!isHovered ? headerIconClassName : undefined} />
                     </div>
-                    <div
-                        className="min-w-0"
-                        style={{
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            wordBreak: 'break-word',
-                        }}
-                    >
-                        <span className="font-color-primary font-medium">{label}</span>
-                        {title && <span className="font-color-secondary ml-15">{title}</span>}
+                    <div className="display-flex flex-col min-w-0 gap-1">
+                        <div
+                            className="min-w-0"
+                            style={{
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                wordBreak: 'break-word',
+                            }}
+                        >
+                            <span className="font-color-primary font-medium">{label}</span>
+                            {title && <span className="font-color-secondary ml-15">{title}</span>}
+                        </div>
+                        {unconfirmedNote && (
+                            <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>
+                        )}
                     </div>
                 </button>
 

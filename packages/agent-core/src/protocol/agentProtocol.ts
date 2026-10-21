@@ -2368,6 +2368,8 @@ export interface WSAgentActionExecuteRequest extends WSBaseEvent {
     run_id?: string;
     /** Thread ID */
     thread_id?: string;
+    /** Tool call the action belongs to; absent from older backends. */
+    toolcall_id?: string;
 }
 
 /** Response to agent action execution request */
@@ -3403,10 +3405,25 @@ export interface WSReattachFailedInfo {
     gapMs: number;
 }
 
+/** The action an `agent_action_execute` request applies, as the request describes it. */
+export interface ExecutedAction {
+    actionId: string;
+    actionType: AgentActionType;
+    actionData: Record<string, any>;
+    /** Null when the backend does not name the tool call. */
+    toolcallId: string | null;
+}
+
 /** An action a run applied whose result the server may not have received. */
 export interface UndeliveredActionResult {
     actionId: string;
     resultData: Record<string, any>;
+    /**
+     * The request that applied it. An action applied without asking reaches
+     * the client only with its result, so this is all the client has of one
+     * whose result was lost.
+     */
+    executed?: ExecutedAction;
 }
 
 export interface WSUndeliveredActionsInfo {

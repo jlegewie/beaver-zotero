@@ -46,7 +46,7 @@ import {
     ReattachFailureReason,
     isReattachRequest,
 } from '../protocol/agentProtocol';
-import { REATTACH_CLOSE_CODES, RunLink, RunReply, answeredPromptKey, promptKey } from './runLink';
+import { REATTACH_CLOSE_CODES, RunLink, RunReply, answeredPromptKey, executedAction, promptKey } from './runLink';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
@@ -1825,12 +1825,7 @@ export class AgentService {
                         reportPhase: (phase) => keepalive.setPhase(phase),
                     };
                     const tracked = run && requestId !== null
-                        ? run.trackReply(
-                            requestId,
-                            eventName === 'agent_action_execute' && typeof dataEvent.action_id === 'string'
-                                ? dataEvent.action_id
-                                : null,
-                        )
+                        ? run.trackReply(requestId, executedAction(eventName, dataEvent))
                         : null;
                     const respond = (response: Record<string, any> | PreparedJsonMessage) => {
                         keepalive.stop();

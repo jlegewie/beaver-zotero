@@ -75,6 +75,7 @@ import {
     inFlightProgressMessage,
     hasFailedUndo,
     getStatusConfig,
+    unconfirmedCaption,
 } from './agentActionViewHelpers';
 import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
@@ -406,6 +407,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         : isAnswerHeld
             ? RECONNECT_HELD_CAPTION
             : isReplyHeld ? RECONNECT_SENDING_CAPTION : null;
+    // An unconfirmed action offers nothing to click; this says what to do.
+    const unconfirmedNote = !isProcessing && !isConfirmAction ? unconfirmedCaption(actions) : null;
 
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
@@ -698,6 +701,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             </div>
                             {reconnectCaption ? (
                                 <span className="font-color-secondary text-sm" role="status">{reconnectCaption}</span>
+                            ) : unconfirmedNote ? (
+                                <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>
                             ) : progressMessage && (
                                 <span className="font-color-tertiary shimmer-text">{progressMessage}</span>
                             )}
