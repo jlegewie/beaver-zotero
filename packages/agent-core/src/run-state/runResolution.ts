@@ -2,6 +2,7 @@ import { atom } from 'jotai/vanilla';
 import type { AgentRun } from '../agents/types';
 import { isInterruptedRun } from './runResumeHelpers';
 import {
+    RUN_CONTINUED_UNTIL_STOP_NOTE,
     RUN_FINISHED_BEFORE_STOP_NOTE,
     RUN_FINISHED_WHILE_DISCONNECTED_NOTE,
 } from '../transport/connectionFailure';
@@ -77,22 +78,46 @@ export function reattachResolutionView(args: {
 export const runReplacementNotesAtom = atom<ReadonlyMap<string, string>>(new Map());
 
 /**
- * Notes for runs this window showed as failed or stopped that the server
- * completed: the local copy said the answer was lost, the saved one has it.
+ * Notes for runs whose saved copy differs from what this window showed:
+ *
+ * - shown as failed or stopped, saved as completed: the local copy said the
+ *   answer was lost, the saved one has it;
+ * - stopped, and saved as stopped with more text: a stop held while the run
+ *   reconnected reached the server only after it had written further.
  */
 export function replacementNotes(local: readonly AgentRun[], saved: readonly AgentRun[]): Map<string, string> {
     const localById = new Map(local.map((run) => [run.id, run]));
     const notes = new Map<string, string>();
     for (const run of saved) {
-        if (run.status !== 'completed') continue;
         const before = localById.get(run.id);
-        if (before?.status === 'canceled') {
-            notes.set(run.id, RUN_FINISHED_BEFORE_STOP_NOTE);
-        } else if (before?.status === 'error' && before.error?.type === 'connection_error') {
-            notes.set(run.id, RUN_FINISHED_WHILE_DISCONNECTED_NOTE);
+        if (run.status === 'completed') {
+            if (before?.status === 'canceled') {
+                notes.set(run.id, RUN_FINISHED_BEFORE_STOP_NOTE);
+            } else if (before?.status === 'error' && before.error?.type === 'connection_error') {
+                notes.set(run.id, RUN_FINISHED_WHILE_DISCONNECTED_NOTE);
+            }
+        } else if (
+            run.status === 'canceled' &&
+            run.error?.reason_code === 'client_cancel' &&
+            before?.status === 'canceled' &&
+            responseTextLength(run) > responseTextLength(before)
+        ) {
+            notes.set(run.id, RUN_CONTINUED_UNTIL_STOP_NOTE);
         }
     }
     return notes;
+}
+
+/** Characters of answer text in a run's model responses. */
+function responseTextLength(run: AgentRun): number {
+    let length = 0;
+    for (const message of run.model_messages ?? []) {
+        if (message.kind !== 'response') continue;
+        for (const part of message.parts) {
+            if (part.part_kind === 'text') length += part.content.length;
+        }
+    }
+    return length;
 }
 
 /**

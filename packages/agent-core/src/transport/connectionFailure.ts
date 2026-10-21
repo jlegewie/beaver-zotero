@@ -348,6 +348,9 @@ export const RUN_FINISHED_WHILE_DISCONNECTED_NOTE = 'Beaver finished this respon
 export const RUN_FINISHED_BEFORE_STOP_NOTE =
     'Beaver finished this response before your stop reached it, so it was charged.';
 
+/** A run the user stopped, whose saved copy runs past what was shown when they stopped it. */
+export const RUN_CONTINUED_UNTIL_STOP_NOTE = 'Beaver kept writing until your stop reached it.';
+
 /** Under the partial text of a response that was cut off. */
 export const PARTIAL_RESPONSE_NOTE = 'The response above may be incomplete.';
 
