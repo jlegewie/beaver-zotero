@@ -12,9 +12,10 @@ import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { newThreadAtom } from '../atoms/threads';
-import { currentMessageItemsAtom, currentMessageCollectionsAtom } from '../atoms/messageComposition';
+import { currentMessageItemsAtom, currentMessageCollectionsAtom, currentMessageViewsAtom } from '../atoms/messageComposition';
 import { CollectionReference } from '@beaver/agent-core/types/zotero';
-import { collectionToReference } from '../utils/zoteroReferences';
+import type { ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import { collectionToReference, viewToAttachment } from '../utils/zoteroReferences';
 import { stageActionPillAtom } from '../atoms/actions';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
@@ -25,18 +26,25 @@ export function useContextMenuActionHandler() {
     const newThread = useSetAtom(newThreadAtom);
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     const setCurrentMessageCollections = useSetAtom(currentMessageCollectionsAtom);
+    const setCurrentMessageViews = useSetAtom(currentMessageViewsAtom);
     const stageActionPill = useSetAtom(stageActionPillAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     useEventSubscription('contextMenuAction', async (detail) => {
         const { actionId, actionTitle, targetType, itemIds, collections } = detail;
+        const views = detail.views ?? [];
 
         // Library exclusion is a read boundary: drop excluded collections using
         // the library ID the event carries, before any Zotero lookup, and never
-        // stage them into the composer.
+        // stage them into the composer. Saved searches and views likewise.
         const allowedCollections = collections.filter(c => searchableLibraryIds.includes(c.libraryId));
-        if (targetType === 'collection' && collections.length > 0 && allowedCollections.length === 0) {
+        const allowedViews = views.filter(v => searchableLibraryIds.includes(v.libraryId));
+        if (
+            targetType === 'collection'
+            && collections.length + views.length > 0
+            && allowedCollections.length + allowedViews.length === 0
+        ) {
             addPopupMessage({
                 type: 'error',
                 title: 'Action skipped',
@@ -100,6 +108,13 @@ export function useContextMenuActionHandler() {
                         setCurrentMessageCollections(contextCollections);
                     }
                 }
+                let contextViews: ViewAttachment[] = [];
+                if (targetType === 'collection' && allowedViews.length > 0) {
+                    contextViews = allowedViews
+                        .map(viewToAttachment)
+                        .filter((view): view is ViewAttachment => view !== null);
+                    if (contextViews.length > 0) setCurrentMessageViews(contextViews);
+                }
 
                 // 4. Stage the action as a /command pill in the input, bound to
                 //    the right-clicked rows. The context menu / reader toolbar
@@ -110,13 +125,13 @@ export function useContextMenuActionHandler() {
                     actionId,
                     targetType,
                     fallbackTitle: actionTitle,
-                    contextOverride: { items: contextItems, collections: contextCollections },
+                    contextOverride: { items: contextItems, collections: contextCollections, views: contextViews },
                     targetWindow: getContextWindow(),
                 });
             } catch (error) {
                 logger(`useContextMenuActionHandler: Error executing action: ${error}`, 1);
             }
         }, 0);
-    }, [user, newThread, setCurrentMessageItems, setCurrentMessageCollections, stageActionPill,
+    }, [user, newThread, setCurrentMessageItems, setCurrentMessageCollections, setCurrentMessageViews, stageActionPill,
         searchableLibraryIds, addPopupMessage]);
 }

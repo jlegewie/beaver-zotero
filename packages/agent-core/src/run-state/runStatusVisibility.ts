@@ -70,7 +70,7 @@ function hasVisibleContent(run: AgentRun): boolean {
  * costs the second a visibly doubled claim, so it is not worth making until
  * both clients agree on whether such a call is drawn at all.
  */
-function hasInProgressToolCall(
+export function hasInProgressToolCall(
     run: AgentRun,
     toolResults: ReadonlyMap<string, ToolReturnPart | RetryPromptPart>,
 ): boolean {

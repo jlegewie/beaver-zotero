@@ -79,6 +79,25 @@ describe('ApiService authentication recovery', () => {
         expect(report).not.toHaveBeenCalled();
     });
 
+    it('checks a dispatch guard before each attempt, including the retry after a refresh', async () => {
+        mockSupabase.auth.refreshSession.mockResolvedValue({ data: { session: { access_token: 'fresh' } }, error: null });
+        fetchMock.mockResolvedValueOnce(new Response('{}', { status: 401 }));
+        let allowed = true;
+        const assertDispatch = vi.fn(() => {
+            if (!allowed) throw new Error('no longer allowed');
+        });
+        // Permission is withdrawn while the token is refreshed.
+        mockSupabase.auth.refreshSession.mockImplementation(async () => {
+            allowed = false;
+            return { data: { session: { access_token: 'fresh' } }, error: null };
+        });
+
+        await expect(service.post('/api/v1/agent-actions/ack', {}, { assertDispatch }))
+            .rejects.toThrow('no longer allowed');
+        expect(assertDispatch).toHaveBeenCalledTimes(2);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('refreshes and retries once when the backend returns 401', async () => {
         mockSupabase.auth.refreshSession.mockResolvedValue({
             data: {

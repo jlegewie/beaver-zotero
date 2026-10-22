@@ -44,6 +44,8 @@ import { markExternalReferenceDeletedAtom, markExternalReferenceImportedAtom } f
 import { currentThreadIdAtom } from '../../../atoms/threads';
 import { ToolDisplayFooter } from '../../../components/messages/ToolDisplayFooter';
 import AgentActionItemButtons from './AgentActionItemButtons';
+import { isUnconfirmedAction } from './reviewChangeRows';
+import { unconfirmedCaption } from './agentActionViewHelpers';
 import ReferenceMetadataDisplay from '../../../components/externalReferences/ReferenceMetadataDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
@@ -157,9 +159,12 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
 /**
  * A failed action the user can retry or dismiss. An import that found its work
  * already in the library is settled: the row offers the existing item instead.
+ * One whose outcome is unknown may already be in the library.
  */
 function isRetryable(action: ItemCreatingAgentAction): boolean {
-    return action.status === 'error' && action.error_details?.error_code !== 'already_in_library';
+    return action.status === 'error'
+        && action.error_details?.error_code !== 'already_in_library'
+        && !isUnconfirmedAction(action);
 }
 
 interface CreateItemAgentActionDisplayProps {
@@ -581,6 +586,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
     // Determine when to show apply button
     const showApplyButton = (somePending || someErrors) && !isApplying;
+    // An unconfirmed item offers nothing to click; this says what to do.
+    const unconfirmedNote = isApplying ? null : unconfirmedCaption(actions);
 
     return (
         <div
@@ -609,9 +616,14 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                         <div className="flex-1 display-flex mt-010">
                             <Icon icon={getIcon()} className="scale-105"/>
                         </div>
-                        <div className="display-flex">
-                            <span className="font-color-primary font-medium">{getButtonTextParts().label}</span>
-                            <span className="ml-15">{getButtonTextParts().detail}</span>
+                        <div className="display-flex flex-col min-w-0 gap-1">
+                            <div className="display-flex">
+                                <span className="font-color-primary font-medium">{getButtonTextParts().label}</span>
+                                <span className="ml-15">{getButtonTextParts().detail}</span>
+                            </div>
+                            {unconfirmedNote && (
+                                <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>
+                            )}
                         </div>
                     </div>
                 </button>

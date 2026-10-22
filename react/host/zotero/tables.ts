@@ -56,6 +56,7 @@ export async function resolveTableDisplay(key: string): Promise<TableDisplay> {
             ),
             rows: result.spec.rows.length,
             columns: result.spec.columns.length,
+            contentColumns: result.spec.columns.filter((column) => !column.system).length,
         };
     } catch {
         return { status: "unavailable", reason: "Table provider unavailable." };

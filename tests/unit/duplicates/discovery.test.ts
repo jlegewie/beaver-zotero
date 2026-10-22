@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
     excluded: false,
@@ -91,7 +92,11 @@ beforeEach(() => {
             }
         },
         Libraries: { get: () => ({ editable: true }) },
-        Utilities: { Internal: { md5: (s: string) => s } },
+        Utilities: {
+            Internal: {
+                md5: (s: string) => createHash("md5").update(s).digest("hex"),
+            },
+        },
         DB: { queryAsync: vi.fn(async () => {}) },
         Items: {
             getAsync: async (ids: number[]) =>
@@ -111,6 +116,7 @@ const find = (args = {}) =>
     });
 it("pages whole groups and requires a stable snapshot for continuation", async () => {
     const first = await find({ limit: 1 });
+    expect(first.snapshot_id).toMatch(/^[0-9a-f]{12}$/);
     expect(first.groups[0].members).toHaveLength(2);
     expect(first.next_offset).toBe(1);
     expect((await find({ offset: 1 })).error_code).toBe("snapshot_required");
@@ -125,6 +131,17 @@ it("pages whole groups and requires a stable snapshot for continuation", async (
     expect(
         (await find({ offset: 1, snapshot_id: first.snapshot_id })).error_code,
     ).toBe("stale_snapshot");
+});
+it("asks for the exact snapshot_id before a restart when it does not match", async () => {
+    const first = await find({ limit: 1 });
+    const mistyped = await find({
+        offset: 1,
+        limit: 1,
+        snapshot_id: first.snapshot_id.slice(0, -1) + "x",
+    });
+    expect(mistyped.error_code).toBe("stale_snapshot");
+    expect(mistyped.error).toMatch(/exact snapshot_id from the previous page/);
+    expect(mistyped.error).toMatch(/restart find_duplicates at offset 0/);
 });
 it("retains out-of-collection members of a matching group", async () => {
     const result = await find({ collection: "COLL1234" });

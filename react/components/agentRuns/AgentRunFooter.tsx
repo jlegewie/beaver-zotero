@@ -21,7 +21,8 @@ import { sumChainUsage } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import { resolveToolCallLabelEnrichMap } from '../../utils/toolCallLabelEnrich';
 import TokenUsageDisplay from './TokenUsageDisplay';
-import { regenerateFromRunAtom, retryPendingRunIdAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { isRunReconnectingAtom, regenerateFromRunAtom, retryPendingRunIdAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
@@ -290,6 +291,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const threadReadOnly = useAtomValue(threadReadOnlyAtom);
+    // Retrying replaces the running response, which would stop it — and a
+    // stop is billed. While that response reconnects, the user can only
+    // stop it explicitly.
+    const isRunReconnecting = useAtomValue(isRunReconnectingAtom);
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     // Loading state while this run's retry commits its removal on the
     // backend (truncate POST + undo), before the replacement run appears.
@@ -357,8 +362,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
                     {/* Retry button */}
                     <Tooltip
-                        content="Retry"
+                        content={isRunReconnecting ? RECONNECT_UNAVAILABLE_TOOLTIP : 'Retry'}
                         showArrow
+                        singleLine
                     >
                         <IconButton
                             icon={RepeatIcon}
@@ -366,7 +372,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                             className="scale-11"
                             ariaLabel="Retry"
                             loading={isRetryPending}
-                            disabled={threadReadOnly}
+                            disabled={threadReadOnly || isRunReconnecting}
                         />
                     </Tooltip>
 

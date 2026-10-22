@@ -1,4 +1,4 @@
-import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
+import { isUnconfirmedAction, type AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { getActionToolGroup } from '../../../atoms/runApprovalPolicy';
 
@@ -543,25 +543,7 @@ function countUnits(actions: AgentAction[]): number {
     return units;
 }
 
-/**
- * `error_details.outcome` when the backend closed an action out without an
- * answer from Zotero: the change was sent and the plugin stopped responding
- * before it reported what happened.
- */
-const UNCONFIRMED_OUTCOME = 'unconfirmed';
-
-/**
- * True when an errored action's effect on the library is unknown, rather than
- * known to have failed or known to have landed.
- *
- * Only the backend can tell these apart — it knows whether the plugin ever
- * received the request — so it says so explicitly instead of leaving the
- * client to read it out of `result_data`, which is absent both for a change
- * that never ran and for one whose outcome never came back.
- */
-export function isUnconfirmedAction(action: AgentAction): boolean {
-    return action.status === 'error' && action.error_details?.outcome === UNCONFIRMED_OUTCOME;
-}
+export { isUnconfirmedAction };
 
 /** The card's heading names the surface; its trail carries all of the state. */
 const CHANGES_CARD_LEAD = 'Library changes';

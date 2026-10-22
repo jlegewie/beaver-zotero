@@ -12,6 +12,7 @@ import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
+    type Citation,
 } from '@beaver/agent-core/types/citations';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
@@ -433,4 +434,52 @@ export async function activateCitation(activation: CitationActivation): Promise<
             // No usable fallback URI; nothing else to do.
         }
     }
+}
+
+/**
+ * Activates a citation stored in a table document, which carries no chat view
+ * model: identity comes straight from the citation's own refs. Resolves false
+ * when the document's own link does better, so the caller follows it instead:
+ * an invalid citation, an unmapped external work, and a PDF attachment cited
+ * without a page or passage, which activation would only select in the
+ * library while the link opens the file.
+ */
+export async function activateStoredCitation(citation: Citation, ownerDocument: Document): Promise<boolean> {
+    if (citation.invalid) return false;
+    const ref = citation.resolved_ref ?? citation.requested_ref;
+    if (!ref || ref.kind === 'external') return false;
+    if (
+        citation.citation_type === 'attachment'
+        && getContentKind(citation) === 'pdf'
+        && getCitationPages(citation).length === 0
+        && getCitationBoundingBoxes(citation).length === 0
+    ) return false;
+    const previewText = (citation.preview ?? '').replace(/\s+/g, ' ').trim();
+    if (ref.kind === 'external_file') {
+        await activateCitation({
+            metadata: citation,
+            isExternal: false,
+            isExternalFile: true,
+            externalFileKey: ref.ext_key,
+            hasMappedItem: false,
+            effectiveLibraryID: 0,
+            effectiveItemKey: '',
+            previewText,
+            ownerDocument,
+        });
+        return true;
+    }
+    await activateCitation({
+        metadata: citation,
+        isExternal: false,
+        isExternalFile: false,
+        externalFileKey: null,
+        hasMappedItem: false,
+        effectiveLibraryID: ref.library_id,
+        effectiveItemKey: ref.zotero_key,
+        effectiveLibraryRef: ref.library_ref,
+        previewText,
+        ownerDocument,
+    });
+    return true;
 }

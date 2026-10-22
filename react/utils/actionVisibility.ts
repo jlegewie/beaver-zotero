@@ -14,7 +14,7 @@
 import { Action, ActionCategory, ActionTargetType } from '@beaver/agent-core/types/actions';
 // Type-only: this module must not pull the Jotai atom graph (and the Supabase
 // client behind it) into consumers that only need the visibility rules.
-import type { ZoteroContext, LibraryViewInfo, SelectedCollectionInfo } from '../atoms/zoteroContext';
+import type { ZoteroContext, LibraryViewInfo, SelectedCollectionInfo, SelectedViewInfo } from '../atoms/zoteroContext';
 import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getDisplayNameFromItem } from './sourceUtils';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
@@ -53,26 +53,43 @@ export function isActionableItem(item: Zotero.Item): boolean {
 // Collection selection rule
 // ---------------------------------------------------------------------------
 
+/** What a collection-targeted action acts on in the collections pane. */
+export interface CollectionTargetSelection {
+    /** Selected collections; attached to the message as references. */
+    collections: SelectedCollectionInfo[];
+    /** Selected saved searches and special views (Unfiled Items, …); attached
+     *  to the message as view attachments. */
+    views: SelectedViewInfo[];
+}
+
+const NO_COLLECTION_TARGET: CollectionTargetSelection = { collections: [], views: [] };
+
 /**
- * The collections a collection-targeted action should act on.
+ * The rows a collection-targeted action should act on.
  *
- * Returns every selected collection, but only when the selection is nothing
- * but collections. A selection mixing collections with a library root, a saved
- * search, or a special view has no single collection meaning, so callers treat
- * it as "no collection target" and fall back to their other behavior — the
- * same reason the plural selection getters replaced the singular ones.
+ * Returns the selected collections and collection-like views, but only when
+ * the selection is nothing but those rows. A selection that includes a library
+ * root, Duplicate Items, or the Trash has no single collection meaning, so
+ * callers treat it as "no collection target" and fall back to their other
+ * behavior.
  *
  * This is the shared rule behind every in-app action surface (slash menu, home
  * launcher, prompt-variable resolution); the context menu mirrors it over its
  * own menu-context rows. On Zotero versions without multi-row selection the
  * selection is always a single row, so this collapses to "the selected
- * collection, if one is selected".
+ * collection or view, if one is selected".
  */
-export function pureCollectionSelection(libraryView: LibraryViewInfo): SelectedCollectionInfo[] {
-    const { selectedCollections, selectedRowCount } = libraryView;
-    if (selectedCollections.length === 0) return [];
-    return selectedCollections.length === selectedRowCount ? selectedCollections : [];
+export function collectionTargetSelection(libraryView: LibraryViewInfo): CollectionTargetSelection {
+    const { selectedCollections, selectedViews, selectedRowCount } = libraryView;
+    const targetRowCount = selectedCollections.length + selectedViews.length;
+    if (targetRowCount === 0 || targetRowCount !== selectedRowCount) return NO_COLLECTION_TARGET;
+    return { collections: selectedCollections, views: selectedViews };
 }
+
+function hasCollectionTarget(selection: CollectionTargetSelection): boolean {
+    return selection.collections.length > 0 || selection.views.length > 0;
+}
+
 
 // ---------------------------------------------------------------------------
 // isActionVisible — OR over the action's target set
@@ -115,7 +132,7 @@ function isTargetSatisfied(target: ActionTargetType, ctx: ActionContext): boolea
             }
             return false;
         case 'collection':
-            return pureCollectionSelection(ctx.zotero.libraryView).length > 0;
+            return hasCollectionTarget(collectionTargetSelection(ctx.zotero.libraryView));
         case 'global':
             return true;
     }
@@ -285,16 +302,16 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     }
 
     // --- 5. Collection group ---
-    const selectedCollections = pureCollectionSelection(ctx.zotero.libraryView);
-    if (selectedCollections.length > 0) {
+    const collectionTarget = collectionTargetSelection(ctx.zotero.libraryView);
+    if (hasCollectionTarget(collectionTarget)) {
         const collectionActions = allActions.filter(a => a.targets.includes('collection'));
         if (collectionActions.length > 0) {
             groups.push({
                 id: 'collection',
-                label: getCollectionLabel(selectedCollections),
+                label: getCollectionLabel(collectionTarget),
                 actions: collectionActions,
                 targetType: 'collection',
-                iconInfo: { type: 'css-icon', name: 'collection' },
+                iconInfo: getCollectionIconInfo(collectionTarget),
             });
         }
     }
@@ -331,7 +348,8 @@ export interface ActiveTarget {
  * 4. Selected items (items_selected context with supported items):
  *    - All attachments → 'attachment'
  *    - Has regular items → 'items'
- * 5. Collection (treeRowType === 'collection') → 'collection'
+ * 5. Collections, saved searches, or special views (see
+ *    {@link collectionTargetSelection}) → 'collection'
  * 6. Fallback → null (global only)
  */
 export function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
@@ -385,13 +403,13 @@ export function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
         }
     }
 
-    // 5. Collection
-    const selectedCollections = pureCollectionSelection(zotero.libraryView);
-    if (selectedCollections.length > 0) {
+    // 5. Collection (or a collection-like view)
+    const collectionTarget = collectionTargetSelection(zotero.libraryView);
+    if (hasCollectionTarget(collectionTarget)) {
         return {
             targetType: 'collection',
-            label: getCollectionLabel(selectedCollections),
-            iconInfo: { type: 'css-icon', name: 'collection' },
+            label: getCollectionLabel(collectionTarget),
+            iconInfo: getCollectionIconInfo(collectionTarget),
         };
     }
 
@@ -450,15 +468,29 @@ function getManualLabel(items: Zotero.Item[]): string {
 }
 
 /**
- * Label for a collection selection: the collection's name when one is
+ * Label for a collection-target selection: the row's name when one is
  * selected, otherwise a count — listing several names is unreadable in the
  * narrow launcher and slash-menu headers.
  */
-function getCollectionLabel(collections: SelectedCollectionInfo[]): string {
-    if (collections.length === 1) {
+function getCollectionLabel({ collections, views }: CollectionTargetSelection): string {
+    if (collections.length === 1 && views.length === 0) {
         return truncateText(collections[0].collectionName || 'Collection', MAX_LABEL_ITEM_LENGTH);
     }
-    return `${collections.length} collections selected`;
+    if (views.length === 1 && collections.length === 0) {
+        const fallback = views[0].type === 'search' ? 'Saved search' : 'Collection';
+        return truncateText(views[0].name || fallback, MAX_LABEL_ITEM_LENGTH);
+    }
+    if (views.length === 0) return `${collections.length} collections selected`;
+    return `${collections.length + views.length} views selected`;
+}
+
+/** Collections-pane icon for a collection-target selection. */
+function getCollectionIconInfo({ collections, views }: CollectionTargetSelection): GroupIconInfo {
+    // Zotero's collections-tree icon names match the row types
+    if (collections.length === 0 && views.length > 0 && views.every(v => v.type === views[0].type)) {
+        return { type: 'css-icon', name: views[0].type };
+    }
+    return { type: 'css-icon', name: 'collection' };
 }
 
 function getSelectedLabel(items: Zotero.Item[]): string {

@@ -13,6 +13,7 @@ import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
     setRunPermissionModeAtom,
     approvalResponseIntentsAtom,
+    isRunReconnectingAtom,
     isWSChatPendingAtom,
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
@@ -30,6 +31,9 @@ import {
     undoAgentActionsAtom,
 } from '../agentActionExecution';
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
+import { RECONNECT_HELD_CAPTION, RECONNECT_SENDING_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP, RESOLVING_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../../hooks/useVisibleReconnect';
+import { useReattachResolutionView } from '../../../components/agentRuns/RunResolutionNotices';
 import { hasLibraryIdentity, resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
 import {
@@ -60,7 +64,6 @@ import DeferredToolPreferenceButton from '../../../components/ui/buttons/Deferre
 import RunPermissionButton, { RunPermissionMode } from '../../../components/ui/buttons/RunPermissionButton';
 import {
     ActionStatus,
-    STATUS_CONFIGS,
     NEVER_AUTO_COLLAPSE_TOOLS,
     getOverallStatus,
     getActionLabel,
@@ -71,6 +74,8 @@ import {
     getAgentActionToolIcon,
     inFlightProgressMessage,
     hasFailedUndo,
+    getStatusConfig,
+    unconfirmedCaption,
 } from './agentActionViewHelpers';
 import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
@@ -82,6 +87,7 @@ import {
     runApprovalPolicyAtom,
 } from '../../../atoms/runApprovalPolicy';
 import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
+import { agentService } from '@beaver/agent-core/transport/agentService';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';
@@ -124,6 +130,17 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const actionInFinalState = action && action.status !== 'pending';
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
     const isAwaitingApproval = pendingApproval !== null;
+    // An answer to the run waits while its connection is being recovered.
+    const isRunReconnecting = useAtomValue(isRunReconnectingAtom);
+    const isAnswerHeld = isAwaitingApproval && isRunReconnecting;
+    const reconnectShown = useRunReconnectShown();
+    // A run whose reattach failed may still be waiting on the server for this
+    // answer; acting on it locally waits until the server says how it ended.
+    const isRunResolving = useReattachResolutionView(runId, true) !== null;
+    const isDecisionHeld = isAnswerHeld || isRunResolving;
+    const heldTooltip = isAnswerHeld
+        ? RECONNECT_UNAVAILABLE_TOOLTIP
+        : isRunResolving ? RESOLVING_UNAVAILABLE_TOOLTIP : null;
 
     const runIsStreamable = runStatus === undefined || runStatus === 'in_progress';
     const isStreaming = !action
@@ -340,7 +357,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isConfirmExternalSearch = toolName === 'confirm_external_search';
     const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
     const hasNoActionData = !action && !pendingApproval && !isStreaming;
-    const baseConfig = STATUS_CONFIGS[status];
+    const baseConfig = getStatusConfig(status, actions);
     const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
         : actions.some(isStaleMergeProposal)
@@ -374,6 +391,24 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         && !isAwaitingApproval
         && (status === 'awaiting' || status === 'pending'),
     );
+
+    // While the run reconnects, a card awaiting a decision says when it can be
+    // answered, and one already answered says its answer has yet to be sent.
+    // An answer sent before the connection dropped is not waiting: the
+    // action may already be applied, its result on the way.
+    const answeredActionId = pendingApprovalProp?.actionId ?? action?.id ?? null;
+    const isReplyHeld = isRunReconnecting && !actionInFinalState
+        && (isProcessingApproval || isExternallyProcessing)
+        && answeredActionId !== null
+        && agentService.isApprovalAnswerHeld(answeredActionId);
+    // Shown only once the reconnect has outlasted a blip.
+    const reconnectCaption = !reconnectShown
+        ? null
+        : isAnswerHeld
+            ? RECONNECT_HELD_CAPTION
+            : isReplyHeld ? RECONNECT_SENDING_CAPTION : null;
+    // An unconfirmed action offers nothing to click; this says what to do.
+    const unconfirmedNote = !isProcessing && !isConfirmAction ? unconfirmedCaption(actions) : null;
 
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
@@ -664,7 +699,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
                                 {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
                             </div>
-                            {progressMessage && (
+                            {reconnectCaption ? (
+                                <span className="font-color-secondary text-sm" role="status">{reconnectCaption}</span>
+                            ) : unconfirmedNote ? (
+                                <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>
+                            ) : progressMessage && (
                                 <span className="font-color-tertiary shimmer-text">{progressMessage}</span>
                             )}
                         </div>
@@ -680,22 +719,24 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
                     {showDecisionButtons && (
                         <>
-                            <Tooltip content="Reject" showArrow singleLine>
+                            <Tooltip content={heldTooltip ?? 'Reject'} showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-red"
                                     onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                     ariaLabel="Reject"
+                                    disabled={isDecisionHeld}
                                 />
                             </Tooltip>
-                            <Tooltip content="Apply" showArrow singleLine>
+                            <Tooltip content={heldTooltip ?? 'Apply'} showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
                                     onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                     ariaLabel="Apply"
+                                    disabled={isDecisionHeld}
                                 />
                             </Tooltip>
                         </>
@@ -789,7 +830,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 variant="outline"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
-                                disabled={isProcessing}
+                                disabled={isProcessing || isDecisionHeld}
+                                title={heldTooltip ?? undefined}
                                 className="flex-none whitespace-nowrap"
                             >
                                 Reject
@@ -836,7 +878,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 variant="solid"
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                 loading={isProcessing && clickedButton === 'approve'}
-                                disabled={isProcessing}
+                                disabled={isProcessing || isDecisionHeld}
+                                title={heldTooltip ?? undefined}
                                 className="flex-none whitespace-nowrap"
                             >
                                 <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>

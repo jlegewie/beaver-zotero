@@ -1406,6 +1406,8 @@ export interface PageImageOptions {
     jpegQuality?: number;
     /** Upper bound on the rendered pixel count (width × height) of one page */
     maxPixels?: number;
+    /** Upper bound on the longer side of one rendered page, in pixels. 0 disables. */
+    maxDimension?: number;
 }
 
 /** Cap on the pixmap a single page render may allocate, in pixels. */
@@ -1420,6 +1422,7 @@ export const DEFAULT_PAGE_IMAGE_OPTIONS: Required<PageImageOptions> = {
     format: "png",
     jpegQuality: 85,
     maxPixels: DEFAULT_MAX_RENDER_PIXELS,
+    maxDimension: 0,
 };
 
 /** Result of rendering a page to an image */

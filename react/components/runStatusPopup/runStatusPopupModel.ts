@@ -74,8 +74,10 @@ export interface ApprovalCard extends RunStatusCardBase {
     approveLabel: string;
     rejectLabel: string;
     onDecide: (approved: boolean) => void;
-    /** A decision is already on its way; the next click must wait. */
+    /** A decision is already on its way, or the connection is being recovered; the next click must wait. */
     decideDisabled: boolean;
+    /** What the card says while the run's connection is being recovered, or null. */
+    reconnectingLine?: string | null;
 }
 
 export interface CreditCard extends RunStatusCardBase {
@@ -86,6 +88,8 @@ export interface CreditCard extends RunStatusCardBase {
     declineLabel: string;
     onDecide: (approved: boolean) => void;
     decideDisabled: boolean;
+    /** What the card says while the run's connection is being recovered, or null. */
+    reconnectingLine?: string | null;
 }
 
 export interface BatchCard extends RunStatusCardBase {
@@ -93,6 +97,10 @@ export interface BatchCard extends RunStatusCardBase {
     /** The request itself; the card draws the shared approval UI for it. */
     approval: PendingBatchApproval;
     onSubmit: (decision: BatchApprovalDecision) => void;
+    /** Hold the decision back while the run's connection is being recovered. */
+    disabled?: boolean;
+    /** Stop the run: the one way out while the decision is held back. */
+    onStop?: () => void;
 }
 
 export interface QuestionCard extends RunStatusCardBase {
@@ -100,6 +108,8 @@ export interface QuestionCard extends RunStatusCardBase {
     /** The request itself; the card draws the shared question UI for it. */
     question: PendingQuestion;
     onSubmit: (answers: AskUserQuestionAnswer[]) => void;
+    /** Hold the answer back while the run's connection is being recovered. */
+    disabled?: boolean;
 }
 
 export interface CompletedCard extends RunStatusCardBase {

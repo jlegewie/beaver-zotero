@@ -447,6 +447,7 @@ async function handleLibraryListHttpRequest(request: any) {
         request_id: generateRequestId(),
         library_id: request.library_id,
         collection_key: request.collection_key,
+        special_collection: request.special_collection,
         tag: request.tag,
         item_category: request.item_category ?? 'regular',
         recursive: request.recursive ?? true,
@@ -513,6 +514,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         library_name: response.library_name,
         collection_names: response.collection_names,
         collection_ids: response.collection_ids,
+        saved_search_names: response.saved_search_names,
         // The join mode actually applied to `conditions`. Its absence is how the
         // caller detects a provider that predates the field, so it has to be
         // forwarded here too.
@@ -1149,6 +1151,10 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/approve-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/approve-action', request));
         endpoints['/beaver/test/confirm-credits'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/confirm-credits', request));
         endpoints['/beaver/test/undo-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/undo-action', request));
+        endpoints['/beaver/test/chat-drop-connection'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-drop-connection', request));
+        endpoints['/beaver/test/run-snapshot'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-snapshot', request));
+        endpoints['/beaver/test/chat-stop'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-stop', request));
+        endpoints['/beaver/test/chat-continue'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-continue', request));
 
         endpoints['/beaver/test/application-state'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/application-state', request));
 

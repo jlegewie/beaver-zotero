@@ -5,7 +5,7 @@ import {
 } from "../runtime/threadAdmission";
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { atom } from "jotai";
-import { readerActionContextAtom, currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { readerActionContextAtom, currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageViewsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import {
     isAtBottomAtom,
     isLibraryTabAtom,
@@ -32,10 +32,12 @@ import { importActionReference } from "../utils/importItemDisplay";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { abandonActiveRunLocallyAtom, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
+import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
-    threadAgentActionsAtom, 
+    threadAgentActionsAtom,
+    withUnrecordedResults,
+    resumeUnrecordedResultsAtom,
     isCreateItemAgentAction, 
     isImportItemAgentAction,
     AgentAction, 
@@ -208,16 +210,34 @@ function confirmOpenMismatchedThread(window?: Window): boolean {
     }) ?? true;
 }
 
+/** The open chat's run, when it is reconnecting and can be left rather than stopped. */
+function leavableRunId(get: (atom: any) => any): string | null {
+    return canLeaveReconnectingRun(get) ? get(activeRunAtom)?.id ?? null : null;
+}
+
 /**
  * Cancel any active run when switching threads.
  * This ensures the WebSocket connection is closed and UI state is consistent.
+ *
+ * `leaveRunId` names a run that was reconnecting when the user chose to
+ * leave, found with `leavableRunId` before any await. It is left instead of
+ * stopped: losing the connection is not a Stop, so the server keeps the run
+ * (see `agentService.leaveRun`) and the chat shows how it ended when the user
+ * returns.
  */
-async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void, isCurrent = () => true): Promise<void> {
+async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void, isCurrent = () => true, leaveRunId: string | null = null): Promise<void> {
     const hadActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
     // Navigation revokes socket callbacks, so cleanup must be synchronous and
     // complete even when the connection's close notification is ignored.
     set(abandonActiveRunLocallyAtom);
     set(activeRunAtom, null);
+
+    if (leaveRunId && agentService.leaveRun(leaveRunId)) {
+        logger(`cancelActiveRunIfNeeded: Leaving run ${leaveRunId} to the server after it lost its connection`, 1);
+        set(isWSConnectedAtom, false);
+        set(isWSReadyAtom, false);
+        return;
+    }
 
     if (hadActiveWork) {
         logger('cancelActiveRunIfNeeded: Canceling active run before switching threads', 1);
@@ -256,8 +276,10 @@ export const newThreadAtom = atom(
         // Gated on run status, not presence: a run that failed keeps sitting in
         // activeRunAtom, and prompting over it claims Beaver is still working.
         const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
+        // A reconnecting run is left, not stopped, so there is nothing to confirm.
+        const leaveRunId = leavableRunId(get);
         if (hasActiveWork) {
-            if (!options?.skipActiveRunConfirm && !confirmInterruptActiveRun(
+            if (!options?.skipActiveRunConfirm && !leaveRunId && !confirmInterruptActiveRun(
                 'Start new chat?',
                 'Beaver is still generating a response in this chat. Starting a new chat will stop it.',
                 'Start New Chat',
@@ -274,7 +296,7 @@ export const newThreadAtom = atom(
 
         try {
             // Cancel any active run before switching threads
-            await cancelActiveRunIfNeeded(get, set, isCurrent);
+            await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId);
             if (!isCurrent()) return;
 
             // Clean up any temporary annotations from previous thread
@@ -301,6 +323,7 @@ export const newThreadAtom = atom(
             set(currentMessageItemsAtom, []);
             set(readerActionContextAtom, null);
             set(currentMessageCollectionsAtom, []);
+            set(currentMessageViewsAtom, []);
             set(currentMessageExternalFilesAtom, []);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationsAtom, []);
@@ -368,7 +391,9 @@ export const loadThreadAtom = atom(
         // current thread. Status, not presence — see newThreadAtom.
         const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
         if (canCommit && (hasActiveWork || !canCommit())) return false;
-        if (hasActiveWork && !confirmInterruptActiveRun(
+        // A reconnecting run is left, not stopped, so there is nothing to confirm.
+        const leaveRunId = leavableRunId(get);
+        if (hasActiveWork && !leaveRunId && !confirmInterruptActiveRun(
             'Switch chat?',
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
             'Switch Chat',
@@ -472,7 +497,7 @@ export const loadThreadAtom = atom(
         let loaded = false;
         try {
             // Cancel any active run before loading a different thread
-            if (!canCommit) await cancelActiveRunIfNeeded(get, set, isCurrent);
+            if (!canCommit) await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId);
             if (!isCurrent()) return false;
             // Clean up any temporary annotations from previous thread
             if (!canCommit) await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
@@ -553,12 +578,13 @@ export const loadThreadAtom = atom(
                 // alone (citation v2).
                 const allItemReferences = new Map<string, ZoteroItemReference>();
 
-                // From user attachments in runs (external files have no Zotero
-                // reference to preload)
+                // From user attachments in runs (external files, saved searches
+                // and built-in views have no Zotero item to preload)
                 for (const run of processedRuns) {
                     const attachments = run.user_prompt.attachments || [];
                     attachments
-                        .filter(att => att.type !== 'external_file' && att.type !== 'table')
+                        .filter(att => att.type !== 'external_file' && att.type !== 'table'
+                            && att.type !== 'saved_search' && att.type !== 'special_collection')
                         .filter(att => !!att.zotero_key)
                         .forEach(att => allItemReferences.set(zoteroReferenceKey(att), {
                             library_id: att.library_id,
@@ -621,8 +647,13 @@ export const loadThreadAtom = atom(
                     reconcileToolcallIds(processedRuns, agent_actions);
                 }
 
-                // Set agent actions
-                set(threadAgentActionsAtom, agent_actions || []);
+                // Set agent actions, with any this window applied whose
+                // results the server has yet to record
+                set(
+                    threadAgentActionsAtom,
+                    withUnrecordedResults(get, set, agent_actions || [], new Set(processedRuns.map((run) => run.id))),
+                );
+                set(resumeUnrecordedResultsAtom);
 
                 // Load item data for agent actions
                 if (agent_actions && agent_actions.length > 0) {
@@ -741,6 +772,7 @@ export const loadThreadAtom = atom(
         set(currentMessageItemsAtom, []);
         set(readerActionContextAtom, null);
         set(currentMessageCollectionsAtom, []);
+        set(currentMessageViewsAtom, []);
         set(currentMessageExternalFilesAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(clearComposerAtom);

@@ -5,7 +5,7 @@ import type { Citation, PartLocation } from '@beaver/agent-core/types/citations'
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { ToolCallPart, AgentRun, AgentRunStatus, MessageSearchFilters } from '@beaver/agent-core/agents/types';
-import type { MessageAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import type { MessageAttachment, ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { MenuPosition, SearchMenuCloseReason } from '../primitives/SearchMenu';
 import type { MenuItem } from '../primitives/ContextMenu';
 import type { AddSourcesMenuHandle, AddSourcesQuerySource } from '../composer/useAddSourcesMenu';
@@ -111,6 +111,12 @@ export interface NavigationHost {
      * `zotero_key` is the collection key (not an item key).
      */
     revealCollection(ref: ZoteroItemReference): void;
+    /**
+     * Reveal/select an attached saved search or built-in view (Unfiled Items,
+     * …) in the library view. Optional — clients without such views leave the
+     * chip inert.
+     */
+    revealView?(view: ViewAttachment): void | Promise<void>;
     /**
      * Reveal whatever `zotero_key` names in the referenced library: a regular
      * item, attachment, or note is selected in the library view, an annotation
@@ -786,7 +792,15 @@ export interface DialogsHost {
  * {@link setHost}. Slices are optional — check before use.
  */
 export type TableDisplay =
-    | { status: 'available'; title: string; rows: number; columns: number }
+    | {
+          status: 'available';
+          title: string;
+          rows: number;
+          /** Every column in the spec, system ones included. */
+          columns: number;
+          /** Content columns: every column except system metadata (year, DOI, row type). */
+          contentColumns?: number;
+      }
     | { status: 'unavailable'; reason: string };
 
 export interface ClientHost {

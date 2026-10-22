@@ -795,7 +795,7 @@ describe("plain text", () => {
 
     it("exports a CSV cell without the tags", () => {
         expect(toCsv(citedSpec)).toBe(
-            'Methods,Methods — evidence,Methods — sources,Methods — state\r\n"Survey of 1,200 adults in 2019.",,zotero:1-ABCD1234:s12,extracted',
+            'Methods,Methods — sources,Methods — state\r\n"Survey of 1,200 adults in 2019.",zotero:1-ABCD1234:s12,extracted',
         );
     });
 });
@@ -807,10 +807,10 @@ describe("toCsv", () => {
             sortRows(spec, { column_id: "cites", direction: "desc" }),
         );
         expect(csv.split("\r\n")).toEqual([
-            "Reference,Reference — evidence,Reference — sources,Reference — state,Year,Year — evidence,Year — sources,Year — state,Citations,Citations — evidence,Citations — sources,Citations — state,Type,Type — evidence,Type — sources,Type — state,Open access,Open access — evidence,Open access — sources,Open access — state,Methods,Methods — evidence,Methods — sources,Methods — state",
-            'Smith 2020 — Alpha,,,,2020,,,,120,,,,Article,,,,true,,,,"Survey, n = 1,200",,,',
-            "Jones 2018,,,,2018-05,,,,7,,,,Book,,,,false,,,,,,,",
-            "adams 2022,,,,2022-01-15,,,,,,,,Article,,,,,,,,Interviews,,,",
+            "Reference,Year,Citations,Type,Open access,Methods",
+            'Smith 2020 — Alpha,2020,120,Article,true,"Survey, n = 1,200"',
+            "Jones 2018,2018-05,7,Book,false,",
+            "adams 2022,2022-01-15,,Article,,Interviews",
         ]);
     });
 });
@@ -1432,4 +1432,18 @@ it("exports self-contained source labels and passage evidence", () => {
     expect(csv).toContain("Author. 2025. Study title.");
     expect(csv).toContain("The study enrolled 120 participants.");
     expect(csv).toContain("u-ABCDEFGH:s1");
+});
+
+it("names a source once per cell, with each of its passages", () => {
+    const tags = ['<citation item_id="u-ABCDEFGH" loc="s1"/>', '<citation item_id="u-ABCDEFGH" loc="s2"/>'];
+    const spec: TableSpec = {
+        id: "grouped",
+        columns: [{ id: "t", header: "Text", type: "text" }],
+        rows: [{ id: "r", cells: { t: { value: { kind: "text", text: `A claim. ${tags.join(" ")}` }, provenance: "extracted" } } }],
+        citations: tags.map((raw_tag, i) => ({ citation_id: `c${i}`, raw_tag, formatted_citation: "Author. 2025. Study title." })),
+    };
+    const csv = toCsv(spec);
+    expect(csv.match(/Author\. 2025\. Study title\./g)).toHaveLength(1);
+    expect(csv).toContain("u-ABCDEFGH:s1; ");
+    expect(csv).toContain("u-ABCDEFGH:s2]");
 });

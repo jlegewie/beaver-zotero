@@ -48,6 +48,7 @@ import {
     createTimeoutController,
 } from './timeout';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
+import { MAX_PAGE_IMAGE_DIMENSION } from './imageProcessing';
 
 // Convert raw bytes to base64 in 32 KB chunks
 function uint8ToBase64(bytes: Uint8Array): string {
@@ -376,6 +377,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
             dpi: dpi ?? 0,
             format: format ?? 'png' as const,
             jpegQuality: jpeg_quality ?? 85,
+            maxDimension: MAX_PAGE_IMAGE_DIMENSION,
         };
 
         // 10. Render — fused metadata + render in one round-trip.

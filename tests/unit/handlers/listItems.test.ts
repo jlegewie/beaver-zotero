@@ -541,4 +541,133 @@ describe('handleListItemsRequest', () => {
         });
     });
 
+    describe('special_collection', () => {
+        const baseRequest = {
+            event: 'list_items_request' as const,
+            request_id: 'req-special',
+            item_category: 'regular' as const,
+            recursive: true,
+            sort_by: 'dateModified',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+        };
+
+        beforeEach(() => {
+            (globalThis as any).Zotero.Libraries.userLibraryID = 1;
+        });
+
+        it('filters the listing with the view\'s search condition', async () => {
+            const item = makeItem({ id: 1, key: 'PUB1' });
+            itemsById.set(1, item);
+            searchResults.push([1]);
+
+            const response = await handleListItemsRequest({ ...baseRequest, special_collection: 'publications' });
+
+            expect(response.error).toBeUndefined();
+            expect(response.items).toHaveLength(1);
+            expect(addedConditions()).toContainEqual(['publications', 'true', '']);
+            expect(addedConditions()).not.toContainEqual(expect.arrayContaining(['collectionID']));
+            expect(response.collection_name).toBeNull();
+        });
+
+        it('walks Unfiled Items parents for child categories, scoped by the unfiled condition', async () => {
+            const parent = makeItem({ id: 1, key: 'PARENT', getNotes: vi.fn(() => [2]) });
+            const note = makeItem({
+                id: 2,
+                key: 'NOTE',
+                itemType: 'note',
+                parentItemID: 1,
+                isNote: vi.fn(() => true),
+                isRegularItem: vi.fn(() => false),
+                getDisplayTitle: vi.fn(() => 'Note'),
+            });
+            itemsById.set(1, parent);
+            itemsById.set(2, note);
+            // Main search (standalone notes only), then the parent walk.
+            searchResults.push([], [1]);
+
+            const response = await handleListItemsRequest({
+                ...baseRequest,
+                item_category: 'note',
+                special_collection: 'unfiled',
+            });
+
+            expect(response.items).toContainEqual(expect.objectContaining({ result_type: 'note' }));
+            expect(searches).toHaveLength(2);
+            expect(searches[1].addCondition.mock.calls.map(call => call.slice(0, 3)))
+                .toContainEqual(['unfiled', 'true', '']);
+        });
+
+        it('does not walk My Publications parents: unpublished children are not in the view', async () => {
+            searchResults.push([]);
+
+            await handleListItemsRequest({ ...baseRequest, item_category: 'note', special_collection: 'publications' });
+
+            expect(searches).toHaveLength(1);
+        });
+
+        it('keeps only published children when include_children lists My Publications', async () => {
+            const parent = makeItem({ id: 1, key: 'PARENT', getAttachments: vi.fn(() => [2, 3]) });
+            const published = makeItem({
+                id: 2, key: 'PUBPDF', itemType: 'attachment', parentItemID: 1,
+                isAttachment: vi.fn(() => true), isRegularItem: vi.fn(() => false),
+                inPublications: true,
+            } as any);
+            const unpublished = makeItem({
+                id: 3, key: 'PRIVPDF', itemType: 'attachment', parentItemID: 1,
+                isAttachment: vi.fn(() => true), isRegularItem: vi.fn(() => false),
+                inPublications: false,
+            } as any);
+            for (const item of [parent, published, unpublished]) itemsById.set(item.id, item);
+            searchResults.push([1]);
+
+            const response = await handleListItemsRequest({
+                ...baseRequest,
+                include_children: true,
+                special_collection: 'publications',
+            });
+
+            const ids = response.items.map((item: any) => item.attachment_id ?? item.item_id);
+            expect(ids).toContain('1-PUBPDF');
+            expect(ids).not.toContain('1-PRIVPDF');
+        });
+
+        it('reports My Publications as unavailable in a group library', async () => {
+            (validateLibraryAccess as any).mockReturnValue({
+                valid: true,
+                library: { libraryID: 5, name: 'Lab Group' },
+            });
+
+            const response = await handleListItemsRequest({
+                ...baseRequest,
+                library_id: 5,
+                special_collection: 'publications',
+            });
+
+            expect(response.error_code).toBe('special_collection_unavailable');
+            expect(response.error).toContain('personal library');
+            expect(searches).toHaveLength(0);
+        });
+
+        it('rejects a view it does not know', async () => {
+            const response = await handleListItemsRequest({ ...baseRequest, special_collection: 'trash' });
+
+            expect(response.error_code).toBe('invalid_special_collection');
+            expect(response.error).toContain('unfiled, publications, retracted');
+            expect(searches).toHaveLength(0);
+        });
+
+        it('rejects a view combined with a collection', async () => {
+            const response = await handleListItemsRequest({
+                ...baseRequest,
+                collection_key: 'COLLECTION',
+                special_collection: 'unfiled',
+            });
+
+            expect(response.error_code).toBe('invalid_special_collection');
+            expect(getCollectionByIdOrName).not.toHaveBeenCalled();
+        });
+    });
+
 });

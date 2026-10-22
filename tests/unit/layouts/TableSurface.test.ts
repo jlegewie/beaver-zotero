@@ -222,7 +222,8 @@ describe("table chrome", () => {
         );
 
         const csv: string = onExport.mock.calls[0][0];
-        expect(csv.split("\r\n")[0]).toBe("Item,Item — evidence,Item — sources,Item — state,Year,Year — evidence,Year — sources,Year — state,Type,Type — evidence,Type — sources,Type — state,Notes,Notes — evidence,Notes — sources,Notes — state");
+        // Companion columns that are empty in every exported row are left out.
+        expect(csv.split("\r\n")[0]).toBe("Item,Year,Type,Notes,Notes — state");
         expect(csv).toContain("Alpha");
         expect(csv).toContain("Gamma");
         expect(csv).not.toContain("Beta"); // filtered out of the view

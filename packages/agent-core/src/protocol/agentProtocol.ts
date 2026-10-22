@@ -24,6 +24,12 @@ export { isRenderableMessage } from '../agents/messageVisibility';
 /** Base interface for all WebSocket events from the server */
 export interface WSBaseEvent {
     event: string;
+    /**
+     * Position of a run event in its run, on a backend that can reattach runs
+     * (see `WSReadyEvent.supports_run_reattach`). Requests and prompts, which
+     * are re-sent by id rather than replayed, carry none.
+     */
+    seq?: number;
 }
 
 /** Ready event sent after connection validation completes */
@@ -38,6 +44,14 @@ export interface WSReadyEvent extends WSBaseEvent {
     supports_request_keepalive?: boolean;
     /** Backend answers the client's `ping` heartbeat with a `pong` */
     supports_heartbeat?: boolean;
+    /**
+     * A run whose socket is lost abnormally keeps going on the server for
+     * `reattach_grace_s` seconds, and a client that declared
+     * CLIENT_FEATURES.RUN_REATTACH can open a new socket and send
+     * `WSReattachRequest` to pick it up.
+     */
+    supports_run_reattach?: boolean;
+    reattach_grace_s?: number | null;
 }
 
 /**
@@ -47,6 +61,59 @@ export interface WSReadyEvent extends WSBaseEvent {
  */
 export interface WSPingMessage {
     type: 'ping';
+    /**
+     * Highest run-event `seq` this client has handled, sent to a backend that
+     * reattaches runs so it can stop holding those events for replay.
+     */
+    last_seq?: number;
+}
+
+/**
+ * Pick up a run that lost its socket, sent after `ready` instead of a chat
+ * request. Answered with `reattached` (then the events after `last_seq`, then
+ * every request still waiting on the client, with its original id) or with
+ * `reattach_unavailable`.
+ */
+export interface WSReattachRequest {
+    type: 'reattach';
+    run_id: string;
+    /** From the run's `request_ack`. */
+    reattach_token: string;
+    /** Highest `seq` handled for this run; 0 if none. */
+    last_seq: number;
+}
+
+/** The first message a connection sends after `ready`. */
+export type AgentConnectRequest = AgentRunRequest | WSReattachRequest;
+
+/** Whether a connect request picks up an existing run rather than starting one. */
+export function isReattachRequest(request: AgentConnectRequest): request is WSReattachRequest {
+    return request.type === 'reattach';
+}
+
+/** A `reattach` succeeded: the run continues on this socket. */
+export interface WSReattachedEvent extends WSBaseEvent {
+    event: 'reattached';
+    run_id: string;
+    /** Highest `seq` the run has produced so far. */
+    last_seq: number;
+    /** Number of buffered events about to be replayed. */
+    replayed: number;
+}
+
+/** Why the backend refused a `reattach`. */
+export type WSReattachUnavailableReason =
+    | 'not_found'
+    | 'expired'
+    | 'wrong_install'
+    | 'bad_token'
+    | 'unsupported';
+
+/** A `reattach` was refused; the client falls back to its usual error handling. */
+export interface WSReattachUnavailableEvent extends WSBaseEvent {
+    event: 'reattach_unavailable';
+    run_id: string;
+    reason: WSReattachUnavailableReason;
 }
 
 /**
@@ -89,6 +156,11 @@ export interface WSRequestAckEvent extends WSBaseEvent {
     model_id: string | null;
     model_name: string | null;
     charge_type: ChargeType;
+    /**
+     * Proof of ownership the client presents to reattach to this run after
+     * losing its socket. Only for runs the backend lets outlive their socket.
+     */
+    reattach_token?: string;
 }
 
 /** Part event for streaming content (text, thinking, tool calls) */
@@ -1710,6 +1782,12 @@ export interface WSListItemsRequest extends WSBaseEvent {
     request_id: string;
     library_id?: number | string | null;
     collection_key?: string | null;
+    /**
+     * Built-in view to list instead of a collection. Typed as a string because
+     * the backend may send a view this client does not know; the handler
+     * rejects anything outside `ListableSpecialCollectionType`.
+     */
+    special_collection?: string | null;
     tag?: string | null;
     item_category: ZoteroItemCategory;
     include_children?: boolean;
@@ -1903,6 +1981,12 @@ export interface WSResolvePopulationResponse {
     collection_names?: string[] | null;
     /** Portable identities aligned with collection_names; legacy keys remain accepted. */
     collection_ids?: string[];
+    /**
+     * Display names of the saved searches named by `savedSearch` conditions,
+     * keyed by the condition value as sent. The approval card names a saved
+     * search from these and falls back to its key.
+     */
+    saved_search_names?: Record<string, string> | null;
     /**
      * The join mode actually applied to the request's `conditions`. Set on
      * every successful resolution, and absent from a failure.
@@ -2421,6 +2505,8 @@ export interface WSAgentActionExecuteRequest extends WSBaseEvent {
     run_id?: string;
     /** Thread ID */
     thread_id?: string;
+    /** Tool call the action belongs to; absent from older backends. */
+    toolcall_id?: string;
 }
 
 /** Response to agent action execution request */
@@ -2790,6 +2876,8 @@ export type WSEvent =
     | WSStreamingDoneEvent
     | WSDoneEvent
     | WSPongEvent
+    | WSReattachedEvent
+    | WSReattachUnavailableEvent
     | WSThreadEvent
     | WSThreadNameEvent
     | WSErrorEvent
@@ -2960,6 +3048,13 @@ export const CLIENT_FEATURES = {
     /** Scoped collection resolution, stable mutation targets, and portable result readers. */
     COLLECTION_IDS: 'collection_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
+    /**
+     * `list_items` honors `special_collection`, listing a built-in view
+     * (Unfiled Items, My Publications, Retracted Items) instead of a
+     * collection. A client without it drops the field and lists the whole
+     * library, so the backend only sends it to declaring clients.
+     */
+    LIST_ITEMS_SPECIAL_COLLECTIONS: 'list_items_special_collections',
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */
     EDIT_NOTE_BATCH: 'edit_note_batch',
@@ -3083,6 +3178,23 @@ export const CLIENT_FEATURES = {
      * offers the style, since an older client would write highlights instead.
      */
     UNDERLINE_ANNOTATIONS: 'underline_annotations',
+    /**
+     * After an abnormal socket loss the client reconnects and sends
+     * `WSReattachRequest` to pick its run back up, reports `last_seq` on
+     * heartbeat pings, and ignores a run event whose `seq` it has handled.
+     * Declaring it commits the client to answering a re-sent request or prompt
+     * id from memory: a request whose reply was lost with the socket is sent
+     * again on reattach, and an action may already have been applied.
+     */
+    RUN_REATTACH: 'run_reattach',
+    /**
+     * The client records an action it applied whose result was lost with its
+     * connection (`/agent-actions/ack` with `only_undecided`), and renders an
+     * unconfirmed action (see `isUnconfirmedAction`) without Apply or Retry.
+     * With it, the backend stores each action as unconfirmed before sending
+     * its execute, so a lost result leaves a record to complete.
+     */
+    UNDELIVERED_ACTION_ACK: 'undelivered_action_ack',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -3178,25 +3290,40 @@ export interface CurrentSavedSearch {
     search_key: string;
     /** Saved search name */
     name: string;
-    /** Library ID this saved search belongs to */
-    library_id: number;
-    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
-    library_ref?: string;
+    /**
+     * Device-portable library identity ("u" | "g<groupID>"). See
+     * `src/utils/libraryIdentity.ts`. Saved searches carry no device-local
+     * library id.
+     */
+    library_ref: string;
 }
 
 /**
  * Zotero special collections Beaver reports in application state: built-in,
  * per-library views in the collections pane rather than user-created
- * collections.
+ * collections. Values are Zotero's collection-tree row types.
  *
  * - `duplicates`: "Duplicate Items", Zotero's duplicate candidates.
  * - `unfiled`: "Unfiled Items", items that belong to no collection.
+ * - `publications`: "My Publications", personal library only.
+ * - `retracted`: "Retracted Items", items Zotero flagged as retracted.
+ * - `trash`: "Trash". Reported so the agent can explain it cannot read it.
  */
-export type SpecialCollectionType = 'duplicates' | 'unfiled';
+export type SpecialCollectionType = 'duplicates' | 'unfiled' | 'publications' | 'retracted' | 'trash';
+
+/** Special collections `list_items` can list via `special_collection`. */
+export type ListableSpecialCollectionType = 'unfiled' | 'publications' | 'retracted';
+
+/** Zotero's English names for the listable special collections. */
+export const LISTABLE_SPECIAL_COLLECTION_NAMES: Readonly<Record<ListableSpecialCollectionType, string>> = {
+    unfiled: 'Unfiled Items',
+    publications: 'My Publications',
+    retracted: 'Retracted Items',
+};
 
 /**
  * A special collection selected in the collections pane. Reported only for
- * kinds the agent can act on; other special views are left out.
+ * kinds the agent knows how to handle; other special views are left out.
  */
 export interface CurrentSpecialCollection {
     /** Which special collection is selected */
@@ -3205,6 +3332,12 @@ export interface CurrentSpecialCollection {
     library_id: number;
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
+    /** Regular items in the view. Omitted for views that are not counted (Duplicate Items). */
+    item_count?: number;
+    /** Attachments in the view without a parent item. */
+    standalone_attachment_count?: number;
+    /** Notes in the view without a parent item. */
+    note_count?: number;
 }
 
 /**
@@ -3221,6 +3354,17 @@ export interface ApplicationStateInput {
     /** Current library context */
     current_library?: CurrentLibrary;
     /**
+     * True when the library behind the open tab (the selected collections-pane
+     * row, or the open attachment or note) is one the user excluded from
+     * Beaver. Nothing else about that library is sent.
+     */
+    current_library_excluded?: boolean;
+    /**
+     * True when some selected collections-pane rows or items were left out
+     * because they belong to a library the user excluded from Beaver.
+     */
+    selection_partially_excluded?: boolean;
+    /**
      * First selected collection.
      *
      * Superseded by `current_collections`, which carries the whole selection.
@@ -3235,6 +3379,12 @@ export interface ApplicationStateInput {
      * libraries — each entry carries its own `library_id`/`library_ref`.
      */
     current_collections?: CurrentCollection[];
+    /**
+     * Library rows (My Library, group libraries) in the current selection, in
+     * collections-list order. `current_library` names only the first selected
+     * library, so this list is what tells several selected libraries apart.
+     */
+    current_libraries?: CurrentLibrary[];
     /**
      * Saved searches in the current selection, in selection order. A selection
      * can mix collections and saved searches, so this list is independent of
@@ -3397,6 +3547,79 @@ export interface WSRequestAckData {
     modelId: string | null;
     modelName: string | null;
     chargeType: ChargeType;
+}
+
+/** A run lost its socket and is waiting on the server to be reattached. */
+export interface WSReattachingInfo {
+    runId: string;
+    /**
+     * The user stopped the run while it was reattaching: the new socket only
+     * delivers the cancel, so the server stops the run instead of waiting out
+     * the grace period.
+     */
+    cancelRequested: boolean;
+    /** When the connection was first lost (epoch ms); the same for every attempt. */
+    detachedAt: number;
+    /** How long the server holds the run after losing its connection, in ms. */
+    graceMs: number;
+}
+
+/** A run was picked up on a new socket. */
+export interface WSReattachedInfo {
+    runId: string;
+    /** How the socket was lost. */
+    evidence: ConnectionFailureEvidence;
+    /** Milliseconds between noticing the loss and the server confirming the reattach. */
+    gapMs: number;
+    /** Events the server is replaying. */
+    replayed: number;
+}
+
+/**
+ * Why a run could not be reattached: a reason the server gave, or one of the
+ * client's own — it ran out of time (`gave_up`), the new socket closed before
+ * the server answered (`connection_closed`), or the server no longer offers
+ * reattach (`unsupported`).
+ */
+export type ReattachFailureReason =
+    | WSReattachUnavailableReason
+    | 'gave_up'
+    | 'connection_closed';
+
+/** A run could not be reattached; it ends the way any lost connection does. */
+export interface WSReattachFailedInfo {
+    runId: string;
+    reason: ReattachFailureReason;
+    /** How the socket was lost. */
+    evidence: ConnectionFailureEvidence;
+    /** Milliseconds spent trying. */
+    gapMs: number;
+}
+
+/** The action an `agent_action_execute` request applies, as the request describes it. */
+export interface ExecutedAction {
+    actionId: string;
+    actionType: AgentActionType;
+    actionData: Record<string, any>;
+    /** Null when the backend does not name the tool call. */
+    toolcallId: string | null;
+}
+
+/** An action a run applied whose result the server may not have received. */
+export interface UndeliveredActionResult {
+    actionId: string;
+    resultData: Record<string, any>;
+    /**
+     * The request that applied it. An action applied without asking reaches
+     * the client only with its result, so this is all the client has of one
+     * whose result was lost.
+     */
+    executed?: ExecutedAction;
+}
+
+export interface WSUndeliveredActionsInfo {
+    runId: string;
+    actions: UndeliveredActionResult[];
 }
 
 export interface WSCallbacks {
@@ -3585,4 +3808,38 @@ export interface WSCallbacks {
         wasClean: boolean,
         evidence?: ConnectionFailureEvidence,
     ) => void;
+
+    /**
+     * Called instead of `onClose` when the socket was lost abnormally while
+     * the run can still be picked up on a new one. The run keeps going on the
+     * server; the client should keep its state, show that it is reconnecting
+     * and start `reattachWithRetry`. Without this callback a lost socket ends
+     * the run through `onClose`, as it always has.
+     */
+    onReattaching?: (info: WSReattachingInfo) => void;
+
+    /** Called when the server confirms the run continues on the new socket. */
+    onReattached?: (info: WSReattachedInfo) => void;
+
+    /**
+     * Called when a run that was being reattached cannot be. The client should
+     * end the run as `onClose` would have for the original loss.
+     */
+    onReattachFailed?: (info: WSReattachFailedInfo) => void;
+
+    /**
+     * Called after a run ended before finishing, with the actions it applied
+     * whose results the server may never have received. The server keeps
+     * those actions pending, so the client records them as applied itself.
+     * Called for a run the client has since left, too.
+     */
+    onUndeliveredActions?: (info: WSUndeliveredActionsInfo) => void;
+
+    /**
+     * Called on a new run's callbacks when it replaced a run the user stopped
+     * while that run was reconnecting, before the stop could be confirmed:
+     * the cancel was never sent and the server did not end the run, so it may
+     * still finish there and be charged.
+     */
+    onPreviousRunNotStopped?: (runId: string) => void;
 }

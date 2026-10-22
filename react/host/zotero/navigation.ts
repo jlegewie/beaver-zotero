@@ -3,10 +3,11 @@ import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
 import { openStoredTable } from './tables';
 import type { NavigationHost, AttachmentMatchNavigation } from '@beaver/agent-ui/host/types';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { AttachmentMatchTarget } from '@beaver/agent-core/run-state/toolResultTypes';
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
-import { selectCollection, selectLibrary, selectTagFilter } from '../../utils/selectItem';
+import { selectCollection, selectLibrary, selectTagFilter, selectView } from '../../utils/selectItem';
 import { activateCitation } from './citationActivation';
 import { itemMenuItems } from './itemMenu';
 import { launchExternalFile, notifyReferenceUnavailable, notifyTagAmbiguous } from './sourceActions';
@@ -82,6 +83,15 @@ export const zoteroNavigation: NavigationHost = {
         const found = Zotero.Collections.getByLibraryAndKey(libraryID, ref.zotero_key);
         if (found) selectCollection(found);
         else notifyReferenceUnavailable('collection');
+    },
+    async revealView(view: ViewAttachment): Promise<void> {
+        const kind = view.type === 'saved_search' ? 'search' : 'view';
+        const libraryID = resolveLibraryRef(view);
+        if (!libraryID) {
+            notifyReferenceUnavailable(kind, 'library_unavailable');
+            return;
+        }
+        if (!(await selectView(view, libraryID))) notifyReferenceUnavailable(kind);
     },
     async revealObject(ref: ZoteroItemReference): Promise<void> {
         // Click handler: an uncaught throw here is a silent dead link.

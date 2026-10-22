@@ -1338,61 +1338,72 @@ function csvEscape(field: string): string {
 /**
  * RFC 4180 CSV of the table: one header row of column headers, then one row per
  * table row in the given order. Companion fields retain evidence, citation
- * identities with locators, and state. Formula-like values are escaped.
+ * identities with locators, and state; a companion column empty in every row is
+ * omitted. Formula-like values are escaped.
  */
 export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
     const citations = citationsByKey(spec.citations);
-    const header = spec.columns
-        .flatMap((c) => [
-            c.header,
-            `${c.header} — evidence`,
-            `${c.header} — sources`,
-            `${c.header} — state`,
-        ])
+    // Each column's value, then its evidence, sources and state.
+    const fields = rows.map((row) =>
+        spec.columns.map((c) => {
+            const cell = row.cells[c.id];
+            const evidence =
+                cell?.details?.kind === "text"
+                    ? cell.details.text
+                    : (cell?.details?.items.join("\n") ?? "");
+            const keys = cell ? citationKeysInCell(cell) : [];
+            const evidenceParts = [
+                stripCitationTags(evidence),
+                ...keys.map((key) => citations[key]?.preview ?? ""),
+            ].filter(Boolean);
+            // One entry per source, listing every passage cited from it, so
+            // a cell citing one paper three times names the paper once.
+            const bySource = new Map<string, string[]>();
+            for (const key of keys) {
+                const citation = citations[key];
+                const label =
+                    citation?.formatted_citation || citation?.display_name || "";
+                const passage = citation?.invalid ? `${key} · Invalid citation` : key;
+                const passages = bySource.get(label);
+                if (passages) passages.push(passage);
+                else bySource.set(label, [passage]);
+            }
+            const sources = [...bySource].flatMap(([label, passages]) =>
+                label ? [`${label} [${passages.join("; ")}]`] : passages,
+            );
+            return [
+                cell?.outcome === "not_reported"
+                    ? "Not reported"
+                    : cellValueText(cell?.value),
+                [...new Set(evidenceParts)].join("\n"),
+                sources.join("; "),
+                [
+                    cell?.status,
+                    cell?.flag,
+                    cell?.stale ? "stale" : "",
+                    cell?.provenance,
+                ]
+                    .filter(Boolean)
+                    .join("; "),
+            ];
+        }),
+    );
+    // A companion column that is empty in every row (a reference column's
+    // evidence, a table with no citations) is left out: it would only widen
+    // the sheet. The value column is always written.
+    const suffixes = ["", " — evidence", " — sources", " — state"];
+    const kept = spec.columns.map((_, ci) =>
+        suffixes.map(
+            (_, fi) => fi === 0 || fields.some((row) => row[ci][fi] !== ""),
+        ),
+    );
+    const pick = (values: string[][]) =>
+        values.flatMap((group, ci) => group.filter((_, fi) => kept[ci][fi]));
+    const header = pick(
+        spec.columns.map((c) => suffixes.map((suffix) => c.header + suffix)),
+    )
         .map(csvEscape)
         .join(",");
-    const lines = rows.map((row) =>
-        spec.columns
-            .flatMap((c) => {
-                const cell = row.cells[c.id];
-                const evidence =
-                    cell?.details?.kind === "text"
-                        ? cell.details.text
-                        : (cell?.details?.items.join("\n") ?? "");
-                const keys = cell ? citationKeysInCell(cell) : [];
-                const evidenceParts = [
-                    stripCitationTags(evidence),
-                    ...keys.map((key) => citations[key]?.preview ?? ""),
-                ].filter(Boolean);
-                const sources = keys.map((key) => {
-                    const citation = citations[key];
-                    const label =
-                        citation?.formatted_citation || citation?.display_name;
-                    return [
-                        label ? `${label} [${key}]` : key,
-                        citation?.invalid ? "Invalid citation" : "",
-                    ]
-                        .filter(Boolean)
-                        .join(" · ");
-                });
-                return [
-                    cell?.outcome === "not_reported"
-                        ? "Not reported"
-                        : cellValueText(cell?.value),
-                    [...new Set(evidenceParts)].join("\n"),
-                    sources.join("; "),
-                    [
-                        cell?.status,
-                        cell?.flag,
-                        cell?.stale ? "stale" : "",
-                        cell?.provenance,
-                    ]
-                        .filter(Boolean)
-                        .join("; "),
-                ];
-            })
-            .map(csvEscape)
-            .join(","),
-    );
+    const lines = fields.map((row) => pick(row).map(csvEscape).join(","));
     return [header, ...lines].join("\r\n");
 }

@@ -24,10 +24,15 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
 vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
     const currentMessageItemsAtom = atom<any[]>([]);
+    const currentMessageViewsAtom = atom<any[]>([]);
     return {
         currentMessageItemsAtom,
         currentMessageCollectionsAtom: atom<unknown[]>([]),
+        currentMessageViewsAtom,
         pendingPillInsertsAtom: atom<unknown[]>([]),
+        addViewsToCurrentMessageAtom: atom(null, (get, set, views: any[]) => {
+            set(currentMessageViewsAtom, [...get(currentMessageViewsAtom), ...views]);
+        }),
         addItemsToCurrentMessageItemsAtom: atom(null, (get, set, items: any[]) => {
             const current = get(currentMessageItemsAtom);
             const added = items.filter((i) => !current.some((c: any) => c.key === i.key));
@@ -65,6 +70,7 @@ vi.mock('../../../react/utils/promptVariables', () => ({
     resolveTargetContext: vi.fn(() => ({
         items: [],
         collections: [],
+        views: [],
         itemsExcluded: false,
         collectionsExcluded: false,
     })),
@@ -72,6 +78,7 @@ vi.mock('../../../react/utils/promptVariables', () => ({
         text: `resolved:${text}`,
         items: [],
         collections: [],
+        views: [],
         emptyItemVariables: [],
     })),
 }));
@@ -105,6 +112,12 @@ vi.mock('../../../react/atoms/profile', async () => {
     };
 });
 
+// Portable library refs resolve to this device's libraries: 'u' → 1, 'g42' → 2.
+vi.mock('../../../src/utils/libraryIdentity', () => ({
+    resolveLibraryRef: (ref: { library_ref?: string; library_id?: number }) =>
+        ref.library_ref === 'u' ? 1 : ref.library_ref === 'g42' ? 2 : ref.library_id ?? null,
+}));
+
 // =============================================================================
 // Imports (after mocks)
 // =============================================================================
@@ -120,6 +133,7 @@ import {
 import {
     currentMessageCollectionsAtom,
     currentMessageItemsAtom,
+    currentMessageViewsAtom,
     pendingPillInsertsAtom,
 } from '../../../react/atoms/messageComposition';
 import { resolvePromptVariables, resolveTargetContext } from '../../../react/utils/promptVariables';
@@ -164,12 +178,14 @@ function stage(
 function nextTargets(context: Partial<{
     items: any[];
     collections: any[];
+    views: any[];
     itemsExcluded: boolean;
     collectionsExcluded: boolean;
 }>) {
     vi.mocked(resolveTargetContext).mockReturnValueOnce({
         items: [],
         collections: [],
+        views: [],
         itemsExcluded: false,
         collectionsExcluded: false,
         ...context,
@@ -315,7 +331,7 @@ describe('sendComposedMessageAtom', () => {
         // name are merged in as they always have been.
         const item = { libraryID: 1, key: 'ABC' };
         vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x', items: [item], collections: [], emptyItemVariables: [],
+            text: 'x', items: [item], collections: [], views: [], emptyItemVariables: [],
         } as any);
         const store = makeStore();
         const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
@@ -325,7 +341,7 @@ describe('sendComposedMessageAtom', () => {
 
     it('aborts without sending when a variable resolves to no items', async () => {
         vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x', items: [], collections: [], emptyItemVariables: ['selected_items'],
+            text: 'x', items: [], collections: [], views: [], emptyItemVariables: ['selected_items'],
         } as any);
         const store = makeStore();
         const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
@@ -338,7 +354,7 @@ describe('sendComposedMessageAtom', () => {
     it('aborts without sending when a variable resolves to an excluded item', async () => {
         // Library 2 is not in the searchable set ([1]).
         vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x', items: [{ libraryID: 2, key: 'XYZ' }], collections: [], emptyItemVariables: [],
+            text: 'x', items: [{ libraryID: 2, key: 'XYZ' }], collections: [], views: [], emptyItemVariables: [],
         } as any);
         const store = makeStore();
         const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
@@ -387,13 +403,133 @@ describe('sendComposedMessageAtom', () => {
     });
 });
 
+describe('collection actions over saved searches and views', () => {
+    const findGaps: Action = {
+        id: 'custom-gaps',
+        title: 'Find gaps',
+        text: 'Find gaps in this collection.',
+        targets: ['collection'],
+        category: 'research',
+    };
+    const unfiled = {
+        type: 'special_collection', special_collection: 'unfiled', library_id: 1, library_ref: 'u', name: 'Unfiled Items',
+    };
+    const search = { type: 'saved_search', library_ref: 'u', zotero_key: 'SRCH0001', name: 'Beaver' };
+    const pill = { commandName: 'find-gaps', actionId: 'custom-gaps', targetType: 'collection' as const };
+
+    it('attaches the saved searches and views the action binds to when picked', () => {
+        nextTargets({ views: [search, unfiled] });
+        const store = makeStore([findGaps]);
+        expect(stage(store, { actionId: 'custom-gaps', targetType: 'collection' })).toBeTruthy();
+        expect(store.get(currentMessageViewsAtom)).toEqual([search, unfiled]);
+    });
+
+    it('stages nothing when the bound views are all in an excluded library', () => {
+        nextTargets({ collectionsExcluded: true });
+        const store = makeStore([findGaps]);
+        expect(stage(store, { actionId: 'custom-gaps', targetType: 'collection' })).toBeNull();
+        expect(store.get(currentMessageViewsAtom)).toEqual([]);
+    });
+
+    it('sends when the message carries a view', async () => {
+        const store = makeStore([findGaps]);
+        store.set(currentMessageViewsAtom, [unfiled]);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(true);
+        expect(sendWSMessageMock).toHaveBeenCalledOnce();
+    });
+
+    it('sends when the message carries a collection', async () => {
+        const store = makeStore([findGaps]);
+        store.set(currentMessageCollectionsAtom, [{ library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null }]);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(true);
+    });
+
+    it('aborts when the attached view\'s library was excluded after the action was picked', async () => {
+        // Library 2 is not in the searchable set ([1]); the send path would
+        // drop the view and run the action on nothing.
+        const store = makeStore([findGaps]);
+        store.set(currentMessageViewsAtom, [{ ...unfiled, library_id: 2, library_ref: 'g42' }]);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(false);
+        expect(sendWSMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('aborts when the attached collection\'s library was excluded after the action was picked', async () => {
+        const store = makeStore([findGaps]);
+        store.set(currentMessageCollectionsAtom, [{ library_id: 2, zotero_key: 'COLLA', name: 'A', parent_key: null }]);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(false);
+    });
+
+    it('refuses an edit whose only collection target is in an excluded library', async () => {
+        const store = makeStore([findGaps]);
+        const result = await store.set(buildEditedPromptActionsAtom, {
+            pills: [pill],
+            existingAttachments: [{ ...unfiled, library_id: 2, library_ref: 'g42' } as any],
+        });
+        expect(result).toBeNull();
+    });
+
+    it('aborts when the user removed the collection target before sending', async () => {
+        const store = makeStore([findGaps]);
+        expect(await store.set(sendComposedMessageAtom, { baseText: '/find-gaps', pills: [pill] })).toBe(false);
+        expect(sendWSMessageMock).not.toHaveBeenCalled();
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Action skipped' }));
+    });
+
+    it('attaches the views an action added to an edit binds to', async () => {
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x', items: [], collections: [], views: [search], emptyItemVariables: [],
+        } as any);
+        const store = makeStore([findGaps]);
+        const result = await store.set(buildEditedPromptActionsAtom, { pills: [pill], existingAttachments: [] });
+        expect(result?.addedAttachments).toEqual([search]);
+    });
+
+    it('does not re-add a view the edited message already carries', async () => {
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x', items: [], collections: [], views: [unfiled], emptyItemVariables: [],
+        } as any);
+        const store = makeStore([findGaps]);
+        const result = await store.set(buildEditedPromptActionsAtom, {
+            pills: [pill],
+            existingAttachments: [{ ...unfiled, library_ref: undefined } as any],
+        });
+        expect(result?.addedAttachments).toEqual([]);
+    });
+
+    it('accepts an edited message that already carries a view', async () => {
+        const store = makeStore([findGaps]);
+        const result = await store.set(buildEditedPromptActionsAtom, {
+            pills: [pill],
+            existingAttachments: [unfiled as any],
+        });
+        expect(result).not.toBeNull();
+    });
+
+    it('accepts an edited view from another device by its portable library', async () => {
+        // The other device's local library_id (7) means nothing here.
+        const store = makeStore([findGaps]);
+        const result = await store.set(buildEditedPromptActionsAtom, {
+            pills: [pill],
+            existingAttachments: [{ ...unfiled, library_id: 7 } as any],
+        });
+        expect(result).not.toBeNull();
+    });
+
+    it('refuses an edit whose collection action has nothing to run on', async () => {
+        const store = makeStore([findGaps]);
+        const result = await store.set(buildEditedPromptActionsAtom, { pills: [pill], existingAttachments: [] });
+        expect(result).toBeNull();
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Action skipped' }));
+    });
+});
+
 describe('buildEditedPromptActionsAtom', () => {
     it('reports unavailable table targets and leaves the edit intact for retry', async () => {
         const item = {
             libraryID: 1, key: 'ABCDEFGH', parentItem: null,
             isRegularItem: () => false, isAttachment: () => true, isNote: () => false,
         };
-        const targets = { text: 'x', items: [item], collections: [], emptyItemVariables: [] };
+        const targets = { text: 'x', items: [item], collections: [], views: [], emptyItemVariables: [] };
         vi.mocked(resolvePromptVariables).mockResolvedValueOnce(targets as any).mockResolvedValueOnce(targets as any);
         vi.mocked(toValidatedMessageAttachment).mockRejectedValueOnce(new Error('Table unavailable (file_missing).'));
         vi.stubGlobal('Zotero', { ...Zotero, Items: { loadDataTypes: vi.fn().mockResolvedValue(undefined) } });
@@ -427,7 +563,7 @@ describe('buildEditedPromptActionsAtom', () => {
     /** Collections a pill added during the edit resolves to on submit. */
     function nextEditTargets(collections: any[]) {
         vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x', items: [], collections, emptyItemVariables: [],
+            text: 'x', items: [], collections, views: [], emptyItemVariables: [],
         } as any);
     }
 

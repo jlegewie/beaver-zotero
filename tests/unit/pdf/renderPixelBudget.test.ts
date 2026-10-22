@@ -141,3 +141,88 @@ describe('renderOnePage pixel budget', () => {
         expect(result.dpi).toBeGreaterThan(0);
     });
 });
+
+describe('renderOnePage dimension cap', () => {
+    /** A0 poster: 841 x 1189 mm. */
+    const A0_PT: RectTuple = [0, 0, 2384, 3370];
+
+    it('is disabled by default', () => {
+        const { api, doc } = fakeRender(A0_PT);
+
+        const result = renderOnePage(api, doc, 0, {
+            ...DEFAULT_PAGE_IMAGE_OPTIONS,
+            dpi: 150,
+        });
+
+        expect(result.dpi).toBe(150);
+        expect(result.height).toBe(Math.ceil(3370 * 150 / 72));
+    });
+
+    it('leaves a page that already fits at the requested dpi', () => {
+        const { api, doc } = fakeRender(A4_PT);
+
+        const result = renderOnePage(api, doc, 0, {
+            ...DEFAULT_PAGE_IMAGE_OPTIONS,
+            dpi: 150,
+            maxDimension: 4096,
+        });
+
+        expect(result.dpi).toBe(150);
+    });
+
+    it('shrinks a large-format page so its longer side fits', () => {
+        const { api, doc } = fakeRender(A0_PT);
+
+        const result = renderOnePage(api, doc, 0, {
+            ...DEFAULT_PAGE_IMAGE_OPTIONS,
+            dpi: 150,
+            maxDimension: 4096,
+        });
+
+        // Unclamped this is ~4967 x 7021.
+        expect(result.height).toBeLessThanOrEqual(4096);
+        expect(result.height).toBeGreaterThan(4090);
+        expect(result.width / result.height).toBeCloseTo(2384 / 3370, 2);
+        expect(result.dpi).toBeLessThan(150);
+    });
+
+    it('caps the longer side of a page whose pixel count is under budget', () => {
+        // 1:16 strip — few pixels, but one side far past the cap.
+        const { api, doc } = fakeRender([0, 0, 500, 8000]);
+
+        const result = renderOnePage(api, doc, 0, {
+            ...DEFAULT_PAGE_IMAGE_OPTIONS,
+            dpi: 150,
+            maxDimension: 4096,
+        });
+
+        expect(Math.max(result.width, result.height)).toBeLessThanOrEqual(4096);
+    });
+
+    it('applies whichever of the pixel budget and dimension cap is tighter', () => {
+        const { api, doc } = fakeRender(A0_PT);
+
+        const result = renderOnePage(api, doc, 0, {
+            ...DEFAULT_PAGE_IMAGE_OPTIONS,
+            dpi: 150,
+            maxPixels: 1_000_000,
+            maxDimension: 4096,
+        });
+
+        expect(result.width * result.height).toBeLessThanOrEqual(1_000_000);
+    });
+
+    it('still caps an infinite dpi', () => {
+        const { api, doc, seen } = fakeRender(A4_PT);
+
+        const result = renderOnePage(api, doc, 0, {
+            ...DEFAULT_PAGE_IMAGE_OPTIONS,
+            dpi: Number.POSITIVE_INFINITY,
+            maxPixels: 0,
+            maxDimension: 4096,
+        });
+
+        expect(Number.isFinite(seen.matrix?.[0] ?? NaN)).toBe(true);
+        expect(Math.max(result.width, result.height)).toBeLessThanOrEqual(4096);
+    });
+});

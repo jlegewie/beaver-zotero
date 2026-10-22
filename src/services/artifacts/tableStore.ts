@@ -115,7 +115,7 @@ import {
     type TableRef,
     type TableVersionEntry,
 } from './tableItem';
-import { getTablesApi, setTableShadowRestore, tableWriteLocks, tableLocalCommands } from './tablesApi';
+import { getTablesApi, setTableShadowRestore, tableWriteLocks, tableLocalCommands, type TableLocalCommands } from './tablesApi';
 import { zoteroLinkScope, zoteroLinksFor } from './view/tableLinks';
 
 // ---------------------------------------------------------------------------
@@ -2115,8 +2115,13 @@ function emitTableUpdated(
 // ---------------------------------------------------------------------------
 
 /** Registers the store callbacks for one renderer and returns its teardown. */
-export function registerTableLocalCommands(win: Window, owner?: string): () => void {
-    const commands = {
+export function registerTableLocalCommands(
+    win: Window,
+    owner?: string,
+    renderer: Pick<TableLocalCommands, 'activateCitation'> = {},
+): () => void {
+    const commands: TableLocalCommands = {
+        ...renderer,
         read: async (ref: TableRef) => Zotero.Beaver.libraryOperations.run('table_openTable', [ref], { owner }),
         history: async (ref: TableRef) => (await Zotero.Beaver.libraryOperations.run('table_openTable', [ref], { owner })).history,
         revert: (ref: TableRef, version: number) => Zotero.Beaver.libraryOperations.run('table_revertTable', [ref, version, { actor: 'user' }], { owner }),

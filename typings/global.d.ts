@@ -573,6 +573,12 @@ declare namespace Zotero {
         let libraryScopeInitialized: boolean | undefined;
 
         /**
+         * Incremented whenever a library leaves `searchableLibraryIds`, so work
+         * that outlives a scope check can tell whether access was revoked since.
+         */
+        let libraryRevocations: number | undefined;
+
+        /**
          * Citation object for CSL formatting
          */
         type Citation = {

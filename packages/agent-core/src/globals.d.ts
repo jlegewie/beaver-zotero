@@ -89,6 +89,8 @@ declare interface RequestInit {
   /** `Uint8Array` for a pre-encoded body — see `ApiService.postRaw`. */
   body?: string | Uint8Array;
   signal?: AbortSignal;
+  /** `no-store` for a probe whose answer must come from the network. */
+  cache?: "no-store";
 }
 
 declare function fetch(url: string, init?: RequestInit): Promise<Response>;

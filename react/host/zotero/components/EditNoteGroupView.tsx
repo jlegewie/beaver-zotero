@@ -27,9 +27,10 @@ import {
     runApprovalPolicyAtom,
 } from '../../../atoms/runApprovalPolicy';
 import {
-    STATUS_CONFIGS,
+    getStatusConfig,
     hasFailedUndo,
     inFlightProgressMessage,
+    unconfirmedCaption,
     type ActionStatus,
 } from './agentActionViewHelpers';
 import {
@@ -63,6 +64,7 @@ import {
 import { buildPreviewableEditOperations } from '../../../utils/editNotePreviewOperations';
 import { getEditNoteRetryOrder } from './editNoteRetryOrder';
 import { isStaleNoteEdit, STALE_NOTE_EDIT_MESSAGE } from './editNoteErrors';
+import { isUnconfirmedAction } from './reviewChangeRows';
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
@@ -243,9 +245,10 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         [allActions],
     );
     // An edit whose target is gone from the note fails the same way on every
-    // retry, so it is reported instead of offered for Retry.
+    // retry, so it is reported instead of offered for Retry. So is one whose
+    // outcome is unknown: it may already be in the note.
     const errorActions = useMemo(
-        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a)),
+        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a) && !isUnconfirmedAction(a)),
         [allActions],
     );
     const hasStaleEdit = useMemo(() => allActions.some(isStaleNoteEdit), [allActions]);
@@ -691,7 +694,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         setExpanded({ key: expansionKey, expanded: !isExpanded });
     }, [setExpanded, expansionKey, isExpanded, hasStreamingChild]);
 
-    const baseConfig = STATUS_CONFIGS[aggregateStatus];
+    const baseConfig = getStatusConfig(aggregateStatus, allActions);
+    // An unconfirmed edit offers nothing to click; this says what to do.
+    const unconfirmedNote = isProcessing ? null : unconfirmedCaption(allActions);
     const headerIcon = (() => {
         if (isProcessing) return Spinner;
         if (isHovered && isExpanded) return ArrowDownIcon;
@@ -796,11 +801,16 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                 className={headerIconClassName}
                             />
                         </div>
-                        <div className="two-line-header">
-                            <span className="font-color-primary font-medium">{groupLabel}</span>
-                            {noteTitle && <span className="font-color-secondary ml-15">{noteTitle}</span>}
-                            {progressMessage && (
-                                <span className="font-color-tertiary ml-15 shimmer-text">{progressMessage}</span>
+                        <div className="display-flex flex-col min-w-0 gap-1">
+                            <div className="two-line-header">
+                                <span className="font-color-primary font-medium">{groupLabel}</span>
+                                {noteTitle && <span className="font-color-secondary ml-15">{noteTitle}</span>}
+                                {progressMessage && (
+                                    <span className="font-color-tertiary ml-15 shimmer-text">{progressMessage}</span>
+                                )}
+                            </div>
+                            {unconfirmedNote && (
+                                <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>
                             )}
                         </div>
                     </div>

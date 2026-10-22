@@ -18,10 +18,15 @@ export interface BeaverEvents {
         targetType: ActionTargetType;
         itemIds: number[];
         /** Every collection the action targets. Empty for non-collection
-         *  dispatches and whenever the selection is not purely collections.
+         *  dispatches and whenever the selection is not purely collections and
+         *  collection-like views.
          *  Carries each collection's library so the receiver can apply
          *  library-exclusion filtering before looking the collection up. */
         collections: { libraryId: number; collectionId: number }[];
+        /** Every saved search or special view (Unfiled Items, …) the action
+         *  targets, with its library for the same exclusion filtering. `type`
+         *  is the collections-tree row type; `key` is set for saved searches. */
+        views: { libraryId: number; type: string; name: string; key?: string }[];
     };
     readerSelectionAction: {
         action: 'explain' | 'ask';

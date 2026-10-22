@@ -50,8 +50,16 @@ vi.mock('../../../src/services/zoteroFulltext/state', () => ({ getZoteroFulltext
 vi.mock('../../../src/services/searchIndexState', () => ({ getSearchIndexState: vi.fn() }));
 import { getSearchIndexState } from '../../../src/services/searchIndexState';
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentRunService: { getThreadRuns: historyMock },
-    agentService: { connect: connectMock, close: vi.fn(), cancel: cancelMock },
+    agentRunService: {
+        getThreadRuns: historyMock,
+        // Reads the tail and activity through the history mock, as the real
+        // service does on a server without the activity endpoint.
+        getThreadActivity: async (threadId: string) => {
+            const history = await historyMock(threadId, false);
+            return { tail_run_id: history.tail_run_id, activity: history.activity };
+        },
+    },
+    agentService: { connect: connectMock, close: vi.fn(), cancel: cancelMock, cancelHandoff: () => null, canLeaveRun: () => false, leaveRun: () => false, isReattaching: () => false },
     AgentConnectionError: class AgentConnectionError extends Error {},
 }));
 vi.mock('@beaver/agent-core/transport/threadService', () => ({
@@ -448,6 +456,42 @@ describe('retry via synchronous truncation', () => {
             expect(store.get(threadConflictAtom)).toBeNull();
             expect(truncateMock).toHaveBeenCalledWith("thread-1", ["b"], "a");
             expect(sentRequest().expected_tail_run_id).toBe("a");
+        });
+        describe("a run the server finished after this window lost it", () => {
+            const idle = { state: "idle", run_id: null } as const;
+            beforeEach(() => {
+                store.set(threadRunsAtom, [makeRun("a"), makeRun("b", { status: "error" })]);
+                store.set(activeRunAtom, null);
+                store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "b", activity: idle });
+                historyMock.mockResolvedValue({ tail_run_id: "b", activity: idle });
+                loadThreadRunsMock.mockResolvedValue({
+                    runs: [makeRun("a"), makeRun("b")],
+                    citations: [],
+                    agentActions: [],
+                    tailRunId: "b",
+                    activity: idle,
+                });
+            });
+            it("shows the saved response instead of retrying it", async () => {
+                await store.set(regenerateFromRunAtom, { runId: "b" });
+                expect(truncateMock).not.toHaveBeenCalled();
+                expect(connectMock).not.toHaveBeenCalled();
+                expect(store.get(threadRunsAtom).map((run) => [run.id, run.status])).toEqual([
+                    ["a", "completed"],
+                    ["b", "completed"],
+                ]);
+                expect(store.get(popupMessagesAtom)).toEqual([
+                    expect.objectContaining({ type: "info", title: "Response finished" }),
+                ]);
+                expect(store.get(retryPendingRunIdAtom)).toBeNull();
+                expect(store.get(isWSChatPendingAtom)).toBe(false);
+            });
+            it("still replaces it when the user edits the prompt", async () => {
+                truncateMock.mockResolvedValue(okReport(["b"]));
+                await store.set(regenerateWithEditedPromptAtom, { runId: "b", editedPrompt: { content: "rewritten" } as any });
+                expect(truncateMock).toHaveBeenCalledWith("thread-1", ["b"], "a");
+                expect(sentRequest().user_prompt.content).toBe("rewritten");
+            });
         });
         it("reports a conflict when the saved follow-up behind an unsaved failure was removed elsewhere", async () => {
             unpersistedFailureBeforeFollowUp();

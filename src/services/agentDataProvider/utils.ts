@@ -1131,6 +1131,15 @@ export function getSearchableLibraryIds(): number[] {
 }
 
 /**
+ * How many times a library has left the searchable set. Compare two readings
+ * to tell whether access was revoked in between; null while the scope has not
+ * loaded, which callers treat as revoked.
+ */
+export function getLibraryRevocations(): number | null {
+    return Zotero.Beaver?.libraryScopeInitialized ? Zotero.Beaver.libraryRevocations ?? 0 : null;
+}
+
+/**
  * Check if a library ID is searchable.
  */
 export function isLibrarySearchable(libraryId: number): boolean {

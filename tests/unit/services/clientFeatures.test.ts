@@ -54,8 +54,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // event a client only answers if it has the handler: a build that predates it
 // drops the unknown event silently, so the backend refuses the op up front
 // rather than letting the caller wait out the request timeout.
-// list_collections_recursive, list_tags_name_query and list_tags_types are
-// declaration-only for the same reason as list_items_include_children: they
+// list_items_special_collections, list_collections_recursive,
+// list_tags_name_query and list_tags_types are declaration-only for the same
+// reason as list_items_include_children: they
 // gate request fields a client only honors if its handler implements them, and
 // a build that predates them drops the field and answers a narrower question
 // without saying so.
@@ -104,6 +105,12 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // (zotero_fulltext_search_request) an older build has no handler for.
 // underline_annotations is declaration-only because a build that predates it
 // ignores `style` and writes highlights where the user asked for underlines.
+// run_reattach is declaration-only because it commits the client to answering a
+// re-sent request or prompt id from memory after a reattach: a build that
+// predates it would run a re-sent action a second time.
+// undelivered_action_ack is declaration-only because it makes the backend store
+// actions as unconfirmed before executing them: a build that predates it never
+// completes those records and would offer to retry a change already made.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -111,6 +118,7 @@ const DECLARATION_ONLY_FEATURES = [
     'portable_ids',
     'collection_ids',
     'list_items_include_children',
+    'list_items_special_collections',
     'create_note_tags_collections',
     'edit_note_batch',
     'edit_annotations',
@@ -133,6 +141,8 @@ const DECLARATION_ONLY_FEATURES = [
     'item_import_v2',
     'book_chapters',
     'zotero_fulltext_search',
+    'run_reattach',
+    'undelivered_action_ack',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

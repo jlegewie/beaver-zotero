@@ -57,6 +57,7 @@ import {
     HEARTBEAT_UPLOAD_TIMEOUT_MS,
 } from '@beaver/agent-core/transport/agentService';
 import { setTransportConfig } from '@beaver/agent-core/transport/config';
+import { ApiError } from '@beaver/agent-core/types/apiErrors';
 import type { AgentRunRequest, WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
 
 class MockWebSocket {
@@ -1057,6 +1058,43 @@ it("keeps admission metadata across the history REST adapter", async () => {
         agent_actions: null,
         tail_run_id: "hidden-tail",
         activity: { state: "active", run_id: "reserved" },
+    });
+});
+
+describe("AgentRunService.getThreadActivity", () => {
+    const busy = { tail_run_id: "tail", activity: { state: "active", run_id: "reserved" } };
+
+    it("reads the activity endpoint without loading history", async () => {
+        const service = new AgentRunService("http://localhost:8000");
+        const get = vi.spyOn(service as any, "get").mockResolvedValue(busy);
+        expect(await service.getThreadActivity("thread")).toEqual(busy);
+        expect(get).toHaveBeenCalledOnce();
+        expect(get.mock.calls[0][0]).toBe("/api/v1/agents/beaver/threads/thread/activity");
+    });
+
+    it("falls back to the history endpoint once a server answers 404", async () => {
+        const service = new AgentRunService("http://localhost:8000");
+        const get = vi.spyOn(service as any, "get").mockImplementation(async (endpoint: any) => {
+            if (endpoint.endsWith("/activity")) throw new ApiError(404, "Not Found");
+            return { runs: [{ id: "tail" }], agent_actions: null, ...busy };
+        });
+        expect(await service.getThreadActivity("thread")).toEqual(busy);
+        expect(await service.getThreadActivity("thread")).toEqual(busy);
+        expect(get.mock.calls.map(([endpoint]) => endpoint)).toEqual([
+            "/api/v1/agents/beaver/threads/thread/activity",
+            "/api/v1/agents/beaver/threads/thread/runs",
+            "/api/v1/agents/beaver/threads/thread/runs",
+        ]);
+    });
+
+    it.each([
+        ["a server error", new ApiError(500, "Internal Server Error")],
+        ["a network failure", new Error("offline")],
+    ])("propagates %s without falling back", async (_label, error) => {
+        const service = new AgentRunService("http://localhost:8000");
+        const get = vi.spyOn(service as any, "get").mockRejectedValue(error);
+        await expect(service.getThreadActivity("thread")).rejects.toBe(error);
+        expect(get).toHaveBeenCalledOnce();
     });
 });
 

@@ -83,11 +83,13 @@ import {
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
 import {
+    baseCitationKey,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
+    type CitationRef,
 } from '@beaver/agent-core/citations/citationGrammar';
-import type { Citation } from '@beaver/agent-core/types/citations';
+import { getCitationPages, type Citation } from '@beaver/agent-core/types/citations';
 import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from '../../utils/html';
 
 /**
@@ -185,19 +187,22 @@ export interface RenderedTable {
 // ---------------------------------------------------------------------------
 
 const RAIL_WIDTH = '2.6rem';
-const FLEX_COLUMN_MIN = 'minmax(14rem, 1.6fr)';
+const FLEX_COLUMN_MIN = 'minmax(8rem, 1fr)';
 
 /**
- * Mirrors the React renderer's per-type defaults so the two look like the same
- * table. A text column flexes; everything else is sized to its content.
+ * Per-type defaults. Text and reference columns share the width the reader
+ * gives the table, so a typical comparison fits without scrolling sideways and
+ * long answers wrap instead; their minimums only take over in a narrow pane or
+ * a very wide table, where the frame scrolls. Everything else is sized to its
+ * content.
  */
 function columnWidth(column: Column, isAnchor: boolean): string {
     if (column.width != null)
         return column.width === 'fill' ? FLEX_COLUMN_MIN : `${column.width}px`;
-    if (isAnchor) return '20rem';
+    if (isAnchor) return 'minmax(11rem, 1.3fr)';
     switch (column.type) {
         case 'reference':
-            return '16rem';
+            return 'minmax(11rem, 1fr)';
         case 'number':
         case 'date':
             // Wider than the React grid's: the sort control sits in the header
@@ -408,27 +413,46 @@ function renderCellValueInner(
 // Citations
 // ---------------------------------------------------------------------------
 
+/** One cited work in the bibliography, with every citation that names it. */
+interface CitedSource {
+    marker: number;
+    key: string;
+    citations: Citation[];
+}
+
 /**
- * Numbers every citation in the table and renders each tag as a marker.
+ * The work a citation belongs to: its owning item when the backend recorded
+ * one, else the cited object itself. Passages from one paper's PDF and a
+ * citation of the paper's own record therefore share a number, as they do in
+ * the chat's sources list.
+ */
+function citationSourceKey(citation: Citation | undefined, fallback: CitationRef): string {
+    const ref = citation?.parent_ref ?? citation?.resolved_ref ?? citation?.requested_ref ?? fallback;
+    return baseCitationKey(ref);
+}
+
+/**
+ * Numbers every cited source in the table and renders each tag as a marker.
  *
- * The marker is what the chat's `Citation` renders: a small superscript number
- * that says where the claim came from, opens the cited page when clicked, and
- * shows the source and the cited passage on hover. Here it is a `zotero://`
- * link — which navigates on its own from a content docshell — and a native
- * `title`, because the cell it sits in is clamped with `overflow: hidden` and
- * would clip any card drawn inside it. A host that can do better upgrades the
- * hover from outside the document; see `view/enhanceTableDocument.ts`.
+ * The marker is what the chat's `Citation` renders: a small number that says
+ * where the claim came from, opens the cited passage when clicked, and shows
+ * the source and the passage on hover. Here it is a `zotero://` link — which
+ * navigates on its own from a content docshell — and a native `title`, because
+ * the cell it sits in is clamped with `overflow: hidden` and would clip any
+ * card drawn inside it. A host that can do better upgrades the hover and the
+ * click from outside the document; see `view/enhanceTableDocument.ts`.
  *
- * Markers are assigned in document order across the whole table, so the same
- * source keeps one number wherever it is cited and the bibliography reads in
- * the order a person meets them.
+ * Numbers belong to sources, not to passages: every passage from one paper
+ * carries that paper's number, and the bibliography lists each paper once.
+ * They are assigned in document order, so the bibliography reads in the order
+ * a person meets the sources.
  */
 class CitationNumbering {
     private readonly byKey: Record<string, Citation>;
-    private readonly markers = new Map<string, number>();
+    private readonly markers = new Map<string, CitedSource>();
     private readonly scopeFor: (libraryId: number) => string;
     /** Every cited source, in the order its marker was assigned. */
-    readonly cited: Array<{ marker: number; key: string; citation?: Citation }> = [];
+    readonly cited: CitedSource[] = [];
 
     constructor(
         citations: Citation[] | undefined,
@@ -448,18 +472,47 @@ class CitationNumbering {
         if (citation?.citation_type === 'item') {
             return `zotero://select/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
         }
-        const page = citation?.pages?.[0];
+        const page = getCitationPages(citation)[0];
         const base = `zotero://open/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
         return page ? `${base}?page=${page}` : base;
     }
 
-    private markerFor(key: string): number {
-        const existing = this.markers.get(key);
-        if (existing) return existing;
-        const marker = this.markers.size + 1;
-        this.markers.set(key, marker);
-        this.cited.push({ marker, key, citation: this.byKey[key] });
-        return marker;
+    /** Where a source's bibliography entry points: the cited work in the library. */
+    revealHrefFor(source: CitedSource): string | null {
+        for (const citation of source.citations) {
+            const ref = citation.parent_ref ?? citation.resolved_ref ?? citation.requested_ref;
+            if (ref && 'zotero_key' in ref && ref.zotero_key) {
+                return `zotero://select/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
+            }
+        }
+        return null;
+    }
+
+    /** The file a source's passages were read from, when it is a Zotero attachment. */
+    openHrefFor(source: CitedSource): { href: string; label: string } | null {
+        for (const citation of source.citations) {
+            if (citation.citation_type !== 'attachment') continue;
+            const ref = citation.resolved_ref ?? citation.requested_ref;
+            if (!ref || !('zotero_key' in ref) || !ref.zotero_key) continue;
+            return {
+                href: `zotero://open/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`,
+                label: citation.content_kind === 'pdf' ? 'Open PDF' : 'Open',
+            };
+        }
+        return null;
+    }
+
+    private markerFor(key: string, ref: CitationRef): number {
+        const citation = this.byKey[key];
+        const sourceKey = citationSourceKey(citation, ref);
+        let source = this.markers.get(sourceKey);
+        if (!source) {
+            source = { marker: this.markers.size + 1, key: sourceKey, citations: [] };
+            this.markers.set(sourceKey, source);
+            this.cited.push(source);
+        }
+        if (citation && !source.citations.includes(citation)) source.citations.push(citation);
+        return source.marker;
     }
 
     /** Escapes `text` and swaps each citation tag for its marker. */
@@ -479,16 +532,19 @@ class CitationNumbering {
             // `<citation …/>` in a cell is noise the reader cannot act on.
             if (!normalized.ok) continue;
             const key = requestedCitationKey(normalized.ref);
-            out += this.marker(this.markerFor(key), this.byKey[key]);
+            out += this.marker(this.markerFor(key, normalized.ref), key, this.byKey[key]);
         }
         return out + escapeHtml(text.slice(last));
     }
 
-    private marker(marker: number, citation: Citation | undefined): string {
+    private marker(marker: number, key: string, citation: Citation | undefined): string {
         const href = this.hrefFor(citation);
         const parts = citationParts(citation);
         const attrs = [
             `class="bt-cite bt-cite--${citationTone(citation)}"`,
+            // The citation's key in `spec.citations`, so a host can hand the
+            // full citation (with its passage locations) to its own navigation.
+            citation ? `data-cite-key="${escapeHtml(key)}"` : '',
             // The tooltip's parts, kept apart so a host can lay them out the
             // way the app does; `title` is the fallback where none can.
             parts.name ? `data-cite-name="${escapeHtml(parts.name)}"` : '',
@@ -515,7 +571,7 @@ function citationTone(citation: Citation | undefined): 'locator' | 'external' | 
     if (!citation) return 'item';
     const ref = citation.resolved_ref ?? citation.requested_ref;
     if (ref && ref.kind === 'external') return 'external';
-    if (citation.pages?.length || (ref && 'loc' in ref && ref.loc)) return 'locator';
+    if (getCitationPages(citation).length || (ref && 'loc' in ref && ref.loc)) return 'locator';
     return 'item';
 }
 
@@ -529,18 +585,28 @@ function citationParts(citation: Citation | undefined): {
 } {
     if (!citation) return {};
     const name = citation.display_name ?? citation.formatted_citation;
-    const locator = citation.pages?.length
-        ? `Page ${citation.pages.join(', ')}`
+    // Sentence citations carry their pages in `locations`; the printed label
+    // is what the reader shows, so it is what the card names.
+    const pages = getCitationPages(citation).map(
+        (page) => citation.page_labels?.[page - 1] ?? String(page)
+    );
+    const locator = pages.length
+        ? `${pages.length > 1 ? 'Pages' : 'Page'} ${pages.join(', ')}`
         : undefined;
+    const passage = !!citation.locations?.some((location) => location.boxes?.length || location.text);
     // The passage as the app quotes it: trimmed, and in quotation marks so it
     // reads as something lifted from the source rather than as prose of ours.
     const raw = citation.preview?.replace(/\s+/g, ' ').trim();
     const preview = raw ? `"${raw}${/[.!?"']$/.test(raw) ? '' : '…'}"` : undefined;
-    const action = locator
-        ? `Highlights passage on ${locator.toLowerCase()}`
-        : citation.filename
-          ? 'Opens the cited file'
-          : undefined;
+    const action = passage
+        ? 'Click to show the highlighted passage'
+        : locator
+          ? `Click to open ${locator.toLowerCase()}`
+          : citation.citation_type === 'item'
+            ? 'Click to show the item in your library'
+            : citation.filename
+              ? 'Click to open the cited file'
+              : undefined;
     const title = [name, locator, preview].filter(Boolean).join(' — ');
     return { name, locator, preview, action, title: title || undefined };
 }
@@ -693,6 +759,13 @@ function resolveRowLinks(
     if (!links || !row.ref) return null;
     return links(row) ?? {};
 }
+
+/**
+ * The toolbar's export control. A command rather than a link: the host that
+ * enhances the document intercepts `data-bt-command` clicks and runs them.
+ */
+export const TABLE_EXPORT_COMMAND = 'export-csv';
+const EXPORT_LINK = `<a class="bt-export" href="#" data-bt-command="${TABLE_EXPORT_COMMAND}" title="Export as CSV with sources and evidence" aria-label="Export CSV"></a>`;
 
 /** Glyph and label of each verb a static rendering can draw as a link. */
 const ACTION_LINKS: Partial<Record<RowAction, { glyph: string; label: string }>> = {
@@ -854,11 +927,13 @@ export function renderTableHtml(
         )
         .join('');
 
+    // Tall by default: a comparison is read, and two clamped lines of an
+    // answer rarely say enough to compare it with its neighbours.
     const densityInputs = controls
         ? ['c', 'z', 't']
               .map(
                   (d) =>
-                      `<input type="radio" name="${prefix}-d" id="${prefix}-d${d}" class="bt-ctl"${d === 'z' ? ' checked' : ''}>`
+                      `<input type="radio" name="${prefix}-d" id="${prefix}-d${d}" class="bt-ctl"${d === 't' ? ' checked' : ''}>`
               )
               .join('')
         : '';
@@ -981,7 +1056,7 @@ export function renderTableHtml(
         densityInputs,
         title,
         controls
-            ? `<div class="bt-toolbar">${filterBar}<span class="bt-space"></span>${densityBar}</div>`
+            ? `<div class="bt-toolbar">${filterBar}<span class="bt-space"></span>${EXPORT_LINK}${densityBar}</div>`
             : '',
         '<div class="bt-scroll">',
         '<div class="bt-body">',
@@ -1027,26 +1102,35 @@ function fitsBudget(
 }
 
 /**
- * The cited sources, numbered as they were met.
+ * The cited sources, numbered as they were met, one entry per work.
  *
  * A table that carries citations has to carry what they refer to: the markers
  * are only useful next to a list that says what each one is, and the list is
  * what makes a saved table self-contained once it is away from the run that
  * produced it.
+ *
+ * Like the chat's sources list, an entry reveals the work in the library and
+ * offers the file its passages were read from as a separate link; a marker is
+ * what goes to a specific passage.
  */
 function renderBibliography(cites: CitationNumbering): string {
     if (cites.cited.length === 0) return '';
     const items = cites.cited
-        .map(({ marker, citation }) => {
+        .map((source) => {
+            const citation = source.citations[0];
             const label =
                 citation?.formatted_citation ??
                 citation?.display_name ??
                 'Source unavailable';
-            const href = cites.hrefFor(citation);
-            const body = href
-                ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`
+            const reveal = cites.revealHrefFor(source);
+            const open = cites.openHrefFor(source);
+            const body = reveal
+                ? `<a href="${escapeHtml(reveal)}" title="Show in library">${escapeHtml(label)}</a>`
                 : escapeHtml(label);
-            return `<li id="bt-src-${marker}"><span class="bt-src-n">${marker}</span>${body}</li>`;
+            const openLink = open
+                ? ` <a class="bt-src-open" href="${escapeHtml(open.href)}">${escapeHtml(open.label)}</a>`
+                : '';
+            return `<li id="bt-src-${source.marker}"><span class="bt-src-n">${source.marker}</span><span class="bt-src-b">${body}${openLink}</span></li>`;
         })
         .join('');
     return `<section class="bt-srcs"><h2 class="bt-srcs-h">Sources</h2><ol class="bt-srcs-l">${items}</ol></section>`;
@@ -1093,7 +1177,9 @@ function renderDynamicCss(
     for (const [key, lines, titleLines, height] of [
         ['c', 2, 1, '3.7rem'],
         ['z', 3, 2, '5.5rem'],
-        ['t', 6, 3, '9.5rem'],
+        // Tall rows size to their content: a fixed height there only pads
+        // the short rows out to the height of the longest.
+        ['t', 8, 3, '0px'],
     ] as const) {
         rules.push(
             `#${prefix}-d${key}:checked ~ .bt-scroll .bt-body { --lines: ${lines}; --title-lines: ${titleLines}; --row-h: ${height}; }`,
@@ -1159,7 +1245,18 @@ export const TABLE_CSS = `
 .bt-seg-c i { --step: 3px; }
 .bt-seg-z i { --step: 4px; }
 .bt-seg-t i { --step: 6px; }
-.bt-scroll { overflow-x: auto; }
+/* A size container, so an expanded row can be exactly as wide as the visible
+   part of a table that scrolls sideways. The gradients are the usual
+   scroll-shadow pair: a shadow at whichever edge has more columns past it,
+   covered by a scrolling white mask at the edge the table has reached. Overlay
+   scrollbars show nothing at rest, so without them a narrow frame hides its
+   last columns without a hint. */
+.bt-scroll { overflow-x: auto; container-type: inline-size;
+  background:
+    linear-gradient(to right, #fff 40%, rgba(255, 255, 255, 0)) left center / 28px 100% no-repeat local,
+    linear-gradient(to left, #fff 40%, rgba(255, 255, 255, 0)) right center / 28px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0)) left center / 14px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0)) right center / 14px 100% no-repeat scroll; }
 .bt-body { --lines: 3; --title-lines: 2; --row-h: 5.5rem;
   display: flex; flex-direction: column; min-width: min-content; }
 .bt-head { display: grid; grid-template-columns: var(--cols); align-items: end;
@@ -1176,7 +1273,10 @@ export const TABLE_CSS = `
 .bt-end .bt-h-top { justify-content: flex-end; }
 .bt-center .bt-h-top { justify-content: center; }
 .bt-center { text-align: center; }
-.bt-h-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Wraps to a second line before it truncates: in a table that fits the frame
+   the columns are narrow, and a header cut to "Research qu…" names nothing. */
+.bt-h-label { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere; }
 /* A fixed two-line box, empty or not, so every header title shares a baseline.
    The full question is on the header's title attribute. */
 .bt-q { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -1191,9 +1291,14 @@ export const TABLE_CSS = `
    next state shows; the values of a sortable column leave the same gutter, so
    the label still lines up with them. */
 .bt-sorters { flex: 0 0 15px; display: inline-flex; justify-content: center;
-  opacity: 0; transition: opacity 100ms ease; }
+  opacity: 0.6; transition: opacity 100ms ease; }
 .bt-so { display: none; }
 .bt-so-a { display: inline-flex; }
+/* The visible sort control stretches over the whole title row, so clicking a
+   header's label sorts by it, as it does in any spreadsheet. */
+.bt-so::after { content: ''; position: absolute; inset: 0; }
+.bt-h.bt-sortable .bt-h-top { cursor: pointer; }
+.bt-h.bt-sortable:hover .bt-h-label { color: var(--t-accent); }
 .bt-c.bt-sortable.bt-end:not(.bt-h) { padding-right: 25px; }
 .bt-c.bt-sortable.bt-center:not(.bt-h) { padding-right: 25px; padding-left: 10px; }
 .bt-h:hover .bt-sorters, .bt-h:focus-within .bt-sorters { opacity: 1; }
@@ -1252,7 +1357,10 @@ export const TABLE_CSS = `
 .bt-ref-act { position: absolute; top: 6px; right: 6px; }
 .bt-act:hover { color: var(--t-accent); }
 .bt-act .bt-gl { width: 14px; height: 14px; }
-.bt-d { padding: 4px 12px 14px 40px; background: #fbfcfd; }
+/* Pinned to the visible width: the row it expands may be wider than the
+   frame, and its text should not need a sideways scroll to read. */
+.bt-d { position: sticky; left: 0; box-sizing: border-box; width: 100cqi;
+  padding: 4px 12px 14px 40px; background: #fbfcfd; }
 .bt-d-fields { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: 5px 14px; margin: 0; }
 .bt-d-fields dt { font-size: 12px; color: var(--t-fade); }
 .bt-d-fields dd { margin: 0; min-width: 0; }
@@ -1282,6 +1390,17 @@ export const TABLE_CSS = `
   font-variant-numeric: tabular-nums; }
 .bt-srcs-l a { color: var(--t-accent); text-decoration: none; }
 .bt-srcs-l a:hover { text-decoration: underline; }
+.bt-srcs-l .bt-src-open { margin-left: 8px; font-size: 12px; white-space: nowrap; color: var(--t-mut); }
+.bt-srcs-l .bt-src-open:hover { color: var(--t-accent); }
+/* Exporting needs the plugin, so the control exists only while one enhances
+   the document. Its text is generated rather than written, so the stored
+   document's own text stays the table's. */
+.bt-export { display: none; font-size: 12px; color: var(--t-mut); text-decoration: none;
+  padding: 2px 8px; border: 1px solid; border-color: color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 6px; }
+.bt-export::after { content: 'Export CSV'; }
+.bt-export:hover { border-color: currentColor; color: var(--t-fg); }
+html[data-beaver-active] .bt-export { display: inline-block; }
 .bt-foot { padding: 8px 0 0; font-size: 12px; color: var(--t-fade); }
 .bt-none { padding: 28px 0; text-align: center; color: var(--t-fade); }
 .bt-wrap .bt-empty { color: var(--t-fade); }

@@ -1,6 +1,6 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { stagedReaderActionContextAtom, currentReaderAttachmentAtom, effectiveReaderTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, removeExternalFileFromMessageAtom, clearMessageContextAtom, messageItemDataRevisionAtom } from '../../atoms/messageComposition';
+import { stagedReaderActionContextAtom, currentReaderAttachmentAtom, effectiveReaderTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, currentMessageViewsAtom, currentMessageExternalFilesAtom, removeExternalFileFromMessageAtom, clearMessageContextAtom, messageItemDataRevisionAtom } from '../../atoms/messageComposition';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { removePopupMessagesByTypeAtom } from '../../atoms/ui';
 import { TextSelectionButton } from '../input/TextSelectionButton';
@@ -12,6 +12,8 @@ import { MessageItemButton } from '../input/MessageItemButton';
 import { TableMessageItemButton } from '../input/TableMessageItemButton';
 import { isTableAttachment } from '../../../src/services/artifacts/tableItemIdentity';
 import { MessageCollectionButton } from '../input/MessageCollectionButton';
+import { MessageViewButton } from '../input/MessageViewButton';
+import { messageAttachmentKey } from '@beaver/agent-core/types/attachments/apiTypes';
 import { ExternalFileButton } from '../input/ExternalFileButton';
 import { collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { ChipWithListPopup } from '@beaver/agent-ui/chat/ChipPopup';
@@ -39,6 +41,7 @@ const MessageAttachmentDisplay = () => {
     // Bumped when attached items finish loading the data their labels read.
     const itemDataRevision = useAtomValue(messageItemDataRevisionAtom);
     const currentMessageCollections = useAtomValue(currentMessageCollectionsAtom);
+    const currentMessageViews = useAtomValue(currentMessageViewsAtom);
     const currentMessageExternalFiles = useAtomValue(currentMessageExternalFilesAtom);
     const removeExternalFileFromMessage = useSetAtom(removeExternalFileFromMessageAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
@@ -90,6 +93,7 @@ const MessageAttachmentDisplay = () => {
         selectedCollections.length +
         currentTagSelections.length +
         currentMessageCollections.length +
+        currentMessageViews.length +
         currentMessageExternalFiles.length +
         (readerTextSelection ? 1 : 0);
 
@@ -130,6 +134,11 @@ const MessageAttachmentDisplay = () => {
             {/* Current message collections */}
             {currentMessageCollections.map(col => (
                 <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} onRemoveAll={handleRemoveAll} />
+            ))}
+
+            {/* Current message saved searches and built-in views */}
+            {currentMessageViews.map(view => (
+                <MessageViewButton key={messageAttachmentKey(view)} view={view} onRemoveAll={handleRemoveAll} />
             ))}
 
             {/* Current reader attachment */}

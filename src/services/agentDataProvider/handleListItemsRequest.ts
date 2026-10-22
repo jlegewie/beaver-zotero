@@ -14,6 +14,8 @@ import {
     WSListItemsRequest,
     WSListItemsResponse,
     ListItemsResultItem,
+    LISTABLE_SPECIAL_COLLECTION_NAMES,
+    ListableSpecialCollectionType,
     RegularListResultItem,
     AttachmentRowResult,
 } from '@beaver/agent-core/protocol/agentProtocol';
@@ -39,15 +41,47 @@ function isAnnotationItem(item: Zotero.Item): boolean {
 }
 
 /**
+ * Built-in views `special_collection` can list, each filled by the Zotero
+ * search condition of the same name.
+ */
+const LISTABLE_SPECIAL_COLLECTIONS: ReadonlySet<string> = new Set<ListableSpecialCollectionType>([
+    'unfiled',
+    'publications',
+    'retracted',
+]);
+
+type ListItemsError = Pick<WSListItemsResponse, 'error' | 'error_code'>;
+
+function listItemsError(request: WSListItemsRequest, error: ListItemsError): WSListItemsResponse {
+    return { type: 'list_items', request_id: request.request_id, items: [], total_count: 0, ...error };
+}
+
+/**
  * Handle list_items request from backend.
  * Lists items in a library, collection, or by tag.
  */
 export async function handleListItemsRequest(
     request: WSListItemsRequest
 ): Promise<WSListItemsResponse> {
-    logger(`handleListItemsRequest: collection=${request.collection_key}, tag=${request.tag}`, 1);
+    logger(`handleListItemsRequest: collection=${request.collection_key}, special_collection=${request.special_collection}, tag=${request.tag}`, 1);
     
     try {
+        const specialCollection = request.special_collection ?? null;
+        if (specialCollection !== null) {
+            if (!LISTABLE_SPECIAL_COLLECTIONS.has(specialCollection)) {
+                return listItemsError(request, {
+                    error: `Unknown special_collection '${specialCollection}'. Supported: ${[...LISTABLE_SPECIAL_COLLECTIONS].join(', ')}.`,
+                    error_code: 'invalid_special_collection',
+                });
+            }
+            if (request.collection_key) {
+                return listItemsError(request, {
+                    error: 'Pass either collection_key or special_collection, not both.',
+                    error_code: 'invalid_special_collection',
+                });
+            }
+        }
+
         // Validate library (checks both existence and searchability)
         let validation = validateLibraryAccess(request.library_id);
         const resolvedCollection = request.collection_key && (request.library_id == null || validation.valid)
@@ -70,6 +104,13 @@ export async function handleListItemsRequest(
         const library = validation.library!;
         let collectionName: string | null = null;
         let resolvedCollectionId: number | null = null;
+
+        if (specialCollection === 'publications' && library.libraryID !== Zotero.Libraries.userLibraryID) {
+            return listItemsError(request, {
+                error: `${LISTABLE_SPECIAL_COLLECTION_NAMES.publications} exists only in the personal library, not in '${library.name}'. Omit the library or pass library='u'.`,
+                error_code: 'special_collection_unavailable',
+            });
+        }
         
         // Resolve collection if specified (supports both key and name)
         if (request.collection_key) {
@@ -96,13 +137,19 @@ export async function handleListItemsRequest(
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID || Zotero.Libraries.userLibraryID;
         
-        // Apply collection filter to search
-        if (resolvedCollectionId !== null) {
-            search.addCondition('collectionID', 'is', String(resolvedCollectionId));
-            if (request.recursive !== false) {
-                search.addCondition('recursive', 'true', '');
+        // The place being listed: a collection or a built-in view. Applied to
+        // the main search and, for child categories, to the parent walk below.
+        const applyScope = (target: ZoteroSearchWritable) => {
+            if (resolvedCollectionId !== null) {
+                target.addCondition('collectionID', 'is', String(resolvedCollectionId));
+                if (request.recursive !== false) {
+                    target.addCondition('recursive', 'true', '');
+                }
+            } else if (specialCollection !== null) {
+                target.addCondition(specialCollection, 'true', '');
             }
-        }
+        };
+        applyScope(search);
         
         // Tag filter: resolve to stored casing; unknown tags error instead of matching nothing.
         // The resolved spelling is kept for the child-expansion filter below, which
@@ -164,22 +211,26 @@ export async function handleListItemsRequest(
         // Child items (notes/attachments) are linked to a collection
         // through their parent, so they aren't returned by the primary search. When
         // a child category is requested with a collection filter, walk the parents
-        // and pull their children of the requested type(s).
+        // and pull their children of the requested type(s). Unfiled Items and
+        // Retracted Items hold only top-level items too. My Publications is
+        // different: Zotero records each published child itself, and a parent's
+        // unpublished children are not part of the view, so it is never walked.
         const wantsChildItems =
             itemCategory === 'note' ||
             itemCategory === 'attachment' ||
             itemCategory === 'all';
+        const scopeHoldsTopLevelOnly =
+            resolvedCollectionId !== null
+            || specialCollection === 'unfiled'
+            || specialCollection === 'retracted';
 
-        if (resolvedCollectionId !== null && wantsChildItems) {
+        if (scopeHoldsTopLevelOnly && wantsChildItems) {
             const wantNotes = itemCategory === 'note' || itemCategory === 'all';
             const wantAttachments = itemCategory === 'attachment' || itemCategory === 'all';
 
             const parentSearch = new Zotero.Search() as unknown as ZoteroSearchWritable;
             parentSearch.libraryID = library.libraryID;
-            parentSearch.addCondition('collectionID', 'is', String(resolvedCollectionId));
-            if (request.recursive !== false) {
-                parentSearch.addCondition('recursive', 'true', '');
-            }
+            applyScope(parentSearch);
             parentSearch.addCondition('noChildren', 'true', '');
             parentSearch.addCondition('itemType', 'isNot', 'note');
             parentSearch.addCondition('itemType', 'isNot', 'annotation');
@@ -248,7 +299,9 @@ export async function handleListItemsRequest(
             if (newChildIds.length > 0) {
                 const children = (await Zotero.Items.getAsync(newChildIds))
                     .filter((c): c is Zotero.Item => c !== null)
-                    .filter(child => !isAnnotationItem(child));
+                    .filter(child => !isAnnotationItem(child))
+                    // A published item's unpublished children are not part of My Publications.
+                    .filter(child => specialCollection !== 'publications' || child.inPublications);
                 validItems.push(...children);
             }
         }

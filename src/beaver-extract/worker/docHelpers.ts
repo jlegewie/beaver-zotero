@@ -180,6 +180,7 @@ export interface RenderOptionsResolved {
     format: "png" | "jpeg";
     jpegQuality: number;
     maxPixels: number;
+    maxDimension: number;
 }
 
 export const DEFAULT_PAGE_IMAGE_OPTIONS: RenderOptionsResolved = {
@@ -190,6 +191,7 @@ export const DEFAULT_PAGE_IMAGE_OPTIONS: RenderOptionsResolved = {
     format: "png",
     jpegQuality: 85,
     maxPixels: DEFAULT_MAX_RENDER_PIXELS,
+    maxDimension: 0,
 };
 
 /** Convert a [x0, y0, x1, y1] tuple (from walk() bboxes) to a BoundingBox. */
@@ -1069,22 +1071,27 @@ function extractRawPageDetailedOnce(
 }
 
 /**
- * Reduce `scale` until the page renders within `maxPixels`.
+ * Reduce `scale` until the page renders within `maxPixels` and its longer side
+ * within `maxDimension`.
  *
- * Returns `scale` untouched when the page already fits, when the budget is
- * disabled (`maxPixels <= 0`), or when the page reports degenerate bounds —
- * MuPDF raises its own classified error for those and should keep owning that
- * path. Otherwise both axes shrink evenly to land inside the budget.
+ * A limit that is not positive is disabled. Returns `scale` untouched when the
+ * page already fits, when both limits are disabled, or when the page reports
+ * degenerate bounds — MuPDF raises its own classified error for those and
+ * should keep owning that path. Otherwise both axes shrink evenly to land
+ * inside the limits.
  */
-function clampScaleToPixelBudget(
+function clampScaleToRenderBudget(
     page: PageLike,
     scale: number,
     maxPixels: number,
+    maxDimension: number,
 ): number {
+    const pixelCap = maxPixels > 0;
+    const dimensionCap = maxDimension > 0;
     // NaN and non-positive scales fall out here (`!(scale > 0)`); `Infinity`
     // deliberately does not — it is over budget, not unmeasurable, so it goes
     // through the clamp below.
-    if (!(maxPixels > 0) || !(scale > 0)) return scale;
+    if (!(pixelCap || dimensionCap) || !(scale > 0)) return scale;
 
     const pb = page.getBounds("CropBox");
     const width = pb[2] - pb[0];
@@ -1096,18 +1103,22 @@ function clampScaleToPixelBudget(
         return scale;
     }
 
-    const maxScale = Math.sqrt(maxPixels / (width * height));
+    let maxScale = Number.POSITIVE_INFINITY;
+    if (pixelCap) maxScale = Math.sqrt(maxPixels / (width * height));
+    if (dimensionCap) maxScale = Math.min(maxScale, maxDimension / Math.max(width, height));
     if (!Number.isFinite(maxScale) || maxScale <= 0) return scale;
     if (scale <= maxScale) return scale;
 
+    const overBudget = (s: number): boolean => {
+        const w = Math.ceil(width * s);
+        const h = Math.ceil(height * s);
+        return (pixelCap && w * h > maxPixels)
+            || (dimensionCap && Math.max(w, h) > maxDimension);
+    };
     let clamped = maxScale;
-    // MuPDF ceils each axis, which can round the product back over the cap.
+    // MuPDF ceils each axis, which can round the size back over a cap.
     // One trim is enough in practice; the bound just keeps this terminating.
-    for (
-        let i = 0;
-        i < 4 && Math.ceil(width * clamped) * Math.ceil(height * clamped) > maxPixels;
-        i++
-    ) {
+    for (let i = 0; i < 4 && overBudget(clamped); i++) {
         clamped *= 0.999;
     }
     return clamped;
@@ -1129,7 +1140,9 @@ export function renderOnePage(
         // size, drive the allocation, and blowing the WASM heap here kills the
         // host process rather than throwing. The caller reads back the scale
         // and dpi actually used.
-        const scale = clampScaleToPixelBudget(page, requestedScale, opts.maxPixels);
+        const scale = clampScaleToRenderBudget(
+            page, requestedScale, opts.maxPixels, opts.maxDimension,
+        );
         const effectiveDpi = scale * 72;
 
         const matrix = Matrix.scale(scale, scale);

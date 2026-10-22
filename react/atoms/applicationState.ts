@@ -28,7 +28,7 @@ import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/re
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import {
     getCollectionTreeRows,
-    getSelectedLibraryId,
+    getSelectedLibraryIds,
     getSelectedCollections,
     getSelectedSavedSearches,
 } from '../../src/utils/zoteroSelection';
@@ -37,7 +37,8 @@ import {
     getCollectionItemCounts,
     getSubcollectionCounts,
 } from '../../src/services/agentDataProvider/collectionCounts';
-import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
+import { getSpecialCollectionItemCounts } from '../../src/services/agentDataProvider/specialCollectionCounts';
+import { excludedLibraryIdsAtom, searchableLibraryIdsAtom, processingModeAtom } from './profile';
 import { ProcessingMode } from '@beaver/agent-core/types/profile';
 import { isLibraryTabAtom } from './ui';
 import { embeddingIndexStateAtom } from './embeddingIndex';
@@ -57,12 +58,17 @@ const MAX_LIBRARY_SELECTION = 30;
 
 /**
  * Collections-tree row types reported as `current_special_collections`. Only
- * views the agent can act on are listed: Duplicate Items maps onto duplicate
- * discovery and merging, Unfiled Items onto the `unfiled` search filter.
+ * views the agent knows how to handle are listed: Duplicate Items maps onto
+ * duplicate discovery and merging; Unfiled Items, My Publications and
+ * Retracted Items onto listing and search filters; the Trash is reported so
+ * the agent can explain that it cannot read it.
  */
 const REPORTED_SPECIAL_COLLECTION_TYPES: ReadonlySet<string> = new Set<SpecialCollectionType>([
     'duplicates',
     'unfiled',
+    'publications',
+    'retracted',
+    'trash',
 ]);
 
 /**
@@ -134,11 +140,16 @@ export function getNoteState(get: Getter, searchableLibraryIds: Set<number>): No
  * embedding-index status, and per-library summaries).
  */
 export async function buildZoteroApplicationState(get: Getter): Promise<ApplicationStateInput> {
-    // Excluded libraries must never appear in application state
+    // Nothing identifying an excluded library (name, id, contents) may appear
+    // in application state; only flags saying that one is open or selected.
     const contextWindow = getContextWindow();
     const pane = contextWindow?.closed ? undefined : contextWindow?.ZoteroPane;
     const searchableLibraryIds = get(searchableLibraryIdsAtom);
     const searchableLibrarySet = new Set(searchableLibraryIds);
+    // Only libraries the user explicitly excluded are flagged, never their
+    // identity. Feeds and libraries pending profile load are not "excluded".
+    const excludedLibrarySet = new Set(get(excludedLibraryIdsAtom));
+    const isExcluded = (libraryID: unknown) => typeof libraryID === 'number' && excludedLibrarySet.has(libraryID);
 
     const readerState = getReaderState(get, searchableLibrarySet);
     const stagedReaderAction = get(stagedReaderActionContextAtom);
@@ -147,15 +158,30 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
     // Get current library and collection context
     let currentLibrary: CurrentLibrary | undefined = undefined;
     let currentCollections: CurrentCollection[] = [];
+    let currentLibraries: CurrentLibrary[] = [];
     let currentSearches: CurrentSavedSearch[] = [];
     let currentSpecialCollections: CurrentSpecialCollection[] = [];
     let librarySelection: ZoteroItemReference[] | undefined = undefined;
     let librarySelectionTotalCount: number | undefined = undefined;
+    let currentLibraryExcluded = false;
+    let selectionPartiallyExcluded = false;
 
     // Detect the note-editor view from the raw tab context, NOT from the
     // exclusion-filtered noteState
     const isNoteTabActive = !!get(currentNoteItemAtom);
     const currentView: 'library' | 'file_reader' | 'note_editor' = stagedReaderAction ? 'file_reader' : get(isLibraryTabAtom) ? 'library' : isNoteTabActive ? 'note_editor' : 'file_reader';
+
+    if (currentView === 'file_reader') {
+        // currentReaderAttachmentAtom never holds an attachment from an excluded
+        // library, so resolve the open reader's library from its item id.
+        const reader = stagedReaderAction ? null : getCurrentReader();
+        const libraryID = stagedReaderAction
+            ? stagedReaderAction.item?.libraryID
+            : reader ? (Zotero.Items.getLibraryAndKeyFromID(reader.itemID) || undefined)?.libraryID : undefined;
+        currentLibraryExcluded = isExcluded(libraryID);
+    } else if (currentView === 'note_editor') {
+        currentLibraryExcluded = isExcluded(get(currentNoteItemAtom)?.libraryID);
+    }
 
     if (currentView === 'file_reader' && readerState) {
         // In reader view, use the library from the reader attachment
@@ -189,16 +215,27 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
             const selectedSearches = getSelectedSavedSearches(pane);
             const selectedTreeRows = getCollectionTreeRows(pane);
             const selectedPaneItems = pane.getSelectedItems() ?? [];
-            // The primary (first) selected library. A selection can span
-            // libraries, so this is deliberately not "the only library in
-            // play" — it answers "where is the user working", while each
-            // entry in current_collections carries its own library identity
-            // for anything that needs to be addressed precisely.
-            const libraryId = getSelectedLibraryId(pane);
+            // Rows carry their library on `ref.libraryID` (library, collection,
+            // saved-search and special rows alike).
+            const rowLibraryIds = selectedTreeRows
+                .map((row: any) => row?.ref?.libraryID)
+                .filter((id: unknown): id is number => typeof id === 'number');
+            const selectedLibraryIds = rowLibraryIds.length > 0 ? rowLibraryIds : getSelectedLibraryIds(pane);
+            // The library the user is working in: the first selected library
+            // Beaver may use. A selection can span libraries, so each entry in
+            // the selection lists carries its own library identity.
+            const libraryId = selectedLibraryIds.find(id => !isExcluded(id)) ?? null;
             const library = libraryId !== null ? Zotero.Libraries.get(libraryId) : null;
-            // Omit the current library entirely when it is excluded, rather than
-            // reporting it with is_synced=false — excluded libraries are not
-            // shared at all.
+            // The open library counts as excluded only when every selected row
+            // is in an excluded library; otherwise the excluded rows are a
+            // partial exclusion of the selection. Neither reports the excluded
+            // library itself.
+            const reachesExcluded = selectedLibraryIds.some(isExcluded);
+            currentLibraryExcluded = libraryId === null && reachesExcluded;
+            selectionPartiallyExcluded = !currentLibraryExcluded && (
+                reachesExcluded
+                || selectedPaneItems.some((item: Zotero.Item) => isExcluded(item.libraryID))
+            );
             if (library && searchableLibrarySet.has(library.libraryID)) {
                 currentLibrary = {
                     library_id: library.libraryID,
@@ -209,6 +246,21 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                     is_synced: true,
                 };
             }
+
+            currentLibraries = selectedTreeRows
+                .filter((row: any) => (row?.type === 'library' || row?.type === 'group')
+                    && typeof row.ref?.libraryID === 'number'
+                    && searchableLibrarySet.has(row.ref.libraryID))
+                .map((row: any) => Zotero.Libraries.get(row.ref.libraryID))
+                .filter((selected: any): selected is Zotero.Library => !!selected)
+                .map((selected: Zotero.Library) => ({
+                    library_id: selected.libraryID,
+                    library_ref: libraryRefForLibraryID(selected.libraryID) ?? undefined,
+                    name: selected.name,
+                    is_group: selected.isGroup,
+                    read_only: !selected.editable,
+                    is_synced: true,
+                }));
 
             // The collections pane allows several rows to be selected at once,
             // and a selection can mix collections with saved searches and span
@@ -241,26 +293,40 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 };
             });
 
+            // Reported by portable library only; a search whose library has no
+            // portable ref cannot be addressed and is left out.
             currentSearches = selectedSearches
                 .filter((search: Zotero.Search) => searchableLibrarySet.has(search.libraryID))
-                .map((search: Zotero.Search) => ({
-                    search_key: search.key,
-                    name: search.name,
-                    library_id: search.libraryID,
-                    library_ref: libraryRefForLibraryID(search.libraryID) ?? undefined,
-                }));
+                .flatMap((search: Zotero.Search) => {
+                    const libraryRef = libraryRefForLibraryID(search.libraryID);
+                    return libraryRef
+                        ? [{ search_key: search.key, name: search.name, library_ref: libraryRef }]
+                        : [];
+                });
 
             // Special-collection rows carry their library on `ref.libraryID`
-            // (a Zotero.Duplicates or Zotero.Search for the two reported kinds).
-            currentSpecialCollections = selectedTreeRows
+            // (a Zotero.Duplicates, a Zotero.Search, or a plain `{ libraryID }`
+            // for My Publications and the Trash). Counts are left out for
+            // Duplicate Items, which Zotero computes with a full-library scan.
+            const specialRows = selectedTreeRows
                 .filter((row: any) => REPORTED_SPECIAL_COLLECTION_TYPES.has(row?.type)
                     && typeof row.ref?.libraryID === 'number'
-                    && searchableLibrarySet.has(row.ref.libraryID))
-                .map((row: any) => ({
-                    type: row.type as SpecialCollectionType,
-                    library_id: row.ref.libraryID,
-                    library_ref: libraryRefForLibraryID(row.ref.libraryID) ?? undefined,
-                }));
+                    && searchableLibrarySet.has(row.ref.libraryID));
+            currentSpecialCollections = await Promise.all(specialRows.map(async (row: any) => {
+                const type = row.type as SpecialCollectionType;
+                const libraryID: number = row.ref.libraryID;
+                const counts = await getSpecialCollectionItemCounts(type, libraryID);
+                return {
+                    type,
+                    library_id: libraryID,
+                    library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
+                    ...(counts ? {
+                        item_count: counts.itemCount,
+                        standalone_attachment_count: counts.standaloneAttachmentCount,
+                        note_count: counts.standaloneNoteCount,
+                    } : {}),
+                };
+            }));
 
             // Drop any selected items that belong to an excluded library.
             const selectedItems = selectedPaneItems
@@ -344,12 +410,15 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         ...(readerState ? { reader_state: readerState } : {}),
         ...(noteState ? { note_state: noteState } : {}),
         ...(currentLibrary ? { current_library: currentLibrary } : {}),
+        ...(currentLibraryExcluded ? { current_library_excluded: true } : {}),
+        ...(selectionPartiallyExcluded ? { selection_partially_excluded: true } : {}),
         // `current_collection` (first selected) is emitted alongside the full
         // list so a server that only reads the single-collection field still
         // understands a multi-row selection.
         ...(currentCollections.length > 0
             ? { current_collection: currentCollections[0], current_collections: currentCollections }
             : {}),
+        ...(currentLibraries.length > 0 ? { current_libraries: currentLibraries } : {}),
         ...(currentSearches.length > 0 ? { current_searches: currentSearches } : {}),
         ...(currentSpecialCollections.length > 0
             ? { current_special_collections: currentSpecialCollections }

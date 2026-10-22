@@ -285,6 +285,7 @@ export class InstanceAccount {
             beaver.hasOcrAccess,
             beaver.hasSearchIndexAccess,
         ]);
+        const previouslySearchable = beaver.searchableLibraryIds ?? [];
         beaver.searchableLibraryIds =
             this.snapshot.scopeReady && this.snapshot.session
                 ? this.snapshot.libraries
@@ -311,6 +312,10 @@ export class InstanceAccount {
             accepted && !!this.snapshot.session && !!profile?.has_search_index_access;
         beaver.libraryScopeInitialized =
             this.snapshot.scopeReady && !!this.snapshot.session;
+        const nowSearchable = new Set(beaver.searchableLibraryIds);
+        if (previouslySearchable.some((libraryId) => !nowSearchable.has(libraryId))) {
+            beaver.libraryRevocations = (beaver.libraryRevocations ?? 0) + 1;
+        }
         const next = JSON.stringify([
             beaver.libraryScopeInitialized,
             beaver.searchableLibraryIds,

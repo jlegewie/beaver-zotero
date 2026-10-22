@@ -276,6 +276,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
                             targetType: 'attachment',
                             itemIds: readerItemID ? [readerItemID] : [],
                             collections: [],
+                            views: [],
                         },
                     }));
                 });

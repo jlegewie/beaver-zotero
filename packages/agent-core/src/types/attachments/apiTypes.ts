@@ -24,6 +24,8 @@ export type MessageAttachment =
     | AnnotationAttachment
     | NoteAttachment
     | CollectionAttachment
+    | SavedSearchAttachment
+    | SpecialCollectionAttachment
     | TableAttachment
     | ExternalFileAttachment;
 
@@ -86,6 +88,46 @@ export interface CollectionAttachment extends BaseMessageAttachment {
     name: string;
     parent_key: string | null;
 }
+
+/**
+ * "saved_search" type attachment: a saved search attached as the scope of a
+ * request (a collection action run on it). `zotero_key` is the search key.
+ *
+ * Identified by its portable library only — no device-local `library_id` —
+ * so the backend and history never carry one. Resolve the local library with
+ * `resolveLibraryRef` where Zotero needs it.
+ */
+export interface SavedSearchAttachment {
+    type: "saved_search";
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref: string;
+    zotero_key: string;
+    name: string;
+}
+
+/** Built-in library views a request can be scoped to. */
+export const SPECIAL_COLLECTION_TYPES = ['unfiled', 'publications', 'retracted'] as const;
+export type SpecialCollectionType = typeof SPECIAL_COLLECTION_TYPES[number];
+
+/**
+ * "special_collection" type attachment: a built-in library view (Unfiled
+ * Items, My Publications, Retracted Items) attached as the scope of a request.
+ * Views have no key of their own; `special_collection` is Zotero's
+ * collection-tree row type. Typed as `string` on the wire so a thread written
+ * by a newer client still loads.
+ */
+export interface SpecialCollectionAttachment {
+    type: "special_collection";
+    special_collection: SpecialCollectionType | (string & {});
+    library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
+    /** Display name, as shown in the collections pane when attached. */
+    name: string;
+}
+
+/** Saved searches and built-in views: collection-like scopes without a collection. */
+export type ViewAttachment = SavedSearchAttachment | SpecialCollectionAttachment;
 
 export type ExternalFileContentKind = 'pdf' | 'epub' | 'text' | 'image';
 
@@ -203,6 +245,14 @@ export function isExternalFileAttachment(attachment: MessageAttachment): attachm
     return attachment.type === "external_file";
 }
 
+export function isViewAttachment(attachment: MessageAttachment): attachment is ViewAttachment {
+    return attachment.type === "saved_search" || attachment.type === "special_collection";
+}
+
+function specialCollectionKey(view: SpecialCollectionAttachment, libraryToken: string | number): string {
+    return `${libraryToken}-${view.special_collection}`;
+}
+
 /**
  * Stable identity key for a Zotero reference. Portable `library_ref` wins so
  * references persisted on different devices deduplicate even when their local
@@ -242,6 +292,10 @@ export function messageAttachmentKey(attachment: MessageAttachment): string {
     if (isExternalFileAttachment(attachment)) {
         return `ext-${attachment.ext_key}`;
     }
+    if (attachment.type === 'special_collection') {
+        return specialCollectionKey(attachment, attachment.library_ref ?? attachment.library_id);
+    }
+    if (attachment.type === 'saved_search') return `${attachment.library_ref}-${attachment.zotero_key}`;
     return attachment.type === 'collection' && attachment.collection_id ? attachment.collection_id : zoteroReferenceKey(attachment);
 }
 
@@ -251,6 +305,12 @@ export function messageAttachmentLookupKeys(attachment: MessageAttachment): stri
     if (isExternalFileAttachment(attachment)) {
         return [`ext-${attachment.ext_key}`];
     }
+    if (attachment.type === 'special_collection') {
+        const canonicalKey = messageAttachmentKey(attachment);
+        const legacyKey = specialCollectionKey(attachment, attachment.library_id);
+        return canonicalKey === legacyKey ? [canonicalKey] : [canonicalKey, legacyKey];
+    }
+    if (attachment.type === 'saved_search') return [messageAttachmentKey(attachment)];
     return zoteroReferenceLookupKeys(attachment);
 }
 
@@ -261,7 +321,12 @@ export function messageAttachmentLookupKeys(attachment: MessageAttachment): stri
  * or an attached item swallows a collection that merely shares its key.
  */
 function attachmentNamespace(attachment: MessageAttachment): string {
-    return attachment.type === 'collection' ? 'collection' : 'item';
+    switch (attachment.type) {
+        case 'collection': return 'collection';
+        case 'saved_search': return 'search';
+        case 'special_collection': return 'view';
+        default: return 'item';
+    }
 }
 
 /**
@@ -328,6 +393,19 @@ export function messageAttachmentsHaveSameIdentity(
         return isExternalFileAttachment(left) &&
             isExternalFileAttachment(right) &&
             left.ext_key === right.ext_key;
+    }
+    if (isViewAttachment(left) || isViewAttachment(right)) {
+        if (left.type !== right.type) return false;
+        if (left.type === 'special_collection' && right.type === 'special_collection'
+            && left.special_collection !== right.special_collection) return false;
+        if (left.type === 'saved_search' && right.type === 'saved_search') {
+            return left.zotero_key === right.zotero_key && left.library_ref === right.library_ref;
+        }
+        if (left.type === 'special_collection' && right.type === 'special_collection') {
+            if (left.library_ref && right.library_ref) return left.library_ref === right.library_ref;
+            return left.library_id === right.library_id;
+        }
+        return false;
     }
     if (left.zotero_key !== right.zotero_key) return false;
     if (left.library_ref && right.library_ref) {

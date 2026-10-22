@@ -83,6 +83,8 @@ class Addon {
     public hasSearchIndexAccess: boolean = false;
     public searchableLibraryIds: number[] = [];
     public libraryScopeInitialized: boolean = false;
+    /** Incremented whenever a library leaves `searchableLibraryIds`. */
+    public libraryRevocations: number = 0;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs
