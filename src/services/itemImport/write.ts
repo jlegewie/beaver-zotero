@@ -31,6 +31,7 @@ import type { AttachmentResolvedPayload } from '../attachmentResolved';
 import { assertLibraryWritable, recheckExistingCollections } from '../collections/collectionMutations';
 import { coordinateLibraryMutation } from '../libraryMutations';
 import { runCommittedTransaction } from '../committedTransaction';
+import { withTagCacheRepair } from '../tagCache';
 import { isPdfDocument } from '../../utils/attachmentFiles';
 import { WEB_CONTENT_ITEM_TYPES } from './duplicates';
 import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
@@ -148,7 +149,9 @@ function tagsForSave(resolved: ZoteroItemJson['tags'], manual: string[] | undefi
  * carries the action's manual tags.
  *
  * The save returns once it has committed, without waiting long for other
- * plugins' Notifier observers (see `runCommittedTransaction`).
+ * plugins' Notifier observers (see `runCommittedTransaction`). A save that
+ * fails on a stale Zotero tag cache is retried once after rebuilding it, if
+ * `beforeRetry` still allows the write.
  */
 async function saveItemJson(
     json: ZoteroItemJson,
@@ -156,6 +159,7 @@ async function saveItemJson(
     collectionIDs: number[],
     manualTags: string[] | undefined,
     timing: TimingAccumulator | undefined,
+    beforeRetry: () => void,
 ): Promise<Zotero.Item> {
     if (json.itemType === 'note' || json.itemType === 'attachment') {
         throw new ImportItemError('invalid_item_type', `Cannot import a standalone ${json.itemType}.`);
@@ -171,7 +175,8 @@ async function saveItemJson(
     if (tags.length) fields.tags = tags;
     else delete fields.tags;
 
-    return runCommittedTransaction(async () => {
+    // Builds every object inside the transaction, so a retry starts clean.
+    return withTagCacheRepair(() => runCommittedTransaction(async () => {
         const item = new Zotero.Item(fields.itemType as any);
         item.libraryID = libraryID;
         item.fromJSON(fields);
@@ -189,7 +194,7 @@ async function saveItemJson(
             await child.save();
         }
         return item;
-    }, { timing, label: 'import_item save' });
+    }, { timing, label: 'import_item save' }), 'import_item save', { beforeRetry });
 }
 
 /** Attach the input file as a child of `parent`, renamed the way Zotero renames on import. */
@@ -398,10 +403,13 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
         snapshotUrl = resolved.snapshot_url;
     }
 
-    options.assertCurrent?.();
     // Resolution can take seconds: the library may have been excluded or made
     // read-only meanwhile, so check again right before anything is written.
-    assertWriteAccess(libraryID);
+    const assertCanWrite = () => {
+        options.assertCurrent?.();
+        assertWriteAccess(libraryID);
+    };
+    assertCanWrite();
 
     if (!json) throw new ImportItemError('missing_item_data', 'No item data provided.');
 
@@ -415,7 +423,7 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
     // which would drop a stamp added in a second save.
     toSave.extra = withProvenanceLines(typeof json.extra === 'string' ? json.extra : '', method);
 
-    const item = await track(options.timing, 'save_ms', () => saveItemJson(toSave, libraryID, collectionIDs, data.tags, options.timing));
+    const item = await track(options.timing, 'save_ms', () => saveItemJson(toSave, libraryID, collectionIDs, data.tags, options.timing, assertCanWrite));
     try {
         await finishItem(item, method, options);
 
