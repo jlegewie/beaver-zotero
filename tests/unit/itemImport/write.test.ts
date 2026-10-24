@@ -78,6 +78,10 @@ import { ImportItemError, undoImportItem, writeImportItem } from '../../../src/s
 
 const Z = Zotero as any;
 
+const STALE_TAG_ERROR = 'Error(s) encountered during statement execution: FOREIGN KEY constraint failed '
+    + '[QUERY: INSERT OR REPLACE INTO itemTags (itemID, tagID, type) VALUES (?, ?, ?)] [PARAMS: 417, 210, 0] '
+    + '[ERROR: FOREIGN KEY constraint failed]';
+
 /** The JSON the new item was built from. */
 const savedJson = () => saved.fromJSON.mock.calls[0][0];
 
@@ -167,6 +171,7 @@ beforeEach(() => {
     Z.Prefs.get = vi.fn((name: string) => prefs[name]);
     Z.Date.dateToISO = vi.fn(() => '2026-10-01T00:00:00Z');
     Z.DB = { executeTransaction: vi.fn(async (work: () => Promise<unknown>) => work()) };
+    Z.Tags = { init: vi.fn(async () => {}) };
     Z.Collections = { get: vi.fn((id: number) => (id === 20 ? { id: 20, libraryID: 1 } : id === 21 ? { id: 21, libraryID: 7 } : undefined)) };
     // `new Zotero.Item(type)`: the parent is `saved`; child notes are recorded.
     Z.Item = function (type: string) {
@@ -356,6 +361,39 @@ describe('writeImportItem saving', () => {
     it('propagates a save failure', async () => {
         saved.save.mockRejectedValue(new Error('database locked'));
         await expect(writeImportItem(journal())).rejects.toThrow('database locked');
+        expect(Z.Tags.init).not.toHaveBeenCalled();
+    });
+
+    it('rebuilds a stale tag cache and builds the item again', async () => {
+        saved.save.mockRejectedValueOnce(new Error(STALE_TAG_ERROR));
+        const result = await writeImportItem(journal({ tags: ['ethnobotany'] }));
+        expect(Z.Tags.init).toHaveBeenCalledOnce();
+        expect(itemCtor).toHaveBeenCalledTimes(2);
+        expect(saved.save).toHaveBeenCalledTimes(2);
+        expect(result).toMatchObject({ zotero_key: 'ITEM0001' });
+    });
+
+    it('does not retry into a library excluded while the tag cache was rebuilt', async () => {
+        saved.save.mockRejectedValueOnce(new Error(STALE_TAG_ERROR));
+        Z.Tags.init.mockImplementation(async () => { Z.Beaver.searchableLibraryIds = []; });
+        await expect(writeImportItem(journal({ tags: ['ethnobotany'] }))).rejects.toMatchObject({ code: 'library_not_searchable' });
+        expect(saved.save).toHaveBeenCalledOnce();
+    });
+
+    it('does not retry once the caller cancelled during the tag cache rebuild', async () => {
+        saved.save.mockRejectedValueOnce(new Error(STALE_TAG_ERROR));
+        let cancelled = false;
+        Z.Tags.init.mockImplementation(async () => { cancelled = true; });
+        const assertCurrent = () => { if (cancelled) throw Object.assign(new Error('Operation cancelled'), { code: 'operation_cancelled' }); };
+        await expect(writeImportItem(journal({ tags: ['ethnobotany'] }), { assertCurrent })).rejects.toMatchObject({ code: 'operation_cancelled' });
+        expect(saved.save).toHaveBeenCalledOnce();
+    });
+
+    it('retries a stale tag cache only once', async () => {
+        saved.save.mockRejectedValue(new Error(STALE_TAG_ERROR));
+        await expect(writeImportItem(journal({ tags: ['ethnobotany'] }))).rejects.toThrow('FOREIGN KEY');
+        expect(Z.Tags.init).toHaveBeenCalledOnce();
+        expect(saved.save).toHaveBeenCalledTimes(2);
     });
 
     it('fills in a translator CURRENT_TIMESTAMP access date', async () => {

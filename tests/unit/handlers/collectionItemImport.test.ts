@@ -98,6 +98,72 @@ it('removes the new item when saving post-processing fails', async () => {
     expect(created[0].eraseTx).toHaveBeenCalledOnce();
 });
 
+it('repairs a stale tag cache and saves the post-processing again', async () => {
+    const init = vi.fn(async () => {});
+    Object.assign(Zotero, {
+        Tags: { init },
+        DB: { executeTransaction: vi.fn(async (work: () => Promise<unknown>) => work()) },
+    });
+    const Item = Zotero.Item;
+    Zotero.Item = function () {
+        const row: any = new Item('document');
+        row.addTag = vi.fn();
+        vi.mocked(row.saveTx)
+            .mockResolvedValueOnce(100)
+            .mockRejectedValueOnce(new Error('Error(s) encountered during statement execution: FOREIGN KEY constraint failed '
+                + '[QUERY: INSERT OR REPLACE INTO itemTags (itemID, tagID, type) VALUES (?, ?, ?)] [PARAMS: 417, 210, 0]'))
+            .mockResolvedValueOnce(100);
+        return row;
+    } as any;
+    await applyCreateItemData({ item: { title: 'Paper' }, suggested_tags: ['ethnobotany'] } as any, { libraryId: 7 });
+    expect(init).toHaveBeenCalledOnce();
+    // Zotero reloads an item whose save failed, so the tag is applied again.
+    expect(created[0].addTag).toHaveBeenCalledTimes(2);
+    expect(created[0].saveTx).toHaveBeenCalledTimes(3);
+    expect(created[0].eraseTx).not.toHaveBeenCalled();
+});
+
+it('does not retry post-processing into a library excluded while the tag cache was rebuilt', async () => {
+    Object.assign(Zotero, {
+        Tags: { init: vi.fn(async () => { (Zotero as any).Beaver.searchableLibraryIds = [1]; }) },
+        DB: { executeTransaction: vi.fn(async (work: () => Promise<unknown>) => work()) },
+    });
+    const Item = Zotero.Item;
+    Zotero.Item = function () {
+        const row: any = new Item('document');
+        row.addTag = vi.fn();
+        vi.mocked(row.saveTx)
+            .mockResolvedValueOnce(100)
+            .mockRejectedValueOnce(new Error('UNIQUE constraint failed: tags.name [QUERY: INSERT INTO tags (tagID, name) VALUES (?, ?)]'));
+        return row;
+    } as any;
+    await expect(applyCreateItemData({ item: { title: 'Paper' }, suggested_tags: ['ethnobotany'] } as any, { libraryId: 7 }))
+        .rejects.toThrow('Library is excluded or unavailable');
+    expect(created[0].saveTx).toHaveBeenCalledTimes(2);
+    // The item this import created is removed, as for any failed post-processing.
+    expect(created[0].eraseTx).toHaveBeenCalledOnce();
+});
+
+it('does not retry post-processing once the caller cancelled', async () => {
+    Object.assign(Zotero, {
+        Tags: { init: vi.fn(async () => {}) },
+        DB: { executeTransaction: vi.fn(async (work: () => Promise<unknown>) => work()) },
+    });
+    const Item = Zotero.Item;
+    Zotero.Item = function () {
+        const row: any = new Item('document');
+        row.addTag = vi.fn();
+        vi.mocked(row.saveTx)
+            .mockResolvedValueOnce(100)
+            .mockRejectedValueOnce(new Error('UNIQUE constraint failed: tags.name [QUERY: INSERT INTO tags (tagID, name) VALUES (?, ?)]'));
+        return row;
+    } as any;
+    const assertCurrent = vi.fn(() => { throw new Error('Operation cancelled'); });
+    await expect(applyCreateItemData({ item: { title: 'Paper' }, suggested_tags: ['ethnobotany'] } as any, { libraryId: 7, assertCurrent }))
+        .rejects.toThrow('Operation cancelled');
+    expect(created[0].saveTx).toHaveBeenCalledTimes(2);
+});
+
 function importReference(route: string): any {
     return { title: 'Paper', ...(route === 'identifier' ? { identifiers: { doi: '10.1234/example' } }
         : route === 'url' ? { url: 'https://example.org/paper' } : {}) };

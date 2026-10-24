@@ -11,6 +11,7 @@ import { TimingAccumulator } from '../../utils/timing';
 import type { AttachmentResolvedPayload } from '../attachmentResolved';
 import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
 import { stampBeaverProvenanceExtra } from './provenance';
+import { withTagCacheRepair } from '../tagCache';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 
@@ -54,6 +55,19 @@ export interface ImportItemOptions {
     runId?: string;
     /** Thread ID */
     threadId?: string;
+    /** Cancellation checkpoint, run before a failed save is retried. */
+    assertCurrent?: () => void;
+}
+
+/** Rejects a library that is excluded from Beaver, unavailable or read-only. */
+function assertImportLibraryWritable(libraryId: number): void {
+    if (!Zotero.Beaver.libraryScopeInitialized || !Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
+        throw new Error('Library is excluded or unavailable');
+    }
+    const library = Zotero.Libraries.get(libraryId);
+    if (!library || !library.editable) {
+        throw new Error('Target library is not editable');
+    }
 }
 
 /**
@@ -68,15 +82,8 @@ async function resolveImportTarget(options?: ImportItemOptions): Promise<{
     const collectionId = options?.collectionId ?? null;
     
     if (libraryId === undefined) throw new Error('An explicit import library is required');
-    if (!Zotero.Beaver.libraryScopeInitialized || !Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
-        throw new Error('Library is excluded or unavailable');
-    }
-    // Check if library is editable
-    const library = Zotero.Libraries.get(libraryId);
-    if (!library || !library.editable) {
-        throw new Error('Target library is not editable');
-    }
-    
+    assertImportLibraryWritable(libraryId);
+
     if (collectionId != null) resolveCollection(collectionId, { libraryID: libraryId });
     return { libraryId, collectionId };
 }
@@ -442,62 +449,71 @@ async function finishCreateItemData(
     const itemKey = item.key;
     const timing = options?.timing;
 
-    // Track if we need to save (consolidate all modifications)
-    let needsSave = false;
+    // Apply all modifications and save them at once. A save that fails on a
+    // stale Zotero tag cache is retried once: Zotero reloads the item when
+    // its save fails, so the modifications are applied again.
+    const applyAndSave = async (): Promise<void> => {
+        let needsSave = false;
 
-    // Post-processing (Things that apply regardless of how item was created)
+        // Post-processing (Things that apply regardless of how item was created)
 
-    // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver provenance)
-    const extraLines: string[] = [];
-    const identifiers = itemData.identifiers;
+        // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver provenance)
+        const extraLines: string[] = [];
+        const identifiers = itemData.identifiers;
 
-    if (identifiers) {
-        const currentExtra = item.getField('extra') as string || '';
-        if (identifiers.arXivID && !currentExtra.includes(identifiers.arXivID)) {
-            extraLines.push(`arXiv: ${identifiers.arXivID}`);
+        if (identifiers) {
+            const currentExtra = item.getField('extra') as string || '';
+            if (identifiers.arXivID && !currentExtra.includes(identifiers.arXivID)) {
+                extraLines.push(`arXiv: ${identifiers.arXivID}`);
+            }
+            if (identifiers.pmid && !currentExtra.includes(identifiers.pmid)) {
+                extraLines.push(`PMID: ${identifiers.pmid}`);
+            }
+            if (identifiers.pmcid && !currentExtra.includes(identifiers.pmcid)) {
+                extraLines.push(`PMCID: ${identifiers.pmcid}`);
+            }
         }
-        if (identifiers.pmid && !currentExtra.includes(identifiers.pmid)) {
-            extraLines.push(`PMID: ${identifiers.pmid}`);
-        }
-        if (identifiers.pmcid && !currentExtra.includes(identifiers.pmcid)) {
-            extraLines.push(`PMCID: ${identifiers.pmcid}`);
-        }
-    }
 
-    if (extraLines.length > 0) {
-        const currentExtra = item.getField('extra') as string;
-        item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
-        needsSave = true;
-    }
-
-    needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
-
-    // 2. Collections (from proposed data, in addition to context collection)
-    if (memberships.length > 0) {
-        const collectionIds = recheckExistingCollections(memberships.map(entry => entry.collectionId), libraryId)
-            .map(entry => entry.collection.id);
-        if (collectionIds.length > 0) {
-            // Append to existing collections if any (from translation or context)
-            const currentCollections = item.getCollections();
-            const newCollections = [...new Set([...currentCollections, ...collectionIds])];
-            item.setCollections(newCollections);
+        if (extraLines.length > 0) {
+            const currentExtra = item.getField('extra') as string;
+            item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
             needsSave = true;
         }
-    }
 
-    // 3. Tags
-    if (proposedData.suggested_tags && proposedData.suggested_tags.length > 0) {
-        for (const tag of proposedData.suggested_tags) {
-            item.addTag(tag);
+        needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
+
+        // 2. Collections (from proposed data, in addition to context collection)
+        if (memberships.length > 0) {
+            const collectionIds = recheckExistingCollections(memberships.map(entry => entry.collectionId), libraryId)
+                .map(entry => entry.collection.id);
+            if (collectionIds.length > 0) {
+                // Append to existing collections if any (from translation or context)
+                const currentCollections = item.getCollections();
+                const newCollections = [...new Set([...currentCollections, ...collectionIds])];
+                item.setCollections(newCollections);
+                needsSave = true;
+            }
         }
-        needsSave = true;
-    }
 
-    // Single consolidated save for all modifications
-    if (needsSave) {
-        await trackWith(timing, 'post_save_ms', () => item.saveTx());
-        logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
-    }
+        // 3. Tags
+        if (proposedData.suggested_tags && proposedData.suggested_tags.length > 0) {
+            for (const tag of proposedData.suggested_tags) {
+                item.addTag(tag);
+            }
+            needsSave = true;
+        }
+
+        if (needsSave) {
+            await item.saveTx();
+            logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
+        }
+    };
+    await trackWith(timing, 'post_save_ms', () => withTagCacheRepair(applyAndSave, 'create_item save', {
+        beforeRetry: () => {
+            options?.assertCurrent?.();
+            assertImportLibraryWritable(libraryId);
+        },
+    }));
 
     if (getPref('addBeaverProvenanceNote') === true) {
         await createProvenanceNote(
