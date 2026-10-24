@@ -15,7 +15,7 @@ export function tableActionErrorMessage(error: unknown, ref: TableRef): string {
 }
 
 /**
- * Asks where to save and writes the table as CSV, with its source and evidence
+ * Asks where to save and writes the table as CSV, with its evidence and reasoning
  * columns. Reads the table again after the picker closes, so a write that lands
  * while it is open is exported rather than the version the user first saw.
  * Resolves the file's name, or null when the user cancelled.
@@ -94,7 +94,7 @@ export function renderTableDocumentActions(
     const exportButton = action("export-csv", "Export CSV", async () => {
         if (!win) throw new Error("The originating window is closed.");
         if (!(await exportTableCsv(win, ref, commands))) return;
-        status.textContent = "CSV exported with source and evidence columns.";
+        status.textContent = "CSV exported with evidence and reasoning columns.";
     });
     const versions = doc.createElement("select");
     versions.setAttribute("aria-label", "Retained version");

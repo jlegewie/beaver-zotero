@@ -1,7 +1,7 @@
 import { handleArtifactRequest } from '../../../src/services/artifacts/artifactProvider';
 import { installMutationInstance } from '../../helpers/mutationInstance';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rename, rm, stat as statFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -19,11 +19,8 @@ vi.mock('../../../src/utils/prefs', () => ({
 }));
 
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
-import {
-    buildTableDocument,
-    parseTableDocument,
-} from '../../../src/services/artifacts/tableDocument';
-import { TABLE_TAG } from '../../../src/services/artifacts/tableItem';
+import { buildTableDocument } from '../../../src/services/artifacts/tableDocument';
+import { TABLE_EMOJI_TAG, TABLE_TAG } from '../../../src/services/artifacts/tableItem';
 import {
     registerTableLocalCommands,
     registerTableShadowRestore,
@@ -60,6 +57,11 @@ let savedZotero: any;
 const realIOUtils = {
     exists: async (path: string) => existsSync(path),
     readUTF8: async (path: string) => readFile(path, 'utf8'),
+    stat: async (path: string) => ({ size: (await statFile(path)).size }),
+    read: async (path: string, options?: { maxBytes?: number }) => {
+        const bytes = new Uint8Array(await readFile(path));
+        return options?.maxBytes ? bytes.slice(0, options.maxBytes) : bytes;
+    },
     writeUTF8: async (path: string, text: string) => {
         await writeFile(path, text, 'utf8');
         return text.length;
@@ -110,8 +112,9 @@ function demoSpec(text = 'One'): TableSpec {
                 id: 'r1',
                 cells: {
                     note: {
+                        outcome: 'answered',
                         value: { kind: 'text', text },
-                        provenance: 'asserted',
+                        provenance: 'document',
                     },
                 },
             },
@@ -119,28 +122,47 @@ function demoSpec(text = 'One'): TableSpec {
     };
 }
 
+/** `table.json`, the table itself. */
+function tablePath(): string {
+    return join(storageDir, 'table.json');
+}
+
+async function readTableFile(): Promise<{ spec: TableSpec; receipts?: unknown[]; creation?: unknown }> {
+    return JSON.parse(await readFile(tablePath(), 'utf8'));
+}
+
 /**
- * Seeds the storage directory with the document and no sidecar at all — the
- * state a table synced from a device whose log did not travel arrives in, and
- * what the write path has to reconcile rather than write over.
+ * Seeds the storage directory with the table, its snapshot and no sidecar at
+ * all — the state a table synced from a device whose log did not travel arrives
+ * in, and what the write path has to reconcile rather than write over.
  */
 async function seedTable(version = 1): Promise<void> {
-    const document = buildTableDocument({ ...demoSpec(), key: KEY, version });
-    await writeFile(htmlPath, document.html, 'utf8');
+    const spec = { ...demoSpec(), key: KEY, version };
+    await writeFile(tablePath(), JSON.stringify({ spec }), 'utf8');
+    await writeFile(htmlPath, buildTableDocument(spec).html, 'utf8');
 }
 
-/** The version the stored document claims. */
+/** What a freshly imported attachment's storage directory holds: nothing yet. */
+async function emptyStorageDirectory(): Promise<void> {
+    for (const name of await readdir(storageDir)) {
+        await rm(join(storageDir, name), { recursive: true, force: true });
+    }
+}
+
+/** The version the stored table claims. */
 async function storedVersion(): Promise<number | undefined> {
-    const parsed = parseTableDocument(await readFile(htmlPath, 'utf8'));
-    return parsed.ok ? parsed.spec.version : undefined;
+    try {
+        return (await readTableFile()).spec.version;
+    } catch {
+        return undefined;
+    }
 }
 
-/** Commits a version straight to the HTML, as an interrupted write would. */
+/** Commits a version straight to `table.json`, as an interrupted write would. */
 async function bumpStoredDocument(): Promise<void> {
-    const parsed = parseTableDocument(await readFile(htmlPath, 'utf8'));
-    if (!parsed.ok) throw new Error('stored document is unreadable');
-    const next = { ...parsed.spec, version: (parsed.spec.version ?? 0) + 1 };
-    await writeFile(htmlPath, buildTableDocument(next).html, 'utf8');
+    const file = await readTableFile();
+    const next = { ...file.spec, version: (file.spec.version ?? 0) + 1 };
+    await writeFile(tablePath(), JSON.stringify({ ...file, spec: next }), 'utf8');
 }
 
 const ref = { libraryID: LIBRARY_ID, key: KEY };
@@ -177,10 +199,12 @@ beforeEach(async () => {
         attachmentContentType: 'text/html',
         isAttachment: () => true,
         isTopLevelItem: () => true,
-        hasTag: (name: string) => name === TABLE_TAG,
+        hasTag: (name: string) => name === TABLE_TAG || name === TABLE_EMOJI_TAG,
         getField: (field: string) =>
             field === 'url' ? 'beaver://table/demo-table' : '',
-        getFilePathAsync: async () => htmlPath,
+        // As in Zotero: the async form answers false for a missing file.
+        getFilePathAsync: async () => ((await realIOUtils.exists(htmlPath)) ? htmlPath : false),
+        getFilePath: () => htmlPath,
         addTag: vi.fn(),
         attachmentFilename: 'demo-table.html',
         saveTx: vi.fn(async () => undefined),
@@ -207,10 +231,11 @@ beforeEach(async () => {
         Attachments: {
             ...savedZotero.Attachments,
             getStorageDirectory: vi.fn(() => ({ path: storageDir })),
-            // Stands in for the real import: writes the first render and hands
-            // back the attachment Zotero would have created.
+            // Stands in for the real import: a new attachment's storage
+            // directory holds only the first render.
             importFromSnapshotContent: vi.fn(
                 async ({ snapshotContent }: { snapshotContent: string }) => {
+                    await emptyStorageDirectory();
                     await writeFile(htmlPath, snapshotContent, 'utf8');
                     return item;
                 }
@@ -323,7 +348,7 @@ describe('the single-flight write lock', () => {
             }),
             second.editTable(
                 ref,
-                [{ op: 'set_meta', caption: 'From instance B' }],
+                [{ op: 'set_meta', description: 'From instance B' }],
                 { actor: 'user' }
             ),
         ]);
@@ -336,7 +361,7 @@ describe('the single-flight write lock', () => {
         // Neither edit was derived from a stale read, so both survive.
         const { spec } = await readTable(ref);
         expect(spec.title).toBe('From instance A');
-        expect(spec.caption).toBe('From instance B');
+        expect(spec.description).toBe('From instance B');
         expect((await listVersions(ref)).map((v) => v.version)).toEqual([1, 2, 3]);
     });
 
@@ -361,27 +386,40 @@ describe('writeTable', () => {
         expect(await storedVersion()).toBe(2);
     });
 
-    it('marks the attachment for upload and saves it, so the change syncs', async () => {
+    it('renders the snapshot inside the write, then marks it for upload and saves it, so the change syncs', async () => {
         const written = expectOk(await writeTable(ref, demoSpec(), { actor: 'agent' }));
 
         expect(item.attachmentSyncState).toBe(0);
         expect(item.saveTx).toHaveBeenCalledTimes(1);
+        expect(Zotero.FullText.queueItem).toHaveBeenCalledWith(item);
         expect(written.saved).toBe(true);
+        const html = await readFile(htmlPath, 'utf8');
+        expect(html).toContain(`data-beaver-spec-sha256="${written.sha256}"`);
+        expect(JSON.parse(await readFile(sidecar('bookkeeping.json'), 'utf8'))).toEqual({
+            sha256: written.sha256,
+            file_sha256: await sha256(await readFile(tablePath(), 'utf8')),
+        });
     });
 
-    it('reports a post-commit save failure without failing the write', async () => {
+    it('never fails a committed write for a failed render, and opening re-renders', async () => {
         item.saveTx = vi.fn(async () => {
             throw new Error('database is locked');
         });
 
         const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
 
-        // The table is on disk, so the caller must not retry: doing so would
-        // apply the same mutations twice.
+        // The table is committed, so the caller must not retry: doing so would
+        // apply the same mutations twice. The failed render is bookkeeping.
         expect(written.saved).toBe(false);
         expect(written.version).toBe(2);
         expect(await storedVersion()).toBe(2);
         expect((await readHistory()).tip).toBe(2);
+        expect(existsSync(sidecar('bookkeeping.json'))).toBe(false);
+
+        item.saveTx = vi.fn(async () => undefined);
+        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'rerendered' });
+        expect(item.saveTx).toHaveBeenCalledTimes(1);
+        expect((await openTable(ref)).recovered).toEqual([]);
     });
 
     it('reports a version log that could not be written without failing the write', async () => {
@@ -759,6 +797,21 @@ describe('openTable recovery', () => {
         expect(existsSync(sidecar('v1.json'))).toBe(true);
     });
 
+    it('records the size of a repaired tip version, for retention', async () => {
+        const written = expectOk(await writeTable(ref, demoSpec('One'), { actor: 'user' }));
+        // A collapsing write that grew the table and committed, then failed to
+        // update its log entry.
+        const grown = { ...written.spec, title: 'x'.repeat(4096) };
+        await writeFile(tablePath(), JSON.stringify({ ...(await readTableFile()), spec: grown }), 'utf8');
+
+        const opened = await openTable(ref);
+
+        expect(opened.recovered).toContainEqual({ kind: 'version_file_repaired', version: written.version });
+        const tip = (await readHistory()).versions.at(-1)!;
+        expect(tip.bytes).toBe(Buffer.byteLength(await readFile(sidecar(`v${written.version}.json`), 'utf8')));
+        expect(tip.bytes).toBeGreaterThan(4096);
+    });
+
     it('repairs the tip version file when it disagrees with its entry', async () => {
         await writeTable(ref, demoSpec('One'), { actor: 'user' });
         // What a collapsing write interrupted between its two renames leaves.
@@ -843,20 +896,27 @@ describe('remote writes', () => {
 
     it('reads replay receipts and the spec from one snapshot when sync replaces the file', async () => {
         const base = await openTable(ref);
-        const beforeWrite = await readFile(htmlPath, 'utf8');
+        const beforeWrite = await readFile(tablePath(), 'utf8');
         const remote = { operation_id: 'snapshot-replay', expected_sha256: base.sha256 };
         const first = expectOk(await writeTable(ref, demoSpec('committed'), meta, base.version, remote));
-        vi.mocked(Zotero.File.getContentsAsync).mockImplementationOnce(async (path: any) => {
-            const snapshot = await readFile(path, 'utf8');
-            // A sync replacement after the read must not replace just the ledger
-            // in the CurrentState assembled from that snapshot.
-            await writeFile(htmlPath, beforeWrite);
+        // The render reads table.json too; settle it before the replacement hook.
+        const readUTF8 = (globalThis as any).IOUtils.readUTF8;
+        let replaced = false;
+        (globalThis as any).IOUtils.readUTF8 = async (path: string) => {
+            const snapshot = await readUTF8(path);
+            if (path === tablePath() && !replaced) {
+                // A sync replacement after the read must not replace just the
+                // receipts in the state assembled from that read.
+                replaced = true;
+                await writeFile(tablePath(), beforeWrite);
+            }
             return snapshot;
-        });
+        };
         const replay = expectOk(await writeTable(ref, demoSpec('committed'), meta, base.version, remote));
+        (globalThis as any).IOUtils.readUTF8 = readUTF8;
         expect(replay).toMatchObject({ replayed: true, version: first.version, operation: first.operation });
         expect(replay.spec).toEqual(first.spec);
-        expect(await readFile(htmlPath, 'utf8')).toBe(beforeWrite);
+        expect(await readFile(tablePath(), 'utf8')).toBe(beforeWrite);
     });
 
     it('refuses reuse of an operation identity with different content', async () => {
@@ -887,7 +947,7 @@ describe('remote writes', () => {
         });
     });
 
-    it.each([false, true])('reports retention pruning during replay even if a later save fails: %s', async (failSave) => {
+    it.each([false, true])('reports retention pruning during replay even if a later render fails: %s', async (failSave) => {
         await createTable({ spec: demoSpec(), actor: 'user' });
         for (let version = 2; version <= TABLE_VERSION_RETENTION; version++) {
             await writeTable(ref, demoSpec(String(version)), { actor: 'user' });
@@ -905,8 +965,9 @@ describe('remote writes', () => {
             .toMatchObject({ ok: true, saved: false, pruned: [] });
         (globalThis as any).IOUtils = realIOUtils;
         if (failSave) item.saveTx.mockRejectedValueOnce(new Error('item save failed'));
+        // The render that indexes and saves never reaches the replay's answer.
         expect(await writeTable(ref, demoSpec('new'), meta, base.version, remote))
-            .toMatchObject({ ok: true, replayed: true, saved: !failSave, pruned: [1] });
+            .toMatchObject({ ok: true, replayed: true, saved: true, pruned: [1] });
         expect(existsSync(sidecar('v1.json'))).toBe(false);
         expect((await listVersions(ref)).map((entry) => entry.version))
             .toEqual(Array.from({ length: TABLE_VERSION_RETENTION }, (_, i) => i + 2));
@@ -1092,8 +1153,10 @@ describe('conversation rewind', () => {
             };
             if (stage === 'index') vi.mocked(Zotero.FullText.queueItem).mockRejectedValueOnce(new Error('index failed'));
             if (stage === 'save') item.saveTx.mockRejectedValueOnce(new Error('save failed'));
+            // Every stage is bookkeeping after the commit: the trim stands, unsaved.
+            const sidecarFailure = stage === 'history' || stage === 'cleanup';
             expect(await trimTable(ref, request)).toMatchObject({ outcome: 'trimmed', saved: false });
-            const document = await readFile(htmlPath, 'utf8');
+            const table = await readFile(tablePath(), 'utf8');
 
             // Simulate reloading the item from its last successfully saved state.
             (globalThis as any).IOUtils = realIOUtils;
@@ -1101,10 +1164,14 @@ describe('conversation rewind', () => {
             item.saveTx.mockClear();
             vi.mocked(Zotero.FullText.queueItem).mockClear();
             expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true });
-            expect(Zotero.FullText.queueItem).toHaveBeenCalledWith(item);
-            expect(item.saveTx).toHaveBeenCalledOnce();
-            expect(item.attachmentSyncState).toBe(0);
-            expect(await readFile(htmlPath, 'utf8')).toBe(document);
+            if (sidecarFailure) {
+                expect(item.saveTx).not.toHaveBeenCalled();
+            } else {
+                expect(Zotero.FullText.queueItem).toHaveBeenCalledWith(item);
+                expect(item.saveTx).toHaveBeenCalledOnce();
+                expect(item.attachmentSyncState).toBe(0);
+            }
+            expect(await readFile(tablePath(), 'utf8')).toBe(table);
             expect((await listVersions(ref)).map((entry) => entry.version)).toEqual([1]);
             expect(existsSync(sidecar('v2.json'))).toBe(false);
         }
@@ -1152,15 +1219,23 @@ describe('conversation rewind', () => {
         expect(existsSync(sidecar('v2.json'))).toBe(false);
     });
 
-    it.each(['index', 'save'])('does not acknowledge an unchanged retry when %s fails again', async (stage) => {
+    it.each(['index', 'save'])('renders an unchanged retry again while %s keeps failing', async (stage) => {
         await createTable({ spec: demoSpec(), actor: 'user' });
         await writeTable(ref, demoSpec('discarded'), owner);
         item.saveTx.mockRejectedValueOnce(new Error('save failed'));
         expect(await trimTable(ref, request)).toMatchObject({ outcome: 'trimmed', saved: false });
+        expect(existsSync(sidecar('bookkeeping.json'))).toBe(true);
+        const trimmedHash = JSON.parse(await readFile(sidecar('bookkeeping.json'), 'utf8')).sha256;
+        // Read without opening: an open would repair the render itself.
+        expect(trimmedHash).not.toBe(await sha256(JSON.stringify((await readTableFile()).spec)));
         if (stage === 'index') vi.mocked(Zotero.FullText.queueItem).mockRejectedValueOnce(new Error('index failed'));
         else item.saveTx.mockRejectedValueOnce(new Error('save failed'));
+        item.saveTx.mockClear();
+        // The retry that still cannot render says so; the next one completes.
         expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: false });
         expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true });
+        expect(JSON.parse(await readFile(sidecar('bookkeeping.json'), 'utf8')).sha256)
+            .toBe((await openTable(ref)).sha256);
     });
 
     it('repairs a trim interrupted after the document commit', async () => {
@@ -1201,6 +1276,7 @@ describe('retriable creation', () => {
         (Zotero.Attachments.importFromSnapshotContent as any).mockImplementation(
             async ({ snapshotContent }: any) => {
                 imported = true;
+                await emptyStorageDirectory();
                 await writeFile(htmlPath, snapshotContent, 'utf8');
                 return item;
             }
@@ -1226,6 +1302,38 @@ describe('retriable creation', () => {
         const replay = await createTable(options);
         expect(replay.replayed).toBe(true);
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
+    it('still replays a creation after table.json is rebuilt from the history', async () => {
+        const created = await createTable(options);
+        await rm(tablePath());
+        tableWriteLocks().clear();
+        const replay = await createTable(options);
+        expect(replay).toMatchObject({ replayed: true, key: created.key });
+        expect((await readTableFile()).creation).toMatchObject({ operation_id: 'create-one', complete: true });
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a mismatched creation retry without rebuilding table.json', async () => {
+        await createTable(options);
+        await rm(tablePath());
+        tableWriteLocks().clear();
+        await expect(createTable({ ...options, spec: demoSpec('different') })).rejects.toMatchObject({ code: 'operation_mismatch' });
+        expect(existsSync(tablePath())).toBe(false);
+    });
+
+    it('confirms a committed creation even when its snapshot cannot be read back', async () => {
+        const readUTF8 = (globalThis as any).IOUtils.readUTF8;
+        (globalThis as any).IOUtils.readUTF8 = async (path: string) => {
+            if (path === htmlPath) throw new Error('snapshot replaced by sync');
+            return readUTF8(path);
+        };
+        try {
+            expect(await createTable(options)).toMatchObject({ key: KEY, saved: true });
+            expect(await createTable(options)).toMatchObject({ key: KEY, replayed: true });
+        } finally {
+            (globalThis as any).IOUtils.readUTF8 = readUTF8;
+        }
     });
 
     it('keeps the title slug in operation URLs and describes replay from a single read', async () => {
@@ -1261,9 +1369,6 @@ describe('retriable creation', () => {
                     key: created.key, replayed: true, operation: created.operation,
                 });
                 expect(shadow).toHaveBeenCalledOnce();
-                expect(Zotero.FullText.queueItem).toHaveBeenCalledWith(item);
-                expect(item.saveTx).toHaveBeenCalledOnce();
-                expect(item.attachmentSyncState).toBe(0);
                 expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
             } finally {
                 shadow.mockRestore();
@@ -1305,28 +1410,35 @@ describe('retriable creation', () => {
         if (step === 'tag') item.addTag.mockImplementationOnce(() => { throw new Error('interrupted'); });
         if (step === 'index') (Zotero.FullText.queueItem as any).mockRejectedValueOnce(new Error('interrupted'));
         if (step === 'save') item.saveTx.mockRejectedValueOnce(new Error('interrupted'));
-        expect(await createTable(options)).toMatchObject({ saved: false, key: KEY });
-        // Unsaved tags disappear on restart; the document must still identify the import.
+        // Every step is bookkeeping after the commit: the creation stands, unsaved.
         const tags = new Set<string>();
-        item.hasTag = (tag: string) => tags.has(tag);
         item.addTag.mockImplementation((tag: string) => tags.add(tag));
-        item.attachmentSyncState = 1;
-        expect((await openTable(ref)).recovered).not.toContainEqual({ kind: 'bookkeeping_pending' });
+        expect(await createTable(options)).toMatchObject({ saved: step === 'index' ? false : true, key: KEY });
+        if (step === 'index') {
+            // The failed render is repaired by the next open.
+            item.attachmentSyncState = 1;
+            expect((await openTable(ref)).recovered).toContainEqual({ kind: 'rerendered' });
+        }
+        // The render inside the creation restores what the import step lost.
         expect(tags).toEqual(new Set(['beaver-table', '📊']));
         expect(Zotero.FullText.queueItem).toHaveBeenCalled();
         expect(item.attachmentSyncState).toBe(0);
         expect(item.saveTx).toHaveBeenCalled();
+        expect((await openTable(ref)).recovered).not.toContainEqual({ kind: 'bookkeeping_pending' });
         expect(await listVersions(ref)).toMatchObject([{ version: 1, creation: true }]);
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
 
-    it.each(['index', 'save'])('keeps a replayed creation retriable when %s fails again', async (step) => {
-        item.saveTx.mockRejectedValueOnce(new Error('initial save failed'));
+    it.each(['index', 'save'])('keeps a replayed creation retriable when its render %s fails again', async (step) => {
+        const fail = (step === 'index' ? Zotero.FullText.queueItem : item.saveTx) as any;
+        // The import's own save, when that is the failing step, then the render's.
+        if (step === 'save') fail.mockRejectedValueOnce(new Error('initial save failed'));
+        fail.mockRejectedValueOnce(new Error('render failed'));
         expect(await createTable(options)).toMatchObject({ saved: false });
-        const fail = step === 'index' ? Zotero.FullText.queueItem : item.saveTx;
-        (fail as any).mockRejectedValueOnce(new Error('retry failed'));
+        fail.mockRejectedValueOnce(new Error('retry failed'));
+        // A replay renders what the creation could not, and says when it still cannot.
         expect(await createTable(options)).toMatchObject({ saved: false, replayed: true });
-        expect(await createTable(options)).toMatchObject({ key: KEY, replayed: true });
+        expect(await createTable(options)).toMatchObject({ key: KEY, saved: true, replayed: true });
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
 
@@ -1334,7 +1446,8 @@ describe('retriable creation', () => {
         vi.spyOn(IOUtils, 'move').mockRejectedValueOnce(new Error('disk full'));
         await expect(createTable(options)).rejects.toMatchObject({ code: 'operation_pending' });
         await expect(createTable(options)).rejects.toMatchObject({ code: 'operation_pending' });
-        await expect(openTable(ref)).rejects.toMatchObject({ code: 'invalid_spec' });
+        // The import left a snapshot and no table.
+        await expect(openTable(ref)).rejects.toMatchObject({ code: 'no_spec' });
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
 
@@ -1350,10 +1463,11 @@ it('repairs a collapsed commit even when both its old sidecars still agree', asy
     const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
     await writeTable(ref, demoSpec('old'), meta);
     const base = await openTable(ref);
+    // Everything after the commit point fails: the version file and the log.
     (globalThis as any).IOUtils = {
         ...realIOUtils,
         move: async (from: string, to: string) => {
-            if (to.endsWith('.json')) throw new Error('disk full');
+            if (to.endsWith('.json') && !to.endsWith('table.json')) throw new Error('disk full');
             await realIOUtils.move(from, to);
         },
     };
@@ -1419,9 +1533,11 @@ describe('artifact provider through the real file store', () => {
         expect(await request('read')).toMatchObject({ ok: false, error_code: 'library_excluded' });
         expect(existsSync(sidecar(`v${current.version}.json`))).toBe(false);
     });
-    it('serves valid documents after tag removal but rejects an arbitrary HTML document', async () => {
+    it('serves valid tables after tag removal but rejects a snapshot that carries no table', async () => {
         item.hasTag = () => false;
         expect(await request('read')).toMatchObject({ ok: true });
+        await rm(tablePath());
+        await rm(sidecar(), { recursive: true, force: true });
         await writeFile(htmlPath, '<html>Ordinary HTML</html>');
         expect(await request('read')).toMatchObject({ ok: false, error_code: 'no_spec' });
         expect(await request('delete')).toMatchObject({ ok: true });
@@ -1478,17 +1594,32 @@ describe('artifact provider through the real file store', () => {
         expect(await request('write', { spec, meta: { actor: 'user' }, operation_id: 'private', expected_version: 1, expected_sha256: 'a'.repeat(64) })).toMatchObject({ error_code: 'library_excluded' });
         expect(await readFile(htmlPath, 'utf8')).toBe(before);
     });
-    it('maps absent local files distinctly from missing items and rejects mismatched document identity', async () => {
-        await rm(htmlPath);
+    it('maps absent local files distinctly from missing items and rejects mismatched table identity', async () => {
+        // A table whose files have not arrived on this device yet.
+        await emptyStorageDirectory();
         expect(await request('read')).toMatchObject({ error_code: 'item_missing' });
-        await writeFile(htmlPath, buildTableDocument({ ...demoSpec(), key: 'OTHER001', version: 1 }).html);
+        await writeFile(tablePath(), JSON.stringify({ spec: { ...demoSpec(), key: 'OTHER001', version: 1 } }));
         expect(await request('read')).toMatchObject({ ok: false });
+    });
+
+    it('rebuilds a missing table.json from the history tip, or reports the table corrupt', async () => {
+        await createTable({ spec: demoSpec('Created'), actor: 'user' });
+        const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        await rm(tablePath());
+        const opened = await openTable(ref);
+        expect(opened.recovered).toContainEqual({ kind: 'table_file_rebuilt', version: written.version });
+        expect(opened.sha256).toBe(written.sha256);
+        expect((await readTableFile()).spec).toEqual(written.spec);
+
+        await rm(tablePath());
+        await writeFile(sidecar(`v${written.version}.json`), JSON.stringify(demoSpec('tampered')));
+        expect(await request('read')).toMatchObject({ ok: false, error_code: 'corrupt' });
     });
     it('guards local drafts inside the store lock and retains intentional blank ownership', async () => {
         const read = await openTable(ref);
         const guard = { version: read.version, sha256: read.sha256 };
-        await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { provenance: 'user' } }] }], { actor: 'user' }, guard);
-        expect((await openTable(ref)).spec.rows[0].cells.note).toEqual({ provenance: 'user' });
+        await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'cleared', provenance: 'user' } }] }], { actor: 'user' }, guard);
+        expect((await openTable(ref)).spec.rows[0].cells.note).toEqual({ outcome: 'cleared', provenance: 'user' });
         const stale = await editTable(ref, [{ op: 'remove_rows', rows: ['r1'] }], { actor: 'user' }, guard);
         expect(stale).toMatchObject({ ok: false, conflict: true });
         expect((await openTable(ref)).spec.rows).toHaveLength(1);
@@ -1503,11 +1634,10 @@ describe('artifact provider through the real file store', () => {
 });
 
 
-it('rechecks source exclusions at the document commit point', async () => {
+it('rechecks source exclusions at the table commit point', async () => {
     const opened = await openTable(ref);
-    const original = await readFile(htmlPath, 'utf8');
-    const spec = demoSpec('new answer');
-    spec.citations = [{ citation_id: 'retained-source', resolved_ref: { kind: 'zotero', library_id: 7, zotero_key: 'SOURCEAB' } } as any];
+    const original = await readFile(tablePath(), 'utf8');
+    const spec = demoSpec('new answer, from 7-SOURCEAB');
     const ioWrite = IOUtils.writeUTF8;
     (IOUtils as any).writeUTF8 = async (...args: any[]) => {
         const result = await (ioWrite as any)(...args);
@@ -1516,7 +1646,7 @@ it('rechecks source exclusions at the document commit point', async () => {
     };
     const response = await handleArtifactRequest({ event: 'artifact_request', request_id: 'mid-write', op: 'write', key: `u-${KEY}`, spec, meta: { actor: 'user' }, operation_id: 'mid-write', expected_version: opened.version, expected_sha256: opened.sha256 });
     expect(response).toMatchObject({ ok: false, error_code: 'library_excluded' });
-    expect(await readFile(htmlPath, 'utf8')).toBe(original);
+    expect(await readFile(tablePath(), 'utf8')).toBe(original);
 });
 
 it('releases renderer-owned commands without withdrawing plugin-owned recovery', async () => {
@@ -1567,7 +1697,7 @@ it('holds the instance queue through an active artifact write after its owner cl
     const blocked = new Promise<void>(resolve => { release = resolve; });
     const originalMove = IOUtils.move;
     (IOUtils as any).move = async (...args: any[]) => {
-        if (args[1] === htmlPath) {
+        if (args[1] === tablePath()) {
             entered();
             await blocked;
         }
@@ -1585,7 +1715,7 @@ it('holds the instance queue through an active artifact write after its owner cl
 });
 
 
-it.each(['index', 'save', 'history'])('repairs a committed %s failure locally and leaves healthy opens clean', async (stage) => {
+it.each(['index', 'save'])('repairs a failed %s render locally and leaves healthy opens clean', async (stage) => {
     const ref = { libraryID: LIBRARY_ID, key: KEY };
     await createTable({ spec: demoSpec(), libraryID: LIBRARY_ID });
     const current = await openTable(ref);
@@ -1593,44 +1723,57 @@ it.each(['index', 'save', 'history'])('repairs a committed %s failure locally an
     const fail = new Error('bookkeeping unavailable');
     if (stage === 'index') vi.mocked(Zotero.FullText.queueItem).mockRejectedValueOnce(fail);
     if (stage === 'save') item.saveTx.mockRejectedValueOnce(fail);
-    const originalMove = IOUtils.move;
-    if (stage === 'history') {
-        vi.spyOn(IOUtils, 'move').mockImplementation(async (from, to) => {
-            if (String(to).endsWith('history.json')) throw fail;
-            return originalMove(from, to);
-        });
-    }
     const written = await writeTable(ref, candidate, { actor: 'agent', run_id: 'repair-run' }, current.version);
-    expect(written).toMatchObject({ ok: true });
-    expect(written).toMatchObject({ saved: false });
-    vi.mocked(IOUtils.move).mockRestore?.();
+    expect(written).toMatchObject({ ok: true, saved: false });
     item.attachmentSyncState = 1;
     const repaired = await openTable(ref);
     expect(repaired.spec.title).toBe('Committed change');
-    expect(repaired.recovered).not.toContainEqual({ kind: 'bookkeeping_pending' });
+    expect(repaired.recovered).toContainEqual({ kind: 'rerendered' });
     expect(item.attachmentSyncState).toBe(0);
     item.saveTx.mockClear();
     vi.mocked(Zotero.FullText.queueItem).mockClear();
-    await openTable(ref);
+    expect((await openTable(ref)).recovered).toEqual([]);
     expect(item.saveTx).not.toHaveBeenCalled();
     expect(Zotero.FullText.queueItem).not.toHaveBeenCalled();
 });
 
+it('repairs a committed history failure locally and leaves healthy opens clean', async () => {
+    const ref = { libraryID: LIBRARY_ID, key: KEY };
+    await createTable({ spec: demoSpec(), libraryID: LIBRARY_ID });
+    const current = await openTable(ref);
+    const candidate = { ...current.spec, title: 'Committed change' };
+    const originalMove = IOUtils.move;
+    vi.spyOn(IOUtils, 'move').mockImplementation(async (from, to) => {
+        if (String(to).endsWith('history.json')) throw new Error('bookkeeping unavailable');
+        return originalMove(from, to);
+    });
+    const written = await writeTable(ref, candidate, { actor: 'agent', run_id: 'repair-run' }, current.version);
+    vi.mocked(IOUtils.move).mockRestore?.();
+    expect(written).toMatchObject({ ok: true, saved: false });
+    const repaired = await openTable(ref);
+    expect(repaired.spec.title).toBe('Committed change');
+    expect(repaired.recovered).toContainEqual({ kind: 'history_appended', version: written.ok ? written.version : 0 });
+    expect(repaired.history.map((entry) => entry.version)).toEqual([1, 2]);
+    expect((await openTable(ref)).recovered).toEqual([]);
+});
 
-it('keeps repair pending across repeated failures, preserves newer content, and respects exclusions', async () => {
+it('keeps re-rendering across repeated failures, preserves newer content, and respects exclusions', async () => {
     const ref = { libraryID: LIBRARY_ID, key: KEY };
     await createTable({ spec: demoSpec(), libraryID: LIBRARY_ID });
     item.saveTx.mockRejectedValue(new Error('item save unavailable'));
     expect(await writeTable(ref, demoSpec('First'), { actor: 'user' })).toMatchObject({ saved: false });
+    // The open's render fails the same way, and says so.
     expect((await openTable(ref)).recovered).toContainEqual({ kind: 'bookkeeping_pending' });
     expect(await writeTable(ref, demoSpec('Newer'), { actor: 'user' })).toMatchObject({ saved: false });
-    const latest = await readFile(htmlPath, 'utf8');
+    const latest = await readFile(tablePath(), 'utf8');
     item.saveTx.mockResolvedValue(item.id);
     const saves = item.saveTx.mock.calls.length;
     await expect(openTable(ref, () => { throw new Error('access refused'); })).rejects.toThrow('access refused');
     expect(item.saveTx.mock.calls.length).toBe(saves);
-    expect((await openTable(ref)).recovered).not.toContainEqual({ kind: 'bookkeeping_pending' });
-    expect(await readFile(htmlPath, 'utf8')).toBe(latest);
+    expect((await openTable(ref)).recovered).toContainEqual({ kind: 'rerendered' });
+    expect((await openTable(ref)).recovered).toEqual([]);
+    expect(await readFile(tablePath(), 'utf8')).toBe(latest);
+    expect(await readFile(htmlPath, 'utf8')).toContain('Newer');
 });
 
 describe('group tables through the provider and file store', () => {
@@ -1707,6 +1850,7 @@ describe('group tables through the provider and file store', () => {
                 expect(options.libraryID).toBe(groupLibraryID);
                 expect(options.contentType).toBe('text/html');
                 expect(options).not.toHaveProperty('parentItemID');
+                await emptyStorageDirectory();
                 await writeFile(
                     htmlPath,
                     await readFile(join(options.directory, options.filename), 'utf8'),
@@ -1914,7 +2058,7 @@ describe('group tables through the provider and file store', () => {
     it('rejects a stale digest after a synced replacement and queues a fresh write for upload', async () => {
         const base = await request('read');
         const replaced = { ...base.spec!, title: 'Synced group revision' };
-        await writeFile(htmlPath, buildTableDocument(replaced).html);
+        await writeFile(tablePath(), JSON.stringify({ spec: replaced }));
         const fields = {
             spec: demoSpec('updated'),
             expected_version: base.version,
@@ -1941,5 +2085,309 @@ describe('group tables through the provider and file store', () => {
             kind: 'text',
             text: 'updated',
         });
+    });
+});
+
+describe('table.json storage', () => {
+    const moves = () => {
+        const order: string[] = [];
+        const move = (globalThis as any).IOUtils.move;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            order.push(basename(to));
+            return move(from, to);
+        };
+        return order;
+    };
+
+    it('reads the table from table.json, never from the snapshot', async () => {
+        await writeFile(htmlPath, '<html>stale rendering</html>');
+        const { spec } = await readTable(ref);
+        expect(spec.rows[0].cells.note?.value).toEqual({ kind: 'text', text: 'One' });
+        expect((await openTable(ref)).spec).toEqual(spec);
+    });
+
+    it('commits in order: version file, table.json, history; then renders', async () => {
+        // Reconcile the seeded table's missing log first, so only the write moves.
+        await openTable(ref);
+        const order = moves();
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        expect(order.slice(0, 3)).toEqual(['v2.json', 'table.json', 'history.json']);
+        expect(order.slice(3)).toEqual([basename(htmlPath), 'bookkeeping.json']);
+    });
+
+    it('writes a collapsing write’s version file after the commit', async () => {
+        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+        expectOk(await writeTable(ref, demoSpec('first'), meta));
+        const order = moves();
+        expectOk(await writeTable(ref, demoSpec('second'), meta));
+        expect(order).toEqual(['table.json', 'v2.json', 'history.json', basename(htmlPath), 'bookkeeping.json']);
+    });
+
+    it('renders the snapshot after every kind of write, with the spec hash on its root', async () => {
+        const hashOnDisk = async () =>
+            /data-beaver-spec-sha256="([a-f0-9]{64})"/.exec(await readFile(htmlPath, 'utf8'))?.[1];
+        const created = await createTable({ spec: demoSpec('Created'), actor: 'user' });
+        expect(await hashOnDisk()).toBe(created.sha256 ?? created.entry.sha256);
+
+        const written = expectOk(await writeTable(ref, demoSpec('Written'), { actor: 'user' }));
+        expect(await hashOnDisk()).toBe(written.sha256);
+
+        const edited = await editTable(ref, [{ op: 'set_meta', title: 'Edited' }], { actor: 'user' });
+        expect(edited.ok && (await hashOnDisk()) === edited.sha256).toBe(true);
+
+        const reverted = expectOk(await revertTable(ref, 1, { actor: 'user' }));
+        expect(await hashOnDisk()).toBe(reverted.sha256);
+
+        // The provider's sha256 for the same state is the root attribute.
+        const read = await handleArtifactRequest({ event: 'artifact_request', request_id: 'hash', op: 'read', key: `u-${KEY}` });
+        expect(read.sha256).toBe(await hashOnDisk());
+        expect(await readFile(htmlPath, 'utf8')).toContain('Created');
+    });
+
+    it('renders after a trim and after an interrupted fill', async () => {
+        const meta = { actor: 'agent' as const, run_id: 'fill-run', thread_id: 'thread' };
+        await createTable({ spec: demoSpec('Created'), actor: 'user' });
+        // A fill commits cell by cell; the run is cancelled after two commits.
+        for (const text of ['row one filled', 'row one refilled']) {
+            const edited = await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'answered', provenance: 'document', value: { kind: 'text', text } } }] }], meta);
+            expect(edited.ok).toBe(true);
+        }
+        expect(await readFile(htmlPath, 'utf8')).toContain('row one refilled');
+        expect((await listVersions(ref)).map((entry) => entry.version)).toEqual([1, 2]);
+
+        expect(await trimTable(ref, { thread_id: 'thread', run_ids: ['fill-run'] })).toMatchObject({ outcome: 'trimmed', trimmed_to: 1 });
+        const html = await readFile(htmlPath, 'utf8');
+        expect(html).toContain('Created');
+        expect(html).not.toContain('row one refilled');
+    });
+
+    it('renders every write before the write returns', async () => {
+        const written = expectOk(await writeTable(ref, demoSpec('rendered'), { actor: 'user' }));
+        const html = await readFile(htmlPath, 'utf8');
+        expect(html).toContain('rendered');
+        expect(html).toContain(`data-beaver-spec-sha256="${written.sha256}"`);
+        expect(JSON.parse(await readFile(sidecar('bookkeeping.json'), 'utf8'))).toMatchObject({ sha256: written.sha256 });
+    });
+
+    it('changes the snapshot for a commit that changes only its receipts', async () => {
+        const base = await openTable(ref);
+        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+        const first = expectOk(await writeTable(ref, demoSpec('same'), meta, base.version, { operation_id: 'a', expected_sha256: base.sha256 }));
+        const before = await readFile(htmlPath, 'utf8');
+        const second = expectOk(await writeTable(ref, demoSpec('same'), meta, first.version, { operation_id: 'b', expected_sha256: first.sha256 }));
+        expect(second.sha256).toBe(first.sha256);
+        expect((await readTableFile()).receipts?.length).toBe(2);
+        const after = await readFile(htmlPath, 'utf8');
+        expect(after).not.toBe(before);
+        expect(after).toContain(`data-beaver-file-sha256="${await sha256(await readFile(tablePath(), 'utf8'))}"`);
+    });
+
+    it('re-renders on open after a receipt-only commit whose render never ran', async () => {
+        const base = await openTable(ref);
+        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+        const first = expectOk(await writeTable(ref, demoSpec('same'), meta, base.version, { operation_id: 'a', expected_sha256: base.sha256 }));
+        const queueItem = vi.mocked(Zotero.FullText.queueItem);
+        queueItem.mockRejectedValueOnce(new Error('indexing failed'));
+        expectOk(await writeTable(ref, demoSpec('same'), meta, first.version, { operation_id: 'b', expected_sha256: first.sha256 }));
+        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'rerendered' });
+        expect((await openTable(ref)).recovered).not.toContainEqual({ kind: 'rerendered' });
+    });
+
+    it('restores a missing table.json before acknowledging a write retry', async () => {
+        const base = await openTable(ref);
+        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+        const remote = { operation_id: 'restored', expected_sha256: base.sha256 };
+        const first = expectOk(await writeTable(ref, demoSpec('restored'), meta, base.version, remote));
+        await rm(tablePath());
+        const replay = expectOk(await writeTable(ref, demoSpec('restored'), meta, base.version, remote));
+        expect(replay).toMatchObject({ replayed: true, saved: true, operation: first.operation });
+        expect(existsSync(tablePath())).toBe(true);
+        expect((await readTableFile()).receipts).toEqual([first.operation]);
+    });
+
+    it('keeps the retry ledger through a table.json rebuilt from the history', async () => {
+        const base = await openTable(ref);
+        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+        const remote = { operation_id: 'ledger', expected_sha256: base.sha256 };
+        const first = expectOk(await writeTable(ref, demoSpec('ledger'), meta, base.version, remote));
+        expect((await readHistory()).ledger?.receipts).toEqual([first.operation]);
+        await rm(tablePath());
+        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'table_file_rebuilt', version: first.version });
+        expect((await readTableFile()).receipts).toEqual([first.operation]);
+        const replay = expectOk(await writeTable(ref, demoSpec('ledger'), meta, base.version, remote));
+        expect(replay).toMatchObject({ replayed: true, operation: first.operation });
+    });
+
+    it('keeps the file\'s own newer receipts over the log copy when its spec is unreadable', async () => {
+        const base = await openTable(ref);
+        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+        // The log update fails, so its ledger copy misses this receipt.
+        const move = (globalThis as any).IOUtils.move;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            if (to.endsWith('history.json')) throw new Error('disk full');
+            return move(from, to);
+        };
+        let first;
+        try {
+            first = expectOk(await writeTable(ref, demoSpec('newest'), meta, base.version, { operation_id: 'newest', expected_sha256: base.sha256 }));
+        } finally {
+            (globalThis as any).IOUtils.move = move;
+        }
+        expect(first.saved).toBe(false);
+        const file = await readTableFile();
+        await writeFile(tablePath(), JSON.stringify({ ...file, spec: { broken: true } }), 'utf8');
+        expectOk(await writeTable(ref, demoSpec('replacement'), { actor: 'user' }));
+        expect((await readTableFile()).receipts).toContainEqual(first.operation);
+    });
+
+    it('keeps the retry ledger when a write replaces an unreadable spec', async () => {
+        const base = await openTable(ref);
+        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+        const remote = { operation_id: 'kept', expected_sha256: base.sha256 };
+        const first = expectOk(await writeTable(ref, demoSpec('kept'), meta, base.version, remote));
+        const file = await readTableFile();
+        await writeFile(tablePath(), JSON.stringify({ ...file, spec: { broken: true } }), 'utf8');
+        expectOk(await writeTable(ref, demoSpec('replacement'), { actor: 'user' }));
+        expect((await readTableFile()).receipts).toEqual([first.operation]);
+        expect((await readHistory()).ledger?.receipts).toEqual([first.operation]);
+    });
+
+    it('renders a missing snapshot when an operation is replayed', async () => {
+        const base = await openTable(ref);
+        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+        const remote = { operation_id: 'replayed', expected_sha256: base.sha256 };
+        const first = expectOk(await writeTable(ref, demoSpec('replayed'), meta, base.version, remote));
+        await rm(htmlPath);
+        const replay = expectOk(await writeTable(ref, demoSpec('replayed'), meta, base.version, remote));
+        expect(replay).toMatchObject({ replayed: true, saved: true });
+        expect(await readFile(htmlPath, 'utf8')).toContain(`data-beaver-spec-sha256="${first.sha256}"`);
+    });
+
+    it('keeps remote receipts through a later fill commit', async () => {
+        const base = await openTable(ref);
+        const remote = { operation_id: 'structural', expected_sha256: base.sha256 };
+        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+        const first = expectOk(await writeTable(ref, demoSpec('structural'), meta, base.version, remote));
+        await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'answered', provenance: 'document', value: { kind: 'text', text: 'filled' } } }] }], { actor: 'agent', run_id: 'fill', thread_id: 'thread' });
+        expect((await readTableFile()).receipts).toEqual([first.operation]);
+        const replay = expectOk(await writeTable(ref, demoSpec('structural'), meta, base.version, remote));
+        expect(replay).toMatchObject({ replayed: true, operation: first.operation });
+        expect(replay.spec.rows[0].cells.note?.value).toEqual({ kind: 'text', text: 'filled' });
+    });
+
+    it('regenerates a missing or stale snapshot on the next read', async () => {
+        await rm(htmlPath);
+        await readTable(ref);
+        await openTable(ref);
+        expect(existsSync(htmlPath)).toBe(true);
+
+        await writeFile(htmlPath, buildTableDocument(demoSpec('older rendering')).html);
+        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'rerendered' });
+        const html = await readFile(htmlPath, 'utf8');
+        expect(html).not.toContain('older rendering');
+        expect(html).toContain(`data-beaver-spec-sha256="${(await openTable(ref)).sha256}"`);
+    });
+
+    it.each([
+        ['read-only', () => (Zotero.Libraries.get as any).mockReturnValue({ editable: false, filesEditable: false })],
+        ['excluded', () => checkLibraryExcluded.mockReturnValue({ message: 'excluded' } as any)],
+    ])('opens a %s table without writing its rebuilt table.json or snapshot', async (_, restrict) => {
+        const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        await rm(tablePath());
+        await rm(htmlPath);
+        restrict();
+        const opened = await openTable(ref);
+        expect(opened.spec).toEqual(written.spec);
+        expect(opened.recovered).not.toContainEqual({ kind: 'table_file_rebuilt', version: written.version });
+        expect(existsSync(tablePath())).toBe(false);
+        expect(existsSync(htmlPath)).toBe(false);
+    });
+
+    it('stops a render whose library is excluded after the commit', async () => {
+        const before = await readFile(htmlPath, 'utf8');
+        const move = (globalThis as any).IOUtils.move;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            await move(from, to);
+            // Excluded between the commit and the render that follows it.
+            if (to === tablePath()) checkLibraryExcluded.mockReturnValue({ message: 'excluded' } as any);
+        };
+        const saves = item.saveTx.mock.calls.length;
+        try {
+            // Committed, but the render that would sync it did not happen.
+            expect(expectOk(await writeTable(ref, demoSpec('excluded after commit'), { actor: 'user' })).saved).toBe(false);
+        } finally {
+            (globalThis as any).IOUtils.move = move;
+        }
+        expect(await readFile(htmlPath, 'utf8')).toBe(before);
+        expect(item.saveTx).toHaveBeenCalledTimes(saves);
+    });
+
+    it('measures versions logged without a size before applying the byte bound', async () => {
+        const big = (label: string) => demoSpec(`${label} ${'x'.repeat(3 * 1024 * 1024)}`);
+        for (const label of ['two', 'three', 'four']) {
+            expectOk(await writeTable(ref, big(label), { actor: 'user' }));
+        }
+        // A log from before sizes were recorded.
+        const history = await readHistory();
+        await writeFile(sidecar('history.json'), JSON.stringify({
+            ...history,
+            versions: history.versions.map(({ bytes: _bytes, ...entry }) => entry),
+        }), 'utf8');
+        for (const label of ['five', 'six', 'seven']) {
+            expectOk(await writeTable(ref, big(label), { actor: 'user' }));
+        }
+        const kept = (await readHistory()).versions;
+        expect(kept.every((entry) => typeof entry.bytes === 'number')).toBe(true);
+        // Counted as zero, the unsized versions would all have been kept.
+        expect(kept.map((entry) => entry.version)).toEqual([3, 4, 5, 6, 7]);
+        expect(kept.reduce((sum, entry) => sum + (entry.bytes ?? 0), 0)).toBeLessThanOrEqual(16 * 1024 * 1024);
+    });
+
+    it('bounds retained versions by bytes beyond the floor', async () => {
+        const big = (label: string) => demoSpec(`${label} ${'x'.repeat(3 * 1024 * 1024)}`);
+        for (const label of ['two', 'three', 'four', 'five', 'six', 'seven']) {
+            expectOk(await writeTable(ref, big(label), { actor: 'user' }));
+        }
+        const versions = (await readHistory()).versions.map((entry) => entry.version);
+        // Five 3 MiB versions fit in 16 MiB; a sixth would not.
+        expect(versions).toEqual([3, 4, 5, 6, 7]);
+        expect(existsSync(sidecar('v2.json'))).toBe(false);
+        const sizes = (await readHistory()).versions.map((entry) => entry.bytes ?? 0);
+        expect(sizes.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(16 * 1024 * 1024);
+    });
+
+    it('always keeps the last three versions, even when they exceed the byte bound', async () => {
+        const big = (label: string) => demoSpec(`${label} ${'x'.repeat(6 * 1024 * 1024)}`);
+        for (const label of ['two', 'three', 'four', 'five']) {
+            expectOk(await writeTable(ref, big(label), { actor: 'user' }));
+        }
+        const kept = (await readHistory()).versions;
+        // Three 6 MiB versions are 18 MiB: over the byte bound, kept by the floor.
+        expect(kept.map((entry) => entry.version)).toEqual([3, 4, 5]);
+        expect(kept.reduce((sum, entry) => sum + (entry.bytes ?? 0), 0)).toBeGreaterThan(16 * 1024 * 1024);
+        expect(existsSync(sidecar('v2.json'))).toBe(false);
+        // A table this large can still go back two versions.
+        expectOk(await revertTable(ref, 3, { actor: 'user' }));
+    });
+
+    it('refuses a write whose cell evidence is over the cap', async () => {
+        const spec = demoSpec();
+        spec.rows[0].cells.note = {
+            outcome: 'answered',
+            provenance: 'document',
+            value: { kind: 'text', text: 'x' },
+            evidence: Array.from({ length: 8 }, (_, i) => ({ locator: `s${i}`, quote: 'q'.repeat(900) })),
+        };
+        await expect(writeTable(ref, spec, { actor: 'agent' })).rejects.toMatchObject({ code: 'too_large' });
+        const edited = await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: spec.rows[0].cells.note }] }], { actor: 'agent' });
+        expect(edited).toMatchObject({ ok: false, error: { code: 'too_large' } });
+        expect(await storedVersion()).toBe(1);
+    });
+
+    it('reports the cell writes a fill skipped and stores the rest', async () => {
+        await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'answered', provenance: 'user', value: { kind: 'text', text: 'mine' } } }] }], { actor: 'user' });
+        const edited = await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'answered', provenance: 'document', value: { kind: 'text', text: 'filler' } } }] }], { actor: 'agent', run_id: 'fill' });
+        expect(edited).toMatchObject({ ok: true, skipped: [{ row: 'r1', column: 'note', reason: 'user_cell' }] });
+        expect((await readTable(ref)).spec.rows[0].cells.note?.value).toEqual({ kind: 'text', text: 'mine' });
     });
 });

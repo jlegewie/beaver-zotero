@@ -6,7 +6,8 @@ function plural(count: number, noun: string): string {
     return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-type SummaryColumn = { system?: boolean; filled?: number };
+/** `answered` in current summaries; `filled` in results recorded before it. */
+type SummaryColumn = { system?: boolean; answered?: number; filled?: number };
 
 /**
  * "3 rows · 2 columns", or null when the record carries no counts.
@@ -52,7 +53,7 @@ function formatFilledCells(summary: TableView["record"]["summary"]): string | nu
         (column) => column && !column.system,
     );
     if (visible.length === 0) return null;
-    const filled = visible.reduce((sum, column) => sum + (column.filled ?? 0), 0);
+    const filled = visible.reduce((sum, column) => sum + (column.answered ?? column.filled ?? 0), 0);
     return `${filled} of ${plural(summary.rows * visible.length, "cell")} filled`;
 }
 

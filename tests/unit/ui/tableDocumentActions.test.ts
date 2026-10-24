@@ -18,11 +18,16 @@ const spec = {
             id: "r",
             cells: {
                 a: {
+                    outcome: "answered" as const,
+                    provenance: "document" as const,
                     value: { kind: "text" as const, text: "Fresh answer" },
-                    details: {
-                        kind: "text" as const,
-                        text: 'Evidence, with "quotes"',
-                    },
+                    evidence: [
+                        {
+                            locator: "s3",
+                            quote: 'Evidence, with "quotes"',
+                            page: 1,
+                        },
+                    ],
                 },
             },
         },
@@ -110,9 +115,13 @@ it("exports a fresh persisted spec after the originating window picker returns",
     );
     expect(IOUtils.writeUTF8).toHaveBeenCalledWith(
         "/tmp/comparison.csv",
-        expect.stringContaining('"Evidence, with ""quotes"""'),
+        expect.stringContaining("Answer — evidence"),
     );
-    expect(root.textContent).toContain("source and evidence columns");
+    expect(IOUtils.writeUTF8).toHaveBeenCalledWith(
+        "/tmp/comparison.csv",
+        expect.stringContaining('"""Evidence, with ""quotes"""" (p. 2, s3)"'),
+    );
+    expect(root.textContent).toContain("evidence and reasoning columns");
 });
 it("treats cancellation as no action", async () => {
     show.mockResolvedValue(2);

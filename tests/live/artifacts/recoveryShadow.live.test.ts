@@ -124,8 +124,9 @@ function spec(title: string, note: string) {
                 id: 'r1',
                 cells: {
                     note: {
+                        outcome: 'answered' as const,
                         value: { kind: 'text' as const, text: note },
-                        provenance: 'asserted' as const,
+                        provenance: 'document' as const,
                     },
                 },
             },

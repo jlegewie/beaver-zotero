@@ -1,6 +1,6 @@
 import { isTableItemError } from '../../artifacts/tableItemIdentity';
 import type { Cell, Column, Row, TableSpec } from '@beaver/agent-core/layouts/table';
-import { rowIdFor, validateTableSpec, type RowRef } from '@beaver/agent-core/layouts/table';
+import { allocateRowId, validateTableSpec, type Evidence, type RowRef } from '@beaver/agent-core/layouts/table';
 import { zoteroLinkScope, zoteroLinksFor } from '../../artifacts/view/tableLinks';
 import type { TableMutation } from '@beaver/agent-core/layouts/tableMutations';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
@@ -103,8 +103,9 @@ export function yearOf(item: Zotero.Item): string {
     return parsed?.year ? String(parsed.year) : '';
 }
 
-export function citationTag(item: DemoItem, index: number): string {
-    return `<citation id="${item.libraryID}-${item.key}" loc="page${index + 1}"/>`;
+/** Evidence for a demo answer: the quoted sentence on a page of the item's attachment. */
+export function evidenceFor(item: DemoItem, quote: string, index: number): Evidence[] {
+    return item.attachmentKey && quote ? [{ locator: `page${index + 1}`, quote, page: index }] : [];
 }
 
 export function sentence(text: string, index: number): string {
@@ -113,8 +114,16 @@ export function sentence(text: string, index: number): string {
     return picked.length > 150 ? `${picked.slice(0, 147)}…` : picked;
 }
 
-export function textCell(text: string): Cell {
-    return text ? { value: { kind: 'text', text }, provenance: 'asserted' } : {};
+export function textCell(text: string, evidence: Evidence[] = []): Cell | undefined {
+    if (!text) return undefined;
+    return evidence.length
+        ? { outcome: 'answered', value: { kind: 'text', text }, provenance: 'document', evidence }
+        : { outcome: 'answered', value: { kind: 'text', text }, provenance: 'metadata' };
+}
+
+/** Sets a cell, leaving it unattempted when there is nothing to write. */
+function put(row: Row, columnId: string, cell: Cell | undefined): void {
+    if (cell) row.cells[columnId] = cell;
 }
 
 export function typeColumn(items: DemoItem[]): Column {
@@ -136,8 +145,9 @@ export function typeLabelFor(item: DemoItem): string {
 
 export function typeCell(item: DemoItem): Cell {
     return {
+        outcome: 'answered',
         value: { kind: 'select', label: typeLabelFor(item) },
-        provenance: 'imported',
+        provenance: 'system',
     };
 }
 
@@ -151,33 +161,32 @@ export async function buildDemoTable(
         : buildSearchDemo(items);
 }
 
-export function referenceRow(item: DemoItem, index: number, withAbstract = true): Row {
+export function referenceRow(item: DemoItem): Row {
+    const libraryRef = item.libraryRef ?? 'u';
     const ref: RowRef = {
         kind: 'item',
         library_id: item.libraryID,
         zotero_key: item.key,
-        library_ref: item.libraryRef,
+        library_ref: libraryRef,
         attachment: item.attachmentKey
-            ? { library_id: item.libraryID, zotero_key: item.attachmentKey, library_ref: item.libraryRef }
+            ? { library_id: item.libraryID, zotero_key: item.attachmentKey, library_ref: libraryRef }
             : undefined,
     };
     return {
-        id: rowIdFor(ref),
+        id: allocateRowId(),
         ref,
         cells: {
             ref: {
+                outcome: 'answered',
                 value: {
                     kind: 'reference',
                     display_name: item.title,
+                    title: item.title,
                     subtitle: item.creators,
                     venue: item.venue || undefined,
                     item_type: item.itemType,
                 },
-                provenance: 'asserted',
-                details:
-                    withAbstract && item.abstract
-                        ? { kind: 'text', label: 'Abstract', text: item.abstract }
-                        : undefined,
+                provenance: 'system',
             },
             _type: typeCell(item),
         },
@@ -207,36 +216,36 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
     ];
 
     const rows: Row[] = items.map((item, i) => {
-        // No abstract on the reference cell: this table has a column for it,
-        // and carrying both prints it twice in the expanded row.
-        const row = referenceRow(item, i, false);
-        row.cells.year = item.year
-            ? { value: { kind: 'date', value: item.year }, provenance: 'asserted' }
-            : {};
+        const row = referenceRow(item);
+        if (item.year)
+            row.cells.year = { outcome: 'answered', value: { kind: 'date', value: item.year }, provenance: 'system' };
         // Stand-in metrics: the demo is about the rendering, not the numbers.
         row.cells.cites = {
+            outcome: 'answered',
             value: { kind: 'number', value: (i + 1) * 137 },
-            provenance: 'asserted',
+            provenance: 'system',
         };
         row.cells.type = {
+            outcome: 'answered',
             value: { kind: 'select', label: selectLabelFor(item.itemType) },
-            provenance: 'asserted',
+            provenance: 'system',
         };
         row.cells.oa = {
+            outcome: 'answered',
             value: { kind: 'boolean', value: i % 3 !== 0 },
-            provenance: 'asserted',
+            provenance: 'system',
         };
-        row.cells.abstract = textCell(item.abstract);
-        row.cells.doi = item.doi
-            ? {
-                  value: {
-                      kind: 'link',
-                      url: `https://doi.org/${item.doi}`,
-                      label: item.doi,
-                  },
-                  provenance: 'asserted',
-              }
-            : {};
+        put(row, 'abstract', textCell(item.abstract));
+        if (item.doi)
+            row.cells.doi = {
+                outcome: 'answered',
+                value: {
+                    kind: 'link',
+                    url: `https://doi.org/${item.doi}`,
+                    label: item.doi,
+                },
+                provenance: 'system',
+            };
         return row;
     });
 
@@ -248,22 +257,23 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
         error: 'Metadata could not be retrieved from the source',
         cells: {
             ref: {
+                outcome: 'answered',
                 value: {
                     kind: 'reference',
                     display_name: 'A result whose metadata failed to load',
                     subtitle: 'openalex',
                     venue: 'demo-failed',
                 },
-                provenance: 'asserted',
+                provenance: 'system',
             },
-            abstract: { status: 'error', error: 'No abstract available' },
+            abstract: { outcome: 'failed', provenance: 'metadata', error: 'No abstract available' },
         },
     });
 
     return {
         id: 'demo-search',
         title: 'External search — demo',
-        caption: 'Built from your library. Citation counts and OA flags are stand-ins.',
+        description: 'Built from your library. Citation counts and OA flags are stand-ins.',
         anchor_column_id: 'ref',
         columns,
         rows,
@@ -321,46 +331,43 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
     const designs = ['RCT', 'Quasi-experiment', 'Observational', 'Unclear'];
 
     const rows: Row[] = items.map((item, i) => {
-        const row = referenceRow(item, i);
-        row.cells.year = item.year
-            ? { value: { kind: 'date', value: item.year }, provenance: 'asserted' }
-            : {};
-        // A citation tag per cell, so the marker, its tooltip and the source
-        // list all have something real to resolve against.
-        const cite = citationTag(item, i);
-        // Short, the way a real extracted field is: the citation marker rides
-        // at the end of the claim, and a paragraph long enough to be clamped
-        // would hide it.
-        row.cells.sample = {
-            ...textCell(
-                item.abstract ? `${sentence(item.abstract, 0)} ${cite}` : ''
-            ),
-            // One hand-edited cell, so a second provenance shows up.
-            provenance: i === 1 ? 'user' : 'asserted',
+        const row = referenceRow(item);
+        if (item.year)
+            row.cells.year = { outcome: 'answered', value: { kind: 'date', value: item.year }, provenance: 'system' };
+        // Short, the way a real extracted field is, each with its evidence so
+        // the marker, its tooltip and the source list have something real to
+        // resolve against.
+        const answer = (index: number) => {
+            const text = item.abstract ? sentence(item.abstract, index) : '';
+            return textCell(text, evidenceFor(item, text, i));
         };
+        const sample = answer(0);
+        // One hand-edited cell, so a second provenance shows up.
+        put(row, 'sample', sample && i === 1
+            ? { outcome: 'answered', value: sample.value, provenance: 'user' }
+            : sample);
         row.cells.design = {
+            outcome: 'answered',
             value: { kind: 'select', label: designs[i % designs.length] },
-            provenance: 'asserted',
+            provenance: 'document',
+            reasoning: 'Stand-in judgment for the demo.',
         };
-        // A cell the producer reports nothing for is a finding, not a gap.
-        row.cells.effect =
+        // A cell the paper reports nothing for is a finding, not a gap.
+        put(row, 'effect',
             i === 2
-                ? {}
+                ? { outcome: 'not_reported', provenance: 'document' }
                 : i === 3
-                  ? { status: 'error', error: 'The PDF has no extractable text layer' }
-                  : textCell(`${sentence(item.abstract, 1)} ${cite}`);
-        // The filling column: the first few are done, the rest are pending.
-        row.cells.retention =
-            i < 3
-                ? textCell(`${sentence(item.abstract, 2)} ${cite}`)
-                : { status: 'pending' };
+                  ? { outcome: 'failed', provenance: 'document', error: 'The PDF has no extractable text layer' }
+                  : answer(1));
+        // The filling column: the first few are done, the rest unattempted.
+        if (i < 3) put(row, 'retention', answer(2));
         return row;
     });
 
     return {
         id: 'demo-extraction',
         title: 'Extraction — demo',
-        caption: 'Built from your library. Cell contents are excerpts, not real extractions.',
+        description: 'Built from your library. Cell contents are excerpts, not real extractions.',
         anchor_column_id: 'ref',
         columns,
         rows,
@@ -370,34 +377,6 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
             allow_add_row: true,
         },
         cost_estimate: { per_row_credits: 1, estimated_seconds: 40 },
-        citations: items.map((item, i) => ({
-            citation_id: `${item.key}-${i}`,
-            // The tag exactly as the cells carry it, so the key the renderer
-            // derives from the text is one this citation answers to.
-            raw_tag: citationTag(item, i),
-            requested_ref: {
-                kind: 'zotero' as const,
-                library_id: item.libraryID,
-                zotero_key: item.key,
-                loc: {
-                    kind: 'page' as const,
-                    value: String(i + 1),
-                    raw: `page${i + 1}`,
-                },
-            },
-            resolved_ref: {
-                kind: 'zotero' as const,
-                library_id: item.libraryID,
-                zotero_key: item.key,
-            },
-            citation_type: 'attachment' as const,
-            display_name: `${item.creators.split(',')[0]} ${item.year}`.trim(),
-            formatted_citation: [item.creators, item.year, item.title, item.venue]
-                .filter(Boolean)
-                .join('. '),
-            preview: item.abstract.slice(0, 180),
-            pages: [i + 1],
-        })),
     };
 }
 

@@ -47,7 +47,7 @@ describe("historical table cards", () => {
         expect(html).not.toContain("columns removed");
         expect(html).not.toContain("Changes are committed");
     });
-    it("summarizes a creation in one line of visible columns and filled cells", () => {
+    it.each(["answered", "filled"])("summarizes a creation in one line of visible columns and %s cells", (count) => {
         const html = renderToStaticMarkup(
             React.createElement(TableResultView, {
                 view: {
@@ -60,7 +60,7 @@ describe("historical table cards", () => {
                             rows: 5,
                             columns: 4,
                             columns_detail: {
-                                paper: { filled: 5 }, _year: { system: true, filled: 5 }, _doi: { system: true, filled: 4 }, q: { filled: 4 },
+                                paper: { [count]: 5 }, _year: { system: true, [count]: 5 }, _doi: { system: true, [count]: 4 }, q: { [count]: 4 },
                             } as never,
                         },
                         changes: { rows_added: 5, columns_added: 4, cells_changed: 10 },

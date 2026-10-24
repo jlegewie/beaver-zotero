@@ -1,0 +1,243 @@
+{
+    "name": "reasoning over 1000 bytes is too large",
+    "before": {
+        "id": "t1",
+        "spec_version": 1,
+        "title": "Sampling methods",
+        "description": "How the papers sampled their respondents.",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAA",
+                    "u-BBB",
+                    "u-CCC"
+                ]
+            }
+        ],
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "_year",
+                "header": "Year",
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "_identifier",
+                "header": "Identifier",
+                "type": "link",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "library_id": 1
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha 2020",
+                            "title": "Sampling hard-to-reach groups",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "_identifier": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "link",
+                            "url": "https://doi.org/10.1000/alpha",
+                            "label": "10.1000/alpha"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "document",
+                        "value": {
+                            "kind": "text",
+                            "text": "Telephone survey"
+                        },
+                        "evidence": [
+                            {
+                                "locator": "s12-s13",
+                                "quote": "Respondents were sampled by random digit dialing.",
+                                "page": 3,
+                                "boxes": [
+                                    [
+                                        72,
+                                        410,
+                                        523,
+                                        436
+                                    ]
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB",
+                    "library_id": 1
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta 2019",
+                            "title": "Mail surveys revisited",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2019"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "metadata",
+                        "value": {
+                            "kind": "text",
+                            "text": "Mail survey"
+                        },
+                        "evidence": [
+                            {
+                                "quote": "A mail survey of 2,000 households.",
+                                "field": "abstract"
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCC",
+                    "library_id": 1
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Gamma 2021",
+                            "title": "Register studies in practice",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2021"
+                        }
+                    }
+                }
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "set_cells",
+            "cells": [
+                {
+                    "row": "r3",
+                    "column": "method",
+                    "cell": {
+                        "outcome": "answered",
+                        "provenance": "document",
+                        "value": {
+                            "kind": "text",
+                            "text": "x"
+                        },
+                        "evidence": [
+                            {
+                                "locator": "s12-s13",
+                                "quote": "Respondents were sampled by random digit dialing.",
+                                "page": 3,
+                                "boxes": [
+                                    [
+                                        72,
+                                        410,
+                                        523,
+                                        436
+                                    ]
+                                ]
+                            }
+                        ],
+                        "reasoning": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+                    }
+                }
+            ]
+        }
+    ],
+    "error": {
+        "code": "too_large"
+    }
+}

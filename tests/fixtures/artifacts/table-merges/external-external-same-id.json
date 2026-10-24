@@ -1,0 +1,144 @@
+{
+    "name": "the same external work from two searches is one row",
+    "existing": [],
+    "incoming": [
+        {
+            "row": {
+                "id": "r1",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W1",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W1",
+                        "title": "Sampling hard-to-reach groups online"
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "row": {
+                "id": "r2",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W1",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W1",
+                        "title": "Sampling hard-to-reach groups online"
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s3",
+                        "date": "2026-10-21"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    "after": {
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W1",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W1",
+                        "title": "Sampling hard-to-reach groups online",
+                        "library_items": [],
+                        "oa_candidates": []
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        },
+                        "provenance": "system"
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        },
+                        "provenance": "system"
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    },
+                    {
+                        "source": "s3",
+                        "date": "2026-10-21"
+                    }
+                ]
+            }
+        ],
+        "added": [
+            "r1"
+        ],
+        "merged": 1
+    }
+}

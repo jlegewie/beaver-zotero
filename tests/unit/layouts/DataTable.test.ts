@@ -3,7 +3,11 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TableSpec } from "@beaver/agent-core/layouts/table";
+import type {
+    Cell,
+    CellValue,
+    TableSpec,
+} from "@beaver/agent-core/layouts/table";
 import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { DataTable } from "@beaver/agent-ui/layouts/DataTable";
 import {
@@ -18,6 +22,10 @@ const externalRef: ExternalReference = {
     title: "Alpha",
     library_items: [],
 };
+
+function answered(value: CellValue): Cell {
+    return { outcome: "answered", provenance: "document", value };
+}
 
 const spec: TableSpec = {
     id: "t",
@@ -56,25 +64,34 @@ const spec: TableSpec = {
             },
             cells: {
                 ref: {
+                    outcome: "answered",
+                    provenance: "system",
                     value: {
                         kind: "reference",
                         display_name: "Smith 2020",
                         subtitle: "Alpha",
                     },
-                    details: {
-                        kind: "text",
-                        text: "An abstract about alpha.",
-                        label: "Abstract",
-                    },
                 },
-                cites: { value: { kind: "number", value: 120 } },
-                type: { value: { kind: "select", label: "Article" } },
-                oa: { value: { kind: "boolean", value: true } },
-                methods: { value: { kind: "text", text: "Survey" } },
+                cites: answered({ kind: "number", value: 120 }),
+                type: answered({ kind: "select", label: "Article" }),
+                oa: answered({ kind: "boolean", value: true }),
+                methods: {
+                    outcome: "answered",
+                    provenance: "document",
+                    value: { kind: "text", text: "Survey" },
+                    reasoning: "The methods section names one instrument.",
+                    evidence: [
+                        {
+                            locator: "s3",
+                            quote: "We surveyed 1,200 adults.",
+                            page: 2,
+                        },
+                    ],
+                },
             },
         },
         {
-            id: "item:u:K2",
+            id: "rK2",
             ref: {
                 kind: "item",
                 library_id: 1,
@@ -83,12 +100,14 @@ const spec: TableSpec = {
             },
             cells: {
                 ref: {
+                    outcome: "answered",
+                    provenance: "system",
                     value: { kind: "reference", display_name: "Jones 2018" },
                 },
-                cites: { value: { kind: "number", value: 7 } },
-                type: { value: { kind: "select", label: "Book" } },
-                oa: { value: { kind: "boolean", value: false } },
-                methods: { status: "pending" },
+                cites: answered({ kind: "number", value: 7 }),
+                type: answered({ kind: "select", label: "Book" }),
+                oa: answered({ kind: "boolean", value: false }),
+                methods: { outcome: "not_reported", provenance: "document" },
             },
         },
         {
@@ -97,10 +116,16 @@ const spec: TableSpec = {
             error: "No text layer",
             cells: {
                 ref: {
+                    outcome: "answered",
+                    provenance: "system",
                     value: { kind: "reference", display_name: "Adams 2022" },
                 },
-                type: { value: { kind: "select", label: "Article" } },
-                methods: { status: "error", error: "Extraction failed" },
+                type: answered({ kind: "select", label: "Article" }),
+                methods: {
+                    outcome: "failed",
+                    provenance: "document",
+                    error: "Extraction failed",
+                },
             },
         },
     ],
@@ -174,7 +199,7 @@ describe("DataTable", () => {
         ).toBe("What method did the study use?");
     });
 
-    it("distinguishes filled, empty, pending and failed cells", () => {
+    it("distinguishes filled, empty, not-reported and failed cells", () => {
         mount(React.createElement(DataTable, { table: spec }));
         const rows = container!.querySelectorAll("tr.bt-row");
 
@@ -185,7 +210,10 @@ describe("DataTable", () => {
 
         // False renders the marker with no glyph — the check is the signal.
         expect(rows[1].querySelector(".bt-bool-no")?.textContent).toBe("");
-        expect(rows[1].querySelector(".bt-skeleton")).not.toBeNull();
+        // Not reported is a finding, so it reads as a value.
+        expect(
+            rows[1].querySelector('[id="rK2/methods"] .bt-empty')?.textContent,
+        ).toBe("Not reported");
 
         // An absent value renders blank rather than a placeholder glyph; what
         // is missing is counted in the footer instead.
@@ -214,30 +242,51 @@ describe("DataTable", () => {
         expect(container!.querySelector("th[aria-sort]")).toBeNull();
     });
 
-    it("expands a row into every field in full, including cell details", () => {
+    it("expands a row into every written cell, with its reasoning and evidence", () => {
         mount(React.createElement(DataTable, { table: spec }));
         expect(container!.querySelector(".bt-detail")).toBeNull();
 
         click(container!.querySelector("tr.bt-row .bt-rail-chevron"));
 
         const detail = container!.querySelector(".bt-detail")!;
-        expect(detail.textContent).toContain("An abstract about alpha.");
-        // The label is the field's name and nothing else repeats it.
-        expect(detail.textContent!.match(/Abstract/g)).toHaveLength(1);
         expect(
             Array.from(detail.querySelectorAll("dt")).map(
                 (dt) => dt.textContent,
             ),
-            // The labelled abstract is a field of its own, after the cell it
-            // belongs to.
-        ).toEqual([
-            "Item",
-            "Abstract",
-            "Citations",
-            "Type",
-            "Open access",
-            "Methods",
-        ]);
+        ).toEqual(["Item", "Citations", "Type", "Open access", "Methods"]);
+
+        const methods = detail.querySelectorAll("dd")[4];
+        expect(methods.querySelector(".bt-details-text")?.textContent).toBe(
+            "The methods section names one instrument.",
+        );
+        // Each evidence entry is a quote followed by its citation, rendered
+        // from the assembled citation with no citation store behind it.
+        expect(
+            Array.from(methods.querySelectorAll(".bt-details-list li")).map(
+                (li) => li.textContent,
+            ),
+        ).toEqual(["“We surveyed 1,200 adults.” Smith 2020, p.3"]);
+    });
+
+    it("lists a failed or not-reported cell in the expanded row, but not an unattempted one", () => {
+        mount(React.createElement(DataTable, { table: spec }));
+        // Sorted by citations: the second row is the item row.
+        click(container!.querySelectorAll(".bt-rail-chevron")[1]);
+        const fields = Array.from(
+            container!.querySelectorAll(".bt-detail dt"),
+        ).map((dt) => dt.textContent);
+        expect(fields).toContain("Methods");
+
+        act(() => root?.unmount());
+        container?.remove();
+        mount(React.createElement(DataTable, { table: spec }));
+        click(container!.querySelectorAll(".bt-rail-chevron")[2]);
+        // The third row never had citations or open access attempted.
+        expect(
+            Array.from(container!.querySelectorAll(".bt-detail dt")).map(
+                (dt) => dt.textContent,
+            ),
+        ).toEqual(["Item", "Type", "Methods"]);
     });
 
     it("spans the detail row across every column", () => {
@@ -469,11 +518,17 @@ describe("DataTable", () => {
                             ...itemRow,
                             cells: {
                                 ...itemRow.cells,
-                                // The anchor is still filling…
-                                ref: { status: "pending" },
+                                // The anchor failed…
+                                ref: {
+                                    outcome: "failed",
+                                    provenance: "system",
+                                    error: "Could not load the item",
+                                },
                                 // …and a second reference column must not grow
                                 // a copy of the row's verbs, nor a title verb.
                                 cites_ref: {
+                                    outcome: "answered",
+                                    provenance: "system",
                                     value: {
                                         kind: "reference",
                                         display_name: "Smith 2020",
@@ -526,6 +581,71 @@ describe("DataTable", () => {
         expect(
             actions.querySelector('button[aria-label="More actions"]'),
         ).not.toBeNull();
+    });
+
+    it("marks unsure, stale, metadata-only and user-owned cells", () => {
+        const text = (value: string): CellValue => ({
+            kind: "text",
+            text: value,
+        });
+        const table: TableSpec = {
+            id: "states",
+            columns: [{ id: "m", header: "Methods", type: "text" }],
+            rows: [
+                {
+                    id: "unsure",
+                    cells: { m: { ...answered(text("Survey")), unsure: true } },
+                },
+                {
+                    id: "stale",
+                    cells: { m: { ...answered(text("Panel")), stale: true } },
+                },
+                {
+                    id: "metadata",
+                    cells: {
+                        m: {
+                            outcome: "answered",
+                            provenance: "metadata",
+                            value: text("Interviews"),
+                            evidence: [{ quote: "Interviews", field: "abstract" }],
+                        },
+                    },
+                },
+                {
+                    id: "cleared",
+                    cells: { m: { outcome: "cleared", provenance: "user" } },
+                },
+                {
+                    id: "edited",
+                    cells: {
+                        m: {
+                            outcome: "answered",
+                            provenance: "user",
+                            value: text("Experiment"),
+                        },
+                    },
+                },
+                {
+                    id: "blanked",
+                    cells: { m: { outcome: "not_reported", provenance: "user" } },
+                },
+            ],
+        };
+        mount(React.createElement(DataTable, { table }));
+        const cell = (rowId: string) =>
+            container!.querySelector(`[id="${rowId}/m"]`)!;
+
+        expect(cell("unsure").textContent).toBe("Survey · Unsure");
+        expect(cell("stale").textContent).toBe("Panel · Stale");
+        expect(
+            cell("metadata").querySelector(".bt-metadata-only")?.textContent,
+        ).toBe(" · From title and abstract");
+        expect(cell("cleared").textContent).toBe(" · Cleared by you");
+        expect(cell("edited").querySelector(".bt-edited")).not.toBeNull();
+        expect(
+            cell("edited").querySelector('.bt-edit-mark[title="Edited by you"]'),
+        ).not.toBeNull();
+        expect(cell("blanked").textContent).toBe("Not reported · Edited by you");
     });
 
     it("renders the empty text for a table without rows", () => {
@@ -689,15 +809,18 @@ describe("DataTable — density, columns and expansion", () => {
         // An in-place update brings an annotation row: the type column is now
         // due by default, and the viewer's own choice about Citations stands.
         const annotationRow = {
-            id: "item:1:A",
+            id: "rA",
             ref: {
                 kind: "annotation" as const,
+                library_ref: "u",
                 library_id: 1,
                 zotero_key: "A",
-                attachment: { library_id: 1, zotero_key: "F" },
+                attachment: { library_ref: "u", library_id: 1, zotero_key: "F" },
             },
             cells: {
                 ref: {
+                    outcome: "answered" as const,
+                    provenance: "system" as const,
                     value: { kind: "annotation" as const, text: "A passage" },
                 },
             },
@@ -784,14 +907,7 @@ describe("DataTable — density, columns and expansion", () => {
             Array.from(container!.querySelectorAll(".bt-detail dt")).map(
                 (dt) => dt.textContent,
             ),
-        ).toEqual([
-            "Item",
-            "Abstract",
-            "Citations",
-            "Type",
-            "Open access",
-            "Methods",
-        ]);
+        ).toEqual(["Item", "Citations", "Type", "Open access", "Methods"]);
     });
 
     it("keeps a failed column in the expanded row and offers its retry", () => {

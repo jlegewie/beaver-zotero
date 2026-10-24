@@ -132,7 +132,7 @@ export function TableSurface({
         <section className={`bt-surface${className ? ` ${className}` : ""}`}>
             <TableTitleBar
                 title={heading}
-                subtitle={subtitle ?? table.caption}
+                subtitle={subtitle ?? table.description}
                 icon={icon}
                 actions={headerActions}
             />

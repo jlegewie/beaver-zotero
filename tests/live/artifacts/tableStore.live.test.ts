@@ -5,9 +5,9 @@
  * What only a real instance can show: that creation seeds the log at version 1
  * and seals it, that a run's writes collapse onto one version while the created
  * version survives underneath them, that the write protocol produces the storage
- * layout it claims (`beaver/history.json` plus one `v<N>.json` per version,
- * beside the rendered `.html`), that the document round-trips back through the
- * parse path, that a revert moves forward rather than back — including all the
+ * layout it claims (`table.json`, `beaver/history.json` plus one `v<N>.json`
+ * per version, beside the rendered `.html`), that the table reads back from
+ * `table.json`, that a revert moves forward rather than back — including all the
  * way to version 1 — and that a write leaves the attachment marked `to_upload`,
  * the one step whose omission is silent and costly because the new bytes then
  * sit locally with nothing to tell Zotero they changed.
@@ -108,8 +108,9 @@ function spec(title: string, note: string) {
                 id: 'r1',
                 cells: {
                     note: {
+                        outcome: 'answered' as const,
                         value: { kind: 'text' as const, text: note },
-                        provenance: 'asserted' as const,
+                        provenance: 'document' as const,
                     },
                 },
             },
@@ -221,7 +222,7 @@ describe('writing versions', () => {
         }
     });
 
-    it('reads the newest spec back through the document parse path', async () => {
+    it('reads the newest spec back from table.json', async () => {
         const read = await post<ReadResponse>('/beaver/test/table-read', {
             key: table!.key,
             libraryID: table!.libraryID,
@@ -711,48 +712,5 @@ describe('trim boundaries and stored citation cleanup', () => {
         expect(opened.version).toBe(oldest);
         expect(opened.conflict).toBeNull();
         expect(opened.history).toHaveLength(1);
-    });
-
-    it('prunes a cleared stored citation while retaining a shared citation and its parent metadata', async () => {
-        const table = await makeTable('Live citation pruning');
-        tables.push(table);
-        const at = { key: table.key, libraryID: table.libraryID };
-        const tag = '<citation id="1-CHILD001"/>';
-        const cited = spec('Live citation pruning', `Evidence ${tag}`);
-        cited.rows.push({ ...cited.rows[0], id: 'r2' });
-        const parent_ref = { kind: 'zotero', library_id: 1, zotero_key: 'PARENT01' };
-        await post('/beaver/test/table-write', {
-            ...at,
-            actor: 'user',
-            spec: {
-                ...cited,
-                citations: [
-                    { citation_id: 'live-citation', raw_tag: tag, parent_ref },
-                    { citation_id: 'unused', raw_tag: '<citation id="1-UNUSED01"/>' },
-                ],
-            },
-        });
-        const edit = (rows: string[]) =>
-            post('/beaver/test/table-edit', {
-                ...at,
-                actor: 'user',
-                mutations: [
-                    {
-                        op: 'set_cells',
-                        cells: rows.map((row) => ({ row, column: 'note', cell: {} })),
-                    },
-                ],
-            });
-        await edit(['r1']);
-        const shared = await post<any>('/beaver/test/table-open', at);
-        expect(shared.spec.citations).toEqual([
-            { citation_id: 'live-citation', raw_tag: tag, parent_ref },
-        ]);
-        await edit(['r2']);
-        const cleared = await post<any>('/beaver/test/table-open', at);
-        expect(cleared.spec.citations).toEqual([]);
-        expect(
-            JSON.parse(await readFile(sidecar(table, `v${cleared.version}.json`), 'utf8')).citations
-        ).toEqual([]);
     });
 });

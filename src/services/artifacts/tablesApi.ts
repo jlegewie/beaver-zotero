@@ -101,8 +101,11 @@ export interface TablesApi {
         options?: { timeoutMs?: number }
     ): Promise<ReaderTableDiagnostics>;
 
-    /** Marks open snapshots as outdated after a persisted write. */
-    tableChanged(ref: TableRef): void;
+    /**
+     * Marks open snapshots as outdated after a persisted write. With `sha256`,
+     * only those not already showing that spec.
+     */
+    tableChanged(ref: TableRef, sha256?: string): void;
     local: {
         commands(win: Window): TableLocalCommands;
     };
