@@ -81,10 +81,11 @@ const MISSING_KEY_ZOTERO = 'ZZZZTEST';
 /**
  * Priority for every job a test expects to be claimed.
  *
- * Jobs at or above `LOW_PRIORITY_CEILING` (100, also the enqueue default)
- * require background processing to be enabled (off by default), plus either
- * a pending "Process now" drain or at least 30s of OS idle time. Use a priority
- * below the ceiling so drain tests do not depend on that preference or idle time.
+ * Jobs at or above `LOW_PRIORITY_CEILING` (100, also the enqueue default) wait
+ * for a pending "Process now" drain or at least 30s of OS idle time. Above the
+ * local extraction band (100-104) they also require background processing to
+ * be enabled. Use a priority below the ceiling so drain tests do not depend on
+ * that preference or idle time.
  * Tests that assert queue bookkeeping use explicit priorities of their own.
  */
 const DRAIN_PRIORITY = 10;

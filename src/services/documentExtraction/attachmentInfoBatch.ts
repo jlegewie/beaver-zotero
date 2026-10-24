@@ -7,9 +7,11 @@ import { modelObjectId } from '../../utils/libraryIdentity';
 
 /**
  * Batch-fetch the "best attachment" for multiple parent items in a single SQL query.
+ * `contentTypes` (lowercase) restricts the candidates, e.g. to the types Beaver can extract.
  */
 export async function getBestAttachmentBatch(
     parentItemIds: number[],
+    contentTypes?: readonly string[],
 ): Promise<Map<number, number>> {
     const result = new Map<number, number>();
     if (parentItemIds.length === 0) return result;
@@ -18,6 +20,9 @@ export async function getBestAttachmentBatch(
     for (let i = 0; i < parentItemIds.length; i += CHUNK_SIZE) {
         const chunk = parentItemIds.slice(i, i + CHUNK_SIZE);
         const placeholders = chunk.map(() => '?').join(',');
+        const contentTypeFilter = contentTypes?.length
+            ? `AND LOWER(IA.contentType) IN (${contentTypes.map(() => '?').join(',')})`
+            : '';
 
         const sql = `
             WITH ranked AS (
@@ -43,6 +48,7 @@ export async function getBestAttachmentBatch(
                 WHERE IA.parentItemID IN (${placeholders})
                   AND DI.itemID IS NULL
                   AND IA.linkMode != ${Zotero.Attachments.LINK_MODE_LINKED_URL}
+                  ${contentTypeFilter}
             )
             SELECT parentItemID, attachmentItemID
             FROM ranked
@@ -50,7 +56,7 @@ export async function getBestAttachmentBatch(
         `;
 
         const rows: { parentItemID: number; attachmentItemID: number }[] = [];
-        await Zotero.DB.queryAsync(sql, chunk, {
+        await Zotero.DB.queryAsync(sql, [...chunk, ...(contentTypes ?? [])], {
             onRow: (row: any) => {
                 rows.push({
                     parentItemID: row.getResultByIndex(0),

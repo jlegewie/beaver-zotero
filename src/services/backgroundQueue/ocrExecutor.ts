@@ -28,7 +28,10 @@ import {
 import { ExternalAbortError } from '../agentDataProvider/timeout';
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../documentExtraction/ocrReextract';
 import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
-import { getRemoteFileHash } from '../documentFileIdentity';
+import { getFileSignature, getRemoteFileHash } from '../documentFileIdentity';
+import { storeEmbeddingText } from '../documentExtraction/embeddingTextStore';
+import { isLibraryInScope } from '../libraryScope';
+import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 import type { ProtectedRepreparation } from '../documentCache';
 import {
     backgroundProcessingEnabled,
@@ -890,6 +893,23 @@ export class OcrExecutor implements JobExecutor {
                     });
                     if (!applied) return { kind: 'complete', reason: 'stale_completion_ignored' };
                     this.reportTerminalOutcome(job, 'ocr_extracted');
+                    // OCR does not pass through the extract executor and emits no
+                    // Zotero event, so derive the scan's embedding text here.
+                    if (isLibraryInScope(job.item.libraryID)) {
+                        try {
+                            await storeEmbeddingText({
+                                db: ctx.db,
+                                item: job.item,
+                                kind: 'pdf',
+                                document: document as DocumentExtractResult,
+                                fileSignature: await getFileSignature(job.filePath),
+                                fileHash: job.fileHash,
+                                extractionSource: 'ocr',
+                            });
+                        } catch (error) {
+                            logger(`OcrExecutor: ${job.sourceKey} storing embedding text failed: ${error}`, 2);
+                        }
+                    }
                     if (
                         applied
                         && previous?.structuredDocumentHash !== structuredDocumentHash

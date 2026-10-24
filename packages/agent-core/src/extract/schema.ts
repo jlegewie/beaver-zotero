@@ -35,6 +35,11 @@ export interface StructuredExtractResult extends ExtractResultBase {
     mode: "structured";
     document: StructuredDocument;
     debug?: ExtractionDebug;
+    /**
+     * Title from the PDF Info dictionary, when present. File metadata rather
+     * than document content: it is not part of the document's index identity.
+     */
+    infoTitle?: string;
 }
 
 export interface StructuredExtractWithDebugResult {
