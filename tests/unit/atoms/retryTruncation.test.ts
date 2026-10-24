@@ -46,6 +46,7 @@ const {
     // The FIRST await, reached only when the retried run is still live.
     cancelMock: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock('../../../src/services/zoteroFulltext/state', () => ({ getZoteroFulltextState: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../../src/services/searchIndexState', () => ({ getSearchIndexState: vi.fn() }));
 import { getSearchIndexState } from '../../../src/services/searchIndexState';
 vi.mock('@beaver/agent-core/transport/agentService', () => ({

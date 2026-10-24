@@ -18,6 +18,7 @@ export { handleExternalReferenceCheckRequest } from './agentDataProvider/handleE
 export { handleItemSearchByMetadataRequest } from './agentDataProvider/handleItemSearchByMetadataRequest';
 export { handleItemSearchByTopicRequest } from './agentDataProvider/handleItemSearchByTopicRequest';
 export { handleResolveSearchFiltersRequest } from './agentDataProvider/handleResolveSearchFiltersRequest';
+export { handleZoteroFulltextSearchRequest } from './agentDataProvider/handleZoteroFulltextSearchRequest';
 export { handleItemQuickSearchRequest } from './agentDataProvider/handleItemQuickSearchRequest';
 export { handleZoteroSearchRequest } from './agentDataProvider/handleZoteroSearchRequest';
 export { handleListItemsRequest } from './agentDataProvider/handleListItemsRequest';

@@ -37,7 +37,6 @@ import {
 } from '../documentExtraction/shared/extractionSchemaVersions';
 import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
-    MAX_PDF_TIMEOUT_SECONDS,
     TimeoutError,
     awaitWithRequestAbort,
     createTimeoutController,
@@ -49,7 +48,6 @@ import {
     notifyRemoteDownloadFailure,
     notifyRemoteFileNotSynced,
     preflightZoteroAttachmentRequest,
-    isLibrarySearchable,
     validateZoteroItemReference,
 } from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
@@ -59,6 +57,7 @@ import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import { isTableItem } from '../artifacts/tableItemIdentity';
 import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import { withWorkerDiagnostics } from './workerDiagnostics';
+import { enqueuePdfExtractionRetry } from './pdfExtractionRetry';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
 import { getBestAttachmentBatch } from '../documentExtraction/attachmentInfoBatch';
@@ -761,32 +760,16 @@ export async function handleZoteroDocumentRequest(
                 libraryId: resolvedLibraryId,
                 zoteroKey: attachment.zotero_key,
             };
-            try {
-                // Exclusions can change while the foreground extraction is in
-                // flight. Recheck the live boundary before staging follow-up
-                // work so an excluded library never reaches the queue. A
-                // non-current schema version is on-demand only: the background
-                // queue produces and caches the current version.
-                if (isCurrentExtractionSchemaVersion('pdf', request.schema_version)
-                    && isLibrarySearchable(target.libraryId)) {
-                    await Zotero.Beaver?.db?.enqueueBackgroundJob({
-                        jobType: 'document_extract',
-                        libraryId: target.libraryId,
-                        zoteroKey: target.zoteroKey,
-                        contentKind: 'pdf',
-                        payloadKind: mode,
-                        priority: 50,
-                        payload: {
-                            content_kind: 'pdf',
-                            maxPages: max_pages ?? null,
-                            timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS,
-                        },
-                        now: Date.now(),
-                    });
-                    Zotero.Beaver?.backgroundExtractor?.notify();
-                }
-            } catch (e) {
-                logger(`handleZoteroDocumentRequest: background enqueue failed: ${e}`, 1);
+            // A non-current schema version is on-demand only: the background
+            // queue produces and caches the current version.
+            if (isCurrentExtractionSchemaVersion('pdf', request.schema_version)) {
+                await enqueuePdfExtractionRetry({
+                    libraryId: target.libraryId,
+                    zoteroKey: target.zoteroKey,
+                    mode,
+                    maxPages: max_pages ?? null,
+                    logContext: 'handleZoteroDocumentRequest',
+                });
             }
             return withWorkerDiagnostics(
                 errorResponse(

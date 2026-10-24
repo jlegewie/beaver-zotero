@@ -459,7 +459,8 @@ function computeMainLabel(
 
         // === Fulltext search tools ===
         case 'fulltext_search': {
-            const query = args.query_semantic as string | undefined;
+            // `query` is the current argument; `query_semantic` belongs to older threads.
+            const query = (args.query ?? args.query_semantic) as string | undefined;
             if (query) {
                 return `${baseLabel}: "${truncate(query, 40)}"`;
             }
