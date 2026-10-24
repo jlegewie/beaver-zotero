@@ -8,6 +8,7 @@ import {
 import type { MenuItem } from "../../primitives/ContextMenu";
 import { DataTable } from "../DataTable";
 import {
+    fitsToWidth,
     renderPlainText,
     type TableDensity,
     type TextRenderer,
@@ -59,8 +60,22 @@ export interface TableSurfaceProps {
 
     showSearch?: boolean;
     searchPlaceholder?: string;
+    /** See `TableToolbarProps.showSortMenu`. */
+    showSortMenu?: boolean;
+    /** See `TableToolbarProps.valueFilters`. */
+    valueFilters?: boolean;
     emptyText?: string;
     filteredEmptyText?: string;
+
+    /** Window the rows (`DataTableProps.virtualize`) — for a long table. */
+    virtualize?: boolean;
+    /** Never scroll sideways (`DataTableProps.fitWidth`). */
+    fitWidth?: boolean;
+    /**
+     * A status line between the toolbar and the grid — a warning about the
+     * table as a whole, which must stay in view however far the grid scrolls.
+     */
+    notice?: React.ReactNode;
     className?: string;
 }
 
@@ -97,8 +112,13 @@ export function TableSurface({
     onRetryCell,
     showSearch,
     searchPlaceholder,
+    showSortMenu,
+    valueFilters,
     emptyText,
     filteredEmptyText,
+    virtualize,
+    fitWidth,
+    notice,
     className,
 }: TableSurfaceProps): React.ReactElement {
     const state = useOptionalTableState(table, externalState, { density });
@@ -129,7 +149,9 @@ export function TableSurface({
     const heading = title ?? table.title ?? "Table";
 
     return (
-        <section className={`bt-surface${className ? ` ${className}` : ""}`}>
+        <section
+            className={`bt-surface${fitsToWidth(table, !!fitWidth) ? " bt-surface-fit" : ""}${className ? ` ${className}` : ""}`}
+        >
             <TableTitleBar
                 title={heading}
                 subtitle={subtitle ?? table.description}
@@ -153,8 +175,16 @@ export function TableSurface({
                     actions={toolbarActions}
                     showSearch={showSearch}
                     searchPlaceholder={searchPlaceholder}
+                    showSortMenu={showSortMenu}
+                    valueFilters={valueFilters}
                 />
             )}
+
+            {notice ? (
+                <div className="bt-notice" role="status">
+                    {notice}
+                </div>
+            ) : null}
 
             <div className="bt-scroll">
                 <DataTable
@@ -167,6 +197,8 @@ export function TableSurface({
                     onRetryCell={onRetryCell}
                     emptyText={emptyText}
                     filteredEmptyText={filteredEmptyText}
+                    virtualize={virtualize}
+                    fitWidth={fitWidth}
                 />
             </div>
 

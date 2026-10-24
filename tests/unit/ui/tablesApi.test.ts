@@ -243,10 +243,11 @@ describe('handlers read the namespace, not module state', () => {
 
         const result = await handleTestOpenStoredTableHttpRequest({ key: ITEM.key });
 
-        expect(api.openTable).toHaveBeenCalledWith({
-            libraryID: ITEM.libraryID,
-            key: ITEM.key,
-        });
+        // No renderer runtime in a unit test: an originless open.
+        expect(api.openTable).toHaveBeenCalledWith(
+            { libraryID: ITEM.libraryID, key: ITEM.key },
+            { window: null },
+        );
         expect(result).toMatchObject({ ok: true, key: ITEM.key, library_id: ITEM.libraryID });
     });
 

@@ -208,6 +208,8 @@ const entryPaths = [
   "src/run-state/pendingQuestions.ts",
   "src/run-state/pendingCreditConfirmations.ts",
   "src/run-state/pendingBatchApprovals.ts",
+  "src/run-state/pendingTableCards.ts",
+  "src/run-state/tableCardDraft.ts",
   "src/run-state/runErrorCopy.ts",
   "src/run-state/runStatusCopy.ts",
   "src/run-state/runStatusVisibility.ts",

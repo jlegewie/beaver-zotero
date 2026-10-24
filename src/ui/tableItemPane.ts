@@ -191,6 +191,11 @@ export interface TableSectionData {
     reason: string | null;
     /** Whether the reader action has a file to open. */
     hasFile: boolean;
+    /**
+     * The table cannot be read but this device has a version it wrote, which
+     * "Restore my version" writes back as a new version.
+     */
+    restorableUnreadable?: boolean;
 }
 
 /** Column headers by id, so a distribution read from a spec is labelled. */
@@ -246,6 +251,14 @@ export async function readTableSectionData(
     } else {
         reason = read.message;
     }
+    let restorableUnreadable = false;
+    if (!read.ok && read.code !== 'no_file') {
+        try {
+            restorableUnreadable = !!(await lastTableShadow({ libraryID: item.libraryID, key: item.key }));
+        } catch (error) {
+            logger(`tableItemPane: could not look for a restorable version: ${String(error)}`, 2);
+        }
+    }
 
     let hasFile = false;
     try {
@@ -254,7 +267,7 @@ export async function readTableSectionData(
         logger(`tableItemPane: could not resolve the file: ${String(error)}`, 2);
     }
 
-    return { fields: buildTableSectionFields(input), reason, hasFile };
+    return { fields: buildTableSectionFields(input), reason, hasFile, restorableUnreadable };
 }
 
 /** Compare the recovery shadow with the validated document, never the sidecar. */
@@ -408,7 +421,7 @@ async function populateSection({
             const actions = tableSectionActions(
                 windowOf(doc),
                 data.hasFile,
-                !!data.fields.conflict?.restorable
+                !!data.fields.conflict?.restorable || !!data.restorableUnreadable
             );
             restore.disabled = !actions.restoreShadow;
             restore.hidden = !actions.restoreShadow;
@@ -514,19 +527,21 @@ function refOf(item: Zotero.Item): TableRef {
 }
 
 /**
- * Opens the table in the reader, through the shared namespace.
+ * Opens the table in the Beaver tab of the window this section is in, through
+ * the shared namespace. The section also renders in the reader's context
+ * pane; that is still the same main window.
  *
  * `Zotero.__beaverTables` rather than a direct import even though this module
  * is in the same bundle as `openTable`: the namespace is the one seam every
  * caller of a table surface uses, and going through it means a torn-down bundle
  * reports "not up" instead of running a dead realm's closure.
  */
-async function openTable(ref: TableRef): Promise<string> {
+async function openTable(ref: TableRef, win: Window | null): Promise<string> {
     const api = getTablesApi();
     if (!api) {
         return 'Table document actions are unavailable.';
     }
-    const outcome = await api.openTable(ref);
+    const outcome = await api.openTable(ref, { window: win });
     return 'error' in outcome ? outcome.error : outcome.warning ?? '';
 }
 
@@ -573,7 +588,7 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
         // Enabled optimistically; the async half disables it when the item has
         // no file, which is the only way to know.
         button(doc, 'open', 'Open table', actions.open, () =>
-            void openTable(ref).then((message) => { status.textContent = message; })
+            void openTable(ref, win).then((message) => { status.textContent = message; })
         ),
         button(doc, 'library', 'Show in library', actions.showInLibrary, () =>
             showInLibrary(win, item)
@@ -692,7 +707,7 @@ export async function describeTableItemPane(
         actions: tableSectionActions(
             win,
             data.hasFile,
-            !!data.fields.conflict?.restorable
+            !!data.fields.conflict?.restorable || !!data.restorableUnreadable
         ),
     };
 }

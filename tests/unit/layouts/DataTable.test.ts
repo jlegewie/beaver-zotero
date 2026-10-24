@@ -950,7 +950,8 @@ describe("DataTable — density, columns and expansion", () => {
             .querySelector("table.bt-table")!
             .getAttribute("style")!;
         // Every column contributes, including a floor for the flexible one.
-        // rail 3.2 + anchor 20 + number 6.5 + select 9.5 + boolean 5.5 + text 14
-        expect(style).toContain("58.7rem");
+        // rail 3.2 + anchor 20 + number 8 ("Citations") + select 9.5
+        // + boolean 9 ("Open access") + text 14: short columns fit their header.
+        expect(style).toContain("63.7rem");
     });
 });

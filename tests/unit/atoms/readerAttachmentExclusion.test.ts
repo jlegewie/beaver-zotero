@@ -4,7 +4,7 @@
  * `application_state`). An attachment in a library the user excluded from
  * Beaver must never enter it — and must not even be read out of Zotero.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { atom, createStore } from 'jotai';
 
 // The real module's import chain reaches Supabase and Zotero APIs at load
@@ -77,6 +77,23 @@ vi.mock('../../../react/components/ui/popup/InvalidItemsMessageContent', () => (
 vi.mock('../../../react/utils/readerUtils', () => ({
     getCurrentReader: vi.fn(() => undefined),
 }));
+
+// The selected Beaver tab's table, when a test selects one.
+const { selectedTableTabItemIDMock } = vi.hoisted(() => ({
+    selectedTableTabItemIDMock: vi.fn((): number | null => null),
+}));
+vi.mock('../../../src/ui/tableTabContextPane', () => ({
+    selectedTableTabItemID: selectedTableTabItemIDMock,
+}));
+const { tableItemMock } = vi.hoisted(() => ({ tableItemMock: { isTable: false } }));
+vi.mock('../../../src/services/artifacts/tableItemIdentity', async (importOriginal) => {
+    const real = await importOriginal<typeof import('../../../src/services/artifacts/tableItemIdentity')>();
+    return {
+        ...real,
+        loadTableItemFields: vi.fn(async () => undefined),
+        isTableAttachment: vi.fn((item: any) => tableItemMock.isTable || real.isTableAttachment(item)),
+    };
+});
 
 const SEARCHABLE_LIBRARY_ID = 1;
 const EXCLUDED_LIBRARY_ID = 2;
@@ -348,4 +365,36 @@ describe('selected collection attachments', () => {
 vi.mock('../../../react/runtime/windowRuntime', async () => {
     const { singleWindowRuntimeMock } = await import('../../helpers/singleWindowRuntime');
     return singleWindowRuntimeMock();
+});
+
+describe('updateReaderAttachmentAtom on a Beaver tab', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+        selectedTableTabItemIDMock.mockReturnValue(null);
+        tableItemMock.isTable = true;
+    });
+    afterEach(() => {
+        tableItemMock.isTable = false;
+    });
+
+    it('keeps the open table as context when the context is refreshed (a new chat)', async () => {
+        const { getAsync } = stubZotero(SEARCHABLE_LIBRARY_ID);
+        selectedTableTabItemIDMock.mockReturnValue(READER_ITEM_ID);
+        const store = createStore();
+
+        await store.set(updateReaderAttachmentAtom);
+
+        expect(getAsync).toHaveBeenCalledWith(READER_ITEM_ID);
+        expect(store.get(currentReaderAttachmentAtom)?.id).toBe(READER_ITEM_ID);
+    });
+
+    it('clears the context when neither a reader nor a Beaver tab is selected', async () => {
+        stubZotero(SEARCHABLE_LIBRARY_ID);
+        const store = createStore();
+
+        await store.set(updateReaderAttachmentAtom);
+
+        expect(store.get(currentReaderAttachmentAtom)).toBeNull();
+    });
 });

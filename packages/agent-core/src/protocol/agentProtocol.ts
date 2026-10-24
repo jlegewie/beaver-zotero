@@ -5,7 +5,7 @@ import { SubscriptionStatus, ProcessingMode, ChargeType } from '../types/profile
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../types/zotero';
-import { ReaderState, NoteState } from '../types/attachments/apiTypes';
+import { ReaderState, NoteState, TableState } from '../types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../agents/types';
 import type { RetryTrigger } from '../agents/types';
 import type { CustomChatModel } from '../types/customChatModel';
@@ -1919,6 +1919,12 @@ export interface WSItemDisplayRequest extends WSBaseEvent {
      * most 1,000 items.
      */
     item_ids: string[];
+    /**
+     * Also report whether each regular item has a PDF attachment
+     * (`has_pdf`). Attachment presence only; no file is opened. Asked by the
+     * table card's local lookups; the backend does not send it.
+     */
+    include_pdf?: boolean;
 }
 
 /** One item as a list draws it, computed by the client that owns the library. */
@@ -1937,6 +1943,8 @@ export interface ItemDisplayRow {
     subtitle?: string | null;
     /** Attachments only: the broad content kind, for the icon. */
     content_kind?: string | null;
+    /** Regular items, when the request asked: whether a PDF attachment exists. */
+    has_pdf?: boolean;
 }
 
 /**
@@ -2795,6 +2803,9 @@ export type WSEvent =
     // Run-level batch approval
     | WSBatchApprovalRequest
     | WSBatchApprovalStale
+    // Table card
+    | import('./tableCardProtocol').WSTableCardRequest
+    | import('./tableCardProtocol').WSTableCardStale
     // User interaction events
     | WSAskUserQuestionRequest;
 
@@ -3211,12 +3222,14 @@ export interface CurrentSpecialCollection {
  * Contains current view state and reader state if in reader view.
  */
 export interface ApplicationStateInput {
-    /** Current application view ('library', 'file_reader', or 'note_editor') */
-    current_view: 'library' | 'file_reader' | 'note_editor';
+    /** Current application view ('library', 'file_reader', 'note_editor', or 'table') */
+    current_view: 'library' | 'file_reader' | 'note_editor' | 'table';
     /** Reader state when in reader view */
     reader_state?: ReaderState;
     /** Note state when in note editor view */
     note_state?: NoteState;
+    /** The stored table open in its Beaver tab (`current_view: 'table'`) */
+    table_state?: TableState;
     /** Current library context */
     current_library?: CurrentLibrary;
     /**
@@ -3646,6 +3659,16 @@ export interface WSCallbacks {
      * @param event The stale-approval notice, keyed by approval id
      */
     onBatchApprovalStale?: (event: WSBatchApprovalStale) => void;
+
+    /**
+     * Called when the backend shows the table card for a proposed table. The
+     * frontend renders the card and sends one WSTableCardResponse with the
+     * edited input or a decline.
+     */
+    onTableCardRequest?: (event: import('./tableCardProtocol').WSTableCardRequest) => void;
+
+    /** Called when a table card answer arrived after the backend stopped waiting. */
+    onTableCardStale?: (event: import('./tableCardProtocol').WSTableCardStale) => void;
 
     /**
      * Called when the backend asks the user structured multiple-choice

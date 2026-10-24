@@ -1304,6 +1304,31 @@ describe('retriable creation', () => {
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
 
+    it('files into a collection by key and replays the creation after that collection is gone', async () => {
+        const collection = { id: 12, key: 'CASHTRN2', libraryID: 1, deleted: false };
+        (Zotero as any).Collections = {
+            get: vi.fn(() => collection),
+            getByLibraryAndKey: vi.fn(() => collection),
+        };
+        const withCollection = { ...options, collectionKey: 'CASHTRN2' };
+        const created = await createTable(withCollection);
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledWith(
+            expect.objectContaining({ collections: [12] }),
+        );
+        (Zotero.Collections.getByLibraryAndKey as any).mockReturnValue(false);
+        tableWriteLocks().clear();
+        expect(await createTable(withCollection)).toMatchObject({ replayed: true, key: created.key });
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a new creation into a collection that is gone', async () => {
+        (Zotero as any).Collections = { get: vi.fn(), getByLibraryAndKey: vi.fn(() => false) };
+        await expect(createTable({ ...options, collectionKey: 'CASHTRN2' })).rejects.toMatchObject({
+            code: 'invalid_target',
+        });
+        expect(Zotero.Attachments.importFromSnapshotContent).not.toHaveBeenCalled();
+    });
+
     it('still replays a creation after table.json is rebuilt from the history', async () => {
         const created = await createTable(options);
         await rm(tablePath());

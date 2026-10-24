@@ -81,6 +81,32 @@ function formatTableChanges(
 }
 
 /**
+ * The stage lines of a record that carries stage counts: whether the call ran
+ * anything, what the next fill would work on, and the answers taken from
+ * metadata only. Empty for records written before stage counts existed.
+ */
+export function formatTableStages(record: TableView["record"]): string[] {
+    const stages = record.stages;
+    if (!stages) return [];
+    const lines: string[] = [];
+    if (record.run === "none" && /^created?\b/i.test(record.change ?? "")) {
+        lines.push(
+            stages.remaining_rows > 0
+                ? `Created without a run · ${plural(stages.remaining_rows, "row")} remaining`
+                : "Created without a run",
+        );
+    } else if (stages.remaining_rows > 0) {
+        lines.push(`${plural(stages.remaining_rows, "row")} remaining`);
+    }
+    if (stages.metadata_only > 0)
+        lines.push(`${plural(stages.metadata_only, "answer")} from title and abstract only`);
+    if (stages.rows_without_document > 0)
+        lines.push(`${plural(stages.rows_without_document, "row")} without an attachment to read`);
+    if (stages.failed > 0) lines.push(`${plural(stages.failed, "cell")} failed`);
+    return lines;
+}
+
+/**
  * Expanded body of a table tool card: what the call changed and the table's
  * size at that step, then how the table looks now when that differs.
  *
@@ -99,6 +125,7 @@ export function TableResultView({ view }: { view: TableView }) {
     const change = /^created? (the )?table\.?$/i.test(record.change?.trim() ?? "")
         ? null
         : record.change;
+    const stageLines = formatTableStages(record);
     const currentDiffers =
         current?.status === "available" &&
         (current.title !== record.reference.title ||
@@ -112,6 +139,11 @@ export function TableResultView({ view }: { view: TableView }) {
                     {[counts, changes].filter(Boolean).join(" · ")}
                 </div>
             )}
+            {stageLines.map((line) => (
+                <div key={line} className="font-color-secondary">
+                    {line}
+                </div>
+            ))}
             {currentDiffers && current.status === "available" && (
                 <div className="font-color-secondary">
                     {`Now ${formatTableCounts(current)}`}

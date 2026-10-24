@@ -1,23 +1,25 @@
 /**
- * The reader as the host for a rendered table document.
+ * The reader as a host for a rendered table document.
  *
- * A stored table is a snapshot attachment, so double-clicking it, following a
- * `zotero://open` link or opening it from the item pane lands it in Zotero's
- * reader — where, left alone, it is an inert page: the citation markers show a
- * native tooltip at best, and the reader swallows the `zotero:` links. This
- * module makes that page interactive through {@link enhanceTableDocument}, and
- * it is the only surface a stored table has.
+ * A stored table is a snapshot attachment. Its product surface is the Beaver
+ * tab (`src/ui/tableTab.ts`), which replaces a reader *tab* opened on a table
+ * as soon as the tab is added. What still reaches the reader is a reader
+ * *window* (`openReaderInNewWindow`, which `zotero://open` honours) and a
+ * restored, unloaded reader tab, which this module's toolbar hook hands to
+ * the Beaver tab once it loads. Left alone, the snapshot in a reader window is
+ * an inert page: the citation markers show a native tooltip at best, and the
+ * reader swallows the `zotero:` links. This module makes that page
+ * interactive through {@link enhanceTableDocument}.
  *
  * **One entry point escapes it, by the user's own choice.** Zotero's
  * double-click and `zotero://open` both end at `Zotero.FileHandlers.open`,
  * which consults the `fileHandler.snapshot` preference — Settings → General →
  * "Open snapshots using". Set to anything but Zotero, the file is handed to the
  * browser or another application and no reader is created, so a table opened
- * that way is the plain static document with no card and no link routing. That
- * is honoured rather than intercepted: overriding it would mean patching a
- * Zotero function to defeat a preference the user set deliberately. The item
- * pane's own button calls `Zotero.Reader.open` directly (`src/ui/openTable.ts`)
- * and so always gets the interactive surface.
+ * that way is the plain static document. That is honoured rather than
+ * intercepted: overriding it would mean patching a Zotero function to defeat a
+ * preference the user set deliberately. The item pane's own button calls
+ * `openTable` (`src/ui/openTable.ts`) and so always gets the Beaver tab.
  *
  * ## Everything here is optional
  *
@@ -239,6 +241,30 @@ const lastDiagnostics = new Map<string, ReaderTableDiagnostics>();
 
 let toolbarHandler: ((event: any) => void) | null = null;
 let notifierID: string | null = null;
+
+/**
+ * Hands a reader *tab* on a table over to the Beaver tab (`src/ui/tableTab.ts`)
+ * instead of enhancing it. Registered by that module; it answers true when it
+ * took the reader. Most readers never get here — the Beaver tab replaces them
+ * when their tab is added — so this catches the ones that load without an
+ * `add`: a restored, unloaded reader tab the user selects.
+ */
+type TableReaderRedirect = (reader: any, item: Zotero.Item) => boolean;
+let readerRedirect: TableReaderRedirect | null = null;
+
+export function setTableReaderRedirect(redirect: TableReaderRedirect | null): void {
+    readerRedirect = redirect;
+}
+
+/**
+ * Items the dev endpoint opened in the reader on purpose: the reader stays,
+ * for the rest of the session, so the enhancement can be inspected.
+ */
+const readerOptIns = new Set<number>();
+
+export function isTableReaderOptedIn(itemID: number): boolean {
+    return readerOptIns.has(itemID);
+}
 
 // ---------------------------------------------------------------------------
 // Reader plumbing
@@ -522,6 +548,11 @@ async function enhanceReader(
         diagnostics.libraryID = item.libraryID;
         lastDiagnostics.set(item.key, diagnostics);
 
+        if (reader.tabID && !readerOptIns.has(item.id) && readerRedirect?.(reader, item)) {
+            diagnostics.failures.push('redirected_to_table_tab');
+            return options.force ? diagnostics : null;
+        }
+
         const view = await initializedView(reader, diagnostics.failures);
         diagnostics.internalReaderFound = !!reader._internalReader;
         diagnostics.primaryViewFound = !!reader._internalReader?._primaryView;
@@ -731,6 +762,7 @@ export function cleanupReaderTableViewsForWindow(win: Window): void {
 /** Restores every reader this touched, for window teardown and shutdown. */
 export function cleanupReaderTableViews(): void {
     lifecycle += 1;
+    readerOptIns.clear();
     for (const reader of [...views.keys()]) disposeView(reader);
     lastDiagnostics.clear();
 
@@ -787,6 +819,7 @@ export async function openTableInReader(
 
     try {
         await closeStaleTableReaders(item.id);
+        readerOptIns.add(item.id);
         await (Zotero.Reader as any).open(item.id);
     } catch (error) {
         const diagnostics = blankDiagnostics();

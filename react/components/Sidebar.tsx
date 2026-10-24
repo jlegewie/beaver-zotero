@@ -3,10 +3,12 @@ import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
 import BatchApprovalPanel from "./input/BatchApprovalPanel"
 import CreditConfirmationPanel from "./input/CreditConfirmationPanel"
+import TableCardPanel from "./tables/card/TableCardPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
+import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
@@ -221,9 +223,11 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
     const pendingQuestionsMap = useAtomValue(pendingQuestionsAtom);
     const pendingBatchApprovalsMap = useAtomValue(pendingBatchApprovalsAtom);
     const pendingCreditConfirmationsMap = useAtomValue(pendingCreditConfirmationsAtom);
+    const pendingTableCardsMap = useAtomValue(pendingTableCardsAtom);
     const composerTakeover = selectComposerTakeover({
         pendingApprovalCount: pendingApprovalsMap.size,
         batchApprovals: pendingBatchApprovalsMap,
+        tableCards: pendingTableCardsMap,
         creditConfirmations: pendingCreditConfirmationsMap,
         questions: pendingQuestionsMap,
     });
@@ -427,6 +431,12 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
                                 <BatchApprovalPanel
                                     key={composerTakeover.approval.approvalId}
                                     approval={composerTakeover.approval}
+                                />
+                            ) : composerTakeover.kind === 'table-card' ? (
+                                // key resets the card's draft per request
+                                <TableCardPanel
+                                    key={composerTakeover.card.card_id}
+                                    card={composerTakeover.card}
                                 />
                             ) : composerTakeover.kind === 'credit-confirmation' ? (
                                 // key resets local decision state per confirmation

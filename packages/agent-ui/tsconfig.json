@@ -258,6 +258,7 @@
     "./src/layouts/index.ts",
     "./src/layouts/tableView.ts",
     "./src/layouts/useTableState.ts",
+    "./src/layouts/useRowWindow.ts",
     "./src/layouts/cells.tsx",
     "./src/layouts/columnHeader.tsx",
     "./src/layouts/rowActionHandlers.ts",

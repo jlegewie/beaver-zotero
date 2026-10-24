@@ -49,6 +49,9 @@ import LibrarySidebar from './components/LibrarySidebar';
 import PreferencesWindow from './components/PreferencesWindow';
 import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
+import TableTabView from './components/tables/TableTabView';
+import type { TableRef } from '../src/services/artifacts/tableItemIdentity';
+import type { TableTabHandle, TableTabMountOptions } from '../src/ui/tableTabTypes';
 import { eventManager } from './events/eventManager';
 import { useAuth } from './hooks/useAuth';
 import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
@@ -283,6 +286,43 @@ export function renderAiSidebar(domElement: HTMLElement, location: 'library' | '
  */
 export function renderWindowSidebar(domElement: HTMLElement) {
     return mountSurface(domElement, <WindowSidebar />);
+}
+
+/**
+ * Renders a stored table into a Beaver tab of this main window
+ * (`src/ui/tableTab.ts` owns the tab and calls this). The handle carries the
+ * open's warning in after the mount, without remounting the table.
+ */
+export function renderTableTab(
+    domElement: HTMLElement,
+    tableRef: TableRef,
+    options: TableTabMountOptions,
+): TableTabHandle {
+    let warning: string | null = null;
+    const listeners = new Set<() => void>();
+    const reloadListeners = new Set<() => void>();
+    const warnings = {
+        get: () => warning,
+        subscribe(listener: () => void) {
+            listeners.add(listener);
+            return () => { listeners.delete(listener); };
+        },
+        onReload(listener: () => void) {
+            reloadListeners.add(listener);
+            return () => { reloadListeners.delete(listener); };
+        },
+    };
+    mountSurface(domElement, <TableTabView tableRef={tableRef} options={options} warnings={warnings} />);
+    return {
+        setWarning(next) {
+            if (next === warning) return;
+            warning = next;
+            for (const listener of listeners) listener();
+        },
+        reload() {
+            for (const listener of reloadListeners) listener();
+        },
+    };
 }
 
 /**

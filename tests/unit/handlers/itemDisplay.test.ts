@@ -201,3 +201,40 @@ describe('handleItemDisplayRequest', () => {
         expect(res.error_code).toBe('internal_error');
     });
 });
+
+describe('handleItemDisplayRequest with include_pdf', () => {
+    beforeEach(() => {
+        mocks.getItemDisplayName.mockImplementation((item: any) => `${item.firstCreator} ${item.year}`);
+    });
+
+    it('reports PDF presence for regular items from attachment rows alone', async () => {
+        library['1-PDFPAPR2'] = regularItem('PDFPAPR2', 1, { id: 11, isRegularItem: () => true });
+        library['1-NQPDFPP2'] = regularItem('NQPDFPP2', 1, { id: 12, isRegularItem: () => true });
+        library['1-NQTEXXX2'] = regularItem('NQTEXXX2', 1, { id: 13, isRegularItem: () => false });
+        const queryAsync = vi.fn(async (sql: string, params: number[], options: any) => {
+            expect(sql).toContain("contentType = 'application/pdf'");
+            expect(sql).toContain('deletedItems');
+            expect(params).toEqual([11, 12]);
+            options.onRow({ getResultByIndex: () => 11 });
+        });
+        (globalThis as any).Zotero.DB = { ...((globalThis as any).Zotero.DB ?? {}), queryAsync };
+
+        const res = await handleItemDisplayRequest({
+            ...request(['u-PDFPAPR2', 'u-NQPDFPP2', 'u-NQTEXXX2']),
+            include_pdf: true,
+        });
+
+        expect(queryAsync).toHaveBeenCalledTimes(1);
+        expect(res.items.map((row) => [row.item_id, row.has_pdf])).toEqual([
+            ['u-PDFPAPR2', true],
+            ['u-NQPDFPP2', false],
+            ['u-NQTEXXX2', undefined],
+        ]);
+    });
+
+    it('leaves rows without has_pdf when the request does not ask', async () => {
+        library['1-PDFPAPR2'] = regularItem('PDFPAPR2', 1, { id: 11, isRegularItem: () => true });
+        const res = await handleItemDisplayRequest(request(['u-PDFPAPR2']));
+        expect(res.items[0]).not.toHaveProperty('has_pdf');
+    });
+});

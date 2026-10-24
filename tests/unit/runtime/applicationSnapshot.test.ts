@@ -33,6 +33,7 @@ vi.mock('../../../src/services/agentDataProvider/specialCollectionCounts', () =>
     getSpecialCollectionItemCounts: mocks.specialCounts,
 }));
 vi.mock('../../../src/utils/libraryIdentity', () => ({ libraryRefForLibraryID: () => 'u' }));
+vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({ isTableAttachment: (item: any) => item?.isTable === true }));
 import { buildZoteroApplicationState } from '../../../react/atoms/applicationState';
 
 it('captures items, searches and collections before database awaits or a focus change', async () => {
@@ -263,3 +264,22 @@ describe('excluded libraries', () => {
         expect(JSON.stringify(state)).not.toContain('Secret');
     });
 });
+
+it('reports a table open in its Beaver tab as the open table, not a reader', async () => {
+    const { currentReaderAttachmentAtom } = await import('../../../react/atoms/messageComposition');
+    const { isLibraryTabAtom } = await import('../../../react/atoms/ui');
+    mocks.win = undefined;
+    mocks.reader = undefined;
+    vi.stubGlobal('Zotero', { Libraries: { get: () => ({ libraryID: 1, name: 'My Library', editable: true, isGroup: false }) } });
+    const store = createStore();
+    store.set(isLibraryTabAtom, false);
+    store.set(currentReaderAttachmentAtom, {
+        id: 7, libraryID: 1, key: 'TABLE222', isTable: true, getField: () => 'Comparison',
+    } as any);
+    const state = await buildZoteroApplicationState(store.get);
+    expect(state.current_view).toBe('table');
+    expect(state.table_state).toEqual({ library_id: 1, zotero_key: 'TABLE222', library_ref: 'u', title: 'Comparison' });
+    expect(state.reader_state).toBeUndefined();
+    expect(state.current_library).toMatchObject({ library_id: 1, name: 'My Library' });
+});
+

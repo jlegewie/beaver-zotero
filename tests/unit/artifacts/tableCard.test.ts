@@ -126,3 +126,20 @@ describe("historical table cards", () => {
         expect(html).not.toContain("<textarea");
     });
 });
+
+describe("stage lines", () => {
+    const stages = {
+        rows: 12, sources: 1, columns: 3, rows_without_document: 2,
+        remaining_rows: 12, remaining_cells: 36, answered: 0, metadata_only: 0, failed: 0, stale: 0,
+    };
+    it("says a created table ran nothing and how many rows remain", async () => {
+        const { formatTableStages } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
+        expect(
+            formatTableStages({ ...record, change: "Created table", run: "none", stages }),
+        ).toEqual(["Created without a run · 12 rows remaining", "2 rows without an attachment to read"]);
+        expect(
+            formatTableStages({ ...record, change: "Read table", stages: { ...stages, remaining_rows: 0, metadata_only: 4, rows_without_document: 0 } }),
+        ).toEqual(["4 answers from title and abstract only"]);
+        expect(formatTableStages(record)).toEqual([]);
+    });
+});

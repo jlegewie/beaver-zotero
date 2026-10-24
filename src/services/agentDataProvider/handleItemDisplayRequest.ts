@@ -39,6 +39,34 @@ import { checkLibraryExcluded } from './utils';
  */
 export const MAX_ITEM_DISPLAY_IDS = 1000;
 
+/** SQLite's bound-variable limit is well above this. */
+const SQL_CHUNK_SIZE = 500;
+
+/**
+ * Regular items with at least one PDF attachment outside the trash. From the
+ * attachment rows alone: no file is opened, so a PDF not yet downloaded
+ * still counts.
+ */
+async function itemIdsWithPdf(itemIDs: number[]): Promise<Set<number>> {
+    const found = new Set<number>();
+    for (let i = 0; i < itemIDs.length; i += SQL_CHUNK_SIZE) {
+        const chunk = itemIDs.slice(i, i + SQL_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            'SELECT DISTINCT ia.parentItemID FROM itemAttachments ia '
+                + 'LEFT JOIN deletedItems di ON di.itemID = ia.itemID '
+                + `WHERE ia.parentItemID IN (${placeholders}) AND ia.contentType = 'application/pdf' AND di.itemID IS NULL`,
+            chunk,
+            {
+                onRow: (row: any) => {
+                    found.add(row.getResultByIndex(0));
+                },
+            },
+        );
+    }
+    return found;
+}
+
 /** The row for one loaded item. Throws only if the item's fields are unreadable. */
 function toItemDisplayRow(item: Zotero.Item): ItemDisplayRow {
     const row: ItemDisplayRow = {
@@ -87,13 +115,18 @@ export async function handleItemDisplayRequest(
         const items: Zotero.Item[] = itemIDs.length ? await Zotero.Items.getAsync(itemIDs) : [];
 
         await loadQuickSearchHitData(items);
+        const withPdf = request.include_pdf
+            ? await itemIdsWithPdf(items.filter((item) => item.isRegularItem()).map((item) => item.id))
+            : null;
 
         const rows: ItemDisplayRow[] = [];
         for (const item of items) {
             // One item whose fields cannot be read costs its own row, not the
             // whole answer.
             try {
-                rows.push(toItemDisplayRow(item));
+                const row = toItemDisplayRow(item);
+                if (withPdf && item.isRegularItem()) row.has_pdf = withPdf.has(item.id);
+                rows.push(row);
             } catch (error) {
                 logger(`handleItemDisplayRequest: Skipped ${item.key}: ${error}`, 1);
             }

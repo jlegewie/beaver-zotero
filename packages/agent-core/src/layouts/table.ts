@@ -191,7 +191,7 @@ export interface ColumnProgress {
     total: number;
 }
 
-export type ExternalReferenceSource = "semantic_scholar" | "openalex";
+export type ExternalReferenceSource = "openalex";
 
 /**
  * A Zotero object as a stored table names it. `library_ref` (`u` /
@@ -1507,4 +1507,34 @@ export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
         .join(",");
     const lines = fields.map((row) => pick(row).map(csvEscape).join(","));
     return [header, ...lines].join("\r\n");
+}
+
+/**
+ * The table as plain text for the clipboard: tab-separated, one header line of
+ * column headers, then one line per row in the given order. It carries what a
+ * reader sees in the grid — the value, or "Not reported" — and none of the
+ * evidence or state companions {@link toCsv} adds. Tabs and line breaks inside
+ * a value become spaces, so every row stays one line and pastes into a
+ * spreadsheet or a document table cell for cell.
+ */
+export function toPlainText(
+    spec: TableSpec,
+    rows: Row[] = spec.rows,
+    columns: Column[] = spec.columns,
+): string {
+    const flatten = (text: string) => text.replace(/[\t\r\n]+/g, " ").trim();
+    const header = columns.map((c) => flatten(c.header)).join("\t");
+    const lines = rows.map((row) =>
+        columns
+            .map((c) => {
+                const cell = row.cells[c.id];
+                return flatten(
+                    cell?.outcome === "not_reported"
+                        ? "Not reported"
+                        : cellValueText(cell?.value),
+                );
+            })
+            .join("\t"),
+    );
+    return [header, ...lines].join("\n");
 }

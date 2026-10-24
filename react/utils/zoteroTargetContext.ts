@@ -2,6 +2,7 @@ import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getSelectedCollection, getSelectedLibraryId } from '../../src/utils/zoteroSelection';
 import { getContextWindow } from '../runtime/windowRuntime';
+import { selectedTableTabItemID } from '../../src/ui/tableTabContextPane';
 
 
 function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
@@ -51,6 +52,14 @@ export async function getZoteroTargetContext(win = getContextWindow()): Promise<
                 return { targetLibraryId, parentReference, collectionToAddTo };
             }
         }
+    }
+
+    // A Beaver tab targets its table's library, with no parent: the table is a
+    // standalone item, and the library pane's hidden selection is not context.
+    const tableItemID = selectedTableTabItemID(win);
+    if (tableItemID) {
+        const table = await Zotero.Items.getAsync(tableItemID);
+        if (table) return { targetLibraryId: table.libraryID, parentReference: null, collectionToAddTo };
     }
 
     // Library view
@@ -112,6 +121,13 @@ export function getZoteroTargetContextSync(win = getContextWindow()): ZoteroTarg
                 return { targetLibraryId, parentReference, collectionToAddTo };
             }
         }
+    }
+
+    // A Beaver tab: see `getZoteroTargetContext`.
+    const tableItemID = selectedTableTabItemID(win);
+    if (tableItemID) {
+        const table = Zotero.Items.get(tableItemID);
+        if (table) return { targetLibraryId: table.libraryID, parentReference: null, collectionToAddTo };
     }
 
     // Library view
@@ -204,6 +220,13 @@ export function getCurrentLibrary(win = getContextWindow()): _ZoteroTypes.Librar
 			}
 		}
 		return null;
+	}
+
+	// A Beaver tab: its table's library.
+	const tableItemID = selectedTableTabItemID(win);
+	if (tableItemID) {
+		const table = Zotero.Items.get(tableItemID);
+		return (table && Zotero.Libraries.get(table.libraryID)) || null;
 	}
 	
 	// Otherwise, get library from library view

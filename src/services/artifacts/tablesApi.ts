@@ -43,8 +43,24 @@ import type { TableVersionEntry } from './tableItemIdentity';
 import type { TableWriteResult, TableShadowRestoreResult } from './tableStore';
 import type { TableViewSummary } from './view/enhanceTableDocument';
 import type { ReaderTableDiagnostics } from './view/readerTableView';
-import type { OpenTableOutcome } from '../../ui/openTable';
+import type { OpenTableOptions, OpenTableOutcome } from '../../ui/openTable';
 import type { TableItemPaneReport } from '../../ui/tableItemPane';
+import type { TableTabRenderReport } from '../../ui/tableTabTypes';
+
+/** The Beaver tabs, owned by `src/ui/tableTab.ts`. */
+export interface TablesTabsApi {
+    /** Closes `win`'s Beaver tabs, unmounting them; the count closed. */
+    closeForWindow(win: Window): number;
+    /** The open Beaver tabs, for the dev endpoint. */
+    list(): Array<{
+        tabID: string;
+        libraryID: number;
+        key: string;
+        title: string;
+        mounted: boolean;
+        renders: TableTabRenderReport[];
+    }>;
+}
 
 /** The item-pane section, as the dev endpoint needs to see it. */
 export interface TablesItemPaneApi {
@@ -85,16 +101,20 @@ export interface TableShadowUnavailable {
 }
 
 export interface TablesApi {
-    /** The single entry point for showing a stored table: the reader. */
-    openTable(ref: TableRef): Promise<OpenTableOutcome>;
+    /**
+     * The single entry point for showing a stored table: the Beaver tab, in
+     * the main window of `options.window` (the window the interaction came
+     * from). See `src/ui/openTable.ts`.
+     */
+    openTable(ref: TableRef, options?: OpenTableOptions): Promise<OpenTableOutcome>;
 
     /** Every table document currently enhanced. */
     listViews(): TableViewSummary[];
 
     /**
-     * Opens a stored table in the reader and reports what the enhancer
-     * attached. {@link openTable} is the product path; this one waits for the
-     * enhancement and describes it, which is what a dev endpoint needs.
+     * Opens a stored table in the reader — kept there, not replaced by the
+     * Beaver tab — and reports what the enhancer attached. Dev only;
+     * {@link openTable} is the product path.
      */
     openInReader(
         item: Zotero.Item,
@@ -111,6 +131,7 @@ export interface TablesApi {
     };
     itemPane: TablesItemPaneApi;
     shadow: TablesShadowApi;
+    tabs: TablesTabsApi;
 }
 
 /** The plugin-owned recovery operation. */

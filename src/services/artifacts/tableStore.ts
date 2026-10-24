@@ -254,6 +254,12 @@ export type TableEditResult = TableWriteResult | TableEditRejected;
 export interface CreateTableOptions extends CreateTableItemOptions {
     accessGuard?: TableAccessGuard;
     operation_id?: string;
+    /**
+     * The collection to file into, by key in the create library. Resolved only
+     * when the table is actually created, so a retry of a creation that already
+     * committed replays even if the collection has since gone.
+     */
+    collectionKey?: string;
     /** Who is creating it. Defaults to `agent`. */
     actor?: TableActor;
     run_id?: string;
@@ -996,22 +1002,39 @@ async function auditSidecar(
  * differ from what the store would have written, this file — not the store's
  * idea of it — is what a revert to version 1 restores.
  */
+/** A collection a new table can be filed into: in the library and not in the trash. */
+function collectionIDForCreate(libraryID: number, key: string): number {
+    const collection = Zotero.Collections.getByLibraryAndKey(libraryID, key) as Zotero.Collection | false;
+    if (!collection || collection.deleted)
+        throw new TableItemError('Collection unavailable.', 'invalid_target');
+    return collection.id;
+}
+
 export async function createTableUncoordinated(options: CreateTableOptions): Promise<CreatedTable> {
-    const { operation_id, accessGuard, ...ordinary } = options;
+    const { operation_id, accessGuard, collectionKey, ...ordinary } = options;
     accessGuard?.(options.spec);
     const spec = options.spec;
     const limit = checkTableLimits(null, spec);
     if (limit) throw new TableItemError(limit.message, 'too_large');
-    if (operation_id === undefined)
-        return createTableOnce({ ...ordinary, spec, accessGuard });
+    if (operation_id === undefined) {
+        if (!collectionKey) return createTableOnce({ ...ordinary, spec, accessGuard });
+        const target = resolveTableLibrary(options.libraryID);
+        if ('error' in target)
+            throw new TableItemError('No eligible library for this table.', target.error);
+        const collectionID = collectionIDForCreate(target.libraryID, collectionKey);
+        return createTableOnce({ ...ordinary, libraryID: target.libraryID, collectionID, spec, accessGuard });
+    }
     if (typeof operation_id !== 'string' || !operation_id.trim())
         throw new TableItemError('operation_id must not be empty.', 'invalid_request');
     const resolved = resolveTableLibrary(options.libraryID);
     if ('error' in resolved)
         throw new TableItemError('No eligible library for this table.', resolved.error);
     const libraryID = resolved.libraryID;
+    // The collection enters the hash by key: the same request on another
+    // device, or after the collection is gone, is still the same request.
     const requestHash = await tableOperationHash({
         ...ordinary,
+        collectionKey,
         linksFor: undefined,
         creationOperation: undefined,
         spec: unstampedSpec(options.spec),
@@ -1043,8 +1066,10 @@ export async function createTableUncoordinated(options: CreateTableOptions): Pro
         }
         requireWritable({ libraryID, key: '' });
         accessGuard?.(spec);
+        const collectionID = collectionKey ? collectionIDForCreate(libraryID, collectionKey) : ordinary.collectionID;
         const created = await createTableOnce({
             ...ordinary,
+            ...(collectionID ? { collectionID } : {}),
             accessGuard,
             libraryID,
             spec,

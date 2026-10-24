@@ -23,7 +23,7 @@ import { Icon, PlusSignIcon } from '../../icons/icons';
 import { useCollectionsMenu } from './hooks/useCollectionsMenu';
 import { useLibrariesMenu } from './hooks/useLibrariesMenu';
 import { useNotesMenu } from './hooks/useNotesMenu';
-import { useSourcesMenu } from './hooks/useSourcesMenu';
+import { useSourcesMenu, type SourcesMenuEntries } from './hooks/useSourcesMenu';
 import { useTagsMenu } from './hooks/useTagsMenu';
 import { CollectionMenuItemContext, LibraryMenuItemContext, SourceMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
 
@@ -115,11 +115,31 @@ const getRecentItems = async (): Promise<Zotero.Item[]> => {
  */
 export interface AddSourcesTarget {
     isAttached: (item: Zotero.Item) => boolean;
+    /**
+     * Whether `addItem` can take the item. Rows it refuses are not offered;
+     * every item when absent. Keep it referentially stable, like `isAttached`.
+     */
+    canAdd?: (item: Zotero.Item) => boolean;
     addItem: (item: Zotero.Item) => void;
     removeItem: (item: Zotero.Item) => void;
     filters: MessageFiltersState;
     setFilters: (updater: (prev: MessageFiltersState) => MessageFiltersState) => void;
     attachFiles: (paths: string[]) => void;
+    /** Which action rows the menu offers for this target; all when absent. Keep it stable. */
+    entries?: SourcesMenuEntries;
+    /**
+     * Take a picked collection or tag directly instead of through `setFilters`.
+     * The composer's filters are exclusive (a collection pick clears tags), so
+     * a target that keeps several kinds side by side needs to know which pick
+     * the user made.
+     */
+    pickCollection?: (collectionId: number) => void;
+    pickTag?: (tag: ZoteroTag) => void;
+    /**
+     * The scope the item search runs in, when it is not `filters`. A target
+     * whose `filters` only mark what it already holds searches everywhere.
+     */
+    searchFilters?: MessageFiltersState;
 }
 
 export interface AddSourcesMenuProps {
@@ -147,6 +167,8 @@ export interface AddSourcesMenuProps {
     verticalPosition?: 'above' | 'below';
     /** Write picks somewhere other than the composer (see {@link AddSourcesTarget}). */
     target?: AddSourcesTarget;
+    /** A text label for the trigger button instead of the composer's "+" icon. */
+    triggerLabel?: string;
 }
 
 const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(function AddSourcesMenu({
@@ -163,6 +185,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     disabled = false,
     verticalPosition = 'above',
     target,
+    triggerLabel,
 }, ref) {
     const surfaceWindow = useSurfaceWindow();
     const [isLoading, setIsLoading] = useState(false);
@@ -186,8 +209,8 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     // The item search scopes itself to the active filters, and runs from an
     // effect that must not re-subscribe on every filter change; a ref keeps it
     // reading the current ones without becoming a dependency.
-    const filtersRef = useRef(currentMessageFilters);
-    filtersRef.current = currentMessageFilters;
+    const filtersRef = useRef(target?.searchFilters ?? currentMessageFilters);
+    filtersRef.current = target?.searchFilters ?? currentMessageFilters;
     const composerIsAttached = useCallback(
         (item: Zotero.Item) => currentMessageItems.some((i) => i.id === item.id),
         [currentMessageItems],
@@ -384,6 +407,11 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     }, [setCurrentMessageFilters, handleCommit]);
 
     const handleSelectCollection = useCallback((collectionId: number) => {
+        if (target?.pickCollection) {
+            target.pickCollection(collectionId);
+            handleCommit();
+            return;
+        }
         setCurrentMessageFilters((prev) => {
             const exists = prev.collectionIds.includes(collectionId);
             return {
@@ -396,9 +424,14 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
             };
         });
         handleCommit();
-    }, [setCurrentMessageFilters, handleCommit]);
+    }, [setCurrentMessageFilters, handleCommit, target]);
 
     const handleSelectTag = useCallback((tag: ZoteroTag) => {
+        if (target?.pickTag) {
+            target.pickTag(tag);
+            handleCommit();
+            return;
+        }
         setCurrentMessageFilters((prev) => {
             const exists = prev.tagSelections.some((selected) => selected.id === tag.id);
             return {
@@ -411,17 +444,19 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
             };
         });
         handleCommit();
-    }, [setCurrentMessageFilters, handleCommit]);
+    }, [setCurrentMessageFilters, handleCommit, target]);
 
     // These contexts stay identity-stable across keystrokes: menu hooks feed
     // them to their fetch effects, so churning them would re-read tags,
     // collections and libraries on every character typed. The search query
     // reaches the rows as a separate argument to the item factories.
+    const canAdd = target?.canAdd;
     const sourceMenuItemContext = useMemo<SourceMenuItemContext>(() => ({
         isAttached,
+        canAdd,
         onAdd: handleAddSourceItem,
         onRemove: handleRemoveSourceItem
-    }), [isAttached, handleAddSourceItem, handleRemoveSourceItem]);
+    }), [isAttached, canAdd, handleAddSourceItem, handleRemoveSourceItem]);
 
     const libraryMenuItemContext = useMemo<LibraryMenuItemContext>(() => ({
         currentLibraryIds,
@@ -469,7 +504,8 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         onSelectFiles: handleSelectFiles,
         getRecentItems,
         recentItemsLimit: RECENT_ITEMS_LIMIT,
-        verticalPosition
+        verticalPosition,
+        entries: target?.entries,
     });
 
     const librariesMenu = useLibrariesMenu({
@@ -579,15 +615,16 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                     // button with no type would default to submit and send the
                     // message on the way to opening the menu.
                     type="button"
-                    className="variant-ghost composer-add-sources"
+                    className={triggerLabel ? "variant-ghost display-flex flex-row items-center gap-1" : "variant-ghost composer-add-sources"}
                     ref={buttonRef}
                     onClick={handleButtonClick}
-                    aria-label="Add Sources"
+                    aria-label={triggerLabel ?? "Add Sources"}
                     aria-haspopup="menu"
                     aria-expanded={isMenuOpen}
                     disabled={disabled}
                 >
-                    <Icon icon={PlusSignIcon} size={18} className="scale-13" />
+                    <Icon icon={PlusSignIcon} size={triggerLabel ? 14 : 18} className={triggerLabel ? undefined : "scale-13"} />
+                    {triggerLabel}
                 </button>
             </Tooltip>
             <SearchMenu

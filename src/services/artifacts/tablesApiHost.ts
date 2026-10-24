@@ -14,6 +14,7 @@ import { registerTableShadowRestore } from './tableStore';
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import { openTable } from '../../ui/openTable';
+import { closeTableTabsForWindow, listTableTabs } from '../../ui/tableTab';
 import {
     describeTableItemPane,
     isTableItemPaneRegistered,
@@ -45,6 +46,10 @@ export function registerTablesApi(): void {
         local: { commands: getTableLocalCommands },
         listViews: () => listReaderTableViews(),
         openInReader: (item, options) => openTableInReader(item, options),
+        tabs: {
+            closeForWindow: (win) => closeTableTabsForWindow(win),
+            list: () => listTableTabs(),
+        },
         itemPane: {
             isRegistered: () => isTableItemPaneRegistered(),
             paneID: () => tableItemPaneID(),

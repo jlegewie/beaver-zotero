@@ -36,6 +36,7 @@ import {
 import { captureInstanceOperation } from './operation';
 import { createEndpoint, registerEndpoint } from './registration';
 import { handleArtifactRequest } from '../artifacts/artifactProvider';
+import { handleTableTabProbe } from '../../ui/tableTabProbe';
 /** Local HTTP routes, owned by the plugin instance. */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -1141,6 +1142,7 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/list-actions'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/list-actions', request));
         endpoints['/beaver/test/approve-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/approve-action', request));
         endpoints['/beaver/test/confirm-credits'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/confirm-credits', request));
+        endpoints['/beaver/test/table-card'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-card', request));
         endpoints['/beaver/test/undo-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/undo-action', request));
         endpoints['/beaver/test/chat-drop-connection'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-drop-connection', request));
         endpoints['/beaver/test/run-snapshot'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-snapshot', request));
@@ -1165,6 +1167,10 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/table-read'] = createEndpoint(handleTestTableReadHttpRequest);
 
         endpoints['/beaver/test/table-list'] = createEndpoint(handleTestTableListHttpRequest);
+
+        // The Beaver tab (dev-only): fixed commands that open, close and time
+        // it through the product paths, and report its tabs and the session.
+        endpoints['/beaver/test/table-tab'] = createEndpoint(handleTableTabProbe);
 
         // The versioned store (dev-only): the write protocol, the version log,
         // revert, trash/restore, and the crash recovery `open` performs.

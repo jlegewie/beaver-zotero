@@ -13,16 +13,18 @@ import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { useRemoveContextMenu } from '../../../hooks/useRemoveContextMenu';
 import { ChipButton } from './ChipButton';
 import { ChipRemovableIcon } from './ChipRemovableIcon';
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 
 const MAX_CHIP_TEXT_LENGTH = 30;
 
 /**
  * A stored table as a request chip. Carries the table glyph rather than the
  * snapshot glyph of its Zotero item so it reads as the same thing the table
- * cards and the artifacts list show; clicking opens the current snapshot.
+ * cards and the artifacts list show; clicking opens it in the Beaver tab.
  */
 export function TableChip({ title, tableKey, remove }: { title: string; tableKey: string; remove?: ChipRemoveConfig }) {
     const [error, setError] = React.useState('');
+    const surfaceWindow = useSurfaceWindow();
     return <>
         <ChipShell
             icon={
@@ -35,7 +37,7 @@ export function TableChip({ title, tableKey, remove }: { title: string; tableKey
             onClick={() => {
                 const open = getHost().navigation?.openTable;
                 if (!open) { setError('Table provider unavailable.'); return; }
-                void open(tableKey).then(result => setError('error' in result ? result.error : result.warning ?? ''))
+                void open(tableKey, surfaceWindow).then(result => setError('error' in result ? result.error : result.warning ?? ''))
                     .catch(() => setError('Table provider unavailable.'));
             }}
         />

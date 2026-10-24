@@ -11,6 +11,7 @@ import type { PendingBatchApproval } from '@beaver/agent-core/run-state/pendingB
 import type { PendingCreditConfirmation } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
 import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
+import type { PendingTableCard } from '@beaver/agent-core/run-state/pendingTableCards';
 
 function confirmation(id = 'conf-1'): PendingCreditConfirmation {
     return {
@@ -166,5 +167,15 @@ describe('selectComposerTakeover', () => {
             kind: 'credit-confirmation',
             confirmation: confirmation('conf-1'),
         });
+    });
+
+    it('puts a table card after a batch approval and before a credit confirmation', () => {
+        const card = { card_id: 'card-1', toolcall_id: 'call-2' } as PendingTableCard;
+        const tableCards = new Map([['card-1', card]]);
+        expect(selectComposerTakeover({ tableCards, creditConfirmations: new Map([['conf-1', confirmation()]]) }))
+            .toEqual({ kind: 'table-card', card });
+        expect(selectComposerTakeover({ tableCards, batchApprovals: new Map([['approval-1', batchApproval()]]) }).kind)
+            .toBe('batch-approval');
+        expect(selectComposerTakeover({ tableCards, pendingApprovalCount: 1 })).toEqual({ kind: 'input' });
     });
 });

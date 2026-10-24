@@ -756,6 +756,19 @@ describe('what the item-pane section reports', () => {
         expect(data.reason).toBeTruthy();
         expect(data.fields.dimensionsLine).toBe('');
         expect(data.fields.conflict).toBeNull();
+        // This device wrote the table, so its last version can be written back.
+        expect(data.restorableUnreadable).toBe(true);
+    });
+
+    it('restores a corrupt table from the version this device wrote', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        await writeFile(tablePath(), '{"spec":');
+        const restored = await restoreShadowVersion(ref);
+        expect(restored).toMatchObject({ ok: true, restoredFrom: 2 });
+        const data = await readTableSectionData(item);
+        expect(data.reason).toBeNull();
+        expect(data.restorableUnreadable).toBe(false);
     });
 
     it('reads the table once on an ordinary table, and never the snapshot', async () => {

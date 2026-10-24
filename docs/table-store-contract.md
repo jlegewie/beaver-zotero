@@ -295,7 +295,9 @@ bookkeeping from the committed table, then verifies all retained digests before
 returning history. Missing or corrupt older versions remain unavailable.
 
 The item-pane Edit action opens one persistent React editor in the existing Beaver
-window. Ordinary Open continues to use the snapshot reader. Local edits, explicit
+window. Ordinary Open shows the table in the Beaver tab (`src/ui/tableTab.ts`), which
+reads the committed `table.json` and re-reads it on the store's update event; a reader tab
+opened on a table is replaced by that tab. Local edits, explicit
 history restore, and resets do not call the backend. Notifications reload current
 content, while unsaved drafts require an explicit reload after concurrent changes.
 Saving one editor section refreshes its saved fields and revision without discarding

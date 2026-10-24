@@ -331,16 +331,20 @@ export function buildTableSectionFields(
         return fields;
     }
 
+    // Counted over the question columns, as the chat's table cards count:
+    // reference, year and identifier are filled by Beaver, not answered.
+    const details = Object.values(summary.columns_detail ?? {});
+    const systemColumns = details.filter((detail) => detail?.system).length;
     const rows = Math.max(0, summary.rows);
-    const columns = Math.max(0, summary.columns);
+    const columns = Math.max(0, summary.columns - systemColumns);
     const cells = rows * columns;
 
     let filled = 0;
     let unsure = 0;
     let metadataOnly = 0;
     let stale = 0;
-    for (const detail of Object.values(summary.columns_detail ?? {})) {
-        if (!detail) continue;
+    for (const detail of details) {
+        if (!detail || detail.system) continue;
         filled += detail.answered ?? 0;
         unsure += detail.unsure ?? 0;
         metadataOnly += detail.metadata_only ?? 0;

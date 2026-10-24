@@ -23,6 +23,8 @@ import {
     SpecialCollectionType,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { currentReaderAttachmentAtom, readerTextSelectionAtom, stagedReaderActionContextAtom } from './messageComposition';
+import { isTableAttachment } from '../../src/services/artifacts/tableItemIdentity';
+import type { TableState } from '@beaver/agent-core/types/attachments/apiTypes';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
@@ -85,6 +87,8 @@ export function getReaderState(get: Getter, searchableLibraryIds: Set<number>): 
     const readerAttachment = staged?.item ?? get(currentReaderAttachmentAtom);
     if (!readerAttachment) return null;
     if (!searchableLibraryIds.has(readerAttachment.libraryID)) return null;
+    // A table open in its Beaver tab is reported as table state, not a reader.
+    if (!staged && isTableAttachment(readerAttachment)) return null;
 
     const activeReader = getCurrentReader();
     const reader = !staged && activeReader?.itemID === readerAttachment.id ? activeReader : undefined;
@@ -169,7 +173,26 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
     // Detect the note-editor view from the raw tab context, NOT from the
     // exclusion-filtered noteState
     const isNoteTabActive = !!get(currentNoteItemAtom);
-    const currentView: 'library' | 'file_reader' | 'note_editor' = stagedReaderAction ? 'file_reader' : get(isLibraryTabAtom) ? 'library' : isNoteTabActive ? 'note_editor' : 'file_reader';
+    // A Beaver tab sets its table as the current context the way a reader
+    // tab sets its document (see `updateTableTabContextAtom`).
+    const contextItem = stagedReaderAction ? null : get(currentReaderAttachmentAtom);
+    const tableItem = contextItem && isTableAttachment(contextItem) ? contextItem : null;
+    const currentView: 'library' | 'file_reader' | 'note_editor' | 'table' = stagedReaderAction
+        ? 'file_reader'
+        : get(isLibraryTabAtom) ? 'library' : isNoteTabActive ? 'note_editor' : tableItem ? 'table' : 'file_reader';
+    let tableState: TableState | null = null;
+    if (tableItem && searchableLibrarySet.has(tableItem.libraryID)) {
+        const libraryRef = libraryRefForLibraryID(tableItem.libraryID);
+        if (libraryRef) {
+            const title = String(tableItem.getField('title') || '').slice(0, 300);
+            tableState = {
+                library_id: tableItem.libraryID,
+                zotero_key: tableItem.key,
+                library_ref: libraryRef,
+                ...(title ? { title } : {}),
+            };
+        }
+    }
 
     if (currentView === 'file_reader') {
         // currentReaderAttachmentAtom never holds an attachment from an excluded
@@ -194,6 +217,18 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 is_group: library.isGroup,
                 read_only: !library.editable,
                 is_synced: searchableLibraryIds.includes(library.libraryID),
+            };
+        }
+    } else if (currentView === 'table' && tableState) {
+        const library = Zotero.Libraries.get(tableState.library_id);
+        if (library) {
+            currentLibrary = {
+                library_id: library.libraryID,
+                library_ref: tableState.library_ref,
+                name: library.name,
+                is_group: library.isGroup,
+                read_only: !library.editable,
+                is_synced: true,
             };
         }
     } else if (currentView === 'note_editor' && noteState) {
@@ -409,6 +444,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         current_view: currentView,
         ...(readerState ? { reader_state: readerState } : {}),
         ...(noteState ? { note_state: noteState } : {}),
+        ...(tableState ? { table_state: tableState } : {}),
         ...(currentLibrary ? { current_library: currentLibrary } : {}),
         ...(currentLibraryExcluded ? { current_library_excluded: true } : {}),
         ...(selectionPartiallyExcluded ? { selection_partially_excluded: true } : {}),

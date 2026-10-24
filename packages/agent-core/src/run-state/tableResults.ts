@@ -90,6 +90,15 @@ export function tableResultMessages(value: unknown): string[] {
     const result = tableResultBody(value);
     const messages: string[] = [];
     switch (result.error_code ?? result.status) {
+        case "declined":
+            messages.push("The table was declined. Nothing was created.");
+            break;
+        case "card_timed_out":
+            messages.push("The table card was not answered in time. Nothing was created.");
+            break;
+        case "card_unreachable":
+            messages.push("The table card could not be shown. Nothing was created.");
+            break;
         case "schema_changed":
             messages.push(
                 "Extraction paused because the questions or population changed. Request a new plan in chat and review its approval.",

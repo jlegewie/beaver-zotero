@@ -17,6 +17,8 @@ export interface SourceMenuItemContext {
      * hooks use the containing context as a fetch-effect dependency.
      */
     isAttached: (item: Zotero.Item) => boolean;
+    /** Whether `onAdd` can take the item; rows it refuses are not offered. */
+    canAdd?: (item: Zotero.Item) => boolean;
     onAdd: (item: Zotero.Item) => void;
     onRemove: (item: Zotero.Item) => void;
 }

@@ -105,6 +105,10 @@ export class TableItemError extends Error {
     }
 }
 
+/** Where an unreadable table can be recovered: the item pane's restore. */
+export const UNREADABLE_TABLE_RECOVERY =
+    'Select the table in your library and use “Restore my version” in its Beaver Table section to write back the last version this device saved.';
+
 /** Error constructors differ between the plugin and renderer bundles. */
 export function isTableItemError(error: unknown): error is TableItemError {
     return !!error && typeof error === 'object'

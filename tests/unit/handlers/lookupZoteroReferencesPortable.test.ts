@@ -49,7 +49,7 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
 }));
 
 import { lookupZoteroReferences } from '../../../src/services/agentDataProvider/lookupZoteroReferences';
-import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
+import { checkLibraryExcluded, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from '../../../src/services/agentDataProvider/utils';
 import { serializeAttachment, serializeItem } from '../../../src/utils/zoteroSerializers';
 import { handleZoteroDataRequest } from '../../../src/services/agentDataProvider/handleZoteroDataRequest';
 
@@ -128,6 +128,23 @@ describe('lookupZoteroReferences with portable-only references', () => {
         );
         expect(result.errors).toEqual([]);
         expect(result.attachments[0].attachment.deleted).toBe(true);
+    });
+
+    it('names the primary attachment even when no file is checked', async () => {
+        const parent = { ...alphaItem, id: 101, key: 'PARENT00' };
+        const attachment = { ...alphaItem, id: 102, parentID: 101,
+            isAttachment: () => true, isRegularItem: () => false };
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(attachment as any);
+        vi.mocked(Zotero.Items.getAsync).mockResolvedValue([parent] as any);
+        vi.mocked(serializeAttachment).mockResolvedValue({ library_id: 100, zotero_key: SHARED_KEY } as any);
+        vi.mocked(getBestAttachmentBatch).mockResolvedValueOnce(new Map([[101, 102]]));
+        const result = await lookupZoteroReferences(
+            [{ library_id: 0, library_ref: 'g555', zotero_key: SHARED_KEY }],
+            { include_attachments: false, include_parents: true, include_notes: false, file_status_level: 'none' },
+        );
+        expect(result.attachments[0].file_status).toBeUndefined();
+        expect(result.attachments[0].is_primary).toBe(true);
+        expect(getAttachmentFileStatusLightweight).not.toHaveBeenCalled();
     });
 
     it.each(['item', 'attachment'] as const)('returns only identity fields when %s metadata becomes excluded during serialization', async (kind) => {
