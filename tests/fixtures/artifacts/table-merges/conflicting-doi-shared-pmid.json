@@ -1,0 +1,183 @@
+{
+    "name": "the most specific identifier both carry decides: different DOIs stay apart despite a shared PMID",
+    "existing": [],
+    "incoming": [
+        {
+            "row": {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA"
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                }
+            },
+            "identifiers": {
+                "doi": "10.1000/a",
+                "pmid": "1"
+            }
+        },
+        {
+            "row": {
+                "id": "r2",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W1",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W1",
+                        "title": "Sampling hard-to-reach groups online",
+                        "identifiers": {
+                            "doi": "10.1000/b",
+                            "pmid": "1"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    "after": {
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "kind": "item"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        },
+                        "provenance": "system"
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        },
+                        "provenance": "system"
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W1",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W1",
+                        "title": "Sampling hard-to-reach groups online",
+                        "identifiers": {
+                            "doi": "10.1000/b",
+                            "pmid": "1"
+                        },
+                        "library_items": [],
+                        "oa_candidates": []
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        },
+                        "provenance": "system"
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        },
+                        "provenance": "system"
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            }
+        ],
+        "added": [
+            "r1",
+            "r2"
+        ],
+        "merged": 0
+    }
+}

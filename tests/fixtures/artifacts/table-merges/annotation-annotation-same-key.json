@@ -1,0 +1,109 @@
+{
+    "name": "the same annotation twice is one row",
+    "existing": [],
+    "incoming": [
+        {
+            "row": {
+                "id": "r1",
+                "ref": {
+                    "kind": "annotation",
+                    "library_ref": "u",
+                    "zotero_key": "ANN1",
+                    "attachment": {
+                        "library_ref": "u",
+                        "zotero_key": "PDF1"
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "annotation",
+                            "text": "Highlighted passage"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "row": {
+                "id": "r2",
+                "ref": {
+                    "kind": "annotation",
+                    "library_ref": "u",
+                    "zotero_key": "ANN1",
+                    "attachment": {
+                        "library_ref": "u",
+                        "zotero_key": "PDF1"
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-20"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "annotation",
+                            "text": "Highlighted passage"
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    "after": {
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "library_ref": "u",
+                    "zotero_key": "ANN1",
+                    "kind": "annotation",
+                    "attachment": {
+                        "library_ref": "u",
+                        "zotero_key": "PDF1"
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "value": {
+                            "kind": "annotation",
+                            "text": "Highlighted passage"
+                        },
+                        "provenance": "system"
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    },
+                    {
+                        "source": "s2",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        ],
+        "added": [
+            "r1"
+        ],
+        "merged": 1
+    }
+}

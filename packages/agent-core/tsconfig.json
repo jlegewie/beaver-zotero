@@ -122,6 +122,7 @@
     "./src/layouts/table.ts",
     "./src/layouts/rowKinds.ts",
     "./src/layouts/tableMutations.ts",
+    "./src/layouts/tableCitations.ts",
     "./src/run-state/toolResultTypes.ts",
     "./src/run-state/tableResults.ts",
     "./src/run-state/toolCallRequest.ts",

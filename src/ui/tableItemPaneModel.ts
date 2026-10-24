@@ -93,7 +93,8 @@ export interface TableSectionFields {
     cells: number;
     filled: number;
     unsure: number;
-    unsourced: number;
+    /** Cells answered from title and abstract only. */
+    metadataOnly: number;
     stale: number;
     version: number | null;
     /** The oldest version still in the log, or null when the log is empty. */
@@ -111,7 +112,7 @@ export interface TableSectionFields {
     dimensionsLine: string;
     /** "58 of 84 cells filled", or empty when there are no cells. */
     coverageLine: string;
-    /** "3 unsure · 1 unsourced · 2 stale", or empty when nothing is flagged. */
+    /** "3 unsure · 1 from title and abstract · 2 stale", or empty when nothing is flagged. */
     flagsLine: string;
     /** "Version 12 · history goes back to v7", or empty when unknown. */
     versionLine: string;
@@ -255,7 +256,7 @@ function emptyFields(annotations: number): TableSectionFields {
         cells: 0,
         filled: 0,
         unsure: 0,
-        unsourced: 0,
+        metadataOnly: 0,
         stale: 0,
         version: null,
         oldestVersion: null,
@@ -336,19 +337,19 @@ export function buildTableSectionFields(
 
     let filled = 0;
     let unsure = 0;
-    let unsourced = 0;
+    let metadataOnly = 0;
     let stale = 0;
     for (const detail of Object.values(summary.columns_detail ?? {})) {
         if (!detail) continue;
-        filled += detail.filled ?? 0;
+        filled += detail.answered ?? 0;
         unsure += detail.unsure ?? 0;
-        unsourced += detail.unsourced ?? 0;
+        metadataOnly += detail.metadata_only ?? 0;
         stale += detail.stale ?? 0;
     }
 
     const flags: string[] = [];
     if (unsure) flags.push(`${unsure} unsure`);
-    if (unsourced) flags.push(`${unsourced} unsourced`);
+    if (metadataOnly) flags.push(`${metadataOnly} from title and abstract`);
     if (stale) flags.push(`${stale} stale`);
 
     const annotationWarning = annotationsBeforeLastWrite > 0;
@@ -360,7 +361,7 @@ export function buildTableSectionFields(
         cells,
         filled,
         unsure,
-        unsourced,
+        metadataOnly,
         stale,
         version,
         oldestVersion,

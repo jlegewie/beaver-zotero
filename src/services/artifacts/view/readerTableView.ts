@@ -79,9 +79,10 @@ import {
     type TableViewSummary,
 } from './enhanceTableDocument';
 import { openTableLink } from './tableLinks';
-import { isTableItem, loadTableItemFields, type TableRef } from '../tableItemIdentity';
+import { isTableItem, loadTableItemFields, readTable, type TableRef } from '../tableItemIdentity';
 import { getTableLocalCommands, tableLocalCommands } from '../tablesApi';
-import { TABLE_EXPORT_COMMAND } from '../tableDocument';
+import { TABLE_EXPORT_COMMAND, TABLE_SPEC_HASH_ATTRIBUTE } from '../tableDocument';
+import { tableSpecHash } from '../recoveryShadow';
 import { exportTableCsv, tableActionErrorMessage } from '../../../ui/tableDocumentActions';
 
 /** How long to wait for a view that never finishes initialising. */
@@ -174,13 +175,18 @@ function snapshotDocument(reader: any): Document | undefined {
     return view?.iframeDocument ?? view?._iframeDocument;
 }
 
-/** A persisted write never leaves an old snapshot silently presented as current. */
-export function markTableReadersStale(ref: TableRef): void {
+/**
+ * A persisted write never leaves an old snapshot silently presented as current.
+ * With `sha256` — the spec a render just wrote — a reader whose document
+ * already renders it is current and left alone.
+ */
+export function markTableReadersStale(ref: TableRef, sha256?: string): void {
     for (const reader of readerRegistry()) {
         const item = Zotero.Items.get(reader.itemID);
         if (!item || item.key !== ref.key || item.libraryID !== ref.libraryID) continue;
-        staleReaders.add(reader);
         const doc = snapshotDocument(reader);
+        if (sha256 && doc?.documentElement?.getAttribute(TABLE_SPEC_HASH_ATTRIBUTE) === sha256) continue;
+        staleReaders.add(reader);
         if (!doc?.body || doc.querySelector('[data-beaver-table-outdated]')) continue;
         const notice = doc.createElement('div');
         notice.setAttribute('data-beaver-table-outdated', 'true');
@@ -188,6 +194,22 @@ export function markTableReadersStale(ref: TableRef): void {
         notice.textContent = 'This table has changed. Close and reopen this snapshot to see the current version.';
         notice.style.cssText = 'position:sticky;top:0;z-index:10000;padding:12px;background:#fff0bd;color:#332600;font:14px sans-serif;border:1px solid #b68700';
         doc.body.prepend(notice);
+    }
+}
+
+/**
+ * Marks the reader outdated when its document renders another revision than the
+ * committed table, and asks the store's open repair to re-render it. Best
+ * effort: an unreadable table or a library Beaver does not write to only logs.
+ */
+export async function checkSnapshotFreshness(ref: TableRef, doc: Document): Promise<void> {
+    try {
+        const current = await tableSpecHash((await readTable(ref)).spec);
+        if (doc.documentElement?.getAttribute(TABLE_SPEC_HASH_ATTRIBUTE) === current) return;
+        markTableReadersStale(ref, current);
+        await Zotero.Beaver?.libraryOperations?.run('table_openTable', [ref]);
+    } catch (error) {
+        logger(`readerTableView: could not check ${ref.key} for a stale snapshot: ${String(error)}`, 2);
     }
 }
 
@@ -315,6 +337,14 @@ function readerHost(reader: any, view: any, mount: Element, ref: TableRef): Tabl
         },
         runCommand: (command) => {
             if (command === TABLE_EXPORT_COMMAND) void exportFromReader(win, ref);
+        },
+        readSpec: async () => {
+            try {
+                return (await readTable(ref)).spec;
+            } catch (error) {
+                logger(`readerTableView: could not read ${ref.key}: ${String(error)}`, 2);
+                return null;
+            }
         },
     };
 }
@@ -534,8 +564,9 @@ async function enhanceReader(
 
         // The card and the link routing — the whole of what is attached. If
         // this throws there is nothing to keep, so the attempt ends here.
+        const tableRef = { libraryID: item.libraryID, key: item.key };
         try {
-            undo.push(enhanceTableDocument(doc, readerHost(reader, view, mount, { libraryID: item.libraryID, key: item.key })));
+            undo.push(enhanceTableDocument(doc, readerHost(reader, view, mount, tableRef)));
             diagnostics.cardMounted = true;
             diagnostics.listenersAttached = true;
         } catch (error) {
@@ -570,6 +601,10 @@ async function enhanceReader(
         // throw in a step below must not make the diagnostics disagree with
         // `views`. Such a throw reports through `failures` instead.
         diagnostics.enhanced = true;
+
+        // A reader opened outside the product Open (a double-click, a restored
+        // session) may load a snapshot whose render never landed.
+        void checkSnapshotFreshness(tableRef, doc);
 
         // The one piece of reader *state* the module changes, so it comes after
         // the registration that owns its undo rather than before.

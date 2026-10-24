@@ -12,6 +12,7 @@ import {
 import {
     baseCitationKey,
     CitationRef,
+    getRequestedRef,
     getResolvedRef,
     LocatorKind,
     requestedCitationKey,
@@ -62,6 +63,19 @@ function propBool(props: Record<string, unknown>, camel: string, kebab: string):
  *   <citation external_id="..."/>                - external reference
  * Legacy item_id/att_id/page attrs are still accepted by preprocessing.
  */
+function directCitation(value: unknown): Citation | undefined {
+    return value && typeof value === 'object' && typeof (value as Citation).citation_id === 'string'
+        ? (value as Citation)
+        : undefined;
+}
+
+/** The identity model of an assembled citation, as its tag would have parsed. */
+function propsFromCitation(citation: Citation): CitationPropsModel {
+    const ref = getRequestedRef(citation) ?? getResolvedRef(citation);
+    if (!ref) return { ok: false, requestedKey: '', consecutive: false, adjacent: false };
+    return { ok: true, ref, requestedKey: requestedCitationKey(ref), consecutive: false, adjacent: false };
+}
+
 export function readCitationProps(props: Record<string, unknown>): CitationPropsModel {
     const consecutive = propBool(props, 'dataConsecutive', 'data-consecutive');
     const adjacent = propBool(props, 'dataAdjacent', 'data-adjacent');
@@ -185,7 +199,14 @@ export interface CitationViewModel {
  * host-agnostic.
  */
 export function useCitationViewModel(props: Record<string, unknown>): CitationViewModel {
-    const parsedProps = useMemo(() => readCitationProps(props), [props]);
+    // A caller holding the assembled citation (a table's evidence) passes it as
+    // `citation`: it identifies itself and is its own metadata, so it never
+    // depends on the thread's store or on a tag naming it uniquely.
+    const direct = directCitation(props.citation);
+    const parsedProps = useMemo(
+        () => (direct ? propsFromCitation(direct) : readCitationProps(props)),
+        [props, direct],
+    );
 
     const citationDataByCitationKey = useAtomValue(citationByKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
@@ -207,9 +228,9 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
     const identity = useMemo(() => {
         const citationKey = parsedProps.requestedKey || '';
 
-        let metadata = citationKey
+        let metadata = direct ?? (citationKey
             ? citationDataByCitationKey[citationKey]
-            : undefined;
+            : undefined);
 
         if (!metadata && parsedProps.ok) {
             metadata = citationDataByCitationKey[baseCitationKey(parsedProps.ref)];
@@ -276,7 +297,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             resolvedRef,
             externalSourceId,
         };
-    }, [parsedProps, citationDataByCitationKey]);
+    }, [parsedProps, citationDataByCitationKey, direct]);
 
     const {
         metadata,

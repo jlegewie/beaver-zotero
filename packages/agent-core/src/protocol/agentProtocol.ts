@@ -2551,7 +2551,6 @@ export type BatchApprovalMode = 'full_access' | 'ask_each_time';
  * nothing destructive, and the block is then hidden.
  */
 export interface WSBatchApprovalRequest extends WSBaseEvent {
-    table?: import('./artifactProtocol').TableBatchApproval | null;
     event: 'batch_approval_request';
     /** Correlation id for the response */
     approval_id: string;
@@ -2640,7 +2639,6 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
  * batch runs, on a decline they say what to do instead.
  */
 export interface WSBatchApprovalResponse {
-    table?: import('./artifactProtocol').TableApprovalIdentity;
     type: 'batch_approval_response';
     approval_id: string;
     /** Whether the user approved the batch */

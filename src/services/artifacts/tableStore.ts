@@ -2,20 +2,27 @@
  * The versioned store for stored tables — every write to a table file goes
  * through here, and nothing else may write one.
  *
- * A table is a Zotero snapshot attachment whose embedded {@link TableSpec} is
- * the only copy of its state ({@link createTableItem}). There is no database
- * row to rebuild it from, so the file *is* the commit: the whole point of this
- * module is that a write either leaves the previous table intact or leaves the
- * new one intact, never something in between, and that the numbers it hands out
- * for the states it has produced never move.
+ * A table is a Zotero snapshot attachment whose `table.json` is the only copy
+ * of its state ({@link createTableItem}). There is no database row to rebuild
+ * it from, so that file *is* the commit: the whole point of this module is that
+ * a write either leaves the previous table intact or leaves the new one intact,
+ * never something in between, and that the numbers it hands out for the states
+ * it has produced never move.
  *
  * ## Storage layout, inside the attachment's storage directory
  *
  * ```
- * <slug>.html            always render(spec); carries the canonical spec
+ * table.json             { spec, receipts, creation } — the table
+ * <slug>.html            the snapshot rendered from it (`tableRenderer.ts`)
  * beaver/history.json    { tip, versions: [ … ] }
  * beaver/v<N>.json       the full spec of version N
+ * beaver/bookkeeping.json  the spec and table.json digests the last completed render covered
  * ```
+ *
+ * A write commits in a fixed order: the version file (for a new number),
+ * `table.json` — the commit point, after which nothing rejects — then the
+ * history and the recovery shadow. The snapshot follows through the renderer,
+ * which every write schedules and which never takes this module's lock.
  *
  * `beaver/`, not `.beaver/`. The storage directory as a whole is what syncs for
  * a stored file attachment, and Zotero's zip writer (`Zotero.File`'s
@@ -26,10 +33,12 @@
  *
  * ## Two sources of truth, and which one wins
  *
- * The document is the state; the sidecar is bookkeeping about it. Everything
- * here follows from that: the document is written at the commit point and every
+ * `table.json` is the state; the sidecar is bookkeeping about it. Everything
+ * here follows from that: `table.json` is written at the commit point and every
  * disagreement is resolved in its favour, by rebuilding the sidecar rather than
- * by rolling the document back. {@link openTable} is where that repair happens.
+ * by rolling the table back. {@link openTable} is where that repair happens.
+ * The one exception is a missing `table.json`, which is rebuilt from the
+ * history's tip when that version file still matches its log entry.
  *
  * ## The one thing the file layout cannot answer
  *
@@ -54,15 +63,16 @@
  */
 
 import {
-    pruneTableCitations,
     readSpec,
     TABLE_SPEC_VERSION,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
 import {
     applyMutations,
+    checkTableLimits,
     summarize,
     type ApplyError,
+    type SkippedCell,
     type TableMutation,
 } from '@beaver/agent-core/layouts/tableMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -79,12 +89,10 @@ import {
 } from './recoveryShadow';
 import { readTable } from './tableItemIdentity';
 import {
-    buildTableDocument,
-    parseTableDocument,
-    parseTableDocumentState,
-    type TableDocumentState,
-    type TableOperationReceipt,
-} from './tableDocument';
+    renderIsCurrent,
+    renderTable,
+    markTablePending,
+} from './tableRenderer';
 import {
     isTableAttachment,
     buildTableUrl,
@@ -93,15 +101,16 @@ import {
     EMPTY_TABLE_HISTORY,
     loadTableItemFields,
     normalizeTableHistory,
-    queueTableFullText,
     readTableHistory,
-    readTableItemDocument,
+    readTableFileLedger,
+    readTableItemSpec,
     resolveTableItem,
     resolveTableLibrary,
     restoreTableItem,
     TABLE_EMOJI_TAG,
     TABLE_TAG,
     TABLE_URL_PREFIX,
+    tableFilePath,
     tableHistoryPath,
     TableItemError,
     tableReadError,
@@ -111,12 +120,14 @@ import {
     type CreatedTableItem,
     type CreateTableItemOptions,
     type TableActor,
+    type TableFile,
     type TableHistory,
+    type TableLedger,
+    type TableOperationReceipt,
     type TableRef,
     type TableVersionEntry,
 } from './tableItem';
 import { getTablesApi, setTableShadowRestore, tableWriteLocks, tableLocalCommands, type TableLocalCommands } from './tablesApi';
-import { zoteroLinkScope, zoteroLinksFor } from './view/tableLinks';
 
 // ---------------------------------------------------------------------------
 // Shape
@@ -175,6 +186,10 @@ export type TableRecovery =
     | { kind: 'orphan_removed'; versions: number[] }
     /** Versions the retention cap dropped while the log was being rewritten. */
     | { kind: 'pruned'; versions: number[] }
+    /** `table.json` was missing and was rebuilt from the history's tip. */
+    | { kind: 'table_file_rebuilt'; version: number }
+    /** The snapshot was missing or a render behind, and a render was scheduled. */
+    | { kind: 'rerendered' }
     | { kind: 'bookkeeping_pending' };
 
 export type TableAccessGuard = (spec: TableSpec) => void;
@@ -209,6 +224,8 @@ export interface TableWriteOk {
     entry: TableVersionEntry;
     /** Versions the retention cap dropped, if any. */
     pruned: number[];
+    /** `set_cells` writes the engine declined, for an {@link editTable}. */
+    skipped?: SkippedCell[];
 }
 
 /**
@@ -309,6 +326,19 @@ export type TableShadowRestoreResult =
  * uploaded whole on every sync — stays bounded.
  */
 export const TABLE_VERSION_RETENTION = 20;
+
+/**
+ * The bytes of version files a table keeps beyond {@link TABLE_VERSION_RETENTION_FLOOR}.
+ * A large table keeps fewer versions, so twenty copies of it never become a
+ * multi-megabyte upload.
+ */
+export const TABLE_VERSION_RETENTION_BYTES = 16 * 1024 * 1024;
+
+/**
+ * The newest versions a table always keeps, whatever their size, so even a
+ * table near the spec cap can be reverted.
+ */
+export const TABLE_VERSION_RETENTION_FLOOR = 3;
 
 /** The line version 1 carries when the caller does not supply one. */
 const CREATED_CHANGE = 'Created the table';
@@ -502,53 +532,83 @@ function requireWritable(ref: TableRef): void {
 // ---------------------------------------------------------------------------
 
 interface CurrentState {
-    /** The spec embedded in the document, or null when it cannot be read. */
+    /** The spec in `table.json`, or null when it is not a readable table. */
     spec: TableSpec | null;
-    /** The version the document claims. 0 when unknown. */
-    htmlVersion: number;
+    /** The version `table.json` claims. 0 when unknown. */
+    version: number;
     history: TableHistory;
-    storeState: TableDocumentState;
+    /** The receipts and creation marker committed with the spec. */
+    file: Omit<TableFile, 'spec'>;
+    /**
+     * `table.json` was missing and `spec` was rebuilt from the history's tip.
+     * Only in memory: a write commits a new file anyway, and an open persists
+     * it once the library is known to be writable.
+     */
+    rebuilt: boolean;
 }
 
 /**
  * What the table looks like right now, from both sources of truth, unreconciled
- * — {@link reconcileLog} is what makes them agree.
+ * — {@link reconcileLog} is what makes them agree. Call only with the lock held.
+ * Writes nothing, so a read in a library Beaver may not modify stays a read.
  */
-async function readCurrentState(
-    item: Zotero.Item,
-    document?: Awaited<ReturnType<typeof readTableItemDocument>>
-): Promise<CurrentState> {
-    const { html, parsed: read } = document ?? await readTableItemDocument(item);
-    // Sync can replace the attachment independently of our write lock. The
-    // document and its receipts must always describe the same file revision.
-    if (!read.ok && (read.code === 'unsupported_version' || read.code === 'no_file' || read.code === 'not_a_table')) {
+async function readCurrentState(item: Zotero.Item): Promise<CurrentState> {
+    const read = await readTableItemSpec(item);
+    if (!read.ok && read.code !== 'invalid' && read.code !== 'no_spec') {
         throw tableReadError(read.code, read.message);
     }
-    if (html === null) throw tableReadError('no_file', `Table ${item.key} has no readable document.`);
-    const spec = read.ok ? read.spec : null;
     if (!read.ok) {
-        // A readable file with an unreadable spec can be repaired by a write.
+        // An unreadable table can still be replaced by an unguarded write.
         logger(`tableStore: ${read.code} reading ${item.key}: ${read.message}`, 2);
     }
+    const spec = read.ok ? read.spec : null;
+    const rebuilt = read.ok && !!read.recovered;
 
     const history =
         (await readJson<TableHistory>(historyPathOf(item))) ?? EMPTY_TABLE_HISTORY;
-
-    let storeState: TableDocumentState;
-    try {
-        storeState = parseTableDocumentState(html);
-    } catch (error) {
-        throw new TableItemError(
-            `Table operation receipts are unreadable: ${String(error)}`,
-            'invalid_spec'
-        );
-    }
+    // An unreadable spec does not lose the retry ledger: the file's own
+    // receipts when they still read, else the log's copy, so a write that
+    // replaces the spec does not erase them.
+    const { spec: _spec, ...file } = read.ok
+        ? read.file
+        : { spec: null, ...((await readTableFileLedger(item)) ?? normalizeTableHistory(history).ledger) };
     return {
         spec,
-        storeState,
-        htmlVersion: typeof spec?.version === 'number' ? spec.version : 0,
+        file,
+        rebuilt,
+        version: typeof spec?.version === 'number' ? spec.version : 0,
         history: normalizeTableHistory(history),
     };
+}
+
+/**
+ * Persists a `table.json` that {@link readCurrentState} rebuilt in memory from
+ * the history's tip. Every writable path that acknowledges a table calls it
+ * once its own checks have passed; reads never do. Call with the lock held.
+ */
+async function persistRebuiltTable(
+    ref: TableRef,
+    item: Zotero.Item,
+    current: CurrentState,
+    accessGuard?: TableAccessGuard
+): Promise<boolean> {
+    if (!current.rebuilt || !current.spec) return false;
+    requireWritable(ref);
+    accessGuard?.(current.spec);
+    await writeTableFile(item, { ...current.file, spec: current.spec });
+    current.rebuilt = false;
+    logger(`tableStore: rebuilt table.json of ${item.key} from version ${current.version}`, 1);
+    return true;
+}
+
+/** Writes `table.json`: the commit point of every write. */
+async function writeTableFile(item: Zotero.Item, file: TableFile): Promise<void> {
+    const path = tableFilePath(item);
+    if (!path) {
+        throw new TableItemError(`Table ${item.key} has no storage directory.`, 'file_missing');
+    }
+    await ensureSidecarDirectory(item);
+    await writeAtomic(path, JSON.stringify(file), tableTempPath(item));
 }
 
 // ---------------------------------------------------------------------------
@@ -576,6 +636,7 @@ async function versionEntry(
         ...(meta.change ? { change: meta.change } : {}),
         at: new Date().toISOString(),
         sha256: await sha256Hex(serialized),
+        bytes: new TextEncoder().encode(serialized).length,
         summary: summarize(spec),
     };
 }
@@ -665,25 +726,60 @@ function mergeEntry(
     return [...entries.filter((e) => e.version !== entry.version), entry];
 }
 
+/** The receipts and creation marker in `table.json` as committed. */
+async function committedLedger(item: Zotero.Item): Promise<TableLedger> {
+    const read = await readTableItemSpec(item);
+    if (!read.ok) return {};
+    const { spec: _spec, ...ledger } = read.file;
+    return ledger;
+}
+
 /**
  * Replaces `history.json` with `entries`, applies the retention cap, and
  * deletes the version files the cap drops. Returns the dropped versions.
+ *
+ * `ledger` is the receipts and creation marker just committed to `table.json`;
+ * omitted, they are read from that file. Either way the log mirrors them.
  */
 async function commitHistory(
     item: Zotero.Item,
-    entries: TableVersionEntry[]
+    entries: TableVersionEntry[],
+    ledger?: TableLedger
 ): Promise<number[]> {
-    const sorted = [...entries].sort((a, b) => a.version - b.version);
-    const dropped = sorted.slice(
-        0,
-        Math.max(0, sorted.length - TABLE_VERSION_RETENTION)
+    const mirrored = ledger ?? (await committedLedger(item));
+    // Entries logged before sizes were recorded are measured from their files,
+    // so the byte bound holds for them too; the measured size is kept.
+    const sorted = await Promise.all(
+        [...entries].sort((a, b) => a.version - b.version).map(async (entry) => {
+            if (typeof entry.bytes === 'number') return entry;
+            try {
+                return { ...entry, bytes: (await IOUtils.stat(versionPathOf(item, entry.version))).size ?? 0 };
+            } catch {
+                return entry;
+            }
+        })
     );
-    const versions = sorted.slice(-TABLE_VERSION_RETENTION);
+    // Newest first: the floor always stays, then either bound stops it.
+    let kept = 0;
+    let bytes = 0;
+    for (let i = sorted.length - 1; i >= 0; i -= 1) {
+        const size = sorted[i].bytes ?? 0;
+        if (
+            kept >= TABLE_VERSION_RETENTION_FLOOR &&
+            (kept >= TABLE_VERSION_RETENTION || bytes + size > TABLE_VERSION_RETENTION_BYTES)
+        )
+            break;
+        kept += 1;
+        bytes += size;
+    }
+    const dropped = sorted.slice(0, sorted.length - kept);
+    const versions = sorted.slice(sorted.length - kept);
     const tip = versions.length ? versions[versions.length - 1].version : 0;
 
+    const hasLedger = !!(mirrored.receipts?.length || mirrored.creation);
     await writeAtomic(
         historyPathOf(item),
-        JSON.stringify({ tip, versions } satisfies TableHistory),
+        JSON.stringify({ tip, versions, ...(hasLedger ? { ledger: mirrored } : {}) } satisfies TableHistory),
         tableTempPath(item)
     );
 
@@ -725,44 +821,45 @@ async function reconcileLog(
 ): Promise<Reconciled> {
     const repairs: TableRecovery[] = [];
     let versions = current.history.versions;
-    if (!current.spec || current.htmlVersion <= 0) return { versions, repairs };
+    if (!current.spec || current.version <= 0) return { versions, repairs };
 
-    const { htmlVersion } = current;
+    const { version: tableVersion } = current;
 
     // The log claims commits the document never took. Their version files are
     // above the commit point, so the audit below deletes them.
-    const abandoned = versions.filter((e) => e.version > htmlVersion);
+    const abandoned = versions.filter((e) => e.version > tableVersion);
     if (abandoned.length) {
-        versions = versions.filter((e) => e.version <= htmlVersion);
+        versions = versions.filter((e) => e.version <= tableVersion);
         repairs.push({
             kind: 'history_truncated',
             versions: abandoned.map((e) => e.version),
         });
     }
 
-    // The document is ahead of the log: the commit landed and the log rewrite
+    // The table is ahead of the log: the commit landed and the log rewrite
     // did not.
-    if (!versions.some((e) => e.version === htmlVersion)) {
+    if (!versions.some((e) => e.version === tableVersion)) {
         const currentHash = await tableSpecHash(current.spec);
+        const creation = current.file.creation;
         versions = [
             ...versions,
             await reconstructEntry(
                 item,
                 current.spec,
-                htmlVersion,
-                htmlVersion === 1 &&
-                    current.storeState.creation?.complete &&
-                    current.storeState.operations?.some(
+                tableVersion,
+                tableVersion === 1 &&
+                    creation?.complete &&
+                    current.file.receipts?.some(
                         (r) =>
-                            r.operation_id === current.storeState.creation?.operation_id &&
+                            r.operation_id === creation.operation_id &&
                             r.version === 1 &&
                             r.sha256 === currentHash
                     )
-                    ? current.storeState.creation.meta
+                    ? creation.meta
                     : undefined
             ),
         ];
-        repairs.push({ kind: 'history_appended', version: htmlVersion });
+        repairs.push({ kind: 'history_appended', version: tableVersion });
     }
 
     return { versions, repairs };
@@ -793,7 +890,7 @@ async function reconcileLog(
 async function auditSidecar(
     item: Zotero.Item,
     spec: TableSpec,
-    htmlVersion: number,
+    tableVersion: number,
     entries: TableVersionEntry[],
     strictCleanup = false
 ): Promise<Reconciled> {
@@ -804,14 +901,14 @@ async function auditSidecar(
 
     // --- the tip's file against its entry
     //
-    // Only when the tip is the version the document carries, since the document
-    // is the spec the repair would write. After {@link reconcileLog} that is the
-    // normal case; it is not one on a document whose version stamp was lost, and
+    // Only when the tip is the version `table.json` carries, since that is the
+    // spec the repair would write. After {@link reconcileLog} that is the
+    // normal case; it is not one on a table whose version stamp was lost, and
     // writing this spec under someone else's number would be worse than the
     // mismatch it was meant to fix.
     const tipEntry = versions[versions.length - 1];
     const tipPath = versionPathOf(item, tip);
-    const stored = htmlVersion === tip ? await readText(tipPath) : undefined;
+    const stored = tableVersion === tip ? await readText(tipPath) : undefined;
     if (
         stored !== undefined &&
         (stored === null ||
@@ -826,6 +923,7 @@ async function auditSidecar(
             {
                 ...tipEntry,
                 sha256: await sha256Hex(serialized),
+                bytes: new TextEncoder().encode(serialized).length,
                 summary: summarize(spec),
             },
         ];
@@ -879,7 +977,7 @@ async function auditSidecar(
  * existence.
  *
  * {@link createTableItem} is the item-layer primitive: it imports the snapshot
- * attachment and writes the document, but it knows nothing about versions, so a
+ * attachment and writes `table.json`, but it knows nothing about versions, so a
  * table created through it directly has a version 1 that is neither logged nor
  * revertable. Since the state a table was created in is the one a user is most
  * likely to want back after an agent has filled it, that is the worst version
@@ -893,7 +991,7 @@ async function auditSidecar(
  * onto it and overwriting the state the seed exists to preserve.
  *
  * **The seed is a copy, not a re-derivation.** `v1.json` holds the spec
- * `createTableItem` stamped and rendered, serialised here. The two agree today
+ * `createTableItem` stamped and committed, serialised here. The two agree today
  * because both serialise the same object; if that two-phase stamp ever came to
  * differ from what the store would have written, this file — not the store's
  * idea of it — is what a revert to version 1 restores.
@@ -901,7 +999,9 @@ async function auditSidecar(
 export async function createTableUncoordinated(options: CreateTableOptions): Promise<CreatedTable> {
     const { operation_id, accessGuard, ...ordinary } = options;
     accessGuard?.(options.spec);
-    const spec = pruneTableCitations(options.spec);
+    const spec = options.spec;
+    const limit = checkTableLimits(null, spec);
+    if (limit) throw new TableItemError(limit.message, 'too_large');
     if (operation_id === undefined)
         return createTableOnce({ ...ordinary, spec, accessGuard });
     if (typeof operation_id !== 'string' || !operation_id.trim())
@@ -980,40 +1080,36 @@ async function replayTableCreation(item: Zotero.Item, operation_id: string, requ
     return withTableLock(ref, async () => {
         requireWritable(ref);
         await loadTableItemFields([item]);
-        const path = await item.getFilePathAsync();
-        if (!path || !(await IOUtils.exists(path)))
-            throw new TableItemError('The earlier import has no readable file yet.', 'operation_pending');
-        const html = await IOUtils.readUTF8(path);
-        if (accessGuard) {
-            const parsed = parseTableDocument(html);
-            if (parsed.ok) {
-                accessGuard(parsed.spec);
-                await guardStoredTable(ref, item, await readCurrentState(item, { html, parsed }), accessGuard);
-            }
-        }
-        const state = parseTableDocumentState(html);
-        if (state.creation?.request_sha256 !== requestHash)
+        const path = tableFilePath(item);
+        // The log is written after table.json, so a creation it mirrors was
+        // committed even if table.json has since gone missing.
+        const committed = (!!path && (await IOUtils.exists(path)))
+            || !!(await readTableHistory(item)).ledger?.creation?.complete;
+        if (!committed)
+            throw new TableItemError('The earlier import has no committed table yet.', 'operation_pending');
+        const opened = await readCurrentState(item);
+        const creation = opened.file.creation;
+        if (creation?.request_sha256 !== requestHash)
             throw new TableItemError('Operation identity was reused with a different request.', 'operation_mismatch');
-        if (!state.creation.complete || item.deleted)
+        if (!creation.complete || item.deleted)
             throw new TableItemError('The earlier import is incomplete or has been discarded.', 'operation_pending');
-        // Validate the stamped import before repairing tags that may never have
-        // reached the item database. Use this same snapshot for all bookkeeping.
-        const read = parseTableDocument(html);
-        if (!read.ok || read.spec.key !== item.key)
+        if (!opened.spec)
             throw new TableItemError('The earlier creation has no matching readable spec.', 'invalid_spec');
-        const spec = read.spec;
-        const opened = await readCurrentState(item, { html, parsed: read });
+        const spec = opened.spec;
+        accessGuard?.(spec);
         await guardStoredTable(ref, item, opened, accessGuard);
-        const operation = opened.storeState.operations?.find((r) => r.operation_id === operation_id);
+        const operation = opened.file.receipts?.find((r) => r.operation_id === operation_id);
+        // Only a validated replay persists the rebuilt file.
+        await persistRebuiltTable(ref, item, opened, accessGuard);
         let saved = true;
         let entry = seal(await versionEntry(spec.version ?? 1, spec, JSON.stringify(spec),
-            state.creation.meta ?? { actor: 'agent' }));
+            creation.meta ?? { actor: 'agent' }));
         try {
             const history = await reconcileLog(item, opened);
-            const audited = await auditSidecar(item, spec, opened.htmlVersion, history.versions);
+            const audited = await auditSidecar(item, spec, opened.version, history.versions);
             if (history.repairs.length || audited.repairs.length) await commitHistory(item, audited.versions);
             entry = audited.versions[audited.versions.length - 1];
-            await repairItemBookkeeping(item, spec);
+            await repairItemBookkeeping(item);
         } catch (error) {
             saved = false;
             logger(`tableStore: committed creation still needs repair: ${String(error)}`, 1);
@@ -1030,7 +1126,7 @@ async function replayTableCreation(item: Zotero.Item, operation_id: string, requ
         }
         emitTableUpdated(ref, entry.version, entry);
         return {
-            ...describeTableItem(item, spec, html),
+            ...describeTableItem(item, spec, (await readSnapshotText(item)) ?? ''),
             version: spec.version ?? 1,
             entry,
             replayed: true,
@@ -1039,6 +1135,36 @@ async function replayTableCreation(item: Zotero.Item, operation_id: string, requ
             sha256,
         };
     });
+}
+
+/**
+ * The snapshot's text, for describing a committed creation. Best effort: a
+ * snapshot that is missing or unreadable answers null and never fails a
+ * creation that has already committed.
+ */
+async function readSnapshotText(item: Zotero.Item): Promise<string | null> {
+    try {
+        const path = await item.getFilePathAsync();
+        return path ? await IOUtils.readUTF8(path) : null;
+    } catch (error) {
+        logger(`tableStore: could not read the snapshot of ${item.key}: ${String(error)}`, 2);
+        return null;
+    }
+}
+
+/**
+ * Renders a committed table's snapshot as part of the write that committed
+ * it. Call with the table's lock held. A failure is bookkeeping: logged,
+ * answered false, and repaired by the next open.
+ */
+async function renderCommitted(ref: TableRef): Promise<boolean> {
+    try {
+        // False when the library stopped being writable after the commit.
+        return await renderTable(ref);
+    } catch (error) {
+        logger(`tableStore: rendering ${ref.key} failed: ${String(error)}`, 1);
+        return false;
+    }
 }
 
 async function createTableOnce(options: CreateTableOptions): Promise<CreatedTable> {
@@ -1055,7 +1181,7 @@ async function createTableOnce(options: CreateTableOptions): Promise<CreatedTabl
         change: change ?? CREATED_CHANGE,
     };
 
-    let saved = created.saved !== false;
+    let saved = true;
     let entry = { ...seal(await versionEntry(created.spec.version ?? 1, created.spec,
         JSON.stringify(created.spec), meta)), creation: true as const };
     try {
@@ -1088,13 +1214,21 @@ async function createTableOnce(options: CreateTableOptions): Promise<CreatedTabl
         saved = false;
         logger(`tableStore: committed creation needs history repair: ${String(error)}`, 1);
     }
-    if (saved) {
-        try { await acknowledgeBookkeeping(created.item, created.spec); }
-        catch { saved = false; }
-    }
-
+    let described: CreatedTableItem = created;
+    await withTableLock(ref, async () => {
+        // The item's tags may not have been saved; the render adds them.
+        if (created.saved === false) await markTablePending(created.item);
+        // A render that lands also saves the item, tags included.
+        if (!(await renderCommitted(ref))) {
+            saved = false;
+            return;
+        }
+        // Describe the snapshot as rendered, as a replay of this creation will.
+        const html = await readSnapshotText(created.item);
+        if (html !== null) described = describeTableItem(created.item, created.spec, html);
+    });
     emitTableUpdated(ref, entry.version, meta);
-    return { ...created, saved, version: entry.version, entry };
+    return { ...created, ...described, saved, version: entry.version, entry };
 }
 
 /** JSON object key order is irrelevant to retry identity; array order is significant. */
@@ -1126,36 +1260,33 @@ function unstampedSpec(spec: TableSpec): Omit<TableSpec, 'key' | 'version'> {
  *
  * 1. Take the table's single-flight lock, and hold it for the read *and* the
  *    write, so no other caller can derive a new state from the same base.
- * 2. Read the document and the log, and reconcile them
- *    ({@link reconcileLog}) so the tip is the version the document actually
- *    committed.
+ * 2. Read `table.json` and the log, and reconcile them ({@link reconcileLog})
+ *    so the tip is the version the table actually committed.
  * 3. Refuse with a conflict when the tip is not `expectedVersion`, handing back
  *    the current spec so the caller can rebase. `expectedVersion` undefined
  *    means "no guard".
  * 4. Write `beaver/v<N>.json`, temp file + rename — but only *before* the
- *    document when this write is taking a new number. See below.
- * 5. Render and write the document, temp file + rename. **This is the commit
- *    point** — the document carries the spec, so the moment it lands the table
- *    is the new one whatever happens next.
- * 6. Rewrite `beaver/history.json`, applying the retention cap and deleting the
- *    version files that fall out of it. A crash before this leaves the log
- *    behind the document, which the next reconciliation repairs.
- * 7. Queue full-text indexing, mark the attachment for upload and save the
- *    item. Zotero schedules auto-sync off data-object notifications, not off
- *    file writes, so without this the change sits unsynced until something
- *    unrelated triggers a sync — see {@link markForUpload}.
- * 8. Release the lock and announce the change.
+ *    commit when this write is taking a new number. See below.
+ * 5. Write `table.json`, temp file + rename. **This is the commit point** —
+ *    the moment it lands the table is the new one whatever happens next.
+ * 6. Rewrite `beaver/history.json`, applying the retention bounds and deleting
+ *    the version files that fall out of them. A crash before this leaves the
+ *    log behind the table, which the next reconciliation repairs.
+ * 7. Record the recovery shadow, release the lock and schedule the snapshot
+ *    render, which indexes, marks the attachment for upload and saves the item
+ *    — Zotero schedules auto-sync off data-object notifications, not off file
+ *    writes, so without it the change sits unsynced.
  *
  * ## Nothing after step 5 may reject
  *
- * Steps 6 and 7 — and the version file a *collapsing* write defers past the
- * document — run when the table on disk is already the new one. So they are not
- * allowed to fail the call in either of the two ways they could: not by
- * crashing (the next open reconciles what they left behind) and not by
- * throwing, which is the worse half, because it tells the caller the write did
- * not happen while it did. A retrying agent would then apply its mutations to
- * an already-mutated table. They report through `saved: false` instead, and the
- * call still succeeds.
+ * Step 6 — and the version file a *collapsing* write defers past the commit —
+ * run when the table on disk is already the new one. So they are not allowed
+ * to fail the call in either of the two ways they could: not by crashing (the
+ * next open reconciles what they left behind) and not by throwing, which is the
+ * worse half, because it tells the caller the write did not happen while it
+ * did. A retrying agent would then apply its mutations to an already-mutated
+ * table. They report through `saved: false` instead, and the call still
+ * succeeds. A failed render never reaches the caller at all.
  *
  * ## Remote preconditions and retries
  *
@@ -1243,9 +1374,9 @@ async function commitWrite(
     const versions = reconciled.versions;
 
     // After reconciliation the log's last entry is the committed version. With
-    // an unreadable or unstamped document there is nothing to reconcile
-    // against, so the log stands on its own.
-    const tip = versions.length ? versions[versions.length - 1].version : current.htmlVersion;
+    // an unreadable or unstamped table there is nothing to reconcile against,
+    // so the log stands on its own.
+    const tip = versions.length ? versions[versions.length - 1].version : current.version;
 
     const currentHash = current.spec ? await tableSpecHash(current.spec) : null;
     let requestHash: string | undefined;
@@ -1269,7 +1400,7 @@ async function commitWrite(
             expected_version: expectedVersion,
             expected_sha256: remote.expected_sha256,
         });
-        const receipt = current.storeState.operations?.find(
+        const receipt = current.file.receipts?.find(
             (r) => r.operation_id === remote.operation_id
         );
         if (receipt) {
@@ -1281,6 +1412,7 @@ async function commitWrite(
             }
             if (!current.spec || !currentHash)
                 throw new TableItemError('The table is unreadable.', 'no_spec');
+            await persistRebuiltTable(ref, item, current, accessGuard);
             let saved = true;
             let pruned: number[] = [];
             let replayEntry = versions[versions.length - 1];
@@ -1288,16 +1420,12 @@ async function commitWrite(
                 const audited = await auditSidecar(
                     item,
                     current.spec,
-                    current.htmlVersion,
+                    current.version,
                     versions
                 );
                 replayEntry = audited.versions[audited.versions.length - 1];
                 if (reconciled.repairs.length || audited.repairs.length)
                     pruned = await commitHistory(item, audited.versions);
-                await queueTableFullText(item, true);
-                markForUpload(item);
-                await item.saveTx();
-                await acknowledgeBookkeeping(item, current.spec);
             } catch (error) {
                 saved = false;
                 logger(
@@ -1305,6 +1433,8 @@ async function commitWrite(
                     1
                 );
             }
+            // A retry may follow a render that never finished.
+            if (!(await renderIsCurrent(item)) && !(await renderCommitted(ref))) saved = false;
             return {
                 ok: true,
                 version: tip,
@@ -1325,6 +1455,8 @@ async function commitWrite(
     ) {
         return { ok: false, conflict: true, version: tip, sha256: currentHash, spec: current.spec };
     }
+    const limit = checkTableLimits(current.spec, spec);
+    if (limit) throw new TableItemError(limit.message, 'too_large');
 
     const tipEntry = versions.find((e) => e.version === tip);
     const collapse =
@@ -1340,7 +1472,7 @@ async function commitWrite(
     // Never the caller's word for either: the file says which table it is and
     // which revision of it, and only the store gets to decide that.
     const stored: TableSpec = {
-        ...pruneTableCitations(spec),
+        ...spec,
         spec_version: spec.spec_version ?? TABLE_SPEC_VERSION,
         key: item.key,
         version,
@@ -1360,19 +1492,11 @@ async function commitWrite(
               sha256: entry.sha256,
           }
         : undefined;
-    const storeState: TableDocumentState = {
-        ...current.storeState,
-        ...(operation ? { operations: [...(current.storeState.operations ?? []), operation] } : {}),
+    const file: TableFile = {
+        spec: stored,
+        ...current.file,
+        ...(operation ? { receipts: [...(current.file.receipts ?? []), operation] } : {}),
     };
-    const document = buildTableDocument(stored, {
-        storeState,
-        linksFor: zoteroLinksFor,
-        citationScopeFor: zoteroLinkScope,
-    });
-    const htmlPath = await item.getFilePathAsync();
-    if (!htmlPath) {
-        throw new TableItemError(`Table ${item.key} has no file on disk.`, 'file_missing');
-    }
 
     if (!collapse) {
         // Nothing points at this number yet, so a crash between the two leaves
@@ -1383,7 +1507,7 @@ async function commitWrite(
     requireWritable(ref);
     if (current.spec) accessGuard?.(current.spec);
     accessGuard?.(stored);
-    await writeAtomic(htmlPath, document.html, temp);
+    await writeTableFile(item, file);
 
     // ---- past the commit point ------------------------------------------
     // The table on disk is the new one from here down, so nothing below may
@@ -1411,7 +1535,8 @@ async function commitWrite(
 
     let pruned: number[] = [];
     try {
-        pruned = await commitHistory(item, mergeEntry(versions, entry));
+        const { spec: _spec, ...ledger } = file;
+        pruned = await commitHistory(item, mergeEntry(versions, entry), ledger);
     } catch (error) {
         bookkeepingFailed('rewriting the version log', error);
     }
@@ -1429,18 +1554,7 @@ async function commitWrite(
         )
     );
 
-    try {
-        await queueTableFullText(item, true);
-        markForUpload(item);
-        await item.saveTx();
-    } catch (error) {
-        bookkeepingFailed('its item save', error);
-    }
-
-    if (saved) {
-        try { await acknowledgeBookkeeping(item, stored); }
-        catch (error) { bookkeepingFailed("recording bookkeeping completion", error); }
-    }
+    if (!(await renderCommitted(ref))) saved = false;
 
     return {
         ok: true,
@@ -1456,36 +1570,22 @@ async function commitWrite(
 }
 
 /**
- * Marks the attachment's file as needing upload.
- *
- * Zotero decides what to send from the item's sync state, so a table that has
- * already synced once would otherwise keep its `in_sync` state and the new
- * bytes would wait for the next file-modification scan.
- *
- * It is also what makes the following `saveTx` a real save: Zotero skips a save
- * on an unchanged object, and an unchanged object emits no notification for the
- * auto-sync timer to hear. A table that is *already* marked for upload needs
- * neither — its upload is pending regardless.
+ * Repairs the item-level marks of a committed table and, when its last render
+ * did not cover it (or `render` says the snapshot is stale), renders it:
+ * indexing, the upload mark and the item save.
+ * Call with the table's lock held.
  */
-async function acknowledgeBookkeeping(item: Zotero.Item, spec: TableSpec): Promise<void> {
-    await ensureSidecarDirectory(item);
-    await writeAtomic(PathUtils.join(requireSidecar(item), 'bookkeeping.json'),
-        JSON.stringify({ sha256: await tableSpecHash(spec) }), tableTempPath(item));
-}
-
-async function repairItemBookkeeping(item: Zotero.Item, spec: TableSpec): Promise<void> {
+async function repairItemBookkeeping(item: Zotero.Item, options: { render?: boolean } = {}): Promise<void> {
     const ref = { libraryID: item.libraryID, key: item.key };
     requireWritable(ref);
-    item.addTag(TABLE_TAG, 1);
-    item.addTag(TABLE_EMOJI_TAG, 1);
-    await queueTableFullText(item, true);
-    markForUpload(item);
-    await item.saveTx();
-    await acknowledgeBookkeeping(item, spec);
-}
-
-function markForUpload(item: Zotero.Item): void {
-    item.attachmentSyncState = Zotero.Sync.Storage.Local.SYNC_STATE_TO_UPLOAD;
+    if (!item.hasTag(TABLE_TAG) || !item.hasTag(TABLE_EMOJI_TAG)) {
+        item.addTag(TABLE_TAG, 1);
+        item.addTag(TABLE_EMOJI_TAG, 1);
+        await item.saveTx();
+    }
+    if ((options.render || !(await renderIsCurrent(item))) && !(await renderCommitted(ref))) {
+        throw new Error(`Table ${ref.key} could not be rendered.`);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1494,10 +1594,8 @@ function markForUpload(item: Zotero.Item): void {
 
 /**
  * The ergonomic write: read the table, apply `mutations`, store the result.
- *
- * This is what "edit a table" means in practice — the document is never
- * patched, it is re-rendered from the new spec, so it can never describe a
- * table the spec does not.
+ * Cell writes the engine declines (user cells, changed questions) come back in
+ * `skipped`; the rest of the batch is stored.
  *
  * Read, apply and write happen in **one** lock acquisition, because they are
  * one operation. Splitting them is what would let two same-run edits both start
@@ -1530,13 +1628,14 @@ export async function editTableUncoordinated(
             );
         }
 
-        if (expected && (current.htmlVersion !== expected.version || await tableSpecHash(current.spec) !== expected.sha256)) {
-            return { ok: false, conflict: true, version: current.htmlVersion, sha256: await tableSpecHash(current.spec), spec: current.spec } as const;
+        if (expected && (current.version !== expected.version || await tableSpecHash(current.spec) !== expected.sha256)) {
+            return { ok: false, conflict: true, version: current.version, sha256: await tableSpecHash(current.spec), spec: current.spec } as const;
         }
         const applied = applyMutations(current.spec, mutations);
         if (!applied.ok) return { ok: false, error: applied.error } as const;
 
-        return commitWrite(ref, item, current, applied.spec, meta, undefined);
+        const written = await commitWrite(ref, item, current, applied.spec, meta, undefined);
+        return written.ok ? { ...written, skipped: applied.skipped } : written;
     });
     if (result.ok) emitTableUpdated(ref, result.version, meta);
     return result;
@@ -1567,9 +1666,7 @@ export async function listVersions(ref: TableRef): Promise<TableVersionEntry[]> 
 export async function openTableUncoordinated(ref: TableRef, accessGuard?: TableAccessGuard): Promise<OpenTableResult> {
     return withTableLock(ref, async () => {
         const item = await resolveTableItem(ref);
-        const document = await readTableItemDocument(item);
-        if (!document.parsed.ok) throw tableReadError(document.parsed.code, document.parsed.message);
-        const current = await readCurrentState(item, document);
+        const current = await readCurrentState(item);
         if (!current.spec) {
             throw new TableItemError(
                 `Table ${ref.key} carries no readable spec.`,
@@ -1577,47 +1674,51 @@ export async function openTableUncoordinated(ref: TableRef, accessGuard?: TableA
             );
         }
 
-        if (current.storeState.creation && !current.storeState.creation.complete) {
-            throw new TableItemError('The imported document is not confirmed complete.', 'operation_pending');
+        if (current.file.creation && !current.file.creation.complete) {
+            throw new TableItemError('The imported table is not confirmed complete.', 'operation_pending');
         }
         const recovered = await guardStoredTable(ref, item, current, accessGuard);
+        const sha256 = await tableSpecHash(current.spec);
         const library = Zotero.Libraries.get(ref.libraryID);
         if (!checkLibraryExcluded(ref.libraryID) && library && library.editable && library.filesEditable !== false) {
             try {
+                if (await persistRebuiltTable(ref, item, current, accessGuard))
+                    recovered.unshift({ kind: 'table_file_rebuilt', version: current.version });
                 const reconciled = await reconcileLog(item, current);
                 const audited = await auditSidecar(
                     item,
                     current.spec,
-                    current.htmlVersion,
+                    current.version,
                     reconciled.versions
                 );
                 recovered.push(...reconciled.repairs, ...audited.repairs);
-                if (recovered.length) {
+                if (reconciled.repairs.length || audited.repairs.length) {
                     const pruned = await commitHistory(item, audited.versions);
                     if (pruned.length) recovered.push({ kind: 'pruned', versions: pruned });
                 }
-                const completion = await readJson<{ sha256: string }>(PathUtils.join(requireSidecar(item), 'bookkeeping.json'));
-                if (recovered.length || completion?.sha256 !== await tableSpecHash(current.spec)) {
+                // A snapshot a render behind (a sync that carried the table but
+                // not its rendering, or a render that failed) is re-rendered.
+                const rendered = await renderIsCurrent(item);
+                if (recovered.length || !rendered) {
                     await guardStoredTable(ref, item, current, accessGuard);
-                    await repairItemBookkeeping(item, current.spec);
-                    if (current.htmlVersion === 1 && current.storeState.creation?.complete) {
+                    await repairItemBookkeeping(item, { render: !rendered });
+                    if (!rendered) recovered.push({ kind: 'rerendered' });
+                    if (current.version === 1 && current.file.creation?.complete) {
                         try {
                             if (!(await lastTableShadow(ref))) await recordTableShadow(ref, 1,
-                                JSON.stringify(current.spec), await tableSpecHash(current.spec));
+                                JSON.stringify(current.spec), sha256);
                         } catch (error) {
                             logger(`tableStore: creation shadow repair unavailable: ${String(error)}`, 2);
                         }
                     }
-
                 }
             } catch (error) {
                 if (error instanceof TableItemError && error.code === 'library_excluded') throw error;
                 recovered.push({ kind: 'bookkeeping_pending' });
                 logger(`tableStore: local bookkeeping repair failed: ${String(error)}`, 1);
             }
-        } else {
-            const completion = await readJson<{ sha256: string }>(PathUtils.join(requireSidecar(item), 'bookkeeping.json'));
-            if (completion?.sha256 !== await tableSpecHash(current.spec)) recovered.push({ kind: 'bookkeeping_pending' });
+        } else if (!(await renderIsCurrent(item))) {
+            recovered.push({ kind: 'bookkeeping_pending' });
         }
 
         const history = normalizeTableHistory(
@@ -1625,9 +1726,9 @@ export async function openTableUncoordinated(ref: TableRef, accessGuard?: TableA
         );
         return {
             ref,
-            sha256: await tableSpecHash(current.spec),
+            sha256,
             spec: current.spec,
-            version: Math.max(current.htmlVersion, history.tip),
+            version: Math.max(current.version, history.tip),
             history: history.versions,
             recovered,
             conflict: await detectSyncConflict(ref, current),
@@ -1638,7 +1739,7 @@ export async function openTableUncoordinated(ref: TableRef, accessGuard?: TableA
 /**
  * Whether the table went backwards under this device.
  *
- * The document's version is compared against the last one this device wrote.
+ * The table's version is compared against the last one this device wrote.
  * The digest is only computed when the two numbers are equal, because that is
  * the only case it decides — and hashing a re-serialised megabyte on every open
  * to answer a question already settled would be a real cost for nothing.
@@ -1653,15 +1754,15 @@ async function detectSyncConflict(
     current: CurrentState
 ): Promise<TableSyncConflict | null> {
     try {
-        if (!current.spec || current.htmlVersion <= 0) return null;
+        if (!current.spec || current.version <= 0) return null;
         const shadow = await lastTableShadow(ref);
         if (!shadow) return null;
         const sha256 =
-            current.htmlVersion === shadow.version
+            current.version === shadow.version
                 ? await tableSpecHash(current.spec)
                 : null;
         return detectTableSyncConflict(shadow, {
-            version: current.htmlVersion,
+            version: current.version,
             sha256,
         });
     } catch (error) {
@@ -1884,10 +1985,10 @@ export async function trimTableUncoordinated(
             | Zotero.Item
             | false;
         requireWritable(ref);
-        if (accessGuard && existing) {
-            const document = await readTableItemDocument(existing);
-            if (!document.parsed.ok) throw tableReadError(document.parsed.code, document.parsed.message);
-            await guardStoredTable(ref, existing, await readCurrentState(existing, document), accessGuard);
+        if (accessGuard && existing && !existing.deleted) {
+            await loadTableItemFields([existing]);
+            if (isTableAttachment(existing))
+                await guardStoredTable(ref, existing, await readCurrentState(existing), accessGuard);
         }
         if (existing && existing.deleted) {
             await loadTableItemFields([existing]);
@@ -1909,7 +2010,7 @@ export async function trimTableUncoordinated(
         // A surviving file with a lost log entry has unknown ownership and must
         // become a protected boundary before we choose the discardable suffix.
         // Cleanup must also succeed before a retry can acknowledge the prior trim.
-        const audited = await auditSidecar(item, current.spec, current.htmlVersion, reconciled.versions, true);
+        const audited = await auditSidecar(item, current.spec, current.version, reconciled.versions, true);
         const versions = audited.versions;
         const runs = new Set(request.run_ids);
         let keep = versions.length;
@@ -1931,21 +2032,13 @@ export async function trimTableUncoordinated(
         const dropped = versions.slice(keep).map((entry) => entry.version);
         const target = keep ? versions[keep - 1].version : null;
         if (!dropped.length) {
+            await persistRebuiltTable(ref, item, current, accessGuard);
             if (reconciled.repairs.length || audited.repairs.length) {
                 await commitHistory(item, versions);
             }
-            // A previous trim may have committed the document but failed before
-            // saving the attachment. Replay this bookkeeping even after a restart,
-            // when neither the history nor the item retains evidence of that failure.
-            let saved = true;
-            try {
-                await queueTableFullText(item, true);
-                markForUpload(item);
-                await item.saveTx();
-            } catch (error) {
-                saved = false;
-                logger(`tableStore: trim retry bookkeeping failed: ${String(error)}`, 1);
-            }
+            // A previous trim may have committed the table before its render
+            // landed; the render is what indexes, uploads and saves the item.
+            const saved = (await renderIsCurrent(item)) || (await renderCommitted(ref));
             return {
                 ok: true,
                 outcome: 'unchanged',
@@ -1972,27 +2065,19 @@ export async function trimTableUncoordinated(
         const spec = await readStoredVersion(
             ref,
             item,
-            { ...current, history: { tip: current.htmlVersion, versions } },
+            { ...current, history: { tip: current.version, versions } },
             target!
         );
-        const document = buildTableDocument(spec, {
-            linksFor: zoteroLinksFor,
-            citationScopeFor: zoteroLinkScope,
-            storeState: current.storeState,
-        });
         await ensureSidecarDirectory(item);
         // Intentionally retire the discarded shadow before the rollback commit. A failed
         // commit may lose this insurance, but must not report an intentional rewind as sync loss.
         await pruneTableShadow(ref, true);
         requireWritable(ref);
-        const path = await item.getFilePathAsync();
-        if (!path) throw new TableItemError('Table file is missing.', 'file_missing');
-        requireWritable(ref);
         accessGuard?.(spec);
-        await writeAtomic(path, document.html, tableTempPath(item));
+        await writeTableFile(item, { ...current.file, spec });
         let saved = true;
         try {
-            await commitHistory(item, versions.slice(0, keep));
+            await commitHistory(item, versions.slice(0, keep), current.file);
             for (const version of dropped)
                 await IOUtils.remove(versionPathOf(item, version), { ignoreAbsent: true });
             try {
@@ -2000,13 +2085,11 @@ export async function trimTableUncoordinated(
             } catch (error) {
                 logger(`tableStore: could not record the trim recovery shadow for ${ref.key}: ${String(error)}`, 2);
             }
-            await queueTableFullText(item, true);
-            markForUpload(item);
-            await item.saveTx();
         } catch (error) {
             saved = false;
             logger(`tableStore: trim committed but bookkeeping failed: ${String(error)}`, 1);
         }
+        if (!(await renderCommitted(ref))) saved = false;
         return {
             ok: true,
             outcome: 'trimmed',
@@ -2150,7 +2233,7 @@ async function guardStoredTable(ref: TableRef, item: Zotero.Item, current: Curre
     // the audit might adopt. Digests are enforced after the canonical tip has had
     // a chance to repair its interrupted write; older damaged history still fails.
     for (const version of await versionFilesOnDisk(item)) {
-        if (version > current.htmlVersion) continue;
+        if (version > current.version) continue;
         const raw = await readJson<unknown>(versionPathOf(item, version));
         const read = readSpec(raw);
         if (read.ok) guard(read.spec);
@@ -2161,7 +2244,7 @@ async function guardStoredTable(ref: TableRef, item: Zotero.Item, current: Curre
         guard(current.spec);
         requireWritable(ref);
         const reconciled = await reconcileLog(item, current);
-        const audited = await auditSidecar(item, current.spec, current.htmlVersion, reconciled.versions);
+        const audited = await auditSidecar(item, current.spec, current.version, reconciled.versions);
         recovered.push(...reconciled.repairs, ...audited.repairs);
         const repaired = { ...current, history: { ...current.history, versions: audited.versions } };
         for (const entry of audited.versions) {

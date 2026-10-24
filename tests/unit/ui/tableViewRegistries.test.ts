@@ -31,12 +31,17 @@ vi.mock('../../../src/services/artifacts/view/enhanceTableDocument', () => ({
     countCitationMarkers,
 }));
 
+const readTable = vi.hoisted(() => vi.fn());
+
 vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({
     isTableItem,
     loadTableItemFields: vi.fn(async () => undefined),
+    readTable,
 }));
 
+import { tableSpecHash } from '../../../src/services/artifacts/recoveryShadow';
 import {
+    checkSnapshotFreshness,
     markTableReadersStale,
     closeStaleTableReaders,
     initReaderTableViews,
@@ -192,6 +197,40 @@ describe('the reader table view registry', () => {
         expect(dispose).toHaveBeenCalledOnce();
         expect(enhanceTableDocument).toHaveBeenCalledTimes(2);
         expect(readers).not.toContain(reader);
+    });
+
+    it('after a render, marks only snapshots that do not show the rendered spec', async () => {
+        await openTableInReader(tableItem(1, 'KEY1'));
+        const reader = readers[0];
+        const current = 'a'.repeat(64);
+        const doc = new JSDOM(`<html data-beaver-table="1" data-beaver-spec-sha256="${current}"><body>Answer</body></html>`).window.document;
+        reader._internalReader._primaryView.iframeDocument = doc;
+        markTableReadersStale({ libraryID: 1, key: 'KEY1' }, current);
+        expect(doc.querySelector('[data-beaver-table-outdated]')).toBeNull();
+        markTableReadersStale({ libraryID: 1, key: 'KEY1' }, 'b'.repeat(64));
+        expect(doc.querySelectorAll('[data-beaver-table-outdated]')).toHaveLength(1);
+    });
+
+    it('marks a natively opened snapshot of an older revision and asks for repair', async () => {
+        await openTableInReader(tableItem(1, 'KEY1'));
+        const reader = readers[0];
+        const spec = { spec_version: 2, key: 'KEY1', version: 3, columns: [], rows: [] };
+        readTable.mockResolvedValue({ spec, version: 3 });
+        const run = vi.fn(async () => ({ recovered: [] }));
+        (Zotero as any).Beaver = { ...(Zotero as any).Beaver, libraryOperations: { run } };
+        const ref = { libraryID: 1, key: 'KEY1' };
+
+        const current = new JSDOM(`<html data-beaver-table="1" data-beaver-spec-sha256="${await tableSpecHash(spec as any)}"><body>New</body></html>`).window.document;
+        reader._internalReader._primaryView.iframeDocument = current;
+        await checkSnapshotFreshness(ref, current);
+        expect(current.querySelector('[data-beaver-table-outdated]')).toBeNull();
+        expect(run).not.toHaveBeenCalled();
+
+        const older = new JSDOM(`<html data-beaver-table="1" data-beaver-spec-sha256="${'b'.repeat(64)}"><body>Old</body></html>`).window.document;
+        reader._internalReader._primaryView.iframeDocument = older;
+        await checkSnapshotFreshness(ref, older);
+        expect(older.querySelector('[data-beaver-table-outdated]')).not.toBeNull();
+        expect(run).toHaveBeenCalledWith('table_openTable', [ref]);
     });
 
     it('recognizes an outdated notice left across plugin reload', async () => {

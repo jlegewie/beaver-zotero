@@ -2,8 +2,8 @@
  * Row kinds: everything about a table row that depends on *what the row is*.
  *
  * A `Row.ref` is a discriminated union (`RowRef`), and this module is the one
- * place that switches on it. Each kind declares how its id is derived, whether
- * it counts as in the library, which anchor cell values may describe it, which
+ * place that switches on it. Each kind declares whether it counts as in the
+ * library, which anchor cell values may describe it, which
  * verb its anchor cell carries, and where each verb points. Everything else —
  * the React grid, the static HTML, CSV — asks these helpers instead of
  * branching on `ref.kind` itself, so adding a kind means adding one entry to
@@ -17,6 +17,7 @@
 
 import type { ExternalReference } from "../types/externalReferences";
 import type { ZoteroItemReference } from "../types/zotero";
+import { UNRESOLVED_LIBRARY_ID } from "../identity/libraryRef";
 import type {
     CellValue,
     CellValueKind,
@@ -24,6 +25,7 @@ import type {
     RowRef,
     SelectColor,
     TableSpec,
+    ZoteroRowReference,
 } from "./table";
 
 /**
@@ -65,8 +67,6 @@ export type RowActionTarget =
     | { kind: "import_reference"; reference: ExternalReference };
 
 export interface RowKindDef<K extends RowKind = RowKind> {
-    /** Stable row id — see {@link rowIdFor}. */
-    id(ref: RefOf<K>): string;
     /** In-library state when the row does not say (`Row.in_library` absent). */
     inLibrary(ref: RefOf<K>): boolean;
     /** Anchor cell value kinds that can describe a row of this kind. */
@@ -161,14 +161,15 @@ export function annotationTitle(
     }
 }
 
-/** Zotero object kinds share one id scheme: the key is the identity, whatever the object is. */
-function zoteroRowId(ref: ZoteroItemReference): string {
-    return `item:${ref.library_ref ?? ref.library_id}:${ref.zotero_key}`;
-}
-
-function bare(ref: ZoteroItemReference): ZoteroItemReference {
+/**
+ * The wire reference for a stored one. A table travels between devices, so its
+ * references may carry no rowid; hosts resolve those through `library_ref`.
+ */
+function bare(
+    ref: ZoteroRowReference | ZoteroItemReference,
+): ZoteroItemReference {
     return {
-        library_id: ref.library_id,
+        library_id: ref.library_id ?? UNRESOLVED_LIBRARY_ID,
         zotero_key: ref.zotero_key,
         library_ref: ref.library_ref,
     };
@@ -176,7 +177,6 @@ function bare(ref: ZoteroItemReference): ZoteroItemReference {
 
 export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
     item: {
-        id: zoteroRowId,
         inLibrary: () => true,
         anchorValueKinds: ["reference"],
         primaryAction: "reveal",
@@ -193,13 +193,12 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
                 // With the file named, a static rendering can link to it;
                 // without, the host picks the best attachment when clicked.
                 return ref.attachment
-                    ? { kind: "open_file", ref: ref.attachment }
+                    ? { kind: "open_file", ref: bare(ref.attachment) }
                     : { kind: "open_item", ref: bare(ref) };
             return undefined;
         },
     },
     attachment: {
-        id: zoteroRowId,
         inLibrary: () => true,
         anchorValueKinds: ["reference"],
         primaryAction: "reveal",
@@ -218,7 +217,6 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
         },
     },
     annotation: {
-        id: zoteroRowId,
         inLibrary: () => true,
         anchorValueKinds: ["annotation"],
         // An annotation has no row in the items tree; the reader is where it
@@ -236,19 +234,18 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
             if (action === "reveal")
                 return {
                     kind: "reveal_item",
-                    ref: ref.parent_item ?? ref.attachment,
+                    ref: bare(ref.parent_item ?? ref.attachment),
                 };
             if (action === "open")
                 return {
                     kind: "open_annotation",
                     ref: bare(ref),
-                    attachment: ref.attachment,
+                    attachment: bare(ref.attachment),
                 };
             return undefined;
         },
     },
     external: {
-        id: (ref) => `ext:${ref.source}:${ref.source_id}`,
         inLibrary: (ref) => (ref.reference?.library_items?.length ?? 0) > 0,
         anchorValueKinds: ["reference"],
         primaryAction: "reveal",
@@ -270,7 +267,6 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
         },
     },
     file: {
-        id: (ref) => `file:${ref.ext_key}`,
         // A context file is not a library item and not a work with an external
         // identity: nothing to reveal, nothing to import, only the file to open.
         inLibrary: () => false,
@@ -289,14 +285,6 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
 /** The kind entry for a ref, typed against that ref. */
 export function rowKindOf<R extends RowRef>(ref: R): RowKindDef<R["kind"]> {
     return ROW_KINDS[ref.kind] as RowKindDef<R["kind"]>;
-}
-
-/**
- * Stable row id derived from what the row is about, so the same paper gets the
- * same id across regenerations (and snapshot annotations stay anchored).
- */
-export function rowIdFor(ref: RowRef): string {
-    return rowKindOf(ref).id(ref as never);
 }
 
 /**

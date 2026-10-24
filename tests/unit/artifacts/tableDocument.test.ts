@@ -1,40 +1,59 @@
 import { describe, expect, it } from "vitest";
 import {
+    cellInvariantError,
+    REFERENCE_COLUMN_ID,
     SELECT_COLORS,
     TABLE_SPEC_VERSION,
+    type Cell,
+    type CellProvenance,
+    type CellValue,
+    type Evidence,
+    type RowRef,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import {
     BEAVER_ACTIVE_ATTRIBUTE,
     BEAVER_HOME_URL,
     buildTableDocument,
-    parseTableDocument,
-    parseTableDocumentState,
-    TABLE_STORE_SCRIPT_ID,
+    evidenceKey,
+    renderedSpecHash,
     renderTableHtml,
     TABLE_CSS,
+    TABLE_SPEC_HASH_ATTRIBUTE,
 } from "../../../src/services/artifacts/tableDocument";
 import { CSS_RULE_BUDGET } from "../../../src/utils/html";
 
-describe('table operation state', () => {
-    const state = { operations: [{ operation_id: 'op', request_sha256: 'request', version: 1, sha256: 'spec' }] };
-    it.each([
-        `id="${TABLE_STORE_SCRIPT_ID}" type="application/json"`,
-        `data-extra="value" type="application/json" id="${TABLE_STORE_SCRIPT_ID}" defer`,
-    ])('reads receipts with reordered or additional attributes: %s', (attributes) => {
-        expect(parseTableDocumentState(`<script ${attributes}>${JSON.stringify(state)}</script>`)).toEqual(state);
-    });
-    it.each([null, [], { operations: {} }, { operations: [null] }, { operations: [{ version: 1 }] }])(
-        'rejects malformed receipt state %j', (invalid) => {
-            expect(() => parseTableDocumentState(`<script id="${TABLE_STORE_SCRIPT_ID}">${JSON.stringify(invalid)}</script>`)).toThrow();
-        }
-    );
-});
+/** A written cell with an answer. */
+function answered(
+    value: CellValue,
+    provenance: CellProvenance = "document",
+    extra: Partial<Cell> = {},
+): Cell {
+    return { outcome: "answered", provenance, value, ...extra };
+}
+
+/** The reference cell the producer fills for a row. */
+function reference(display_name: string, extra: Record<string, string> = {}): Cell {
+    return answered({ kind: "reference", display_name, ...extra }, "system");
+}
+
+/** A library item row, optionally naming the attachment that was read. */
+function itemRef(key: string, attachment?: string, libraryId = 1, libraryRef = "u"): RowRef {
+    return {
+        kind: "item",
+        library_ref: libraryRef,
+        library_id: libraryId,
+        zotero_key: key,
+        ...(attachment
+            ? { attachment: { library_ref: libraryRef, library_id: libraryId, zotero_key: attachment } }
+            : {}),
+    };
+}
 
 const spec: TableSpec = {
     id: "t",
     title: "Results",
-    caption: "From OpenAlex",
+    description: "From OpenAlex",
     anchor_column_id: "ref",
     columns: [
         { id: "ref", header: "Item", type: "reference" },
@@ -51,32 +70,32 @@ const spec: TableSpec = {
     rows: [
         {
             id: "r1",
-            ref: { kind: "item", library_id: 1, zotero_key: "K1" },
+            ref: itemRef("K1"),
             cells: {
-                ref: { value: { kind: "reference", display_name: "Alpha" } },
-                cites: { value: { kind: "number", value: 10 } },
-                type: { value: { kind: "select", label: "Article" } },
-                oa: { value: { kind: "boolean", value: true } },
-                abstract: { value: { kind: "text", text: "First abstract" } },
+                ref: reference("Alpha"),
+                cites: answered({ kind: "number", value: 10 }, "metadata"),
+                type: answered({ kind: "select", label: "Article" }),
+                oa: answered({ kind: "boolean", value: true }),
+                abstract: answered({ kind: "text", text: "First abstract" }),
             },
         },
         {
             id: "r2",
-            ref: { kind: "item", library_id: 1, zotero_key: "K2" },
+            ref: itemRef("K2"),
             cells: {
-                ref: { value: { kind: "reference", display_name: "Beta" } },
-                cites: { value: { kind: "number", value: 90 } },
-                type: { value: { kind: "select", label: "Book" } },
-                oa: { value: { kind: "boolean", value: false } },
-                abstract: { value: { kind: "text", text: "Second abstract" } },
+                ref: reference("Beta"),
+                cites: answered({ kind: "number", value: 90 }, "metadata"),
+                type: answered({ kind: "select", label: "Book" }),
+                oa: answered({ kind: "boolean", value: false }),
+                abstract: answered({ kind: "text", text: "Second abstract" }),
             },
         },
         {
             // No citation count: it must sort last in *both* directions.
             id: "r3",
             cells: {
-                ref: { value: { kind: "reference", display_name: "Gamma" } },
-                type: { value: { kind: "select", label: "Article" } },
+                ref: reference("Gamma"),
+                type: answered({ kind: "select", label: "Article" }),
             },
         },
     ],
@@ -100,6 +119,33 @@ function ranksFor(html: string, rowId: string): Record<string, number> {
             }),
     );
 }
+
+/** The markup of one grid cell, from its opening tag to the end of its row. */
+function cellHtml(html: string, rowId: string, columnId: string): string {
+    const start = html.indexOf(`id="${rowId}/${columnId}"`);
+    return html.slice(start, html.indexOf("</summary>", start));
+}
+
+/** The expanded detail of one row. */
+function detailHtml(html: string, rowId: string): string {
+    const start = html.indexOf(`id="${rowId}" style=`);
+    const detail = html.indexOf('<div class="bt-d">', start);
+    return html.slice(detail, html.indexOf("</details>", detail));
+}
+
+/**
+ * The document's text, near enough for offset comparisons: annotations anchor
+ * into text, and markup — including the inline style attributes that carry the
+ * sort ranks — is not text. Entities are left alone, since both sides of a
+ * comparison carry the same ones.
+ */
+function textOf(html: string): string {
+    return html
+        .replace(/<style[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, "");
+}
+
+const HASH = "0123456789abcdef".repeat(4);
 
 describe("renderTableHtml", () => {
     it("bakes the producer's sort into document order, so a viewer with no CSS still agrees", () => {
@@ -149,6 +195,11 @@ describe("renderTableHtml", () => {
         expect(html).toContain('id="r2"');
     });
 
+    it("renders the table's description under its title", () => {
+        const { html } = renderTableHtml(spec);
+        expect(html).toContain('<h1 class="bt-t">Results</h1><p class="bt-cap">From OpenAlex</p>');
+    });
+
     it("escapes producer text, including inside attributes", () => {
         const hostile: TableSpec = {
             ...spec,
@@ -156,14 +207,7 @@ describe("renderTableHtml", () => {
             rows: [
                 {
                     id: '"><script>alert(1)</script>',
-                    cells: {
-                        ref: {
-                            value: {
-                                kind: "reference",
-                                display_name: "</span><b>bold</b>",
-                            },
-                        },
-                    },
+                    cells: { ref: reference("</span><b>bold</b>") },
                 },
             ],
         };
@@ -185,24 +229,16 @@ describe("renderTableHtml", () => {
                 {
                     id: "r1",
                     cells: {
-                        url: {
-                            value: {
-                                kind: "link",
-                                url: "javascript:alert(1)",
-                                label: "bad",
-                            },
-                        },
+                        url: answered(
+                            { kind: "link", url: "javascript:alert(1)", label: "bad" },
+                            "system",
+                        ),
                     },
                 },
                 {
                     id: "r2",
                     cells: {
-                        url: {
-                            value: {
-                                kind: "link",
-                                url: "https://doi.org/10.1/x",
-                            },
-                        },
+                        url: answered({ kind: "link", url: "https://doi.org/10.1/x" }, "system"),
                     },
                 },
             ],
@@ -232,11 +268,9 @@ describe("renderTableHtml", () => {
             capabilities: { row_actions: ["open", "import"] },
             rows: [
                 {
-                    id: "file:AB12CD34",
+                    id: "f1",
                     ref: { kind: "file", ext_key: "AB12CD34" },
-                    cells: {
-                        ref: { value: { kind: "reference", display_name: "notes.pdf" } },
-                    },
+                    cells: { ref: reference("notes.pdf") },
                 },
             ],
         };
@@ -258,13 +292,10 @@ describe("renderTableHtml", () => {
 });
 
 describe("buildTableDocument", () => {
-    it("produces a self-contained document whose only script is the embedded spec", () => {
+    it("produces a self-contained document that carries no script", () => {
         const { html } = buildTableDocument(spec);
         expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
-        // Data, not code: the document still runs nothing.
-        expect([...html.matchAll(/<script\b[^>]*>/gi)].map((m) => m[0])).toEqual([
-            '<script type="application/json" id="beaver-table-spec">',
-        ]);
+        expect(html).not.toMatch(/<script\b/i);
         // Nothing is fetched over the network: the only external URL the
         // document carries is the notice's own link, which is not a resource.
         expect(html.match(/https?:\/\/(?!doi\.org)[^"']*/g) ?? []).toEqual([
@@ -272,6 +303,14 @@ describe("buildTableDocument", () => {
         ]);
         // rem is meaningless without a pinned root.
         expect(html).toContain("html { font-size: 14px; }");
+    });
+
+    it("is a rendering of the spec, not a copy of it", () => {
+        // `table.json` is the table; the snapshot carries none of its state.
+        const { html } = buildTableDocument(fullSpec);
+        expect(html).not.toContain('"columns"');
+        expect(html).not.toContain('"spec_version"');
+        expect(html).not.toContain("SNAP1234");
     });
 
     it("says the table needs the plugin, and links to it", () => {
@@ -337,6 +376,54 @@ describe("buildTableDocument", () => {
     });
 });
 
+describe("the spec hash", () => {
+    it("is written as a root attribute and read back", () => {
+        const { html } = buildTableDocument(spec, { specSha256: HASH });
+        expect(html).toContain(
+            `<html lang="en" data-beaver-table="${TABLE_SPEC_VERSION}" ${TABLE_SPEC_HASH_ATTRIBUTE}="${HASH}">`,
+        );
+        expect(renderedSpecHash(html)).toBe(HASH);
+    });
+
+    it("is left out unless it is a SHA-256 hex digest", () => {
+        for (const specSha256 of ["not-a-hash", HASH.toUpperCase(), HASH.slice(1), `${HASH}" onload="x`]) {
+            const { html } = buildTableDocument(spec, { specSha256 });
+            expect(html).not.toContain(TABLE_SPEC_HASH_ATTRIBUTE);
+            expect(renderedSpecHash(html)).toBeNull();
+        }
+    });
+
+    it("reads null from a document that names none", () => {
+        expect(renderedSpecHash(buildTableDocument(spec).html)).toBeNull();
+        expect(renderedSpecHash("<!DOCTYPE html><html><body>Nope</body></html>")).toBeNull();
+    });
+
+    it("is read only from the root, never from table content", () => {
+        const spoofed: TableSpec = {
+            ...spec,
+            rows: [
+                {
+                    id: "r1",
+                    cells: {
+                        abstract: answered({
+                            kind: "text",
+                            text: `<html ${TABLE_SPEC_HASH_ATTRIBUTE}="${HASH}">`,
+                        }),
+                    },
+                },
+            ],
+        };
+        expect(renderedSpecHash(buildTableDocument(spoofed).html)).toBeNull();
+    });
+
+    it("changes no text, so a new hash never moves an annotation", () => {
+        const without = buildTableDocument(spec).html;
+        const withHash = buildTableDocument(spec, { specSha256: HASH }).html;
+        expect(withHash).not.toBe(without);
+        expect(textOf(withHash)).toBe(textOf(without));
+    });
+});
+
 describe("select pills", () => {
     it("renders every colour in the shared palette as itself, not as grey", () => {
         // The renderer checks a declared colour against agent-core's palette.
@@ -356,9 +443,7 @@ describe("select pills", () => {
                 rows: [
                     {
                         id: "r1",
-                        cells: {
-                            tag: { value: { kind: "select", label: "Alpha" } },
-                        },
+                        cells: { tag: answered({ kind: "select", label: "Alpha" }) },
                     },
                 ],
             });
@@ -390,7 +475,7 @@ describe("select pills", () => {
             rows: [
                 {
                     id: "r1",
-                    cells: { tag: { value: { kind: "select", label: "Alpha" } } },
+                    cells: { tag: answered({ kind: "select", label: "Alpha" }) },
                 },
             ],
         });
@@ -400,56 +485,45 @@ describe("select pills", () => {
 });
 
 describe("citations", () => {
+    const columns: TableSpec["columns"] = [
+        { id: REFERENCE_COLUMN_ID, header: "Item", type: "reference", system: true },
+        { id: "finding", header: "Finding", type: "text" },
+    ];
+
+    /** A row whose finding rests on `evidence`. */
+    function citedRow(
+        id: string,
+        ref: RowRef | undefined,
+        evidence: Evidence[],
+        referenceCell: Cell | null = reference(id),
+        provenance: CellProvenance = "document",
+    ): TableSpec["rows"][number] {
+        return {
+            id,
+            ...(ref ? { ref } : {}),
+            cells: {
+                ...(referenceCell ? { [REFERENCE_COLUMN_ID]: referenceCell } : {}),
+                finding: answered({ kind: "text", text: `Finding of ${id}.` }, provenance, { evidence }),
+            },
+        };
+    }
+
     const cited: TableSpec = {
         id: "c",
-        columns: [
-            { id: "ref", header: "Item", type: "reference" },
-            { id: "finding", header: "Finding", type: "text" },
-        ],
+        columns,
         rows: [
-            {
-                id: "r1",
-                cells: {
-                    ref: {
-                        value: { kind: "reference", display_name: "Alpha" },
-                    },
-                    finding: {
-                        value: {
-                            kind: "text",
-                            text: 'Performance rose 13%. <citation id="1-K1" loc="page4"/>',
-                        },
-                    },
-                },
-            },
-            {
-                id: "r2",
-                cells: {
-                    ref: { value: { kind: "reference", display_name: "Beta" } },
-                    finding: {
-                        value: {
-                            kind: "text",
-                            // The same source again, and one with no metadata.
-                            text: 'No effect. <citation id="1-K1" loc="page4"/> <citation id="1-K9"/>',
-                        },
-                    },
-                },
-            },
-        ],
-        citations: [
-            {
-                citation_id: "c1",
-                raw_tag: '<citation id="1-K1" loc="page4"/>',
-                display_name: "Bloom 2015",
-                formatted_citation:
-                    "Bloom, N. 2015. Does working from home work?",
-                preview: "a 13% performance increase",
-                pages: [4],
-                resolved_ref: {
-                    kind: "zotero",
-                    library_id: 1,
-                    zotero_key: "K1",
-                },
-            },
+            citedRow(
+                "r1",
+                itemRef("P1", "K1"),
+                [{ locator: "s4", quote: "a 13% performance increase", page: 3 }],
+                reference("Bloom 2015", {
+                    formatted_citation: "Bloom, N. 2015. Does working from home work?",
+                    content_kind: "pdf",
+                }),
+            ),
+            citedRow("r2", itemRef("P2", "K2"), [{ locator: "s1", quote: "no effect", page: 0 }], reference("Beta")),
+            // A row without a reference cannot be cited.
+            citedRow("r3", undefined, [{ locator: "s1", quote: "uncitable" }]),
         ],
     };
 
@@ -459,43 +533,54 @@ describe("citations", () => {
             (m) => m[1],
         );
         // Each cell is rendered twice — in its row and in that row's detail —
-        // so what matters is that the repeated source kept one number and the
-        // unknown one took the next.
+        // so what matters is that each source kept one number.
         expect([...new Set(markers)]).toEqual(["1", "2"]);
         expect(markers.filter((m) => m === "1").length).toBeGreaterThan(1);
     });
 
+    it("keys every marker by the evidence entry behind it", () => {
+        const { html } = renderTableHtml(cited, { controls: false });
+        expect(evidenceKey("r1", "finding", 0)).toBe("r1|finding|0");
+        expect(cellHtml(html, "r1", "finding")).toContain('data-cite-key="r1|finding|0"');
+        expect(cellHtml(html, "r2", "finding")).toContain('data-cite-key="r2|finding|0"');
+        // No reference, nothing to cite: the answer stands without a marker.
+        expect(cellHtml(html, "r3", "finding")).not.toContain("data-bt-cite");
+    });
+
     it("gives every passage from one paper that paper's number and lists the paper once", () => {
-        const paper = { kind: "zotero" as const, library_id: 1, zotero_key: "P1" };
-        const pdf = { kind: "zotero" as const, library_id: 1, zotero_key: "A1" };
-        const spec: TableSpec = {
+        const paper: TableSpec = {
             id: "s",
-            columns: [{ id: "t", header: "Text", type: "text" }],
+            columns: [...columns, { id: "abstract", header: "Abstract", type: "text" }],
             rows: [
                 {
                     id: "r",
+                    ref: itemRef("P1", "A1"),
                     cells: {
-                        t: {
-                            value: {
-                                kind: "text",
-                                text: 'One <citation id="1-A1" loc="s1"/> two <citation id="1-A1" loc="s9"/> three <citation id="1-P1"/>',
-                            },
-                        },
+                        [REFERENCE_COLUMN_ID]: reference("Paper One", {
+                            formatted_citation: "Paper One",
+                            content_kind: "pdf",
+                        }),
+                        finding: answered({ kind: "text", text: "One." }, "document", {
+                            evidence: [
+                                { locator: "s1", quote: "first", page: 0 },
+                                { locator: "s9", quote: "second", page: 2 },
+                            ],
+                        }),
+                        abstract: answered({ kind: "text", text: "Two." }, "metadata", {
+                            evidence: [{ field: "abstract", quote: "from the abstract" }],
+                        }),
                     },
                 },
             ],
-            citations: [
-                { citation_id: "a", raw_tag: '<citation id="1-A1" loc="s1"/>', parent_ref: paper, resolved_ref: pdf, citation_type: "attachment", content_kind: "pdf", formatted_citation: "Paper One" },
-                { citation_id: "b", raw_tag: '<citation id="1-A1" loc="s9"/>', parent_ref: paper, resolved_ref: pdf, citation_type: "attachment", content_kind: "pdf", formatted_citation: "Paper One" },
-                { citation_id: "c", raw_tag: '<citation id="1-P1"/>', resolved_ref: paper, citation_type: "item", formatted_citation: "Paper One" },
-            ],
         };
-        const { html } = renderTableHtml(spec, { controls: false });
+        const { html } = renderTableHtml(paper, { controls: false });
         const markers = [...html.matchAll(/data-bt-cite="(\d+)"/g)].map((m) => m[1]);
+        // The passages and the metadata answer are all the one paper's.
         expect(new Set(markers)).toEqual(new Set(["1"]));
-        // Each marker still names its own passage for the host to navigate to.
-        expect(html).toContain('data-cite-key="zotero:1-A1:s1"');
-        expect(html).toContain('data-cite-key="zotero:1-A1:s9"');
+        // Each marker still names its own evidence for the host to navigate to.
+        expect(html).toContain('data-cite-key="r|finding|0"');
+        expect(html).toContain('data-cite-key="r|finding|1"');
+        expect(html).toContain('data-cite-key="r|abstract|0"');
         const sources = html.slice(html.indexOf('class="bt-srcs"'));
         expect(sources.match(/<li /g)).toHaveLength(1);
         // The entry reveals the paper; the file it was read from is a separate link.
@@ -503,36 +588,58 @@ describe("citations", () => {
         expect(sources).toContain('href="zotero://open/library/items/A1">Open PDF</a>');
     });
 
-    it("keeps one marker per citation, as the chat does, even for one source", () => {
-        const spec = structuredClone(cited);
-        spec.rows[0].cells.finding.value = {
-            kind: "text",
-            text: 'Rose. <citation id="1-K1" loc="page4"/> <citation id="1-K1" loc="page4"/>',
+    it("keeps one marker per evidence entry, even for one source", () => {
+        const twice: TableSpec = {
+            id: "t",
+            columns,
+            rows: [
+                citedRow("r1", itemRef("P1", "K1"), [
+                    { locator: "s4", quote: "rose", page: 3 },
+                    { locator: "s5", quote: "rose again", page: 3 },
+                ]),
+            ],
         };
-        spec.rows = [spec.rows[0]];
-        const { html } = renderTableHtml(spec, { controls: false });
-        const cell = html.slice(html.indexOf('id="r1/finding"'), html.indexOf("</summary>"));
-        expect(cell.match(/data-bt-cite="1"/g)).toHaveLength(2);
+        const { html } = renderTableHtml(twice, { controls: false });
+        expect(cellHtml(html, "r1", "finding").match(/data-bt-cite="1"/g)).toHaveLength(2);
     });
 
-    it("names the page of a sentence citation and says a click shows the passage", () => {
-        const spec = structuredClone(cited);
-        spec.citations![0].pages = undefined;
-        spec.citations![0].locations = [{ part_id: "s3", page_idx: 2, boxes: [[1, 2, 3, 4]] }];
-        spec.citations![0].page_labels = { 2: "ix" };
-        const { html } = renderTableHtml(spec);
-        expect(html).toContain('data-cite-loc="Page ix"');
+    it("names the page of a located passage and says a click shows it", () => {
+        const located: TableSpec = {
+            id: "l",
+            columns,
+            rows: [
+                citedRow("r1", itemRef("P1", "K1"), [
+                    { locator: "s3", quote: "the passage", page: 2, boxes: [[1, 2, 3, 4]] },
+                ]),
+            ],
+        };
+        const { html } = renderTableHtml(located);
+        expect(html).toContain('data-cite-loc="Page 3"');
         expect(html).toContain('data-cite-action="Click to show the highlighted passage"');
         expect(html).toContain('href="zotero://open/library/items/K1?page=3"');
     });
 
-    it("reveals metadata sources instead of asking the reader to open a regular item", () => {
-        const metadata = structuredClone(cited);
-        metadata.citations![0].citation_type = "item";
-        metadata.citations![0].pages = undefined;
+    it("reveals the item for an answer taken from title and abstract", () => {
+        const metadata: TableSpec = {
+            id: "m",
+            columns,
+            rows: [
+                citedRow(
+                    "r1",
+                    itemRef("P1", "K1"),
+                    [{ field: "abstract", quote: "We study remote work." }],
+                    reference("Bloom 2015"),
+                    "metadata",
+                ),
+            ],
+        };
         const { html } = renderTableHtml(metadata);
-        expect(html).toContain('href="zotero://select/library/items/K1"');
-        expect(html).not.toContain('href="zotero://open/library/items/K1');
+        expect(html).toContain('href="zotero://select/library/items/P1"');
+        expect(html).not.toContain("zotero://open/");
+        expect(html).toContain("bt-cite bt-cite--item");
+        expect(html).toContain('data-cite-action="Click to show the item in your library"');
+        expect(cellHtml(html, "r1", "finding")).toContain("From title and abstract");
+        expect(detailHtml(html, "r1")).toContain("“We study remote work.” (abstract)");
     });
 
     it("opens the cited page, and carries the card's parts", () => {
@@ -550,30 +657,62 @@ describe("citations", () => {
     });
 
     it("colours a marker by what it points at", () => {
-        const { html } = renderTableHtml(cited);
-        // A locator lands on a passage; a bare tag with no metadata does not.
-        expect(html).toContain("bt-cite bt-cite--locator");
-        expect(html).toContain("bt-cite bt-cite--item");
+        const mixed: TableSpec = {
+            id: "x",
+            columns,
+            rows: [
+                citedRow("r1", itemRef("P1", "K1"), [{ locator: "s4", quote: "located", page: 3 }]),
+                citedRow(
+                    "r2",
+                    itemRef("P2"),
+                    [{ field: "title", quote: "A title" }],
+                    reference("Beta"),
+                    "metadata",
+                ),
+                citedRow(
+                    "r3",
+                    { kind: "external", source: "openalex", source_id: "W1" },
+                    [{ locator: "p2", quote: "external", page: 1 }],
+                ),
+            ],
+        };
+        const { html } = renderTableHtml(mixed, { controls: false });
+        expect(cellHtml(html, "r1", "finding")).toContain("bt-cite bt-cite--locator");
+        expect(cellHtml(html, "r2", "finding")).toContain("bt-cite bt-cite--item");
+        // An external work has no link here; the marker is a span.
+        expect(cellHtml(html, "r3", "finding")).toContain('<span class="bt-cite bt-cite--external"');
     });
 
     it("lists the cited sources so a saved table stands on its own", () => {
-        const { html } = renderTableHtml(cited);
-        expect(html).toContain("Bloom, N. 2015. Does working from home work?");
-        // A tag with no metadata still gets a numbered entry rather than vanishing.
-        expect(html).toContain("Source unavailable");
-        expect([...html.matchAll(/<li id="bt-src-\d+"/g)]).toHaveLength(2);
+        const listed: TableSpec = {
+            ...cited,
+            rows: [
+                ...cited.rows,
+                // A row with a reference but no reference cell has nothing to name it by.
+                citedRow("r4", itemRef("P4", "K4"), [{ locator: "s1", quote: "unnamed", page: 0 }], null),
+            ],
+        };
+        const { html } = renderTableHtml(listed);
+        const sources = html.slice(html.indexOf('class="bt-srcs"'));
+        const entries = [...sources.matchAll(/<li id="bt-src-(\d+)"[\s\S]*?<\/li>/g)];
+        expect(entries.map((m) => m[1])).toEqual(["1", "2", "3"]);
+        // The formatted citation, else the short name, else a placeholder.
+        expect(entries[0][0]).toContain("Bloom, N. 2015. Does working from home work?");
+        expect(entries[1][0]).toContain("Beta");
+        expect(entries[2][0]).toContain("Source unavailable");
     });
 
-    it("drops a tag it cannot parse instead of printing it raw", () => {
+    it("strips citation tags from a text value instead of printing them raw", () => {
         const { html } = renderTableHtml({
             ...cited,
             rows: [
                 {
                     id: "r1",
                     cells: {
-                        finding: {
-                            value: { kind: "text", text: "Claim. <citation/>" },
-                        },
+                        finding: answered({
+                            kind: "text",
+                            text: 'Claim. <citation id="u-ABCD1234" loc="s1"/> <citation/>',
+                        }),
                     },
                 },
             ],
@@ -588,16 +727,12 @@ describe("citations", () => {
         // the `citationScopeFor` seam.
         const inGroup: TableSpec = {
             ...cited,
-            citations: [
-                {
-                    ...cited.citations![0],
-                    resolved_ref: {
-                        kind: "zotero",
-                        library_id: 7,
-                        library_ref: "g4242",
-                        zotero_key: "K1",
-                    },
-                },
+            rows: [
+                citedRow(
+                    "r1",
+                    itemRef("P1", "K1", 7, "g4242"),
+                    [{ locator: "s4", quote: "a 13% performance increase", page: 3 }],
+                ),
             ],
         };
 
@@ -615,6 +750,7 @@ describe("citations", () => {
             [...html.matchAll(/zotero:\/\/open\/groups\/4242\/items\/K1/g)]
                 .length,
         ).toBeGreaterThan(1);
+        expect(html).toContain('href="zotero://select/groups/4242/items/P1"');
     });
 
     it("falls back to the personal library when no host supplies a scope", () => {
@@ -622,30 +758,146 @@ describe("citations", () => {
         expect(html).toContain('href="zotero://open/library/items/K1?page=4"');
     });
 
-    it("renders no sources section for a table without citations", () => {
-        const { html } = renderTableHtml({
-            ...cited,
-            citations: undefined,
-            rows: [],
-        });
-        expect(html).not.toContain("bt-srcs");
+    it("renders no sources section for a table without evidence", () => {
+        expect(renderTableHtml(spec).html).not.toContain("bt-srcs");
+        expect(renderTableHtml({ ...cited, rows: [] }).html).not.toContain("bt-srcs");
     });
 });
 
+describe("cell states", () => {
+    const columns: TableSpec["columns"] = [
+        { id: REFERENCE_COLUMN_ID, header: "Item", type: "reference", system: true },
+        { id: "a", header: "Answer", type: "text" },
+    ];
+
+    it("shows uncertainty and staleness beside a failure's error", () => {
+        const { html } = renderTableHtml({
+            id: "states",
+            columns: [{ id: "a", header: "Answer", type: "text" }],
+            rows: [
+                {
+                    id: "r",
+                    cells: {
+                        a: {
+                            outcome: "failed",
+                            provenance: "document",
+                            error: "Failed inspection",
+                            unsure: true,
+                            stale: true,
+                        },
+                    },
+                },
+            ],
+        });
+        expect(html).toContain(
+            'Failed inspection</span><small class="bt-cell-state"> · Unsure · Stale</small>',
+        );
+    });
+
+    it("says a failure failed even when it names no error", () => {
+        const { html } = renderTableHtml({
+            id: "f",
+            columns: [{ id: "a", header: "Answer", type: "text" }],
+            rows: [{ id: "r", cells: { a: { outcome: "failed", provenance: "document" } as Cell } }],
+        });
+        expect(html).toContain('<span class="bt-err">Could not be answered</span>');
+    });
+
+    it("preserves every outcome and who wrote it in the snapshot", () => {
+        const states: TableSpec = {
+            id: "outcomes",
+            columns,
+            rows: [
+                {
+                    id: "absent",
+                    ref: itemRef("P1", "K1"),
+                    cells: {
+                        [REFERENCE_COLUMN_ID]: reference("Absent 2020"),
+                        a: {
+                            outcome: "not_reported",
+                            provenance: "document",
+                            reasoning: "The methods section names no sample.",
+                            evidence: [{ locator: "s12", quote: "We   surveyed\n firms.", page: 4 }],
+                        },
+                    },
+                },
+                { id: "blank", cells: { a: { outcome: "cleared", provenance: "user" } } },
+                { id: "mine", cells: { a: answered({ kind: "text", text: "My answer" }, "user") } },
+                {
+                    id: "tentative",
+                    cells: {
+                        a: answered({ kind: "text", text: "Tentative answer" }, "document", {
+                            unsure: true,
+                            stale: true,
+                        }),
+                    },
+                },
+                {
+                    id: "meta",
+                    ref: itemRef("P2"),
+                    cells: {
+                        a: answered({ kind: "text", text: "From the abstract" }, "metadata", {
+                            evidence: [{ field: "abstract", quote: "An abstract." }],
+                        }),
+                    },
+                },
+                {
+                    id: "broken",
+                    cells: { a: { outcome: "failed", provenance: "document", error: "Timed out" } },
+                },
+            ],
+        };
+        const { html } = buildTableDocument(states);
+
+        expect(cellHtml(html, "absent", "a")).toContain("Not reported");
+        // A not-reported finding still cites where it looked.
+        expect(cellHtml(html, "absent", "a")).toContain('data-cite-key="absent|a|0"');
+        expect(cellHtml(html, "blank", "a")).toContain("Cleared by you");
+        expect(cellHtml(html, "mine", "a")).toContain("Edited by you");
+        expect(cellHtml(html, "tentative", "a")).toContain("Unsure · Stale");
+        expect(cellHtml(html, "meta", "a")).toContain("From title and abstract");
+        expect(cellHtml(html, "broken", "a")).toContain("Timed out");
+
+        // The expanded row shows the reasoning and the quotes behind the answer.
+        const detail = detailHtml(html, "absent");
+        expect(detail).toContain('<div class="bt-d-extra">The methods section names no sample.</div>');
+        expect(detail).toContain("<li>“We surveyed firms.”</li>");
+
+        const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
+        expect(footer).toBe("6 rows · 1 not reported · 1 failed · 1 from title and abstract");
+        expect(html).not.toContain("contenteditable");
+        expect(html).not.toMatch(/<script\b/i);
+    });
+
+    it("never counts a column as filling in the footer", () => {
+        const { html } = renderTableHtml({
+            id: "f",
+            columns: [
+                { id: "a", header: "Answer", type: "text", status: "filling", progress: { done: 1, total: 3 } },
+            ],
+            rows: [{ id: "r", cells: {} }],
+        });
+        const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
+        expect(footer).toBe("1 row");
+    });
+});
 
 /**
  * One spec that exercises every part of the model a stored table has to keep:
- * all seven cell kinds, both flags, `stale`, every provenance, a select with a
- * declared vocabulary, a screening decision with its details, a library row, an
- * external row, a context-file row, and a citation with a preview.
+ * all seven cell kinds, every outcome and provenance, `unsure` and `stale`,
+ * evidence from the document and from metadata, a select with a declared
+ * vocabulary, a screening decision with its reasoning, a library row, an
+ * external row, a context-file row, row origins and the approved sources.
  */
 const fullSpec: TableSpec = {
     id: "full",
+    spec_version: TABLE_SPEC_VERSION,
     key: "SNAP1234",
     version: 7,
     title: "Screening",
-    caption: "Every cell kind at once",
+    description: "Every cell kind at once",
     anchor_column_id: "ref",
+    sources: [{ id: "src1", type: "items", ids: ["u-K1", "openalex:W123"] }],
     columns: [
         {
             id: "ref",
@@ -657,7 +909,7 @@ const fullSpec: TableSpec = {
             id: "decision",
             header: "Include?",
             type: "select",
-            role: "screening_decision",
+            role: "decision",
             description: "Does it meet the inclusion criteria?",
             options: [
                 { label: "Include", color: "green" },
@@ -698,56 +950,59 @@ const fullSpec: TableSpec = {
     ],
     rows: [
         {
-            id: "item:1:K1",
-            ref: { kind: "item", library_id: 1, zotero_key: "K1" },
+            id: "a1b2c3",
+            ref: itemRef("K1", "A1"),
             in_library: true,
+            origin: [{ source: "src1", date: "2026-10-01" }],
             cells: {
-                ref: {
-                    value: {
+                ref: answered(
+                    {
                         kind: "reference",
-                        display_name: "Does working from home work?",
+                        display_name: "Bloom et al. 2015",
+                        title: "Does working from home work?",
                         subtitle: "Bloom et al.",
                         venue: "QJE",
                         item_type: "journalArticle",
+                        formatted_citation: "Bloom, N. et al. 2015. Does working from home work? QJE.",
+                        content_kind: "pdf",
                     },
-                    provenance: "imported",
-                },
-                decision: {
-                    value: { kind: "select", label: "Include" },
-                    details: { kind: "text", text: "Randomised, and on topic." },
-                    provenance: "asserted",
-                },
-                n: {
-                    value: { kind: "number", value: 1200 },
-                    provenance: "extracted",
-                    flag: "unsure",
-                },
-                when: {
-                    value: { kind: "date", value: "2015-02", display: "Feb 2015" },
-                    provenance: "extracted",
-                },
-                oa: { value: { kind: "boolean", value: true }, provenance: "user" },
-                finding: {
-                    value: {
-                        kind: "text",
-                        text: 'Performance rose 13%. <citation id="1-K1" loc="page4"/>',
+                    "system",
+                ),
+                decision: answered({ kind: "select", label: "Include" }, "document", {
+                    reasoning: "Randomised, and on topic.",
+                    evidence: [{ locator: "s12", quote: "Employees were randomly assigned.", page: 2 }],
+                }),
+                n: answered({ kind: "number", value: 1200 }, "document", {
+                    unsure: true,
+                    evidence: [{ locator: "s3", quote: "1,200 employees", page: 1, boxes: [[10, 20, 30, 40]] }],
+                }),
+                when: answered({ kind: "date", value: "2015-02", display: "Feb 2015" }, "metadata", {
+                    evidence: [{ field: "title", quote: "Does working from home work?" }],
+                }),
+                oa: answered({ kind: "boolean", value: true }, "user"),
+                finding: answered(
+                    { kind: "text", text: "Performance rose 13%." },
+                    "document",
+                    {
+                        stale: true,
+                        evidence: [
+                            { locator: "s40-s41", quote: "a 13% performance increase", page: 3 },
+                            { locator: "s52", quote: "of which 9% came from more minutes", page: 4 },
+                        ],
                     },
-                    details: { kind: "list", items: ["Nine months", "Call centre"] },
-                    provenance: "extracted",
-                },
-                url: {
-                    value: {
+                ),
+                url: answered(
+                    {
                         kind: "link",
                         url: "https://doi.org/10.1093/qje/qju032",
                         label: "10.1093/qje/qju032",
                     },
-                    provenance: "imported",
-                    stale: true,
-                },
+                    "system",
+                ),
             },
         },
         {
-            id: "ext:openalex:W123",
+            id: "d4e5f6",
             ref: {
                 kind: "external",
                 source: "openalex",
@@ -763,41 +1018,26 @@ const fullSpec: TableSpec = {
             },
             in_library: false,
             actions: ["import"],
+            origin: [{ source: "src1", date: "2026-10-01" }],
             cells: {
-                ref: {
-                    value: {
-                        kind: "reference",
-                        display_name: "Remote work and productivity",
-                        subtitle: "Nguyen",
-                    },
-                    provenance: "imported",
+                ref: reference("Remote work and productivity", { subtitle: "Nguyen" }),
+                decision: answered({ kind: "select", label: "Exclude" }, "user"),
+                n: {
+                    outcome: "not_reported",
+                    provenance: "metadata",
+                    reasoning: "The abstract gives no sample size.",
                 },
-                decision: {
-                    value: { kind: "select", label: "Exclude" },
-                    details: { kind: "list", items: ["Wrong population"] },
-                    provenance: "user",
-                },
-                n: { status: "pending" },
-                when: {
-                    value: { kind: "date", value: "2019" },
-                    provenance: "asserted",
-                    flag: "unsourced",
-                },
-                oa: { value: { kind: "boolean", value: false }, provenance: "user" },
-                finding: { status: "error", error: "Extraction failed" },
+                when: answered({ kind: "date", value: "2019" }, "metadata"),
+                oa: { outcome: "cleared", provenance: "user" },
+                finding: { outcome: "failed", provenance: "document", error: "Extraction failed" },
             },
         },
         {
-            id: "file:f1",
+            id: "g7h8i9",
             ref: { kind: "file", ext_key: "f1", label: "protocol.pdf" },
             status: "error",
             error: "The file could not be read.",
-            cells: {
-                ref: {
-                    value: { kind: "reference", display_name: "protocol.pdf" },
-                    provenance: "imported",
-                },
-            },
+            cells: { ref: reference("protocol.pdf") },
         },
     ],
     sort: { column_id: "when", direction: "asc" },
@@ -810,101 +1050,62 @@ const fullSpec: TableSpec = {
         allow_add_row: true,
     },
     cost_estimate: { per_row_credits: 2, estimated_seconds: 45 },
-    citations: [
-        {
-            citation_id: "c1",
-            raw_tag: '<citation id="1-K1" loc="page4"/>',
-            display_name: "Bloom 2015",
-            formatted_citation: "Bloom, N. 2015. Does working from home work?",
-            preview: "a 13% performance increase",
-            pages: [4],
-            resolved_ref: { kind: "zotero", library_id: 1, zotero_key: "K1" },
-        },
-    ],
 };
 
-/**
- * The document's text, near enough for offset comparisons: annotations anchor
- * into text, and markup — including the inline style attributes that carry the
- * sort ranks — is not text. Entities are left alone, since both sides of a
- * comparison carry the same ones.
- */
-function textOf(html: string): string {
-    return html
-        .replace(/<script[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[\s\S]*?<\/style>/gi, "")
-        .replace(/<[^>]+>/g, "");
-}
-
-/** The JSON the document carries, as written (still `<`-escaped). */
-function embeddedJson(html: string): string {
-    return /id="beaver-table-spec">([\s\S]*?)<\/script>/.exec(html)![1];
-}
-
-describe("the embedded spec", () => {
-    it("round-trips a spec that uses every part of the model", () => {
-        const { html } = buildTableDocument(fullSpec);
-        expect(parseTableDocument(html)).toEqual({
-            ok: true,
-            spec: { ...fullSpec, spec_version: TABLE_SPEC_VERSION },
-        });
+describe("a stored table's rendering", () => {
+    it("is built from a spec every cell of which a store would accept", () => {
+        for (const row of fullSpec.rows) {
+            for (const cell of Object.values(row.cells)) {
+                expect(cellInvariantError(cell)).toBeUndefined();
+            }
+        }
     });
 
-    it("stamps the format version, and passes an existing one through", () => {
-        const stamped = parseTableDocument(buildTableDocument(fullSpec).html);
-        expect(stamped.ok && stamped.spec.spec_version).toBe(TABLE_SPEC_VERSION);
-        // Identity and revision belong to the store, so they survive untouched.
-        expect(stamped.ok && stamped.spec.key).toBe("SNAP1234");
-        expect(stamped.ok && stamped.spec.version).toBe(7);
-    });
-
-    it("serialises compactly, since the JSON is machine state", () => {
-        const json = embeddedJson(buildTableDocument(fullSpec).html);
-        expect(json).not.toContain("\n");
-        // Re-serialising it compactly changes nothing, so it was compact: no
-        // indentation and no space the data did not put there.
-        expect(json).toBe(
-            JSON.stringify(JSON.parse(json)).replace(/</g, "\\u003c"),
+    it("is byte-for-byte the same on a second build", () => {
+        expect(buildTableDocument(fullSpec, { specSha256: HASH }).html).toBe(
+            buildTableDocument(fullSpec, { specSha256: HASH }).html,
         );
     });
 
-    it("survives a cell that tries to close the script element", () => {
+    it("renders every evidence entry as a marker and lists each source once", () => {
+        const { html } = buildTableDocument(fullSpec);
+        const keys = new Set([...html.matchAll(/data-cite-key="([^"]+)"/g)].map((m) => m[1]));
+        expect(keys).toEqual(
+            new Set([
+                "a1b2c3|decision|0",
+                "a1b2c3|n|0",
+                "a1b2c3|when|0",
+                "a1b2c3|finding|0",
+                "a1b2c3|finding|1",
+            ]),
+        );
+        const sources = html.slice(html.indexOf('class="bt-srcs"'));
+        expect(sources.match(/<li /g)).toHaveLength(1);
+        expect(sources).toContain("Bloom, N. et al. 2015. Does working from home work? QJE.");
+    });
+
+    it("escapes a cell that tries to inject markup", () => {
         const hostile: TableSpec = {
             ...fullSpec,
             rows: [
                 {
                     id: "r1",
                     cells: {
-                        finding: {
-                            value: {
+                        finding: answered(
+                            {
                                 kind: "text",
                                 text: "</script><!-- <script>alert(1)</script> --> still here",
                             },
-                            provenance: "user",
-                        },
+                            "user",
+                        ),
                     },
                 },
             ],
         };
         const { html } = buildTableDocument(hostile);
-        // Nothing in the data can end the element early, so the document still
-        // has exactly one script and it still parses.
-        expect([...html.matchAll(/<\/script>/gi)]).toHaveLength(1);
-        expect(embeddedJson(html)).not.toContain("<");
-        const parsed = parseTableDocument(html);
-        expect(parsed).toEqual({
-            ok: true,
-            spec: { ...hostile, spec_version: TABLE_SPEC_VERSION },
-        });
-        // …and the rendered cell escaped it rather than running it.
-        expect(html).not.toContain("<script>alert(1)</script>");
+        expect(html).not.toMatch(/<\/?script\b/i);
         expect(html).toContain("&lt;script&gt;alert(1)");
-    });
-
-    it("is byte-for-byte the same on a second build", () => {
-        expect(buildTableDocument(fullSpec).html).toBe(
-            buildTableDocument(fullSpec).html,
-        );
+        expect(html).toContain("still here");
     });
 
     it("does not move the text before a row when a later row changes", () => {
@@ -918,12 +1119,7 @@ describe("the embedded spec", () => {
                           ...row,
                           cells: {
                               ...row.cells,
-                              abstract: {
-                                  value: {
-                                      kind: "text" as const,
-                                      text: "A late addition",
-                                  },
-                              },
+                              abstract: answered({ kind: "text", text: "A late addition" }),
                           },
                       }
                     : row,
@@ -938,41 +1134,6 @@ describe("the embedded spec", () => {
     });
 });
 
-describe("parseTableDocument", () => {
-    it("reports a document that carries no spec", () => {
-        expect(
-            parseTableDocument("<!DOCTYPE html><html><body>Nope</body></html>"),
-        ).toEqual({ ok: false, reason: "no_spec" });
-    });
-
-    it("refuses a newer format, and says which one", () => {
-        const { html } = buildTableDocument({ ...fullSpec, spec_version: 999 });
-        expect(parseTableDocument(html)).toEqual({
-            ok: false,
-            reason: "unsupported_version",
-            specVersion: 999,
-        });
-    });
-
-    it("reports malformed JSON rather than throwing", () => {
-        const broken =
-            '<!DOCTYPE html><html><body><script type="application/json" ' +
-            'id="beaver-table-spec">{"id":</script></body></html>';
-        const parsed = parseTableDocument(broken);
-        expect(parsed.ok).toBe(false);
-        expect(parsed.ok === false && parsed.reason).toBe("invalid");
-        expect(parsed.ok === false && parsed.detail).toBeTruthy();
-    });
-
-    it("reports JSON that parses but is not a table", () => {
-        const notATable =
-            '<!DOCTYPE html><html><body><script type="application/json" ' +
-            'id="beaver-table-spec">{"id":"t","columns":[]}</script></body></html>';
-        const parsed = parseTableDocument(notATable);
-        expect(parsed.ok === false && parsed.reason).toBe("invalid");
-    });
-});
-
 describe("a stored table stands on its own", () => {
     it("references no external resource", () => {
         const { html } = buildTableDocument(fullSpec, {
@@ -981,8 +1142,7 @@ describe("a stored table stands on its own", () => {
                 open: "zotero://open/library/items/K1",
             }),
         });
-        // No stylesheet, script or image to fetch — the only `src`-less
-        // stylesheet is the inline <style>, and the only script is data.
+        // No stylesheet, script or image to fetch.
         expect(html).not.toMatch(/<link\b/i);
         expect(html).not.toMatch(/<img\b/i);
         expect(html).not.toMatch(/\bsrc=/i);
@@ -1020,20 +1180,8 @@ describe("a stored table stands on its own", () => {
 });
 
 describe("things a stored table must survive", () => {
-    it("keeps the embedded spec after the table, where it cannot displace annotation offsets", () => {
-        const { html } = buildTableDocument(spec);
-        const script = html.indexOf("<script");
-        // Snapshot annotations anchor by character offset into the document's
-        // text, so the spec has to come after every piece of the table. Pinned
-        // because the cost of moving it is invisible: the document still
-        // renders, and every other test here still passes.
-        expect(script).toBeGreaterThan(html.lastIndexOf("</section>"));
-        expect(html.indexOf("<script")).toBe(html.lastIndexOf("<script"));
-        expect(html.trimEnd().endsWith("</html>")).toBe(true);
-    });
-
     it("renders a number that no longer survives a save as no value at all", () => {
-        // JSON has no NaN, so `JSON.stringify` stores it as null and a reloaded
+        // JSON has no NaN, so `table.json` stores it as null and a reloaded
         // table would render `null.toLocaleString()`. Both directions read as
         // an empty cell instead of throwing.
         const withNaN: TableSpec = {
@@ -1042,23 +1190,17 @@ describe("things a stored table must survive", () => {
             rows: [
                 {
                     id: "r1",
-                    cells: {
-                        size: {
-                            value: { kind: "number", value: Number.NaN },
-                            provenance: "asserted",
-                        },
-                    },
+                    cells: { size: answered({ kind: "number", value: Number.NaN }) },
                 },
             ],
         };
         expect(() => buildTableDocument(withNaN)).not.toThrow();
 
-        const parsed = parseTableDocument(buildTableDocument(withNaN).html);
-        expect(parsed.ok).toBe(true);
-        if (!parsed.ok) return;
+        const reloaded = JSON.parse(JSON.stringify(withNaN)) as TableSpec;
+        expect(reloaded.rows[0].cells.size.value).toEqual({ kind: "number", value: null });
         // Re-rendering what came back is the case that used to throw.
-        expect(() => buildTableDocument(parsed.spec)).not.toThrow();
-        expect(buildTableDocument(parsed.spec).html).toContain("bt-empty");
+        expect(() => buildTableDocument(reloaded)).not.toThrow();
+        expect(cellHtml(buildTableDocument(reloaded).html, "r1", "size")).toContain("bt-empty");
     });
 
     it("points a filter chip at the rows that actually carry its label", () => {
@@ -1070,24 +1212,8 @@ describe("things a stored table must survive", () => {
             columns: [{ id: "d", header: "Design", type: "select" }],
             sort: { column_id: "d", direction: "asc" },
             rows: [
-                {
-                    id: "zeta",
-                    cells: {
-                        d: {
-                            value: { kind: "select", label: "Zeta" },
-                            provenance: "asserted",
-                        },
-                    },
-                },
-                {
-                    id: "alpha",
-                    cells: {
-                        d: {
-                            value: { kind: "select", label: "Alpha" },
-                            provenance: "asserted",
-                        },
-                    },
-                },
+                { id: "zeta", cells: { d: answered({ kind: "select", label: "Zeta" }) } },
+                { id: "alpha", cells: { d: answered({ kind: "select", label: "Alpha" }) } },
             ],
         };
         const { html } = buildTableDocument(openSelect, { controls: true });
@@ -1105,29 +1231,6 @@ describe("things a stored table must survive", () => {
     });
 });
 
-it("shows uncertainty and staleness alongside failures without requiring a value", () => {
-    const { html } = renderTableHtml({ id: "states", columns: [{ id: "a", header: "Answer", type: "text" }], rows: [{ id: "r", cells: { a: { status: "error", error: "Failed inspection", flag: "unsourced", stale: true } } }] });
-    expect(html).toContain('Failed inspection</span><small class="bt-cell-state"> · Unsourced · Stale</small>');
-});
-
-it("preserves not-reported, blank user ownership, uncertainty and cited evidence in the snapshot", () => {
-    const { html } = buildTableDocument({
-        id: "outcomes", columns: [{ id: "a", header: "Answer", type: "text" }],
-        rows: [
-            { id: "absent", cells: { a: { outcome: "not_reported", provenance: "extracted", details: { kind: "text", text: 'No result reported <citation id="u-ABCD1234-p1-s1"/>' } } } },
-            { id: "blank", cells: { a: { provenance: "user" } } },
-            { id: "tentative", cells: { a: { value: { kind: "text", text: "Tentative answer" }, flag: "unsure", stale: true } } },
-        ],
-    });
-    expect(html).toContain('Not reported');
-    expect(html).toContain('Edited by you');
-    expect(html).toContain('Unsure · Stale');
-    expect(html).toContain('No result reported');
-    expect(html).toContain('u-ABCD1234-p1-s1');
-    expect(html).not.toContain('contenteditable');
-    expect(html).not.toMatch(/<script(?![^>]*type="application\/json")/);
-});
-
 describe("reading layout", () => {
     const spec: TableSpec = {
         id: "l",
@@ -1135,7 +1238,7 @@ describe("reading layout", () => {
             { id: "ref", header: "Paper", type: "reference" },
             { id: "q", header: "Question", type: "text" },
         ],
-        rows: [{ id: "r", cells: { ref: { value: { kind: "reference", display_name: "A" } } } }],
+        rows: [{ id: "r", cells: { ref: reference("A") } }],
     };
 
     it("opens on tall rows", () => {

@@ -1,9 +1,27 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BEAVER_ACTIVE_ATTRIBUTE } from "../../../src/services/artifacts/tableDocument";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TableSpec } from "@beaver/agent-core/layouts/table";
+import { tableSpecHash } from "../../../src/services/artifacts/recoveryShadow";
+
+// jsdom's `crypto.subtle` rejects buffers from Node's realm; any stable digest
+// of the serialized spec serves the comparison under test.
+vi.mock("../../../src/services/artifacts/recoveryShadow", () => ({
+    tableSpecHash: async (spec: unknown) => {
+        const text = JSON.stringify(spec);
+        let hash = 0;
+        for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+        return hash.toString(16).padStart(64, "0");
+    },
+}));
+import {
+    BEAVER_ACTIVE_ATTRIBUTE,
+    renderTableHtml,
+    TABLE_SPEC_HASH_ATTRIBUTE,
+} from "../../../src/services/artifacts/tableDocument";
 import {
     citationCardPosition,
+    citationForMarker,
     countCitationMarkers,
     enhanceTableDocument,
     isRoutedTableHref,
@@ -305,33 +323,160 @@ describe("countCitationMarkers", () => {
     });
 });
 
+/** One row whose answer rests on two passages of its PDF. */
+const citedSpec: TableSpec = {
+    id: "t",
+    key: "TBL00001",
+    version: 3,
+    columns: [
+        { id: "_reference", header: "Item", type: "reference", system: true },
+        { id: "finding", header: "Finding", type: "text" },
+    ],
+    rows: [
+        {
+            id: "r1",
+            ref: {
+                kind: "item",
+                library_ref: "u",
+                library_id: 1,
+                zotero_key: "P1",
+                attachment: { library_ref: "u", library_id: 1, zotero_key: "K1" },
+            },
+            cells: {
+                _reference: {
+                    outcome: "answered",
+                    provenance: "system",
+                    value: { kind: "reference", display_name: "Bloom 2015" },
+                },
+                finding: {
+                    outcome: "answered",
+                    provenance: "document",
+                    value: { kind: "text", text: "Rose 13%." },
+                    evidence: [
+                        { locator: "s2", quote: "first passage", page: 1 },
+                        { locator: "s9", quote: "second passage", page: 4, boxes: [[1, 2, 3, 4]] },
+                    ],
+                },
+            },
+        },
+    ],
+};
+
+describe("citationForMarker", () => {
+    it("builds the citation for the evidence entry a marker names", () => {
+        const citation = citationForMarker(citedSpec, "r1|finding|1");
+        expect(citation).toMatchObject({
+            citation_type: "attachment",
+            resolved_ref: { kind: "zotero", library_ref: "u", zotero_key: "K1" },
+            parent_ref: { kind: "zotero", library_ref: "u", zotero_key: "P1" },
+            display_name: "Bloom 2015",
+            preview: "second passage",
+            pages: [5],
+            locations: [{ part_id: "s9", page_idx: 4, boxes: [[1, 2, 3, 4]] }],
+        });
+    });
+
+    it("answers null for a key that names no evidence", () => {
+        expect(citationForMarker(citedSpec, "r1|finding|7")).toBeNull();
+        expect(citationForMarker(citedSpec, "r9|finding|0")).toBeNull();
+        expect(citationForMarker(citedSpec, "r1|missing|0")).toBeNull();
+        expect(citationForMarker(citedSpec, "garbage")).toBeNull();
+    });
+
+    it("resolves every marker the rendered document carries", () => {
+        const { html } = renderTableHtml(citedSpec, { controls: false });
+        const keys = [...new Set([...html.matchAll(/data-cite-key="([^"]+)"/g)].map((m) => m[1]))];
+        expect(keys).toEqual(["r1|finding|0", "r1|finding|1"]);
+        for (const key of keys) expect(citationForMarker(citedSpec, key)).not.toBeNull();
+    });
+});
+
 describe("citation and command clicks", () => {
-    const citation = { citation_id: "c", raw_tag: '<citation id="1-K1" loc="s2"/>', preview: "passage" };
     const page =
-        `<script type="application/json" id="beaver-table-spec">${JSON.stringify({ citations: [citation] })}</script>` +
-        '<a class="bt-cite" data-bt-cite="1" data-cite-key="zotero:1-K1:s2" href="zotero://open/library/items/K1?page=2">1</a>' +
+        '<a class="bt-cite" data-bt-cite="1" data-cite-key="r1|finding|1" href="zotero://open/library/items/K1?page=5">1</a>' +
         '<a class="bt-export" href="#" data-bt-command="export-csv"></a>';
 
-    it("hands a marker's full citation to the host instead of following its link", async () => {
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+    // The document renders `citedSpec`, as a snapshot of it would.
+    beforeEach(async () => {
+        doc.documentElement.setAttribute(TABLE_SPEC_HASH_ATTRIBUTE, await tableSpecHash(citedSpec));
+    });
+    afterEach(() => doc.documentElement.removeAttribute(TABLE_SPEC_HASH_ATTRIBUTE));
+
+    it("hands the citation built from the stored spec to the host instead of following its link", async () => {
         const { root, card } = mount(page);
         const activated: unknown[] = [];
-        const host = { ...hostFor(card), activateCitation: async (c: unknown) => { activated.push(c); return true; } };
+        const readSpec = vi.fn(async () => citedSpec);
+        const host = {
+            ...hostFor(card),
+            readSpec,
+            activateCitation: async (c: unknown) => {
+                activated.push(c);
+                return true;
+            },
+        };
         const dispose = enhanceTableDocument(doc, host);
         const event = click(root.querySelector(".bt-cite")!);
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await settle();
         expect(event.defaultPrevented).toBe(true);
-        expect(activated).toEqual([citation]);
+        expect(readSpec).toHaveBeenCalledTimes(1);
+        expect(activated).toEqual([citationForMarker(citedSpec, "r1|finding|1")]);
         expect(host.opened).toEqual([]);
         dispose();
     });
 
     it("falls back to the marker's link when the host cannot navigate", async () => {
         const { root, card } = mount(page);
-        const host = { ...hostFor(card), activateCitation: async () => false };
+        const host = { ...hostFor(card), readSpec: async () => citedSpec, activateCitation: async () => false };
         const dispose = enhanceTableDocument(doc, host);
         click(root.querySelector(".bt-cite")!);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(host.opened).toEqual(["zotero://open/library/items/K1?page=2"]);
+        await settle();
+        expect(host.opened).toEqual(["zotero://open/library/items/K1?page=5"]);
+        dispose();
+    });
+
+    it("follows the marker's link when the spec cannot be read or names no such evidence", async () => {
+        for (const readSpec of [
+            async () => null,
+            async () => ({ ...citedSpec, rows: [] }),
+            async () => {
+                throw new Error("unreadable");
+            },
+        ]) {
+            const { root, card } = mount(page);
+            const activateCitation = vi.fn(async () => true);
+            const host = { ...hostFor(card), readSpec, activateCitation };
+            const dispose = enhanceTableDocument(doc, host);
+            click(root.querySelector(".bt-cite")!);
+            await settle();
+            expect(activateCitation).not.toHaveBeenCalled();
+            expect(host.opened).toEqual(["zotero://open/library/items/K1?page=5"]);
+            dispose();
+        }
+    });
+
+    it("follows the marker's link when the table changed since the document was rendered", async () => {
+        const { root, card } = mount(page);
+        const activateCitation = vi.fn(async () => true);
+        const newer: TableSpec = { ...citedSpec, title: "Edited since" };
+        const host = { ...hostFor(card), readSpec: async () => newer, activateCitation };
+        const dispose = enhanceTableDocument(doc, host);
+        click(root.querySelector(".bt-cite")!);
+        await settle();
+        expect(activateCitation).not.toHaveBeenCalled();
+        expect(host.opened).toEqual(["zotero://open/library/items/K1?page=5"]);
+        dispose();
+    });
+
+    it("follows the marker's link at once for a host that cannot read the spec", () => {
+        const { root, card } = mount(page);
+        const activateCitation = vi.fn(async () => true);
+        const host = { ...hostFor(card), activateCitation };
+        const dispose = enhanceTableDocument(doc, host);
+        click(root.querySelector(".bt-cite")!);
+        expect(activateCitation).not.toHaveBeenCalled();
+        expect(host.opened).toEqual(["zotero://open/library/items/K1?page=5"]);
         dispose();
     });
 
@@ -347,4 +492,3 @@ describe("citation and command clicks", () => {
         dispose();
     });
 });
-

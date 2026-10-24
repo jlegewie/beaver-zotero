@@ -11,8 +11,10 @@
  *
  * 1. **Nothing throws.** Every caller is a UI path that must degrade, so
  *    failures come back as `{ error }`.
- * 2. **The file is checked first.** The reader opened on a snapshot with no
- *    file on disk is an error dialog, and the caller can say something better.
+ * 2. **The file is checked before the reader opens.** The reader opened on a
+ *    snapshot with no file on disk is an error dialog, and the caller can say
+ *    something better. It is checked after the open's repair, which is what
+ *    restores a missing or stale snapshot.
  *
  * Unlike Zotero's own open paths, this one always reaches the reader: it calls
  * `Zotero.Reader.open` rather than `Zotero.FileHandlers.open`, so a user who
@@ -30,6 +32,7 @@
  */
 
 import { closeStaleTableReaders } from '../services/artifacts/view/readerTableView';
+import { snapshotIsCurrent } from '../services/artifacts/tableRenderer';
 import { resolveTableItem, type TableRef } from '../services/artifacts/tableItemIdentity';
 
 export type OpenTableOutcome = { ok: true; warning?: string } | { error: string };
@@ -77,18 +80,23 @@ export async function openTable(ref: TableRef): Promise<OpenTableOutcome> {
     }
     try {
         const item = await resolveTableItem(ref);
-        const path = await item.getFilePathAsync();
-        if (!path) {
-            return { error: `Could not open table ${ref.key} — it has no file on disk.` };
-        }
         let warning: string | undefined;
+        let sha256: string | undefined;
         try {
             const current = await Zotero.Beaver.libraryOperations.run('table_openTable', [ref]);
+            sha256 = current.sha256;
             if (current.recovered.some((entry) => entry.kind === 'bookkeeping_pending'))
                 warning = 'Content is committed, but local bookkeeping needs repair. Use Check / repair table to retry.';
         } catch {
             warning = 'Local bookkeeping could not be checked. Use Check / repair table to retry.';
         }
+        const path = await item.getFilePathAsync();
+        if (!path) {
+            return { error: `Could not open table ${ref.key} — it has no file on disk.` };
+        }
+        // A render that failed leaves the previous snapshot in place.
+        if (sha256 && !warning && !(await snapshotIsCurrent(item, sha256)))
+            warning = 'This view shows an earlier version of the table; it could not be updated.';
         await closeStaleTableReaders(item.id);
         const openInWindow = openReaderInNewWindow();
         // `allowDuplicate` mirrors `Zotero.FileHandlers.open`, and is not

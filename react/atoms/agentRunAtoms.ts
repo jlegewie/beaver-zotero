@@ -4113,9 +4113,8 @@ export const sendCreditConfirmationResponseAtom = atom(
  */
 export const sendBatchApprovalResponseAtom = atom(
     null,
-    (_get, set, { approvalId, approved, mode, userInstructions, table }: {
+    (_get, set, { approvalId, approved, mode, userInstructions }: {
         approvalId: string;
-        table?: import('@beaver/agent-core/protocol/artifactProtocol').TableApprovalIdentity;
         approved: boolean;
         mode: BatchApprovalMode;
         userInstructions?: string | null;
@@ -4127,7 +4126,6 @@ export const sendBatchApprovalResponseAtom = atom(
             approved,
             mode,
             userInstructions,
-            table,
         );
         if (!delivered) {
             logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);

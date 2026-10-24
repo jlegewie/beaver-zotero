@@ -18,22 +18,6 @@ export interface TableRecord {
     saved?: boolean | null;
 }
 
-/** Immutable extraction plan shown for approval; identifiers are opaque to the client. */
-export interface TableBatchApproval {
-    reference: TableReference;
-    schema_id: string;
-    population_id: string;
-    population_count: number;
-    columns: Array<{ id: string; question: string }>;
-    cost_estimate: string;
-}
-
-export interface TableApprovalIdentity {
-    key: string;
-    schema_id: string;
-    population_id: string;
-}
-
 /** Portable stored-document provider envelopes. Optional nulls are wire defaults. */
 export interface ArtifactRequest {
     event: "artifact_request";

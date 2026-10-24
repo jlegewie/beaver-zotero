@@ -10,6 +10,8 @@ import {
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
+import { citationForEvidence } from "@beaver/agent-core/layouts/tableCitations";
+import Citation from "../chat/Citation";
 import { ArrowRightIcon, Icon, TickIcon } from "../icons";
 import type { MenuItem } from "../primitives/ContextMenu";
 import { CellView, DetailsView } from "./cells";
@@ -516,19 +518,11 @@ function RowDetail({
     onRetryCell?: (row: Row, column: Column) => void;
     extra?: React.ReactNode;
 }): React.ReactElement {
-    // A column that failed or is still filling is exactly what the reader
-    // expanded the row to look at, so a status counts as content here.
-    const fields = table.columns.filter((column) => {
-        const cell = row.cells[column.id];
-        return (
-            !!cell?.value ||
-            !!cell?.details ||
-            !!cell?.status ||
-            !!cell?.outcome ||
-            cell?.provenance === "user" ||
-            hiddenColumns.includes(column)
-        );
-    });
+    // A failed cell is exactly what the reader expanded the row to look at,
+    // so every written cell counts as content here.
+    const fields = table.columns.filter(
+        (column) => !!row.cells[column.id] || hiddenColumns.includes(column),
+    );
 
     return (
         <div className="bt-detail">
@@ -557,10 +551,19 @@ function RowDetail({
                                             : undefined
                                     }
                                 />
-                                {cell?.details && !cell.details.label ? (
+                                {cell?.reasoning ? (
                                     <DetailsView
-                                        details={cell.details}
+                                        details={{
+                                            kind: "text",
+                                            text: cell.reasoning,
+                                        }}
                                         renderText={renderText}
+                                    />
+                                ) : null}
+                                {cell?.evidence?.length ? (
+                                    <EvidenceList
+                                        row={row}
+                                        columnId={column.id}
                                     />
                                 ) : null}
                             </dd>
@@ -584,6 +587,47 @@ function RowDetail({
             </dl>
 
             {extra ? <div className="bt-detail-extra">{extra}</div> : null}
+        </div>
+    );
+}
+
+/**
+ * A cell's evidence: each quote with the citation assembled from it, handed to
+ * the chat's `Citation` component directly. A tag names only a work and a
+ * locator, so two quotes of one work could not be told apart through the
+ * thread's citation store; the assembled citation carries its own quote,
+ * page and highlight.
+ */
+function EvidenceList({
+    row,
+    columnId,
+}: {
+    row: Row;
+    columnId: string;
+}): React.ReactElement {
+    const evidence = row.cells[columnId]?.evidence ?? [];
+    return (
+        <div className="bt-details">
+            <ul className="bt-details-list">
+                {evidence.map((entry, index) => {
+                    const citation = citationForEvidence(row, entry);
+                    return (
+                        <li key={index}>
+                            “{entry.quote.replace(/\s+/g, " ").trim()}”
+                            {entry.field ? ` (${entry.field})` : null}
+                            {citation ? (
+                                <span className="markdown">
+                                    {" "}
+                                    <Citation
+                                        citation={citation}
+                                        marker={String(index + 1)}
+                                    />
+                                </span>
+                            ) : null}
+                        </li>
+                    );
+                })}
+            </ul>
         </div>
     );
 }

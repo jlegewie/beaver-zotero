@@ -152,9 +152,8 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                 ? draft
                 : { ...draft, userInstructions: '' },
             approved,
-            approval.table,
         ));
-    }, [draft, authoredInstructions, onSubmit, approval.table, disabled]);
+    }, [draft, authoredInstructions, onSubmit, disabled]);
 
     const handleApprove = useCallback(() => decide(true), [decide]);
     const handleDecline = useCallback(() => decide(false), [decide]);
@@ -234,14 +233,6 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         {approval.scopeSecondary && ` ${approval.scopeSecondary}`}
                     </div>
                 </div>
-
-                {approval.table && <section aria-label="Table extraction plan" className="display-flex flex-col gap-2">
-                    <strong>{approval.table.reference.title}</strong>
-                    <div>{approval.table.population_count} items</div>
-                    <ul>{approval.table.columns.map(column => <li key={column.id}>{column.question}</li>)}</ul>
-                    <div>Estimated cost: {approval.table.cost_estimate}. Final charges depend on work executed.</div>
-                    <div>To change questions or items, cancel this proposal and request changes in chat.</div>
-                </section>}
 
                 {/* The batch goal. DocsLink resolves the backend-provided
                     path for this client. */}
@@ -401,7 +392,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         ariaLabel="Approve batch job"
                         style={{ padding: '3px 5px' }}
                         onClick={handleApprove}
-                        disabled={isDecided || disabled || Boolean(approval.table && hasInstructions)}
+                        disabled={isDecided || disabled}
                         title={disabled ? heldCaption : undefined}
                         className="flex-none whitespace-nowrap"
                     >

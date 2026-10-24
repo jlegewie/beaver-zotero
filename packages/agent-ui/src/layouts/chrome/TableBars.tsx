@@ -155,10 +155,11 @@ export function TableFooter({
             : `${shown} of ${total} rows`,
     );
     if (sortLabel) parts.push(sortLabel);
-    if (coverage.pending > 0) parts.push(`${coverage.pending} filling`);
     if (coverage.notReported > 0)
         parts.push(`${coverage.notReported} not reported`);
     if (coverage.error > 0) parts.push(`${coverage.error} failed`);
+    if (coverage.metadataOnly > 0)
+        parts.push(`${coverage.metadataOnly} from title and abstract`);
     if (coverage.errorRows > 0)
         parts.push(
             `${coverage.errorRows} ${coverage.errorRows === 1 ? "row" : "rows"} incomplete`,

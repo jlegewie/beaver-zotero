@@ -4,7 +4,6 @@ import type { TableRecord } from "../protocol/artifactProtocol";
 /** Tools that change a stored table; their cards and the artifacts list are table-shaped. */
 const TABLE_WRITE_TOOL_NAMES = new Set([
     "create_table",
-    "edit_rows",
     "edit_table",
     "fill_table",
 ]);

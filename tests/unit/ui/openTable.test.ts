@@ -10,9 +10,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const resolveTableItem = vi.hoisted(() => vi.fn());
+const snapshotIsCurrent = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({
     resolveTableItem,
+}));
+vi.mock('../../../src/services/artifacts/tableRenderer', () => ({
+    snapshotIsCurrent,
 }));
 
 import { openTable } from '../../../src/ui/openTable';
@@ -34,6 +38,7 @@ let prefs: Record<string, unknown>;
 
 beforeEach(() => {
     vi.clearAllMocks();
+    snapshotIsCurrent.mockReset().mockResolvedValue(true);
     prefs = {};
     (Zotero as any).Beaver = { ...(Zotero as any).Beaver, libraryOperations: { run: vi.fn().mockResolvedValue({ recovered: [] }) } };
     readerOpen = vi.fn().mockResolvedValue(undefined);
@@ -43,6 +48,30 @@ beforeEach(() => {
 });
 
 describe('openTable', () => {
+    it('warns when the snapshot it opens is behind the table', async () => {
+        (Zotero as any).Beaver.libraryOperations.run.mockResolvedValue({ recovered: [], sha256: 'a'.repeat(64) });
+        snapshotIsCurrent.mockResolvedValue(false);
+        const outcome = await openTable(REF);
+        expect(outcome).toMatchObject({ ok: true, warning: expect.stringContaining('earlier version') });
+        expect(snapshotIsCurrent).toHaveBeenCalledWith(expect.objectContaining({ id: 42 }), 'a'.repeat(64));
+        expect(readerOpen).toHaveBeenCalled();
+    });
+
+    it('checks for the snapshot only after the open repair that restores it', async () => {
+        const order: string[] = [];
+        let path: string | false = false;
+        (Zotero as any).Beaver.libraryOperations.run.mockImplementation(async () => {
+            order.push('repair');
+            path = '/tmp/table.html';
+            return { recovered: [{ kind: 'rerendered' }] };
+        });
+        readerOpen.mockImplementation(async () => { order.push('reader'); });
+        resolveTableItem.mockResolvedValue({ ...fileItem(null), getFilePathAsync: vi.fn(async () => path) });
+
+        await expect(openTable(REF)).resolves.toEqual({ ok: true });
+        expect(order).toEqual(['repair', 'reader']);
+    });
+
     it('opens the table item in the reader', async () => {
         await expect(openTable(REF)).resolves.toEqual({ ok: true });
         expect(readerOpen).toHaveBeenCalledWith(42, undefined, {

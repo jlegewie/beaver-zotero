@@ -1,21 +1,42 @@
 {
-    "name": "remove_rows drops the named rows and keeps the order of the rest",
+    "name": "remove_rows drops the rows",
     "before": {
         "id": "t1",
         "spec_version": 1,
         "title": "Sampling methods",
-        "anchor_column_id": "paper",
+        "description": "How the papers sampled their respondents.",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAA",
+                    "u-BBB",
+                    "u-CCC"
+                ]
+            }
+        ],
         "columns": [
             {
-                "id": "paper",
-                "header": "Paper",
-                "type": "reference"
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
             },
             {
-                "id": "year",
+                "id": "_year",
                 "header": "Year",
-                "type": "number",
-                "system": true
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "_identifier",
+                "header": "Identifier",
+                "type": "link",
+                "system": true,
+                "priority": "secondary"
             },
             {
                 "id": "method",
@@ -29,30 +50,67 @@
                 "id": "r1",
                 "ref": {
                     "kind": "item",
-                    "library_id": 1,
-                    "zotero_key": "AAA"
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "library_id": 1
                 },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
                 "cells": {
-                    "paper": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
-                            "display_name": "Alpha"
-                        },
-                        "provenance": "imported"
+                            "display_name": "Alpha 2020",
+                            "title": "Sampling hard-to-reach groups",
+                            "item_type": "journalArticle"
+                        }
                     },
-                    "year": {
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
-                            "kind": "number",
-                            "value": 2020
-                        },
-                        "provenance": "imported"
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "_identifier": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "link",
+                            "url": "https://doi.org/10.1000/alpha",
+                            "label": "10.1000/alpha"
+                        }
                     },
                     "method": {
+                        "outcome": "answered",
+                        "provenance": "document",
                         "value": {
                             "kind": "text",
-                            "text": "Survey"
+                            "text": "Telephone survey"
                         },
-                        "provenance": "extracted"
+                        "evidence": [
+                            {
+                                "locator": "s12-s13",
+                                "quote": "Respondents were sampled by random digit dialing.",
+                                "page": 3,
+                                "boxes": [
+                                    [
+                                        72,
+                                        410,
+                                        523,
+                                        436
+                                    ]
+                                ]
+                            }
+                        ]
                     }
                 }
             },
@@ -60,30 +118,49 @@
                 "id": "r2",
                 "ref": {
                     "kind": "item",
-                    "library_id": 1,
-                    "zotero_key": "BBB"
+                    "library_ref": "u",
+                    "zotero_key": "BBB",
+                    "library_id": 1
                 },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
                 "cells": {
-                    "paper": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
-                            "display_name": "Beta"
-                        },
-                        "provenance": "imported"
+                            "display_name": "Beta 2019",
+                            "title": "Mail surveys revisited",
+                            "item_type": "journalArticle"
+                        }
                     },
-                    "year": {
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
-                            "kind": "number",
-                            "value": 2019
-                        },
-                        "provenance": "imported"
+                            "kind": "date",
+                            "value": "2019"
+                        }
                     },
                     "method": {
+                        "outcome": "answered",
+                        "provenance": "metadata",
                         "value": {
                             "kind": "text",
-                            "text": "Field experiment"
+                            "text": "Mail survey"
                         },
-                        "provenance": "extracted"
+                        "evidence": [
+                            {
+                                "quote": "A mail survey of 2,000 households.",
+                                "field": "abstract"
+                            }
+                        ]
                     }
                 }
             },
@@ -91,23 +168,35 @@
                 "id": "r3",
                 "ref": {
                     "kind": "item",
-                    "library_id": 1,
-                    "zotero_key": "CCC"
+                    "library_ref": "u",
+                    "zotero_key": "CCC",
+                    "library_id": 1
                 },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
                 "cells": {
-                    "paper": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
-                            "display_name": "Gamma"
-                        },
-                        "provenance": "imported"
+                            "display_name": "Gamma 2021",
+                            "title": "Register studies in practice",
+                            "item_type": "journalArticle"
+                        }
                     },
-                    "year": {
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
-                            "kind": "number",
-                            "value": 2021
-                        },
-                        "provenance": "imported"
+                            "kind": "date",
+                            "value": "2021"
+                        }
                     }
                 }
             }
@@ -116,25 +205,48 @@
     "mutations": [
         {
             "op": "remove_rows",
-            "rows": ["r2"]
+            "rows": [
+                "r2"
+            ]
         }
     ],
     "after": {
         "id": "t1",
         "spec_version": 1,
         "title": "Sampling methods",
-        "anchor_column_id": "paper",
+        "description": "How the papers sampled their respondents.",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAA",
+                    "u-BBB",
+                    "u-CCC"
+                ]
+            }
+        ],
         "columns": [
             {
-                "id": "paper",
-                "header": "Paper",
-                "type": "reference"
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
             },
             {
-                "id": "year",
+                "id": "_year",
                 "header": "Year",
-                "type": "number",
-                "system": true
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "_identifier",
+                "header": "Identifier",
+                "type": "link",
+                "system": true,
+                "priority": "secondary"
             },
             {
                 "id": "method",
@@ -148,30 +260,67 @@
                 "id": "r1",
                 "ref": {
                     "kind": "item",
-                    "library_id": 1,
-                    "zotero_key": "AAA"
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "library_id": 1
                 },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
                 "cells": {
-                    "paper": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
-                            "display_name": "Alpha"
-                        },
-                        "provenance": "imported"
+                            "display_name": "Alpha 2020",
+                            "title": "Sampling hard-to-reach groups",
+                            "item_type": "journalArticle"
+                        }
                     },
-                    "year": {
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
-                            "kind": "number",
-                            "value": 2020
-                        },
-                        "provenance": "imported"
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "_identifier": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "link",
+                            "url": "https://doi.org/10.1000/alpha",
+                            "label": "10.1000/alpha"
+                        }
                     },
                     "method": {
+                        "outcome": "answered",
+                        "provenance": "document",
                         "value": {
                             "kind": "text",
-                            "text": "Survey"
+                            "text": "Telephone survey"
                         },
-                        "provenance": "extracted"
+                        "evidence": [
+                            {
+                                "locator": "s12-s13",
+                                "quote": "Respondents were sampled by random digit dialing.",
+                                "page": 3,
+                                "boxes": [
+                                    [
+                                        72,
+                                        410,
+                                        523,
+                                        436
+                                    ]
+                                ]
+                            }
+                        ]
                     }
                 }
             },
@@ -179,23 +328,35 @@
                 "id": "r3",
                 "ref": {
                     "kind": "item",
-                    "library_id": 1,
-                    "zotero_key": "CCC"
+                    "library_ref": "u",
+                    "zotero_key": "CCC",
+                    "library_id": 1
                 },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
                 "cells": {
-                    "paper": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
-                            "display_name": "Gamma"
-                        },
-                        "provenance": "imported"
+                            "display_name": "Gamma 2021",
+                            "title": "Register studies in practice",
+                            "item_type": "journalArticle"
+                        }
                     },
-                    "year": {
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
-                            "kind": "number",
-                            "value": 2021
-                        },
-                        "provenance": "imported"
+                            "kind": "date",
+                            "value": "2021"
+                        }
                     }
                 }
             }

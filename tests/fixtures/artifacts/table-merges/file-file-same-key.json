@@ -1,0 +1,103 @@
+{
+    "name": "the same attached file twice is one row",
+    "existing": [],
+    "incoming": [
+        {
+            "row": {
+                "id": "r1",
+                "ref": {
+                    "kind": "file",
+                    "ext_key": "EXT1",
+                    "label": "notes.pdf"
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "notes.pdf",
+                            "title": "notes.pdf",
+                            "item_type": "journalArticle"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "row": {
+                "id": "r2",
+                "ref": {
+                    "kind": "file",
+                    "ext_key": "EXT1",
+                    "label": "notes.pdf"
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-20"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "notes.pdf",
+                            "title": "notes.pdf",
+                            "item_type": "journalArticle"
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    "after": {
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "file",
+                    "ext_key": "EXT1",
+                    "label": "notes.pdf"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "notes.pdf",
+                            "title": "notes.pdf",
+                            "item_type": "journalArticle"
+                        },
+                        "provenance": "system"
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    },
+                    {
+                        "source": "s2",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        ],
+        "added": [
+            "r1"
+        ],
+        "merged": 1
+    }
+}

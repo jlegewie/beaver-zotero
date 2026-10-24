@@ -37,7 +37,8 @@ afterEach(() => {
 });
 
 it.each([
-    { kind: "table card", tool: "create_table", expanded: true },
+    // A successful table write is an ordinary row: collapsed over its table view.
+    { kind: "table result", tool: "create_table", expanded: false },
     { kind: "table status", tool: "fill_table", expanded: true },
     { kind: "ordinary result", tool: "list_tags", expanded: false },
 ])(
@@ -52,7 +53,7 @@ it.each([
                 kind === "table status"
                     ? { ok: false, error_code: "schema_changed" }
                     : { ok: true },
-            ...(kind === "table card"
+            ...(kind === "table result"
                 ? {
                       metadata: {
                           view: {

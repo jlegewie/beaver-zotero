@@ -1,6 +1,5 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useSetAtom } from 'jotai';
-import { citationsAtom, processCitationsAtom } from '@beaver/agent-core/citations/atoms';
 import { ExtractionTable, SearchResultsTable } from '@beaver/agent-ui/layouts';
 import { ArrowLeftIcon } from '@beaver/agent-ui/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -22,10 +21,11 @@ type TableSurface = Extract<WindowSurface, { kind: 'table' }>;
  * (export, save to library, re-running a column) are deliberately not passed:
  * an absent callback renders no control, which is the point.
  *
- * Cell text goes through the same renderer the chat uses, so a `<citation …/>`
- * tag in a cell becomes the same marker it would be in a message: the tooltip,
- * the preview and the click-through to the cited passage are the component's,
- * not a second implementation of them.
+ * Cell text goes through the renderer the chat uses. A cell's evidence renders
+ * through the chat's `Citation` component with the citation assembled from the
+ * row, so the tooltip, the preview and the click-through to the cited passage
+ * are the component's, not a second implementation of them — and nothing is
+ * added to the thread's citation store.
  */
 const renderCellText = (text: string) => (
     // `markdown` is what the chat's citation styling is scoped to, so the
@@ -35,26 +35,6 @@ const renderCellText = (text: string) => (
 
 export default function TableWindowView({ surface }: { surface: TableSurface }): React.ReactElement {
     const showThread = useSetAtom(showThreadInWindowAtom);
-    const addCitations = useSetAtom(citationsAtom);
-    const processCitations = useSetAtom(processCitationsAtom);
-    const citations = surface.table.citations;
-
-    // A `TableSpec` carries its own citations; the `Citation` component reads
-    // the thread's store. Contributing them to it is what makes a marker in a
-    // cell resolve to the same tooltip, number and click-through it would have
-    // in a message — rather than a second implementation of all three.
-    //
-    // Merged, never assigned: the store is shared with the thread the window
-    // came from, and replacing it would strip that thread of its own sources.
-    useEffect(() => {
-        if (!citations?.length) return;
-        addCitations((current) => {
-            const known = new Set(current.map((c) => c.citation_id));
-            const added = citations.filter((c) => !known.has(c.citation_id));
-            return added.length ? [...current, ...added] : current;
-        });
-        processCitations();
-    }, [citations, addCitations, processCitations]);
 
     const table = surface.title ? { ...surface.table, title: surface.title } : surface.table;
 
