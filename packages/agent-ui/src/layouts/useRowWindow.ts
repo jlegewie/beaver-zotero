@@ -66,8 +66,10 @@ function sameWindow(a: RowWindow, b: RowWindow): boolean {
  * assumes it: every rendered row, and every expanded row's detail, is
  * measured after the commit and remembered by row id, and a row not yet
  * measured counts as the height of the first one that was. The window is
- * recomputed from those heights on scroll, on resize, and after every render,
- * so filters, sorts, expansion and a changed spec all settle before paint.
+ * recomputed from those heights on scroll, on resize (after measuring the
+ * rows on screen again, since a narrower viewport rewraps them without a
+ * render), and after every render, so filters, sorts, expansion and a changed
+ * spec all settle before paint.
  *
  * The scroll handler commits synchronously (`flushSync`): a scroll that
  * reached a spacer before React rendered the rows behind it would paint a
@@ -158,6 +160,26 @@ export function useRowWindow({
         };
     };
 
+    /** Remembers the height of every row and detail row now in the DOM. */
+    const measure = () => {
+        const body = bodyRef.current;
+        if (!body) return;
+        for (const tr of Array.from(body.children) as HTMLElement[]) {
+            const rowId = tr.getAttribute("data-row-id");
+            if (rowId) {
+                const h = tr.offsetHeight;
+                if (h > 0) {
+                    heights.current.set(rowId, h);
+                    if (!estimate.current) estimate.current = h;
+                }
+                continue;
+            }
+            const detailFor = tr.getAttribute("data-detail-for");
+            if (detailFor && tr.offsetHeight > 0)
+                detailHeights.current.set(detailFor, tr.offsetHeight);
+        }
+    };
+
     const update = (sync: boolean) => {
         const next = compute();
         if (sameWindow(next, winRef.current)) return;
@@ -178,7 +200,12 @@ export function useRowWindow({
             return;
         }
         const onScroll = () => update(true);
-        const onResize = () => update(false);
+        // A resize can rewrap the rows on screen without a render, so their
+        // heights are read again before the window is recomputed from them.
+        const onResize = () => {
+            measure();
+            update(false);
+        };
         scroller.addEventListener("scroll", onScroll, { passive: true });
         const view = scroller.ownerDocument.defaultView;
         view?.addEventListener("resize", onResize);
@@ -193,7 +220,8 @@ export function useRowWindow({
             observer?.disconnect();
             scrollerRef.current = null;
         };
-        // `update` reads everything through refs, so only the switch matters.
+        // `measure` and `update` read everything through refs, so only the
+        // switch matters.
     }, [enabled]);
 
     // After every commit: measure what is on screen, then settle the window.
@@ -201,23 +229,7 @@ export function useRowWindow({
     // unchanged one stops here, so this cannot loop.
     useLayoutEffect(() => {
         if (!enabled || !scrollerRef.current) return;
-        const body = bodyRef.current;
-        if (body) {
-            for (const tr of Array.from(body.children) as HTMLElement[]) {
-                const rowId = tr.getAttribute("data-row-id");
-                if (rowId) {
-                    const h = tr.offsetHeight;
-                    if (h > 0) {
-                        heights.current.set(rowId, h);
-                        if (!estimate.current) estimate.current = h;
-                    }
-                    continue;
-                }
-                const detailFor = tr.getAttribute("data-detail-for");
-                if (detailFor && tr.offsetHeight > 0)
-                    detailHeights.current.set(detailFor, tr.offsetHeight);
-            }
-        }
+        measure();
         update(false);
     });
 
