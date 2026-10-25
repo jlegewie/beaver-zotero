@@ -91,6 +91,11 @@ async function click(label: string) {
 }
 
 beforeEach(() => {
+    // Selected items resolve to themselves unless a test says otherwise.
+    mocks.resolveItems.mockImplementation(async (ids: string[]) => {
+        const rows = await mocks.describeItems(ids);
+        return { resolved: { count: rows.length, total: ids.length, truncated: false, without_pdf: 0, sample: [] }, rows };
+    });
     vi.clearAllMocks();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -155,6 +160,24 @@ describe('TableCard', () => {
         expect(container.textContent).toContain('Sources: 16 papers from 2 sources');
         await click('Create');
         expect(sent[0].sources).toHaveLength(2);
+    });
+
+    it('counts merged papers from the same items the source counts, without one trashed since the proposal', async () => {
+        // PAPER002 went to the trash while the card was open.
+        mocks.resolveItems.mockImplementation(async (ids: string[]) => {
+            const rows = (await mocks.describeItems(ids)).filter((row) => row.item_id !== 'u-PAPER002');
+            return { resolved: { count: rows.length, total: ids.length, truncated: false, without_pdf: 0, sample: [] }, rows };
+        });
+        mocks.resolveLibraryScope.mockResolvedValue({
+            resolved: { count: 3, total: 3, truncated: false, without_pdf: 0, sample: [] },
+            rows: ['u-COLL0001', 'u-COLL0002', 'u-COLL0003'].map((id) => ({ item_id: id, display_name: id })),
+            name: 'Cash transfers',
+        });
+        render(fixture('create-items'));
+        await act(async () => { mocks.target.pickCollection(41); });
+        await click('Next');
+        expect(mocks.resolveItems).toHaveBeenCalledWith(['u-PAPER001', 'u-PAPER002']);
+        expect(container.textContent).toContain('Sources: 4 papers from 2 sources');
     });
 
     it('warns on the over-cap card and keeps Create disabled', async () => {

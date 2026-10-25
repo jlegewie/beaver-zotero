@@ -286,9 +286,11 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             const ask = `${source.key}|${key}`;
             if (rows[source.key] !== undefined || source.counting || requested.current.has(ask)) return;
             requested.current.add(ask);
+            // Items go through the same filter as their live count (regular
+            // items outside the trash), so the merged count cannot exceed it.
             const work =
                 source.type === 'items'
-                    ? describeItems(source.ids ?? [])
+                    ? resolveItems(source.ids ?? []).then((live) => live.rows)
                     : resolveLibraryScope(source.scope!).then((live) => {
                           if (live.resolved.error) throw new Error(live.resolved.error);
                           return live.rows;
