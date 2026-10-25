@@ -141,6 +141,12 @@ pref("onboardingSignInTextShown", false);
 // cleared by the "chat interrupted" popup on the next start.
 pref("interruptedThread", "");
 
+// Beaver tabs open when Beaver last closed them for a restart, a plugin
+// reload or the last main window closing (JSON). Reopened and cleared when a
+// main window that can host them next loads; never written to Zotero's
+// session.
+pref("beaverTabsToRestore", "");
+
 // Throttle for the automatic pre-sync thread claim: the
 // `${beaverUserId}:${zoteroUserId}:${localUserKey}` combination that was
 // last claimed successfully. Empty = never claimed (or cleared after

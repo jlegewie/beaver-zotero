@@ -47,11 +47,9 @@ import type { OpenTableOptions, OpenTableOutcome } from '../../ui/openTable';
 import type { TableItemPaneReport } from '../../ui/tableItemPane';
 import type { TableTabRenderReport } from '../../ui/tableTabTypes';
 
-/** The Beaver tabs, owned by `src/ui/tableTab.ts`. */
+/** The table tabs, owned by `src/ui/tableTab.ts`. */
 export interface TablesTabsApi {
-    /** Closes `win`'s Beaver tabs, unmounting them; the count closed. */
-    closeForWindow(win: Window): number;
-    /** The open Beaver tabs, for the dev endpoint. */
+    /** The open table tabs, for the dev endpoint. */
     list(): Array<{
         tabID: string;
         libraryID: number;
