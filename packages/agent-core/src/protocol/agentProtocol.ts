@@ -1920,9 +1920,10 @@ export interface WSItemDisplayRequest extends WSBaseEvent {
      */
     item_ids: string[];
     /**
-     * Also report whether each regular item has a PDF attachment
-     * (`has_pdf`). Attachment presence only; no file is opened. Asked by the
-     * table card's local lookups; the backend does not send it.
+     * Also report whether each regular item has a document a table row
+     * reads — a PDF, EPUB or HTML snapshot outside the trash (`has_pdf`).
+     * Attachment presence only; no file is opened. Asked by the table card's
+     * local lookups; the backend does not send it.
      */
     include_pdf?: boolean;
 }
@@ -1943,7 +1944,7 @@ export interface ItemDisplayRow {
     subtitle?: string | null;
     /** Attachments only: the broad content kind, for the icon. */
     content_kind?: string | null;
-    /** Regular items, when the request asked: whether a PDF attachment exists. */
+    /** Regular items, when the request asked: whether a PDF, EPUB or snapshot attachment exists. */
     has_pdf?: boolean;
 }
 

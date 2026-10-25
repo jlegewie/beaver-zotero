@@ -39,30 +39,23 @@ import { checkLibraryExcluded } from './utils';
  */
 export const MAX_ITEM_DISPLAY_IDS = 1000;
 
-/** SQLite's bound-variable limit is well above this. */
-const SQL_CHUNK_SIZE = 500;
+/** The attachment kinds a table row reads, in the backend's order of preference. */
+const ROW_DOCUMENT_KINDS: ReadonlySet<string> = new Set(['pdf', 'epub', 'snapshot']);
 
 /**
- * Regular items with at least one PDF attachment outside the trash. From the
- * attachment rows alone: no file is opened, so a PDF not yet downloaded
- * still counts.
+ * Regular items with at least one PDF, EPUB or HTML snapshot attachment
+ * outside the trash — the documents a table row reads. From the attachment
+ * items alone: no file is opened, so a file not yet downloaded still counts.
  */
-async function itemIdsWithPdf(itemIDs: number[]): Promise<Set<number>> {
+async function itemIdsWithDocument(items: Zotero.Item[]): Promise<Set<number>> {
     const found = new Set<number>();
-    for (let i = 0; i < itemIDs.length; i += SQL_CHUNK_SIZE) {
-        const chunk = itemIDs.slice(i, i + SQL_CHUNK_SIZE);
-        const placeholders = chunk.map(() => '?').join(', ');
-        await Zotero.DB.queryAsync(
-            'SELECT DISTINCT ia.parentItemID FROM itemAttachments ia '
-                + 'LEFT JOIN deletedItems di ON di.itemID = ia.itemID '
-                + `WHERE ia.parentItemID IN (${placeholders}) AND ia.contentType = 'application/pdf' AND di.itemID IS NULL`,
-            chunk,
-            {
-                onRow: (row: any) => {
-                    found.add(row.getResultByIndex(0));
-                },
-            },
-        );
+    if (!items.length) return found;
+    await Zotero.Items.loadDataTypes(items, ['childItems']);
+    const attachmentIDs = items.flatMap((item) => item.getAttachments(false));
+    const attachments: Zotero.Item[] = attachmentIDs.length ? await Zotero.Items.getAsync(attachmentIDs) : [];
+    for (const attachment of attachments) {
+        if (!attachment || attachment.deleted || !attachment.parentItemID) continue;
+        if (ROW_DOCUMENT_KINDS.has(getContentKind(attachment))) found.add(attachment.parentItemID);
     }
     return found;
 }
@@ -116,7 +109,7 @@ export async function handleItemDisplayRequest(
 
         await loadQuickSearchHitData(items);
         const withPdf = request.include_pdf
-            ? await itemIdsWithPdf(items.filter((item) => item.isRegularItem()).map((item) => item.id))
+            ? await itemIdsWithDocument(items.filter((item) => item.isRegularItem()))
             : null;
 
         const rows: ItemDisplayRow[] = [];

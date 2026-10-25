@@ -300,7 +300,7 @@ export interface OpenTableResult {
 }
 
 /** What {@link checkShadowRestore} found. */
-export type TableShadowRestoreCheck = 'ok' | 'no_shadow' | 'no_payload' | 'not_writable';
+export type TableShadowRestoreCheck = 'ok' | 'no_shadow' | 'no_payload' | 'not_writable' | 'unavailable';
 
 /** The outcome of {@link restoreShadowVersion}. */
 export type TableShadowRestoreResult =
@@ -1825,6 +1825,22 @@ async function retainedShadow(
 }
 
 /**
+ * Why the table itself would refuse a restore's write, or null when it would
+ * accept one: the checks {@link prepareWrite} makes on the item and its current
+ * file — a trashed table, or a `table.json` that is missing beyond repair or
+ * written by a newer format. Reads only, so it may run without the lock.
+ */
+async function restoreTargetRefusal(ref: TableRef): Promise<TableItemError | null> {
+    try {
+        await readCurrentState(await resolveTableItem(ref));
+        return null;
+    } catch (error) {
+        if (error instanceof TableItemError) return error;
+        throw error;
+    }
+}
+
+/**
  * Whether {@link restoreShadowVersion} would write a version back right now,
  * checked the way the restore checks it. Surfaces that offer or mention the
  * restore ask this rather than judging from the shadow row, whose payload can
@@ -1833,13 +1849,16 @@ async function retainedShadow(
  * - `ok`: the restore would run.
  * - `no_shadow` / `no_payload`: this device keeps no usable copy.
  * - `not_writable`: a copy is kept, but the library is excluded or read-only.
+ * - `unavailable`: a copy is kept, but the table is trashed or its current file
+ *   cannot be written over (see {@link restoreTargetRefusal}).
  */
 export async function checkShadowRestore(ref: TableRef): Promise<TableShadowRestoreCheck> {
     try {
         const retained = await retainedShadow(ref);
         if (!retained.shadow) return 'no_shadow';
         if (!retained.spec) return 'no_payload';
-        return writeRefusal(ref) ? 'not_writable' : 'ok';
+        if (writeRefusal(ref)) return 'not_writable';
+        return (await restoreTargetRefusal(ref)) ? 'unavailable' : 'ok';
     } catch (error) {
         logger(`tableStore: could not check the restore for ${ref.key}: ${String(error)}`, 2);
         return 'no_payload';
@@ -1885,6 +1904,10 @@ export async function restoreShadowVersionUncoordinated(
                 `This device wrote version ${shadow.version} of table ${ref.key}, but its ` +
                 'stored copy is missing or no longer matches what was recorded for it, so it cannot be restored.',
         };
+    }
+    const refusal = await restoreTargetRefusal(ref);
+    if (refusal) {
+        return { ok: false, code: 'write_refused', version: shadow.version, error: refusal.message };
     }
 
     // A restore is a deliberate step, never folded into whatever version a run

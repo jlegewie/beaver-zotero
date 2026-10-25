@@ -2918,6 +2918,9 @@ const sendWSMessage = async (
         // never auto-attach a reader source in a library the user excluded from
         // Beaver — this path bypasses the currentMessageItems gate above.
         const readerAttachment = submissionReaderAttachment;
+        // Set when the tab's table is dropped below, so the captured
+        // application state stops naming it as the open table.
+        let droppedTableContextKey: string | null = null;
         if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
@@ -2937,8 +2940,28 @@ const sendWSMessage = async (
                 if (readerAttachment.parentItem) {
                     await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
                 }
-                const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
-                if (readerMessageAttachment) attachments.push(readerMessageAttachment);
+                // The tab context is attached automatically, so a table that
+                // stopped being sendable since it became the context (corrupt,
+                // write pending, newly cites an excluded library) is dropped
+                // with a notice instead of failing the whole send.
+                try {
+                    const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
+                    if (readerMessageAttachment) attachments.push(readerMessageAttachment);
+                } catch (error: any) {
+                    droppedTableContextKey = readerAttachment.key;
+                    logger(`sendWSMessageAtom: Dropping unavailable tab context ${readerKeys[0]}: ${error?.message ?? error}`, 1);
+                    // Stop offering it as context, so the next send does not
+                    // warn again; selecting the tab again re-checks it.
+                    if (get(currentReaderAttachmentAtom)?.id === readerAttachment.id) {
+                        set(currentReaderAttachmentAtom, null);
+                    }
+                    set(addPopupMessageAtom, {
+                        type: 'warning',
+                        title: 'Table not attached',
+                        text: 'The open table is unavailable and was not added to the message.',
+                        expire: true,
+                    });
+                }
             } else {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKeys[0]}`, 1);
             }
@@ -3006,7 +3029,11 @@ const sendWSMessage = async (
         // Application state (current view, reader/note state, library context,
         // indexing status). Built via the injectable provider so a non-Zotero
         // host can supply its own document state through the same slot.
-        const applicationState = await applicationStatePromise;
+        let applicationState = await applicationStatePromise;
+        if (droppedTableContextKey && applicationState?.table_state?.zotero_key === droppedTableContextKey) {
+            const { table_state: _dropped, ...rest } = applicationState;
+            applicationState = rest;
+        }
         // Build the message
         const userPrompt: BeaverAgentPrompt = {
             content: message,

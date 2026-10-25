@@ -19,11 +19,14 @@ const canHostTableTab = vi.hoisted(() => vi.fn(() => true));
 const openTableTab = vi.hoisted(() => vi.fn());
 const setTableTabWarning = vi.hoisted(() => vi.fn());
 const restoreCheck = vi.hoisted(() => vi.fn(async () => 'ok'));
+const tableRepairAllowed = vi.hoisted(() => vi.fn(() => true));
 
 vi.mock('../../../src/services/artifacts/tableItemIdentity', async (importOriginal) => {
     const original = await importOriginal<typeof import('../../../src/services/artifacts/tableItemIdentity')>();
     return {
         UNREADABLE_TABLE_RECOVERY: original.UNREADABLE_TABLE_RECOVERY,
+        TABLE_REPAIR_SKIPPED: original.TABLE_REPAIR_SKIPPED,
+        tableRepairAllowed,
         unreadableTableRecovery: original.unreadableTableRecovery,
         resolveTableItem,
         readTableItemSpec,
@@ -57,6 +60,7 @@ beforeEach(() => {
     resolveTableItem.mockResolvedValue(ITEM);
     readTableItemSpec.mockResolvedValue({ ok: true, spec: SPEC, file: { spec: SPEC } });
     snapshotIsCurrent.mockResolvedValue(true);
+    tableRepairAllowed.mockReturnValue(true);
     contextMainWindow.mockImplementation((origin: any) => (origin === main || origin?.context === main ? main : null));
     resolveNavigationWindow.mockImplementation(async (origin?: any) => origin ?? other);
     openTableTab.mockReturnValue({ tabID: 'tab-1', reused: false });
@@ -129,6 +133,17 @@ describe('openTable', () => {
         const outcome = await openTable(REF, { window: main });
         expect(outcome).toMatchObject({ ok: true, warning: expect.stringContaining('Check / repair table') });
         expect(openTableTab).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+        ['unfinished bookkeeping', () => run.mockResolvedValue({ recovered: [{ kind: 'bookkeeping_pending' }] })],
+        ['a stale snapshot', () => snapshotIsCurrent.mockResolvedValue(false)],
+    ])('does not promise a repair for %s where Beaver may not modify the table', async (_case, arrange) => {
+        arrange();
+        tableRepairAllowed.mockReturnValue(false);
+        const outcome = await openTable(REF, { window: main });
+        expect(outcome).toMatchObject({ ok: true, warning: expect.stringContaining('does not modify tables') });
+        expect(tableRepairAllowed).toHaveBeenCalledWith(REF.libraryID);
     });
 
     it('still opens a table whose library refuses the repair', async () => {

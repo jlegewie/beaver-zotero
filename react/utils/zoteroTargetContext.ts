@@ -15,6 +15,26 @@ function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroIt
 
 
 /**
+ * Whether the library tab is the selected tab. A reader or a Beaver tab is
+ * its own context: the library pane's selection stays behind it, hidden.
+ */
+export function isLibraryTabSelected(win = getContextWindow()): boolean {
+    const type = win?.Zotero_Tabs?.selectedType;
+    return !type || type === 'library';
+}
+
+/**
+ * The collection shown in the library tab, for new items to be filed in, or
+ * null when another tab is selected and that collection is not what the user
+ * is looking at.
+ */
+export function getLibraryViewCollection(win = getContextWindow()): Zotero.Collection | null {
+    if (!win || win.closed || !isLibraryTabSelected(win)) return null;
+    return getSelectedCollection(win.ZoteroPane) ?? null;
+}
+
+
+/**
  * Context for determining where to create or insert a new Zotero item
  */
 export interface ZoteroTargetContext {

@@ -8,8 +8,10 @@ vi.mock('../../../react/runtime/windowRuntime', () => ({ getContextWindow: vi.fn
 
 import {
     getCurrentLibrary,
+    getLibraryViewCollection,
     getZoteroTargetContext,
     getZoteroTargetContextSync,
+    isLibraryTabSelected,
 } from '../../../react/utils/zoteroTargetContext';
 
 const table = { id: 7, key: 'TABLE777', libraryID: 2, parentKey: null };
@@ -47,5 +49,27 @@ describe('Zotero target context on a Beaver tab', () => {
         expect(getZoteroTargetContextSync(tableTabWindow())).toEqual(expected);
         expect(await getZoteroTargetContext(tableTabWindow())).toEqual(expected);
         expect(getCurrentLibrary(tableTabWindow())).toEqual({ libraryID: 2 });
+    });
+});
+
+describe('the library tab\'s collection', () => {
+    const collection = { id: 41, key: 'COLL0041', libraryID: 1 };
+    function withCollection(win: any, selectedType: string): any {
+        win.Zotero_Tabs.selectedType = selectedType;
+        win.ZoteroPane.getSelectedCollection = () => collection;
+        win.ZoteroPane.collectionsView = { selectedTreeRow: { isCollection: () => true, ref: collection } };
+        return win;
+    }
+
+    it('is the selected collection while the library tab is selected', () => {
+        const win = withCollection(tableTabWindow(), 'library');
+        expect(isLibraryTabSelected(win)).toBe(true);
+        expect(getLibraryViewCollection(win)).toBe(collection);
+    });
+
+    it.each(['beaver-table', 'reader', 'reader-loading'])('is hidden behind a %s tab', (type) => {
+        const win = withCollection(tableTabWindow(), type);
+        expect(isLibraryTabSelected(win)).toBe(false);
+        expect(getLibraryViewCollection(win)).toBeNull();
     });
 });

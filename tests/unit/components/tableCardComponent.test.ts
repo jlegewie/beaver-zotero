@@ -37,7 +37,7 @@ vi.mock('../../../react/components/ui/menus/AddSourcesMenu', () => ({
 
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
-    return { searchableLibraryIdsAtom: atom([1]) };
+    return { searchableLibraryIdsAtom: atom([1, 5]) };
 });
 
 vi.mock('../../../react/utils/selectItem', () => ({
@@ -52,6 +52,7 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 }));
 
 import { TableCard } from '../../../react/components/tables/card/TableCard';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
 const FIXTURES = join(__dirname, '../../fixtures/artifacts/table-cards');
 const fixture = (name: string): WSTableCardRequest =>
@@ -99,7 +100,7 @@ beforeEach(() => {
         getByLibraryAndKey: (_l: number, key: string) => (key === 'CASHTRN2' ? { id: 41, key, libraryID: 1, name: 'Cash transfers', hasChildCollections: () => true } : false),
     };
     zotero.Tags = { getID: () => false };
-    zotero.Libraries = { get: () => ({ name: 'My Library' }) };
+    zotero.Libraries = { get: () => ({ name: 'My Library', editable: true, filesEditable: true }) };
 });
 
 afterEach(() => {
@@ -260,6 +261,35 @@ describe('TableCard', () => {
         render(fixture('create-collection-destination'));
         const { canAdd } = mocks.target;
         expect([paper, pdf, loose, note, excluded].map((item) => canAdd(item))).toEqual([true, true, false, false, false]);
+    });
+
+    it('does not offer a paper in the trash, picked directly or through its attachment', async () => {
+        const trashed = { id: 5, key: 'PAPER005', libraryID: 1, deleted: true, isRegularItem: () => true, isAttachment: () => false };
+        const pdf = { id: 6, key: 'ATTACH06', libraryID: 1, parentItemID: 5, isRegularItem: () => false, isAttachment: () => true };
+        (globalThis as any).Zotero.Items = { get: (id: number) => (id === 5 ? trashed : false) };
+        render(fixture('create-collection-destination'));
+        expect([trashed, pdf].map((item) => mocks.target.canAdd(item))).toEqual([false, false]);
+    });
+
+    it('blocks Create when an edited card has no library to file the table in', async () => {
+        mocks.resolveLibraryScope.mockResolvedValue({
+            resolved: { count: 1, total: 1, truncated: false, without_pdf: 0, sample: [] },
+            rows: [{ item_id: 'g5-LABPAPR1', display_name: 'L1' }],
+        });
+        (globalThis as any).Zotero.Collections = {
+            get: (id: number) => (id === 42 ? { id: 42, key: 'LABCOLL1', libraryID: 5, name: 'Lab papers' } : false),
+            getByLibraryAndKey: () => false,
+        };
+        // My Library is excluded; the sources span it and a group, so the
+        // backend would fall back to My Library and refuse.
+        const store = createStore();
+        store.set(searchableLibraryIdsAtom, [5]);
+        render(fixture('create-items'), store);
+        await act(async () => { mocks.target.pickCollection(42); });
+        expect(container.textContent).toContain('No library to save the table in');
+        await click('Next');
+        expect(button('Create')!.disabled).toBe(true);
+        expect(container.textContent).toContain('My Library cannot hold the table');
     });
 
     it('looks up the items of a card that opens on its own warning', async () => {

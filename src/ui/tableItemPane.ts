@@ -189,8 +189,12 @@ export interface TableSectionData {
     fields: TableSectionFields;
     /** Why the counts are missing, when they are. */
     reason: string | null;
-    /** Whether the reader action has a file to open. */
-    hasFile: boolean;
+    /**
+     * Whether "Open table" would open it: the table is not in the trash and
+     * its `table.json` reads (or rebuilds from history). The snapshot is not
+     * required; opening re-renders a missing one.
+     */
+    canOpen: boolean;
     /**
      * The table went backwards or cannot be read, and "Restore my version"
      * would write this device's last version back as a new version.
@@ -251,8 +255,8 @@ export async function readTableSectionData(
     } else {
         reason = read.message;
     }
-    // Offered only where it would work: the store checks the retained copy
-    // and the library the way the restore itself does.
+    // Offered only where it would work: the store checks the retained copy,
+    // the library and the table's current file the way the restore does.
     let canRestore = false;
     const check = getTablesApi()?.shadow.check;
     if (check && (input.conflict || (!read.ok && read.code !== 'no_file'))) {
@@ -261,20 +265,17 @@ export async function readTableSectionData(
         if (input.conflict) {
             input.conflict = {
                 ...input.conflict,
-                restorable: outcome === 'ok' || outcome === 'not_writable',
+                restorable: outcome === 'ok' || outcome === 'not_writable' || outcome === 'unavailable',
                 writable: outcome !== 'not_writable',
+                unavailable: outcome === 'unavailable',
             };
         }
     }
 
-    let hasFile = false;
-    try {
-        hasFile = !!(await item.getFilePathAsync());
-    } catch (error) {
-        logger(`tableItemPane: could not resolve the file: ${String(error)}`, 2);
-    }
+    // The checks openTable makes before showing anything.
+    const canOpen = !item.deleted && read.ok;
 
-    return { fields: buildTableSectionFields(input), reason, hasFile, canRestore };
+    return { fields: buildTableSectionFields(input), reason, canOpen, canRestore };
 }
 
 /** Compare the recovery shadow with the validated document, never the sidecar. */
@@ -419,7 +420,7 @@ async function populateSection({
         const open = body.querySelector<HTMLButtonElement>(
             '[data-beaver-action="open"]'
         );
-        if (open) open.disabled = !data.hasFile;
+        if (open) open.disabled = !data.canOpen;
 
         const restore = body.querySelector<HTMLButtonElement>(
             '[data-beaver-action="restore-shadow"]'
@@ -427,7 +428,7 @@ async function populateSection({
         if (restore) {
             const actions = tableSectionActions(
                 windowOf(doc),
-                data.hasFile,
+                data.canOpen,
                 !!data.canRestore
             );
             restore.disabled = !actions.restoreShadow;
@@ -508,18 +509,18 @@ function canShowInLibrary(win: Window | null): boolean {
 /**
  * What the section's buttons would do for this item.
  *
- * `open` needs a file on disk and `restoreShadow` needs a retained version,
- * neither of which is knowable without a read, so both are passed in rather
- * than guessed.
+ * `open` needs a readable table outside the trash and `restoreShadow` needs a
+ * retained version, neither of which is knowable without a read, so both are
+ * passed in rather than guessed.
  */
 export function tableSectionActions(
     win: Window | null,
-    hasFile: boolean,
+    canOpen: boolean,
     canRestoreShadow = false
 ): TableSectionActions {
     const api = !!getTablesApi();
     return {
-        open: api && hasFile,
+        open: api && canOpen,
         showInLibrary: canShowInLibrary(win),
         restoreShadow: api && canRestoreShadow,
     };
@@ -592,8 +593,8 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
     const status = doc.createElement('div');
     status.setAttribute('role', 'status');
     wrapper.append(
-        // Enabled optimistically; the async half disables it when the item has
-        // no file, which is the only way to know.
+        // Enabled optimistically; the async half disables it when the table
+        // is trashed or unreadable, which only a read can tell.
         button(doc, 'open', 'Open table', actions.open, () =>
             void openTable(ref, win).then((message) => { status.textContent = message; })
         ),
@@ -713,7 +714,7 @@ export async function describeTableItemPane(
         fields: data.fields,
         actions: tableSectionActions(
             win,
-            data.hasFile,
+            data.canOpen,
             !!data.canRestore
         ),
     };

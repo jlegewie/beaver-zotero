@@ -5,6 +5,7 @@ import { collectionToReference } from '../utils/zoteroReferences';
 import { atom, type Getter, type Setter } from "jotai";
 import { isTableAttachment, loadTableItemFields } from '../../src/services/artifacts/tableItemIdentity';
 import { selectedTableTabItemID } from '../../src/ui/tableTabContextPane';
+import { toValidatedMessageAttachment } from '../types/attachments/converters';
 import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "@beaver/agent-core/run-state/atoms";
 import { createElement } from 'react';
@@ -927,6 +928,20 @@ export const updateTableTabContextAtom = atom(
         await loadTableItemFields([item]);
         if (generation !== readerAttachmentGeneration) return;
         if (!isTableAttachment(item) || !get(searchableLibraryIdsAtom).includes(item.libraryID)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+        // Only a table that can be submitted becomes the context: table chat
+        // may be disabled in this build, and the provider refuses a table that
+        // is corrupt, pending a write, or cites an excluded library.
+        let sendable = false;
+        try {
+            sendable = (await toValidatedMessageAttachment(item)) !== null;
+        } catch (error: any) {
+            logger(`updateTableTabContextAtom: table ${item.key} is not sendable: ${error?.message ?? error}`, 2);
+        }
+        if (generation !== readerAttachmentGeneration) return;
+        if (!sendable || !get(searchableLibraryIdsAtom).includes(item.libraryID)) {
             set(currentReaderAttachmentAtom, null);
             return;
         }

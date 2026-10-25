@@ -4,10 +4,12 @@
  * A library source (collection, tag, saved search) goes through the same
  * population handler the backend asks over the socket, so the card counts what
  * the table will be built from; items go through the item display lookup. No
- * file is opened: the "No PDF" chip is attachment presence only. The card's
- * numbers are a preview; the backend resolves the approved entries again.
+ * file is opened: the "No PDF" chip is attachment presence only, of any
+ * document a row reads (PDF, EPUB or snapshot). The card's numbers are a
+ * preview; the backend resolves the approved entries again.
  */
 
+import { parseItemReference } from '@beaver/agent-core/identity/libraryRef';
 import type { ItemDisplayRow } from '@beaver/agent-core/protocol/agentProtocol';
 import type { TableCardLibraryScope, TableCardResolved } from '@beaver/agent-core/protocol/tableCardProtocol';
 import {
@@ -58,12 +60,22 @@ function block(rows: ItemDisplayRow[], total: number, truncated: boolean): Table
     };
 }
 
+/** Whether a portable item id names an item in the trash, which yields no row. */
+function isTrashed(id: string): boolean {
+    const ref = parseItemReference(id);
+    const libraryID = ref ? resolveLibraryRef(ref) : null;
+    if (!ref || !libraryID) return false;
+    const item = Zotero.Items.getByLibraryAndKey(libraryID, ref.zotero_key) as Zotero.Item | false;
+    return !!item && item.deleted;
+}
+
 /**
- * The Selected items source: its ids that resolve to regular items. The
- * total is every id it holds, so a source above the row cap stays above it.
+ * The Selected items source: its ids that resolve to regular items outside
+ * the trash, as the backend resolves them. The total is every id it holds, so
+ * a source above the row cap stays above it.
  */
 export async function resolveItems(ids: string[]): Promise<LiveSource> {
-    const rows = (await describeItems(ids)).filter((row) => row.content_kind == null);
+    const rows = (await describeItems(ids)).filter((row) => row.content_kind == null && !isTrashed(row.item_id));
     return { resolved: block(rows, ids.length, false), rows };
 }
 

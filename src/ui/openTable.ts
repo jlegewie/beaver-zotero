@@ -36,6 +36,8 @@ import { snapshotIsCurrent } from '../services/artifacts/tableRenderer';
 import {
     readTableItemSpec,
     resolveTableItem,
+    TABLE_REPAIR_SKIPPED,
+    tableRepairAllowed,
     unreadableTableRecovery,
     type TableRef,
 } from '../services/artifacts/tableItemIdentity';
@@ -99,12 +101,14 @@ async function repairOnOpen(item: Zotero.Item, ref: TableRef): Promise<string | 
     try {
         const current = await Zotero.Beaver.libraryOperations.run('table_openTable', [ref]);
         sha256 = current.sha256;
-        if (current.recovered.some((entry) => entry.kind === 'bookkeeping_pending')) return BOOKKEEPING_PENDING;
+        if (current.recovered.some((entry) => entry.kind === 'bookkeeping_pending'))
+            return tableRepairAllowed(ref.libraryID) ? BOOKKEEPING_PENDING : TABLE_REPAIR_SKIPPED;
     } catch {
         return BOOKKEEPING_UNCHECKED;
     }
     // A render that failed leaves the previous snapshot in place.
-    if (sha256 && !(await snapshotIsCurrent(item, sha256))) return SNAPSHOT_BEHIND;
+    if (sha256 && !(await snapshotIsCurrent(item, sha256)))
+        return tableRepairAllowed(ref.libraryID) ? SNAPSHOT_BEHIND : TABLE_REPAIR_SKIPPED;
     return undefined;
 }
 

@@ -75,6 +75,10 @@ const MENU_ENTRIES: SourcesMenuEntries = { libraries: false, notes: false, files
 
 const BLOCK_GAP = '0.85rem';
 
+/** Tries for a source's item lookup, and the base delay between them. */
+const MAX_LOOKUP_ATTEMPTS = 3;
+const LOOKUP_RETRY_MS = 1000;
+
 export interface TableCardProps {
     request: WSTableCardRequest;
     onSubmit: (response: WSTableCardResponse) => void;
@@ -108,10 +112,13 @@ function hasSubcollections(scope: TableCardLibraryScope): boolean {
     return !!collection && collection.hasChildCollections();
 }
 
-/** A library's name and whether Beaver may write a table into it. */
-function destinationLibrary(ref: string): { name: string; writable: boolean } | null {
+/**
+ * A library's name and whether Beaver may write a table into it; null for a
+ * library the user excluded, which the backend does not see at all.
+ */
+function destinationLibrary(ref: string, searchableLibraryIds: number[]): { name: string; writable: boolean } | null {
     const id = libraryIdOf(ref);
-    if (!id) return null;
+    if (!id || !searchableLibraryIds.includes(id)) return null;
     try {
         const library = Zotero.Libraries.get(id) as Zotero.Library | false;
         return library
@@ -267,7 +274,12 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     // when the card is first open.
     // Each lookup is for the source's content when it started, and lands only
     // while the source still has that content.
+    // A failed lookup is asked again a few times, since without a source's
+    // items the card falls back to summing counts, which can hold Create
+    // above the cap although the distinct papers fit.
     const requested = useRef(new Set<string>());
+    const lookupAttempts = useRef(new Map<string, number>());
+    const [lookupRetry, setLookupRetry] = useState(0);
     const loadRows = useCallback(
         (source: DraftSource) => {
             const key = resolutionKey(source);
@@ -277,7 +289,10 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             const work =
                 source.type === 'items'
                     ? describeItems(source.ids ?? [])
-                    : resolveLibraryScope(source.scope!).then((live) => live.rows);
+                    : resolveLibraryScope(source.scope!).then((live) => {
+                          if (live.resolved.error) throw new Error(live.resolved.error);
+                          return live.rows;
+                      });
             work.then(
                 (found) => {
                     if (!isCurrent(source.key, key)) return;
@@ -286,7 +301,17 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     setDraft((prev) => (sourceStill(prev, source.key, key) ? setSourceItemIds(prev, source.key, ids) : prev));
                 },
                 () => {
-                    if (isCurrent(source.key, key)) rememberRows(source.key, []);
+                    if (!isCurrent(source.key, key)) return;
+                    const attempts = (lookupAttempts.current.get(ask) ?? 0) + 1;
+                    lookupAttempts.current.set(ask, attempts);
+                    if (attempts < MAX_LOOKUP_ATTEMPTS) {
+                        requested.current.delete(ask);
+                        setTimeout(() => {
+                            if (mounted.current) setLookupRetry((n) => n + 1);
+                        }, LOOKUP_RETRY_MS * attempts);
+                    } else {
+                        rememberRows(source.key, []);
+                    }
                 },
             );
         },
@@ -300,7 +325,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         for (const source of draft.sources) {
             if (!source.itemIds && !source.counting) loadRows(source);
         }
-    }, [draft.sourcesEdited, draft.sources, loadRows]);
+    }, [draft.sourcesEdited, draft.sources, loadRows, lookupRetry]);
 
     // Removed ids need their rows for the undo line. Each id is looked up
     // once; one that does not resolve keeps showing its id.
@@ -371,9 +396,10 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
 
     // A row is a paper: a picked attachment stands for its parent item; a
     // standalone attachment or a note cannot be a row yet, so it is not offered.
+    // Nor is a paper in the trash, which the backend does not resolve.
     const rowIdOf = useCallback((item: Zotero.Item): string | null => {
         const paper = paperOf(item);
-        if (!paper || !searchableLibraryIds.includes(paper.libraryID)) return null;
+        if (!paper || paper.deleted || !searchableLibraryIds.includes(paper.libraryID)) return null;
         return portableItemId(paper);
     }, [searchableLibraryIds]);
     const canAdd = useCallback((item: Zotero.Item) => rowIdOf(item) !== null, [rowIdOf]);
@@ -415,7 +441,11 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
 
     // Decisions ------------------------------------------------------------------
 
-    const blocker = createBlocker(draft, request);
+    const libraryOf = useCallback(
+        (ref: string) => destinationLibrary(ref, searchableLibraryIds),
+        [searchableLibraryIds],
+    );
+    const blocker = createBlocker(draft, request, libraryOf);
     const actions = createActions(draft, request);
     const hasInstructions = draft.instructions.trim().length > 0
         && draft.instructions.trim() !== (request.user_instructions_prefill ?? '').trim();
@@ -423,7 +453,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const decide = useCallback(
         (choice: TableCardChoice | null) => {
             if (decidedRef.current || disabled) return;
-            if (choice && createBlocker(draft, request)) return;
+            if (choice && createBlocker(draft, request, libraryOf)) return;
             decidedRef.current = true;
             setIsDecided(true);
             onSubmit(
@@ -432,7 +462,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     : tableCardDecline(hasInstructions ? draft : setInstructions(draft, ''), request),
             );
         },
-        [disabled, draft, hasInstructions, onSubmit, request],
+        [disabled, draft, hasInstructions, libraryOf, onSubmit, request],
     );
 
     const showInZotero = useCallback((scope: TableCardLibraryScope) => {
@@ -456,7 +486,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const overCap = overCapSources(draft, request);
     // A derived destination follows the sources as edited; the backend
     // derives it again on approval with the same rule.
-    const destination = cardDestination(draft, request, destinationLibrary);
+    const destination = cardDestination(draft, request, libraryOf);
     const merge = mergeLine(draft, request);
     const isLast = stepIndex === steps.length - 1;
 
@@ -486,7 +516,9 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 disabled={locked}
                 onChange={(e) => setDraft((prev) => setDescription(prev, e.target.value))}
             />
-            <div className="text-sm font-color-tertiary">{destinationLine(destination)}</div>
+            <div className="text-sm font-color-tertiary">
+                {destination ? destinationLine(destination) : 'No library to save the table in'}
+            </div>
         </div>
     );
 

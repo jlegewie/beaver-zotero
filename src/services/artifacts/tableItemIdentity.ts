@@ -114,6 +114,22 @@ export function tableFilesEditable(library: { editable: boolean; filesEditable?:
     return !!library && !!library.editable && library.filesEditable !== false;
 }
 
+/**
+ * Whether the store's open repair runs for a table in this library: its files
+ * are editable and the library is not excluded (fail-closed until the library
+ * scope has loaded, as the store's exclusion check is).
+ */
+export function tableRepairAllowed(libraryID: number): boolean {
+    const beaver = Zotero.Beaver;
+    return tableFilesEditable(Zotero.Libraries.get(libraryID))
+        && !!beaver?.libraryScopeInitialized
+        && (beaver.searchableLibraryIds ?? []).includes(libraryID);
+}
+
+/** Why a table's bookkeeping stays unrepaired where {@link tableRepairAllowed} is false. */
+export const TABLE_REPAIR_SKIPPED =
+    'Local bookkeeping needs repair, but Beaver does not modify tables in a read-only library or one excluded from Beaver.';
+
 /** Where an unreadable table can be recovered: the item pane's restore. */
 export const UNREADABLE_TABLE_RECOVERY =
     'Select the table in your library and use “Restore my version” in its Beaver Table section to write back the last version this device saved.';
@@ -586,7 +602,7 @@ export async function resolveTableItem(ref: TableRef, allowTrashed = false): Pro
         | false;
     if (!item || (item.deleted && !allowTrashed)) {
         throw new TableItemError(
-            `No item ${ref.key} in library ${ref.libraryID}.`,
+            item ? `Table ${ref.key} is in the trash.` : `No item ${ref.key} in library ${ref.libraryID}.`,
             'not_found'
         );
     }

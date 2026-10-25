@@ -18,6 +18,7 @@ import type {
     WSTableCardRequest,
     WSTableCardResponse,
 } from '../protocol/tableCardProtocol';
+import { MAX_MODEL_COLUMNS, normalizeSelectLabel } from '../layouts/table';
 
 export type TableCardStep = 'sources' | 'screening' | 'columns';
 
@@ -463,14 +464,27 @@ export function removeColumn(draft: TableCardDraft, key: string): TableCardDraft
     return { ...draft, columns: draft.columns.filter((column) => column.key !== key) };
 }
 
-/** What keeps a column from being sent, or null. */
+/** The backend's limits on a select column's options. */
+export const MAX_CARD_SELECT_OPTIONS = 50;
+export const MAX_CARD_SELECT_LABEL_CHARS = 60;
+
+/**
+ * What keeps a column from being sent, or null. Select options are checked
+ * the way the backend checks the reply: at most 50, each 1–60 characters
+ * (code points, as Python counts them), and no two the same option under
+ * {@link normalizeSelectLabel} — so `Yes` and `Yes.` are one option.
+ */
 export function columnProblem(column: DraftColumn): string | null {
     if (!column.header.trim()) return 'Add a header.';
     if (!column.description.trim()) return 'Add the question this column asks.';
     if (column.type === 'select') {
         const options = column.options.map((option) => option.trim()).filter(Boolean);
         if (!options.length) return 'Add at least one option.';
-        const folded = options.map((option) => option.toLowerCase());
+        if (options.length > MAX_CARD_SELECT_OPTIONS)
+            return `Use at most ${MAX_CARD_SELECT_OPTIONS} options, or a text column.`;
+        if (options.some((option) => [...option].length > MAX_CARD_SELECT_LABEL_CHARS))
+            return `Keep each option to ${MAX_CARD_SELECT_LABEL_CHARS} characters.`;
+        const folded = options.map(normalizeSelectLabel);
         if (new Set(folded).size !== folded.length) return 'Options must differ.';
     }
     return null;
@@ -498,10 +512,18 @@ export function stepCount(draft: TableCardDraft, step: TableCardStep, request: W
     return draft.columns.length;
 }
 
-/** Why Create is disabled, or null when it can be pressed. */
-export function createBlocker(draft: TableCardDraft, request: WSTableCardRequest): string | null {
+/**
+ * Why Create is disabled, or null when it can be pressed. With `libraryOf`,
+ * an edited card whose derived destination has nowhere to go is blocked too.
+ */
+export function createBlocker(
+    draft: TableCardDraft,
+    request: WSTableCardRequest,
+    libraryOf?: (ref: string) => DestinationLibrary | null,
+): string | null {
     if (!draft.title.trim()) return 'Add a title.';
     if (!draft.sources.length) return 'Add a source.';
+    if (libraryOf && !cardDestination(draft, request, libraryOf)) return NO_DESTINATION;
     if (draft.sources.some((source) => source.counting)) return 'Counting papers…';
     const failed = draft.sources.find((source) => source.resolved?.error);
     if (failed) return 'Remove the source that cannot be used.';
@@ -509,6 +531,8 @@ export function createBlocker(draft: TableCardDraft, request: WSTableCardRequest
     if (overCapSources(draft, request).length)
         return `${plural(cardPaperCount(draft, request), 'paper')}; a table holds ${format(request.row_cap)}.`;
     if (!draft.columns.length) return 'Add a question column.';
+    if (draft.columns.length > MAX_MODEL_COLUMNS)
+        return `A table holds at most ${MAX_MODEL_COLUMNS} question columns.`;
     if (draft.columns.some((column) => columnProblem(column))) return 'Finish the question columns.';
     return null;
 }
@@ -532,35 +556,44 @@ export function createActions(
     };
 }
 
-/** A library as the destination rule needs it. */
+/**
+ * A library as the destination rule needs it. `libraryOf` returns null for a
+ * library Beaver cannot use (missing, or excluded), as the backend sees it.
+ */
 export interface DestinationLibrary {
     name: string;
     writable: boolean;
 }
+
+/** The blocker when a derived destination has nowhere to go. */
+export const NO_DESTINATION =
+    'My Library cannot hold the table (excluded or read-only). Keep the sources in one library Beaver can write to.';
 
 /**
  * Where the table is filed for the card's current sources. An explicit
  * destination is kept. A derived one follows the backend's rule: one library
  * across the sources gives that library, and sources that are exactly one
  * collection give that collection too; otherwise, or when that library cannot
- * be written, the user library. The backend derives it again on approval.
+ * be written, the user library — or null when the user library cannot be
+ * used either, which the backend refuses. The backend derives it again on
+ * approval.
  */
 export function cardDestination(
     draft: TableCardDraft,
     request: WSTableCardRequest,
     libraryOf: (ref: string) => DestinationLibrary | null,
-): TableCardDestination {
+): TableCardDestination | null {
     if (request.destination.explicit || !draft.sourcesEdited) return request.destination;
     const refs = new Set<string>();
     for (const source of draft.sources) {
         if (source.scope) refs.add(source.scope.library_ref);
         for (const id of source.ids ?? []) refs.add(id.slice(0, id.indexOf('-')));
     }
-    const fallback = (): TableCardDestination => ({
-        library_ref: 'u',
-        library_name: libraryOf('u')?.name ?? 'My Library',
-        explicit: false,
-    });
+    const fallback = (): TableCardDestination | null => {
+        const user = libraryOf('u');
+        if (!user?.writable) return null;
+        return { library_ref: 'u', library_name: user.name, explicit: false };
+    };
     if (refs.size !== 1) return fallback();
     const ref = [...refs][0];
     const library = libraryOf(ref);

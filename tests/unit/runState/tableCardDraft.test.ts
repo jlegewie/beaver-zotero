@@ -12,6 +12,7 @@ import {
     addLibrarySource,
     addScreening,
     cardTotals,
+    columnProblem,
     createActions,
     createBlocker,
     destinationLine,
@@ -320,6 +321,37 @@ describe('table card draft', () => {
         expect(itemsSource(draft)!.ids).toEqual([first, second]);
     });
 
+    describe('select options, checked as the backend checks the reply', () => {
+        const select = (options: string[]) => ({
+            key: 'c', header: 'Design', type: 'select' as const, description: 'Which design?', options,
+        });
+
+        it('treats labels that differ only in case, spacing, dashes or trailing punctuation as one option', () => {
+            expect(columnProblem(select(['Yes', 'Yes.']))).toBe('Options must differ.');
+            expect(columnProblem(select(['low-risk', 'low risk']))).toBe('Options must differ.');
+            expect(columnProblem(select(['Yes', 'No']))).toBeNull();
+        });
+
+        it('allows at most 50 options of at most 60 characters', () => {
+            const many = Array.from({ length: 51 }, (_, i) => `Option ${i}`);
+            expect(columnProblem(select(many))).toContain('at most 50');
+            expect(columnProblem(select(many.slice(0, 50)))).toBeNull();
+            expect(columnProblem(select(['x'.repeat(61)]))).toContain('60 characters');
+            // Code points, as Python counts them: 60 emoji are 120 UTF-16 units.
+            expect(columnProblem(select(['😀'.repeat(60)]))).toBeNull();
+        });
+
+        it('blocks Create above the question-column cap', () => {
+            const { request } = fixture('create-items');
+            let draft = initialTableCardDraft(request);
+            while (draft.columns.length <= 30) {
+                const added = addColumn(draft);
+                draft = updateColumn(added.draft, added.key, { header: 'H', description: 'Q?' });
+            }
+            expect(createBlocker(draft, request)).toContain('at most 30 question columns');
+        });
+    });
+
     describe('destination', () => {
         const libraries: Record<string, { name: string; writable: boolean }> = {
             u: { name: 'My Library', writable: true },
@@ -367,7 +399,18 @@ describe('table card draft', () => {
                 library_ref: 'g42', library_name: 'Lab', collection_key: 'LABPAPR2', collection_name: 'Lab papers', explicit: false,
             });
             draft = addLibrarySource(removeSource(draft, draft.sources[0].key), { kind: 'tag', library_ref: 'g77', tag: 'old' }).draft;
-            expect(cardDestination(draft, request, libraryOf).library_ref).toBe('u');
+            expect(cardDestination(draft, request, libraryOf)!.library_ref).toBe('u');
+        });
+
+        it('has nowhere to go, and blocks Create, when the user library cannot take the fallback', () => {
+            const { request } = fixture('create-items');
+            const noUser = (ref: string) => (ref === 'u' ? null : libraryOf(ref));
+            let draft = initialTableCardDraft(request);
+            draft = addLibrarySource(draft, groupCollection).draft;
+            expect(cardDestination(draft, request, noUser)).toBeNull();
+            expect(createBlocker(draft, request, noUser)).toContain('My Library cannot hold the table');
+            // The proposal as sent keeps the backend's destination.
+            expect(cardDestination(initialTableCardDraft(request), request, noUser)).toEqual(request.destination);
         });
     });
 });

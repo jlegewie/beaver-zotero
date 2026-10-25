@@ -367,12 +367,18 @@ vi.mock('../../../react/runtime/windowRuntime', async () => {
     return singleWindowRuntimeMock();
 });
 
+const validateTableMock = vi.hoisted(() => vi.fn());
+vi.mock('../../../react/types/attachments/converters', () => ({
+    toValidatedMessageAttachment: validateTableMock,
+}));
+
 describe('updateReaderAttachmentAtom on a Beaver tab', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.unstubAllGlobals();
         selectedTableTabItemIDMock.mockReturnValue(null);
         tableItemMock.isTable = true;
+        validateTableMock.mockResolvedValue({ type: 'table', reference: { kind: 'table', key: 'u-TABLE001', title: 'T' } });
     });
     afterEach(() => {
         tableItemMock.isTable = false;
@@ -387,6 +393,18 @@ describe('updateReaderAttachmentAtom on a Beaver tab', () => {
 
         expect(getAsync).toHaveBeenCalledWith(READER_ITEM_ID);
         expect(store.get(currentReaderAttachmentAtom)?.id).toBe(READER_ITEM_ID);
+    });
+
+    it('does not make a table the context when it could not be sent', async () => {
+        stubZotero(SEARCHABLE_LIBRARY_ID);
+        selectedTableTabItemIDMock.mockReturnValue(READER_ITEM_ID);
+        validateTableMock.mockRejectedValue(new Error('Table chat is not enabled in this build.'));
+        const store = createStore();
+
+        await store.set(updateReaderAttachmentAtom);
+
+        expect(validateTableMock).toHaveBeenCalled();
+        expect(store.get(currentReaderAttachmentAtom)).toBeNull();
     });
 
     it('clears the context when neither a reader nor a Beaver tab is selected', async () => {

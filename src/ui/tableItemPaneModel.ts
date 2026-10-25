@@ -41,6 +41,8 @@ export interface TableSectionConflict {
     restorable: boolean;
     /** False when the library is excluded or read-only, so nothing can be restored into it. */
     writable?: boolean;
+    /** True when the table itself refuses the restore's write right now (e.g. it is in the trash). */
+    unavailable?: boolean;
 }
 
 export interface TableSectionInput {
@@ -441,7 +443,9 @@ function conflictLineFor(conflict: TableSectionConflict): string {
         ? `but Beaver no longer keeps a copy of your version ${conflict.shadowVersion}.`
         : conflict.writable === false
             ? `your version ${conflict.shadowVersion} is kept here, but Beaver cannot write to this library to restore it.`
-            : `your version ${conflict.shadowVersion} is kept here and can be restored as a new version.`;
+            : conflict.unavailable
+                ? `your version ${conflict.shadowVersion} is kept here, but the table cannot be restored right now (it may be in the trash).`
+                : `your version ${conflict.shadowVersion} is kept here and can be restored as a new version.`;
     return `${showing}; ${wrote}. Nothing was merged and nothing was overwritten — ${tail}`;
 }
 

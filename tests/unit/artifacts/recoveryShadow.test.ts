@@ -792,6 +792,24 @@ describe('what the item-pane section reports', () => {
         expect((await readTableSectionData(item)).canRestore).toBe(false);
     });
 
+    it('does not offer a restore for a table in the trash, which the restore refuses', async () => {
+        await createTable({ spec: demoSpec('One') });
+        await writeFile(tablePath(), '{"spec":');
+        item.deleted = true;
+        expect(await checkShadowRestore(ref)).toBe('unavailable');
+        expect((await readTableSectionData(item)).canRestore).toBe(false);
+        const result = await restoreShadowVersion(ref);
+        expect(result).toMatchObject({ ok: false, code: 'write_refused' });
+    });
+
+    it('does not offer a restore over a table written by a newer format', async () => {
+        await createTable({ spec: demoSpec('One') });
+        await writeFile(tablePath(), JSON.stringify({ spec: { ...demoSpec('Newer'), spec_version: 99, key: KEY, version: 2 } }));
+        expect(await checkShadowRestore(ref)).toBe('unavailable');
+        expect((await readTableSectionData(item)).canRestore).toBe(false);
+        expect(await restoreShadowVersion(ref)).toMatchObject({ ok: false, code: 'write_refused' });
+    });
+
     it('says a conflicted version is kept only while its copy still verifies', async () => {
         await createTable({ spec: demoSpec('One') });
         expectOk(await writeTable(ref, demoSpec('Mine'), { actor: 'user' }));
