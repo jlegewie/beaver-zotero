@@ -107,13 +107,19 @@ function hasSubcollections(scope: TableCardLibraryScope): boolean {
     return !!collection && collection.hasChildCollections();
 }
 
-/** A library's name and whether Beaver may write a table into it. */
+/**
+ * A library's name and whether Beaver may write a table into it. A table is a
+ * stored file, so a group that allows item edits but not file edits cannot
+ * hold one.
+ */
 function destinationLibrary(ref: string): { name: string; writable: boolean } | null {
     const id = libraryIdOf(ref);
     if (!id) return null;
     try {
         const library = Zotero.Libraries.get(id) as Zotero.Library | false;
-        return library ? { name: library.name, writable: !!library.editable } : null;
+        return library
+            ? { name: library.name, writable: !!library.editable && library.filesEditable !== false }
+            : null;
     } catch {
         return null;
     }

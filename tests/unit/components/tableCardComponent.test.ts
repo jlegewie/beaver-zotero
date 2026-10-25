@@ -47,8 +47,8 @@ vi.mock('../../../react/utils/selectItem', () => ({
 }));
 
 vi.mock('../../../src/utils/libraryIdentity', () => ({
-    resolveLibraryRef: (ref: { library_ref?: string }) => (ref.library_ref === 'u' ? 1 : null),
-    libraryRefForLibraryID: (id: number) => (id === 1 ? 'u' : null),
+    resolveLibraryRef: (ref: { library_ref?: string }) => (ref.library_ref === 'u' ? 1 : ref.library_ref === 'g5' ? 5 : null),
+    libraryRefForLibraryID: (id: number) => (id === 1 ? 'u' : id === 5 ? 'g5' : null),
 }));
 
 import { TableCard } from '../../../react/components/tables/card/TableCard';
@@ -219,6 +219,35 @@ describe('TableCard', () => {
             { type: 'library', scope: { kind: 'collection', library_ref: 'u', key: 'CASHTRN2', name: 'Cash transfers' } },
             { type: 'library', scope: { kind: 'tag', library_ref: 'u', tag: 'review' } },
         ]);
+    });
+
+    it.each([
+        [true, 'Saved to Lab group'],
+        [false, 'Saved to My Library'],
+    ])('derives an edited group destination only when the group allows file edits (%s)', async (filesEditable, line) => {
+        const zotero = (globalThis as any).Zotero;
+        zotero.Libraries = {
+            get: (id: number) => (id === 5
+                ? { name: 'Lab group', editable: true, filesEditable }
+                : { name: 'My Library', editable: true, filesEditable: true }),
+        };
+        zotero.Collections = {
+            get: (id: number) => (id === 42 ? { id: 42, key: 'LABCOLL1', libraryID: 5, name: 'Lab papers' } : false),
+            getByLibraryAndKey: () => false,
+        };
+        mocks.resolveLibraryScope.mockResolvedValue({
+            resolved: { count: 1, total: 1, truncated: false, without_pdf: 0, sample: [] },
+            rows: [{ item_id: 'g5-LABPAPR1', display_name: 'L1' }],
+            name: 'Lab papers',
+        });
+        const request = fixture('create-items');
+        request.destination = { library_ref: 'g5', library_name: 'Lab group', collection_key: null, collection_name: null, explicit: false };
+        request.sources[0].ids = ['g5-PAPER001', 'g5-PAPER002'];
+        render(request);
+        await act(async () => {
+            mocks.target.pickCollection(42);
+        });
+        expect(container.textContent).toContain(line);
     });
 
     it('offers papers in "+ Source", and attachments by their paper, but not notes or standalone files', async () => {
