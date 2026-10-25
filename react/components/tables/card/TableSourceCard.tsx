@@ -7,6 +7,7 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import {
     ArrowDownIcon,
     ArrowRightIcon,
+    ArrowUpRightIcon,
     CancelIcon,
     CSSIcon,
     CSSItemTypeIcon,
@@ -34,6 +35,8 @@ export interface TableSourceCardProps {
     onUndoRemoveItem?: (id: string) => void;
     /** Select the collection, tag or saved search in Zotero. */
     onShowInZotero?: () => void;
+    /** Reveal one of the source's papers in the Zotero library. */
+    onRevealItem?: (id: string) => void;
 }
 
 function sourceName(source: DraftSource): string {
@@ -55,6 +58,12 @@ function sourceSubtitle(source: DraftSource, libraryName: string | null, include
     return libraryName ? `${kind} · ${libraryName}` : kind;
 }
 
+/** "collection", "tag" or "saved search", for the Show in Zotero link. */
+function sourceKindNoun(source: DraftSource): string {
+    const kind = source.scope?.kind;
+    return kind === 'collection' ? 'collection' : kind === 'tag' ? 'tag' : 'saved search';
+}
+
 function sourceIcon(source: DraftSource): React.ReactNode {
     if (source.type === 'items') return <CSSItemTypeIcon itemType="journalArticle" />;
     const kind = source.scope!.kind;
@@ -72,24 +81,44 @@ function withoutPdfLine(count: number): string | null {
     return `${count.toLocaleString('en-US')} without PDF, answered from title and abstract`;
 }
 
-function ItemRow({ row, action }: { row: ItemDisplayRow; action?: React.ReactNode }) {
+function ItemRow({
+    row,
+    action,
+    onReveal,
+}: {
+    row: ItemDisplayRow;
+    action?: React.ReactNode;
+    onReveal?: () => void;
+}) {
     return (
-        <div className="display-flex flex-row items-start gap-2 min-w-0 py-05">
-            <span className="scale-80 flex-none">
+        <div
+            className={`table-card-item ${onReveal ? 'table-card-item-link' : ''}`}
+            role={onReveal ? 'button' : undefined}
+            tabIndex={onReveal ? 0 : undefined}
+            title={onReveal ? 'Show in Zotero' : undefined}
+            aria-label={onReveal ? `Show ${row.display_name} in Zotero` : undefined}
+            onClick={onReveal}
+            onKeyDown={
+                onReveal
+                    ? (e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onReveal();
+                          }
+                      }
+                    : undefined
+            }
+        >
+            <span className="scale-80 flex-none table-card-item-icon">
                 <CSSItemTypeIcon itemType={row.item_type || 'document'} />
             </span>
             <div className="display-flex flex-col min-w-0 flex-1">
                 <div className="font-color-primary truncate">{row.display_name}</div>
-                {row.subtitle && <div className="text-sm font-color-tertiary truncate">{row.subtitle}</div>}
+                {row.subtitle && <div className="text-sm font-color-secondary truncate">{row.subtitle}</div>}
             </div>
-            {row.has_pdf === false && (
-                <span
-                    className="text-xs font-color-secondary flex-none whitespace-nowrap"
-                    style={{ border: '1px solid var(--fill-quarternary)', borderRadius: '4px', padding: '0 4px' }}
-                >
-                    No PDF
-                </span>
-            )}
+            {row.has_pdf === false && <span className="table-card-chip flex-none">No PDF</span>}
             {action}
         </div>
     );
@@ -115,6 +144,7 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
     onRemoveItem,
     onUndoRemoveItem,
     onShowInZotero,
+    onRevealItem,
 }) => {
     const error = source.resolved?.error ?? null;
     const [expanded, setExpanded] = useState(() => !!warning || !!error);
@@ -132,31 +162,29 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
 
     return (
         <div
-            className="display-flex flex-col min-w-0 rounded-md"
-            style={{ border: '1px solid var(--fill-quinary)', padding: '0.4rem 0.55rem' }}
+            className={`table-card-source ${open ? 'table-card-source-open' : ''}`}
             role="group"
             aria-label={`Source: ${sourceName(source)}`}
         >
-            <div className="display-flex flex-row items-center gap-2 min-w-0">
+            <div className="table-card-source-head">
                 <button
                     type="button"
-                    className="variant-ghost-secondary display-flex flex-row items-center gap-2 min-w-0 flex-1 text-left"
-                    style={{ background: 'transparent', border: 0, padding: 0 }}
+                    className="table-card-source-toggle"
                     aria-expanded={open}
                     onClick={toggle}
                 >
-                    <Icon icon={open ? ArrowDownIcon : ArrowRightIcon} className="scale-10 font-color-tertiary flex-none" />
+                    <Icon icon={open ? ArrowDownIcon : ArrowRightIcon} className="scale-10 font-color-secondary flex-none" />
                     <span className="flex-none">{sourceIcon(source)}</span>
-                    <span className="display-flex flex-col min-w-0">
+                    <span className="display-flex flex-col min-w-0 flex-1">
                         <span className="font-color-primary font-medium truncate">{sourceName(source)}</span>
-                        <span className="text-sm font-color-tertiary truncate">
+                        <span className="text-sm font-color-secondary truncate">
                             {sourceSubtitle(source, libraryName, includesSubcollections)}
                         </span>
                     </span>
+                    <span className="table-card-count flex-none" aria-label="Papers">
+                        {source.counting ? <Spinner size={12} /> : total.toLocaleString('en-US')}
+                    </span>
                 </button>
-                <span className="font-color-secondary flex-none" aria-label="Papers">
-                    {source.counting ? <Spinner size={12} /> : total.toLocaleString('en-US')}
-                </span>
                 <IconButton
                     icon={CancelIcon}
                     variant="ghost-secondary"
@@ -168,7 +196,7 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
             </div>
 
             {open && (
-                <div className="display-flex flex-col min-w-0 mt-2" style={{ gap: '0.35rem' }}>
+                <div className="table-card-source-body">
                     {(warning || error) && (
                         <div
                             className="display-flex flex-row items-start gap-2 p-2 rounded-md min-w-0"
@@ -182,26 +210,30 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
                             <div className="font-color-orange min-w-0">{warning ?? error}</div>
                         </div>
                     )}
-                    {pdfLine && <div className="text-sm font-color-secondary">{pdfLine}</div>}
+                    {pdfLine && <div className="text-sm font-color-secondary px-1">{pdfLine}</div>}
                     {rows === undefined ? (
-                        <div className="text-sm font-color-tertiary">Loading items…</div>
+                        <div className="display-flex flex-row items-center gap-2 text-sm font-color-secondary px-1 py-1">
+                            <Spinner size={12} />
+                            <span>Loading items…</span>
+                        </div>
                     ) : rows.length === 0 && !error ? (
-                        <div className="text-sm font-color-tertiary">No papers.</div>
+                        <div className="text-sm font-color-secondary px-1 py-1">No papers.</div>
                     ) : (
-                        <div
-                            className="display-flex flex-col min-w-0"
-                            style={{ maxHeight: '220px', overflowY: 'auto' }}
-                        >
+                        <div className="table-card-item-list">
                             {rows.map((row) => (
                                 <ItemRow
                                     key={row.item_id}
                                     row={row}
+                                    onReveal={onRevealItem ? () => onRevealItem(row.item_id) : undefined}
                                     action={
                                         isItems && onRemoveItem ? (
                                             <IconButton
                                                 icon={CancelIcon}
-                                                variant="ghost-tertiary"
-                                                onClick={() => onRemoveItem(row.item_id)}
+                                                variant="ghost-secondary"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onRemoveItem(row.item_id);
+                                                }}
                                                 ariaLabel={`Remove ${row.display_name}`}
                                                 disabled={disabled}
                                                 className="flex-none"
@@ -211,7 +243,7 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
                                 />
                             ))}
                             {total > (rows?.length ?? 0) && !isItems && (
-                                <div className="text-sm font-color-tertiary py-05">
+                                <div className="text-sm font-color-secondary px-1 py-05">
                                     {`and ${(total - rows.length).toLocaleString('en-US')} more`}
                                 </div>
                             )}
@@ -220,8 +252,8 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
                     {isItems && removedRows.length > 0 && (
                         <div className="display-flex flex-col min-w-0" style={{ gap: '0.2rem' }}>
                             {removedRows.map((row) => (
-                                <div key={row.item_id} className="display-flex flex-row items-center gap-2 min-w-0 text-sm">
-                                    <span className="font-color-tertiary truncate flex-1" style={{ textDecoration: 'line-through' }}>
+                                <div key={row.item_id} className="display-flex flex-row items-center gap-2 min-w-0 text-sm px-1">
+                                    <span className="font-color-secondary truncate flex-1" style={{ textDecoration: 'line-through' }}>
                                         {row.display_name}
                                     </span>
                                     <Button
@@ -239,11 +271,12 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
                     )}
                     {!isItems && onShowInZotero && (
                         <Button
-                            variant="ghost"
+                            variant="ghost-secondary"
+                            rightIcon={ArrowUpRightIcon}
                             onClick={onShowInZotero}
-                            style={{ alignSelf: 'flex-start', marginLeft: '-6px' }}
+                            style={{ alignSelf: 'flex-start' }}
                         >
-                            Show in Zotero
+                            {`Show ${sourceKindNoun(source)} in Zotero`}
                         </Button>
                     )}
                 </div>

@@ -51,16 +51,17 @@ import Button from '@beaver/agent-ui/primitives/Button';
 import InstructionsDisclosure from '@beaver/agent-ui/primitives/InstructionsDisclosure';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import type { ZoteroTag } from '@beaver/agent-core/types/zotero';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
+import { getHost } from '@beaver/agent-ui/host';
+import { libraryRefForLibraryID, resolveLibraryRef, resolveObjectId } from '../../../../src/utils/libraryIdentity';
 import { tableFilesEditable } from '../../../../src/services/artifacts/tableItemIdentity';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import type { MessageFiltersState } from '../../../atoms/messageComposition';
 import { selectCollection, selectTagFilter, selectView } from '../../../utils/selectItem';
-import { Icon, StopStrokeIcon, TableIcon } from '../../icons/icons';
+import { ArrowRightIcon, CheckmarkCircleIcon, CSSIcon, Icon, StopStrokeIcon, TableIcon } from '../../icons/icons';
 import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSourcesMenu';
 import type { SourcesMenuEntries } from '../../ui/menus/hooks/useSourcesMenu';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
-import AutoGrowTextarea from './AutoGrowTextarea';
+import InlineEditableText from './InlineEditableText';
 import TableColumnsStep from './TableColumnsStep';
 import TableSourceCard from './TableSourceCard';
 
@@ -74,6 +75,13 @@ const STEP_LABELS: Record<TableCardStep, string> = {
 const MENU_ENTRIES: SourcesMenuEntries = { libraries: false, notes: false, files: false, scopeVerb: 'add' };
 
 const BLOCK_GAP = '0.85rem';
+
+/** The step heading's count: papers for Sources, entries otherwise. */
+function stepHeadingCount(step: TableCardStep, count: number): string {
+    const n = count.toLocaleString('en-US');
+    if (step === 'sources') return `${n} ${count === 1 ? 'paper' : 'papers'}`;
+    return n;
+}
 
 /** Tries for a source's item lookup, and the base delay between them. */
 const MAX_LOOKUP_ATTEMPTS = 3;
@@ -151,18 +159,20 @@ function portableItemId(item: Zotero.Item): string | null {
     return ref ? `${ref}-${item.key}` : null;
 }
 
+/** "Add source" searches every library: the card's sources are not a search scope. */
+const NO_SEARCH_FILTERS: MessageFiltersState = { libraryIds: [], collectionIds: [], tagSelections: [] };
+
 /**
  * The table card: the proposed table, editable step by step, answered once.
  *
- * Title and description sit above the stepper on every step with the
- * destination line under them. Sources come first, then Screening when the
- * card has it, then Columns, which is always last because it holds the run
- * choice. Step state is local; Create sends every part as edited, and Cancel
- * declines with the user's instructions, if any.
+ * Title and description read as text above the steps, each with a pencil to
+ * edit it in place, and the destination line under them. The steps follow one
+ * another with Next and Back: Sources first, then Screening when the card has
+ * it, then Columns, which is always last because it holds the run choice. A
+ * completed step collapses to one line that leads back to it. Step state is
+ * local; Create sends every part as edited, and Cancel declines with the
+ * user's instructions, if any.
  */
-/** "+ Source" searches every library: the card's sources are not a search scope. */
-const NO_SEARCH_FILTERS: MessageFiltersState = { libraryIds: [], collectionIds: [], tagSelections: [] };
-
 export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop }) => {
     // The draft lives in the renderer's store, keyed by card, so a remount
     // (switching sidebars, closing Beaver) keeps the user's edits.
@@ -483,6 +493,11 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         }
     }, []);
 
+    const revealItem = useCallback((id: string) => {
+        const ref = resolveObjectId(id);
+        if (ref) getHost().navigation?.revealInLibrary?.(ref);
+    }, []);
+
     // Rendering ------------------------------------------------------------------
 
     const overCap = overCapSources(draft, request);
@@ -493,79 +508,88 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const isLast = stepIndex === steps.length - 1;
 
     const header = (
-        <div className="display-flex flex-col min-w-0" style={{ gap: '0.35rem' }}>
-            <div className="display-flex flex-row items-center gap-2 min-w-0">
-                <Icon icon={TableIcon} className="font-color-secondary scale-12 flex-none" />
-                <input
-                    className="preference-input py-1 px-2 font-semibold flex-1 min-w-0"
+        <div className="table-card-header">
+            <div className="display-flex flex-row items-start min-w-0" style={{ gap: '0.45rem' }}>
+                <Icon icon={TableIcon} className="font-color-secondary flex-none table-card-title-icon" />
+                <InlineEditableText
+                    className="table-card-title flex-1 min-w-0"
                     value={draft.title}
-                    placeholder="Title"
-                    aria-label="Table title"
+                    placeholder="Untitled table"
+                    ariaLabel="Table title"
+                    editLabel="Edit title"
                     disabled={locked}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                        }
-                    }}
-                    onChange={(e) => setDraft((prev) => setTitle(prev, e.target.value))}
+                    onChange={(title) => setDraft((prev) => setTitle(prev, title))}
                 />
             </div>
-            <AutoGrowTextarea
-                value={draft.description}
-                placeholder="One sentence: what is compared and why"
-                aria-label="Table description"
-                disabled={locked}
-                onChange={(e) => setDraft((prev) => setDescription(prev, e.target.value))}
-            />
-            <div className="text-sm font-color-tertiary">
-                {destination ? destinationLine(destination) : 'No library to save the table in'}
+            <div className="table-card-header-body">
+                <InlineEditableText
+                    className="table-card-description"
+                    value={draft.description}
+                    placeholder="Add a description"
+                    ariaLabel="Table description"
+                    editLabel="Edit description"
+                    multiline
+                    disabled={locked}
+                    onChange={(description) => setDraft((prev) => setDescription(prev, description))}
+                />
+                <div className="table-card-destination">
+                    {destination ? (
+                        <>
+                            <CSSIcon
+                                name={destination.collection_key ? 'collection' : 'library'}
+                                className="icon-16 scale-80 flex-none"
+                            />
+                            <span className="truncate">{destinationLine(destination)}</span>
+                        </>
+                    ) : (
+                        <span className="font-color-orange">No library to save the table in</span>
+                    )}
+                </div>
             </div>
         </div>
     );
 
-    const stepper = (
-        <div className="display-flex flex-row min-w-0" style={{ gap: '6px' }} role="tablist" aria-label="Steps">
-            {steps.map((step, index) => {
-                const current = step === draft.step;
-                return (
-                    <button
-                        key={step}
-                        type="button"
-                        role="tab"
-                        aria-selected={current}
-                        className="flex-1 text-sm min-w-0 truncate"
-                        disabled={locked}
-                        style={{
-                            background: 'transparent',
-                            border: 0,
-                            borderBottom: `2px solid ${current ? 'var(--accent-blue)' : 'var(--fill-quinary)'}`,
-                            padding: '4px 2px',
-                            color: current ? 'var(--fill-primary)' : 'var(--fill-tertiary)',
-                            fontWeight: current ? 600 : 400,
-                            cursor: 'pointer',
-                        }}
-                        onClick={() => setDraft((prev) => goToStep(prev, step))}
-                    >
-                        {`${STEP_LABELS[step]} · ${stepCount(draft, step, request).toLocaleString('en-US')}`}
-                    </button>
-                );
-            })}
+    // The current step's heading, with where it sits in the sequence.
+    const stepHeading = (
+        <div className="table-card-step-head">
+            <span className="font-semibold font-color-primary">{STEP_LABELS[draft.step]}</span>
+            <span className="table-card-count">
+                {stepHeadingCount(draft.step, stepCount(draft, draft.step, request))}
+            </span>
+            <div className="flex-1" />
+            <div
+                className="table-card-progress"
+                role="img"
+                aria-label={`Step ${stepIndex + 1} of ${steps.length}`}
+            >
+                <span className="text-sm font-color-secondary">{`Step ${stepIndex + 1} of ${steps.length}`}</span>
+                <span className="display-flex flex-row" style={{ gap: '3px' }}>
+                    {steps.map((step, index) => (
+                        <span
+                            key={step}
+                            className={`table-card-progress-bar ${index <= stepIndex ? 'table-card-progress-bar-done' : ''}`}
+                        />
+                    ))}
+                </span>
+            </div>
         </div>
     );
 
-    // Completed steps collapse to one line each, so only one part is open.
+    // Completed steps collapse to one line each, so only one part is open;
+    // clicking a line goes back to that step.
     const summaries = steps.slice(0, stepIndex).map((step) => (
         <button
             key={step}
             type="button"
-            className="variant-ghost-secondary text-sm text-left"
-            style={{ background: 'transparent', border: 0, padding: 0 }}
+            className="table-card-step-done"
             disabled={locked}
+            aria-label={`${STEP_LABELS[step]}: ${stepSummary(draft, step, request)}. Edit`}
             onClick={() => setDraft((prev) => goToStep(prev, step))}
         >
-            <span className="font-color-tertiary">{`${STEP_LABELS[step]}: `}</span>
-            <span className="font-color-secondary">{stepSummary(draft, step, request)}</span>
+            <Icon icon={CheckmarkCircleIcon} className="font-color-green flex-none" />
+            <span className="font-medium font-color-primary flex-none">{STEP_LABELS[step]}</span>
+            <span className="font-color-secondary truncate flex-1 min-w-0">{stepSummary(draft, step, request)}</span>
+            {!locked && <span className="table-card-step-edit flex-none">Edit</span>}
         </button>
     ));
 
@@ -589,6 +613,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     onRemoveItem={(id) => setDraft((prev) => removeItem(prev, id))}
                     onUndoRemoveItem={(id) => setDraft((prev) => undoRemoveItem(prev, id))}
                     onShowInZotero={source.scope ? () => showInZotero(source.scope!) : undefined}
+                    onRevealItem={revealItem}
                 />
             ))}
             {merge && <div className="text-sm font-color-secondary">{merge}</div>}
@@ -608,7 +633,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     disabled={locked}
                     verticalPosition="above"
                     target={target}
-                    triggerLabel="Source"
+                    triggerLabel="Add source"
                 />
             </div>
         </div>
@@ -653,13 +678,15 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         >
             <div className="display-flex flex-col min-w-0" style={{ gap: BLOCK_GAP }}>
                 {header}
-                {stepper}
-                {summaries.length > 0 && (
-                    <div className="display-flex flex-col min-w-0" style={{ gap: '0.2rem' }}>
-                        {summaries}
-                    </div>
-                )}
-                {draft.step === 'sources' ? sourcesStep : draft.step === 'screening' ? screeningStep : columnsStep}
+                <div className="table-card-step">
+                    {summaries.length > 0 && (
+                        <div className="display-flex flex-col min-w-0" style={{ gap: '0.35rem' }}>
+                            {summaries}
+                        </div>
+                    )}
+                    {stepHeading}
+                    {draft.step === 'sources' ? sourcesStep : draft.step === 'screening' ? screeningStep : columnsStep}
+                </div>
 
                 {isLast && (
                     <InstructionsDisclosure
@@ -683,7 +710,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     </div>
                 )}
                 {isLast && blocker && !disabled && (
-                    <div className="text-sm font-color-tertiary" role="status">
+                    <div className="text-sm font-color-secondary" role="status">
                         {blocker}
                     </div>
                 )}
@@ -731,6 +758,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     {!isLast ? (
                         <Button
                             variant="solid"
+                            rightIcon={ArrowRightIcon}
                             onClick={() => setDraft((prev) => nextStep(prev))}
                             disabled={locked}
                             className="flex-none whitespace-nowrap"

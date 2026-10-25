@@ -49,8 +49,13 @@ vi.mock('../../../react/utils/selectItem', () => ({
 vi.mock('../../../src/utils/libraryIdentity', () => ({
     resolveLibraryRef: (ref: { library_ref?: string }) => (ref.library_ref === 'u' ? 1 : ref.library_ref === 'g5' ? 5 : null),
     libraryRefForLibraryID: (id: number) => (id === 1 ? 'u' : id === 5 ? 'g5' : null),
+    resolveObjectId: (id: string) => {
+        const [ref, key] = id.split('-');
+        return { library_ref: ref, library_id: ref === 'u' ? 1 : 0, zotero_key: key };
+    },
 }));
 
+import { setHost } from '@beaver/agent-ui/host';
 import { TableCard } from '../../../react/components/tables/card/TableCard';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
@@ -80,6 +85,19 @@ function button(label: string): HTMLButtonElement | undefined {
     return [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as
         | HTMLButtonElement
         | undefined;
+}
+
+/** The one-line summary a completed step folds into. */
+function doneStep(step: string): string | undefined {
+    const line = container.querySelector(`button[aria-label^="${step}: "]`);
+    return line?.getAttribute('aria-label')?.slice(step.length + 2).replace(/\. Edit$/, '');
+}
+
+async function clickElement(target: Element | null) {
+    if (!target) throw new Error('No element to click');
+    await act(async () => {
+        (target as HTMLElement).click();
+    });
 }
 
 async function click(label: string) {
@@ -126,7 +144,7 @@ describe('TableCard', () => {
         expect(button('Create')).toBeTruthy();
         expect(button('Create only')).toBeUndefined();
         expect(button('Back')).toBeTruthy();
-        expect(container.textContent).toContain('Sources: 2 papers from 1 source');
+        expect(doneStep('Sources')).toBe('2 papers from 1 source');
         await click('Create');
         expect(sent).toHaveLength(1);
         expect(sent[0]).toMatchObject({
@@ -157,7 +175,7 @@ describe('TableCard', () => {
             });
         });
         expect(button('Create')!.disabled).toBe(false);
-        expect(container.textContent).toContain('Sources: 16 papers from 2 sources');
+        expect(doneStep('Sources')).toBe('16 papers from 2 sources');
         await click('Create');
         expect(sent[0].sources).toHaveLength(2);
     });
@@ -177,7 +195,7 @@ describe('TableCard', () => {
         await act(async () => { mocks.target.pickCollection(41); });
         await click('Next');
         expect(mocks.resolveItems).toHaveBeenCalledWith(['u-PAPER001', 'u-PAPER002']);
-        expect(container.textContent).toContain('Sources: 4 papers from 2 sources');
+        expect(doneStep('Sources')).toBe('4 papers from 2 sources');
     });
 
     it('warns on the over-cap card and keeps Create disabled', async () => {
@@ -209,6 +227,8 @@ describe('TableCard', () => {
     it('keeps a comma inside a choice option, one option per line', async () => {
         render(fixture('create-items'));
         await click('Next');
+        expect(container.querySelector('textarea[aria-label="Column 2 options"]')).toBeNull();
+        await clickElement(container.querySelectorAll('.table-card-column')[1]);
         const field = container.querySelector('textarea[aria-label="Column 2 options"]') as HTMLTextAreaElement;
         expect(field.value).toBe('RCT\nObservational\nOther');
         await act(async () => {
@@ -237,7 +257,7 @@ describe('TableCard', () => {
             mocks.target.pickTag({ id: 9, tag: 'review', libraryId: 1, type: 0, color: '' });
         });
         await click('Next');
-        expect(container.textContent).toContain('Sources: 5 papers from 2 sources');
+        expect(doneStep('Sources')).toBe('5 papers from 2 sources');
         await click('Create');
         expect(sent[0].sources).toEqual([
             { type: 'library', scope: { kind: 'collection', library_ref: 'u', key: 'CASHTRN2', name: 'Cash transfers' } },
@@ -330,6 +350,8 @@ describe('TableCard', () => {
     it('keeps edits when the card is unmounted and mounted again in the same window', async () => {
         const store = createStore();
         render(fixture('create-items'), store);
+        expect(container.querySelector('input[aria-label="Table title"]')).toBeNull();
+        await clickElement(container.querySelector('button[aria-label="Edit title"]'));
         const title = container.querySelector('input[aria-label="Table title"]') as HTMLInputElement;
         await act(async () => {
             const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -338,7 +360,7 @@ describe('TableCard', () => {
         });
         act(() => root?.unmount());
         render(fixture('create-items'), store);
-        expect((container.querySelector('input[aria-label="Table title"]') as HTMLInputElement).value).toBe('Edited title');
+        expect(container.textContent).toContain('Edited title');
     });
 
     it('drops a count that lands after its card unmounted and the source changed', async () => {
@@ -358,7 +380,162 @@ describe('TableCard', () => {
             finishers[0]({ resolved: { count: 99, total: 99, truncated: false, without_pdf: 0, sample: [] }, rows: [] });
         });
         await click('Next');
-        expect(container.textContent).toContain('Sources: 2 papers from 1 source');
+        expect(doneStep('Sources')).toBe('2 papers from 1 source');
+    });
+
+    it('reveals a paper in Zotero when its row in an expanded source is clicked', async () => {
+        const revealInLibrary = vi.fn();
+        setHost({ navigation: { revealInLibrary } as any });
+        mocks.resolveLibraryScope.mockResolvedValue({
+            resolved: { count: 2, total: 2, truncated: false, without_pdf: 0, sample: [] },
+            rows: [
+                { item_id: 'u-PAPER002', display_name: 'Paper two', has_pdf: true },
+                { item_id: 'u-PAPER003', display_name: 'Paper three', has_pdf: true },
+            ],
+        });
+        try {
+            render(fixture('create-collection-destination'));
+            await clickElement(container.querySelector('button[aria-expanded="false"]'));
+            await clickElement(container.querySelector('[aria-label="Show Paper three in Zotero"]'));
+            expect(revealInLibrary).toHaveBeenCalledWith({ library_ref: 'u', library_id: 1, zotero_key: 'PAPER003' });
+        } finally {
+            setHost({});
+        }
+    });
+
+    it('opens a column for editing on click and folds it back on a click outside', async () => {
+        render(fixture('create-items'));
+        await click('Next');
+        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBeNull();
+        await clickElement(container.querySelectorAll('.table-card-column')[0]);
+        expect(container.querySelector('input[aria-label="Column 1 header"]')).not.toBeNull();
+        // The press alone does not collapse it, so nothing moves under the pointer.
+        await act(async () => {
+            document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        });
+        expect(container.querySelector('input[aria-label="Column 1 header"]')).not.toBeNull();
+        await act(async () => {
+            document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBeNull();
+    });
+
+    it('moves the editor to the column pressed below the open one', async () => {
+        render(fixture('create-items'));
+        await click('Next');
+        await clickElement(container.querySelectorAll('.table-card-column')[0]);
+        const next = container.querySelectorAll('.table-card-column')[1];
+        await act(async () => {
+            next.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        });
+        // Nothing collapses on the press, so the layout under the pointer holds
+        // until the click arrives.
+        expect(container.querySelector('input[aria-label="Column 1 header"]')).not.toBeNull();
+        await act(async () => {
+            (next as HTMLElement).click();
+        });
+        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBeNull();
+        expect(container.querySelector('input[aria-label="Column 2 header"]')).not.toBeNull();
+    });
+
+    it('keeps the editor open when a selection dragged out of a field ends outside the card', async () => {
+        render(fixture('create-items'));
+        await click('Next');
+        await clickElement(container.querySelectorAll('.table-card-column')[0]);
+        const header = container.querySelector('input[aria-label="Column 1 header"]') as HTMLInputElement;
+        await act(async () => {
+            header.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBe(header);
+    });
+
+    it('restores the title when its edit is abandoned with Escape', async () => {
+        render(fixture('create-items'));
+        await clickElement(container.querySelector('button[aria-label="Edit title"]'));
+        const title = container.querySelector('input[aria-label="Table title"]') as HTMLInputElement;
+        const original = title.value;
+        await act(async () => {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+            setter.call(title, 'Something else');
+            title.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await act(async () => {
+            title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        });
+        expect(container.querySelector('input[aria-label="Table title"]')).toBeNull();
+        expect(container.textContent).toContain(original);
+        expect(container.textContent).not.toContain('Something else');
+    });
+
+    it.each([
+        ['title', 'Edit title', 'input[aria-label="Table title"]'],
+        ['description', 'Edit description', 'textarea[aria-label="Table description"]'],
+    ])('keeps the %s editor open while an IME owns Enter and Escape', async (_part, editLabel, selector) => {
+        render(fixture('create-items'));
+        await clickElement(container.querySelector(`button[aria-label="${editLabel}"]`));
+        const field = container.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement;
+        const proto = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+        await act(async () => {
+            Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(field, '日本語');
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        for (const key of ['Enter', 'Escape']) {
+            const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, isComposing: true });
+            await act(async () => {
+                field.dispatchEvent(event);
+            });
+            expect(event.defaultPrevented).toBe(false);
+            expect(container.querySelector(selector)).toBe(field);
+        }
+        expect(field.value).toBe('日本語');
+    });
+
+    it('keeps a column editor open when Escape cancels an IME candidate', async () => {
+        render(fixture('create-items'));
+        await click('Next');
+        await clickElement(container.querySelectorAll('.table-card-column')[0]);
+        const header = container.querySelector('input[aria-label="Column 1 header"]') as HTMLInputElement;
+        const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, isComposing: true });
+        await act(async () => {
+            header.dispatchEvent(enter);
+            header.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, isComposing: true }));
+        });
+        expect(enter.defaultPrevented).toBe(false);
+        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBe(header);
+        await act(async () => {
+            header.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        });
+        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBeNull();
+    });
+
+    it('keeps the title field in place until a press that took its focus completes', async () => {
+        render(fixture('create-items'));
+        await clickElement(container.querySelector('button[aria-label="Edit title"]'));
+        const title = container.querySelector('input[aria-label="Table title"]') as HTMLInputElement;
+        const next = button('Next')!;
+        // Pressing Next moves focus off the field at mousedown ...
+        await act(async () => {
+            next.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            title.blur();
+        });
+        // ... but the header keeps its layout until Next's click arrives.
+        expect(container.querySelector('input[aria-label="Table title"]')).toBe(title);
+        await act(async () => {
+            next.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            next.click();
+        });
+        expect(container.querySelector('input[aria-label="Table title"]')).toBeNull();
+        expect(button('Create')).toBeTruthy();
+    });
+
+    it('finishes the title edit at once when focus leaves without a press', async () => {
+        render(fixture('create-items'));
+        await clickElement(container.querySelector('button[aria-label="Edit title"]'));
+        const title = container.querySelector('input[aria-label="Table title"]') as HTMLInputElement;
+        await act(async () => {
+            title.blur();
+        });
+        expect(container.querySelector('input[aria-label="Table title"]')).toBeNull();
     });
 });
-
