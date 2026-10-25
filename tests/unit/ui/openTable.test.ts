@@ -18,12 +18,19 @@ const resolveNavigationWindow = vi.hoisted(() => vi.fn());
 const canHostTableTab = vi.hoisted(() => vi.fn(() => true));
 const openTableTab = vi.hoisted(() => vi.fn());
 const setTableTabWarning = vi.hoisted(() => vi.fn());
+const restoreCheck = vi.hoisted(() => vi.fn(async () => 'ok'));
 
-vi.mock('../../../src/services/artifacts/tableItemIdentity', async (importOriginal) => ({
-    UNREADABLE_TABLE_RECOVERY: (await importOriginal<typeof import('../../../src/services/artifacts/tableItemIdentity')>())
-        .UNREADABLE_TABLE_RECOVERY,
-    resolveTableItem,
-    readTableItemSpec,
+vi.mock('../../../src/services/artifacts/tableItemIdentity', async (importOriginal) => {
+    const original = await importOriginal<typeof import('../../../src/services/artifacts/tableItemIdentity')>();
+    return {
+        UNREADABLE_TABLE_RECOVERY: original.UNREADABLE_TABLE_RECOVERY,
+        unreadableTableRecovery: original.unreadableTableRecovery,
+        resolveTableItem,
+        readTableItemSpec,
+    };
+});
+vi.mock('../../../src/services/artifacts/tablesApi', () => ({
+    getTablesApi: () => ({ shadow: { check: restoreCheck } }),
 }));
 vi.mock('../../../src/services/artifacts/tableRenderer', () => ({ snapshotIsCurrent }));
 vi.mock('../../../src/services/artifacts/view/readerTableView', () => ({ closeStaleTableReaders }));
@@ -145,6 +152,16 @@ describe('openTable', () => {
             error: `Could not open table ${REF.key} — The table is corrupted. Select the table in your library and use “Restore my version” in its Beaver Table section to write back the last version this device saved.`,
         });
         expect(openTableTab).not.toHaveBeenCalled();
+    });
+
+    it('does not point to a restore that would not run', async () => {
+        readTableItemSpec.mockResolvedValue({ ok: false, code: 'corrupt', message: 'The table is corrupted.' });
+        for (const outcome of ['no_shadow', 'no_payload', 'not_writable']) {
+            restoreCheck.mockResolvedValueOnce(outcome);
+            await expect(openTable(REF, { window: main })).resolves.toEqual({
+                error: `Could not open table ${REF.key} — The table is corrupted.`,
+            });
+        }
     });
 
     it('replaces a reader showing an outdated snapshot', async () => {

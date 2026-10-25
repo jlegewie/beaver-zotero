@@ -25,6 +25,7 @@ import { readSpec, type TableSpec } from '@beaver/agent-core/layouts/table';
 import type { TableSummary } from '@beaver/agent-core/layouts/tableMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { sha256Hex } from '../../utils/hash';
+import { getTablesApi } from './tablesApi';
 
 // ---------------------------------------------------------------------------
 // Marks
@@ -105,9 +106,31 @@ export class TableItemError extends Error {
     }
 }
 
+/**
+ * Whether a library lets Beaver write a table's files: item edits and file
+ * edits, since a table is a stored file. Exclusion is checked separately.
+ */
+export function tableFilesEditable(library: { editable: boolean; filesEditable?: boolean } | false | null | undefined): boolean {
+    return !!library && !!library.editable && library.filesEditable !== false;
+}
+
 /** Where an unreadable table can be recovered: the item pane's restore. */
 export const UNREADABLE_TABLE_RECOVERY =
     'Select the table in your library and use “Restore my version” in its Beaver Table section to write back the last version this device saved.';
+
+/**
+ * The recovery hint for an unreadable table, or '' when the item pane would
+ * not offer the restore (no usable copy on this device, or a read-only
+ * library). Never throws.
+ */
+export async function unreadableTableRecovery(ref: TableRef): Promise<string> {
+    try {
+        const outcome = await getTablesApi()?.shadow.check(ref);
+        return outcome === 'ok' ? UNREADABLE_TABLE_RECOVERY : '';
+    } catch {
+        return '';
+    }
+}
 
 /** Error constructors differ between the plugin and renderer bundles. */
 export function isTableItemError(error: unknown): error is TableItemError {

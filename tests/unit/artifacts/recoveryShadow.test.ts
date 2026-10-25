@@ -57,6 +57,7 @@ import {
     TABLE_SHADOW_RETENTION,
 } from '../../../src/services/artifacts/recoveryShadow';
 import {
+    checkShadowRestore,
     createTable,
     deleteTable,
     openTable,
@@ -67,6 +68,7 @@ import {
     type TableWriteResult,
 } from '../../../src/services/artifacts/tableStore';
 import { readTableSectionData } from '../../../src/ui/tableItemPane';
+import { setTablesApi, type TablesApi } from '../../../src/services/artifacts/tablesApi';
 
 // ---------------------------------------------------------------------------
 // A temp profile and a temp storage directory
@@ -684,6 +686,20 @@ describe('restoring this device\'s version', () => {
  * runs on every table they select.
  */
 describe('what the item-pane section reports', () => {
+    beforeEach(() => {
+        // The section asks the store through the namespace, as in Zotero.
+        setTablesApi({ shadow: { check: checkShadowRestore } } as unknown as TablesApi);
+    });
+
+    /** Makes the table's library allow item edits but not file edits. */
+    function makeFilesReadOnly(): void {
+        (globalThis as any).Zotero.Libraries.get = vi.fn((id: number) =>
+            id === LIBRARY_ID
+                ? { libraryID: LIBRARY_ID, libraryType: 'user', editable: true, filesEditable: false }
+                : false
+        );
+    }
+
     /**
      * Commits a version and loses the log write, which is what an interrupted
      * write leaves behind: `table.json` is the new version, the log is a
@@ -757,7 +773,47 @@ describe('what the item-pane section reports', () => {
         expect(data.fields.dimensionsLine).toBe('');
         expect(data.fields.conflict).toBeNull();
         // This device wrote the table, so its last version can be written back.
-        expect(data.restorableUnreadable).toBe(true);
+        expect(data.canRestore).toBe(true);
+    });
+
+    it('does not offer a restore for a corrupt table whose retained copy is gone', async () => {
+        await createTable({ spec: demoSpec('One') });
+        await rm((await lastTableShadow(ref))!.payloadPath!);
+        await writeFile(tablePath(), '{"spec":');
+        expect(await checkShadowRestore(ref)).toBe('no_payload');
+        expect((await readTableSectionData(item)).canRestore).toBe(false);
+    });
+
+    it('does not offer a restore for a corrupt table in a library that cannot be written', async () => {
+        await createTable({ spec: demoSpec('One') });
+        await writeFile(tablePath(), '{"spec":');
+        makeFilesReadOnly();
+        expect(await checkShadowRestore(ref)).toBe('not_writable');
+        expect((await readTableSectionData(item)).canRestore).toBe(false);
+    });
+
+    it('says a conflicted version is kept only while its copy still verifies', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Mine'), { actor: 'user' }));
+        await resolveConflictTowardRemote(demoSpec('Theirs'), 2);
+        expect((await readTableSectionData(item)).canRestore).toBe(true);
+
+        // A row whose copy is gone, as for a version over the retention cap.
+        await rm((await lastTableShadow(ref))!.payloadPath!);
+        const data = await readTableSectionData(item);
+        expect(data.fields.conflict).toMatchObject({ reason: 'diverged', restorable: false });
+        expect(data.canRestore).toBe(false);
+    });
+
+    it('keeps saying a conflicted version is kept when only the library blocks the restore', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Mine'), { actor: 'user' }));
+        await resolveConflictTowardRemote(demoSpec('Theirs'), 2);
+        makeFilesReadOnly();
+        const data = await readTableSectionData(item);
+        expect(data.fields.conflict).toMatchObject({ restorable: true, writable: false });
+        expect(data.fields.conflictLine).toContain('cannot write to this library');
+        expect(data.canRestore).toBe(false);
     });
 
     it('restores a corrupt table from the version this device wrote', async () => {
@@ -768,7 +824,7 @@ describe('what the item-pane section reports', () => {
         expect(restored).toMatchObject({ ok: true, restoredFrom: 2 });
         const data = await readTableSectionData(item);
         expect(data.reason).toBeNull();
-        expect(data.restorableUnreadable).toBe(false);
+        expect(data.canRestore).toBe(false);
     });
 
     it('reads the table once on an ordinary table, and never the snapshot', async () => {

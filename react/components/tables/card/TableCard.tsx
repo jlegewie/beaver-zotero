@@ -52,6 +52,7 @@ import InstructionsDisclosure from '@beaver/agent-ui/primitives/InstructionsDisc
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import type { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
+import { tableFilesEditable } from '../../../../src/services/artifacts/tableItemIdentity';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import type { MessageFiltersState } from '../../../atoms/messageComposition';
 import { selectCollection, selectTagFilter, selectView } from '../../../utils/selectItem';
@@ -107,18 +108,14 @@ function hasSubcollections(scope: TableCardLibraryScope): boolean {
     return !!collection && collection.hasChildCollections();
 }
 
-/**
- * A library's name and whether Beaver may write a table into it. A table is a
- * stored file, so a group that allows item edits but not file edits cannot
- * hold one.
- */
+/** A library's name and whether Beaver may write a table into it. */
 function destinationLibrary(ref: string): { name: string; writable: boolean } | null {
     const id = libraryIdOf(ref);
     if (!id) return null;
     try {
         const library = Zotero.Libraries.get(id) as Zotero.Library | false;
         return library
-            ? { name: library.name, writable: !!library.editable && library.filesEditable !== false }
+            ? { name: library.name, writable: tableFilesEditable(library) }
             : null;
     } catch {
         return null;

@@ -1,4 +1,4 @@
-import { registerTableShadowRestore } from './tableStore';
+import { checkShadowRestore, registerTableShadowRestore } from './tableStore';
 /**
  * Publishes the esbuild bundle's stored-table surfaces on the shared global.
  *
@@ -58,6 +58,7 @@ export function registerTablesApi(): void {
         shadow: {
             // Reading the shadow is esbuild-safe, so it is answered here.
             inspect: (ref, observed) => inspectTableShadow(ref, observed ?? null),
+            check: (ref) => checkShadowRestore(ref),
             // The plugin-owned store coordinates restoration with every writer.
             restore: async (ref) => {
                 const restore = getTableShadowRestore();

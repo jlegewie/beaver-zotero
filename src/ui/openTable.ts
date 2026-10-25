@@ -36,7 +36,7 @@ import { snapshotIsCurrent } from '../services/artifacts/tableRenderer';
 import {
     readTableItemSpec,
     resolveTableItem,
-    UNREADABLE_TABLE_RECOVERY,
+    unreadableTableRecovery,
     type TableRef,
 } from '../services/artifacts/tableItemIdentity';
 import { contextMainWindow, resolveNavigationWindow, WindowUnavailableError } from '../runtime/navigation';
@@ -122,10 +122,10 @@ export async function openTable(ref: TableRef, options: OpenTableOptions = {}): 
         // this device, or that cannot be read at all, opens nothing.
         const read = await readTableItemSpec(item);
         if (!read.ok) {
+            if (read.code === 'no_file') return { error: `Could not open table ${ref.key} — it has no file on disk.` };
+            const recovery = await unreadableTableRecovery(ref);
             return {
-                error: read.code === 'no_file'
-                    ? `Could not open table ${ref.key} — it has no file on disk.`
-                    : `Could not open table ${ref.key} — ${read.message.replace(/\.$/, '')}. ${UNREADABLE_TABLE_RECOVERY}`,
+                error: `Could not open table ${ref.key} — ${read.message.replace(/\.$/, '')}.${recovery ? ` ${recovery}` : ''}`,
             };
         }
         const win = await tableTabWindow(options.window);

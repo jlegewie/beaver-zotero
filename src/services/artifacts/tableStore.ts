@@ -85,9 +85,10 @@ import {
     readTableShadowSpec,
     recordTableShadow,
     tableSpecHash,
+    type TableShadowEntry,
     type TableSyncConflict,
 } from './recoveryShadow';
-import { readTable } from './tableItemIdentity';
+import { readTable, tableFilesEditable } from './tableItemIdentity';
 import {
     renderIsCurrent,
     renderTable,
@@ -297,6 +298,9 @@ export interface OpenTableResult {
      */
     conflict: TableSyncConflict | null;
 }
+
+/** What {@link checkShadowRestore} found. */
+export type TableShadowRestoreCheck = 'ok' | 'no_shadow' | 'no_payload' | 'not_writable';
 
 /** The outcome of {@link restoreShadowVersion}. */
 export type TableShadowRestoreResult =
@@ -526,11 +530,18 @@ async function versionFilesOnDisk(item: Zotero.Item): Promise<number[]> {
  * Called twice on every mutation — once by the entry point and once inside the
  * lock — because the set can change while a caller waits its turn.
  */
-function requireWritable(ref: TableRef): void {
+/** Why Beaver may not write this table now, or null when it may. */
+function writeRefusal(ref: TableRef): TableItemError | null {
     const excluded = checkLibraryExcluded(ref.libraryID);
-    if (excluded) throw new TableItemError(excluded.message, 'library_excluded');
+    if (excluded) return new TableItemError(excluded.message, 'library_excluded');
     const library = Zotero.Libraries.get(ref.libraryID);
-    if (library && (!library.editable || library.filesEditable === false)) throw new TableItemError('Library is read-only.', 'invalid_target');
+    if (library && !tableFilesEditable(library)) return new TableItemError('Library is read-only.', 'invalid_target');
+    return null;
+}
+
+function requireWritable(ref: TableRef): void {
+    const refusal = writeRefusal(ref);
+    if (refusal) throw refusal;
 }
 
 // ---------------------------------------------------------------------------
@@ -1705,7 +1716,7 @@ export async function openTableUncoordinated(ref: TableRef, accessGuard?: TableA
         const recovered = await guardStoredTable(ref, item, current, accessGuard);
         const sha256 = await tableSpecHash(current.spec);
         const library = Zotero.Libraries.get(ref.libraryID);
-        if (!checkLibraryExcluded(ref.libraryID) && library && library.editable && library.filesEditable !== false) {
+        if (!checkLibraryExcluded(ref.libraryID) && tableFilesEditable(library)) {
             try {
                 if (await persistRebuiltTable(ref, item, current, accessGuard))
                     recovered.unshift({ kind: 'table_file_rebuilt', version: current.version });
@@ -1804,6 +1815,37 @@ async function detectSyncConflict(
 // Restoring what a sync conflict took
 // ---------------------------------------------------------------------------
 
+/** The version this device last wrote, and its spec when a restore could write it back. */
+async function retainedShadow(
+    ref: TableRef
+): Promise<{ shadow: null; spec: null } | { shadow: TableShadowEntry; spec: TableSpec | null }> {
+    const shadow = await lastTableShadow(ref);
+    if (!shadow) return { shadow: null, spec: null };
+    return { shadow, spec: await readTableShadowSpec(shadow) };
+}
+
+/**
+ * Whether {@link restoreShadowVersion} would write a version back right now,
+ * checked the way the restore checks it. Surfaces that offer or mention the
+ * restore ask this rather than judging from the shadow row, whose payload can
+ * be over the retention cap, pruned or no longer match its digest.
+ *
+ * - `ok`: the restore would run.
+ * - `no_shadow` / `no_payload`: this device keeps no usable copy.
+ * - `not_writable`: a copy is kept, but the library is excluded or read-only.
+ */
+export async function checkShadowRestore(ref: TableRef): Promise<TableShadowRestoreCheck> {
+    try {
+        const retained = await retainedShadow(ref);
+        if (!retained.shadow) return 'no_shadow';
+        if (!retained.spec) return 'no_payload';
+        return writeRefusal(ref) ? 'not_writable' : 'ok';
+    } catch (error) {
+        logger(`tableStore: could not check the restore for ${ref.key}: ${String(error)}`, 2);
+        return 'no_payload';
+    }
+}
+
 /**
  * Writes the version this device last wrote back, as a **new** version.
  *
@@ -1825,16 +1867,15 @@ export async function restoreShadowVersionUncoordinated(
 ): Promise<TableShadowRestoreResult> {
     requireWritable(ref);
 
-    const shadow = await lastTableShadow(ref);
-    if (!shadow) {
+    const retained = await retainedShadow(ref);
+    if (!retained.shadow) {
         return {
             ok: false,
             code: 'no_shadow',
             error: `This device has no recorded version of table ${ref.key} to restore.`,
         };
     }
-
-    const spec = await readTableShadowSpec(shadow);
+    const { shadow, spec } = retained;
     if (!spec) {
         return {
             ok: false,
@@ -2265,7 +2306,7 @@ async function guardStoredTable(ref: TableRef, item: Zotero.Item, current: Curre
     }
     const recovered: TableRecovery[] = [];
     const library = Zotero.Libraries.get(ref.libraryID);
-    if (current.spec && library && library.editable && library.filesEditable !== false) {
+    if (current.spec && tableFilesEditable(library)) {
         guard(current.spec);
         requireWritable(ref);
         const reconciled = await reconcileLog(item, current);

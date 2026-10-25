@@ -39,6 +39,8 @@ export interface TableSectionConflict {
     shadowVersion: number;
     /** Whether the retained spec is still here to be restored. */
     restorable: boolean;
+    /** False when the library is excluded or read-only, so nothing can be restored into it. */
+    writable?: boolean;
 }
 
 export interface TableSectionInput {
@@ -435,9 +437,11 @@ function conflictLineFor(conflict: TableSectionConflict): string {
             ? `Showing a different version ${conflict.documentVersion} from another device`
             : `Showing version ${conflict.documentVersion} from another device`;
     const wrote = `this device last wrote version ${conflict.shadowVersion}`;
-    const tail = conflict.restorable
-        ? `your version ${conflict.shadowVersion} is kept here and can be restored as a new version.`
-        : `but Beaver no longer keeps a copy of your version ${conflict.shadowVersion}.`;
+    const tail = !conflict.restorable
+        ? `but Beaver no longer keeps a copy of your version ${conflict.shadowVersion}.`
+        : conflict.writable === false
+            ? `your version ${conflict.shadowVersion} is kept here, but Beaver cannot write to this library to restore it.`
+            : `your version ${conflict.shadowVersion} is kept here and can be restored as a new version.`;
     return `${showing}; ${wrote}. Nothing was merged and nothing was overwritten — ${tail}`;
 }
 

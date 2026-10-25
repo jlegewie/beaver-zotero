@@ -192,10 +192,10 @@ export interface TableSectionData {
     /** Whether the reader action has a file to open. */
     hasFile: boolean;
     /**
-     * The table cannot be read but this device has a version it wrote, which
-     * "Restore my version" writes back as a new version.
+     * The table went backwards or cannot be read, and "Restore my version"
+     * would write this device's last version back as a new version.
      */
-    restorableUnreadable?: boolean;
+    canRestore?: boolean;
 }
 
 /** Column headers by id, so a distribution read from a spec is labelled. */
@@ -251,12 +251,19 @@ export async function readTableSectionData(
     } else {
         reason = read.message;
     }
-    let restorableUnreadable = false;
-    if (!read.ok && read.code !== 'no_file') {
-        try {
-            restorableUnreadable = !!(await lastTableShadow({ libraryID: item.libraryID, key: item.key }));
-        } catch (error) {
-            logger(`tableItemPane: could not look for a restorable version: ${String(error)}`, 2);
+    // Offered only where it would work: the store checks the retained copy
+    // and the library the way the restore itself does.
+    let canRestore = false;
+    const check = getTablesApi()?.shadow.check;
+    if (check && (input.conflict || (!read.ok && read.code !== 'no_file'))) {
+        const outcome = await check({ libraryID: item.libraryID, key: item.key });
+        canRestore = outcome === 'ok';
+        if (input.conflict) {
+            input.conflict = {
+                ...input.conflict,
+                restorable: outcome === 'ok' || outcome === 'not_writable',
+                writable: outcome !== 'not_writable',
+            };
         }
     }
 
@@ -267,7 +274,7 @@ export async function readTableSectionData(
         logger(`tableItemPane: could not resolve the file: ${String(error)}`, 2);
     }
 
-    return { fields: buildTableSectionFields(input), reason, hasFile, restorableUnreadable };
+    return { fields: buildTableSectionFields(input), reason, hasFile, canRestore };
 }
 
 /** Compare the recovery shadow with the validated document, never the sidecar. */
@@ -421,7 +428,7 @@ async function populateSection({
             const actions = tableSectionActions(
                 windowOf(doc),
                 data.hasFile,
-                !!data.fields.conflict?.restorable || !!data.restorableUnreadable
+                !!data.canRestore
             );
             restore.disabled = !actions.restoreShadow;
             restore.hidden = !actions.restoreShadow;
@@ -485,9 +492,9 @@ export interface TableSectionActions {
     open: boolean;
     showInLibrary: boolean;
     /**
-     * True only for a table another device's copy replaced whose own version is
-     * still retained. There is nothing to restore otherwise, and an enabled
-     * button that cannot work is worse than no button.
+     * True only when the restore would run: the table went backwards or cannot
+     * be read, this device's version is retained and verifies, and the library
+     * can be written. An enabled button that cannot work is worse than none.
      */
     restoreShadow: boolean;
 }
@@ -707,7 +714,7 @@ export async function describeTableItemPane(
         actions: tableSectionActions(
             win,
             data.hasFile,
-            !!data.fields.conflict?.restorable || !!data.restorableUnreadable
+            !!data.canRestore
         ),
     };
 }

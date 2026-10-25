@@ -40,7 +40,7 @@ import type { TableShadowReport, TableShadowObservation } from './recoveryShadow
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import type { TableVersionEntry } from './tableItemIdentity';
-import type { TableWriteResult, TableShadowRestoreResult } from './tableStore';
+import type { TableWriteResult, TableShadowRestoreCheck, TableShadowRestoreResult } from './tableStore';
 import type { TableViewSummary } from './view/enhanceTableDocument';
 import type { ReaderTableDiagnostics } from './view/readerTableView';
 import type { OpenTableOptions, OpenTableOutcome } from '../../ui/openTable';
@@ -89,6 +89,11 @@ export interface TablesShadowApi {
         ref: TableRef,
         observed?: TableShadowObservation | null
     ): Promise<TableShadowReport>;
+    /**
+     * Whether {@link restore} would write a version back now. Ask this before
+     * offering or mentioning the restore.
+     */
+    check(ref: TableRef): Promise<TableShadowRestoreCheck>;
     /** Writes the retained spec back as a new version. */
     restore(ref: TableRef): Promise<TableShadowRestoreResult | TableShadowUnavailable>;
 }

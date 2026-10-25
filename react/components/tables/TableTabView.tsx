@@ -5,7 +5,7 @@ import MarkdownRenderer from '../messages/MarkdownRenderer';
 import {
     isTableItemError,
     readTable,
-    UNREADABLE_TABLE_RECOVERY,
+    unreadableTableRecovery,
     type TableRef,
 } from '../../../src/services/artifacts/tableItemIdentity';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
@@ -39,11 +39,16 @@ function sameTable(a: Loaded, b: Loaded): boolean {
     return a.version === b.version && JSON.stringify(a.spec) === JSON.stringify(b.spec);
 }
 
-/** What the tab says when the table cannot be read, with the way back for a damaged file. */
-function readFailure(error: unknown): string {
+/**
+ * What the tab says when the table cannot be read, with the way back for a
+ * damaged file when there is one.
+ */
+async function readFailure(error: unknown, ref: TableRef): Promise<string> {
     const message = String((error as Error)?.message ?? error).replace(/\.$/, '');
     const damaged = isTableItemError(error) && error.code !== 'file_missing' && error.code !== 'not_a_table';
-    return damaged ? `This table could not be read — ${message}. ${UNREADABLE_TABLE_RECOVERY}` : `${message}.`;
+    if (!damaged) return `${message}.`;
+    const recovery = await unreadableTableRecovery(ref);
+    return `This table could not be read — ${message}.${recovery ? ` ${recovery}` : ''}`;
 }
 
 const renderCellText = (text: string) => (
@@ -107,7 +112,8 @@ export default function TableTabView({
                 setState({ kind: 'table', table: read });
             } catch (error) {
                 if (!live || mine !== sequence) return;
-                const message = readFailure(error);
+                const message = await readFailure(error, tableRef);
+                if (!live || mine !== sequence) return;
                 // A table already on screen stays; the failure is reported over it.
                 setState((current) =>
                     current.kind === 'table'
