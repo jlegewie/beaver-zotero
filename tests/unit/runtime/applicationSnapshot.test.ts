@@ -36,6 +36,11 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({ libraryRefForLibraryID: (
 vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({ isTableAttachment: (item: any) => item?.isTable === true }));
 import { buildZoteroApplicationState } from '../../../react/atoms/applicationState';
 
+/** A main window whose selected tab is a Beaver tab on `itemID`. */
+function tableTabWindow(itemID: number) {
+    return { Zotero_Tabs: { selectedID: 'beaver-1', _tabs: [{ id: 'beaver-1', type: 'beaver-table', data: { itemID } }] } };
+}
+
 it('captures items, searches and collections before database awaits or a focus change', async () => {
     const originalItem = { libraryID: 1, key: 'ORIGINAL' };
     let selection = [originalItem];
@@ -268,9 +273,12 @@ describe('excluded libraries', () => {
 it('reports a table open in its Beaver tab as the open table, not a reader', async () => {
     const { currentReaderAttachmentAtom } = await import('../../../react/atoms/messageComposition');
     const { isLibraryTabAtom } = await import('../../../react/atoms/ui');
-    mocks.win = undefined;
+    mocks.win = tableTabWindow(7);
     mocks.reader = undefined;
-    vi.stubGlobal('Zotero', { Libraries: { get: () => ({ libraryID: 1, name: 'My Library', editable: true, isGroup: false }) } });
+    vi.stubGlobal('Zotero', {
+        Libraries: { get: () => ({ libraryID: 1, name: 'My Library', editable: true, isGroup: false }) },
+        Items: { getLibraryAndKeyFromID: () => ({ libraryID: 1, key: 'TABLE222' }) },
+    });
     const store = createStore();
     store.set(isLibraryTabAtom, false);
     store.set(currentReaderAttachmentAtom, {
@@ -281,5 +289,47 @@ it('reports a table open in its Beaver tab as the open table, not a reader', asy
     expect(state.table_state).toEqual({ library_id: 1, zotero_key: 'TABLE222', library_ref: 'u', title: 'Comparison' });
     expect(state.reader_state).toBeUndefined();
     expect(state.current_library).toMatchObject({ library_id: 1, name: 'My Library' });
+    expect(state).not.toHaveProperty('current_library_excluded');
+});
+
+it('flags a Beaver tab open on a table in an excluded library without identifying it', async () => {
+    // The context atom stays empty for excluded libraries; only the selected
+    // tab identifies the table.
+    const { currentReaderAttachmentAtom } = await import('../../../react/atoms/messageComposition');
+    const { isLibraryTabAtom } = await import('../../../react/atoms/ui');
+    mocks.win = tableTabWindow(9);
+    mocks.reader = undefined;
+    vi.stubGlobal('Zotero', {
+        Libraries: { get: () => null },
+        Items: { getLibraryAndKeyFromID: (id: number) => (id === 9 ? { libraryID: 2, key: 'HIDDEN01' } : false) },
+    });
+    const store = createStore();
+    store.set(isLibraryTabAtom, false);
+    store.set(currentReaderAttachmentAtom, null);
+    const state = await buildZoteroApplicationState(store.get);
+    expect(state.current_view).toBe('table');
+    expect(state.current_library_excluded).toBe(true);
+    expect(state).not.toHaveProperty('table_state');
+    expect(state).not.toHaveProperty('current_library');
+    expect(JSON.stringify(state)).not.toContain('HIDDEN01');
+});
+
+it('does not report a table left in the context atom once its tab is no longer selected', async () => {
+    const { currentReaderAttachmentAtom } = await import('../../../react/atoms/messageComposition');
+    const { isLibraryTabAtom } = await import('../../../react/atoms/ui');
+    mocks.win = tableTabWindow(11);
+    mocks.reader = undefined;
+    vi.stubGlobal('Zotero', {
+        Libraries: { get: () => ({ libraryID: 1, name: 'My Library', editable: true, isGroup: false }) },
+        Items: { getLibraryAndKeyFromID: () => ({ libraryID: 1, key: 'TABLE333' }) },
+    });
+    const store = createStore();
+    store.set(isLibraryTabAtom, false);
+    store.set(currentReaderAttachmentAtom, {
+        id: 7, libraryID: 1, key: 'TABLE222', isTable: true, getField: () => 'Comparison',
+    } as any);
+    const state = await buildZoteroApplicationState(store.get);
+    expect(state.current_view).toBe('table');
+    expect(state).not.toHaveProperty('table_state');
 });
 

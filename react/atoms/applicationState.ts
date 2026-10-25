@@ -25,6 +25,7 @@ import {
 import { currentReaderAttachmentAtom, readerTextSelectionAtom, stagedReaderActionContextAtom } from './messageComposition';
 import { isTableAttachment } from '../../src/services/artifacts/tableItemIdentity';
 import type { TableState } from '@beaver/agent-core/types/attachments/apiTypes';
+import { selectedTableTabItemID } from '../../src/ui/tableTabContextPane';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
@@ -173,13 +174,17 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
     // Detect the note-editor view from the raw tab context, NOT from the
     // exclusion-filtered noteState
     const isNoteTabActive = !!get(currentNoteItemAtom);
-    // A Beaver tab sets its table as the current context the way a reader
-    // tab sets its document (see `updateTableTabContextAtom`).
-    const contextItem = stagedReaderAction ? null : get(currentReaderAttachmentAtom);
-    const tableItem = contextItem && isTableAttachment(contextItem) ? contextItem : null;
+    // Detect the table view from the selected Beaver tab, NOT from the
+    // context atom, which stays empty for a table in an excluded library. The
+    // atom supplies the table's details (see `updateTableTabContextAtom`).
+    const tableTabItemID = stagedReaderAction ? null : selectedTableTabItemID(contextWindow);
+    const contextItem = tableTabItemID === null ? null : get(currentReaderAttachmentAtom);
+    const tableItem = contextItem && contextItem.id === tableTabItemID && isTableAttachment(contextItem)
+        ? contextItem
+        : null;
     const currentView: 'library' | 'file_reader' | 'note_editor' | 'table' = stagedReaderAction
         ? 'file_reader'
-        : get(isLibraryTabAtom) ? 'library' : isNoteTabActive ? 'note_editor' : tableItem ? 'table' : 'file_reader';
+        : get(isLibraryTabAtom) ? 'library' : isNoteTabActive ? 'note_editor' : tableTabItemID !== null ? 'table' : 'file_reader';
     let tableState: TableState | null = null;
     if (tableItem && searchableLibrarySet.has(tableItem.libraryID)) {
         const libraryRef = libraryRefForLibraryID(tableItem.libraryID);
@@ -204,6 +209,8 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         currentLibraryExcluded = isExcluded(libraryID);
     } else if (currentView === 'note_editor') {
         currentLibraryExcluded = isExcluded(get(currentNoteItemAtom)?.libraryID);
+    } else if (currentView === 'table' && tableTabItemID !== null) {
+        currentLibraryExcluded = isExcluded((Zotero.Items.getLibraryAndKeyFromID(tableTabItemID) || undefined)?.libraryID);
     }
 
     if (currentView === 'file_reader' && readerState) {
