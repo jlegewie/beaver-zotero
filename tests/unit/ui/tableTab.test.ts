@@ -10,8 +10,13 @@ const isTableItem = vi.hoisted(() => vi.fn(() => true));
 const loadTableItemFields = vi.hoisted(() => vi.fn(async () => {}));
 const optedIn = vi.hoisted(() => new Set<number>());
 const redirect = vi.hoisted(() => ({ current: null as null | ((reader: any, item: any) => boolean) }));
+const prefs = vi.hoisted(() => new Map<string, unknown>());
 
 vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({ isTableItem, loadTableItemFields }));
+vi.mock('../../../src/utils/prefs', () => ({
+    getPref: (key: string) => prefs.get(key) ?? '',
+    setPref: (key: string, value: unknown) => { prefs.set(key, value); },
+}));
 vi.mock('../../../src/services/artifacts/view/readerTableView', () => ({
     isTableReaderOptedIn: (id: number) => optedIn.has(id),
     setTableReaderRedirect: (fn: any) => { redirect.current = fn; },
@@ -20,125 +25,28 @@ vi.mock('../../../src/services/artifacts/view/readerTableView', () => ({
 import {
     TABLE_TAB_TYPE,
     cleanupTableTabs,
-    closeTableTabsForWindow,
-    dropTableTabsFromSession,
     initTableTabs,
     listTableTabs,
     openTableTab,
-    recoverTabsAfterTableTabs,
     setTableTabWarning,
     tableTabStats,
 } from '../../../src/ui/tableTab';
+import {
+    cleanupBeaverTabs,
+    closeBeaverTabsForWindow,
+    dropBeaverTabsFromSession,
+    initBeaverTabs,
+    recoverTabsAfterBeaverTabs,
+    restoreBeaverTabs,
+} from '../../../src/ui/beaverTabs';
+import { fakeWindow, type FakeTab } from '../../helpers/fakeZoteroTabs';
 
 const REF = { libraryID: 1, key: 'TABLEKEY' };
 
-interface FakeTab { id: string; type: string; title?: string; data?: any; onClose?: () => void }
-
-let notifyAdd: ((id: string, extra: any) => void) | null = null;
-// Zotero's tab ids are random, so unique across windows.
-let nextTabID = 0;
-
-class FakeTabs {
-    tabs: FakeTab[] = [{ id: 'zotero-pane', type: 'library', data: {} }];
-    selectedID = 'zotero-pane';
-    tabHooks: Record<string, Record<string, any>> = {
-        // Zotero's own: an unloaded tab at `index`, which must be >= 1.
-        restoreState: {
-            reader: vi.fn(async (tab: FakeTab, index: number) => {
-                if (!(index >= 1)) throw new Error(`'index' should be an integer > 0 (was ${index})`);
-                this.add({ type: 'reader-unloaded', title: tab.title, data: tab.data });
-                return { itemID: tab.data.itemID };
-            }),
-            note: vi.fn(async (tab: FakeTab, index: number) => {
-                if (!(index >= 1)) throw new Error(`'index' should be an integer > 0 (was ${index})`);
-                this.add({ type: 'note-unloaded', title: tab.title, data: tab.data });
-                return { itemID: tab.data.itemID };
-            }),
-        },
-        getTitle: {},
-        undoClose: {},
-    };
-    deck: HTMLElement;
-    rename = vi.fn(async (id: string, title?: string) => {
-        const tab = this.tabs.find((t) => t.id === id);
-        if (!tab) return;
-        tab.title = title || (await this.tabHooks.getTitle?.beaver?.(tab));
-    });
-    restoreState = vi.fn(async (tabs: FakeTab[]) => {
-        for (const tab of tabs) this.add({ type: `${tab.type}-unloaded`, title: tab.title, data: tab.data });
-    });
-
-    constructor(private doc: Document) {
-        this.deck = doc.createElement('div');
-        doc.body.appendChild(this.deck);
-    }
-
-    get selectedType() {
-        return this.tabs.find((t) => t.id === this.selectedID)?.type;
-    }
-
-    add({ type, title, data, select, onClose }: any) {
-        const id = `tab-${++nextTabID}`;
-        const container = this.doc.createElement('div');
-        container.id = id;
-        this.deck.appendChild(container);
-        this.tabs.push({ id, type, title, data, onClose });
-        notifyAdd?.(id, { ...data, type });
-        if (select) this.selectedID = id;
-        return { id, container };
-    }
-
-    select(id: string) {
-        this.selectedID = id;
-    }
-
-    close(ids: string | string[]) {
-        for (const id of Array.isArray(ids) ? ids : [ids]) {
-            const index = this.tabs.findIndex((t) => t.id === id);
-            if (index < 0) continue;
-            const [tab] = this.tabs.splice(index, 1);
-            if (this.selectedID === id) this.selectedID = 'zotero-pane';
-            tab.onClose?.();
-            // Zotero removes the container on the next tick.
-            setTimeout(() => this.doc.getElementById(id)?.remove());
-        }
-    }
-
-    getState() {
-        return this.tabs.map((t) => ({ type: t.type.replace(/-unloaded$/, ''), title: t.title, data: t.data }));
-    }
-}
-
-function fakeWindow() {
-    const doc = document.implementation.createHTMLDocument('main');
-    const listeners: Record<string, Array<() => void>> = {};
-    const handle = { setWarning: vi.fn(), reload: vi.fn() };
-    const win: any = {
-        closed: false,
-        document: doc,
-        location: { href: 'chrome://zotero/content/zoteroPane.xhtml' },
-        addEventListener: vi.fn((name: string, fn: () => void) => { (listeners[name] ??= []).push(fn); }),
-        dispatch: (name: string) => listeners[name]?.forEach((fn) => fn()),
-        BeaverReact: {
-            renderTableTab: vi.fn((container: HTMLElement) => {
-                container.appendChild(doc.createElement('section'));
-                return handle;
-            }),
-            unmountFromElement: vi.fn((container: HTMLElement) => {
-                container.replaceChildren();
-                return true;
-            }),
-        },
-        handle,
-    };
-    win.Zotero_Tabs = new FakeTabs(doc);
-    return win;
-}
-
-function tableItem(id = 42) {
+function tableItem(id = 42, key = REF.key) {
     return {
         id,
-        key: REF.key,
+        key,
         libraryID: REF.libraryID,
         isAttachment: () => true,
         attachmentContentType: 'text/html',
@@ -156,7 +64,7 @@ let session: { state: any; save: ReturnType<typeof vi.fn> };
 beforeEach(() => {
     vi.clearAllMocks();
     optedIn.clear();
-    notifyAdd = null;
+    prefs.clear();
     windows = [fakeWindow()];
     session = { state: { windows: [] }, save: vi.fn(async () => {}) };
     (globalThis as any).Services = {
@@ -167,18 +75,31 @@ beforeEach(() => {
         getMainWindows: () => windows,
         Session: session,
         Items: { get: vi.fn(() => tableItem()) },
+        Promise: { delay: vi.fn(async () => {}) },
         Notifier: {
             registerObserver: vi.fn((o: any) => { notifier = o; return 'beaver-table-tab'; }),
             unregisterObserver: vi.fn(),
         },
     });
     opener = vi.fn(async () => ({ ok: true }));
-    initTableTabs(opener as any);
+    startTabs(opener);
 });
 
 afterEach(() => {
-    cleanupTableTabs();
+    stopTabs();
 });
+
+/** Plugin startup: the shared Beaver tabs, then the table kind. */
+function startTabs(open: any) {
+    initBeaverTabs();
+    initTableTabs(open);
+}
+
+/** Plugin shutdown: the tabs close while their kind is registered. */
+function stopTabs(options: { saveSession?: boolean } = {}) {
+    cleanupBeaverTabs(options);
+    cleanupTableTabs();
+}
 
 describe('opening', () => {
     it('opens a beaver-table tab carrying the item and table, with React one level below a beaver-pane root', () => {
@@ -188,7 +109,7 @@ describe('opening', () => {
 
         expect(reused).toBe(false);
         const tab = win.Zotero_Tabs.tabs.find((t: FakeTab) => t.id === tabID);
-        expect(tab).toMatchObject({ type: TABLE_TAB_TYPE, title: 'Spec title', data: { itemID: 42, beaverTable: REF } });
+        expect(tab).toMatchObject({ type: TABLE_TAB_TYPE, title: 'Spec title', data: { itemID: 42, beaverTab: { kind: 'table', ref: REF } } });
         expect(win.Zotero_Tabs.selectedID).toBe(tabID);
 
         const pane = win.document.getElementById(`beaver-pane-table-${tabID}`);
@@ -266,7 +187,7 @@ describe('closing', () => {
         openTableTab(windows[0], tableItem(), REF);
         const { tabID: kept } = openTableTab(other, tableItem(), REF);
 
-        expect(closeTableTabsForWindow(windows[0])).toBe(1);
+        expect(closeBeaverTabsForWindow(windows[0])).toBe(1);
 
         expect(listTableTabs().map((t) => t.tabID)).toEqual([kept]);
         expect(windows[0].BeaverReact.unmountFromElement).toHaveBeenCalledOnce();
@@ -277,7 +198,7 @@ describe('closing', () => {
         session.state = {
             windows: [{ type: 'pane', tabs: [{ type: 'library' }, { type: TABLE_TAB_TYPE, data: {} }, { type: 'reader', data: { itemID: 9 } }] }],
         };
-        closeTableTabsForWindow(windows[0]);
+        closeBeaverTabsForWindow(windows[0]);
         expect(session.state.windows[0].tabs.map((t: any) => t.type)).toEqual(['library', 'reader']);
     });
 
@@ -317,7 +238,7 @@ describe('tab hooks', () => {
 
     it('reopens a closed table through the product open on undo-close', async () => {
         const hook = windows[0].Zotero_Tabs.tabHooks.undoClose.beaver;
-        await expect(hook({ data: { itemID: 42, beaverTable: REF } }, 3)).resolves.toBe(false);
+        await expect(hook({ data: { itemID: 42, beaverTab: { kind: 'table', ref: REF } } }, 3)).resolves.toBe(false);
         expect(opener).toHaveBeenCalledWith(REF, { window: windows[0], index: 3 });
     });
 
@@ -350,7 +271,7 @@ describe('tab hooks', () => {
         openTableTab(win, tableItem(), REF);
         session.state = { windows: [{ type: 'pane', tabs: [{ type: 'library' }, { type: TABLE_TAB_TYPE }] }] };
 
-        cleanupTableTabs({ saveSession: true });
+        stopTabs({ saveSession: true });
 
         expect(listTableTabs()).toEqual([]);
         expect(win.Zotero_Tabs.tabHooks.restoreState.beaver).toBeUndefined();
@@ -512,11 +433,11 @@ describe('session restore', () => {
         };
         // The plugin starts after that restore; its startup must not strip
         // the saved session it is about to compare against.
-        initTableTabs(opener as any);
-        closeTableTabsForWindow(win);
+        startTabs(opener);
+        closeBeaverTabsForWindow(win);
         expect(session.state.windows[0].tabs.some((t: any) => t.type === TABLE_TAB_TYPE)).toBe(false);
 
-        await expect(recoverTabsAfterTableTabs(win)).resolves.toBe(2);
+        await expect(recoverTabsAfterBeaverTabs(win)).resolves.toBe(2);
         expect(win.Zotero_Tabs.getState().map((t: any) => [t.type, t.data?.itemID])).toEqual([
             ['library', undefined],
             ['reader', 7],
@@ -524,28 +445,541 @@ describe('session restore', () => {
             ['note', 9],
         ]);
         // A second load of the same window does nothing.
-        await expect(recoverTabsAfterTableTabs(win)).resolves.toBe(0);
+        await expect(recoverTabsAfterBeaverTabs(win)).resolves.toBe(0);
     });
 
     it('leaves a window alone that got the hooks before it restored', async () => {
         session.state = { windows: [{ type: 'pane', tabs: [{ type: TABLE_TAB_TYPE }, { type: 'reader', data: { itemID: 8 } }] }] };
-        initTableTabs(opener as any);
+        startTabs(opener);
         const fresh = fakeWindow();
         wmListener.onOpenWindow({ docShell: { domWindow: fresh } });
         fresh.dispatch('DOMContentLoaded');
-        await expect(recoverTabsAfterTableTabs(fresh)).resolves.toBe(0);
+        await expect(recoverTabsAfterBeaverTabs(fresh)).resolves.toBe(0);
         expect(fresh.Zotero_Tabs.tabHooks.restoreState.reader).not.toHaveBeenCalled();
     });
 
     it('does nothing when the session it started from holds no Beaver tab', async () => {
         session.state = { windows: [{ type: 'pane', tabs: [{ type: 'library' }, { type: 'reader', data: { itemID: 8 } }] }] };
-        initTableTabs(opener as any);
-        await expect(recoverTabsAfterTableTabs(windows[0])).resolves.toBe(0);
+        startTabs(opener);
+        await expect(recoverTabsAfterBeaverTabs(windows[0])).resolves.toBe(0);
         expect(windows[0].Zotero_Tabs.tabHooks.restoreState.reader).not.toHaveBeenCalled();
     });
 
     it('reports whether anything was stripped', () => {
         session.state = { windows: [{ type: 'pane', tabs: [{ type: 'library' }] }] };
-        expect(dropTableTabsFromSession()).toBe(false);
+        expect(dropBeaverTabsFromSession()).toBe(false);
     });
+});
+
+describe('reopening Beaver tabs after a lifecycle close', () => {
+    const T1 = { libraryID: 1, key: 'TABLEONE' };
+    const T2 = { libraryID: 1, key: 'TABLETWO' };
+    const IDS: Record<string, number> = { TABLEONE: 51, TABLETWO: 52, TABLEKEY: 42 };
+
+    /** The product open as the tab sees it: opens or reuses the tab. */
+    function openingOpener(fail: Record<string, string> = {}) {
+        return vi.fn(async (ref: any, options: any) => {
+            if (fail[ref.key]) return { error: fail[ref.key] };
+            openTableTab(options.window, tableItem(IDS[ref.key] ?? 1, ref.key), ref, {
+                background: options.background,
+                index: options.index,
+            });
+            return { ok: true as const };
+        });
+    }
+
+    function layout(win: any) {
+        return win.Zotero_Tabs.getState().map((t: any) =>
+            t.type === TABLE_TAB_TYPE ? `table:${t.data.beaverTab.ref.key}` : `${t.type}:${t.data?.itemID ?? ''}`);
+    }
+
+    function selected(win: any) {
+        const tab = win.Zotero_Tabs.tabs.find((t: FakeTab) => t.id === win.Zotero_Tabs.selectedID);
+        return tab?.type === TABLE_TAB_TYPE ? `table:${tab.data.beaverTab.ref.key}` : tab?.type;
+    }
+
+    /** library, reader 7, table one, reader 8, table two — table two selected. */
+    function arrange(win: any) {
+        win.Zotero_Tabs.add({ type: 'reader', data: { itemID: 7 } });
+        openTableTab(win, tableItem(51, T1.key), T1, { background: true });
+        win.Zotero_Tabs.add({ type: 'reader', data: { itemID: 8 } });
+        openTableTab(win, tableItem(52, T2.key), T2);
+        expect(layout(win)).toEqual(['library:', 'reader:7', 'table:TABLEONE', 'reader:8', 'table:TABLETWO']);
+    }
+
+    function record() {
+        const value = prefs.get('beaverTabsToRestore');
+        return value ? JSON.parse(value as string) : null;
+    }
+
+    function startPlugin(open = openingOpener()) {
+        stopTabs();
+        startTabs(open);
+        return open;
+    }
+
+    it('reopens the tables a plugin reload closed, in their positions, with the selected one selected', async () => {
+        const win = windows[0];
+        arrange(win);
+
+        // Plugin shutdown: removeChatPanel per window, then cleanup.
+        closeBeaverTabsForWindow(win);
+        expect(selected(win)).not.toBe('table:TABLETWO');
+        expect(record().windows).toEqual([{
+            window: String(win.docShell.outerWindowID),
+            primary: true,
+            tabs: [
+                { kind: 'table', ref: T1, index: 2, selected: false },
+                { kind: 'table', ref: T2, index: 4, selected: true },
+            ],
+        }]);
+        const open = startPlugin();
+
+        await expect(restoreBeaverTabs(win)).resolves.toBe(2);
+
+        expect(layout(win)).toEqual(['library:', 'reader:7', 'table:TABLEONE', 'reader:8', 'table:TABLETWO']);
+        expect(selected(win)).toBe('table:TABLETWO');
+        expect(open).toHaveBeenCalledWith(T1, { window: win, background: true, index: 2 });
+        expect(prefs.get('beaverTabsToRestore')).toBe('');
+    });
+
+    it('remembers the tabs it closes on quit, and the next start reopens them in the first window', async () => {
+        const win = windows[0];
+        arrange(win);
+        quitObserver.observe();
+        expect(listTableTabs()).toEqual([]);
+        expect(record().windows[0].tabs).toHaveLength(2);
+
+        // A new run of Zotero: its session restored the other tabs, and Zotero
+        // selected the neighbour it chose when the selected table closed.
+        const next = fakeWindow();
+        next.Zotero_Tabs.add({ type: 'reader-unloaded', data: { itemID: 7 } });
+        next.Zotero_Tabs.add({ type: 'reader-unloaded', data: { itemID: 8 }, select: true });
+        windows = [next];
+        (Zotero as any).__beaverAppSessionID = 'a later run';
+        try {
+            startPlugin();
+            await expect(restoreBeaverTabs(next)).resolves.toBe(2);
+        } finally {
+            delete (Zotero as any).__beaverAppSessionID;
+        }
+        expect(layout(next)).toEqual(['library:', 'reader:7', 'table:TABLEONE', 'reader:8', 'table:TABLETWO']);
+        expect(selected(next)).toBe('table:TABLETWO');
+        expect(prefs.get('beaverTabsToRestore')).toBe('');
+    });
+
+    it('reopens only the first window\'s tables after a restart, as Zotero restores only its tabs', async () => {
+        const second = fakeWindow();
+        windows.push(second);
+        openTableTab(windows[0], tableItem(51, T1.key), T1);
+        openTableTab(second, tableItem(52, T2.key), T2);
+        quitObserver.observe();
+        expect(record().windows.map((w: any) => [w.primary, w.tabs[0].ref.key])).toEqual([[true, 'TABLEONE'], [false, 'TABLETWO']]);
+
+        const next = fakeWindow();
+        windows = [next];
+        (Zotero as any).__beaverAppSessionID = 'a later run';
+        try {
+            startPlugin();
+            await restoreBeaverTabs(next);
+        } finally {
+            delete (Zotero as any).__beaverAppSessionID;
+        }
+        expect(layout(next)).toEqual(['library:', 'table:TABLEONE']);
+    });
+
+    it('gives each window its own tables back after a plugin reload', async () => {
+        const second = fakeWindow();
+        windows.push(second);
+        openTableTab(windows[0], tableItem(51, T1.key), T1);
+        openTableTab(second, tableItem(52, T2.key), T2);
+        for (const win of windows) closeBeaverTabsForWindow(win);
+        startPlugin();
+
+        await restoreBeaverTabs(second);
+        await restoreBeaverTabs(windows[0]);
+
+        expect(layout(windows[0])).toEqual(['library:', 'table:TABLEONE']);
+        expect(layout(second)).toEqual(['library:', 'table:TABLETWO']);
+    });
+
+    it('never remembers a tab the user closed, or one closed because its table was trashed', async () => {
+        const win = windows[0];
+        const { tabID } = openTableTab(win, tableItem(51, T1.key), T1);
+        openTableTab(win, tableItem(52, T2.key), T2);
+
+        win.Zotero_Tabs.close(tabID);
+        await notifier.notify('trash', 'item', [52], {});
+
+        expect(listTableTabs()).toEqual([]);
+        expect(prefs.get('beaverTabsToRestore') ?? '').toBe('');
+        closeBeaverTabsForWindow(win);
+        expect(prefs.get('beaverTabsToRestore') ?? '').toBe('');
+    });
+
+    it('reopens a list once: a later load, or a crash after it, finds nothing', async () => {
+        const win = windows[0];
+        openTableTab(win, tableItem(51, T1.key), T1);
+        closeBeaverTabsForWindow(win);
+        const open = startPlugin();
+        await expect(restoreBeaverTabs(win)).resolves.toBe(1);
+        // The user closes it; a second load of the window opens nothing.
+        win.Zotero_Tabs.close(findTabID(win, T1));
+
+        await expect(restoreBeaverTabs(win)).resolves.toBe(0);
+        expect(open).toHaveBeenCalledOnce();
+    });
+
+    it('skips a table that is gone or unreadable without a message, and keeps the others in place', async () => {
+        const win = windows[0];
+        arrange(win);
+        closeBeaverTabsForWindow(win);
+        const alert = vi.fn();
+        (Zotero as any).alert = alert;
+        startPlugin(openingOpener({ TABLEONE: 'Could not open table TABLEONE — Table TABLEONE is in the trash.' }));
+
+        await expect(restoreBeaverTabs(win)).resolves.toBe(1);
+
+        expect(layout(win)).toEqual(['library:', 'reader:7', 'reader:8', 'table:TABLETWO']);
+        expect(selected(win)).toBe('table:TABLETWO');
+        expect(alert).not.toHaveBeenCalled();
+    });
+
+    it('does not open a second tab for a table already open again', async () => {
+        const win = windows[0];
+        openTableTab(win, tableItem(51, T1.key), T1);
+        closeBeaverTabsForWindow(win);
+        startPlugin();
+        // A reader redirect, or undo-close, got there first.
+        openTableTab(win, tableItem(51, T1.key), T1, { background: true });
+
+        await restoreBeaverTabs(win);
+
+        expect(layout(win)).toEqual(['library:', 'table:TABLEONE']);
+    });
+
+    it('leaves the selection alone when the user moved to another tab while tables reopened', async () => {
+        const win = windows[0];
+        arrange(win);
+        closeBeaverTabsForWindow(win);
+        const inner = openingOpener();
+        startPlugin(vi.fn(async (ref: any, options: any) => {
+            win.Zotero_Tabs.select('zotero-pane');
+            return inner(ref, options);
+        }) as any);
+        win.Zotero_Tabs.select(win.Zotero_Tabs.tabs[1].id);
+
+        await restoreBeaverTabs(win);
+
+        expect(selected(win)).toBe('library');
+    });
+
+    it('reopens the last window\'s tables in the next main window after it closed while Zotero runs', async () => {
+        const win = windows[0];
+        arrange(win);
+        // The window has left Zotero's window list and is closing.
+        windows = [];
+        win.closed = true;
+        closeBeaverTabsForWindow(win);
+        expect(record().windows[0]).toMatchObject({ primary: true });
+
+        const next = fakeWindow();
+        next.Zotero_Tabs.add({ type: 'reader-unloaded', data: { itemID: 7 } });
+        next.Zotero_Tabs.add({ type: 'reader-unloaded', data: { itemID: 8 }, select: true });
+        windows = [next];
+        startPlugin();
+        await expect(restoreBeaverTabs(next)).resolves.toBe(2);
+        expect(layout(next)).toEqual(['library:', 'reader:7', 'table:TABLEONE', 'reader:8', 'table:TABLETWO']);
+        expect(selected(next)).toBe('table:TABLETWO');
+    });
+
+    it('remembers from the pane state Zotero saved when its own teardown closes the last window first', async () => {
+        const win = windows[0];
+        arrange(win);
+        // ZoteroPane.destroy: the window has left the list, Zotero keeps its
+        // tabs as the session's pane, then closes them all.
+        windows = [];
+        win.closed = true;
+        session.state = { windows: [{ type: 'pane', tabs: win.Zotero_Tabs.getState() }] };
+        win.Zotero_Tabs.closeAll();
+
+        expect(listTableTabs()).toEqual([]);
+        expect(record().windows[0].tabs).toEqual([
+            { kind: 'table', ref: T1, index: 2, selected: false },
+            { kind: 'table', ref: T2, index: 4, selected: true },
+        ]);
+        // Beaver's own unload follows and finds nothing left to remember.
+        closeBeaverTabsForWindow(win);
+        expect(record().windows[0].tabs).toHaveLength(2);
+        expect(session.state.windows[0].tabs.some((t: any) => t.type === TABLE_TAB_TYPE)).toBe(false);
+    });
+
+    it('forgets the tables of a window that closes while another stays open, as Zotero forgets its tabs', () => {
+        const win = windows[0];
+        const other = fakeWindow();
+        openTableTab(win, tableItem(51, T1.key), T1);
+        windows = [other];
+        win.closed = true;
+
+        closeBeaverTabsForWindow(win);
+        session.state = { windows: [{ type: 'pane', tabs: [] }] };
+        win.Zotero_Tabs.closeAll();
+
+        expect(prefs.get('beaverTabsToRestore') ?? '').toBe('');
+    });
+
+    it('keeps the list for a later load when the window never comes up', async () => {
+        const win = windows[0];
+        openTableTab(win, tableItem(51, T1.key), T1);
+        closeBeaverTabsForWindow(win);
+        const open = startPlugin();
+        win.__beaverRuntime.status = 'closing';
+
+        await expect(restoreBeaverTabs(win)).resolves.toBe(0);
+
+        expect(open).not.toHaveBeenCalled();
+        expect(record().windows[0].tabs).toHaveLength(1);
+    });
+
+    it('waits for the renderer before taking the list', async () => {
+        const win = windows[0];
+        openTableTab(win, tableItem(51, T1.key), T1);
+        closeBeaverTabsForWindow(win);
+        startPlugin();
+        win.__beaverRuntime.status = 'attaching';
+        (Zotero.Promise.delay as any).mockImplementationOnce(async () => {
+            expect(record()).not.toBeNull();
+            win.__beaverRuntime.status = 'ready';
+        });
+
+        await expect(restoreBeaverTabs(win)).resolves.toBe(1);
+    });
+
+    it('remembers the tabs plugin cleanup closes itself', () => {
+        const win = windows[0];
+        openTableTab(win, tableItem(51, T1.key), T1);
+        stopTabs({ saveSession: true });
+        expect(record().windows[0].tabs).toEqual([{ kind: 'table', ref: T1, index: 1, selected: true }]);
+    });
+
+    it('ignores a record that is too old', async () => {
+        const win = windows[0];
+        openTableTab(win, tableItem(51, T1.key), T1);
+        closeBeaverTabsForWindow(win);
+        const old = record();
+        prefs.set('beaverTabsToRestore', JSON.stringify({ ...old, savedAt: Date.now() - 8 * 24 * 60 * 60 * 1000 }));
+        const open = startPlugin();
+
+        await expect(restoreBeaverTabs(win)).resolves.toBe(0);
+        expect(open).not.toHaveBeenCalled();
+        expect(prefs.get('beaverTabsToRestore')).toBe('');
+    });
+
+    it('keeps the tables a restore had yet to reopen when the plugin unloads during it, and opens no stray tab', async () => {
+        const T3 = { libraryID: 1, key: 'TABLETRI' };
+        const win = windows[0];
+        win.Zotero_Tabs.add({ type: 'reader', data: { itemID: 7 } });
+        openTableTab(win, tableItem(51, T1.key), T1, { background: true });
+        openTableTab(win, tableItem(52, T2.key), T2, { background: true });
+        openTableTab(win, tableItem(53, T3.key), T3);
+        closeBeaverTabsForWindow(win);
+
+        // The second open is still reading when the plugin unloads.
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        const inner = openingOpener();
+        startPlugin(vi.fn(async (ref: any, options: any) => {
+            if (ref.key === T2.key) await gate;
+            return inner(ref, options).catch((error: unknown) => ({ error: String(error) }));
+        }) as any);
+        const running = restoreBeaverTabs(win);
+        await vi.waitFor(() => expect(layout(win)).toEqual(['library:', 'reader:7', 'table:TABLEONE']));
+
+        // Plugin shutdown: removeChatPanel, then cleanup.
+        closeBeaverTabsForWindow(win);
+        stopTabs();
+        release();
+        await expect(running).resolves.toBe(1);
+
+        expect(layout(win)).toEqual(['library:', 'reader:7']);
+        expect(record().windows[0].tabs).toEqual([
+            { kind: 'table', ref: T1, index: 2, selected: false },
+            { kind: 'table', ref: T2, index: 3, selected: false },
+            { kind: 'table', ref: T3, index: 4, selected: true },
+        ]);
+
+        startPlugin();
+        await expect(restoreBeaverTabs(win)).resolves.toBe(3);
+        expect(layout(win)).toEqual(['library:', 'reader:7', 'table:TABLEONE', 'table:TABLETWO', 'table:TABLETRI']);
+        expect(selected(win)).toBe('table:TABLETRI');
+    });
+
+    /** Starts a restore of T1, T2, T3 whose open of `slow` waits for `release`. */
+    async function restoreWithSlowOpen(win: any, slow: string) {
+        const T3 = { libraryID: 1, key: 'TABLETRI' };
+        win.Zotero_Tabs.add({ type: 'reader', data: { itemID: 7 } });
+        openTableTab(win, tableItem(51, T1.key), T1, { background: true });
+        openTableTab(win, tableItem(52, T2.key), T2, { background: true });
+        openTableTab(win, tableItem(53, T3.key), T3);
+        closeBeaverTabsForWindow(win);
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        const inner = openingOpener();
+        startPlugin(vi.fn(async (ref: any, options: any) => {
+            // The tab is up before the open's repair finishes.
+            const outcome = await inner(ref, options).catch((error: unknown) => ({ error: String(error) }));
+            if (ref.key === slow) await gate;
+            return outcome;
+        }) as any);
+        const running = restoreBeaverTabs(win);
+        return { running, release, T3 };
+    }
+
+    it('keeps the tables already back and those still to come when the last window closes mid-restore', async () => {
+        const win = windows[0];
+        const { running, release, T3 } = await restoreWithSlowOpen(win, T2.key);
+        await vi.waitFor(() => expect(layout(win)).toEqual(['library:', 'reader:7', 'table:TABLEONE', 'table:TABLETWO']));
+
+        // Zotero's teardown first, then Beaver's unload.
+        windows = [];
+        win.closed = true;
+        session.state = { windows: [{ type: 'pane', tabs: win.Zotero_Tabs.getState() }] };
+        win.Zotero_Tabs.closeAll();
+        closeBeaverTabsForWindow(win);
+        release();
+        await running;
+
+        expect(record().windows[0].tabs.map((tab: any) => [tab.ref.key, tab.index])).toEqual([
+            [T1.key, 2], [T2.key, 3], [T3.key, 4],
+        ]);
+    });
+
+    it('does not record a restored tab the user closed while its open was still finishing', async () => {
+        const win = windows[0];
+        const { running, release } = await restoreWithSlowOpen(win, T2.key);
+        await vi.waitFor(() => expect(layout(win)).toContain('table:TABLETWO'));
+
+        win.Zotero_Tabs.close(findTabID(win, T2));
+        closeBeaverTabsForWindow(win);
+        release();
+        await running;
+
+        expect(record().windows[0].tabs.map((tab: any) => tab.ref.key)).toEqual([T1.key, 'TABLETRI']);
+    });
+
+    it('keeps the selected table selected when a reload interrupts the restore after it reopened', async () => {
+        const win = windows[0];
+        const { running, release } = await restoreWithSlowOpen(win, 'TABLETRI');
+        await vi.waitFor(() => expect(layout(win)).toContain('table:TABLETRI'));
+        expect(selected(win)).not.toBe('table:TABLETRI');
+
+        closeBeaverTabsForWindow(win);
+        stopTabs();
+        release();
+        await running;
+
+        expect(record().windows[0].tabs.map((tab: any) => [tab.ref.key, tab.selected])).toEqual([
+            [T1.key, false], [T2.key, false], ['TABLETRI', true],
+        ]);
+    });
+
+    it('keeps a table whose open failed because its window was closing', async () => {
+        const win = windows[0];
+        const T3 = { libraryID: 1, key: 'TABLETRI' };
+        openTableTab(win, tableItem(51, T1.key), T1, { background: true });
+        openTableTab(win, tableItem(52, T2.key), T2, { background: true });
+        openTableTab(win, tableItem(53, T3.key), T3);
+        closeBeaverTabsForWindow(win);
+        const inner = openingOpener();
+        startPlugin(vi.fn(async (ref: any, options: any) => {
+            if (ref.key !== T2.key) return inner(ref, options);
+            // The last window closes while this open waits for it.
+            windows = [];
+            win.closed = true;
+            return { error: 'Could not open table TABLETWO — no Zotero window is available to show it.' };
+        }) as any);
+
+        await restoreBeaverTabs(win);
+        closeBeaverTabsForWindow(win);
+
+        expect(record().windows[0].tabs.map((tab: any) => tab.ref.key)).toEqual([T1.key, T2.key, T3.key]);
+    });
+
+    it('keeps a table whose open failed because the plugin was shutting the window\'s renderer down', async () => {
+        const win = windows[0];
+        openTableTab(win, tableItem(51, T1.key), T1, { background: true });
+        openTableTab(win, tableItem(52, T2.key), T2);
+        closeBeaverTabsForWindow(win);
+        const inner = openingOpener();
+        startPlugin(vi.fn(async (ref: any, options: any) => {
+            if (ref.key !== T2.key) return inner(ref, options);
+            // Plugin shutdown marks the window closing before it closes the tabs.
+            win.__beaverRuntime.status = 'closing';
+            return { error: 'Could not open table TABLETWO — no Zotero window is available to show it.' };
+        }) as any);
+
+        await restoreBeaverTabs(win);
+        closeBeaverTabsForWindow(win);
+
+        expect(record().windows[0].tabs.map((tab: any) => [tab.ref.key, tab.selected])).toEqual([[T1.key, false], [T2.key, true]]);
+    });
+
+    it('selects nothing when the user closed the selected table while later ones opened', async () => {
+        const win = windows[0];
+        openTableTab(win, tableItem(51, T1.key), T1);
+        openTableTab(win, tableItem(52, T2.key), T2, { background: true });
+        closeBeaverTabsForWindow(win);
+        const inner = openingOpener();
+        startPlugin(vi.fn(async (ref: any, options: any) => {
+            const outcome = await inner(ref, options);
+            if (ref.key === T2.key) win.Zotero_Tabs.close(findTabID(win, T1));
+            return outcome;
+        }) as any);
+        const select = vi.spyOn(win.Zotero_Tabs, 'select');
+
+        await expect(restoreBeaverTabs(win)).resolves.toBe(2);
+
+        expect(select).not.toHaveBeenCalled();
+        expect(layout(win)).toEqual(['library:', 'table:TABLETWO']);
+    });
+
+    it('reopens a previous run\'s tables only in the first main window', async () => {
+        const first = windows[0];
+        const second = fakeWindow();
+        windows.push(second);
+        openTableTab(first, tableItem(51, T1.key), T1);
+        quitObserver.observe();
+        (Zotero as any).__beaverAppSessionID = 'a later run';
+        try {
+            startPlugin();
+            // The second window's renderer is ready first.
+            await expect(restoreBeaverTabs(second)).resolves.toBe(0);
+            await expect(restoreBeaverTabs(first)).resolves.toBe(1);
+        } finally {
+            delete (Zotero as any).__beaverAppSessionID;
+        }
+        expect(layout(second)).toEqual(['library:']);
+        expect(layout(first)).toEqual(['library:', 'table:TABLEONE']);
+    });
+
+    it('refuses to open a tab once torn down', () => {
+        stopTabs();
+        expect(() => openTableTab(windows[0], tableItem(51, T1.key), T1)).toThrow(/not running/);
+        expect(windows[0].Zotero_Tabs.tabs).toHaveLength(1);
+    });
+
+    it('records only the Beaver tabs it tracks', () => {
+        const win = windows[0];
+        // A tab some other copy of the plugin left behind.
+        win.Zotero_Tabs.add({ type: TABLE_TAB_TYPE, data: { itemID: 52, beaverTab: { kind: 'table', ref: T2 } } });
+        openTableTab(win, tableItem(51, T1.key), T1);
+
+        closeBeaverTabsForWindow(win);
+
+        expect(record().windows[0].tabs).toEqual([{ kind: 'table', ref: T1, index: 2, selected: true }]);
+    });
+
+    function findTabID(win: any, ref: { key: string }) {
+        return win.Zotero_Tabs.tabs.find((t: FakeTab) => t.data?.beaverTab?.ref?.key === ref.key)!.id;
+    }
 });

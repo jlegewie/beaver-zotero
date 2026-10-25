@@ -13,7 +13,8 @@
  */
 
 import { openTable } from './openTable';
-import { listTableTabs, tableTabStartup, tableTabStats, TABLE_TAB_TYPE } from './tableTab';
+import { listTableTabs, tableTabStats, TABLE_TAB_KIND, TABLE_TAB_TYPE } from './tableTab';
+import { beaverTabStartup } from './beaverTabs';
 import { readTable, type TableRef } from '../services/artifacts/tableItemIdentity';
 import type { TableTabRenderReport } from './tableTabTypes';
 
@@ -240,7 +241,7 @@ export async function handleTableTabProbe(request: ProbeRequest = {}): Promise<a
                 tabs: tabsSummary(win),
                 entries: listTableTabs().map(({ renders, ...rest }) => ({ ...rest, renders: renders.slice(-3) })),
                 stats: tableTabStats(),
-                startup: tableTabStartup(),
+                startup: beaverTabStartup(),
                 mainWindows: Zotero.getMainWindows().length,
                 errors: errors.length,
             };
@@ -356,7 +357,7 @@ export async function handleTableTabProbe(request: ProbeRequest = {}): Promise<a
             let error: string | null = null;
             try {
                 await tabs.restoreState([
-                    { type: TABLE_TAB_TYPE, title: 'Probe table', data: { itemID: 1, beaverTable: { libraryID: 1, key: 'PROBEKEY' } } },
+                    { type: TABLE_TAB_TYPE, title: 'Probe table', data: { itemID: 1, beaverTab: { kind: TABLE_TAB_KIND, ref: { libraryID: 1, key: 'PROBEKEY' } } } },
                     { type: 'reader', title: 'Probe reader after table', data: { itemID: request.readerItemID } },
                 ]);
             } catch (e) {
