@@ -33,6 +33,7 @@ import {
     removeScreening,
     removeSource,
     sourceTotal,
+    setCancelling,
     setDescription,
     setInstructions,
     setSourceName,
@@ -52,8 +53,9 @@ import {
 } from '@beaver/agent-core/run-state/tableCardDraft';
 import { MAX_MODEL_COLUMNS } from '@beaver/agent-core/layouts/table';
 import { useAddSourcesMenu, type AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
+import { ArrowLeftIcon } from '@beaver/agent-ui/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
-import InstructionsDisclosure from '@beaver/agent-ui/primitives/InstructionsDisclosure';
+import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import type { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { getHost } from '@beaver/agent-ui/host';
@@ -78,6 +80,7 @@ import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSources
 import type { SourcesMenuEntries } from '../../ui/menus/hooks/useSourcesMenu';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
 import { paperOf, portableItemId, rowForItem } from './cardItems';
+import AutoGrowTextarea from './AutoGrowTextarea';
 import TableCardDropZone from './TableCardDropZone';
 import TableCardStepper from './TableCardStepper';
 import InlineEditableText, { type InlineEditableTextHandle } from './InlineEditableText';
@@ -177,8 +180,9 @@ const NO_SEARCH_FILTERS: MessageFiltersState = { libraryIds: [], collectionIds: 
  * another with Next and Back: Sources first, then Screening when the card has
  * it, then Columns, which is always last because it holds the run choice. A
  * completed step collapses to one line that leads back to it. Step state is
- * local; Create sends every part as edited, and Cancel declines with the
- * user's instructions, if any.
+ * local; Create sends every part as edited. Cancel opens a view that asks
+ * what Beaver should do instead, so typed instructions only ever travel with
+ * a decline.
  */
 export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop }) => {
     // The draft lives in the renderer's store, keyed by card, so a remount
@@ -199,7 +203,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     );
     const [rows, setRows] = useState<Record<string, ItemDisplayRow[] | undefined>>({});
     const [rowsById, setRowsById] = useState<Record<string, ItemDisplayRow>>({});
-    const [wantsInstructions, setWantsInstructions] = useState(() => !!request.user_instructions_prefill);
     const [isDecided, setIsDecided] = useState(false);
     const [dropNotice, setDropNotice] = useState<string | null>(null);
     const [editingTitle, setEditingTitle] = useState(false);
@@ -486,8 +489,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const blockerReason = createBlockerReason(draft, request, libraryOf);
     const blocker = blockerReason?.message ?? null;
     const actions = createActions(draft, request);
-    const hasInstructions = draft.instructions.trim().length > 0
-        && draft.instructions.trim() !== (request.user_instructions_prefill ?? '').trim();
+    const hasInstructions = draft.instructions.trim().length > 0;
 
     const decide = useCallback(
         (choice: TableCardChoice | null) => {
@@ -496,13 +498,12 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             decidedRef.current = true;
             setIsDecided(true);
             onSubmit(
-                choice
-                    ? tableCardResponse(draft, request, choice)
-                    : tableCardDecline(hasInstructions ? draft : setInstructions(draft, ''), request),
+                choice ? tableCardResponse(draft, request, choice) : tableCardDecline(draft, request),
             );
         },
-        [disabled, draft, hasInstructions, libraryOf, onSubmit, request],
+        [disabled, draft, libraryOf, onSubmit, request],
     );
+    const resumeEditing = useCallback(() => setDraft((prev) => setCancelling(prev, false)), [setDraft]);
 
     const showInZotero = useCallback((scope: TableCardLibraryScope) => {
         const libraryId = libraryIdOf(scope.library_ref);
@@ -811,7 +812,94 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         </div>
     ) : null;
 
-    const cancelLabel = hasInstructions ? 'Send instructions' : 'Cancel';
+    const stopButton = disabled && onStop && (
+        <Tooltip content="Stop the agent run" showArrow singleLine>
+            <Button
+                variant="outline"
+                rightIcon={StopStrokeIcon}
+                ariaLabel="Stop generating"
+                style={{ padding: '2px 5px' }}
+                onClick={onStop}
+                className="flex-none"
+            >
+                Stop
+            </Button>
+        </Tooltip>
+    );
+
+    if (draft.cancelling) {
+        const heldNotice = disabled && heldCaption ? (
+            <div className="table-card-notice table-card-notice-pending" role="status">
+                <Spinner size={12} />
+                <span className="table-card-notice-text">{heldCaption}</span>
+            </div>
+        ) : null;
+        return (
+            <div
+                ref={containerRef}
+                className="user-message-display table-card"
+                role="group"
+                aria-label="Cancel the proposed table"
+                aria-live="assertive"
+                onKeyDown={(e) => {
+                    // An IME composing text owns Escape: it dismisses the candidate.
+                    if (e.key !== 'Escape' || locked || isImeKeyEvent(e.nativeEvent)) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    resumeEditing();
+                }}
+            >
+                <div className="table-card-top">
+                    <div className="table-card-header">
+                        <div className="display-flex flex-row items-start min-w-0" style={{ gap: '0.45rem' }}>
+                            <Icon icon={TableIcon} className="font-color-secondary flex-none table-card-title-icon" />
+                            <span className="table-card-title flex-1 min-w-0 truncate">
+                                {draft.title.trim() || request.title || 'Untitled table'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div className="table-card-body" style={{ gap: BLOCK_GAP }}>
+                    <div className="table-card-header-body">
+                        <span className="font-color-secondary">Cancel this table?</span>
+                        <AutoGrowTextarea
+                            value={draft.instructions}
+                            placeholder="Optional: what should Beaver do instead?"
+                            aria-label="What Beaver should do instead (optional)"
+                            autoFocus
+                            disabled={locked}
+                            style={{ minHeight: '3.6em' }}
+                            onChange={(e) => setDraft((prev) => setInstructions(prev, e.target.value))}
+                        />
+                    </div>
+                </div>
+                <div className="table-card-footer">
+                    {heldNotice}
+                    <Button
+                        variant="ghost"
+                        icon={ArrowLeftIcon}
+                        onClick={resumeEditing}
+                        disabled={locked}
+                        className="flex-none whitespace-nowrap"
+                    >
+                        Back to table
+                    </Button>
+                    {stopButton}
+                    <div className="flex-1" />
+                    <Button
+                        variant={hasInstructions ? 'solid' : 'outline'}
+                        ariaLabel={hasInstructions ? 'Decline the table and send instructions' : 'Cancel the table'}
+                        onClick={() => decide(null)}
+                        disabled={locked}
+                        className="flex-none whitespace-nowrap"
+                        style={{ padding: hasInstructions ? '3px 8px' : '2px 6px' }}
+                    >
+                        {hasInstructions ? 'Send' : 'Cancel table'}
+                    </Button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <TableCardDropZone
@@ -851,51 +939,19 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     {stepHeading}
                     {draft.step === 'sources' ? sourcesStep : draft.step === 'screening' ? screeningStep : columnsStep}
                 </div>
-
-                {isLast && (
-                    <InstructionsDisclosure
-                        open={wantsInstructions}
-                        onOpen={() => setWantsInstructions(true)}
-                        value={draft.instructions}
-                        onChange={(text) => setDraft((prev) => setInstructions(prev, text))}
-                        revealLabel="Add instructions"
-                        revealAriaLabel="Add instructions for this table"
-                        heading="Your instructions"
-                        placeholder="What to change, or what you want done instead"
-                        ariaLabel="Instructions for this table (optional)"
-                        disabled={isDecided}
-                        autoFocus={!request.user_instructions_prefill}
-                    />
-                )}
-
-
             </div>
 
             <div className="table-card-footer">
                 {notice}
                 <Button
                     variant="ghost"
-                    ariaLabel={hasInstructions ? 'Decline the table and send instructions' : 'Cancel the table'}
-                    onClick={() => decide(null)}
+                    onClick={() => setDraft((prev) => setCancelling(prev, true))}
                     disabled={locked}
                     className="flex-none whitespace-nowrap"
                 >
-                    {cancelLabel}
+                    Cancel
                 </Button>
-                {disabled && onStop && (
-                    <Tooltip content="Stop the agent run" showArrow singleLine>
-                        <Button
-                            variant="outline"
-                            rightIcon={StopStrokeIcon}
-                            ariaLabel="Stop generating"
-                            style={{ padding: '2px 5px' }}
-                            onClick={onStop}
-                            className="flex-none"
-                        >
-                            Stop
-                        </Button>
-                    </Tooltip>
-                )}
+                {stopButton}
                 {/* "Add screening" joins this footer when screening exists (P4). */}
                 <div className="flex-1" />
                 {stepIndex > 0 && (

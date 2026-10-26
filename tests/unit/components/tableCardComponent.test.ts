@@ -123,6 +123,10 @@ function dragEvent(type: string, data: Record<string, string>): Event {
     return event;
 }
 
+function instructionsField(): HTMLTextAreaElement {
+    return container.querySelector('textarea[aria-label="What Beaver should do instead (optional)"]') as HTMLTextAreaElement;
+}
+
 async function click(label: string) {
     const target = button(label);
     if (!target) throw new Error(`No button ${label}: ${[...container.querySelectorAll('button')].map((b) => b.textContent).join(' | ')}`);
@@ -232,22 +236,66 @@ describe('TableCard', () => {
         expect(button('Create')!.title).toBe('This table would have 1,840 items; the maximum is 1,000. Remove sources to continue.');
     });
 
-    it('declines with Cancel and sends typed instructions with it', async () => {
+    it('declines from the cancel view and sends typed instructions with it', async () => {
         render(fixture('create-items'));
-        await click('Next');
-        await click('Add instructions');
-        const field = container.querySelector('textarea[aria-label="Instructions for this table (optional)"]') as HTMLTextAreaElement;
-        await act(async () => {
-            const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-            setter.call(field, 'Use a note instead');
-            field.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-        await click('Send instructions');
+        await click('Cancel');
+        expect(button('Next')).toBeUndefined();
+        expect(button('Cancel table')).toBeDefined();
+        await typeInto(instructionsField(), 'Use a note instead');
+        await click('Send');
         expect(sent).toEqual([
             { type: 'table_card_response', card_id: fixture('create-items').card_id, approved: false, user_instructions: 'Use a note instead' },
         ]);
-        await click('Send instructions').catch(() => {});
+        await click('Send').catch(() => {});
         expect(sent).toHaveLength(1);
+    });
+
+    it('cancels without instructions when nothing was typed', async () => {
+        render(fixture('create-items'));
+        await click('Cancel');
+        await click('Cancel table');
+        expect(sent).toEqual([
+            { type: 'table_card_response', card_id: fixture('create-items').card_id, approved: false, user_instructions: null },
+        ]);
+    });
+
+    it('goes back to the table with the text kept, and Create never sends it', async () => {
+        render(fixture('create-items'));
+        await click('Cancel');
+        await typeInto(instructionsField(), 'Use a note instead');
+        await click('Back to table');
+        expect(button('Send')).toBeUndefined();
+        await click('Cancel');
+        expect(instructionsField().value).toBe('Use a note instead');
+        await click('Back to table');
+        await click('Next');
+        await click('Create');
+        expect(sent).toHaveLength(1);
+        expect(sent[0]).toMatchObject({ approved: true, choice: 'create' });
+        expect(sent[0]).not.toHaveProperty('user_instructions');
+    });
+
+    it('goes back to the table on Escape', async () => {
+        render(fixture('create-items'));
+        await click('Cancel');
+        await press(instructionsField(), 'Escape');
+        expect(button('Next')).toBeDefined();
+        expect(sent).toEqual([]);
+    });
+
+    it('stays in the cancel view when Escape dismisses an IME candidate', async () => {
+        render(fixture('create-items'));
+        await click('Cancel');
+        const field = instructionsField();
+        await typeInto(field, '日本語');
+        const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, isComposing: true });
+        await act(async () => {
+            field.dispatchEvent(escape);
+        });
+        expect(escape.defaultPrevented).toBe(false);
+        expect(instructionsField()).toBe(field);
+        expect(field.value).toBe('日本語');
+        expect(button('Next')).toBeUndefined();
     });
 
     it('keeps a comma inside a choice option, one option per line', async () => {

@@ -66,6 +66,9 @@ export interface TableCardDraft {
     step: TableCardStep;
     /** The user changed the sources, so the backend's merge line no longer applies. */
     sourcesEdited: boolean;
+    /** The cancel view is open: the card asks what Beaver should do instead. */
+    cancelling: boolean;
+    /** Sent only with a decline. */
     instructions: string;
     /** Counter for local keys. */
     nextKey: number;
@@ -119,6 +122,7 @@ export function initialTableCardDraft(request: WSTableCardRequest): TableCardDra
         columns,
         step: 'sources',
         sourcesEdited: false,
+        cancelling: false,
         instructions: request.user_instructions_prefill ?? '',
         nextKey,
     };
@@ -169,6 +173,11 @@ export function setDescription(draft: TableCardDraft, description: string): Tabl
 
 export function setInstructions(draft: TableCardDraft, instructions: string): TableCardDraft {
     return { ...draft, instructions };
+}
+
+/** Open or close the cancel view; the typed text and the edits are kept. */
+export function setCancelling(draft: TableCardDraft, cancelling: boolean): TableCardDraft {
+    return { ...draft, cancelling };
 }
 
 // Sources ----------------------------------------------------------------------
@@ -660,7 +669,7 @@ export function tableCardResponse(
     request: WSTableCardRequest,
     choice: TableCardChoice,
 ): WSTableCardResponse {
-    const instructions = draft.instructions.trim();
+    // Instructions travel only with a decline: an approval is the table as shown.
     return {
         type: 'table_card_response',
         card_id: request.card_id,
@@ -674,7 +683,6 @@ export function tableCardResponse(
         }),
         criteria: draft.criteria ?? [],
         columns: draft.columns.map(wireColumn),
-        user_instructions: instructions || null,
     };
 }
 

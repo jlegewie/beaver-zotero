@@ -28,6 +28,7 @@ import {
     removeItem,
     removeScreening,
     removeSource,
+    setInstructions,
     setSourceResolved,
     stepSummary,
     tableCardDecline,
@@ -81,7 +82,6 @@ describe('table card draft', () => {
             title: reply!.title,
             sources: [{ type: 'items', ids: request.sources[0].ids }],
             criteria: [],
-            user_instructions: null,
         });
         expect(response.columns).toEqual(reply!.columns);
     });
@@ -253,6 +253,12 @@ describe('table card draft', () => {
             user_instructions: null,
         });
         expect(tableCardDecline({ ...draft, instructions: ' Use a note ' }, request).user_instructions).toBe('Use a note');
+    });
+
+    it('never sends instructions with an approval', () => {
+        const { request } = fixture('create-items');
+        const draft = setInstructions(initialTableCardDraft(request), 'Use a note');
+        expect(tableCardResponse(draft, request, 'create')).not.toHaveProperty('user_instructions');
     });
 
     it('blocks Create while a source cannot be resolved', () => {
