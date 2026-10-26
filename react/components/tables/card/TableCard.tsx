@@ -74,6 +74,7 @@ import type { SourcesMenuEntries } from '../../ui/menus/hooks/useSourcesMenu';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
 import { paperOf, portableItemId, rowForItem } from './cardItems';
 import TableCardDropZone from './TableCardDropZone';
+import TableCardStepper from './TableCardStepper';
 import InlineEditableText from './InlineEditableText';
 import TableColumnsStep, { type TableColumnsStepHandle } from './TableColumnsStep';
 import TableSourceCard from './TableSourceCard';
@@ -551,23 +552,16 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 />
                 {/* Where the card is in its steps; it makes way while the title is edited. */}
                 {!editingTitle && (
-                    <Tooltip content={`Step ${stepIndex + 1} of ${steps.length}`} showArrow singleLine>
-                        <div
-                            className="table-card-progress"
-                            role="img"
-                            aria-label={`Step ${stepIndex + 1} of ${steps.length}`}
-                        >
-                            <span className="text-sm font-color-secondary">{`${stepIndex + 1} of ${steps.length}`}</span>
-                            <span className="display-flex flex-row" style={{ gap: '3px' }}>
-                                {steps.map((step, index) => (
-                                    <span
-                                        key={step}
-                                        className={`table-card-progress-bar ${index <= stepIndex ? 'table-card-progress-bar-done' : ''}`}
-                                    />
-                                ))}
-                            </span>
-                        </div>
-                    </Tooltip>
+                    <TableCardStepper
+                        steps={steps.map((step) => ({
+                            key: step,
+                            label: STEP_LABELS[step],
+                            summary: stepSummary(draft, step, request),
+                        }))}
+                        current={stepIndex}
+                        disabled={locked}
+                        onGoTo={(step) => setDraft((prev) => goToStep(prev, step as TableCardStep))}
+                    />
                 )}
             </div>
             <div className="table-card-header-body">
@@ -589,7 +583,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                                 className="table-card-destination-icon"
                             />
                             <span className="table-card-destination-path" title={destinationLine(destination)}>
-                                <span>Saved to </span>
+                                {/* <span>Saved to </span> */}
                                 <button
                                     type="button"
                                     className="table-card-crumb"
@@ -643,7 +637,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             target={target}
             triggerLabel="Add source"
             triggerClassName="table-card-head-action"
-            triggerTooltip="Add papers, a collection or a tag, or drag them onto the card"
+            // triggerTooltip="Add papers, a collection or a tag, or drag them onto the card"
             triggerContent={
                 <>
                     <Icon icon={PlusSignIcon} />
@@ -686,7 +680,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             aria-label={`${STEP_LABELS[step]}: ${stepSummary(draft, step, request)}. Edit`}
             onClick={() => setDraft((prev) => goToStep(prev, step))}
         >
-            <Icon icon={CheckmarkCircleIcon} className="font-color-green flex-none" />
+            <Icon icon={CheckmarkCircleIcon} className="table-card-step-done-icon flex-none" />
             <span className="font-medium font-color-primary flex-none">{STEP_LABELS[step]}</span>
             <span className="font-color-secondary truncate flex-1 min-w-0">{stepSummary(draft, step, request)}</span>
             {!locked && <span className="table-card-step-edit flex-none">Edit</span>}
@@ -825,7 +819,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                         onClick={() => decide(null)}
                         disabled={locked}
                         className="flex-none whitespace-nowrap"
-                        style={{ marginLeft: '-6px' }}
                     >
                         {cancelLabel}
                     </Button>

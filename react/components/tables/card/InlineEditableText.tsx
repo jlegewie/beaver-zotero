@@ -148,14 +148,13 @@ export const InlineEditableText: React.FC<InlineEditableTextProps> = ({
                         variant="ghost-secondary"
                         onClick={discard}
                         ariaLabel="Discard changes"
-                        className="scale-90"
                     />
                     <IconButton
                         icon={TickIcon}
                         variant="ghost-secondary"
                         onClick={confirm}
                         ariaLabel="Save changes"
-                        className="scale-11"
+                        className="scale-12"
                     />
                 </div>
             </div>

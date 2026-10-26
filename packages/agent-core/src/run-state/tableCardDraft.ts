@@ -615,7 +615,7 @@ export function cardDestination(
 export function destinationLine(destination: TableCardDestination): string {
     const { library_name, collection_name, collection_key } = destination;
     const collection = collection_name || collection_key;
-    return `Saved to ${library_name}${collection ? ` › ${collection}` : ''}`;
+    return `${library_name}${collection ? ` › ${collection}` : ''}`;
 }
 
 // Replies ------------------------------------------------------------------------

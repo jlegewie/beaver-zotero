@@ -4534,7 +4534,7 @@
 [id^="beaver-pane-"] .table-card-header {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.4rem;
     min-width: 0;
 }
 
@@ -4561,7 +4561,7 @@
 }
 
 [id^="beaver-pane-"] .table-card-description {
-    font-size: 0.875rem;
+    font-size: 0.95rem;
     line-height: 1.4;
     color: var(--fill-secondary);
 }
@@ -4616,7 +4616,7 @@
     width: calc(100% + 10px);
     margin: -3px -5px;
     padding: 2px 4px;
-    border: 1px solid var(--fill-quarternary);
+    border: 1px solid transparent;
     border-radius: 5px;
     background: transparent;
     font-family: inherit;
@@ -4627,17 +4627,18 @@
 }
 
 [id^="beaver-pane-"] .table-card-inline-field:focus {
-    border-color: var(--accent-blue);
+    border-color: var(--fill-quarternary);
 }
 
 /* Editing: the field takes the text's place, with discard / save after it. */
 [id^="beaver-pane-"] .table-card-inline-editing {
     display: flex;
     flex-direction: row;
-    align-items: flex-start;
+    align-items: flex-end;
     gap: 0.35rem;
     flex: 1;
     min-width: 0;
+    font-size: 0.95rem !important;
 }
 
 [id^="beaver-pane-"] .table-card-inline-editing .table-card-inline-field {
@@ -4651,7 +4652,7 @@
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.5rem;
     flex: none;
     margin-top: -1px;
 }
@@ -4722,7 +4723,7 @@
     border-radius: 5px;
     background: transparent;
     color: var(--fill-secondary);
-    font-size: 0.875rem;
+    font-size: 0.925rem;
     white-space: nowrap;
     cursor: pointer;
 }
@@ -4798,27 +4799,88 @@
     min-width: 0;
 }
 
-/* "1 of 2" and its bars, at the end of the title row, centred on the title's
- * first line. */
-[id^="beaver-pane-"] .table-card-progress {
+/* The stepper at the end of the title row: numbered circles joined by a line,
+ * centred on the title's first line. The current step is the only filled
+ * circle; completed steps are a blue outline with a check, steps to come a
+ * grey outline with their number. */
+[id^="beaver-pane-"] .table-card-stepper {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 0.4rem;
     flex: none;
     height: calc(1.05rem * 1.3);
     margin-inline-start: 0.25rem;
-    white-space: nowrap;
 }
 
-[id^="beaver-pane-"] .table-card-progress-bar {
-    width: 14px;
-    height: 4px;
-    border-radius: 2px;
+/* The tooltip's anchor wraps each circle; keep it from adding line height. */
+[id^="beaver-pane-"] .table-card-stepper > span {
+    display: inline-flex;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    box-sizing: border-box;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-current {
+    background: var(--accent-blue);
+    color: #fff;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-todo {
+    border: 1.5px solid var(--fill-tertiary);
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-done {
+    border: 1.5px solid var(--accent-blue);
+    background: transparent;
+    color: var(--accent-blue);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+/* The check is a filled glyph, thin at this size; a matching stroke gives it
+ * the weight of the step numbers. */
+[id^="beaver-pane-"] .table-card-stepper-step-done svg path {
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+}
+
+/* A light fill on hover marks the completed step as the way back. */
+[id^="beaver-pane-"] .table-card-stepper-step-done:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-done:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-done:disabled {
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-line {
+    width: 12px;
+    height: 1.5px;
+    margin: 0 3px;
+    border-radius: 1px;
     background: var(--fill-quarternary);
 }
 
-[id^="beaver-pane-"] .table-card-progress-bar-done {
+[id^="beaver-pane-"] .table-card-stepper-line-done {
     background: var(--accent-blue);
 }
 
@@ -4844,6 +4906,10 @@
 
 [id^="beaver-pane-"] .table-card-step-done:disabled {
     cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-step-done-icon {
+    color: var(--accent-blue);
 }
 
 [id^="beaver-pane-"] .table-card-step-edit {

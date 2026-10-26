@@ -665,17 +665,32 @@ describe('TableCard', () => {
         }
     });
 
-    it('shows the step position beside the title, and makes way for the title field', async () => {
+    it('shows the steps as circles beside the title, and makes way for the title field', async () => {
         render(fixture('create-items'));
-        const progress = () => container.querySelector('.table-card-header [role="img"]');
-        expect(progress()?.getAttribute('aria-label')).toBe('Step 1 of 2');
-        expect(progress()?.textContent).toContain('1 of 2');
+        const stepper = () => container.querySelector('.table-card-header [role="group"]');
+        const current = () => stepper()?.querySelector('[aria-current="step"]');
+        expect(stepper()?.getAttribute('aria-label')).toBe('Step 1 of 2');
+        expect(current()?.getAttribute('aria-label')).toBe('Step 1 of 2: Sources, current');
+        // A step still to come is a number, not a way to skip ahead.
+        expect(stepper()?.querySelector('button')).toBeNull();
+        expect(stepper()?.textContent).toBe('12');
         await clickElement(container.querySelector('button[aria-label="Edit title"]'));
-        expect(progress()).toBeNull();
+        expect(stepper()).toBeNull();
         await press(container.querySelector('input[aria-label="Table title"]')!, 'Escape');
-        expect(progress()).not.toBeNull();
+        expect(stepper()).not.toBeNull();
         await click('Next');
-        expect(progress()?.getAttribute('aria-label')).toBe('Step 2 of 2');
+        expect(current()?.getAttribute('aria-label')).toBe('Step 2 of 2: Columns, current');
+    });
+
+    it('goes back to a completed step from its circle', async () => {
+        render(fixture('create-items'));
+        await click('Next');
+        const done = container.querySelector('.table-card-header button[aria-label^="Step 1 of 2: Sources, done"]');
+        expect(done).not.toBeNull();
+        await clickElement(done);
+        expect(button('Next')).toBeTruthy();
+        expect(container.querySelector('.table-card-header [aria-current="step"]')?.getAttribute('aria-label'))
+            .toBe('Step 1 of 2: Sources, current');
     });
 
     it('puts each step\'s add action in its heading, and opens a column added there', async () => {
