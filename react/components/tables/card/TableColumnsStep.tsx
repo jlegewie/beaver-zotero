@@ -1,38 +1,13 @@
 import React, { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
-import type { TableCardColumnType } from '@beaver/agent-core/protocol/tableCardProtocol';
 import type { DraftColumn } from '@beaver/agent-core/run-state/tableCardDraft';
 import { columnProblem } from '@beaver/agent-core/run-state/tableCardDraft';
 import Button from '@beaver/agent-ui/primitives/Button';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
-import {
-    ArrowDownIcon,
-    CalendarIcon,
-    CheckmarkCircleIcon,
-    DeleteIcon,
-    HashtagIcon,
-    Icon,
-    ListBulletIcon,
-    TextIcon,
-} from '../../icons/icons';
+import { ArrowDownIcon, DeleteIcon, Icon } from '../../icons/icons';
+import { COLUMN_TYPES, ColumnOptionChips, ColumnTypeTag, columnTypeOf } from '../columnTypes';
 import AutoGrowTextarea from './AutoGrowTextarea';
-
-type IconComponent = React.ComponentType<React.SVGProps<SVGSVGElement>>;
-
-/** Column types in menu order, with the names the table view uses. */
-const TYPES: { value: TableCardColumnType; label: string; icon: IconComponent }[] = [
-    { value: 'text', label: 'Text', icon: TextIcon },
-    { value: 'number', label: 'Number', icon: HashtagIcon },
-    { value: 'date', label: 'Date', icon: CalendarIcon },
-    { value: 'boolean', label: 'Yes / no', icon: CheckmarkCircleIcon },
-    { value: 'select', label: 'Category', icon: ListBulletIcon },
-];
-
-const typeOf = (type: TableCardColumnType) => TYPES.find((entry) => entry.value === type) ?? TYPES[0];
-
-/** Options a collapsed category column shows before "+N". */
-const PREVIEW_OPTIONS = 4;
 
 export interface TableColumnsStepProps {
     columns: DraftColumn[];
@@ -80,17 +55,6 @@ const OptionsInput = React.forwardRef<HTMLTextAreaElement, {
         />
     );
 });
-
-/** The column's type as a small tag: its icon and name, the same width for every column of a type. */
-const TypeTag: React.FC<{ column: DraftColumn }> = ({ column }) => {
-    const type = typeOf(column.type);
-    return (
-        <span className="table-card-type-tag">
-            <Icon icon={type.icon} />
-            <span className="table-card-type-tag-label">{type.label}</span>
-        </span>
-    );
-};
 
 interface ColumnCardProps {
     column: DraftColumn;
@@ -224,7 +188,7 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
                     </span>
                     {problem && <span className="table-card-badge-warning flex-none">Incomplete</span>}
                     <span className="flex-none">
-                        <TypeTag column={column} />
+                        <ColumnTypeTag type={column.type} />
                     </span>
                 </div>
                 <div
@@ -232,30 +196,17 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
                 >
                     {column.description.trim() || 'No question yet'}
                 </div>
-                {column.type === 'select' && options.length > 0 && (
-                    <div className="table-card-options" aria-label="Options">
-                        {options.slice(0, PREVIEW_OPTIONS).map((option, i) => (
-                            <span key={`${option}-${i}`} className="table-card-option">
-                                {option}
-                            </span>
-                        ))}
-                        {options.length > PREVIEW_OPTIONS && (
-                            <span className="text-sm font-color-secondary flex-none">
-                                {`+${options.length - PREVIEW_OPTIONS}`}
-                            </span>
-                        )}
-                    </div>
-                )}
+                {column.type === 'select' && options.length > 0 && <ColumnOptionChips options={options} />}
             </div>
         );
     }
 
-    const typeItems: MenuItem[] = TYPES.map((type) => ({
+    const typeItems: MenuItem[] = COLUMN_TYPES.map((type) => ({
         label: type.label,
         icon: type.icon,
         onClick: () => onUpdate({ type: type.value }),
     }));
-    const type = typeOf(column.type);
+    const type = columnTypeOf(column.type);
 
     return (
         <div

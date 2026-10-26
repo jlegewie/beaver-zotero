@@ -454,6 +454,10 @@ export default tseslint.config(
             "react/components/agentRuns/ToolCallPartView.tsx",
             // The table write card: opens tables through getHost().navigation.
             "react/components/agentRuns/TableToolCallView.tsx",
+            // Column type tags, option chips and source icons, shared by the
+            // table card and the table tool card body.
+            "react/components/tables/columnTypes.tsx",
+            "react/components/tables/sourceKinds.ts",
             // Request-side label name resolution (extracted from ToolCallPartView):
             // goes through getHost().itemData, never the Zotero global.
             "react/utils/toolCallLabelEnrich.ts",

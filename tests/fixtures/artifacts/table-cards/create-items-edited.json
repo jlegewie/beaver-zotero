@@ -125,6 +125,41 @@
       "title": "Sample sizes in three trials"
     },
     "change": "Created table",
+    "description": "Sample sizes across the papers.",
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "rows": 1
+      },
+      {
+        "id": "s2",
+        "type": "library",
+        "kind": "collection",
+        "name": "Cash transfers",
+        "library_ref": "u",
+        "rows": 2
+      }
+    ],
+    "columns": [
+      {
+        "id": "sample_size",
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many people were randomised?"
+      },
+      {
+        "id": "design",
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          "RCT",
+          "Observational",
+          "Other"
+        ]
+      }
+    ],
     "summary": {
       "rows": 3,
       "columns": 5,

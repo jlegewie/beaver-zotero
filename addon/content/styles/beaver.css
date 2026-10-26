@@ -5274,6 +5274,49 @@
     white-space: nowrap;
 }
 
+/* Table tool card body: the recorded table in sections — description, then
+   sources and question columns as divided lists with the create card's icons
+   and type tags, then the counts. */
+[id^="beaver-pane-"] .table-record {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem 0.5rem;
+    line-height: 1.4;
+}
+
+[id^="beaver-pane-"] .table-record-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-record-label {
+    color: var(--fill-primary);
+    font-weight: 500;
+}
+
+[id^="beaver-pane-"] .table-record-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 8px;
+}
+
+[id^="beaver-pane-"] .table-record-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.45rem 0.6rem;
+}
+
+[id^="beaver-pane-"] .table-record-row + .table-record-row {
+    border-top: 1px solid var(--fill-quarternary);
+}
+
 [id^="beaver-pane-"] .table-card-problem {
     color: var(--tag-orange-secondary);
 }

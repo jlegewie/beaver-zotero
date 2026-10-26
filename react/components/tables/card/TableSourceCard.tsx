@@ -4,19 +4,16 @@ import type { DraftSource } from '@beaver/agent-core/run-state/tableCardDraft';
 import { sourceCount } from '@beaver/agent-core/run-state/tableCardDraft';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import { sourceKindIcon } from '../sourceKinds';
 import {
     ArrowDownIcon,
     ArrowRightIcon,
     ArrowUpRightIcon,
-    BookCopyIcon,
     CancelIcon,
     CSSItemTypeIcon,
-    FilterIcon,
-    FolderIcon,
     Icon,
     SecurityWarningIcon,
     Spinner,
-    TagIcon,
 } from '../../icons/icons';
 
 export interface TableSourceCardProps {
@@ -76,10 +73,7 @@ function sourceKindNoun(source: DraftSource): string {
  * for the papers listed inside a source.
  */
 function sourceIcon(source: DraftSource): React.ReactNode {
-    const kind = source.type === 'items' ? 'items' : source.scope!.kind;
-    const icon =
-        kind === 'items' ? BookCopyIcon : kind === 'collection' ? FolderIcon : kind === 'tag' ? TagIcon : FilterIcon;
-    return <Icon icon={icon} className="table-card-source-icon" />;
+    return <Icon icon={sourceKindIcon(source.type, source.scope?.kind)} className="table-card-source-icon" />;
 }
 
 /** "16 without PDF, answered from title and abstract". */

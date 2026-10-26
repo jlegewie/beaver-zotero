@@ -26,9 +26,41 @@ export interface TableStages {
     stale: number;
 }
 
+/** A question column as the recorded call left it. */
+export interface TableRecordColumn {
+    id: string;
+    header: string;
+    type: string;
+    /** The column's question. */
+    description?: string | null;
+    /** `select` columns: the category labels. */
+    options?: string[] | null;
+    role?: string | null;
+}
+
+/** A source entry as the recorded call left it. */
+export interface TableRecordSource {
+    id: string;
+    /** `items`, `library`, or a search type. */
+    type: string;
+    /** `library` entries: collection, tag or saved_search, and its display name. */
+    kind?: string | null;
+    name?: string | null;
+    library_ref?: string | null;
+    /** Rows this entry added; a row several entries found counts for each. */
+    rows: number;
+}
+
 export interface TableRecord {
     reference: TableReference;
     change: string;
+    /**
+     * The table's description, sources and question columns as of the call.
+     * Absent on records written before they were recorded.
+     */
+    description?: string | null;
+    sources?: TableRecordSource[] | null;
+    columns?: TableRecordColumn[] | null;
     summary: Partial<TableSummary>;
     changes?: Record<string, number>;
     operation_id?: string | null;

@@ -24,7 +24,8 @@ describe("historical table cards", () => {
         );
         expect(html).toContain("Added a column");
         expect(html).toContain("3 rows · 2 columns");
-        expect(html).toContain("Changes are committed");
+        // A write whose bookkeeping failed reads as the success it is.
+        expect(html).not.toContain("bookkeeping");
         expect(html).not.toContain("<table");
         expect(html).not.toContain("Edit table");
         expect(html).not.toContain("<button");
@@ -132,14 +133,86 @@ describe("stage lines", () => {
         rows: 12, sources: 1, columns: 3, rows_without_document: 2,
         remaining_rows: 12, remaining_cells: 36, answered: 0, metadata_only: 0, failed: 0, stale: 0,
     };
-    it("says a created table ran nothing and how many rows remain", async () => {
+    it("says what a partial fill left and what came from metadata, and never counts rows without attachments", async () => {
         const { formatTableStages } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
         expect(
             formatTableStages({ ...record, change: "Created table", run: "none", stages }),
-        ).toEqual(["Created without a run · 12 rows remaining", "2 rows without an attachment to read"]);
+        ).toEqual([]);
         expect(
-            formatTableStages({ ...record, change: "Read table", stages: { ...stages, remaining_rows: 0, metadata_only: 4, rows_without_document: 0 } }),
+            formatTableStages({ ...record, change: "Filled table", stages: { ...stages, answered: 9, remaining_rows: 9 } }),
+        ).toEqual(["9 rows still to fill"]);
+        expect(
+            formatTableStages({ ...record, change: "Read table", stages: { ...stages, answered: 4, remaining_rows: 0, metadata_only: 4 } }),
         ).toEqual(["4 answers from title and abstract only"]);
         expect(formatTableStages(record)).toEqual([]);
+    });
+});
+
+describe("recorded columns", () => {
+    const columns = [
+        { id: "country", header: "Country studied", type: "text", description: "What country does the study analyze?" },
+        { id: "design", header: "Study design", type: "select", options: ["RCT", "Observational", "Other"] },
+    ];
+    const created = {
+        ...record,
+        change: "Created table",
+        saved: true,
+        description: "Compare studies by country and design.",
+        sources: [
+            { id: "s1", type: "library", kind: "collection", name: "Gender & Labor Market", library_ref: "u", rows: 10 },
+            { id: "s2", type: "items", rows: 2 },
+        ],
+        columns,
+        summary: {
+            rows: 12,
+            columns: 4,
+            columns_detail: {
+                _reference: { system: true, answered: 12 },
+                _year: { system: true, answered: 12 },
+                country: { answered: 0 },
+                design: { answered: 0 },
+            } as never,
+        },
+        changes: { rows_added: 12, columns_added: 4 },
+    };
+    const render = (value: typeof created) =>
+        renderToStaticMarkup(
+            React.createElement(TableResultView, { view: { view_type: "table", record: value } }),
+        );
+
+    it("renders the description and each question column from the record alone", () => {
+        const html = render(created);
+        expect(html).toContain("Compare studies by country and design.");
+        expect(html).toContain("Country studied");
+        expect(html).toContain("What country does the study analyze?");
+        // Each column carries the create card's type tag; a category column
+        // shows its options as chips.
+        expect(html).toContain(">Text</span>");
+        expect(html).toContain(">Category</span>");
+        expect(html).toContain('<span class="table-card-option">Observational</span>');
+        expect(html).toContain("12 rows · 2 columns · not filled yet");
+        expect(html).not.toContain("attachment");
+        expect(html).not.toContain("Created table");
+    });
+    it("names each source with the rows it added", () => {
+        const html = render(created);
+        expect(html).toContain(">Sources<");
+        expect(html).toContain("Gender &amp; Labor Market");
+        expect(html).toContain("10 rows");
+        expect(html).toContain("Selected items");
+        expect(html).toContain("2 rows");
+        expect(html.indexOf(">Sources<")).toBeLessThan(html.indexOf(">Columns<"));
+    });
+    it("shows per-column progress once anything is answered", () => {
+        const html = render({
+            ...created,
+            summary: {
+                ...created.summary,
+                columns_detail: { ...(created.summary.columns_detail as object), country: { answered: 8 }, design: { answered: 12 } } as never,
+            },
+        });
+        expect(html).toContain("8/12");
+        expect(html).toContain("12/12");
+        expect(html).toContain("20 of 24 cells filled");
     });
 });
