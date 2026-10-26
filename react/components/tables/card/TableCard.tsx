@@ -861,10 +861,10 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 </div>
                 <div className="table-card-body" style={{ gap: BLOCK_GAP }}>
                     <div className="table-card-header-body">
-                        <span className="font-color-secondary">Cancel this table?</span>
+                        {/* <span className="font-color-secondary">Cancel this table?</span> */}
                         <AutoGrowTextarea
                             value={draft.instructions}
-                            placeholder="Optional: what should Beaver do instead?"
+                            placeholder="Optional: What should Beaver do instead?"
                             aria-label="What Beaver should do instead (optional)"
                             autoFocus
                             disabled={locked}
