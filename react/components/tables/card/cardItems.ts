@@ -59,7 +59,7 @@ export function rejectionMessage(rejection: RowRejection, count = 1): string {
         case 'excluded':
             return 'Items from excluded libraries cannot be added';
         default:
-            return 'Only papers can be table rows';
+            return 'Only regular items can be table rows';
     }
 }
 

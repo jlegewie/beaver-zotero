@@ -4530,6 +4530,73 @@
 
 /* ───── Table card (create_table) ───── */
 
+/* The card: the title row and the footer stay put, and everything between
+ * them scrolls in one area, so the card never nests a scroll inside another. */
+[id^="beaver-pane-"] .user-message-display.table-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: 70vh;
+    padding: 0;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .table-card-top {
+    flex: none;
+    padding: 0.8rem 0.8rem 0.4rem;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s ease;
+}
+
+/* Once the body scrolls under it, a rule separates the title row. */
+[id^="beaver-pane-"] .table-card-top-scrolled {
+    border-bottom-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .table-card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 0.2rem 0.8rem 0.75rem;
+}
+
+[id^="beaver-pane-"] .table-card-footer {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    flex: none;
+    min-width: 0;
+    padding: 0.6rem 0.8rem 0.7rem;
+    border-top: 1px solid var(--fill-quinary);
+}
+
+/* The row-cap warning, under the Sources heading. */
+[id^="beaver-pane-"] .table-card-warning {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.45rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--tag-orange-tertiary);
+    border-radius: 6px;
+    background: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+[id^="beaver-pane-"] .table-card-warning-icon {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    margin-top: 1px;
+}
+
 /* Header: title and description read as text; a pencil at the end edits them. */
 [id^="beaver-pane-"] .table-card-header {
     display: flex;
@@ -4931,6 +4998,13 @@
 }
 
 /* Sources */
+/* A source that alone holds more papers than a table. */
+[id^="beaver-pane-"] .table-card-count-warning {
+    background: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    box-shadow: inset 0 0 0 1px var(--tag-orange-tertiary);
+}
+
 [id^="beaver-pane-"] .table-card-source {
     display: flex;
     flex-direction: column;
@@ -4981,8 +5055,28 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    max-height: 240px;
-    overflow-y: auto;
+}
+
+/* Pages a long item list instead of giving it a scroll area of its own. */
+[id^="beaver-pane-"] .table-card-show-more {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fill-primary);
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-show-more:hover {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-show-more:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
 }
 
 [id^="beaver-pane-"] .table-card-item {

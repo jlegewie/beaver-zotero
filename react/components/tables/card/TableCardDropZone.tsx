@@ -77,14 +77,14 @@ function planDrop(dataTransfer: DataTransfer, searchableLibraryIds: number[]): D
     }
     if (!plan.error && !plan.ids.length && !plan.scopes.length) {
         const [first] = [...plan.rejected.entries()].sort((a, b) => b[1] - a[1]);
-        plan.error = first ? rejectionMessage(first[0], first[1]) : 'Only papers can be table rows';
+        plan.error = first ? rejectionMessage(first[0], first[1]) : 'Only regular items can be table rows';
     }
     return plan;
 }
 
-/** "3 papers", "Gender & Labor Market", "2 collections". */
+/** "3 items", "Gender & Labor Market", "2 sources". */
 function dropLabel(plan: DropPlan): string {
-    if (plan.ids.length) return `${plan.ids.length} ${plan.ids.length === 1 ? 'paper' : 'papers'}`;
+    if (plan.ids.length) return `${plan.ids.length} ${plan.ids.length === 1 ? 'item' : 'items'}`;
     if (plan.scopes.length === 1) return plan.scopes[0].name || 'source';
     return `${plan.scopes.length} sources`;
 }

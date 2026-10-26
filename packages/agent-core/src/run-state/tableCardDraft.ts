@@ -400,20 +400,13 @@ export function overCapSources(draft: TableCardDraft, request: WSTableCardReques
     return largest ? [largest.key] : [];
 }
 
-/** The warning an over-cap source shows. */
-export function overCapMessage(draft: TableCardDraft, source: DraftSource, request: WSTableCardRequest): string {
-    const rowCap = request.row_cap;
-    const total = sourceTotal(source);
-    if (total > rowCap || source.resolved?.truncated) {
-        const fix =
-            source.type === 'items'
-                ? 'Remove items'
-                : source.scope?.kind === 'collection'
-                  ? 'Narrow the collection or add a tag filter'
-                  : 'Narrow it in Zotero';
-        return `${plural(total, 'paper')}; a table holds ${format(rowCap)}. ${fix}.`;
-    }
-    return `${plural(cardRowCount(draft, request), 'paper')} across sources; a table holds ${format(rowCap)}. Remove a source or narrow one.`;
+/**
+ * The row-cap warning, the same whatever made the table too big: how many
+ * items it would have, the maximum, and that removing sources fixes it.
+ * Sources are taken as they are, so the card offers no other remedy.
+ */
+export function overCapMessage(draft: TableCardDraft, request: WSTableCardRequest): string {
+    return `This table would have ${plural(cardPaperCount(draft, request), 'item')}; the maximum is ${format(request.row_cap)}. Remove sources to continue.`;
 }
 
 /**
@@ -425,11 +418,11 @@ export function mergeLine(draft: TableCardDraft, request: WSTableCardRequest): s
     if (!draft.sourcesEdited) {
         const { rows, duplicates } = request.merge;
         if (!several && !duplicates) return null;
-        const head = `${plural(rows, 'paper')}${several ? ' across sources' : ''}`;
+        const head = `${plural(rows, 'item')}${several ? ' across sources' : ''}`;
         return duplicates ? `${head}; found in more than one source, merged −${format(duplicates)}` : head;
     }
     if (!several) return null;
-    return `${plural(cardRowCount(draft, request), 'paper')} across sources; duplicates are merged on create`;
+    return `${plural(cardRowCount(draft, request), 'item')} across sources; duplicates are merged on create`;
 }
 
 // Columns ----------------------------------------------------------------------
@@ -496,7 +489,7 @@ export function columnProblem(column: DraftColumn): string | null {
 export function stepSummary(draft: TableCardDraft, step: TableCardStep, request: WSTableCardRequest): string {
     if (step === 'sources') {
         const count = cardPaperCount(draft, request);
-        return `${plural(count, 'paper')} from ${plural(draft.sources.length, 'source')}`;
+        return `${plural(count, 'item')} from ${plural(draft.sources.length, 'source')}`;
     }
     if (step === 'screening') {
         const criteria = draft.criteria ?? [];
@@ -505,7 +498,7 @@ export function stepSummary(draft: TableCardDraft, step: TableCardStep, request:
     return draft.columns.length ? plural(draft.columns.length, 'question') : 'No questions';
 }
 
-/** The number a step's tab shows: papers, criteria, or questions. */
+/** The number a step's heading shows: items, criteria, or questions. */
 export function stepCount(draft: TableCardDraft, step: TableCardStep, request: WSTableCardRequest): number {
     if (step === 'sources') return cardPaperCount(draft, request);
     if (step === 'screening') return (draft.criteria ?? []).length;
@@ -524,12 +517,11 @@ export function createBlocker(
     if (!draft.title.trim()) return 'Add a title.';
     if (!draft.sources.length) return 'Add a source.';
     if (libraryOf && !cardDestination(draft, request, libraryOf)) return NO_DESTINATION;
-    if (draft.sources.some((source) => source.counting)) return 'Counting papers…';
+    if (draft.sources.some((source) => source.counting)) return 'Counting items…';
     const failed = draft.sources.find((source) => source.resolved?.error);
     if (failed) return 'Remove the source that cannot be used.';
-    if (cardTotals(draft).count === 0) return 'The sources contain no papers.';
-    if (overCapSources(draft, request).length)
-        return `${plural(cardPaperCount(draft, request), 'paper')}; a table holds ${format(request.row_cap)}.`;
+    if (cardTotals(draft).count === 0) return 'The sources contain no items.';
+    if (overCapSources(draft, request).length) return overCapMessage(draft, request);
     if (!draft.columns.length) return 'Add a question column.';
     if (draft.columns.length > MAX_MODEL_COLUMNS)
         return `A table holds at most ${MAX_MODEL_COLUMNS} question columns.`;

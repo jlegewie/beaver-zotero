@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ItemDisplayRow } from '@beaver/agent-core/protocol/agentProtocol';
 import type { DraftSource } from '@beaver/agent-core/run-state/tableCardDraft';
 import { sourceCount } from '@beaver/agent-core/run-state/tableCardDraft';
@@ -25,8 +25,8 @@ export interface TableSourceCardProps {
     rows: ItemDisplayRow[] | undefined;
     /** Rows for ids removed on the Selected items card, for their undo line. */
     removedRows?: ItemDisplayRow[];
-    /** The row-cap warning this card carries, if any. */
-    warning: string | null;
+    /** The source alone holds more papers than a table: its count is marked. */
+    overCap?: boolean;
     /** The library a collection, tag or saved search is in, for the subtitle. */
     libraryName?: string | null;
     /** A collection with subcollections: the source includes their items. */
@@ -42,7 +42,10 @@ export interface TableSourceCardProps {
     onRevealItem?: (id: string) => void;
 }
 
-function sourceName(source: DraftSource): string {
+/** The items an expanded source lists at first, and per "Show more". */
+const ROWS_PER_PAGE = 25;
+
+export function sourceName(source: DraftSource): string {
     if (source.type === 'items') return 'Selected items';
     const scope = source.scope!;
     if (scope.kind === 'tag') return scope.tag ?? 'Tag';
@@ -52,7 +55,7 @@ function sourceName(source: DraftSource): string {
 function sourceSubtitle(source: DraftSource, libraryName: string | null, includesSubcollections: boolean): string {
     const kind =
         source.type === 'items'
-            ? 'Individual papers'
+            ? 'Individual items'
             : source.scope!.kind === 'collection'
               ? includesSubcollections ? 'Collection, incl. subcollections' : 'Collection'
               : source.scope!.kind === 'tag'
@@ -133,13 +136,16 @@ function ItemRow({
  * subtitle and count on one header row, remove for the card as a whole, and on
  * expand the items it yields. Collections, tags and saved searches are taken as
  * they are; only the Selected items card removes single items, with undo while
- * the card is open. A card with a problem opens expanded with its warning.
+ * the card is open. A source that cannot be used opens expanded on its error;
+ * every card can be collapsed. The row-cap warning belongs to the step, not to
+ * a source: an over-cap source only marks its count. The item list pages
+ * rather than scrolling, so the card has a single scroll area.
  */
 export const TableSourceCard: React.FC<TableSourceCardProps> = ({
     source,
     rows,
     removedRows = [],
-    warning,
+    overCap = false,
     libraryName = null,
     includesSubcollections = false,
     disabled,
@@ -151,15 +157,23 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
     onRevealItem,
 }) => {
     const error = source.resolved?.error ?? null;
-    const [expanded, setExpanded] = useState(() => !!warning || !!error);
+    const [expanded, setExpanded] = useState(() => !!error);
+    // An error can arrive after the card mounted (a source added on the card
+    // resolves later): it opens the card once, and the user may close it.
+    const shownError = useRef(error);
+    useEffect(() => {
+        if (error && error !== shownError.current) setExpanded(true);
+        shownError.current = error;
+    }, [error]);
+    const [shown, setShown] = useState(ROWS_PER_PAGE);
     const toggle = () => setExpanded(!expanded);
     const count = sourceCount(source);
     const total = source.resolved?.total ?? count;
     const pdfLine = withoutPdfLine(source.resolved?.without_pdf ?? 0);
     const isItems = source.type === 'items';
-    const open = expanded || !!warning || !!error;
-    // Whatever opened the card (a click, or a warning that opens it), its
-    // items are looked up then.
+    const open = expanded;
+    // Whatever opened the card (a click, or an error it opens on), its items
+    // are looked up then.
     useEffect(() => {
         if (open) onExpand();
     }, [open, onExpand]);
@@ -185,7 +199,11 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
                             {sourceSubtitle(source, libraryName, includesSubcollections)}
                         </span>
                     </span>
-                    <span className="table-card-count flex-none" aria-label="Papers">
+                    <span
+                        className={`table-card-count flex-none ${overCap ? 'table-card-count-warning' : ''}`}
+                        aria-label={overCap ? 'Items, more than a table holds' : 'Items'}
+                        title={overCap ? 'More items than a table holds' : undefined}
+                    >
                         {source.counting ? <Spinner size={12} /> : total.toLocaleString('en-US')}
                     </span>
                 </button>
@@ -201,7 +219,7 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
 
             {open && (
                 <div className="table-card-source-body">
-                    {(warning || error) && (
+                    {error && (
                         <div
                             className="display-flex flex-row items-start gap-2 p-2 rounded-md min-w-0"
                             style={{
@@ -211,7 +229,7 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
                             role="alert"
                         >
                             <Icon icon={SecurityWarningIcon} className="font-color-orange scale-12 flex-none mt-1" />
-                            <div className="font-color-orange min-w-0">{warning ?? error}</div>
+                            <div className="font-color-orange min-w-0">{error}</div>
                         </div>
                     )}
                     {pdfLine && <div className="text-sm font-color-secondary px-1">{pdfLine}</div>}
@@ -221,10 +239,10 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
                             <span>Loading items…</span>
                         </div>
                     ) : rows.length === 0 && !error ? (
-                        <div className="text-sm font-color-secondary px-1 py-1">No papers.</div>
+                        <div className="text-sm font-color-secondary px-1 py-1">No items.</div>
                     ) : (
                         <div className="table-card-item-list">
-                            {rows.map((row) => (
+                            {rows.slice(0, shown).map((row) => (
                                 <ItemRow
                                     key={row.item_id}
                                     row={row}
@@ -246,10 +264,23 @@ export const TableSourceCard: React.FC<TableSourceCardProps> = ({
                                     }
                                 />
                             ))}
-                            {total > (rows?.length ?? 0) && !isItems && (
-                                <div className="text-sm font-color-secondary px-1 py-05">
-                                    {`and ${(total - rows.length).toLocaleString('en-US')} more`}
-                                </div>
+                            {rows.length > shown ? (
+                                <button
+                                    type="button"
+                                    className="table-card-show-more"
+                                    onClick={() => setShown((n) => n + ROWS_PER_PAGE)}
+                                >
+                                    {`Show ${Math.min(ROWS_PER_PAGE, rows.length - shown).toLocaleString('en-US')} more`}
+                                    <span className="font-color-secondary">
+                                        {` of ${(Math.max(total, rows.length) - shown).toLocaleString('en-US')} not shown`}
+                                    </span>
+                                </button>
+                            ) : (
+                                total > rows.length && !isItems && (
+                                    <div className="text-sm font-color-secondary px-1 py-05">
+                                        {`and ${(total - rows.length).toLocaleString('en-US')} more`}
+                                    </div>
+                                )
                             )}
                         </div>
                     )}

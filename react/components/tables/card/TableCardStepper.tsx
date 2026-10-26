@@ -5,7 +5,7 @@ import { Icon, TickIcon } from '../../icons/icons';
 export interface StepperStep {
     key: string;
     label: string;
-    /** One line about a completed step ("10 papers from 1 source"). */
+    /** One line about a completed step ("10 items from 1 source"). */
     summary: string;
 }
 

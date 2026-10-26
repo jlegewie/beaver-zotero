@@ -137,7 +137,7 @@ describe('table card draft', () => {
         const { request } = fixture('create-merge-across-sources');
         const draft = initialTableCardDraft(request);
         // The backend's merged count for the proposal as sent.
-        expect(stepSummary(draft, 'sources', request)).toBe('2 papers from 2 sources');
+        expect(stepSummary(draft, 'sources', request)).toBe('2 items from 2 sources');
         expect(stepSummary(draft, 'columns', request)).toBe('2 questions');
     });
 
@@ -151,10 +151,10 @@ describe('table card draft', () => {
     it("uses the backend's merge line until the sources are edited", () => {
         const { request } = fixture('create-merge-across-sources');
         let draft = initialTableCardDraft(request);
-        expect(mergeLine(draft, request)).toBe('2 papers across sources; found in more than one source, merged −1');
+        expect(mergeLine(draft, request)).toBe('2 items across sources; found in more than one source, merged −1');
         draft = removeItem(draft, request.sources[0].ids![0]);
         draft = undoRemoveItem(draft, request.sources[0].ids![0]);
-        expect(mergeLine(draft, request)).toBe('3 papers across sources; duplicates are merged on create');
+        expect(mergeLine(draft, request)).toBe('3 items across sources; duplicates are merged on create');
         expect(mergeLine(initialTableCardDraft(fixture('create-items').request), fixture('create-items').request)).toBeNull();
     });
 
@@ -164,7 +164,7 @@ describe('table card draft', () => {
         let draft = removeItem(initialTableCardDraft(request), id);
         expect(itemsSource(draft)!.ids).not.toContain(id);
         expect(itemsSource(draft)!.removed).toEqual([id]);
-        expect(createBlocker(draft, request)).toBe('Counting papers…');
+        expect(createBlocker(draft, request)).toBe('Counting items…');
         draft = undoRemoveItem(draft, id);
         expect(itemsSource(draft)!.ids).toContain(id);
         draft = setSourceResolved(draft, 'items', resolved(1));
@@ -184,7 +184,7 @@ describe('table card draft', () => {
         const scope = { kind: 'collection' as const, library_ref: 'u', key: 'CASHTRN2' };
         const added = addLibrarySource(initialTableCardDraft(request), scope);
         expect(addLibrarySource(added.draft, scope).key).toBeNull();
-        expect(createBlocker(added.draft, request)).toBe('Counting papers…');
+        expect(createBlocker(added.draft, request)).toBe('Counting items…');
         const counted = setSourceResolved(added.draft, added.key!, resolved(14));
         expect(cardTotals(counted)).toEqual({ count: 16, total: 16 });
         expect(createBlocker(counted, request)).toBeNull();
@@ -196,16 +196,16 @@ describe('table card draft', () => {
         const draft = initialTableCardDraft(request);
         const [key] = overCapSources(draft, request);
         expect(key).toBe(draft.sources[0].key);
-        expect(overCapMessage(draft, draft.sources[0], request)).toBe(
-            '1,840 papers; a table holds 1,000. Narrow the collection or add a tag filter.',
+        expect(overCapMessage(draft, request)).toBe(
+            'This table would have 1,840 items; the maximum is 1,000. Remove sources to continue.',
         );
-        expect(createBlocker(draft, request)).toBe('1,840 papers; a table holds 1,000.');
+        expect(createBlocker(draft, request)).toBe(overCapMessage(draft, request));
         // The step reports the source's full size, not the rows the cap left.
         expect(stepCount(draft, 'sources', request)).toBe(1840);
-        expect(stepSummary(draft, 'sources', request)).toBe('1,840 papers from 1 source');
+        expect(stepSummary(draft, 'sources', request)).toBe('1,840 items from 1 source');
     });
 
-    it('warns on the largest card when only the sum is over the cap', () => {
+    it('warns once with the neutral message when only the sum is over the cap', () => {
         const { request } = fixture('create-items');
         let draft = initialTableCardDraft(request);
         const a = addLibrarySource(draft, { kind: 'tag', library_ref: 'u', tag: 'a' });
@@ -213,8 +213,9 @@ describe('table card draft', () => {
         const b = addLibrarySource(draft, { kind: 'tag', library_ref: 'u', tag: 'b' });
         draft = setSourceResolved(b.draft, b.key!, resolved(500));
         expect(overCapSources(draft, request)).toEqual([a.key]);
-        expect(overCapMessage(draft, draft.sources[1], request)).toBe(
-            '1,102 papers across sources; a table holds 1,000. Remove a source or narrow one.',
+        // The same neutral message, whichever source tipped the table over.
+        expect(overCapMessage(draft, request)).toBe(
+            'This table would have 1,102 items; the maximum is 1,000. Remove sources to continue.',
         );
     });
 
@@ -309,7 +310,7 @@ describe('table card draft', () => {
         expect(cardRowCount(draft, request)).toBe(5);
         draft = setSourceItemIds(draft, 'items', ['u-PAPER001', 'u-PAPER002']);
         expect(cardRowCount(draft, request)).toBe(4);
-        expect(mergeLine(draft, request)).toBe('4 papers across sources; duplicates are merged on create');
+        expect(mergeLine(draft, request)).toBe('4 items across sources; duplicates are merged on create');
         expect(stepCount(draft, 'sources', request)).toBe(4);
     });
 

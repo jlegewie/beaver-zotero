@@ -30,6 +30,7 @@ import {
     removeItem,
     removeScreening,
     removeSource,
+    sourceTotal,
     setDescription,
     setInstructions,
     setSourceName,
@@ -66,6 +67,7 @@ import {
     Icon,
     LibraryIcon,
     PlusSignIcon,
+    SecurityWarningIcon,
     StopStrokeIcon,
     TableIcon,
 } from '../../icons/icons';
@@ -93,10 +95,10 @@ const BLOCK_GAP = '0.85rem';
 /** How long the note about items a drop left out stays up. */
 const DROP_NOTICE_MS = 6000;
 
-/** The step heading's count: papers for Sources, entries otherwise. */
+/** The step heading's count: items for Sources, entries otherwise. */
 function stepHeadingCount(step: TableCardStep, count: number): string {
     const n = count.toLocaleString('en-US');
-    if (step === 'sources') return `${n} ${count === 1 ? 'paper' : 'papers'}`;
+    if (step === 'sources') return `${n} ${count === 1 ? 'item' : 'items'}`;
     return n;
 }
 
@@ -198,6 +200,8 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const [isDecided, setIsDecided] = useState(false);
     const [dropNotice, setDropNotice] = useState<string | null>(null);
     const [editingTitle, setEditingTitle] = useState(false);
+    const [bodyScrolled, setBodyScrolled] = useState(false);
+    const bodyRef = useRef<HTMLDivElement | null>(null);
     const columnsRef = useRef<TableColumnsStepHandle | null>(null);
     const noticeTimer = useRef<number | undefined>(undefined);
     // A note about items a drop left out, cleared after a while.
@@ -530,6 +534,12 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     // Rendering ------------------------------------------------------------------
 
     const overCap = overCapSources(draft, request);
+    // The row-cap warning belongs to the step, under its heading, rather than
+    // to a source, and reads the same whichever source made the table too
+    // big. A source that alone holds more than a table marks its count.
+    const capWarning = overCap.length ? overCapMessage(draft, request) : null;
+    const overCapAlone = (source: DraftSource) =>
+        sourceTotal(source) > request.row_cap || !!source.resolved?.truncated;
     // A derived destination follows the sources as edited; the backend
     // derives it again on approval with the same rule.
     const destination = cardDestination(draft, request, libraryOf);
@@ -564,53 +574,57 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     />
                 )}
             </div>
-            <div className="table-card-header-body">
-                <InlineEditableText
-                    className="table-card-description"
-                    value={draft.description}
-                    placeholder="Add a description"
-                    ariaLabel="Table description"
-                    editLabel="Edit description"
-                    multiline
-                    disabled={locked}
-                    onChange={(description) => setDraft((prev) => setDescription(prev, description))}
-                />
-                <div className="table-card-destination">
-                    {destination ? (
-                        <>
-                            <Icon
-                                icon={destination.collection_key ? FolderIcon : LibraryIcon}
-                                className="table-card-destination-icon"
-                            />
-                            <span className="table-card-destination-path" title={destinationLine(destination)}>
-                                {/* <span>Saved to </span> */}
-                                <button
-                                    type="button"
-                                    className="table-card-crumb"
-                                    title={`Show ${destination.library_name} in Zotero`}
-                                    onClick={() => revealDestination(destination, false)}
-                                >
-                                    {destination.library_name}
-                                </button>
-                                {(destination.collection_name || destination.collection_key) && (
-                                    <>
-                                        <span> › </span>
-                                        <button
-                                            type="button"
-                                            className="table-card-crumb"
-                                            title={`Show ${destination.collection_name || destination.collection_key} in Zotero`}
-                                            onClick={() => revealDestination(destination, true)}
-                                        >
-                                            {destination.collection_name || destination.collection_key}
-                                        </button>
-                                    </>
-                                )}
-                            </span>
-                        </>
-                    ) : (
-                        <span className="font-color-orange">No library to save the table in</span>
-                    )}
-                </div>
+        </div>
+    );
+
+    // Description and destination scroll with the step; only the title row stays.
+    const headerBody = (
+        <div className="table-card-header-body">
+            <InlineEditableText
+                className="table-card-description"
+                value={draft.description}
+                placeholder="Add a description"
+                ariaLabel="Table description"
+                editLabel="Edit description"
+                multiline
+                disabled={locked}
+                onChange={(description) => setDraft((prev) => setDescription(prev, description))}
+            />
+            <div className="table-card-destination">
+                {destination ? (
+                    <>
+                        <Icon
+                            icon={destination.collection_key ? FolderIcon : LibraryIcon}
+                            className="table-card-destination-icon"
+                        />
+                        <span className="table-card-destination-path" title={destinationLine(destination)}>
+                            {/* <span>Saved to </span> */}
+                            <button
+                                type="button"
+                                className="table-card-crumb"
+                                title={`Show ${destination.library_name} in Zotero`}
+                                onClick={() => revealDestination(destination, false)}
+                            >
+                                {destination.library_name}
+                            </button>
+                            {(destination.collection_name || destination.collection_key) && (
+                                <>
+                                    <span> › </span>
+                                    <button
+                                        type="button"
+                                        className="table-card-crumb"
+                                        title={`Show ${destination.collection_name || destination.collection_key} in Zotero`}
+                                        onClick={() => revealDestination(destination, true)}
+                                    >
+                                        {destination.collection_name || destination.collection_key}
+                                    </button>
+                                </>
+                            )}
+                        </span>
+                    </>
+                ) : (
+                    <span className="font-color-orange">No library to save the table in</span>
+                )}
             </div>
         </div>
     );
@@ -637,7 +651,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             target={target}
             triggerLabel="Add source"
             triggerClassName="table-card-head-action"
-            // triggerTooltip="Add papers, a collection or a tag, or drag them onto the card"
+            // triggerTooltip="Add items, a collection or a tag, or drag them onto the card"
             triggerContent={
                 <>
                     <Icon icon={PlusSignIcon} />
@@ -689,9 +703,15 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
 
     const sourcesStep = (
         <div className="display-flex flex-col min-w-0" style={{ gap: '0.45rem' }}>
+            {capWarning && (
+                <div className="table-card-warning" role="alert">
+                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                    <span>{capWarning}</span>
+                </div>
+            )}
             {draft.sources.length === 0 && (
                 <div className="text-sm font-color-secondary">
-                    No sources yet. Add papers, a collection or a tag, or drag them onto the card.
+                    No sources yet. Add items, a collection or a tag, or drag them onto the card.
                 </div>
             )}
             {draft.sources.map((source) => (
@@ -700,7 +720,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     source={source}
                     rows={rows[source.key]}
                     removedRows={(source.removed ?? []).map((id) => rowsById[id] ?? { item_id: id, display_name: id })}
-                    warning={overCap.includes(source.key) ? overCapMessage(draft, source, request) : null}
+                    overCap={overCapAlone(source)}
                     libraryName={source.scope ? libraryNameOf(source.scope.library_ref) : null}
                     includesSubcollections={source.scope ? hasSubcollections(source.scope) : false}
                     disabled={locked}
@@ -764,14 +784,21 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         >
         <div
             ref={containerRef}
-            className="user-message-display"
-            style={{ minHeight: 'fit-content', padding: '0.8rem', maxHeight: '70vh', overflowY: 'auto' }}
+            className="user-message-display table-card"
             role="group"
             aria-label="Proposed table"
             aria-live="assertive"
         >
-            <div className="display-flex flex-col min-w-0" style={{ gap: BLOCK_GAP }}>
-                {header}
+            {/* The title row and the footer stay in place; everything between
+                them scrolls in one area. */}
+            <div className={`table-card-top ${bodyScrolled ? 'table-card-top-scrolled' : ''}`}>{header}</div>
+            <div
+                ref={bodyRef}
+                className="table-card-body"
+                style={{ gap: BLOCK_GAP }}
+                onScroll={(e) => setBodyScrolled(e.currentTarget.scrollTop > 0)}
+            >
+                {headerBody}
                 <div className="table-card-step">
                     {summaries.length > 0 && (
                         <div className="display-flex flex-col min-w-0" style={{ gap: '0.35rem' }}>
@@ -809,84 +836,82 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     </div>
                 )}
 
-                <div
-                    className="display-flex flex-row items-center gap-2 min-w-0"
-                    style={{ borderTop: '1px solid var(--fill-quinary)', paddingTop: '0.7rem', flexWrap: 'wrap' }}
+            </div>
+
+            <div className="table-card-footer">
+                <Button
+                    variant="ghost"
+                    ariaLabel={hasInstructions ? 'Decline the table and send instructions' : 'Cancel the table'}
+                    onClick={() => decide(null)}
+                    disabled={locked}
+                    className="flex-none whitespace-nowrap"
                 >
-                    <Button
-                        variant="ghost"
-                        ariaLabel={hasInstructions ? 'Decline the table and send instructions' : 'Cancel the table'}
-                        onClick={() => decide(null)}
-                        disabled={locked}
-                        className="flex-none whitespace-nowrap"
-                    >
-                        {cancelLabel}
-                    </Button>
-                    {disabled && onStop && (
-                        <Tooltip content="Stop the agent run" showArrow singleLine>
-                            <Button
-                                variant="outline"
-                                rightIcon={StopStrokeIcon}
-                                ariaLabel="Stop generating"
-                                style={{ padding: '2px 5px' }}
-                                onClick={onStop}
-                                className="flex-none"
-                            >
-                                Stop
-                            </Button>
-                        </Tooltip>
-                    )}
-                    {/* "Add screening" joins this footer when screening exists (P4). */}
-                    <div className="flex-1" />
-                    {stepIndex > 0 && (
+                    {cancelLabel}
+                </Button>
+                {disabled && onStop && (
+                    <Tooltip content="Stop the agent run" showArrow singleLine>
                         <Button
                             variant="outline"
-                            onClick={() => setDraft((prev) => previousStep(prev))}
-                            disabled={locked}
-                            className="flex-none whitespace-nowrap"
-                            style={{ padding: '2px 6px' }}
+                            rightIcon={StopStrokeIcon}
+                            ariaLabel="Stop generating"
+                            style={{ padding: '2px 5px' }}
+                            onClick={onStop}
+                            className="flex-none"
                         >
-                            Back
+                            Stop
                         </Button>
-                    )}
-                    {!isLast ? (
+                    </Tooltip>
+                )}
+                {/* "Add screening" joins this footer when screening exists (P4). */}
+                <div className="flex-1" />
+                {stepIndex > 0 && (
+                    <Button
+                        variant="outline"
+                        onClick={() => setDraft((prev) => previousStep(prev))}
+                        disabled={locked}
+                        className="flex-none whitespace-nowrap"
+                        style={{ padding: '2px 6px' }}
+                    >
+                        Back
+                    </Button>
+                )}
+                {!isLast ? (
+                    <Button
+                        variant="solid"
+                        rightIcon={ArrowRightIcon}
+                        onClick={() => setDraft((prev) => nextStep(prev))}
+                        disabled={locked}
+                        className="flex-none whitespace-nowrap"
+                        style={{ padding: '3px 8px' }}
+                    >
+                        Next
+                    </Button>
+                ) : (
+                    <>
+                        {actions.secondary && (
+                            <Button
+                                variant="outline"
+                                onClick={() => decide(actions.secondary!.choice)}
+                                disabled={locked || !!blocker}
+                                className="flex-none whitespace-nowrap"
+                                style={{ padding: '2px 6px' }}
+                            >
+                                {actions.secondary.label}
+                            </Button>
+                        )}
                         <Button
                             variant="solid"
-                            rightIcon={ArrowRightIcon}
-                            onClick={() => setDraft((prev) => nextStep(prev))}
-                            disabled={locked}
+                            ariaLabel={`${actions.primary.label} the table`}
+                            onClick={() => decide(actions.primary.choice)}
+                            disabled={locked || !!blocker}
+                            title={blocker ?? (disabled ? heldCaption : undefined)}
                             className="flex-none whitespace-nowrap"
                             style={{ padding: '3px 8px' }}
                         >
-                            Next
+                            {actions.primary.label}
                         </Button>
-                    ) : (
-                        <>
-                            {actions.secondary && (
-                                <Button
-                                    variant="outline"
-                                    onClick={() => decide(actions.secondary!.choice)}
-                                    disabled={locked || !!blocker}
-                                    className="flex-none whitespace-nowrap"
-                                    style={{ padding: '2px 6px' }}
-                                >
-                                    {actions.secondary.label}
-                                </Button>
-                            )}
-                            <Button
-                                variant="solid"
-                                ariaLabel={`${actions.primary.label} the table`}
-                                onClick={() => decide(actions.primary.choice)}
-                                disabled={locked || !!blocker}
-                                title={blocker ?? (disabled ? heldCaption : undefined)}
-                                className="flex-none whitespace-nowrap"
-                                style={{ padding: '3px 8px' }}
-                            >
-                                {actions.primary.label}
-                            </Button>
-                        </>
-                    )}
-                </div>
+                    </>
+                )}
             </div>
         </div>
         </TableCardDropZone>

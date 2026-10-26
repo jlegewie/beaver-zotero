@@ -167,7 +167,7 @@ describe('TableCard', () => {
         expect(button('Create')).toBeTruthy();
         expect(button('Create only')).toBeUndefined();
         expect(button('Back')).toBeTruthy();
-        expect(doneStep('Sources')).toBe('2 papers from 1 source');
+        expect(doneStep('Sources')).toBe('2 items from 1 source');
         await click('Create');
         expect(sent).toHaveLength(1);
         expect(sent[0]).toMatchObject({
@@ -189,7 +189,7 @@ describe('TableCard', () => {
         );
         await click('Next');
         expect(button('Create')!.disabled).toBe(true);
-        expect(container.textContent).toContain('Counting papers…');
+        expect(container.textContent).toContain('Counting items…');
         await act(async () => {
             finish({
                 resolved: { count: 14, total: 14, truncated: false, without_pdf: 3, sample: [] },
@@ -198,7 +198,7 @@ describe('TableCard', () => {
             });
         });
         expect(button('Create')!.disabled).toBe(false);
-        expect(doneStep('Sources')).toBe('16 papers from 2 sources');
+        expect(doneStep('Sources')).toBe('16 items from 2 sources');
         await click('Create');
         expect(sent[0].sources).toHaveLength(2);
     });
@@ -218,15 +218,15 @@ describe('TableCard', () => {
         await act(async () => { mocks.target.pickCollection(41); });
         await click('Next');
         expect(mocks.resolveItems).toHaveBeenCalledWith(['u-PAPER001', 'u-PAPER002']);
-        expect(doneStep('Sources')).toBe('4 papers from 2 sources');
+        expect(doneStep('Sources')).toBe('4 items from 2 sources');
     });
 
     it('warns on the over-cap card and keeps Create disabled', async () => {
         render(fixture('create-over-cap'));
-        expect(container.textContent).toContain('1,840 papers; a table holds 1,000. Narrow the collection or add a tag filter.');
+        expect(container.textContent).toContain('This table would have 1,840 items; the maximum is 1,000. Remove sources to continue.');
         await click('Next');
         expect(button('Create')!.disabled).toBe(true);
-        expect(container.textContent).toContain('1,840 papers; a table holds 1,000.');
+        expect(button('Create')!.title).toBe('This table would have 1,840 items; the maximum is 1,000. Remove sources to continue.');
     });
 
     it('declines with Cancel and sends typed instructions with it', async () => {
@@ -280,7 +280,7 @@ describe('TableCard', () => {
             mocks.target.pickTag({ id: 9, tag: 'review', libraryId: 1, type: 0, color: '' });
         });
         await click('Next');
-        expect(doneStep('Sources')).toBe('5 papers from 2 sources');
+        expect(doneStep('Sources')).toBe('5 items from 2 sources');
         await click('Create');
         expect(sent[0].sources).toEqual([
             { type: 'library', scope: { kind: 'collection', library_ref: 'u', key: 'CASHTRN2', name: 'Cash transfers' } },
@@ -361,16 +361,43 @@ describe('TableCard', () => {
         expect(container.textContent).toContain('My Library cannot hold the table');
     });
 
-    it('looks up the items of a card that opens on its own warning', async () => {
+    it('warns about the row cap under the Sources heading and leaves the source collapsed', async () => {
         mocks.resolveLibraryScope.mockResolvedValue({
             resolved: { count: 1000, total: 1840, truncated: true, without_pdf: 0, sample: [] },
             rows: [{ item_id: 'u-PAPER001', display_name: 'Paper one', has_pdf: false }],
         });
         render(fixture('create-over-cap'));
         await act(async () => {});
+        const alert = container.querySelector('.table-card-step [role="alert"]');
+        expect(alert?.textContent).toBe('This table would have 1,840 items; the maximum is 1,000. Remove sources to continue.');
+        // The source is not opened for the warning; its count is marked instead.
+        const toggle = container.querySelector('.table-card-source-toggle') as HTMLButtonElement;
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        expect(container.querySelector('[aria-label="Items, more than a table holds"]')).not.toBeNull();
+        expect(mocks.resolveLibraryScope).not.toHaveBeenCalled();
+        // Expanding it looks its items up, and it collapses again.
+        await clickElement(toggle);
         expect(mocks.resolveLibraryScope).toHaveBeenCalledTimes(1);
         expect(container.textContent).toContain('Paper one');
         expect(container.textContent).toContain('No PDF');
+        await clickElement(toggle);
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('pages a long source instead of scrolling it', async () => {
+        const rows = Array.from({ length: 60 }, (_, i) => ({ item_id: `u-P${String(i).padStart(7, '0')}`, display_name: `Paper ${i}` }));
+        mocks.resolveLibraryScope.mockResolvedValue({
+            resolved: { count: 60, total: 60, truncated: false, without_pdf: 0, sample: [] },
+            rows,
+        });
+        render(fixture('create-collection-destination'));
+        await clickElement(container.querySelector('.table-card-source-toggle'));
+        expect(container.querySelectorAll('.table-card-item')).toHaveLength(25);
+        await click('Show 25 more of 35 not shown');
+        expect(container.querySelectorAll('.table-card-item')).toHaveLength(50);
+        await click('Show 10 more of 10 not shown');
+        expect(container.querySelectorAll('.table-card-item')).toHaveLength(60);
+        expect(container.textContent).not.toContain('not shown');
     });
 
     it('keeps edits when the card is unmounted and mounted again in the same window', async () => {
@@ -407,7 +434,7 @@ describe('TableCard', () => {
             finishers[0]({ resolved: { count: 99, total: 99, truncated: false, without_pdf: 0, sample: [] }, rows: [] });
         });
         await click('Next');
-        expect(doneStep('Sources')).toBe('2 papers from 1 source');
+        expect(doneStep('Sources')).toBe('2 items from 1 source');
     });
 
     it('reveals a paper in Zotero when its row in an expanded source is clicked', async () => {
@@ -606,13 +633,13 @@ describe('TableCard', () => {
         await act(async () => {
             zone.dispatchEvent(dragEvent('dragover', { 'zotero/item': '5,6' }));
         });
-        expect(container.textContent).toContain('Drop to add 2 papers');
+        expect(container.textContent).toContain('Drop to add 2 items');
         await act(async () => {
             zone.dispatchEvent(dragEvent('drop', { 'zotero/item': '5,6' }));
         });
         expect(mocks.resolveItems).toHaveBeenLastCalledWith(['u-PAPER001', 'u-PAPER002', 'u-PAPER005', 'u-PAPER007']);
         await click('Next');
-        expect(doneStep('Sources')).toBe('4 papers from 1 source');
+        expect(doneStep('Sources')).toBe('4 items from 1 source');
     });
 
     it('refuses a dropped note with the reason, and says which items a mixed drop left out', async () => {
@@ -705,5 +732,26 @@ describe('TableCard', () => {
         const name = container.querySelector(`input[aria-label="Column ${before + 1} name"]`);
         expect(name).not.toBeNull();
         expect(document.activeElement).toBe(name);
+    });
+
+    it('opens a source on an error that arrives after it was added, and lets it close', async () => {
+        let fail: (value: unknown) => void = () => {};
+        mocks.resolveLibraryScope.mockReturnValue(new Promise((resolve) => { fail = resolve; }));
+        render(fixture('create-items'));
+        await act(async () => {
+            mocks.target.pickCollection(41);
+        });
+        const toggles = () => [...container.querySelectorAll('.table-card-source-toggle')] as HTMLButtonElement[];
+        expect(toggles()[1].getAttribute('aria-expanded')).toBe('false');
+        await act(async () => {
+            fail({
+                resolved: { count: 0, total: 0, truncated: false, without_pdf: 0, sample: [], error: 'This library is not available.' },
+                rows: [],
+            });
+        });
+        expect(toggles()[1].getAttribute('aria-expanded')).toBe('true');
+        expect(container.textContent).toContain('This library is not available.');
+        await clickElement(toggles()[1]);
+        expect(toggles()[1].getAttribute('aria-expanded')).toBe('false');
     });
 });

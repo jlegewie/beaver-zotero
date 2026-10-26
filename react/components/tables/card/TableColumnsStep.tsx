@@ -321,7 +321,7 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
                     ref={questionRef}
                     className="table-card-field text-sm"
                     value={column.description}
-                    placeholder="The question asked of every paper"
+                    placeholder="The question asked of every item"
                     aria-label={`Column ${index + 1} question`}
                     disabled={disabled}
                     onChange={(e) => onUpdate({ description: e.target.value })}
@@ -426,7 +426,7 @@ export const TableColumnsStep = React.forwardRef<TableColumnsStepHandle, TableCo
         <div className="display-flex flex-col min-w-0" style={{ gap: '0.45rem' }}>
             {columns.length === 0 && (
                 <div className="text-sm font-color-secondary">
-                    No columns yet. Use Add column to ask a question of every paper.
+                    No columns yet. Use Add column to ask a question of every item.
                 </div>
             )}
             {columns.map((column, index) => (
