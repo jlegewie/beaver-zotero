@@ -93,4 +93,39 @@ describe("extractSnapshotDocumentFromFile", () => {
         expect(doc.pageCount).toBe(0);
         expect(doc.diagnostics.extractedTextChars).toBe(0);
     });
+
+    it("extracts the title, authors, and abstract of an arXiv-style abstract page", async () => {
+        (globalThis as any).IOUtils.read.mockResolvedValue(htmlBytes(
+            `<div id="abs-outer"><div class="leftcolumn"><div id="content-inner"><div id="abs">`
+            + `<h1 class="title mathjax"><span class="descriptor">Title:</span>Learning to Reason</h1>`
+            + `<div class="authors"><span class="descriptor">Authors:</span><a href="#">Ada Lovelace</a>, <a href="#">Alan Turing</a></div>`
+            + `<blockquote class="abstract mathjax"><span class="descriptor">Abstract:</span>We study reasoning. Results improve.</blockquote>`
+            + `</div></div></div></div>`,
+            { title: "[2501.12948] Learning to Reason" },
+        ));
+
+        const doc = await extractSnapshotDocumentFromFile("/tmp/2501.html");
+        const text = doc.sections[0].items.map((item) => item.text).join(" ");
+
+        expect(text).toContain("Learning to Reason");
+        expect(text).toContain("Ada Lovelace");
+        expect(text).toContain("Alan Turing");
+        expect(text).toContain("We study reasoning. Results improve.");
+        expect(doc.diagnostics.textCoverage).toBeGreaterThanOrEqual(1);
+    });
+
+    it("reports no source text for a capture of a browser PDF viewer", async () => {
+        // Saving from a browser PDF tab stores the viewer page, whose body holds
+        // only the plugin embed: the empty result is the file's, not the walk's.
+        (globalThis as any).IOUtils.read.mockResolvedValue(htmlBytes(
+            `<embed type="application/pdf" src="about:blank" width="100%" height="100%">`,
+            { title: "2501.12948v2.pdf" },
+        ));
+
+        const doc = await extractSnapshotDocumentFromFile("/tmp/2501.html");
+
+        expect(doc.diagnostics.extractedTextChars).toBe(0);
+        expect(doc.diagnostics.sourceTextChars).toBe(0);
+        expect(doc.diagnostics.textCoverage).toBeNull();
+    });
 });

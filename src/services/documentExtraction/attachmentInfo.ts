@@ -514,7 +514,7 @@ function resolveSnapshotInfo(
                 page_count: snapshotMeta?.pageCount ?? null,
                 status: 'unreadable',
                 status_code: 'snapshot_no_text',
-                status_reason: 'Snapshot contains no extractable text.',
+                status_reason: 'Snapshot contains no extractable text (the saved page is empty, likely a placeholder such as a browser PDF viewer rather than the article).',
             };
         }
         // Snapshot reads use the same stamped synthetic page coordinate as
