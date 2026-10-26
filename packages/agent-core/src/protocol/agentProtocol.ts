@@ -1774,6 +1774,15 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
     item_category: 'regular' | 'attachment';
     /** Include matching standalone attachments before exclusions and truncation. */
     include_standalone_attachments?: boolean;
+    /**
+     * Attachment populations only: leave out a web snapshot (`text/html`)
+     * whose parent item also has a PDF or EPUB attachment in the population.
+     * Applied before exclusions and truncation, so every tranche of a
+     * continued job sees the same population.
+     *
+     * A handler that applies this MUST set `sibling_snapshots_skipped`.
+     */
+    skip_sibling_snapshots?: boolean;
     /** Filter regular items by attachment presence; null = no filter. */
     has_attachments?: boolean | null;
     /**
@@ -1884,6 +1893,12 @@ export interface WSResolvePopulationResponse {
     any_conditions_applied?: boolean | null;
     /** Confirms standalone attachments were included in resolution. */
     standalone_attachments_included?: boolean | null;
+    /**
+     * How many web snapshots `skip_sibling_snapshots` left out, counted before
+     * exclusions and truncation. Set (including 0) on every successful
+     * resolution of a request that asked for it; absent otherwise.
+     */
+    sibling_snapshots_skipped?: number | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found' or 'library_unavailable') */
