@@ -107,6 +107,18 @@ export const useSourcesMenu = ({
         // The target may take only some kinds of item (the table card takes papers).
         const addable = (item: Zotero.Item) =>
             sourceMenuItemContext.canAdd?.(item) ?? true;
+        // The target may offer another item in a candidate's place (the table
+        // card offers a child attachment as its paper); rows are merged after.
+        const asOffered = (items: Zotero.Item[]): Zotero.Item[] => {
+            const map = sourceMenuItemContext.asSourceItem;
+            if (!map) return items;
+            const offered: Zotero.Item[] = [];
+            for (const item of items) {
+                const mapped = map(item);
+                if (mapped && !offered.some((other) => other.id === mapped.id)) offered.push(mapped);
+            }
+            return offered;
+        };
 
         // A group of item rows, optionally headed. 'above' menus display the
         // array reversed, so the header follows its rows there to land above
@@ -120,16 +132,19 @@ export const useSourcesMenu = ({
         /** The rows for a typed query: matching items, nothing else. */
         const buildSearchSections = async (): Promise<SearchMenuItem[]> => {
             const items: SearchMenuItem[] = [];
+            const seen = new Set<number>();
             for (const result of searchResults) {
                 // A portable library ref that couldn't be resolved on this device
                 // carries library_id 0, which throws synchronously if looked up.
                 if (result.library_id === UNRESOLVED_LIBRARY_ID) {
                     continue;
                 }
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
-                if (!item || !addable(item)) {
+                const found = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+                const item = found ? asOffered([found])[0] : null;
+                if (!item || !addable(item) || seen.has(item.id)) {
                     continue;
                 }
+                seen.add(item.id);
                 items.push(await createSourceMenuItem(item, sourceMenuItemContext, searchQuery));
             }
             return itemSection('Search Results', items);
@@ -144,8 +159,8 @@ export const useSourcesMenu = ({
          * selected the menu falls back to recents, as before.
          */
         const buildDefaultSections = async (): Promise<SearchMenuItem[]> => {
-            const selectedItems = searchableOnly(selectedZoteroItems)
-                .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())
+            const selectedItems = asOffered(searchableOnly(selectedZoteroItems)
+                .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote()))
                 .filter(addable)
                 .filter(notAlreadyAttached)
                 .slice(0, proposedItemsLimit);
@@ -314,10 +329,10 @@ export const useSourcesMenu = ({
                     selectedItems.map((item) => createSourceMenuItem(item, sourceMenuItemContext))
                 ));
             } else {
-                const recentCandidates = [...recentItems, ...recentlyModifiedItems
+                const recentCandidates = asOffered([...recentItems, ...recentlyModifiedItems
                     .map((item) => (item.parentItem ? item.parentItem : item))
                     .filter((item): item is Zotero.Item => Boolean(item))
-                    .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())]
+                    .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())])
                     .filter((item, index, self) => index === self.findIndex((candidate) => candidate.id === item.id))
                     .filter(addable)
                     .filter(notAlreadyAttached)

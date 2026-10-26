@@ -19,6 +19,8 @@ export interface SourceMenuItemContext {
     isAttached: (item: Zotero.Item) => boolean;
     /** Whether `onAdd` can take the item; rows it refuses are not offered. */
     canAdd?: (item: Zotero.Item) => boolean;
+    /** The item a row offers in a candidate's place, or null to leave it out (see `AddSourcesTarget`). */
+    asSourceItem?: (item: Zotero.Item) => Zotero.Item | null;
     onAdd: (item: Zotero.Item) => void;
     onRemove: (item: Zotero.Item) => void;
 }

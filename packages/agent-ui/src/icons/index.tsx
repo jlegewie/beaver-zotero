@@ -87,6 +87,7 @@ export { default as TextIcon } from './TextIcon';
 export { default as HashtagIcon } from './HashtagIcon';
 export { default as CalendarIcon } from './CalendarIcon';
 export { default as ListBulletIcon } from './ListBulletIcon';
+export { default as FolderIcon } from './FolderIcon';
 export { default as SearchIcon } from './SearchIcon';
 export { default as ArrowUpRightIcon } from './ArrowUpRightIcon';
 export { default as ZapIcon } from './ZapIcon';

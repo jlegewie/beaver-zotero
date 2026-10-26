@@ -1,10 +1,12 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
-import { EditIcon, Icon } from '../../icons/icons';
+import { CancelIcon, EditIcon, Icon, TickIcon } from '../../icons/icons';
 import AutoGrowTextarea from './AutoGrowTextarea';
 
 export interface InlineEditableTextProps {
     value: string;
+    /** Called with the confirmed text; a discarded edit never calls it. */
     onChange: (value: string) => void;
     /** Shown in place of an empty value. */
     placeholder: string;
@@ -17,15 +19,17 @@ export interface InlineEditableTextProps {
     disabled?: boolean;
     /** Typography for both the text and the field, so editing does not shift the layout. */
     className?: string;
+    /** Told when editing starts and ends, for a layout that makes room for the field. */
+    onEditingChange?: (editing: boolean) => void;
 }
 
 /**
  * Text that reads as text, with a quiet pencil at its end. Clicking the text or
- * the pencil swaps in a field with the same typography. Edits apply as typed;
- * Enter or leaving the field finishes (by mouse, once the press completes, so
- * the layout holds under the pointer), Escape restores the value from before
- * the edit; both keys are left to an IME while it composes. Enter never reaches a
- * host shortcut, so it cannot decide the card.
+ * the pencil swaps in a field with the same typography and confirm / discard
+ * buttons, as renaming a thread does. The edit is held locally: Enter or the
+ * check applies it; Escape, the cross or a click outside discards it. Both keys
+ * are left to an IME while it composes, and Enter never reaches a host
+ * shortcut, so it cannot decide the card.
  */
 export const InlineEditableText: React.FC<InlineEditableTextProps> = ({
     value,
@@ -36,14 +40,18 @@ export const InlineEditableText: React.FC<InlineEditableTextProps> = ({
     multiline = false,
     disabled = false,
     className = '',
+    onEditingChange,
 }) => {
-    const [editing, setEditing] = useState(false);
-    const original = useRef(value);
+    const [text, setText] = useState<string | null>(null);
+    const editing = text !== null && !disabled;
+    const wrapperRef = useRef<HTMLDivElement | null>(null);
     const fieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
-    /** A mouse button is down somewhere in the document. */
-    const pressing = useRef(false);
-    /** Focus left during a press; the edit finishes once the press completes. */
-    const closeAfterPress = useRef(false);
+
+    const reportEditing = useRef(onEditingChange);
+    reportEditing.current = onEditingChange;
+    useLayoutEffect(() => {
+        reportEditing.current?.(editing);
+    }, [editing]);
 
     useLayoutEffect(() => {
         if (!editing || !fieldRef.current) return;
@@ -52,55 +60,44 @@ export const InlineEditableText: React.FC<InlineEditableTextProps> = ({
         field.setSelectionRange(field.value.length, field.value.length);
     }, [editing]);
 
-    // Leaving the field by mouse blurs it on mousedown. Swapping the field for
-    // text then can change the header's height (a single-line title wraps), which
-    // moves the pressed control (Next, Create) out from under the pointer before
-    // its click. So a blur during a press waits for the press to complete: its
-    // click, or a mouseup that produces none.
+    const start = () => {
+        if (!disabled) setText(value);
+    };
+    const discard = () => setText(null);
+    const confirm = () => {
+        if (text !== null && text !== value) onChange(text);
+        setText(null);
+    };
+
+    // A click outside discards the edit. It acts on the completed click, not
+    // the press, so nothing moves under the pointer before the click lands
+    // (a wrapped title is taller than its one-line field), and only for a
+    // press that also started outside, so a selection dragged out of the field
+    // keeps it.
     useEffect(() => {
-        const doc = fieldRef.current?.ownerDocument;
-        if (!editing || !doc) return;
-        const win = doc.defaultView;
-        let timer: number | undefined;
-        const release = () => {
-            pressing.current = false;
-            if (closeAfterPress.current) {
-                closeAfterPress.current = false;
-                setEditing(false);
-            }
+        const wrapper = wrapperRef.current;
+        if (!editing || !wrapper) return;
+        const doc = wrapper.ownerDocument;
+        const outside = (event: Event) => {
+            const target = event.target as Node | null;
+            return !!target && !wrapper.contains(target);
         };
-        const onMouseDown = () => {
-            pressing.current = true;
+        let pressedOutside = false;
+        const onMouseDown = (event: Event) => {
+            pressedOutside = outside(event);
         };
-        // The click follows its mouseup in the same task; the timer only
-        // settles a press that ends without one (a drag).
-        const onMouseUp = () => {
-            if (win) timer = win.setTimeout(release, 0);
-            else release();
+        const onClick = (event: Event) => {
+            if (pressedOutside && outside(event)) setText(null);
+            pressedOutside = false;
         };
         doc.addEventListener('mousedown', onMouseDown, true);
-        doc.addEventListener('mouseup', onMouseUp, true);
-        doc.addEventListener('click', release, true);
+        doc.addEventListener('click', onClick, true);
         return () => {
             doc.removeEventListener('mousedown', onMouseDown, true);
-            doc.removeEventListener('mouseup', onMouseUp, true);
-            doc.removeEventListener('click', release, true);
-            if (timer !== undefined) win?.clearTimeout(timer);
-            pressing.current = false;
-            closeAfterPress.current = false;
+            doc.removeEventListener('click', onClick, true);
         };
     }, [editing]);
 
-    const onBlur = () => {
-        if (pressing.current) closeAfterPress.current = true;
-        else setEditing(false);
-    };
-
-    const start = () => {
-        if (disabled) return;
-        original.current = value;
-        setEditing(true);
-    };
     const onKeyDown = (e: React.KeyboardEvent) => {
         // Enter and Escape belong to an active IME composition (confirming or
         // cancelling a candidate); acting on them would end the edit mid-word.
@@ -111,40 +108,57 @@ export const InlineEditableText: React.FC<InlineEditableTextProps> = ({
         if (e.key === 'Enter' && !(multiline && e.shiftKey)) {
             e.preventDefault();
             e.stopPropagation();
-            setEditing(false);
+            confirm();
         } else if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
-            onChange(original.current);
-            setEditing(false);
+            discard();
         }
     };
 
-    if (editing && !disabled) {
+    if (editing) {
         const fieldClass = `table-card-inline-field ${className}`;
-        return multiline ? (
-            <AutoGrowTextarea
-                bare
-                ref={(el) => { fieldRef.current = el; }}
-                className={fieldClass}
-                value={value}
-                placeholder={placeholder}
-                aria-label={ariaLabel}
-                onChange={(e) => onChange(e.target.value)}
-                onKeyDown={onKeyDown}
-                onBlur={onBlur}
-            />
-        ) : (
-            <input
-                ref={(el) => { fieldRef.current = el; }}
-                className={fieldClass}
-                value={value}
-                placeholder={placeholder}
-                aria-label={ariaLabel}
-                onChange={(e) => onChange(e.target.value)}
-                onKeyDown={onKeyDown}
-                onBlur={onBlur}
-            />
+        return (
+            <div ref={wrapperRef} className="table-card-inline-editing">
+                {multiline ? (
+                    <AutoGrowTextarea
+                        bare
+                        ref={(el) => { fieldRef.current = el; }}
+                        className={fieldClass}
+                        value={text}
+                        placeholder={placeholder}
+                        aria-label={ariaLabel}
+                        onChange={(e) => setText(e.target.value)}
+                        onKeyDown={onKeyDown}
+                    />
+                ) : (
+                    <input
+                        ref={(el) => { fieldRef.current = el; }}
+                        className={fieldClass}
+                        value={text}
+                        placeholder={placeholder}
+                        aria-label={ariaLabel}
+                        onChange={(e) => setText(e.target.value)}
+                        onKeyDown={onKeyDown}
+                    />
+                )}
+                <div className="table-card-inline-actions">
+                    <IconButton
+                        icon={CancelIcon}
+                        variant="ghost-secondary"
+                        onClick={discard}
+                        ariaLabel="Discard changes"
+                        className="scale-90"
+                    />
+                    <IconButton
+                        icon={TickIcon}
+                        variant="ghost-secondary"
+                        onClick={confirm}
+                        ariaLabel="Save changes"
+                        className="scale-11"
+                    />
+                </div>
+            </div>
         );
     }
 

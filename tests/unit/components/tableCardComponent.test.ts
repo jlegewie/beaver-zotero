@@ -100,6 +100,29 @@ async function clickElement(target: Element | null) {
     });
 }
 
+async function typeInto(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
+    const proto = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+    await act(async () => {
+        Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(field, value);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+}
+
+async function press(field: Element, key: string) {
+    await act(async () => {
+        field.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    });
+}
+
+/** A drag event carrying Zotero drag data, as Zotero's trees set it. */
+function dragEvent(type: string, data: Record<string, string>): Event {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', {
+        value: { types: Object.keys(data), getData: (t: string) => data[t] ?? '', dropEffect: 'none' },
+    });
+    return event;
+}
+
 async function click(label: string) {
     const target = button(label);
     if (!target) throw new Error(`No button ${label}: ${[...container.querySelectorAll('button')].map((b) => b.textContent).join(' | ')}`);
@@ -295,20 +318,23 @@ describe('TableCard', () => {
     });
 
     it('offers papers in "+ Source", and attachments by their paper, but not notes or standalone files', async () => {
-        const paper = { id: 5, key: 'PAPER005', libraryID: 1, isRegularItem: () => true, isAttachment: () => false };
-        const pdf = { id: 6, key: 'ATTACH06', libraryID: 1, parentItemID: 5, isRegularItem: () => false, isAttachment: () => true };
-        const loose = { id: 7, key: 'ATTACH07', libraryID: 1, parentItemID: null, isRegularItem: () => false, isAttachment: () => true };
-        const note = { id: 8, key: 'NOTE0008', libraryID: 1, isRegularItem: () => false, isAttachment: () => false };
-        const excluded = { id: 9, key: 'PAPER009', libraryID: 2, isRegularItem: () => true, isAttachment: () => false };
+        const paper = { id: 5, key: 'PAPER005', libraryID: 1, isRegularItem: () => true, isAttachment: () => false, isNote: () => false, isAnnotation: () => false };
+        const pdf = { id: 6, key: 'ATTACH06', libraryID: 1, parentItemID: 5, isRegularItem: () => false, isAttachment: () => true, isNote: () => false, isAnnotation: () => false };
+        const loose = { id: 7, key: 'ATTACH07', libraryID: 1, parentItemID: null, isRegularItem: () => false, isAttachment: () => true, isNote: () => false, isAnnotation: () => false };
+        const note = { id: 8, key: 'NOTE0008', libraryID: 1, isRegularItem: () => false, isAttachment: () => false, isNote: () => true, isAnnotation: () => false };
+        const excluded = { id: 9, key: 'PAPER009', libraryID: 2, isRegularItem: () => true, isAttachment: () => false, isNote: () => false, isAnnotation: () => false };
         (globalThis as any).Zotero.Items = { get: (id: number) => (id === 5 ? paper : false) };
         render(fixture('create-collection-destination'));
-        const { canAdd } = mocks.target;
+        const { canAdd, asSourceItem } = mocks.target;
         expect([paper, pdf, loose, note, excluded].map((item) => canAdd(item))).toEqual([true, true, false, false, false]);
+        // The menu lists a child attachment as the paper a pick adds.
+        expect(asSourceItem(pdf)).toBe(paper);
+        expect(asSourceItem(note)).toBeNull();
     });
 
     it('does not offer a paper in the trash, picked directly or through its attachment', async () => {
-        const trashed = { id: 5, key: 'PAPER005', libraryID: 1, deleted: true, isRegularItem: () => true, isAttachment: () => false };
-        const pdf = { id: 6, key: 'ATTACH06', libraryID: 1, parentItemID: 5, isRegularItem: () => false, isAttachment: () => true };
+        const trashed = { id: 5, key: 'PAPER005', libraryID: 1, deleted: true, isRegularItem: () => true, isAttachment: () => false, isNote: () => false, isAnnotation: () => false };
+        const pdf = { id: 6, key: 'ATTACH06', libraryID: 1, parentItemID: 5, isRegularItem: () => false, isAttachment: () => true, isNote: () => false, isAnnotation: () => false };
         (globalThis as any).Zotero.Items = { get: (id: number) => (id === 5 ? trashed : false) };
         render(fixture('create-collection-destination'));
         expect([trashed, pdf].map((item) => mocks.target.canAdd(item))).toEqual([false, false]);
@@ -358,6 +384,7 @@ describe('TableCard', () => {
             setter.call(title, 'Edited title');
             title.dispatchEvent(new Event('input', { bubbles: true }));
         });
+        await press(title, 'Enter');
         act(() => root?.unmount());
         render(fixture('create-items'), store);
         expect(container.textContent).toContain('Edited title');
@@ -406,18 +433,18 @@ describe('TableCard', () => {
     it('opens a column for editing on click and folds it back on a click outside', async () => {
         render(fixture('create-items'));
         await click('Next');
-        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBeNull();
+        expect(container.querySelector('input[aria-label="Column 1 name"]')).toBeNull();
         await clickElement(container.querySelectorAll('.table-card-column')[0]);
-        expect(container.querySelector('input[aria-label="Column 1 header"]')).not.toBeNull();
+        expect(container.querySelector('input[aria-label="Column 1 name"]')).not.toBeNull();
         // The press alone does not collapse it, so nothing moves under the pointer.
         await act(async () => {
             document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
         });
-        expect(container.querySelector('input[aria-label="Column 1 header"]')).not.toBeNull();
+        expect(container.querySelector('input[aria-label="Column 1 name"]')).not.toBeNull();
         await act(async () => {
             document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         });
-        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBeNull();
+        expect(container.querySelector('input[aria-label="Column 1 name"]')).toBeNull();
     });
 
     it('moves the editor to the column pressed below the open one', async () => {
@@ -430,24 +457,24 @@ describe('TableCard', () => {
         });
         // Nothing collapses on the press, so the layout under the pointer holds
         // until the click arrives.
-        expect(container.querySelector('input[aria-label="Column 1 header"]')).not.toBeNull();
+        expect(container.querySelector('input[aria-label="Column 1 name"]')).not.toBeNull();
         await act(async () => {
             (next as HTMLElement).click();
         });
-        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBeNull();
-        expect(container.querySelector('input[aria-label="Column 2 header"]')).not.toBeNull();
+        expect(container.querySelector('input[aria-label="Column 1 name"]')).toBeNull();
+        expect(container.querySelector('input[aria-label="Column 2 name"]')).not.toBeNull();
     });
 
     it('keeps the editor open when a selection dragged out of a field ends outside the card', async () => {
         render(fixture('create-items'));
         await click('Next');
         await clickElement(container.querySelectorAll('.table-card-column')[0]);
-        const header = container.querySelector('input[aria-label="Column 1 header"]') as HTMLInputElement;
+        const header = container.querySelector('input[aria-label="Column 1 name"]') as HTMLInputElement;
         await act(async () => {
             header.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
             document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         });
-        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBe(header);
+        expect(container.querySelector('input[aria-label="Column 1 name"]')).toBe(header);
     });
 
     it('restores the title when its edit is abandoned with Escape', async () => {
@@ -495,47 +522,173 @@ describe('TableCard', () => {
         render(fixture('create-items'));
         await click('Next');
         await clickElement(container.querySelectorAll('.table-card-column')[0]);
-        const header = container.querySelector('input[aria-label="Column 1 header"]') as HTMLInputElement;
+        const header = container.querySelector('input[aria-label="Column 1 name"]') as HTMLInputElement;
         const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, isComposing: true });
         await act(async () => {
             header.dispatchEvent(enter);
             header.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, isComposing: true }));
         });
         expect(enter.defaultPrevented).toBe(false);
-        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBe(header);
+        expect(container.querySelector('input[aria-label="Column 1 name"]')).toBe(header);
         await act(async () => {
             header.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         });
-        expect(container.querySelector('input[aria-label="Column 1 header"]')).toBeNull();
+        expect(container.querySelector('input[aria-label="Column 1 name"]')).toBeNull();
     });
 
-    it('keeps the title field in place until a press that took its focus completes', async () => {
+    it('discards a title edit on a click outside, without moving the layout before the click lands', async () => {
         render(fixture('create-items'));
+        const original = fixture('create-items').title;
         await clickElement(container.querySelector('button[aria-label="Edit title"]'));
         const title = container.querySelector('input[aria-label="Table title"]') as HTMLInputElement;
+        await typeInto(title, 'Unsaved title');
         const next = button('Next')!;
-        // Pressing Next moves focus off the field at mousedown ...
         await act(async () => {
             next.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
             title.blur();
         });
-        // ... but the header keeps its layout until Next's click arrives.
+        // Losing focus keeps the edit; only the completed click outside ends it.
         expect(container.querySelector('input[aria-label="Table title"]')).toBe(title);
         await act(async () => {
-            next.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
             next.click();
         });
         expect(container.querySelector('input[aria-label="Table title"]')).toBeNull();
+        expect(container.textContent).toContain(original);
+        expect(container.textContent).not.toContain('Unsaved title');
         expect(button('Create')).toBeTruthy();
     });
 
-    it('finishes the title edit at once when focus leaves without a press', async () => {
+    it('saves a title edit with Enter or the check, and discards it with the cross', async () => {
         render(fixture('create-items'));
         await clickElement(container.querySelector('button[aria-label="Edit title"]'));
-        const title = container.querySelector('input[aria-label="Table title"]') as HTMLInputElement;
+        await typeInto(container.querySelector('input[aria-label="Table title"]') as HTMLInputElement, 'With Enter');
+        await press(container.querySelector('input[aria-label="Table title"]')!, 'Enter');
+        expect(container.textContent).toContain('With Enter');
+
+        await clickElement(container.querySelector('button[aria-label="Edit title"]'));
+        await typeInto(container.querySelector('input[aria-label="Table title"]') as HTMLInputElement, 'With the check');
+        await clickElement(container.querySelector('button[aria-label="Save changes"]'));
+        expect(container.textContent).toContain('With the check');
+
+        await clickElement(container.querySelector('button[aria-label="Edit title"]'));
+        await typeInto(container.querySelector('input[aria-label="Table title"]') as HTMLInputElement, 'Thrown away');
+        await clickElement(container.querySelector('button[aria-label="Discard changes"]'));
+        expect(container.textContent).toContain('With the check');
+        expect(container.textContent).not.toContain('Thrown away');
+
+        await click('Next');
+        await click('Create');
+        expect(sent[0].title).toBe('With the check');
+    });
+
+    it('opens a column editor on the part that was clicked, with the caret at the end', async () => {
+        render(fixture('create-items'));
+        await click('Next');
+        await clickElement(container.querySelectorAll('.table-card-column-question')[0]);
+        const question = container.querySelector('textarea[aria-label="Column 1 question"]') as HTMLTextAreaElement;
+        expect(document.activeElement).toBe(question);
+        expect(question.selectionStart).toBe(question.value.length);
+        await press(question, 'Escape');
+        await clickElement(container.querySelectorAll('.table-card-column')[0]);
+        const name = container.querySelector('input[aria-label="Column 1 name"]') as HTMLInputElement;
+        expect(document.activeElement).toBe(name);
+        expect(name.selectionStart).toBe(name.value.length);
+    });
+
+    it('adds a dropped paper, and the paper of a dropped attachment', async () => {
+        const paper = { id: 5, key: 'PAPER005', libraryID: 1, isRegularItem: () => true, isAttachment: () => false, isNote: () => false, isAnnotation: () => false };
+        const pdf = { id: 6, key: 'ATTACH06', libraryID: 1, parentItemID: 7, isRegularItem: () => false, isAttachment: () => true, isNote: () => false, isAnnotation: () => false };
+        const parent = { id: 7, key: 'PAPER007', libraryID: 1, isRegularItem: () => true, isAttachment: () => false, isNote: () => false, isAnnotation: () => false };
+        const byId: Record<number, unknown> = { 5: paper, 6: pdf, 7: parent };
+        (globalThis as any).Zotero.Items = { get: (id: number) => byId[id] ?? false };
+        render(fixture('create-items'));
+        const zone = container.firstElementChild!;
         await act(async () => {
-            title.blur();
+            zone.dispatchEvent(dragEvent('dragover', { 'zotero/item': '5,6' }));
         });
-        expect(container.querySelector('input[aria-label="Table title"]')).toBeNull();
+        expect(container.textContent).toContain('Drop to add 2 papers');
+        await act(async () => {
+            zone.dispatchEvent(dragEvent('drop', { 'zotero/item': '5,6' }));
+        });
+        expect(mocks.resolveItems).toHaveBeenLastCalledWith(['u-PAPER001', 'u-PAPER002', 'u-PAPER005', 'u-PAPER007']);
+        await click('Next');
+        expect(doneStep('Sources')).toBe('4 papers from 1 source');
+    });
+
+    it('refuses a dropped note with the reason, and says which items a mixed drop left out', async () => {
+        const paper = { id: 5, key: 'PAPER005', libraryID: 1, isRegularItem: () => true, isAttachment: () => false, isNote: () => false, isAnnotation: () => false };
+        const note = { id: 8, key: 'NOTE0008', libraryID: 1, isRegularItem: () => false, isAttachment: () => false, isNote: () => true, isAnnotation: () => false };
+        const byId: Record<number, unknown> = { 5: paper, 8: note };
+        (globalThis as any).Zotero.Items = { get: (id: number) => byId[id] ?? false };
+        render(fixture('create-items'));
+        const zone = container.firstElementChild!;
+        const refused = dragEvent('drop', { 'zotero/item': '8' });
+        await act(async () => {
+            zone.dispatchEvent(refused);
+        });
+        expect(container.textContent).toContain('A note cannot be a table row');
+        expect(mocks.resolveItems).not.toHaveBeenCalledWith(expect.arrayContaining(['u-NOTE0008']));
+        await act(async () => {
+            zone.dispatchEvent(dragEvent('drop', { 'zotero/item': '5,8' }));
+        });
+        expect(container.textContent).toContain('1 item was not added: a note cannot be a table row.');
+        expect(mocks.resolveItems).toHaveBeenLastCalledWith(['u-PAPER001', 'u-PAPER002', 'u-PAPER005']);
+    });
+
+    it('adds a dropped collection as a source', async () => {
+        mocks.resolveLibraryScope.mockResolvedValue({
+            resolved: { count: 3, total: 3, truncated: false, without_pdf: 0, sample: [] },
+            rows: [],
+            name: 'Cash transfers',
+        });
+        render(fixture('create-items'));
+        await act(async () => {
+            container.firstElementChild!.dispatchEvent(dragEvent('drop', { 'zotero/collection': '41' }));
+        });
+        expect(mocks.resolveLibraryScope).toHaveBeenCalledWith(
+            expect.objectContaining({ kind: 'collection', library_ref: 'u', key: 'CASHTRN2' }),
+        );
+    });
+
+    it('selects the destination collection in Zotero from its breadcrumb', async () => {
+        const revealCollection = vi.fn();
+        const revealLibrary = vi.fn();
+        setHost({ navigation: { revealCollection, revealLibrary } as any });
+        try {
+            render(fixture('create-collection-destination'));
+            await clickElement(container.querySelector('button[title="Show Cash transfers in Zotero"]'));
+            expect(revealCollection).toHaveBeenCalledWith({ library_id: 0, library_ref: 'u', zotero_key: 'CASHTRN2' });
+            await clickElement(container.querySelector('button[title="Show My Library in Zotero"]'));
+            expect(revealLibrary).toHaveBeenCalledWith(1);
+        } finally {
+            setHost({});
+        }
+    });
+
+    it('shows the step position beside the title, and makes way for the title field', async () => {
+        render(fixture('create-items'));
+        const progress = () => container.querySelector('.table-card-header [role="img"]');
+        expect(progress()?.getAttribute('aria-label')).toBe('Step 1 of 2');
+        expect(progress()?.textContent).toContain('1 of 2');
+        await clickElement(container.querySelector('button[aria-label="Edit title"]'));
+        expect(progress()).toBeNull();
+        await press(container.querySelector('input[aria-label="Table title"]')!, 'Escape');
+        expect(progress()).not.toBeNull();
+        await click('Next');
+        expect(progress()?.getAttribute('aria-label')).toBe('Step 2 of 2');
+    });
+
+    it('puts each step\'s add action in its heading, and opens a column added there', async () => {
+        render(fixture('create-items'));
+        const heading = () => container.querySelector('.table-card-step-head')!;
+        expect(heading().textContent).toContain('Add source');
+        await click('Next');
+        expect(heading().textContent).toContain('Add column');
+        const before = container.querySelectorAll('.table-card-column').length;
+        await clickElement([...heading().querySelectorAll('button')].find((b) => b.textContent?.includes('Add column'))!);
+        expect(container.querySelectorAll('.table-card-column')).toHaveLength(before + 1);
+        const name = container.querySelector(`input[aria-label="Column ${before + 1} name"]`);
+        expect(name).not.toBeNull();
+        expect(document.activeElement).toBe(name);
     });
 });

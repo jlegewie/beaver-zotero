@@ -2,7 +2,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { AddSourcesMenuHandle, AddSourcesQuerySource } from '@beaver/agent-ui/composer/useAddSourcesMenu';
-import SearchMenu, { MenuPosition, SearchMenuCloseReason } from '@beaver/agent-ui/primitives/SearchMenu';
+import SearchMenu, { MenuPosition, SearchMenuCloseReason, menuSideWithRoom } from '@beaver/agent-ui/primitives/SearchMenu';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { useAtomValue, useSetAtom } from 'jotai';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
@@ -26,6 +26,13 @@ import { useNotesMenu } from './hooks/useNotesMenu';
 import { useSourcesMenu, type SourcesMenuEntries } from './hooks/useSourcesMenu';
 import { useTagsMenu } from './hooks/useTagsMenu';
 import { CollectionMenuItemContext, LibraryMenuItemContext, SourceMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
+
+/** The menu's width, which an end-aligned menu needs to place itself. */
+const MENU_WIDTH = 250;
+/** The menu's tallest, which decides whether it fits on the preferred side of its button. */
+const MENU_MAX_HEIGHT = 300;
+/** Space kept between the menu and the window edge. */
+const VIEWPORT_MARGIN = 8;
 
 /** How many recent items are carried in the `recentItems` preference. */
 const RECENT_ITEMS_LIMIT = 5;
@@ -120,6 +127,13 @@ export interface AddSourcesTarget {
      * every item when absent. Keep it referentially stable, like `isAttached`.
      */
     canAdd?: (item: Zotero.Item) => boolean;
+    /**
+     * The item a row offers in a candidate's place, or null to leave the
+     * candidate out: the table card offers a child attachment as its paper, so
+     * the row names what a pick adds. Rows that map to the same item are
+     * merged. Candidates are offered as they are when absent. Keep it stable.
+     */
+    asSourceItem?: (item: Zotero.Item) => Zotero.Item | null;
     addItem: (item: Zotero.Item) => void;
     removeItem: (item: Zotero.Item) => void;
     filters: MessageFiltersState;
@@ -169,6 +183,20 @@ export interface AddSourcesMenuProps {
     target?: AddSourcesTarget;
     /** A text label for the trigger button instead of the composer's "+" icon. */
     triggerLabel?: string;
+    /**
+     * The trigger's own look: its class and content replace the default ones
+     * (and its tooltip, which a labelled trigger does not need). `triggerLabel`
+     * stays its accessible name.
+     */
+    triggerClassName?: string;
+    triggerContent?: React.ReactNode;
+    /** A tooltip for a trigger with its own content. */
+    triggerTooltip?: string;
+    /**
+     * Which edge of the trigger the menu lines up with: its start (the
+     * default), or its end for a trigger at the right edge of a panel.
+     */
+    menuAlign?: 'start' | 'end';
 }
 
 const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(function AddSourcesMenu({
@@ -186,11 +214,19 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     verticalPosition = 'above',
     target,
     triggerLabel,
+    triggerClassName,
+    triggerContent,
+    triggerTooltip,
+    menuAlign = 'start',
 }, ref) {
     const surfaceWindow = useSurfaceWindow();
     const [isLoading, setIsLoading] = useState(false);
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
     const [menuMode, setMenuMode] = useState<MenuMode>('sources');
+    // The side a menu opened from the button chose for the room it has; a
+    // menu following a typed `@` keeps the caller's side.
+    const [buttonDirection, setButtonDirection] = useState<'above' | 'below' | null>(null);
+    const openDirection = querySource === 'menu' && buttonDirection ? buttonDirection : verticalPosition;
     const [activeZoteroLibraryId, setActiveZoteroLibraryId] = useState<number | null>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
@@ -451,12 +487,14 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     // collections and libraries on every character typed. The search query
     // reaches the rows as a separate argument to the item factories.
     const canAdd = target?.canAdd;
+    const asSourceItem = target?.asSourceItem;
     const sourceMenuItemContext = useMemo<SourceMenuItemContext>(() => ({
         isAttached,
         canAdd,
+        asSourceItem,
         onAdd: handleAddSourceItem,
         onRemove: handleRemoveSourceItem
-    }), [isAttached, canAdd, handleAddSourceItem, handleRemoveSourceItem]);
+    }), [isAttached, canAdd, asSourceItem, handleAddSourceItem, handleRemoveSourceItem]);
 
     const libraryMenuItemContext = useMemo<LibraryMenuItemContext>(() => ({
         currentLibraryIds,
@@ -504,7 +542,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         onSelectFiles: handleSelectFiles,
         getRecentItems,
         recentItemsLimit: RECENT_ITEMS_LIMIT,
-        verticalPosition,
+        verticalPosition: openDirection,
         entries: target?.entries,
     });
 
@@ -513,7 +551,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         searchQuery,
         searchableLibraryIds,
         libraryMenuItemContext,
-        verticalPosition
+        verticalPosition: openDirection
     });
 
     const collectionsMenu = useCollectionsMenu({
@@ -521,7 +559,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         searchQuery,
         searchableLibraryIds,
         collectionMenuItemContext,
-        verticalPosition
+        verticalPosition: openDirection
     });
 
     const tagsMenu = useTagsMenu({
@@ -529,7 +567,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         searchQuery,
         searchableLibraryIds,
         tagMenuItemContext,
-        verticalPosition
+        verticalPosition: openDirection
     });
 
     const notesMenu = useNotesMenu({
@@ -537,7 +575,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         searchQuery,
         searchableLibraryIds,
         sourceMenuItemContext,
-        verticalPosition
+        verticalPosition: openDirection
     });
 
     const menuItems = menuMode === 'sources'
@@ -556,9 +594,13 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         // Get button position
         if (buttonRef.current) {
             const rect = buttonRef.current.getBoundingClientRect();
-            const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom;
+            // Open on the side with room for the menu (see menuSideWithRoom).
+            const viewportHeight = buttonRef.current.ownerDocument.defaultView?.innerHeight ?? Infinity;
+            const direction = menuSideWithRoom(verticalPosition, rect, viewportHeight, MENU_MAX_HEIGHT + 8, VIEWPORT_MARGIN);
+            setButtonDirection(direction);
+            const y = direction === 'above' ? rect.top - 5 : rect.bottom;
             setMenuMode('sources');
-            onOpen({ x: rect.left, y });
+            onOpen({ x: menuAlign === 'end' ? rect.right - MENU_WIDTH : rect.left, y });
 
             // Remove focus from the button after opening the menu
             buttonRef.current.blur();
@@ -609,6 +651,22 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
 
     return (
         <>
+            {triggerContent !== undefined ? (
+                <Tooltip content={triggerTooltip ?? ''} showArrow disabled={!triggerTooltip}>
+                    <button
+                        type="button"
+                        className={triggerClassName}
+                        ref={buttonRef}
+                        onClick={handleButtonClick}
+                        aria-label={triggerLabel ?? "Add Sources"}
+                        aria-haspopup="menu"
+                        aria-expanded={isMenuOpen}
+                        disabled={disabled}
+                    >
+                        {triggerContent}
+                    </button>
+                </Tooltip>
+            ) : (
             <Tooltip content="Add Sources" showArrow singleLine>
                 <button
                     // The control row lives inside the composer's <form>, so a
@@ -627,15 +685,16 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                     {triggerLabel}
                 </button>
             </Tooltip>
+            )}
             <SearchMenu
                 menuItems={menuItems}
                 isOpen={isMenuOpen}
                 onClose={handleDismiss}
                 position={menuPosition}
                 useFixedPosition={true}
-                verticalPosition={verticalPosition}
-                width="250px"
-                maxHeight="300px"
+                verticalPosition={openDirection}
+                width={`${MENU_WIDTH}px`}
+                maxHeight={`${MENU_MAX_HEIGHT}px`}
                 // The query drives an effect above, so the menu's own field
                 // needs no separate search callback.
                 onSearch={() => {}}

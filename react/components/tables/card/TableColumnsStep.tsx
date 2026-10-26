@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import type { TableCardColumnType } from '@beaver/agent-core/protocol/tableCardProtocol';
 import type { DraftColumn } from '@beaver/agent-core/run-state/tableCardDraft';
 import { columnProblem } from '@beaver/agent-core/run-state/tableCardDraft';
@@ -16,7 +16,6 @@ import {
     HashtagIcon,
     Icon,
     ListBulletIcon,
-    PlusSignIcon,
     TextIcon,
 } from '../../icons/icons';
 import AutoGrowTextarea from './AutoGrowTextarea';
@@ -60,16 +59,17 @@ const keepEnter = (e: React.KeyboardEvent) => {
  * a comma ("Before, after"). The text is kept as typed, so a line can be
  * emptied while editing; the options are parsed from it.
  */
-const OptionsInput: React.FC<{
+const OptionsInput = React.forwardRef<HTMLTextAreaElement, {
     options: string[];
     label: string;
     disabled: boolean;
     onChange: (options: string[]) => void;
-}> = ({ options, label, disabled, onChange }) => {
+}>(function OptionsInput({ options, label, disabled, onChange }, ref) {
     const [text, setText] = useState(() => options.join('\n'));
     return (
         <AutoGrowTextarea
             bare
+            ref={ref}
             className="table-card-field text-sm min-w-0"
             value={text}
             placeholder="One option per line"
@@ -81,7 +81,7 @@ const OptionsInput: React.FC<{
             }}
         />
     );
-};
+});
 
 /** The column's type as a small tag: its icon and name, and a number's unit. */
 const TypeTag: React.FC<{ column: DraftColumn }> = ({ column }) => {
@@ -90,7 +90,7 @@ const TypeTag: React.FC<{ column: DraftColumn }> = ({ column }) => {
     return (
         <span className="table-card-type-tag">
             <Icon icon={type.icon} />
-            <span>{unit ? `${type.label} · ${unit}` : type.label}</span>
+            <span className="table-card-type-tag-label">{unit ? `${type.label} · ${unit}` : type.label}</span>
         </span>
     );
 };
@@ -100,25 +100,44 @@ interface ColumnCardProps {
     index: number;
     disabled: boolean;
     editing: boolean;
-    /** Focus the header when the editor opens: the column was just added. */
-    focusHeader: boolean;
-    onEdit: () => void;
+    /** The field the editor focuses when it opens. */
+    focusField: ColumnField;
+    onEdit: (field: ColumnField) => void;
     onClose: () => void;
     onUpdate: (patch: Partial<Omit<DraftColumn, 'key'>>) => void;
     onRemove: () => void;
 }
 
+/** The editor's text fields, in order. */
+type ColumnField = 'header' | 'question' | 'options';
+
+/** The field a click on the collapsed card points at: the part of the summary it hit. */
+function fieldAt(target: EventTarget | null, column: DraftColumn): ColumnField {
+    const el = target instanceof Element ? target : null;
+    if (el?.closest('.table-card-column-question')) return 'question';
+    if (el?.closest('.table-card-options') && column.type === 'select') return 'options';
+    return 'header';
+}
+
+/** Focus a field with the caret after its text, where an edit usually continues. */
+function focusAtEnd(field: HTMLInputElement | HTMLTextAreaElement | null): void {
+    if (!field) return;
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+}
+
 /**
  * One question column. At rest it reads as a summary (header, type, the
  * question clamped to two lines, a category's options); clicking it opens the
- * editor in place. A click outside the card, Escape, or Done closes it again.
+ * editor in place, focused on the part that was clicked. A click outside the
+ * card, Escape, or Done closes it again.
  */
 const ColumnCard: React.FC<ColumnCardProps> = ({
     column,
     index,
     disabled,
     editing,
-    focusHeader,
+    focusField,
     onEdit,
     onClose,
     onUpdate,
@@ -127,13 +146,19 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
     const cardRef = useRef<HTMLDivElement | null>(null);
     const headerRef = useRef<HTMLInputElement | null>(null);
     const questionRef = useRef<HTMLTextAreaElement | null>(null);
+    const optionsRef = useRef<HTMLTextAreaElement | null>(null);
     const problem = columnProblem(column);
     const name = column.header.trim() || `Column ${index + 1}`;
 
     useLayoutEffect(() => {
         if (!editing) return;
-        (focusHeader ? headerRef.current : questionRef.current ?? headerRef.current)?.focus();
-    }, [editing, focusHeader]);
+        const fields = { header: headerRef.current, question: questionRef.current, options: optionsRef.current };
+        focusAtEnd(fields[focusField] ?? headerRef.current);
+        // The editor is taller than the summary, and a column added from the
+        // step heading opens at the end of the list: bring all of it into view.
+        cardRef.current?.scrollIntoView?.({ block: 'nearest' });
+        // Only on opening: the focus is the user's from then on.
+    }, [editing]);
 
     // A click outside the card closes the editor. It closes on the completed
     // click, not on the press: collapsing shifts everything below the card,
@@ -176,13 +201,13 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
                 tabIndex={disabled ? -1 : 0}
                 aria-label={`Edit column ${name}`}
                 aria-disabled={disabled || undefined}
-                onClick={() => !disabled && onEdit()}
+                onClick={(e) => !disabled && onEdit(fieldAt(e.target, column))}
                 onKeyDown={(e) => {
                     if (disabled || e.target !== e.currentTarget) return;
                     if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
                         e.stopPropagation();
-                        onEdit();
+                        onEdit('header');
                     }
                 }}
             >
@@ -256,13 +281,13 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
         >
             <div className="display-flex flex-row items-start gap-3 min-w-0">
                 <label className="table-card-label flex-1 min-w-0">
-                    <span>Header</span>
+                    <span>Name</span>
                     <input
                         ref={headerRef}
                         className="table-card-field font-medium"
                         value={column.header}
                         placeholder="e.g. Sample size"
-                        aria-label={`Column ${index + 1} header`}
+                        aria-label={`Column ${index + 1} name`}
                         disabled={disabled}
                         onKeyDown={keepEnter}
                         onChange={(e) => onUpdate({ header: e.target.value })}
@@ -320,6 +345,7 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
                 <label className="table-card-label">
                     <span>Options, one per line</span>
                     <OptionsInput
+                        ref={optionsRef}
                         options={column.options}
                         label={`Column ${index + 1} options`}
                         disabled={disabled}
@@ -350,48 +376,57 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
     );
 };
 
+/** What the step heading's "Add column" button calls. */
+export interface TableColumnsStepHandle {
+    /** Add an empty column and open it for editing. */
+    add: () => void;
+}
+
 /**
  * The Columns step: the proposed questions as summary cards, one open for
- * editing at a time, with add and remove. A column has no basis of its own:
- * the filler reads the paper when there is one.
+ * editing at a time, with remove; "Add column" lives in the step heading and
+ * reaches the list through {@link TableColumnsStepHandle}. A column has no
+ * basis of its own: the filler reads the paper when there is one.
  */
-export const TableColumnsStep: React.FC<TableColumnsStepProps> = ({
+export const TableColumnsStep = React.forwardRef<TableColumnsStepHandle, TableColumnsStepProps>(function TableColumnsStep({
     columns,
     disabled,
     onAdd,
     onUpdate,
     onRemove,
-}) => {
-    const [editingKey, setEditingKey] = useState<string | null>(null);
-    const [addedKey, setAddedKey] = useState<string | null>(null);
+}, ref) {
+    const [editing, setEditing] = useState<{ key: string; field: ColumnField } | null>(null);
     const knownKeys = useRef(new Set(columns.map((column) => column.key)));
     const addRequested = useRef(false);
 
-    // A column added from "+ Column" opens with its header focused.
+    // A column added from "Add column" opens with its name focused.
     useEffect(() => {
         const added = columns.find((column) => !knownKeys.current.has(column.key));
         for (const column of columns) knownKeys.current.add(column.key);
         if (added && addRequested.current) {
             addRequested.current = false;
-            setEditingKey(added.key);
-            setAddedKey(added.key);
+            setEditing({ key: added.key, field: 'header' });
         }
     }, [columns]);
 
     useEffect(() => {
-        if (disabled) setEditingKey(null);
+        if (disabled) setEditing(null);
     }, [disabled]);
 
-    const close = React.useCallback(() => {
-        setEditingKey(null);
-        setAddedKey(null);
-    }, []);
+    const close = React.useCallback(() => setEditing(null), []);
+
+    useImperativeHandle(ref, () => ({
+        add: () => {
+            addRequested.current = true;
+            onAdd();
+        },
+    }), [onAdd]);
 
     return (
         <div className="display-flex flex-col min-w-0" style={{ gap: '0.45rem' }}>
             {columns.length === 0 && (
                 <div className="text-sm font-color-secondary">
-                    No columns yet. Add the questions the table asks of every paper.
+                    No columns yet. Use Add column to ask a question of every paper.
                 </div>
             )}
             {columns.map((column, index) => (
@@ -400,34 +435,19 @@ export const TableColumnsStep: React.FC<TableColumnsStepProps> = ({
                     column={column}
                     index={index}
                     disabled={disabled}
-                    editing={editingKey === column.key}
-                    focusHeader={addedKey === column.key}
-                    onEdit={() => {
-                        setEditingKey(column.key);
-                        setAddedKey(null);
-                    }}
+                    editing={editing?.key === column.key}
+                    focusField={editing?.key === column.key ? editing.field : 'header'}
+                    onEdit={(field) => setEditing({ key: column.key, field })}
                     onClose={close}
                     onUpdate={(patch) => onUpdate(column.key, patch)}
                     onRemove={() => {
-                        if (editingKey === column.key) close();
+                        if (editing?.key === column.key) close();
                         onRemove(column.key);
                     }}
                 />
             ))}
-            <Button
-                variant="ghost-secondary"
-                icon={PlusSignIcon}
-                onClick={() => {
-                    addRequested.current = true;
-                    onAdd();
-                }}
-                disabled={disabled || columns.length >= 30}
-                style={{ alignSelf: 'flex-start', marginLeft: '-6px' }}
-            >
-                Add column
-            </Button>
         </div>
     );
-};
+});
 
 export default TableColumnsStep;

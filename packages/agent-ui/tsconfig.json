@@ -173,6 +173,7 @@
     "./src/icons/HashtagIcon.tsx",
     "./src/icons/CalendarIcon.tsx",
     "./src/icons/ListBulletIcon.tsx",
+    "./src/icons/FolderIcon.tsx",
     "./src/icons/ThreeIcon.tsx",
     "./src/icons/TickIcon.tsx",
     "./src/icons/TissuePaperIcon.tsx",

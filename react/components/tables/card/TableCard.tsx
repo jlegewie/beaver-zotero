@@ -4,6 +4,7 @@ import { tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCa
 import type { ItemDisplayRow } from '@beaver/agent-core/protocol/agentProtocol';
 import type {
     TableCardChoice,
+    TableCardDestination,
     TableCardLibraryScope,
     WSTableCardRequest,
     WSTableCardResponse,
@@ -46,6 +47,7 @@ import {
     type TableCardDraft,
     type TableCardStep,
 } from '@beaver/agent-core/run-state/tableCardDraft';
+import { MAX_MODEL_COLUMNS } from '@beaver/agent-core/layouts/table';
 import { useAddSourcesMenu, type AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import Button from '@beaver/agent-ui/primitives/Button';
 import InstructionsDisclosure from '@beaver/agent-ui/primitives/InstructionsDisclosure';
@@ -57,12 +59,23 @@ import { tableFilesEditable } from '../../../../src/services/artifacts/tableItem
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import type { MessageFiltersState } from '../../../atoms/messageComposition';
 import { selectCollection, selectTagFilter, selectView } from '../../../utils/selectItem';
-import { ArrowRightIcon, CheckmarkCircleIcon, CSSIcon, Icon, StopStrokeIcon, TableIcon } from '../../icons/icons';
+import {
+    ArrowRightIcon,
+    CheckmarkCircleIcon,
+    FolderIcon,
+    Icon,
+    LibraryIcon,
+    PlusSignIcon,
+    StopStrokeIcon,
+    TableIcon,
+} from '../../icons/icons';
 import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSourcesMenu';
 import type { SourcesMenuEntries } from '../../ui/menus/hooks/useSourcesMenu';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
+import { paperOf, portableItemId, rowForItem } from './cardItems';
+import TableCardDropZone from './TableCardDropZone';
 import InlineEditableText from './InlineEditableText';
-import TableColumnsStep from './TableColumnsStep';
+import TableColumnsStep, { type TableColumnsStepHandle } from './TableColumnsStep';
 import TableSourceCard from './TableSourceCard';
 
 const STEP_LABELS: Record<TableCardStep, string> = {
@@ -75,6 +88,9 @@ const STEP_LABELS: Record<TableCardStep, string> = {
 const MENU_ENTRIES: SourcesMenuEntries = { libraries: false, notes: false, files: false, scopeVerb: 'add' };
 
 const BLOCK_GAP = '0.85rem';
+
+/** How long the note about items a drop left out stays up. */
+const DROP_NOTICE_MS = 6000;
 
 /** The step heading's count: papers for Sources, entries otherwise. */
 function stepHeadingCount(step: TableCardStep, count: number): string {
@@ -144,21 +160,6 @@ function resolutionKey(source: DraftSource): string {
     return `${scope.kind}:${scope.library_ref}:${scope.key ?? scope.tag}`;
 }
 
-/** The regular item a pick stands for: itself, or a child attachment's parent. */
-function paperOf(item: Zotero.Item): Zotero.Item | null {
-    if (item.isRegularItem()) return item;
-    if (item.isAttachment() && item.parentItemID) {
-        const parent = Zotero.Items.get(item.parentItemID) as Zotero.Item | false;
-        return parent && parent.isRegularItem() ? parent : null;
-    }
-    return null;
-}
-
-function portableItemId(item: Zotero.Item): string | null {
-    const ref = libraryRefForLibraryID(item.libraryID);
-    return ref ? `${ref}-${item.key}` : null;
-}
-
 /** "Add source" searches every library: the card's sources are not a search scope. */
 const NO_SEARCH_FILTERS: MessageFiltersState = { libraryIds: [], collectionIds: [], tagSelections: [] };
 
@@ -194,6 +195,20 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const [rowsById, setRowsById] = useState<Record<string, ItemDisplayRow>>({});
     const [wantsInstructions, setWantsInstructions] = useState(() => !!request.user_instructions_prefill);
     const [isDecided, setIsDecided] = useState(false);
+    const [dropNotice, setDropNotice] = useState<string | null>(null);
+    const [editingTitle, setEditingTitle] = useState(false);
+    const columnsRef = useRef<TableColumnsStepHandle | null>(null);
+    const noticeTimer = useRef<number | undefined>(undefined);
+    // A note about items a drop left out, cleared after a while.
+    const showDropNotice = useCallback((notice: string | null) => {
+        const win = containerRef.current?.ownerDocument.defaultView;
+        if (noticeTimer.current !== undefined) win?.clearTimeout(noticeTimer.current);
+        setDropNotice(notice);
+        if (notice && win) noticeTimer.current = win.setTimeout(() => setDropNotice(null), DROP_NOTICE_MS);
+    }, []);
+    useEffect(() => () => {
+        if (noticeTimer.current !== undefined) containerRef.current?.ownerDocument.defaultView?.clearTimeout(noticeTimer.current);
+    }, []);
     const decidedRef = useRef(false);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const steps = tableCardSteps(draft);
@@ -406,19 +421,21 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         });
     }, [setDraft]);
 
-    // A row is a paper: a picked attachment stands for its parent item; a
-    // standalone attachment or a note cannot be a row yet, so it is not offered.
-    // Nor is a paper in the trash, which the backend does not resolve.
+    // A row is a paper: a picked attachment stands for its parent item, and
+    // the menu offers that paper in its place; a standalone attachment or a
+    // note cannot be a row yet, so it is not offered. Nor is a paper in the
+    // trash, which the backend does not resolve.
     const rowIdOf = useCallback((item: Zotero.Item): string | null => {
-        const paper = paperOf(item);
-        if (!paper || paper.deleted || !searchableLibraryIds.includes(paper.libraryID)) return null;
-        return portableItemId(paper);
+        const row = rowForItem(item, searchableLibraryIds);
+        return 'id' in row ? row.id : null;
     }, [searchableLibraryIds]);
     const canAdd = useCallback((item: Zotero.Item) => rowIdOf(item) !== null, [rowIdOf]);
+    const asSourceItem = useCallback((item: Zotero.Item) => paperOf(item), []);
 
     const target = useMemo<AddSourcesTarget>(() => ({
         isAttached,
         canAdd,
+        asSourceItem,
         addItem: (item) => {
             const id = rowIdOf(item);
             if (id) setDraft((prev) => addItems(prev, [id]));
@@ -445,7 +462,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         },
         attachFiles: () => {},
         entries: MENU_ENTRIES,
-    }), [isAttached, canAdd, rowIdOf, filters, toggleScope, setDraft]);
+    }), [isAttached, canAdd, asSourceItem, rowIdOf, filters, toggleScope, setDraft]);
 
     const menuPortalContainer = containerRef.current?.closest(
         '[id^="beaver-react-root-"], #beaver-pane-window',
@@ -493,6 +510,17 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         }
     }, []);
 
+    /** Select the destination's library, or its collection, in Zotero. */
+    const revealDestination = useCallback((target: TableCardDestination, collection: boolean) => {
+        const navigation = getHost().navigation;
+        if (collection && target.collection_key) {
+            navigation?.revealCollection?.({ library_id: 0, library_ref: target.library_ref, zotero_key: target.collection_key });
+            return;
+        }
+        const libraryId = libraryIdOf(target.library_ref);
+        if (libraryId) navigation?.revealLibrary?.(libraryId);
+    }, []);
+
     const revealItem = useCallback((id: string) => {
         const ref = resolveObjectId(id);
         if (ref) getHost().navigation?.revealInLibrary?.(ref);
@@ -519,7 +547,28 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     editLabel="Edit title"
                     disabled={locked}
                     onChange={(title) => setDraft((prev) => setTitle(prev, title))}
+                    onEditingChange={setEditingTitle}
                 />
+                {/* Where the card is in its steps; it makes way while the title is edited. */}
+                {!editingTitle && (
+                    <Tooltip content={`Step ${stepIndex + 1} of ${steps.length}`} showArrow singleLine>
+                        <div
+                            className="table-card-progress"
+                            role="img"
+                            aria-label={`Step ${stepIndex + 1} of ${steps.length}`}
+                        >
+                            <span className="text-sm font-color-secondary">{`${stepIndex + 1} of ${steps.length}`}</span>
+                            <span className="display-flex flex-row" style={{ gap: '3px' }}>
+                                {steps.map((step, index) => (
+                                    <span
+                                        key={step}
+                                        className={`table-card-progress-bar ${index <= stepIndex ? 'table-card-progress-bar-done' : ''}`}
+                                    />
+                                ))}
+                            </span>
+                        </div>
+                    </Tooltip>
+                )}
             </div>
             <div className="table-card-header-body">
                 <InlineEditableText
@@ -535,11 +584,34 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 <div className="table-card-destination">
                     {destination ? (
                         <>
-                            <CSSIcon
-                                name={destination.collection_key ? 'collection' : 'library'}
-                                className="icon-16 scale-80 flex-none"
+                            <Icon
+                                icon={destination.collection_key ? FolderIcon : LibraryIcon}
+                                className="table-card-destination-icon"
                             />
-                            <span className="truncate">{destinationLine(destination)}</span>
+                            <span className="table-card-destination-path" title={destinationLine(destination)}>
+                                <span>Saved to </span>
+                                <button
+                                    type="button"
+                                    className="table-card-crumb"
+                                    title={`Show ${destination.library_name} in Zotero`}
+                                    onClick={() => revealDestination(destination, false)}
+                                >
+                                    {destination.library_name}
+                                </button>
+                                {(destination.collection_name || destination.collection_key) && (
+                                    <>
+                                        <span> › </span>
+                                        <button
+                                            type="button"
+                                            className="table-card-crumb"
+                                            title={`Show ${destination.collection_name || destination.collection_key} in Zotero`}
+                                            onClick={() => revealDestination(destination, true)}
+                                        >
+                                            {destination.collection_name || destination.collection_key}
+                                        </button>
+                                    </>
+                                )}
+                            </span>
                         </>
                     ) : (
                         <span className="font-color-orange">No library to save the table in</span>
@@ -550,6 +622,48 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     );
 
     // The current step's heading, with where it sits in the sequence.
+    // The step's own "add" action sits in its heading, in view however long
+    // the list below gets.
+    const addSource = (
+        <AddSourcesMenu
+            ref={menuRef}
+            isMenuOpen={menu.isOpen}
+            menuPosition={menu.position}
+            searchQuery={menu.query}
+            querySource={menu.querySource}
+            onQueryChange={menu.setQuery}
+            onOpen={menu.openFromButton}
+            onDismiss={menu.dismiss}
+            onCommit={menu.commit}
+            onResetQuery={menu.resetQuery}
+            menuPortalContainer={menuPortalContainer}
+            disabled={locked}
+            verticalPosition="above"
+            menuAlign="end"
+            target={target}
+            triggerLabel="Add source"
+            triggerClassName="table-card-head-action"
+            triggerTooltip="Add papers, a collection or a tag, or drag them onto the card"
+            triggerContent={
+                <>
+                    <Icon icon={PlusSignIcon} />
+                    <span>Add source</span>
+                </>
+            }
+        />
+    );
+    const addColumnAction = (
+        <button
+            type="button"
+            className="table-card-head-action"
+            onClick={() => columnsRef.current?.add()}
+            disabled={locked || draft.columns.length >= MAX_MODEL_COLUMNS}
+        >
+            <Icon icon={PlusSignIcon} />
+            <span>Add column</span>
+        </button>
+    );
+
     const stepHeading = (
         <div className="table-card-step-head">
             <span className="font-semibold font-color-primary">{STEP_LABELS[draft.step]}</span>
@@ -557,21 +671,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 {stepHeadingCount(draft.step, stepCount(draft, draft.step, request))}
             </span>
             <div className="flex-1" />
-            <div
-                className="table-card-progress"
-                role="img"
-                aria-label={`Step ${stepIndex + 1} of ${steps.length}`}
-            >
-                <span className="text-sm font-color-secondary">{`Step ${stepIndex + 1} of ${steps.length}`}</span>
-                <span className="display-flex flex-row" style={{ gap: '3px' }}>
-                    {steps.map((step, index) => (
-                        <span
-                            key={step}
-                            className={`table-card-progress-bar ${index <= stepIndex ? 'table-card-progress-bar-done' : ''}`}
-                        />
-                    ))}
-                </span>
-            </div>
+            {draft.step === 'sources' ? addSource : draft.step === 'columns' ? addColumnAction : null}
         </div>
     );
 
@@ -596,7 +696,9 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const sourcesStep = (
         <div className="display-flex flex-col min-w-0" style={{ gap: '0.45rem' }}>
             {draft.sources.length === 0 && (
-                <div className="text-sm font-color-secondary">No sources. Add papers, a collection or a tag.</div>
+                <div className="text-sm font-color-secondary">
+                    No sources yet. Add papers, a collection or a tag, or drag them onto the card.
+                </div>
             )}
             {draft.sources.map((source) => (
                 <TableSourceCard
@@ -617,25 +719,11 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 />
             ))}
             {merge && <div className="text-sm font-color-secondary">{merge}</div>}
-            <div className="display-flex flex-row" style={{ marginLeft: '-6px' }}>
-                <AddSourcesMenu
-                    ref={menuRef}
-                    isMenuOpen={menu.isOpen}
-                    menuPosition={menu.position}
-                    searchQuery={menu.query}
-                    querySource={menu.querySource}
-                    onQueryChange={menu.setQuery}
-                    onOpen={menu.openFromButton}
-                    onDismiss={menu.dismiss}
-                    onCommit={menu.commit}
-                    onResetQuery={menu.resetQuery}
-                    menuPortalContainer={menuPortalContainer}
-                    disabled={locked}
-                    verticalPosition="above"
-                    target={target}
-                    triggerLabel="Add source"
-                />
-            </div>
+            {dropNotice && (
+                <div className="text-sm font-color-secondary" role="status">
+                    {dropNotice}
+                </div>
+            )}
         </div>
     );
 
@@ -657,6 +745,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
 
     const columnsStep = (
         <TableColumnsStep
+            ref={columnsRef}
             columns={draft.columns}
             disabled={locked}
             onAdd={() => setDraft((prev) => addColumn(prev).draft)}
@@ -668,6 +757,17 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const cancelLabel = hasInstructions ? 'Send instructions' : 'Cancel';
 
     return (
+        <TableCardDropZone
+            searchableLibraryIds={searchableLibraryIds}
+            disabled={locked}
+            onAddItems={(ids) => setDraft((prev) => addItems(prev, ids))}
+            onAddScopes={(scopes) =>
+                setDraft((prev) =>
+                    scopes.reduce((next, scope) => (librarySourceKey(next, scope) ? next : addLibrarySource(next, scope).draft), prev),
+                )
+            }
+            onNotice={showDropNotice}
+        >
         <div
             ref={containerRef}
             className="user-message-display"
@@ -719,6 +819,16 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     className="display-flex flex-row items-center gap-2 min-w-0"
                     style={{ borderTop: '1px solid var(--fill-quinary)', paddingTop: '0.7rem', flexWrap: 'wrap' }}
                 >
+                    <Button
+                        variant="ghost"
+                        ariaLabel={hasInstructions ? 'Decline the table and send instructions' : 'Cancel the table'}
+                        onClick={() => decide(null)}
+                        disabled={locked}
+                        className="flex-none whitespace-nowrap"
+                        style={{ marginLeft: '-6px' }}
+                    >
+                        {cancelLabel}
+                    </Button>
                     {disabled && onStop && (
                         <Tooltip content="Stop the agent run" showArrow singleLine>
                             <Button
@@ -735,15 +845,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     )}
                     {/* "Add screening" joins this footer when screening exists (P4). */}
                     <div className="flex-1" />
-                    <Button
-                        variant="ghost"
-                        ariaLabel={hasInstructions ? 'Decline the table and send instructions' : 'Cancel the table'}
-                        onClick={() => decide(null)}
-                        disabled={locked}
-                        className="flex-none whitespace-nowrap"
-                    >
-                        {cancelLabel}
-                    </Button>
                     {stepIndex > 0 && (
                         <Button
                             variant="outline"
@@ -795,6 +896,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 </div>
             </div>
         </div>
+        </TableCardDropZone>
     );
 };
 

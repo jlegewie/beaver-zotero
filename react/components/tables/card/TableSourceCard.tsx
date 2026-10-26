@@ -8,12 +8,15 @@ import {
     ArrowDownIcon,
     ArrowRightIcon,
     ArrowUpRightIcon,
+    BookCopyIcon,
     CancelIcon,
-    CSSIcon,
     CSSItemTypeIcon,
+    FilterIcon,
+    FolderIcon,
     Icon,
     SecurityWarningIcon,
     Spinner,
+    TagIcon,
 } from '../../icons/icons';
 
 export interface TableSourceCardProps {
@@ -49,7 +52,7 @@ function sourceName(source: DraftSource): string {
 function sourceSubtitle(source: DraftSource, libraryName: string | null, includesSubcollections: boolean): string {
     const kind =
         source.type === 'items'
-            ? 'Items'
+            ? 'Individual papers'
             : source.scope!.kind === 'collection'
               ? includesSubcollections ? 'Collection, incl. subcollections' : 'Collection'
               : source.scope!.kind === 'tag'
@@ -64,15 +67,16 @@ function sourceKindNoun(source: DraftSource): string {
     return kind === 'collection' ? 'collection' : kind === 'tag' ? 'tag' : 'saved search';
 }
 
+/**
+ * The source's kind as a Beaver icon. Source kinds share one icon family,
+ * including kinds Zotero has no icon for; Zotero's item-type icons are kept
+ * for the papers listed inside a source.
+ */
 function sourceIcon(source: DraftSource): React.ReactNode {
-    if (source.type === 'items') return <CSSItemTypeIcon itemType="journalArticle" />;
-    const kind = source.scope!.kind;
-    return (
-        <CSSIcon
-            name={kind === 'collection' ? 'collection' : kind === 'tag' ? 'tag' : 'saved-search'}
-            className="icon-16 scale-90"
-        />
-    );
+    const kind = source.type === 'items' ? 'items' : source.scope!.kind;
+    const icon =
+        kind === 'items' ? BookCopyIcon : kind === 'collection' ? FolderIcon : kind === 'tag' ? TagIcon : FilterIcon;
+    return <Icon icon={icon} className="table-card-source-icon" />;
 }
 
 /** "16 without PDF, answered from title and abstract". */

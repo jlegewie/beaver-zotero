@@ -4630,14 +4630,154 @@
     border-color: var(--accent-blue);
 }
 
+/* Editing: the field takes the text's place, with discard / save after it. */
+[id^="beaver-pane-"] .table-card-inline-editing {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.35rem;
+    flex: 1;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-card-inline-editing .table-card-inline-field {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    margin: -3px 0 -3px -5px;
+}
+
+[id^="beaver-pane-"] .table-card-inline-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.35rem;
+    flex: none;
+    margin-top: -1px;
+}
+
 [id^="beaver-pane-"] .table-card-destination {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.35rem;
     min-width: 0;
     font-size: 0.875rem;
     color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-destination-icon {
+    flex: none;
+    width: 14px;
+    height: 14px;
+}
+
+[id^="beaver-pane-"] .table-card-destination-path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A breadcrumb segment that selects its library or collection in Zotero. */
+[id^="beaver-pane-"] .table-card-crumb {
+    display: inline;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-crumb:hover {
+    color: var(--fill-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+[id^="beaver-pane-"] .table-card-crumb:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 2px;
+}
+
+[id^="beaver-pane-"] .table-card-source-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--fill-secondary);
+}
+
+/* "Add source" / "Add column": a quiet action at the end of the step heading,
+ * in the secondary color like the "Edit" link of a completed step. */
+[id^="beaver-pane-"] .table-card-head-action {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.3rem;
+    flex: none;
+    margin-inline-end: -6px;
+    padding: 2px 6px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fill-secondary);
+    font-size: 0.875rem;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-head-action:hover:not(:disabled),
+[id^="beaver-pane-"] .table-card-head-action[aria-expanded="true"] {
+    background: var(--beaver-fill-hover);
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-head-action:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 0;
+}
+
+[id^="beaver-pane-"] .table-card-head-action:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+/* Drop overlay: over the whole card while a drag is over it. */
+[id^="beaver-pane-"] .table-card-drop-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px dashed var(--accent-blue);
+    border-radius: var(--beaver-radius-card, 8px);
+    background: color-mix(in srgb, var(--material-background, var(--color-background)) 88%, transparent);
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+
+[id^="beaver-pane-"] .table-card-drop-overlay-error {
+    border-color: var(--tag-red-tertiary, var(--fill-tertiary));
+}
+
+[id^="beaver-pane-"] .table-card-drop-message {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 1rem;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--fill-primary);
+    text-align: center;
+}
+
+[id^="beaver-pane-"] .table-card-drop-icon {
+    width: 18px;
+    height: 18px;
+    flex: none;
 }
 
 /* Steps: one part at a time, completed ones folded into a line above. */
@@ -4658,12 +4798,17 @@
     min-width: 0;
 }
 
+/* "1 of 2" and its bars, at the end of the title row, centred on the title's
+ * first line. */
 [id^="beaver-pane-"] .table-card-progress {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.4rem;
     flex: none;
+    height: calc(1.05rem * 1.3);
+    margin-inline-start: 0.25rem;
+    white-space: nowrap;
 }
 
 [id^="beaver-pane-"] .table-card-progress-bar {
@@ -4870,7 +5015,15 @@
     font-style: italic;
 }
 
+[id^="beaver-pane-"] .table-card-type-tag-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* A long unit must not crowd out the column name. */
 [id^="beaver-pane-"] .table-card-type-tag {
+    max-width: 11rem;
     display: inline-flex;
     align-items: center;
     gap: 4px;
