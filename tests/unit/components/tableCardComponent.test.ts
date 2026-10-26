@@ -158,7 +158,7 @@ afterEach(() => {
 describe('TableCard', () => {
     it('shows the destination line and a single Create on the last step', async () => {
         render(fixture('create-collection-destination'));
-        expect(container.textContent).toContain('Saved to My Library › Cash transfers');
+        expect(container.textContent).toContain('My Library › Cash transfers');
         expect(container.textContent).toContain('Collection, incl. subcollections · My Library');
         expect(button('Next')).toBeTruthy();
         // Screening arrives with P4; until then the card offers no step for it.
@@ -289,8 +289,8 @@ describe('TableCard', () => {
     });
 
     it.each([
-        [true, 'Saved to Lab group'],
-        [false, 'Saved to My Library'],
+        [true, 'Lab group'],
+        [false, 'My Library'],
     ])('derives an edited group destination only when the group allows file edits (%s)', async (filesEditable, line) => {
         const zotero = (globalThis as any).Zotero;
         zotero.Libraries = {

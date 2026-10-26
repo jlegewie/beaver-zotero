@@ -142,9 +142,9 @@ describe('table card draft', () => {
     });
 
     it('shows the destination line', () => {
-        expect(destinationLine(fixture('create-items').request.destination)).toBe('Saved to My Library');
+        expect(destinationLine(fixture('create-items').request.destination)).toBe('My Library');
         expect(destinationLine(fixture('create-collection-destination').request.destination)).toBe(
-            'Saved to My Library › Cash transfers',
+            'My Library › Cash transfers',
         );
     });
 
