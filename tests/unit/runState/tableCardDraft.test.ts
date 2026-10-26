@@ -15,6 +15,7 @@ import {
     columnProblem,
     createActions,
     createBlocker,
+    createBlockerReason,
     destinationLine,
     initialTableCardDraft,
     itemsSource,
@@ -225,11 +226,15 @@ describe('table card draft', () => {
         expect(createBlocker(draft, request)).toBe('Add a question column.');
         const added = addColumn(draft);
         draft = added.draft;
-        expect(createBlocker(draft, request)).toBe('Finish the question columns.');
+        // The blocker names the column and what it still needs.
+        expect(createBlocker(draft, request)).toBe('A column needs a name.');
+        expect(createBlockerReason(draft, request)).toMatchObject({ part: 'columns' });
         draft = updateColumn(draft, added.key, { header: 'Design', description: 'What design?', type: 'select' });
-        expect(createBlocker(draft, request)).toBe('Finish the question columns.');
+        expect(createBlocker(draft, request)).toBe('Design: Add at least one option.');
         draft = updateColumn(draft, added.key, { options: ['RCT', ' rct '] });
-        expect(createBlocker(draft, request)).toBe('Finish the question columns.');
+        expect(createBlocker(draft, request)).toBe('Design: Options must differ.');
+        const second = addColumn(draft);
+        expect(createBlocker(second.draft, request)).toBe('2 columns are incomplete.');
         draft = updateColumn(draft, added.key, { options: ['RCT', 'Other', ''] });
         expect(createBlocker(draft, request)).toBeNull();
         expect(tableCardResponse(draft, request, 'create').columns).toEqual([

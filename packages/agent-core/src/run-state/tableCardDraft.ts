@@ -468,7 +468,7 @@ export const MAX_CARD_SELECT_LABEL_CHARS = 60;
  * {@link normalizeSelectLabel} — so `Yes` and `Yes.` are one option.
  */
 export function columnProblem(column: DraftColumn): string | null {
-    if (!column.header.trim()) return 'Add a header.';
+    if (!column.header.trim()) return 'Add a name.';
     if (!column.description.trim()) return 'Add the question this column asks.';
     if (column.type === 'select') {
         const options = column.options.map((option) => option.trim()).filter(Boolean);
@@ -506,27 +506,57 @@ export function stepCount(draft: TableCardDraft, step: TableCardStep, request: W
 }
 
 /**
+ * Why Create is disabled: the message, the part of the card that needs the
+ * fix (so the card can lead there), and whether it only needs to wait (a
+ * count in flight) rather than a change.
+ */
+export interface CreateBlocker {
+    message: string;
+    part: 'title' | 'sources' | 'columns';
+    pending?: boolean;
+}
+
+/**
  * Why Create is disabled, or null when it can be pressed. With `libraryOf`,
  * an edited card whose derived destination has nowhere to go is blocked too.
  */
+export function createBlockerReason(
+    draft: TableCardDraft,
+    request: WSTableCardRequest,
+    libraryOf?: (ref: string) => DestinationLibrary | null,
+): CreateBlocker | null {
+    const sources = (message: string): CreateBlocker => ({ message, part: 'sources' });
+    if (!draft.title.trim()) return { message: 'Add a title.', part: 'title' };
+    if (!draft.sources.length) return sources('Add a source.');
+    if (libraryOf && !cardDestination(draft, request, libraryOf)) return sources(NO_DESTINATION);
+    if (draft.sources.some((source) => source.counting))
+        return { message: 'Counting items…', part: 'sources', pending: true };
+    const failed = draft.sources.find((source) => source.resolved?.error);
+    if (failed) return sources('Remove the source that cannot be used.');
+    if (cardTotals(draft).count === 0) return sources('The sources contain no items.');
+    if (overCapSources(draft, request).length) return sources(overCapMessage(draft, request));
+    if (!draft.columns.length) return { message: 'Add a question column.', part: 'columns' };
+    if (draft.columns.length > MAX_MODEL_COLUMNS)
+        return { message: `A table holds at most ${MAX_MODEL_COLUMNS} question columns.`, part: 'columns' };
+    const incomplete = draft.columns.filter((column) => columnProblem(column));
+    if (incomplete.length === 1) {
+        const [column] = incomplete;
+        const name = column.header.trim();
+        // A column with no name can only be pointed at by what it lacks.
+        const message = name ? `${name}: ${columnProblem(column)}` : 'A column needs a name.';
+        return { message, part: 'columns' };
+    }
+    if (incomplete.length) return { message: `${incomplete.length} columns are incomplete.`, part: 'columns' };
+    return null;
+}
+
+/** {@link createBlockerReason}'s message alone. */
 export function createBlocker(
     draft: TableCardDraft,
     request: WSTableCardRequest,
     libraryOf?: (ref: string) => DestinationLibrary | null,
 ): string | null {
-    if (!draft.title.trim()) return 'Add a title.';
-    if (!draft.sources.length) return 'Add a source.';
-    if (libraryOf && !cardDestination(draft, request, libraryOf)) return NO_DESTINATION;
-    if (draft.sources.some((source) => source.counting)) return 'Counting items…';
-    const failed = draft.sources.find((source) => source.resolved?.error);
-    if (failed) return 'Remove the source that cannot be used.';
-    if (cardTotals(draft).count === 0) return 'The sources contain no items.';
-    if (overCapSources(draft, request).length) return overCapMessage(draft, request);
-    if (!draft.columns.length) return 'Add a question column.';
-    if (draft.columns.length > MAX_MODEL_COLUMNS)
-        return `A table holds at most ${MAX_MODEL_COLUMNS} question columns.`;
-    if (draft.columns.some((column) => columnProblem(column))) return 'Finish the question columns.';
-    return null;
+    return createBlockerReason(draft, request, libraryOf)?.message ?? null;
 }
 
 /**

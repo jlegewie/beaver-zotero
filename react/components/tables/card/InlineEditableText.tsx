@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import { CancelIcon, EditIcon, Icon, TickIcon } from '../../icons/icons';
@@ -23,6 +23,11 @@ export interface InlineEditableTextProps {
     onEditingChange?: (editing: boolean) => void;
 }
 
+/** Starts editing from outside, as the card's "Add a title" notice does. */
+export interface InlineEditableTextHandle {
+    edit: () => void;
+}
+
 /**
  * Text that reads as text, with a quiet pencil at its end. Clicking the text or
  * the pencil swaps in a field with the same typography and confirm / discard
@@ -31,7 +36,7 @@ export interface InlineEditableTextProps {
  * are left to an IME while it composes, and Enter never reaches a host
  * shortcut, so it cannot decide the card.
  */
-export const InlineEditableText: React.FC<InlineEditableTextProps> = ({
+export const InlineEditableText = forwardRef<InlineEditableTextHandle, InlineEditableTextProps>(function InlineEditableText({
     value,
     onChange,
     placeholder,
@@ -41,7 +46,7 @@ export const InlineEditableText: React.FC<InlineEditableTextProps> = ({
     disabled = false,
     className = '',
     onEditingChange,
-}) => {
+}, ref) {
     const [text, setText] = useState<string | null>(null);
     const editing = text !== null && !disabled;
     const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -63,6 +68,7 @@ export const InlineEditableText: React.FC<InlineEditableTextProps> = ({
     const start = () => {
         if (!disabled) setText(value);
     };
+    useImperativeHandle(ref, () => ({ edit: start }));
     const discard = () => setText(null);
     const confirm = () => {
         if (text !== null && text !== value) onChange(text);
@@ -182,6 +188,6 @@ export const InlineEditableText: React.FC<InlineEditableTextProps> = ({
             )}
         </div>
     );
-};
+});
 
 export default InlineEditableText;

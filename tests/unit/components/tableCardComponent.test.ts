@@ -190,6 +190,9 @@ describe('TableCard', () => {
         await click('Next');
         expect(button('Create')!.disabled).toBe(true);
         expect(container.textContent).toContain('Counting items…');
+        // Waiting on a count is a quiet status, not a warning.
+        expect(container.querySelector('.table-card-footer [role="status"]')?.textContent).toContain('Counting items…');
+        expect(container.querySelector('.table-card-footer [role="alert"]')).toBeNull();
         await act(async () => {
             finish({
                 resolved: { count: 14, total: 14, truncated: false, without_pdf: 3, sample: [] },
@@ -753,5 +756,62 @@ describe('TableCard', () => {
         expect(container.textContent).toContain('This library is not available.');
         await clickElement(toggles()[1]);
         expect(toggles()[1].getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('explains a disabled Create in the footer and leads to the column that needs work', async () => {
+        render(fixture('create-items'));
+        await click('Next');
+        expect(container.querySelector('.table-card-footer [role="alert"]')).toBeNull();
+        // An empty column added from the heading blocks Create.
+        await clickElement([...container.querySelectorAll('.table-card-step-head button')].find((b) => b.textContent?.includes('Add column'))!);
+        await press(document.activeElement!, 'Escape');
+        const notice = () => container.querySelector('.table-card-footer [role="alert"]');
+        expect(notice()?.textContent).toContain('A column needs a name.');
+        expect(button('Create')!.disabled).toBe(true);
+        await click('Show');
+        const index = container.querySelectorAll('.table-card-column').length;
+        expect(document.activeElement).toBe(container.querySelector(`input[aria-label="Column ${index} name"]`));
+    });
+
+    it('leads from a missing title to the title field', async () => {
+        const request = { ...fixture('create-items'), title: '' };
+        render(request);
+        await click('Next');
+        expect(container.querySelector('.table-card-footer [role="alert"]')?.textContent).toContain('Add a title.');
+        await click('Edit title');
+        expect(document.activeElement).toBe(container.querySelector('input[aria-label="Table title"]'));
+    });
+
+    it('shows a column\'s type alone in its summary, with removal in the editor', async () => {
+        const request = fixture('create-collection-destination');
+        request.columns[0] = { ...request.columns[0], unit: 'participants' };
+        render(request);
+        await click('Next');
+        const first = container.querySelectorAll('.table-card-column')[0];
+        expect(first.querySelector('.table-card-type-tag')?.textContent).toBe('Number');
+        expect(first.querySelector('button')).toBeNull();
+        const before = container.querySelectorAll('.table-card-column').length;
+        await clickElement(first);
+        await click('Remove');
+        expect(container.querySelectorAll('.table-card-column')).toHaveLength(before - 1);
+    });
+
+    it('moves to the missing field when the incomplete column is already open', async () => {
+        render(fixture('create-items'));
+        await click('Next');
+        await clickElement([...container.querySelectorAll('.table-card-step-head button')].find((b) => b.textContent?.includes('Add column'))!);
+        const index = container.querySelectorAll('.table-card-column').length;
+        const name = container.querySelector(`input[aria-label="Column ${index} name"]`) as HTMLInputElement;
+        await typeInto(name, 'Region');
+        expect(container.querySelector('.table-card-footer [role="alert"]')?.textContent).toContain('Region: Add the question this column asks.');
+        // The press on Show starts outside the open editor; the click closes and reopens it.
+        const show = button('Show')!;
+        await act(async () => {
+            show.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            show.click();
+        });
+        const question = container.querySelector(`textarea[aria-label="Column ${index} question"]`);
+        expect(question).not.toBeNull();
+        expect(document.activeElement).toBe(question);
     });
 });

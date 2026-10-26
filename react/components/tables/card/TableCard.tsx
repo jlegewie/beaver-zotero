@@ -14,7 +14,9 @@ import {
     addItems,
     addLibrarySource,
     createActions,
+    columnProblem,
     createBlocker,
+    createBlockerReason,
     cardDestination,
     destinationLine,
     goToStep,
@@ -68,6 +70,7 @@ import {
     LibraryIcon,
     PlusSignIcon,
     SecurityWarningIcon,
+    Spinner,
     StopStrokeIcon,
     TableIcon,
 } from '../../icons/icons';
@@ -77,7 +80,7 @@ import { describeItems, resolveItems, resolveLibraryScope } from './liveSources'
 import { paperOf, portableItemId, rowForItem } from './cardItems';
 import TableCardDropZone from './TableCardDropZone';
 import TableCardStepper from './TableCardStepper';
-import InlineEditableText from './InlineEditableText';
+import InlineEditableText, { type InlineEditableTextHandle } from './InlineEditableText';
 import TableColumnsStep, { type TableColumnsStepHandle } from './TableColumnsStep';
 import TableSourceCard from './TableSourceCard';
 
@@ -203,6 +206,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const [bodyScrolled, setBodyScrolled] = useState(false);
     const bodyRef = useRef<HTMLDivElement | null>(null);
     const columnsRef = useRef<TableColumnsStepHandle | null>(null);
+    const titleRef = useRef<InlineEditableTextHandle | null>(null);
     const noticeTimer = useRef<number | undefined>(undefined);
     // A note about items a drop left out, cleared after a while.
     const showDropNotice = useCallback((notice: string | null) => {
@@ -479,7 +483,8 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         (ref: string) => destinationLibrary(ref, searchableLibraryIds),
         [searchableLibraryIds],
     );
-    const blocker = createBlocker(draft, request, libraryOf);
+    const blockerReason = createBlockerReason(draft, request, libraryOf);
+    const blocker = blockerReason?.message ?? null;
     const actions = createActions(draft, request);
     const hasInstructions = draft.instructions.trim().length > 0
         && draft.instructions.trim() !== (request.user_instructions_prefill ?? '').trim();
@@ -551,6 +556,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             <div className="display-flex flex-row items-start min-w-0" style={{ gap: '0.45rem' }}>
                 <Icon icon={TableIcon} className="font-color-secondary flex-none table-card-title-icon" />
                 <InlineEditableText
+                    ref={titleRef}
                     className="table-card-title flex-1 min-w-0"
                     value={draft.title}
                     placeholder="Untitled table"
@@ -768,6 +774,43 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         />
     );
 
+    // Why Create is disabled, in the pinned footer right above it, with a way
+    // to the part that needs the fix. A count in flight only waits, so it is a
+    // quiet line rather than a warning.
+    const blockerAction = ((): { label: string; run: () => void } | null => {
+        if (!blockerReason || blockerReason.pending) return null;
+        if (blockerReason.part === 'title') return { label: 'Edit title', run: () => titleRef.current?.edit() };
+        if (blockerReason.part === 'sources')
+            return draft.step === 'sources' ? null : { label: 'Go to Sources', run: () => setDraft((prev) => goToStep(prev, 'sources')) };
+        if (!draft.columns.length) return { label: 'Add column', run: () => columnsRef.current?.add() };
+        if (draft.columns.some((column) => columnProblem(column)))
+            return { label: 'Show', run: () => columnsRef.current?.openFirstIncomplete() };
+        return null;
+    })();
+    const notice = disabled && heldCaption ? (
+        <div className="table-card-notice table-card-notice-pending" role="status">
+            <Spinner size={12} />
+            <span className="table-card-notice-text">{heldCaption}</span>
+        </div>
+    ) : isLast && blockerReason?.pending && !disabled ? (
+        <div className="table-card-notice table-card-notice-pending" role="status">
+            <Spinner size={12} />
+            <span className="table-card-notice-text">{blockerReason.message}</span>
+        </div>
+    ) : isLast && blockerReason && !disabled ? (
+        // The same warning as the Sources step's: in both places the user has
+        // to change something before the card can go on.
+        <div className="table-card-warning table-card-footer-warning" role="alert">
+            <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+            <span className="table-card-notice-text">{blockerReason.message}</span>
+            {blockerAction && (
+                <button type="button" className="table-card-warning-action" onClick={blockerAction.run}>
+                    {blockerAction.label}
+                </button>
+            )}
+        </div>
+    ) : null;
+
     const cancelLabel = hasInstructions ? 'Send instructions' : 'Cancel';
 
     return (
@@ -825,20 +868,11 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     />
                 )}
 
-                {disabled && heldCaption && (
-                    <div className="text-sm font-color-secondary" role="status">
-                        {heldCaption}
-                    </div>
-                )}
-                {isLast && blocker && !disabled && (
-                    <div className="text-sm font-color-secondary" role="status">
-                        {blocker}
-                    </div>
-                )}
 
             </div>
 
             <div className="table-card-footer">
+                {notice}
                 <Button
                     variant="ghost"
                     ariaLabel={hasInstructions ? 'Decline the table and send instructions' : 'Cancel the table'}

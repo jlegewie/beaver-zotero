@@ -4575,6 +4575,60 @@
     border-top: 1px solid var(--fill-quinary);
 }
 
+/* Above the footer's buttons: why Create is disabled, as the same warning the
+ * Sources step shows, or a quiet line while a count is in flight. */
+[id^="beaver-pane-"] .table-card-notice {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.45rem;
+    flex: 1 0 100%;
+    min-width: 0;
+    margin-bottom: 0.1rem;
+    font-size: 0.875rem;
+    line-height: 1.35;
+}
+
+[id^="beaver-pane-"] .table-card-notice-pending {
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-notice-text {
+    min-width: 0;
+    flex: 1;
+}
+
+[id^="beaver-pane-"] .table-card-footer-warning {
+    flex: 1 0 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+/* The way to the fix, inside the warning: its own color, underlined on hover. */
+[id^="beaver-pane-"] .table-card-warning-action {
+    flex: none;
+    align-self: center;
+    padding: 0 2px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    /* font-weight: 600; */
+    text-decoration: none;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-warning-action:hover {
+    text-decoration: underline;
+}
+
+[id^="beaver-pane-"] .table-card-warning-action:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 1px;
+}
+
 /* The row-cap warning, under the Sources heading. */
 [id^="beaver-pane-"] .table-card-warning {
     display: flex;
@@ -4893,7 +4947,7 @@
     padding: 0;
     border-radius: 50%;
     box-sizing: border-box;
-    font-size: 0.6875rem;
+    font-size: 0.8rem;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     line-height: 1;
@@ -4959,10 +5013,10 @@
     min-width: 0;
     width: 100%;
     padding: 5px 8px;
-    border: 1px solid var(--fill-quinary);
+    border: 1px solid var(--fill-quarternary);
     border-radius: 6px;
     background: transparent;
-    font-size: 0.875rem;
+    font-size: 0.95rem;
     text-align: start;
     cursor: pointer;
 }
@@ -4981,7 +5035,7 @@
 
 [id^="beaver-pane-"] .table-card-step-edit {
     color: var(--accent-blue);
-    font-weight: 500;
+    /* font-weight: 500; */
 }
 
 [id^="beaver-pane-"] .table-card-count {
@@ -5143,17 +5197,6 @@
     cursor: default;
 }
 
-/* The remove button stays reachable by keyboard; it only fades in on pointer hover. */
-[id^="beaver-pane-"] .table-card-column .table-card-column-remove {
-    opacity: 0;
-    margin: -2px -4px -2px 0;
-}
-
-[id^="beaver-pane-"] .table-card-column:hover .table-card-column-remove,
-[id^="beaver-pane-"] .table-card-column:focus-within .table-card-column-remove {
-    opacity: 1;
-}
-
 [id^="beaver-pane-"] .table-card-column-editing {
     gap: 0.6rem;
     padding: 0.6rem 0.65rem 0.5rem;
@@ -5216,7 +5259,7 @@
     border: 1px solid var(--fill-quarternary);
     border-radius: 9px;
     color: var(--fill-secondary);
-    font-size: 0.75rem;
+    font-size: 0.85rem;
     line-height: 1.45;
 }
 
@@ -5278,7 +5321,7 @@
 }
 
 [id^="beaver-pane-"] .table-card-field:focus {
-    border-color: var(--accent-blue);
+    border-color: var(--fill-tertiary);
 }
 
 [id^="beaver-pane-"] .table-card-field::placeholder,
