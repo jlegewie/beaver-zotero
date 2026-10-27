@@ -246,6 +246,7 @@ const PROMPTS = [
     { request: 'deferred_approval_request', response: 'deferred_approval_response', idField: 'action_id' },
     { request: 'credit_confirmation_request', response: 'credit_confirmation_response', idField: 'confirmation_id' },
     { request: 'batch_approval_request', response: 'batch_approval_response', idField: 'approval_id' },
+    { request: 'table_card_request', response: 'table_card_response', idField: 'card_id' },
     { request: 'ask_user_question_request', response: 'ask_user_question_response', idField: 'question_id' },
 ] as const;
 

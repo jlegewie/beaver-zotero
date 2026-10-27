@@ -90,6 +90,15 @@ export function tableResultMessages(value: unknown): string[] {
     const result = tableResultBody(value);
     const messages: string[] = [];
     switch (result.error_code ?? result.status) {
+        case "declined":
+            messages.push("The table was declined. Nothing was created.");
+            break;
+        case "card_timed_out":
+            messages.push("The table card was not answered in time. Nothing was created.");
+            break;
+        case "card_unreachable":
+            messages.push("The table card could not be shown. Nothing was created.");
+            break;
         case "schema_changed":
             messages.push(
                 "Extraction paused because the questions or population changed. Request a new plan in chat and review its approval.",
@@ -127,11 +136,9 @@ export function tableResultMessages(value: unknown): string[] {
                 : "The table operation could not be completed.",
         );
     }
-    if (result.saved === false || result.repair_warning) {
-        messages.push(
-            "Changes are committed. Local bookkeeping needs repair; use Check / repair table in the item pane.",
-        );
-    }
+    // `saved: false` / `repair_warning` (the write committed, its local
+    // bookkeeping did not) is not a chat status: opening the table repairs it,
+    // and the table tab and item pane report what is still pending.
     if (result.recording_warning) {
         messages.push(
             "The confirmed table outcome is unchanged, but saving its chat result failed. Do not repeat the table change to repair chat history.",

@@ -586,6 +586,12 @@ source Zotero). `fix-db` applies the same treatment to an already-created clone.
   compare against previous versions of the code ("pre-refactor, this used to…"), or mention
   internal planning documents. This repository is public — comments must not leak internal or
   development-only details.
+- **Keyboard handlers in text fields**: a custom `onKeyDown` that acts on Enter, Escape, Tab or
+  arrow keys must first return when `isImeKeyEvent(e.nativeEvent)`
+  (`@beaver/agent-ui/primitives/ime`). While an IME composes text (Chinese, Japanese, Korean),
+  it owns those keys; acting on them or calling `preventDefault()` cancels the composition or
+  closes the field mid-word. Cover it with a test that dispatches the key with
+  `isComposing: true`.
 
 ## Deprecated — do not build on
 

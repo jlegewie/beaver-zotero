@@ -4527,3 +4527,848 @@
     font-size: 0.8125rem;
     line-height: 1.5;
 }
+
+/* ───── Table card (create_table) ───── */
+
+/* The card: the title row and the footer stay put, and everything between
+ * them scrolls in one area, so the card never nests a scroll inside another. */
+[id^="beaver-pane-"] .user-message-display.table-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: 70vh;
+    padding: 0;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .table-card-top {
+    flex: none;
+    padding: 0.8rem 0.8rem 0.4rem;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s ease;
+}
+
+/* Once the body scrolls under it, a rule separates the title row. */
+[id^="beaver-pane-"] .table-card-top-scrolled {
+    border-bottom-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .table-card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 0.2rem 0.8rem 0.75rem;
+}
+
+[id^="beaver-pane-"] .table-card-footer {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    flex: none;
+    min-width: 0;
+    padding: 0.6rem 0.8rem 0.7rem;
+    border-top: 1px solid var(--fill-quinary);
+}
+
+/* Above the footer's buttons: why Create is disabled, as the same warning the
+ * Sources step shows, or a quiet line while a count is in flight. */
+[id^="beaver-pane-"] .table-card-notice {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.45rem;
+    flex: 1 0 100%;
+    min-width: 0;
+    margin-bottom: 0.1rem;
+    font-size: 0.875rem;
+    line-height: 1.35;
+}
+
+[id^="beaver-pane-"] .table-card-notice-pending {
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-notice-text {
+    min-width: 0;
+    flex: 1;
+}
+
+[id^="beaver-pane-"] .table-card-footer-warning {
+    flex: 1 0 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+/* The way to the fix, inside the warning: its own color, underlined on hover. */
+[id^="beaver-pane-"] .table-card-warning-action {
+    flex: none;
+    align-self: center;
+    padding: 0 2px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    /* font-weight: 600; */
+    text-decoration: none;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-warning-action:hover {
+    text-decoration: underline;
+}
+
+[id^="beaver-pane-"] .table-card-warning-action:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 1px;
+}
+
+/* The row-cap warning, under the Sources heading. */
+[id^="beaver-pane-"] .table-card-warning {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.45rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--tag-orange-tertiary);
+    border-radius: 6px;
+    background: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+[id^="beaver-pane-"] .table-card-warning-icon {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    margin-top: 1px;
+}
+
+/* Header: title and description read as text; a pencil at the end edits them. */
+[id^="beaver-pane-"] .table-card-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-card-header-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+    /* Align with the title text, past the table icon and its gap. */
+    padding-inline-start: calc(16px + 0.45rem);
+}
+
+[id^="beaver-pane-"] .table-card-title-icon {
+    width: 16px;
+    height: 16px;
+    margin-top: 0.15rem;
+}
+
+[id^="beaver-pane-"] .table-card-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-description {
+    font-size: 0.95rem;
+    line-height: 1.4;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-inline {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+[id^="beaver-pane-"] .table-card-inline-text {
+    cursor: text;
+}
+
+[id^="beaver-pane-"] .table-card-inline-disabled .table-card-inline-text {
+    cursor: default;
+}
+
+/* The pencil flows after the last word, so it marks the end of the text. */
+[id^="beaver-pane-"] .table-card-inline-edit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: baseline;
+    margin-inline-start: 0.3rem;
+    padding: 2px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fill-secondary);
+    font-size: 0.8em;
+    line-height: 1;
+    cursor: pointer;
+    position: relative;
+    top: 0.1em;
+}
+
+[id^="beaver-pane-"] .table-card-inline-edit:hover,
+[id^="beaver-pane-"] .table-card-inline-edit:focus-visible {
+    color: var(--fill-primary);
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-inline-edit:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 0;
+}
+
+/* The field keeps the text's typography and position: a hairline and a little
+ * inset (cancelled by the negative margin) are the only change. */
+[id^="beaver-pane-"] .table-card-inline-field {
+    display: block;
+    width: calc(100% + 10px);
+    margin: -3px -5px;
+    padding: 2px 4px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+[id^="beaver-pane-"] .table-card-inline-field:focus {
+    border-color: var(--fill-quarternary);
+}
+
+/* Editing: the field takes the text's place, with discard / save after it. */
+[id^="beaver-pane-"] .table-card-inline-editing {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 0.35rem;
+    flex: 1;
+    min-width: 0;
+    font-size: 0.95rem !important;
+}
+
+[id^="beaver-pane-"] .table-card-inline-editing .table-card-inline-field {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    margin: -3px 0 -3px -5px;
+}
+
+[id^="beaver-pane-"] .table-card-inline-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    flex: none;
+    margin-top: -1px;
+}
+
+[id^="beaver-pane-"] .table-card-destination {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    font-size: 0.875rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-destination-icon {
+    flex: none;
+    width: 14px;
+    height: 14px;
+}
+
+[id^="beaver-pane-"] .table-card-destination-path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A breadcrumb segment that selects its library or collection in Zotero. */
+[id^="beaver-pane-"] .table-card-crumb {
+    display: inline;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-crumb:hover {
+    color: var(--fill-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+[id^="beaver-pane-"] .table-card-crumb:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 2px;
+}
+
+[id^="beaver-pane-"] .table-card-source-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--fill-secondary);
+}
+
+/* "Add source" / "Add column": a quiet action at the end of the step heading,
+ * in the secondary color like the "Edit" link of a completed step. */
+[id^="beaver-pane-"] .table-card-head-action {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.3rem;
+    flex: none;
+    margin-inline-end: -6px;
+    padding: 2px 6px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fill-secondary);
+    font-size: 0.925rem;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-head-action:hover:not(:disabled),
+[id^="beaver-pane-"] .table-card-head-action[aria-expanded="true"] {
+    background: var(--beaver-fill-hover);
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-head-action:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 0;
+}
+
+[id^="beaver-pane-"] .table-card-head-action:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+/* Drop overlay: over the whole card while a drag is over it. */
+[id^="beaver-pane-"] .table-card-drop-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px dashed var(--accent-blue);
+    border-radius: var(--beaver-radius-card, 8px);
+    background: color-mix(in srgb, var(--material-background, var(--color-background)) 88%, transparent);
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+
+[id^="beaver-pane-"] .table-card-drop-overlay-error {
+    border-color: var(--tag-red-tertiary, var(--fill-tertiary));
+}
+
+[id^="beaver-pane-"] .table-card-drop-message {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 1rem;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--fill-primary);
+    text-align: center;
+}
+
+[id^="beaver-pane-"] .table-card-drop-icon {
+    width: 18px;
+    height: 18px;
+    flex: none;
+}
+
+/* Steps: one part at a time, completed ones folded into a line above. */
+[id^="beaver-pane-"] .table-card-step {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    min-width: 0;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .table-card-step-head {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+/* The stepper at the end of the title row: numbered circles joined by a line,
+ * centred on the title's first line. The current step is the only filled
+ * circle; completed steps are a blue outline with a check, steps to come a
+ * grey outline with their number. */
+[id^="beaver-pane-"] .table-card-stepper {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex: none;
+    height: calc(1.05rem * 1.3);
+    margin-inline-start: 0.25rem;
+}
+
+/* The tooltip's anchor wraps each circle; keep it from adding line height. */
+[id^="beaver-pane-"] .table-card-stepper > span {
+    display: inline-flex;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    box-sizing: border-box;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-current {
+    background: var(--accent-blue);
+    color: #fff;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-todo {
+    border: 1.5px solid var(--fill-tertiary);
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-done {
+    border: 1.5px solid var(--accent-blue);
+    background: transparent;
+    color: var(--accent-blue);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+/* The check is a filled glyph, thin at this size; a matching stroke gives it
+ * the weight of the step numbers. */
+[id^="beaver-pane-"] .table-card-stepper-step-done svg path {
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+}
+
+/* A light fill on hover marks the completed step as the way back. */
+[id^="beaver-pane-"] .table-card-stepper-step-done:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-done:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-done:disabled {
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-line {
+    width: 12px;
+    height: 1.5px;
+    margin: 0 3px;
+    border-radius: 1px;
+    background: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .table-card-stepper-line-done {
+    background: var(--accent-blue);
+}
+
+[id^="beaver-pane-"] .table-card-step-done {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    background: transparent;
+    font-size: 0.95rem;
+    text-align: start;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-step-done:hover:not(:disabled) {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-step-done:disabled {
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-step-done-icon {
+    color: var(--accent-blue);
+}
+
+[id^="beaver-pane-"] .table-card-step-edit {
+    color: var(--accent-blue);
+    /* font-weight: 500; */
+}
+
+[id^="beaver-pane-"] .table-card-count {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Sources */
+/* A source that alone holds more papers than a table. */
+[id^="beaver-pane-"] .table-card-count-warning {
+    background: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    box-shadow: inset 0 0 0 1px var(--tag-orange-tertiary);
+}
+
+[id^="beaver-pane-"] .table-card-source {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .table-card-source-head {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+    padding: 0.35rem 0.4rem 0.35rem 0;
+}
+
+[id^="beaver-pane-"] .table-card-source-toggle {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+    padding: 0.1rem 0.25rem 0.1rem 0.55rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: start;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-source-head:hover {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-source-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    padding: 0.4rem 0.4rem 0.45rem;
+    border-top: 1px solid var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .table-card-item-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* Pages a long item list instead of giving it a scroll area of its own. */
+[id^="beaver-pane-"] .table-card-show-more {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fill-primary);
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-show-more:hover {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-show-more:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+[id^="beaver-pane-"] .table-card-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 3px 6px;
+    border-radius: 5px;
+}
+
+[id^="beaver-pane-"] .table-card-item-icon {
+    align-self: flex-start;
+    margin-top: 1px;
+}
+
+[id^="beaver-pane-"] .table-card-item-link {
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-item-link:hover {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-item-link:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+[id^="beaver-pane-"] .table-card-chip {
+    padding: 0 5px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 4px;
+    color: var(--fill-secondary);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    white-space: nowrap;
+}
+
+/* Columns: a summary card that opens into its editor. */
+[id^="beaver-pane-"] .table-card-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+[id^="beaver-pane-"] .table-card-column:hover:not(.table-card-column-editing):not(.table-card-column-disabled) {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-column:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+[id^="beaver-pane-"] .table-card-column-disabled {
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-column-editing {
+    gap: 0.6rem;
+    padding: 0.6rem 0.65rem 0.5rem;
+    border-color: var(--fill-tertiary);
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-column-question {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+[id^="beaver-pane-"] .table-card-empty {
+    font-style: italic;
+}
+
+[id^="beaver-pane-"] .table-card-type-tag-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* A long unit must not crowd out the column name. */
+[id^="beaver-pane-"] .table-card-type-tag {
+    max-width: 11rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    white-space: nowrap;
+}
+
+[id^="beaver-pane-"] .table-card-options {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    margin-top: 0.15rem;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .table-card-option {
+    flex: none;
+    max-width: 10rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 6px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 9px;
+    color: var(--fill-secondary);
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+
+[id^="beaver-pane-"] .table-card-badge-warning {
+    padding: 0 5px;
+    border: 1px solid var(--tag-orange-tertiary);
+    border-radius: 4px;
+    background: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    white-space: nowrap;
+}
+
+/* Table tool card body: the recorded table in sections — description, then
+   sources and question columns as divided lists with the create card's icons
+   and type tags, then the counts. */
+[id^="beaver-pane-"] .table-record {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem 0.5rem;
+    line-height: 1.4;
+}
+
+[id^="beaver-pane-"] .table-record-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-record-label {
+    color: var(--fill-primary);
+    font-weight: 500;
+}
+
+[id^="beaver-pane-"] .table-record-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 8px;
+}
+
+[id^="beaver-pane-"] .table-record-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.45rem 0.6rem;
+}
+
+[id^="beaver-pane-"] .table-record-row + .table-record-row {
+    border-top: 1px solid var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .table-card-problem {
+    color: var(--tag-orange-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-card-label > span:first-child {
+    font-size: 0.8125rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-field {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 3px 6px;
+    font-size: 0.875rem;
+    line-height: 1.35;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fill-primary);
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+/* Zotero paints its own fill on focused and hovered inputs; these fields stay
+ * on the card's surface in every state. */
+[id^="beaver-pane-"] .table-card-field,
+[id^="beaver-pane-"] .table-card-field:hover,
+[id^="beaver-pane-"] .table-card-field:focus,
+[id^="beaver-pane-"] .table-card-inline-field,
+[id^="beaver-pane-"] .table-card-inline-field:hover,
+[id^="beaver-pane-"] .table-card-inline-field:focus {
+    background-color: transparent !important;
+    background-image: none !important;
+}
+
+[id^="beaver-pane-"] .table-card-field:focus {
+    border-color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .table-card-field::placeholder,
+[id^="beaver-pane-"] .table-card-inline-field::placeholder {
+    color: var(--fill-secondary);
+    opacity: 0.8;
+}

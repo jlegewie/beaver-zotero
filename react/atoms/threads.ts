@@ -48,6 +48,7 @@ import {
 import { clearAllPendingQuestionsAtom } from "@beaver/agent-core/run-state/pendingQuestions";
 import { clearAllPendingCreditConfirmationsAtom } from "@beaver/agent-core/run-state/pendingCreditConfirmations";
 import { clearAllPendingBatchApprovalsAtom } from "@beaver/agent-core/run-state/pendingBatchApprovals";
+import { clearAllPendingTableCardsAtom } from "@beaver/agent-core/run-state/pendingTableCards";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
@@ -317,6 +318,7 @@ export const newThreadAtom = atom(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
+            set(clearAllPendingTableCardsAtom);
 
             set(isWebSearchEnabledAtom, false);
 
@@ -524,6 +526,7 @@ export const loadThreadAtom = atom(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
+            set(clearAllPendingTableCardsAtom);
             // Legacy non-stateful path: fetch the name from the local DB when
             // not provided (the stateful path already resolved it above).
             const threadNamePromise = !resolvedName && !statefulChat

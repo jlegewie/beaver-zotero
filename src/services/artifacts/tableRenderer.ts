@@ -22,6 +22,7 @@ import { logger } from "@beaver/agent-core/platform/logger";
 import { checkLibraryExcluded } from "../agentDataProvider/utils";
 import { sha256Hex } from "../../utils/hash";
 import { tableSpecHash } from "./recoveryShadow";
+import { tableFilesEditable } from "./tableItemIdentity";
 import {
     buildTableDocument,
     renderedFileHash,
@@ -54,8 +55,7 @@ async function writeAtomic(
 /** Whether Beaver may replace the table's files: not excluded, and editable now. */
 function mayRender(ref: TableRef): boolean {
     if (checkLibraryExcluded(ref.libraryID)) return false;
-    const library = Zotero.Libraries.get(ref.libraryID);
-    return !!library && library.editable && library.filesEditable !== false;
+    return tableFilesEditable(Zotero.Libraries.get(ref.libraryID));
 }
 
 /**

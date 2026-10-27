@@ -85,9 +85,10 @@ import {
     readTableShadowSpec,
     recordTableShadow,
     tableSpecHash,
+    type TableShadowEntry,
     type TableSyncConflict,
 } from './recoveryShadow';
-import { readTable } from './tableItemIdentity';
+import { readTable, tableFilesEditable } from './tableItemIdentity';
 import {
     renderIsCurrent,
     renderTable,
@@ -254,6 +255,12 @@ export type TableEditResult = TableWriteResult | TableEditRejected;
 export interface CreateTableOptions extends CreateTableItemOptions {
     accessGuard?: TableAccessGuard;
     operation_id?: string;
+    /**
+     * The collection to file into, by key in the create library. Resolved only
+     * when the table is actually created, so a retry of a creation that already
+     * committed replays even if the collection has since gone.
+     */
+    collectionKey?: string;
     /** Who is creating it. Defaults to `agent`. */
     actor?: TableActor;
     run_id?: string;
@@ -291,6 +298,9 @@ export interface OpenTableResult {
      */
     conflict: TableSyncConflict | null;
 }
+
+/** What {@link checkShadowRestore} found. */
+export type TableShadowRestoreCheck = 'ok' | 'no_shadow' | 'no_payload' | 'not_writable' | 'unavailable';
 
 /** The outcome of {@link restoreShadowVersion}. */
 export type TableShadowRestoreResult =
@@ -520,11 +530,18 @@ async function versionFilesOnDisk(item: Zotero.Item): Promise<number[]> {
  * Called twice on every mutation — once by the entry point and once inside the
  * lock — because the set can change while a caller waits its turn.
  */
-function requireWritable(ref: TableRef): void {
+/** Why Beaver may not write this table now, or null when it may. */
+function writeRefusal(ref: TableRef): TableItemError | null {
     const excluded = checkLibraryExcluded(ref.libraryID);
-    if (excluded) throw new TableItemError(excluded.message, 'library_excluded');
+    if (excluded) return new TableItemError(excluded.message, 'library_excluded');
     const library = Zotero.Libraries.get(ref.libraryID);
-    if (library && (!library.editable || library.filesEditable === false)) throw new TableItemError('Library is read-only.', 'invalid_target');
+    if (library && !tableFilesEditable(library)) return new TableItemError('Library is read-only.', 'invalid_target');
+    return null;
+}
+
+function requireWritable(ref: TableRef): void {
+    const refusal = writeRefusal(ref);
+    if (refusal) throw refusal;
 }
 
 // ---------------------------------------------------------------------------
@@ -996,22 +1013,39 @@ async function auditSidecar(
  * differ from what the store would have written, this file — not the store's
  * idea of it — is what a revert to version 1 restores.
  */
+/** A collection a new table can be filed into: in the library and not in the trash. */
+function collectionIDForCreate(libraryID: number, key: string): number {
+    const collection = Zotero.Collections.getByLibraryAndKey(libraryID, key) as Zotero.Collection | false;
+    if (!collection || collection.deleted)
+        throw new TableItemError('Collection unavailable.', 'invalid_target');
+    return collection.id;
+}
+
 export async function createTableUncoordinated(options: CreateTableOptions): Promise<CreatedTable> {
-    const { operation_id, accessGuard, ...ordinary } = options;
+    const { operation_id, accessGuard, collectionKey, ...ordinary } = options;
     accessGuard?.(options.spec);
     const spec = options.spec;
     const limit = checkTableLimits(null, spec);
     if (limit) throw new TableItemError(limit.message, 'too_large');
-    if (operation_id === undefined)
-        return createTableOnce({ ...ordinary, spec, accessGuard });
+    if (operation_id === undefined) {
+        if (!collectionKey) return createTableOnce({ ...ordinary, spec, accessGuard });
+        const target = resolveTableLibrary(options.libraryID);
+        if ('error' in target)
+            throw new TableItemError('No eligible library for this table.', target.error);
+        const collectionID = collectionIDForCreate(target.libraryID, collectionKey);
+        return createTableOnce({ ...ordinary, libraryID: target.libraryID, collectionID, spec, accessGuard });
+    }
     if (typeof operation_id !== 'string' || !operation_id.trim())
         throw new TableItemError('operation_id must not be empty.', 'invalid_request');
     const resolved = resolveTableLibrary(options.libraryID);
     if ('error' in resolved)
         throw new TableItemError('No eligible library for this table.', resolved.error);
     const libraryID = resolved.libraryID;
+    // The collection enters the hash by key: the same request on another
+    // device, or after the collection is gone, is still the same request.
     const requestHash = await tableOperationHash({
         ...ordinary,
+        collectionKey,
         linksFor: undefined,
         creationOperation: undefined,
         spec: unstampedSpec(options.spec),
@@ -1043,8 +1077,10 @@ export async function createTableUncoordinated(options: CreateTableOptions): Pro
         }
         requireWritable({ libraryID, key: '' });
         accessGuard?.(spec);
+        const collectionID = collectionKey ? collectionIDForCreate(libraryID, collectionKey) : ordinary.collectionID;
         const created = await createTableOnce({
             ...ordinary,
+            ...(collectionID ? { collectionID } : {}),
             accessGuard,
             libraryID,
             spec,
@@ -1680,7 +1716,7 @@ export async function openTableUncoordinated(ref: TableRef, accessGuard?: TableA
         const recovered = await guardStoredTable(ref, item, current, accessGuard);
         const sha256 = await tableSpecHash(current.spec);
         const library = Zotero.Libraries.get(ref.libraryID);
-        if (!checkLibraryExcluded(ref.libraryID) && library && library.editable && library.filesEditable !== false) {
+        if (!checkLibraryExcluded(ref.libraryID) && tableFilesEditable(library)) {
             try {
                 if (await persistRebuiltTable(ref, item, current, accessGuard))
                     recovered.unshift({ kind: 'table_file_rebuilt', version: current.version });
@@ -1779,6 +1815,56 @@ async function detectSyncConflict(
 // Restoring what a sync conflict took
 // ---------------------------------------------------------------------------
 
+/** The version this device last wrote, and its spec when a restore could write it back. */
+async function retainedShadow(
+    ref: TableRef
+): Promise<{ shadow: null; spec: null } | { shadow: TableShadowEntry; spec: TableSpec | null }> {
+    const shadow = await lastTableShadow(ref);
+    if (!shadow) return { shadow: null, spec: null };
+    return { shadow, spec: await readTableShadowSpec(shadow) };
+}
+
+/**
+ * Why the table itself would refuse a restore's write, or null when it would
+ * accept one: the checks {@link prepareWrite} makes on the item and its current
+ * file — a trashed table, or a `table.json` that is missing beyond repair or
+ * written by a newer format. Reads only, so it may run without the lock.
+ */
+async function restoreTargetRefusal(ref: TableRef): Promise<TableItemError | null> {
+    try {
+        await readCurrentState(await resolveTableItem(ref));
+        return null;
+    } catch (error) {
+        if (error instanceof TableItemError) return error;
+        throw error;
+    }
+}
+
+/**
+ * Whether {@link restoreShadowVersion} would write a version back right now,
+ * checked the way the restore checks it. Surfaces that offer or mention the
+ * restore ask this rather than judging from the shadow row, whose payload can
+ * be over the retention cap, pruned or no longer match its digest.
+ *
+ * - `ok`: the restore would run.
+ * - `no_shadow` / `no_payload`: this device keeps no usable copy.
+ * - `not_writable`: a copy is kept, but the library is excluded or read-only.
+ * - `unavailable`: a copy is kept, but the table is trashed or its current file
+ *   cannot be written over (see {@link restoreTargetRefusal}).
+ */
+export async function checkShadowRestore(ref: TableRef): Promise<TableShadowRestoreCheck> {
+    try {
+        const retained = await retainedShadow(ref);
+        if (!retained.shadow) return 'no_shadow';
+        if (!retained.spec) return 'no_payload';
+        if (writeRefusal(ref)) return 'not_writable';
+        return (await restoreTargetRefusal(ref)) ? 'unavailable' : 'ok';
+    } catch (error) {
+        logger(`tableStore: could not check the restore for ${ref.key}: ${String(error)}`, 2);
+        return 'no_payload';
+    }
+}
+
 /**
  * Writes the version this device last wrote back, as a **new** version.
  *
@@ -1800,16 +1886,15 @@ export async function restoreShadowVersionUncoordinated(
 ): Promise<TableShadowRestoreResult> {
     requireWritable(ref);
 
-    const shadow = await lastTableShadow(ref);
-    if (!shadow) {
+    const retained = await retainedShadow(ref);
+    if (!retained.shadow) {
         return {
             ok: false,
             code: 'no_shadow',
             error: `This device has no recorded version of table ${ref.key} to restore.`,
         };
     }
-
-    const spec = await readTableShadowSpec(shadow);
+    const { shadow, spec } = retained;
     if (!spec) {
         return {
             ok: false,
@@ -1819,6 +1904,10 @@ export async function restoreShadowVersionUncoordinated(
                 `This device wrote version ${shadow.version} of table ${ref.key}, but its ` +
                 'stored copy is missing or no longer matches what was recorded for it, so it cannot be restored.',
         };
+    }
+    const refusal = await restoreTargetRefusal(ref);
+    if (refusal) {
+        return { ok: false, code: 'write_refused', version: shadow.version, error: refusal.message };
     }
 
     // A restore is a deliberate step, never folded into whatever version a run
@@ -2240,7 +2329,7 @@ async function guardStoredTable(ref: TableRef, item: Zotero.Item, current: Curre
     }
     const recovered: TableRecovery[] = [];
     const library = Zotero.Libraries.get(ref.libraryID);
-    if (current.spec && library && library.editable && library.filesEditable !== false) {
+    if (current.spec && tableFilesEditable(library)) {
         guard(current.spec);
         requireWritable(ref);
         const reconciled = await reconcileLog(item, current);

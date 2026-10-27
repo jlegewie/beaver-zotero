@@ -1,0 +1,59 @@
+{
+  "description": "Wire shape of a card without question columns: the Columns step is empty and says the table is created without questions. create_table rejects such a proposal until edit_columns exists, so no tool sends it yet.",
+  "request": {
+    "event": "table_card_request",
+    "card_id": "00000000-0000-4000-8000-0000000000c1",
+    "run_id": "00000000-0000-4000-8000-0000000000a1",
+    "thread_id": "00000000-0000-4000-8000-0000000000b1",
+    "toolcall_id": "test-tool-call-id",
+    "scope": "create",
+    "title": "Comparison",
+    "description": "Sample sizes across the papers.",
+    "destination": {
+      "library_ref": "u",
+      "library_name": "My Library",
+      "collection_key": null,
+      "collection_name": null,
+      "explicit": false
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "ids": [
+          "u-PAPER001",
+          "u-PAPER002"
+        ],
+        "scope": null,
+        "resolved": {
+          "count": 2,
+          "total": 2,
+          "truncated": false,
+          "without_pdf": 1,
+          "sample": [
+            {
+              "id": "u-PAPER001",
+              "title": "A study called paper001 of things"
+            },
+            {
+              "id": "u-PAPER002",
+              "title": "A study called paper002 of things"
+            }
+          ],
+          "error": null
+        }
+      }
+    ],
+    "merge": {
+      "rows": 2,
+      "duplicates": 0
+    },
+    "row_cap": 1000,
+    "total": 2,
+    "criteria": [],
+    "columns": [],
+    "cost": null,
+    "user_instructions_prefill": "",
+    "timeout_seconds": 600.0
+  }
+}

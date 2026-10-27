@@ -238,6 +238,8 @@ export async function handleArtifactRequestUncoordinated(
             const guard = accessFor(libraryID);
             const created = await createTable({
                 libraryID,
+                // Resolved by the store after its replay check.
+                ...(request.collection_key ? { collectionKey: request.collection_key } : {}),
                 title: request.title!,
                 spec: content(request.spec),
                 ...meta,

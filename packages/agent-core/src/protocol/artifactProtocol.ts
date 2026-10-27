@@ -8,14 +8,71 @@ export interface TableReference {
     title: string;
 }
 
+/** Stage counts of a table, as of the call that recorded them. */
+export interface TableStages {
+    rows: number;
+    sources: number;
+    /** Question columns; system columns are not counted. */
+    columns: number;
+    /** Rows with no attachment to read, which a fill answers from metadata. */
+    rows_without_document: number;
+    /** The default row set of the next fill, and its cells. */
+    remaining_rows: number;
+    remaining_cells: number;
+    answered: number;
+    /** Answered cells taken from title and abstract only. */
+    metadata_only: number;
+    failed: number;
+    stale: number;
+}
+
+/** A question column as the recorded call left it. */
+export interface TableRecordColumn {
+    id: string;
+    header: string;
+    type: string;
+    /** The column's question. */
+    description?: string | null;
+    /** `select` columns: the category labels. */
+    options?: string[] | null;
+    role?: string | null;
+}
+
+/** A source entry as the recorded call left it. */
+export interface TableRecordSource {
+    id: string;
+    /** `items`, `library`, or a search type. */
+    type: string;
+    /** `library` entries: collection, tag or saved_search, and its display name. */
+    kind?: string | null;
+    name?: string | null;
+    library_ref?: string | null;
+    /** Rows this entry added; a row several entries found counts for each. */
+    rows: number;
+}
+
 export interface TableRecord {
     reference: TableReference;
     change: string;
+    /**
+     * The table's description, sources and question columns as of the call.
+     * Absent on records written before they were recorded.
+     */
+    description?: string | null;
+    sources?: TableRecordSource[] | null;
+    columns?: TableRecordColumn[] | null;
     summary: Partial<TableSummary>;
     changes?: Record<string, number>;
     operation_id?: string | null;
     version?: number | null;
     saved?: boolean | null;
+    /** Absent from records written before stage counts existed. */
+    stages?: TableStages | null;
+    /** `none` when the call wrote the table without running the filler. */
+    run?: 'none' | null;
+    next_step?: string | null;
+    /** ISO time of the call the counts describe. */
+    as_of?: string | null;
 }
 
 /** Portable stored-document provider envelopes. Optional nulls are wire defaults. */
@@ -27,6 +84,8 @@ export interface ArtifactRequest {
     keys?: string[] | null;
     kind?: "table" | null;
     library_ref?: string | null;
+    /** `create`: bare key of the collection the new table is filed into. */
+    collection_key?: string | null;
     title?: string | null;
     spec?: Record<string, unknown> | null;
     meta?: {
@@ -111,7 +170,7 @@ const contracts: Record<string, [string[], string[]]> = {
     versions: [["key"], []],
     create: [
         ["kind", "library_ref", "title", "spec", "meta", "operation_id"],
-        [],
+        ["collection_key"],
     ],
     write: [
         [
@@ -164,6 +223,12 @@ export function validateArtifactRequest(
     if (
         raw.key != null &&
         (typeof raw.key !== "string" || !handle.test(raw.key))
+    )
+        return "invalid_request";
+    if (
+        raw.collection_key != null &&
+        (typeof raw.collection_key !== "string" ||
+            !/^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/.test(raw.collection_key))
     )
         return "invalid_request";
     if (

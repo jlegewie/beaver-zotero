@@ -96,7 +96,7 @@ describe("table conversation contracts", () => {
             "Earlier committed answers remain",
         );
     });
-    it("keeps committed work successful despite repair or result-recording failures", () => {
+    it("keeps committed work successful despite bookkeeping or result-recording failures", () => {
         const result = {
             ok: true,
             saved: false,
@@ -104,7 +104,9 @@ describe("table conversation contracts", () => {
             rejected_count: 2,
         };
         const messages = tableResultMessages(JSON.stringify(result));
-        expect(messages.join(" ")).toContain("Changes are committed");
+        // Bookkeeping that failed after the commit is repaired when the table
+        // opens; it is not a chat status.
+        expect(messages.join(" ")).not.toContain("bookkeeping");
         expect(messages.join(" ")).toContain(
             "confirmed table outcome is unchanged",
         );

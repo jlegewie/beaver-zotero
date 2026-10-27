@@ -122,6 +122,10 @@ vi.mock('../../src/services/artifacts/view/readerTableView', () => ({
     initReaderTableViews: vi.fn(), cleanupReaderTableViews: vi.fn(), cleanupReaderTableViewsForWindow: vi.fn(),
 }));
 vi.mock('../../src/ui/tableItemPane', () => ({ initTableItemPane: vi.fn(), cleanupTableItemPane: vi.fn() }));
+vi.mock('../../src/ui/tableTab', () => ({
+    initTableTabs: vi.fn(), cleanupTableTabs: vi.fn(), recoverTabsAfterTableTabs: vi.fn(async () => 0),
+}));
+vi.mock('../../src/ui/tableTabProbe', () => ({ stopTableTabProbe: vi.fn(), handleTableTabProbe: vi.fn() }));
 vi.mock('../../src/services/artifacts/tablesApiHost', () => ({
     registerTablesApi: vi.fn(), unregisterTablesApi: vi.fn(), unregisterTableShadowRestore: vi.fn(),
 }));

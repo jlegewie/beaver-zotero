@@ -179,6 +179,15 @@ import {
     removePendingBatchApprovalAtom,
     clearAllPendingBatchApprovalsAtom,
 } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import {
+    addPendingTableCardAtom,
+    clearAllPendingTableCardsAtom,
+    removePendingTableCardAtom,
+    removePendingTableCardForToolCallAtom,
+} from '@beaver/agent-core/run-state/pendingTableCards';
+import type { WSTableCardRequest, WSTableCardResponse, WSTableCardStale } from '@beaver/agent-core/protocol/tableCardProtocol';
+import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
+import { openStoredTable } from '../host/zotero/tables';
 import { readCreditThreshold } from '../utils/creditThreshold';
 import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQueue';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
@@ -1458,6 +1467,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
@@ -1686,6 +1696,7 @@ export function createWSCallbacks(
         set(clearAllPendingQuestionsAtom);
         set(clearAllPendingCreditConfirmationsAtom);
         set(clearAllPendingBatchApprovalsAtom);
+        set(clearAllPendingTableCardsAtom);
         set(clearRunApprovalPolicyAtom);
 
         // A run that reached `completed` (run_complete processed) but whose
@@ -1851,6 +1862,19 @@ export function createWSCallbacks(
             if (event.part.part_kind === "tool-return") {
                 await processToolReturnResults(event.part, set);
 
+                // A table the user just approved opens in its Beaver tab,
+                // behind the selected tab so the answer stays in view.
+                if (event.part.tool_name === "create_table") {
+                    const created = tableRecordFromMetadata(event.part.metadata);
+                    if (created) {
+                        void openStoredTable(created.reference.key, getHostWindow(), { background: true })
+                            .then((outcome) => {
+                                if ("error" in outcome) logger(`WS onToolReturn: opening the new table failed: ${outcome.error}`, 1);
+                            })
+                            .catch((error) => logger(`WS onToolReturn: opening the new table failed: ${String(error)}`, 1));
+                    }
+                }
+
                 // Safety net: the current backend ships a hydrated `metadata.view`
                 // on every tool return, but synthesize one from the legacy summary
                 // when it is missing OR malformed so the shared render layer always
@@ -1901,6 +1925,10 @@ export function createWSCallbacks(
                         break;
                     }
                 }
+
+                // Same for a table card: create_table returns on the backend's
+                // timeout too, and the card must not outlive its call.
+                set(removePendingTableCardForToolCallAtom, toolCallId);
             }
         },
 
@@ -2059,6 +2087,7 @@ export function createWSCallbacks(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
+            set(clearAllPendingTableCardsAtom);
             set(clearRunApprovalPolicyAtom);
         },
 
@@ -2115,6 +2144,7 @@ export function createWSCallbacks(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
+            set(clearAllPendingTableCardsAtom);
             set(clearRunApprovalPolicyAtom);
 
             if (
@@ -2340,6 +2370,22 @@ export function createWSCallbacks(
             // The batch moved on without the decision and there is nothing to
             // apply locally, so the card is simply retired.
             set(removePendingBatchApprovalAtom, event.approval_id);
+        },
+
+        onTableCardRequest: (event: WSTableCardRequest) => {
+            logger('WS onTableCardRequest:', {
+                cardId: event.card_id,
+                runId: event.run_id,
+                toolcallId: event.toolcall_id,
+                sources: event.sources.length,
+                columns: event.columns.length,
+            }, 1);
+            set(addPendingTableCardAtom, event);
+        },
+
+        onTableCardStale: (event: WSTableCardStale) => {
+            logger('WS onTableCardStale:', { cardId: event.card_id, reason: event.reason }, 1);
+            set(removePendingTableCardAtom, event.card_id);
         },
 
         onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
@@ -2872,6 +2918,9 @@ const sendWSMessage = async (
         // never auto-attach a reader source in a library the user excluded from
         // Beaver — this path bypasses the currentMessageItems gate above.
         const readerAttachment = submissionReaderAttachment;
+        // Set when the tab's table is dropped below, so the captured
+        // application state stops naming it as the open table.
+        let droppedTableContextKey: string | null = null;
         if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
@@ -2891,8 +2940,28 @@ const sendWSMessage = async (
                 if (readerAttachment.parentItem) {
                     await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
                 }
-                const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
-                if (readerMessageAttachment) attachments.push(readerMessageAttachment);
+                // The tab context is attached automatically, so a table that
+                // stopped being sendable since it became the context (corrupt,
+                // write pending, newly cites an excluded library) is dropped
+                // with a notice instead of failing the whole send.
+                try {
+                    const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
+                    if (readerMessageAttachment) attachments.push(readerMessageAttachment);
+                } catch (error: any) {
+                    droppedTableContextKey = readerAttachment.key;
+                    logger(`sendWSMessageAtom: Dropping unavailable tab context ${readerKeys[0]}: ${error?.message ?? error}`, 1);
+                    // Stop offering it as context, so the next send does not
+                    // warn again; selecting the tab again re-checks it.
+                    if (get(currentReaderAttachmentAtom)?.id === readerAttachment.id) {
+                        set(currentReaderAttachmentAtom, null);
+                    }
+                    set(addPopupMessageAtom, {
+                        type: 'warning',
+                        title: 'Table not attached',
+                        text: 'The open table is unavailable and was not added to the message.',
+                        expire: true,
+                    });
+                }
             } else {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKeys[0]}`, 1);
             }
@@ -2960,7 +3029,11 @@ const sendWSMessage = async (
         // Application state (current view, reader/note state, library context,
         // indexing status). Built via the injectable provider so a non-Zotero
         // host can supply its own document state through the same slot.
-        const applicationState = await applicationStatePromise;
+        let applicationState = await applicationStatePromise;
+        if (droppedTableContextKey && applicationState?.table_state?.zotero_key === droppedTableContextKey) {
+            const { table_state: _dropped, ...rest } = applicationState;
+            applicationState = rest;
+        }
         // Build the message
         const userPrompt: BeaverAgentPrompt = {
             content: message,
@@ -3689,6 +3762,7 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
@@ -3815,6 +3889,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
     set(clearRunApprovalPolicyAtom);
 });
 
@@ -4131,6 +4206,24 @@ export const sendBatchApprovalResponseAtom = atom(
             logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);
         }
         set(removePendingBatchApprovalAtom, approvalId);
+    }
+);
+
+/**
+ * Send the answer to a table card and retire it.
+ *
+ * The card is removed even when the send fails: the answer can no longer
+ * reach the run, so leaving it up would strand the user on it.
+ */
+export const sendTableCardResponseAtom = atom(
+    null,
+    (_get, set, response: WSTableCardResponse) => {
+        if (!ownsWriter(currentWriter())) return;
+        const delivered = agentService.sendTableCardResponse(response);
+        if (!delivered) {
+            logger(`sendTableCardResponseAtom: Table card response for ${response.card_id} was not sent`, 1);
+        }
+        set(removePendingTableCardAtom, response.card_id);
     }
 );
 
