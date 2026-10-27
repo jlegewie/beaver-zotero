@@ -40,8 +40,9 @@ interface OptionFocus {
 }
 
 /**
- * A category column's options, one row each: a label and, behind "Define",
- * what counts as the category. Entry stays fast: Enter in a label adds a row
+ * A category column's options as one list, a row each: the label and, under it
+ * in quieter text, what counts as the category. A row's "Define" and remove
+ * controls show on hover or focus and take no room, so nothing moves. Entry stays fast: Enter in a label adds a row
  * below it, Backspace in an empty label removes the row, and pasting several
  * lines into a label adds a row per line. A column without options still shows
  * one empty row; typing into it makes it the first option under the same key,
@@ -99,12 +100,13 @@ const OptionsEditor = React.forwardRef<HTMLInputElement, {
     const optionName = (row: DraftOption, index: number) => row.label.trim() || `option ${index + 1}`;
 
     return (
-        <div className="table-card-option-rows">
+        <div className="display-flex flex-col items-start gap-1 min-w-0">
+            <div className="table-card-option-list" role="list">
             {rows.map((row, index) => {
                 const showDefinition = !!row.description || defining.has(row.key);
                 return (
-                    <div key={row.key} className="table-card-option-row">
-                        <div className="display-flex flex-row items-center gap-1 min-w-0">
+                    <div key={row.key} className="table-card-option-row" role="listitem">
+                        <div className="table-card-option-line">
                             <input
                                 ref={(el) => {
                                     if (el) labels.current.set(row.key, el);
@@ -114,7 +116,7 @@ const OptionsEditor = React.forwardRef<HTMLInputElement, {
                                         else if (ref) ref.current = el;
                                     }
                                 }}
-                                className="table-card-field text-sm flex-1"
+                                className="table-card-option-label"
                                 value={row.label}
                                 placeholder={index === 0 ? 'e.g. RCT' : 'Option'}
                                 aria-label={`Column ${columnIndex + 1} option ${index + 1}`}
@@ -155,8 +157,8 @@ const OptionsEditor = React.forwardRef<HTMLInputElement, {
                             {!showDefinition && (
                                 <Button
                                     variant="ghost-secondary"
-                                    className="text-sm flex-none"
-                                    style={{ padding: '1px 5px' }}
+                                    className="table-card-option-action text-sm"
+                                    style={{ padding: '0 5px' }}
                                     disabled={disabled}
                                     ariaLabel={`Add a definition for ${optionName(row, index)}`}
                                     title="Say what counts as this category"
@@ -171,7 +173,7 @@ const OptionsEditor = React.forwardRef<HTMLInputElement, {
                             <IconButton
                                 icon={CancelIcon}
                                 variant="ghost-secondary"
-                                className="flex-none"
+                                className="table-card-option-action"
                                 disabled={disabled}
                                 ariaLabel={`Remove ${optionName(row, index)}`}
                                 onClick={() => remove(row.key, false)}
@@ -184,7 +186,7 @@ const OptionsEditor = React.forwardRef<HTMLInputElement, {
                                     if (el) definitions.current.set(row.key, el);
                                     else definitions.current.delete(row.key);
                                 }}
-                                className="table-card-field table-card-option-definition text-sm"
+                                className="table-card-option-definition"
                                 value={row.description}
                                 placeholder="What counts as this category?"
                                 aria-label={`Definition of ${optionName(row, index)}`}
@@ -209,18 +211,17 @@ const OptionsEditor = React.forwardRef<HTMLInputElement, {
                     </div>
                 );
             })}
-            <div>
-                <Button
-                    variant="ghost-secondary"
-                    icon={PlusSignIcon}
-                    className="text-sm"
-                    style={{ marginLeft: '-6px', padding: '1px 6px' }}
-                    disabled={disabled}
-                    onClick={() => addAfter(rows.length - 1)}
-                >
-                    Add option
-                </Button>
             </div>
+            <Button
+                variant="ghost-secondary"
+                icon={PlusSignIcon}
+                className="text-sm"
+                style={{ marginLeft: '-6px', padding: '1px 6px' }}
+                disabled={disabled}
+                onClick={() => addAfter(rows.length - 1)}
+            >
+                Add option
+            </Button>
         </div>
     );
 });

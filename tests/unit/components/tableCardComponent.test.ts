@@ -377,7 +377,6 @@ describe('TableCard', () => {
             await typeInto(definition, ' Random assignment to arms. ');
             await click('Done');
             const chip = [...container.querySelectorAll('.table-card-option')].find((c) => c.textContent === 'RCT')!;
-            expect(chip.classList.contains('table-card-option-defined')).toBe(true);
             expect(chip.getAttribute('title')).toBe('RCT: Random assignment to arms.');
             await click('Create');
             expect(sent[0].columns![1].options![0]).toEqual({ label: 'RCT', description: 'Random assignment to arms.' });

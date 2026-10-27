@@ -50,7 +50,7 @@ export const ColumnOptionChips: React.FC<{
             return (
                 <span
                     key={`${label}-${i}`}
-                    className={`table-card-option${definition ? ' table-card-option-defined' : ''}`}
+                    className="table-card-option"
                     title={definition ? `${label}: ${definition}` : undefined}
                 >
                     {label}

@@ -5263,30 +5263,86 @@
     line-height: 1.45;
 }
 
-/* A defined category: its definition is the chip's tooltip. */
-[id^="beaver-pane-"] .table-card-option-defined {
-    text-decoration: underline dotted var(--fill-tertiary);
-    text-underline-offset: 2px;
-    cursor: help;
+/* The options editor: one bordered list, a row per category. The label and
+   its definition are borderless fields; the row shows focus instead, and its
+   controls fade in on hover or focus without taking room. */
+[id^="beaver-pane-"] .table-card-option-list {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    min-width: 0;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    overflow: hidden;
 }
 
-/* The options editor: one row per category, its definition indented below. */
-[id^="beaver-pane-"] .table-card-option-rows,
 [id^="beaver-pane-"] .table-card-option-row {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
     min-width: 0;
+    padding: 3px 3px 3px 8px;
+    transition: background-color 0.12s ease;
 }
 
-[id^="beaver-pane-"] .table-card-option-row {
-    gap: 0.2rem;
+[id^="beaver-pane-"] .table-card-option-row + .table-card-option-row {
+    border-top: 1px solid var(--fill-quinary);
 }
 
-/* Two classes: it must win over `.table-card-field`'s full width and zero margin. */
-[id^="beaver-pane-"] .table-card-field.table-card-option-definition {
-    margin-left: 0.75rem;
-    width: calc(100% - 0.75rem - 26px);
+[id^="beaver-pane-"] .table-card-option-row:focus-within {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-option-line {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    min-height: 22px;
+}
+
+[id^="beaver-pane-"] .table-card-option-label,
+[id^="beaver-pane-"] .table-card-option-definition {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    box-sizing: border-box;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+[id^="beaver-pane-"] .table-card-option-label {
+    flex: 1;
+    font-size: 0.875rem;
+    line-height: 1.35;
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-option-definition {
+    width: 100%;
+    padding: 0 26px 2px 0;
+    font-size: 0.8125rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-option-label::placeholder,
+[id^="beaver-pane-"] .table-card-option-definition::placeholder {
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .table-card-option-action {
+    flex: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+
+[id^="beaver-pane-"] .table-card-option-row:hover .table-card-option-action,
+[id^="beaver-pane-"] .table-card-option-row:focus-within .table-card-option-action {
+    opacity: 1;
 }
 
 [id^="beaver-pane-"] .table-card-badge-warning {
@@ -5384,7 +5440,13 @@
 [id^="beaver-pane-"] .table-card-field:focus,
 [id^="beaver-pane-"] .table-card-inline-field,
 [id^="beaver-pane-"] .table-card-inline-field:hover,
-[id^="beaver-pane-"] .table-card-inline-field:focus {
+[id^="beaver-pane-"] .table-card-inline-field:focus,
+[id^="beaver-pane-"] .table-card-option-label,
+[id^="beaver-pane-"] .table-card-option-label:hover,
+[id^="beaver-pane-"] .table-card-option-label:focus,
+[id^="beaver-pane-"] .table-card-option-definition,
+[id^="beaver-pane-"] .table-card-option-definition:hover,
+[id^="beaver-pane-"] .table-card-option-definition:focus {
     background-color: transparent !important;
     background-image: none !important;
 }
