@@ -39,13 +39,24 @@ export const ColumnTypeTag: React.FC<{ type: string }> = ({ type }) => {
 export const PREVIEW_OPTIONS = 4;
 
 /** A category column's options as chips, the first few then "+N". */
-export const ColumnOptionChips: React.FC<{ options: string[] }> = ({ options }) => (
+export const ColumnOptionChips: React.FC<{
+    /** Labels, or options with a definition the chip shows as its tooltip. */
+    options: ReadonlyArray<string | { label: string; description?: string | null }>;
+}> = ({ options }) => (
     <div className="table-card-options" aria-label="Options">
-        {options.slice(0, PREVIEW_OPTIONS).map((option, i) => (
-            <span key={`${option}-${i}`} className="table-card-option">
-                {option}
-            </span>
-        ))}
+        {options.slice(0, PREVIEW_OPTIONS).map((option, i) => {
+            const label = typeof option === 'string' ? option : option.label;
+            const definition = typeof option === 'string' ? null : option.description || null;
+            return (
+                <span
+                    key={`${label}-${i}`}
+                    className={`table-card-option${definition ? ' table-card-option-defined' : ''}`}
+                    title={definition ? `${label}: ${definition}` : undefined}
+                >
+                    {label}
+                </span>
+            );
+        })}
         {options.length > PREVIEW_OPTIONS && (
             <span className="text-sm font-color-secondary flex-none">
                 {`+${options.length - PREVIEW_OPTIONS}`}

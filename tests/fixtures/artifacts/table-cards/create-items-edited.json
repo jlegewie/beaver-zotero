@@ -64,9 +64,18 @@
         "type": "select",
         "description": "What is the study design?",
         "options": [
-          "RCT",
-          "Observational",
-          "Other"
+          {
+            "label": "RCT",
+            "description": null
+          },
+          {
+            "label": "Observational",
+            "description": null
+          },
+          {
+            "label": "Other",
+            "description": null
+          }
         ],
         "unit": null
       }
@@ -111,9 +120,15 @@
         "type": "select",
         "description": "What is the study design?",
         "options": [
-          "RCT",
-          "Observational",
-          "Other"
+          {
+            "label": "RCT"
+          },
+          {
+            "label": "Observational"
+          },
+          {
+            "label": "Other"
+          }
         ]
       }
     ]

@@ -4,6 +4,7 @@ import {
     isColumnFilterable,
     isColumnSortable,
     selectLabelsInColumn,
+    selectOptionDefinition,
     type Column,
     type Filter,
     type TableSpec,
@@ -260,8 +261,11 @@ function buildFilterMenu(
                         f.labels.includes(label),
                 );
                 items.push(
-                    checkItem(label, active, () =>
-                        state.toggleSelectFilter(column.id, label),
+                    checkItem(
+                        label,
+                        active,
+                        () => state.toggleSelectFilter(column.id, label),
+                        selectOptionDefinition(column, label),
                     ),
                 );
             }
@@ -357,12 +361,17 @@ function checkItem(
     label: string,
     active: boolean,
     onClick: () => void,
+    /** Shown on hover: what a select category means. */
+    title?: string,
 ): MenuItem {
     return {
         label,
         onClick,
         customContent: (
-            <div className={`bt-menu-check${active ? " bt-checked" : ""}`}>
+            <div
+                className={`bt-menu-check${active ? " bt-checked" : ""}`}
+                title={title}
+            >
                 <span className="bt-menu-tick" aria-hidden="true">
                     <Icon icon={TickIcon} size={12} />
                 </span>

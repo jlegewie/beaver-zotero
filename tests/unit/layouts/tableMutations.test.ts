@@ -170,7 +170,7 @@ describe("questionHash", () => {
         ).toBe("d667836d03ab527c");
     });
 
-    it("follows the type and the description only", () => {
+    it("follows the type and the description", () => {
         const column = { type: "text" as const, description: "Q?" };
         expect(questionHash({ ...column, description: "Q2?" })).not.toBe(
             questionHash(column),
@@ -178,6 +178,79 @@ describe("questionHash", () => {
         expect(questionHash({ ...column, type: "number" })).not.toBe(
             questionHash(column),
         );
+    });
+
+    const design = {
+        type: "select" as const,
+        description: "What is the study design?",
+        options: [
+            {
+                label: "RCT",
+                color: "blue" as const,
+                description: "Units are randomly assigned to arms.",
+            },
+            { label: "Observational" },
+            {
+                label: "Quasi-experimental",
+                description: "Assignment follows an external rule.",
+            },
+        ],
+    };
+
+    it("matches the backend's digests for option definitions", () => {
+        expect(questionHash(design)).toBe("7dc398c2ee79acd0");
+        expect(
+            questionHash({
+                type: "select",
+                description: "Studiendesign?",
+                options: [
+                    {
+                        label: "Größe",
+                        description: 'Zeile eins\nZeile — zwei "zitiert"',
+                    },
+                    { label: "Ära 𝔸", description: "日本語の定義" },
+                ],
+            }),
+        ).toBe("e752f6b8da55d15c");
+    });
+
+    it("hashes a column without definitions exactly as before options counted", () => {
+        const plain = {
+            type: "select" as const,
+            description: "What method does the paper use?",
+        };
+        expect(
+            questionHash({
+                ...plain,
+                options: [{ label: "Survey", color: "blue" }],
+            }),
+        ).toBe(questionHash(plain));
+    });
+
+    it("ignores option order, colour, spelling and undefined labels", () => {
+        const hash = questionHash(design);
+        expect(
+            questionHash({ ...design, options: [...design.options].reverse() }),
+        ).toBe(hash);
+        expect(
+            questionHash({
+                ...design,
+                options: [
+                    { ...design.options[0], label: "rct.", color: "red" },
+                    ...design.options.slice(1),
+                    { label: "Case study" },
+                ],
+            }),
+        ).toBe(hash);
+        expect(
+            questionHash({
+                ...design,
+                options: [
+                    { ...design.options[0], description: "Lottery." },
+                    ...design.options.slice(1),
+                ],
+            }),
+        ).not.toBe(hash);
     });
 });
 

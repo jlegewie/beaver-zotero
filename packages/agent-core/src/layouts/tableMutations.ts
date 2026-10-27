@@ -34,6 +34,7 @@ import {
     normalizeSelectLabel,
     isExtractionColumn,
     isFillableColumn,
+    codePointLength,
     jsonBytes,
     questionHash,
     rowInScope,
@@ -42,6 +43,8 @@ import {
     MAX_MODEL_COLUMNS,
     MAX_REASONING_BYTES,
     MAX_ROWS,
+    MAX_SELECT_DEFINITION_CHARS,
+    MAX_SELECT_DEFINITIONS_CHARS,
     MAX_SPEC_BYTES,
     SELECT_COLORS,
     WRITE_BLOCKING_ISSUES,
@@ -70,9 +73,21 @@ export interface AddColumnsMutation {
 }
 
 /**
+ * An option in `update_column.options`. Without `description` it keeps the
+ * definition the option had (paired by {@link normalizeSelectLabel}), so a
+ * labels-only update cannot wipe the codebook; `null` clears it.
+ */
+export interface UpdateColumnOption {
+    label: string;
+    color?: SelectColor;
+    description?: string | null;
+}
+
+/**
  * Changes a column's declaration. Only the named fields move; an omitted field
- * is left alone. Changing `description` restates the column's question, so the
- * cells below it are marked stale — see {@link applyMutations}.
+ * is left alone. A change to the column's question ({@link questionHash}: its
+ * description or an option definition) marks the cells below it stale — see
+ * {@link applyMutations}.
  */
 export interface UpdateColumnMutation {
     op: "update_column";
@@ -81,7 +96,7 @@ export interface UpdateColumnMutation {
     header?: string;
     description?: string | null;
     /** Add-only: the list may re-spell and append, never drop a label in use. */
-    options?: SelectOption[] | null;
+    options?: UpdateColumnOption[] | null;
     unit?: string | null;
     priority?: "primary" | "secondary" | null;
 }
@@ -440,12 +455,16 @@ function addColumns(
                 `add_columns: column "${column.id}" lists "${clash[0]}" and "${clash[1]}" as two options, which are one label`,
             );
         }
+        const options = column.options
+            ? cleanDefinitions("add_columns", column.id, column.options)
+            : undefined;
+        if (isFailure(options)) return options;
         const columns = columnsOf(draft);
         draft.columnIndex.set(column.id, columns.length);
         // Copied so a caller that keeps editing its own object cannot reach
         // into the spec it just produced.
         draft.ownColumns.add(column.id);
-        columns.push({ ...column });
+        columns.push(options ? { ...column, options } : { ...column });
     }
     return undefined;
 }
@@ -539,7 +558,7 @@ function isFailure(value: unknown): value is Failure {
  * uses. `gray` is skipped too — it is what an option with no colour renders as.
  */
 function nextSelectColor(
-    options: SelectOption[],
+    options: readonly Pick<SelectOption, "color">[],
     reserved?: Iterable<SelectColor>,
 ): SelectColor {
     const rotation = SELECT_COLORS.filter((color) => color !== "gray");
@@ -568,7 +587,7 @@ function optionFor(
  * any — `["Yes", "yes"]` declares one category twice.
  */
 function duplicateOptionLabels(
-    options: SelectOption[] | null | undefined,
+    options: readonly Pick<SelectOption, "label">[] | null | undefined,
 ): [string, string] | undefined {
     const seen = new Map<string, string>();
     for (const option of options ?? []) {
@@ -578,6 +597,50 @@ function duplicateOptionLabels(
         seen.set(key, option.label);
     }
     return undefined;
+}
+
+/**
+ * `options` with each definition trimmed and empty ones dropped, or the cap
+ * they break: {@link MAX_SELECT_DEFINITION_CHARS} per definition and
+ * {@link MAX_SELECT_DEFINITIONS_CHARS} across the column.
+ */
+function cleanDefinitions(
+    op: string,
+    columnId: string,
+    options: readonly UpdateColumnOption[],
+): SelectOption[] | Failure {
+    let total = 0;
+    const cleaned: SelectOption[] = [];
+    for (const option of options) {
+        const { description, ...rest } = option;
+        if (description != null && typeof description !== "string") {
+            return fail(
+                "invalid_mutation",
+                `${op}: column "${columnId}": the definition of "${option.label}" must be a string`,
+            );
+        }
+        const definition = description?.trim();
+        if (!definition) {
+            cleaned.push(rest);
+            continue;
+        }
+        const length = codePointLength(definition);
+        if (length > MAX_SELECT_DEFINITION_CHARS) {
+            return fail(
+                "too_large",
+                `${op}: column "${columnId}": the definition of "${option.label}" exceeds ${MAX_SELECT_DEFINITION_CHARS} characters`,
+            );
+        }
+        total += length;
+        cleaned.push({ ...rest, description: definition });
+    }
+    if (total > MAX_SELECT_DEFINITIONS_CHARS) {
+        return fail(
+            "too_large",
+            `${op}: column "${columnId}": its option definitions exceed ${MAX_SELECT_DEFINITIONS_CHARS} characters together`,
+        );
+    }
+    return cleaned;
 }
 
 /** Every select label the cells of `columnId` hold, in row order, with repeats. */
@@ -607,7 +670,7 @@ interface OptionsPlan {
 function planOptions(
     draft: Draft,
     column: Column,
-    incoming: SelectOption[],
+    incoming: UpdateColumnOption[],
 ): OptionsPlan | Failure {
     // The colours the update keeps, known before the first new label is given
     // one: a label further down the list that holds on to blue must not have
@@ -627,8 +690,7 @@ function planOptions(
         );
     }
 
-    const options: SelectOption[] = [];
-    const byKey = new Map<string, SelectOption>();
+    const planned: UpdateColumnOption[] = [];
     for (const option of incoming) {
         // A label the column already has keeps the colour it had, so
         // re-spelling one does not repaint the table.
@@ -636,13 +698,21 @@ function planOptions(
         const color =
             option.color ??
             previous?.color ??
-            nextSelectColor(options, reserved);
-        const next: SelectOption = color
+            nextSelectColor(planned, reserved);
+        const next: UpdateColumnOption = color
             ? { label: option.label, color }
             : { label: option.label };
-        options.push(next);
-        byKey.set(normalizeSelectLabel(option.label), next);
+        // An option sent without a definition keeps the one it had.
+        const description =
+            "description" in option ? option.description : previous?.description;
+        if (description != null) next.description = description;
+        planned.push(next);
     }
+    const options = cleanDefinitions("update_column", column.id, planned);
+    if (isFailure(options)) return options;
+    const byKey = new Map<string, SelectOption>();
+    for (const option of options)
+        byKey.set(normalizeSelectLabel(option.label), option);
 
     const dropped = new Set<string>();
     const respell = new Map<string, string>();
@@ -722,9 +792,7 @@ function updateColumn(
         }
     }
 
-    const questionChanged =
-        mutation.description !== undefined &&
-        (mutation.description ?? null) !== (column.description ?? null);
+    const question = questionHash(column);
 
     if (mutation.header !== undefined) column.header = mutation.header;
     if (mutation.description !== undefined)
@@ -735,10 +803,11 @@ function updateColumn(
     if (mutation.priority !== undefined)
         setOptional(column, "priority", mutation.priority);
 
-    // The answers under the column were given to the previous question, so
-    // they are marked rather than dropped: the value is still the best thing
-    // anyone has until the column is re-run.
-    if (questionChanged) {
+    // The answers under the column were given to the previous question (its
+    // description or an option definition), so they are marked rather than
+    // dropped: the value is still the best thing anyone has until the column
+    // is re-run. A header, colour or re-spelling is not a new question.
+    if (questionHash(column) !== question) {
         for (const row of draft.spec.rows) {
             if (!row.cells[column.id]) continue;
             const writable = writableRow(draft, row.id);

@@ -5,6 +5,7 @@ import {
     annotationTitle,
     annotationTypeLabel,
     columnWrap,
+    selectOptionDefinition,
     type Cell,
     type CellValue,
     type Column,
@@ -324,12 +325,23 @@ function SelectPill({
     onClick?: (label: string) => void;
 }): React.ReactElement {
     const className = `bt-pill bt-pill-${selectColor(label, column)}`;
-    if (!onClick) return <span className={className}>{label}</span>;
+    // A defined category explains itself on hover.
+    const definition = selectOptionDefinition(column, label);
+    if (!onClick)
+        return (
+            <span className={className} title={definition}>
+                {label}
+            </span>
+        );
     return (
         <button
             type="button"
             className={`${className} bt-pill-button`}
-            title={`Filter by ${label}`}
+            title={
+                definition
+                    ? `${label}: ${definition}\n\nFilter by ${label}`
+                    : `Filter by ${label}`
+            }
             onClick={(e) => {
                 e.stopPropagation();
                 onClick(label);

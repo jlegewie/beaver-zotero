@@ -5263,6 +5263,34 @@
     line-height: 1.45;
 }
 
+/* A defined category: its definition is the chip's tooltip. */
+[id^="beaver-pane-"] .table-card-option-defined {
+    text-decoration: underline dotted var(--fill-tertiary);
+    text-underline-offset: 2px;
+    cursor: help;
+}
+
+/* The options editor: one row per category, its definition indented below. */
+[id^="beaver-pane-"] .table-card-option-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-card-option-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+/* Two classes: it must win over `.table-card-field`'s full width and zero margin. */
+[id^="beaver-pane-"] .table-card-field.table-card-option-definition {
+    margin-left: 0.75rem;
+    width: calc(100% - 0.75rem - 26px);
+}
+
 [id^="beaver-pane-"] .table-card-badge-warning {
     padding: 0 5px;
     border: 1px solid var(--tag-orange-tertiary);
