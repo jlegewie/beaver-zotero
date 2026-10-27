@@ -447,12 +447,15 @@ async function handleLibraryListHttpRequest(request: any) {
         special_collection: request.special_collection,
         tag: request.tag,
         item_category: request.item_category ?? 'regular',
+        include_children: request.include_children ?? false,
+        nest_children: request.nest_children ?? false,
         include_abstract: request.include_abstract ?? false,
         recursive: request.recursive ?? true,
         sort_by: request.sort_by || 'dateModified',
         sort_order: request.sort_order || 'desc',
         limit: request.limit ?? 20,
         offset: request.offset ?? 0,
+        has_attachments: request.has_attachments ?? null,
     };
     
     const response = await handleListItemsRequest(wsRequest);
