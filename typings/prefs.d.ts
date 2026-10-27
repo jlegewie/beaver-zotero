@@ -75,6 +75,7 @@ declare namespace _ZoteroTypes {
       "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
       "interruptedThread": string;
+      "beaverTabsToRestore": string;
       "threadsClaimKey": string;
       "mcpServerEnabled": boolean;
       "mcpCreateNoteToolEnabled": boolean;
