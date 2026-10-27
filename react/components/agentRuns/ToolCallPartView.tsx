@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isNotFoundWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
-import { isTableToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
+import { isTableToolName, isTableWriteToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import {
     isToolResultView,
@@ -11,6 +11,7 @@ import {
 } from '@beaver/agent-core/run-state/toolResultViews';
 import { ToolResultView, hasRenderableResult } from './ToolResultView';
 import { GenericAgentActionView } from './GenericAgentActionView';
+import { TableToolCallView } from './TableToolCallView';
 import { getHost } from '@beaver/agent-ui/host';
 import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
 import {
@@ -92,7 +93,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     edit_note: PropertyEditIcon,
     create_note: DocumentValidationIcon,
 
-    // Table tools
+    // Table tools (the writes render as TableToolCallView; read_table is a plain row)
     create_table: TableIcon,
     read_table: TableIcon,
     edit_table: TableIcon,
@@ -416,6 +417,20 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const streamingArgs = part.streaming_args;
     const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
         && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
+
+    // Table writes are cards like the note actions: the header names the table
+    // and opens it, the body carries the call's summary and reveal / open.
+    if (isTableWriteToolName(part.tool_name)) {
+        return (
+            <TableToolCallView
+                part={part}
+                result={result}
+                runId={runId}
+                responseIndex={responseIndex}
+                runStatus={runStatus}
+            />
+        );
+    }
 
     // Note: a pending ask_user_question renders as the composer-takeover panel
     // (AskUserQuestionPanel, swapped in by Sidebar) — here the call stays a

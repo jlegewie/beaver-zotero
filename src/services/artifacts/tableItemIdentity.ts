@@ -25,6 +25,7 @@ import { readSpec, type TableSpec } from '@beaver/agent-core/layouts/table';
 import type { TableSummary } from '@beaver/agent-core/layouts/tableMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { sha256Hex } from '../../utils/hash';
+import { getTablesApi } from './tablesApi';
 
 // ---------------------------------------------------------------------------
 // Marks
@@ -102,6 +103,48 @@ export class TableItemError extends Error {
         super(message);
         this.name = 'TableItemError';
         this.code = code;
+    }
+}
+
+/**
+ * Whether a library lets Beaver write a table's files: item edits and file
+ * edits, since a table is a stored file. Exclusion is checked separately.
+ */
+export function tableFilesEditable(library: { editable: boolean; filesEditable?: boolean } | false | null | undefined): boolean {
+    return !!library && !!library.editable && library.filesEditable !== false;
+}
+
+/**
+ * Whether the store's open repair runs for a table in this library: its files
+ * are editable and the library is not excluded (fail-closed until the library
+ * scope has loaded, as the store's exclusion check is).
+ */
+export function tableRepairAllowed(libraryID: number): boolean {
+    const beaver = Zotero.Beaver;
+    return tableFilesEditable(Zotero.Libraries.get(libraryID))
+        && !!beaver?.libraryScopeInitialized
+        && (beaver.searchableLibraryIds ?? []).includes(libraryID);
+}
+
+/** Why a table's bookkeeping stays unrepaired where {@link tableRepairAllowed} is false. */
+export const TABLE_REPAIR_SKIPPED =
+    'Local bookkeeping needs repair, but Beaver does not modify tables in a read-only library or one excluded from Beaver.';
+
+/** Where an unreadable table can be recovered: the item pane's restore. */
+export const UNREADABLE_TABLE_RECOVERY =
+    'Select the table in your library and use “Restore my version” in its Beaver Table section to write back the last version this device saved.';
+
+/**
+ * The recovery hint for an unreadable table, or '' when the item pane would
+ * not offer the restore (no usable copy on this device, or a read-only
+ * library). Never throws.
+ */
+export async function unreadableTableRecovery(ref: TableRef): Promise<string> {
+    try {
+        const outcome = await getTablesApi()?.shadow.check(ref);
+        return outcome === 'ok' ? UNREADABLE_TABLE_RECOVERY : '';
+    } catch {
+        return '';
     }
 }
 
@@ -559,7 +602,7 @@ export async function resolveTableItem(ref: TableRef, allowTrashed = false): Pro
         | false;
     if (!item || (item.deleted && !allowTrashed)) {
         throw new TableItemError(
-            `No item ${ref.key} in library ${ref.libraryID}.`,
+            item ? `Table ${ref.key} is in the trash.` : `No item ${ref.key} in library ${ref.libraryID}.`,
             'not_found'
         );
     }

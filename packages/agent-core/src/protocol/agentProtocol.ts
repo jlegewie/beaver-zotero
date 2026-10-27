@@ -5,7 +5,7 @@ import { SubscriptionStatus, ProcessingMode, ChargeType } from '../types/profile
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../types/zotero';
-import { ReaderState, NoteState } from '../types/attachments/apiTypes';
+import { ReaderState, NoteState, TableState } from '../types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../agents/types';
 import type { RetryTrigger } from '../agents/types';
 import type { CustomChatModel } from '../types/customChatModel';
@@ -1666,6 +1666,14 @@ export interface WSListItemsRequest extends WSBaseEvent {
     tag?: string | null;
     item_category: ZoteroItemCategory;
     include_children?: boolean;
+    /**
+     * With `include_children`: sort and page top-level items only and nest each
+     * item's children on its row (`attachments` / `notes`). Sent only to
+     * clients that declare `list_items_nested_children`.
+     */
+    nest_children?: boolean;
+    /** Add `abstract` to every regular row. */
+    include_abstract?: boolean;
     recursive: boolean;
     sort_by: string;
     sort_order: string;
@@ -1687,6 +1695,19 @@ export interface RegularListResultItem {
     year?: number | null;
     date_added?: string | null;
     date_modified?: string | null;
+    /**
+     * Set only for an `include_abstract` request: "" when the item has no
+     * abstract. Left out when it could not be read, which tells the backend to
+     * look it up another way.
+     */
+    abstract?: string;
+    /**
+     * Set only for a `nest_children` request: the item's attachments, primary
+     * first, then by title. Left out when its children could not be read.
+     */
+    attachments?: AttachmentRowResult[];
+    /** Set with `attachments`: the item's child notes, by title. */
+    notes?: NoteResultItem[];
 }
 
 /** Response to list_items request */
@@ -1934,6 +1955,13 @@ export interface WSItemDisplayRequest extends WSBaseEvent {
      * most 1,000 items.
      */
     item_ids: string[];
+    /**
+     * Also report whether each regular item has a document a table row
+     * reads — a PDF, EPUB or HTML snapshot outside the trash (`has_pdf`).
+     * Attachment presence only; no file is opened. Asked by the table card's
+     * local lookups; the backend does not send it.
+     */
+    include_pdf?: boolean;
 }
 
 /** One item as a list draws it, computed by the client that owns the library. */
@@ -1952,6 +1980,8 @@ export interface ItemDisplayRow {
     subtitle?: string | null;
     /** Attachments only: the broad content kind, for the icon. */
     content_kind?: string | null;
+    /** Regular items, when the request asked: whether a PDF, EPUB or snapshot attachment exists. */
+    has_pdf?: boolean;
 }
 
 /**
@@ -2810,6 +2840,9 @@ export type WSEvent =
     // Run-level batch approval
     | WSBatchApprovalRequest
     | WSBatchApprovalStale
+    // Table card
+    | import('./tableCardProtocol').WSTableCardRequest
+    | import('./tableCardProtocol').WSTableCardStale
     // User interaction events
     | WSAskUserQuestionRequest;
 
@@ -2935,6 +2968,13 @@ export const CLIENT_FEATURES = {
     /** Scoped collection resolution, stable mutation targets, and portable result readers. */
     COLLECTION_IDS: 'collection_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
+    /**
+     * `list_items` honors `nest_children`: an `include_children` listing pages
+     * top-level items only and nests their children on each row. A client
+     * without it returns children as rows of their own, sorted and paged with
+     * their parents.
+     */
+    LIST_ITEMS_NESTED_CHILDREN: 'list_items_nested_children',
     /**
      * `list_items` honors `special_collection`, listing a built-in view
      * (Unfiled Items, My Publications, Retracted Items) instead of a
@@ -3226,12 +3266,14 @@ export interface CurrentSpecialCollection {
  * Contains current view state and reader state if in reader view.
  */
 export interface ApplicationStateInput {
-    /** Current application view ('library', 'file_reader', or 'note_editor') */
-    current_view: 'library' | 'file_reader' | 'note_editor';
+    /** Current application view ('library', 'file_reader', 'note_editor', or 'table') */
+    current_view: 'library' | 'file_reader' | 'note_editor' | 'table';
     /** Reader state when in reader view */
     reader_state?: ReaderState;
     /** Note state when in note editor view */
     note_state?: NoteState;
+    /** The stored table open in its Beaver tab (`current_view: 'table'`) */
+    table_state?: TableState;
     /** Current library context */
     current_library?: CurrentLibrary;
     /**
@@ -3661,6 +3703,16 @@ export interface WSCallbacks {
      * @param event The stale-approval notice, keyed by approval id
      */
     onBatchApprovalStale?: (event: WSBatchApprovalStale) => void;
+
+    /**
+     * Called when the backend shows the table card for a proposed table. The
+     * frontend renders the card and sends one WSTableCardResponse with the
+     * edited input or a decline.
+     */
+    onTableCardRequest?: (event: import('./tableCardProtocol').WSTableCardRequest) => void;
+
+    /** Called when a table card answer arrived after the backend stopped waiting. */
+    onTableCardStale?: (event: import('./tableCardProtocol').WSTableCardStale) => void;
 
     /**
      * Called when the backend asks the user structured multiple-choice

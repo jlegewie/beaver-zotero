@@ -37,9 +37,10 @@ afterEach(() => {
 });
 
 it.each([
-    // A successful table write is an ordinary row: collapsed over its table view.
+    // A table write is a card that starts collapsed over its table view.
     { kind: "table result", tool: "create_table", expanded: false },
-    { kind: "table status", tool: "fill_table", expanded: true },
+    // A failed table read opens on its recovery status.
+    { kind: "table status", tool: "read_table", expanded: true },
     { kind: "ordinary result", tool: "list_tags", expanded: false },
 ])(
     "toggles $kind from its displayed default on the first click",
@@ -155,6 +156,49 @@ it("keeps a tool without a supported view collapsed", async () => {
     const button = container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
     expect(button.textContent).toContain("Find patent families");
     expect(button.getAttribute("aria-expanded")).toBe("false");
+
+    act(() => button.click());
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector("#tool-result-call")).toBeNull();
+});
+
+it("shows a failed table write's status under the title without expanding", async () => {
+    const store = createStore();
+    store.set(resultAtom, {
+        part_kind: "tool-return",
+        tool_name: "create_table",
+        tool_call_id: "call",
+        content: { ok: false, error_code: "declined" },
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () =>
+        root!.render(
+            React.createElement(
+                Provider,
+                { store },
+                React.createElement(ToolCallPartView, {
+                    part: {
+                        part_kind: "tool-call",
+                        tool_name: "create_table",
+                        tool_call_id: "call",
+                        args: { title: "Study comparison" },
+                    },
+                    runId: "run",
+                    responseIndex: 0,
+                    runStatus: "completed",
+                }),
+            ),
+        ),
+    );
+    const button = container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    expect(button.textContent).toContain("Create table");
+    expect(button.textContent).toContain("Study comparison");
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+        "The table was declined. Nothing was created.",
+    );
+    expect(container.querySelector('[aria-label="Open table"]')).toBeNull();
 
     act(() => button.click());
     expect(button.getAttribute("aria-expanded")).toBe("false");

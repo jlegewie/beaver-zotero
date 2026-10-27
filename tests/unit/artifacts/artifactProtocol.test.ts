@@ -61,3 +61,27 @@ describe("artifact request envelopes", () => {
         ).toBe("invalid_request");
     });
 });
+
+describe("create into a collection", () => {
+    const create = {
+        event: "artifact_request",
+        request_id: "create",
+        op: "create",
+        kind: "table",
+        library_ref: "u",
+        title: "Comparison",
+        spec: {},
+        meta: { actor: "agent", run_id: "run", thread_id: "thread" },
+        operation_id: "op",
+    };
+    it("accepts a bare collection key on create only", () => {
+        expect(validateArtifactRequest({ ...create, collection_key: "CASHTRN2" })).toBeNull();
+        expect(validateArtifactRequest({ ...create, collection_key: null })).toBeNull();
+        expect(
+            validateArtifactRequest({ event: "artifact_request", request_id: "r", op: "read", key: "u-ABCDEFGH", collection_key: "CASHTRN2" }),
+        ).toBe("invalid_request");
+    });
+    it.each(["u-CASHTRN2", "cashtrn2", "CASHTRN0", 7])("rejects a malformed key %s", (key) => {
+        expect(validateArtifactRequest({ ...create, collection_key: key })).toBe("invalid_request");
+    });
+});

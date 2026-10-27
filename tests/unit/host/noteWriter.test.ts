@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   selectItem: vi.fn(),
   selectItemById: vi.fn(),
   saveTx: vi.fn(),
+  getLibraryViewCollection: vi.fn(),
 }));
 
 vi.mock("../../../react/utils/zoteroTargetContext", () => ({
@@ -17,6 +18,11 @@ vi.mock("../../../react/utils/zoteroTargetContext", () => ({
   getZoteroTargetContextSync: mocks.getZoteroTargetContextSync,
   getCurrentLibrary: mocks.getCurrentLibrary,
   isLibraryEditable: mocks.isLibraryEditable,
+  isLibraryTabSelected: (win: any) => {
+    const type = win?.Zotero_Tabs?.selectedType;
+    return !type || type === "library";
+  },
+  getLibraryViewCollection: mocks.getLibraryViewCollection,
 }));
 
 vi.mock("../../../react/utils/selectItem", () => ({
@@ -117,6 +123,19 @@ describe("zoteroNoteWriter", () => {
     })).resolves.toMatchObject({ library_id: 7, zotero_key: "NOTE1234", library_ref: "g42" });
     expect(select).toHaveBeenCalledOnce();
     expect(mocks.saveTx).toHaveBeenCalledOnce();
+  });
+
+  it("files the note in the library tab's collection only while that tab is selected", async () => {
+    const win: any = { closed: false, Zotero_Tabs: { selectedType: "beaver-table" }, ZoteroPane: {} };
+    vi.mocked(Zotero.getMainWindow).mockReturnValue(win);
+    mocks.getLibraryViewCollection.mockReturnValue(null);
+    await zoteroNoteWriter.saveNote({
+      contentHtml: "<p>Saved response</p>", asChild: false, format: { kind: "streaming-note" },
+    });
+    expect(mocks.getLibraryViewCollection).toHaveBeenCalledWith(win);
+    // A Beaver tab keeps the focus: the note is not revealed in the library.
+    expect(mocks.selectItemById).not.toHaveBeenCalled();
+    expect(mocks.selectItem).not.toHaveBeenCalled();
   });
 
   it("still rejects an actual persistence failure", async () => {

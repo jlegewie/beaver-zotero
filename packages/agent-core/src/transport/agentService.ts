@@ -47,6 +47,7 @@ import {
     isReattachRequest,
 } from '../protocol/agentProtocol';
 import { REATTACH_CLOSE_CODES, RunLink, RunReply, answeredPromptKey, executedAction, promptKey } from './runLink';
+import type { WSTableCardResponse } from '../protocol/tableCardProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
@@ -1750,6 +1751,28 @@ export class AgentService {
                     this.callbacks?.onBatchApprovalStale?.(event);
                     break;
 
+                case 'table_card_request':
+                    logger("AgentService: Received table_card_request", { card_id: event.card_id, sources: event.sources.length }, 1);
+                    if (this.callbacks?.onTableCardRequest) {
+                        this.callbacks.onTableCardRequest(event);
+                    } else {
+                        // A client that cannot show the card declines: nothing
+                        // is created, and the run is not stalled for the card's
+                        // whole timeout.
+                        logger("AgentService: No table card handler, declining", 1);
+                        this.sendDecision({
+                            type: 'table_card_response',
+                            card_id: event.card_id,
+                            approved: false,
+                        });
+                    }
+                    break;
+
+                case 'table_card_stale':
+                    logger("AgentService: Received table_card_stale", event, 1);
+                    this.callbacks?.onTableCardStale?.(event);
+                    break;
+
                 case 'ask_user_question_request':
                     logger("AgentService: Received ask_user_question_request", event, 1);
                     // This event is handled by the UI via callback
@@ -2066,6 +2089,17 @@ export class AgentService {
             mode,
             user_instructions: userInstructions,
         });
+    }
+
+    /**
+     * Send the answer to a table card: the edited input on an approval, or a
+     * decline with optional instructions. Correlated by `card_id`.
+     * @returns false if the socket was not open, so the answer never left the
+     *   client.
+     */
+    sendTableCardResponse(response: WSTableCardResponse): boolean {
+        logger(`AgentService: Sending table card response for ${response.card_id}: ${response.approved ? response.choice ?? 'create' : 'declined'}`, 1);
+        return this.sendDecision(response);
     }
 
     /**

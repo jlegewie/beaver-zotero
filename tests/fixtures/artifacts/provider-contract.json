@@ -701,6 +701,387 @@
     }
   },
   {
+    "name": "create-into-collection",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "create-into-collection",
+      "op": "create",
+      "kind": "table",
+      "library_ref": "u",
+      "title": "Comparison",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "title": "Comparison",
+        "description": "Open-access status and topic of the compared papers.",
+        "anchor_column_id": "_reference",
+        "sources": [
+          {
+            "id": "s1",
+            "type": "items",
+            "ids": [
+              "u-PAPER222"
+            ]
+          }
+        ],
+        "columns": [
+          {
+            "id": "_reference",
+            "header": "Reference",
+            "type": "reference",
+            "system": true
+          },
+          {
+            "id": "_year",
+            "header": "Year",
+            "type": "date",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "_identifier",
+            "header": "Identifier",
+            "type": "link",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "description": "What is the paper's main topic?",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean",
+            "description": "Is the paper open access?"
+          }
+        ],
+        "rows": [
+          {
+            "id": "r5f2c81a90b",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER222",
+              "attachment": {
+                "library_ref": "u",
+                "zotero_key": "PDF22222"
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Smith 2021",
+                  "title": "Sampling online panels",
+                  "item_type": "journalArticle",
+                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2021"
+                }
+              },
+              "_identifier": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "link",
+                  "url": "https://doi.org/10.1000/smith",
+                  "label": "10.1000/smith"
+                }
+              },
+              "topic": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "select",
+                  "label": "Methods"
+                },
+                "evidence": [
+                  {
+                    "locator": "s4-s5",
+                    "quote": "We compare three sampling designs.",
+                    "page": 0,
+                    "boxes": [
+                      [
+                        72,
+                        300,
+                        520,
+                        330
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "open_access": {
+                "outcome": "not_reported",
+                "provenance": "metadata"
+              }
+            }
+          }
+        ]
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread"
+      },
+      "operation_id": "operation",
+      "collection_key": "CASHTRN2"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "create-into-collection",
+      "op": "create",
+      "ok": true,
+      "version": 3,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "title": "Comparison",
+        "description": "Open-access status and topic of the compared papers.",
+        "anchor_column_id": "_reference",
+        "sources": [
+          {
+            "id": "s1",
+            "type": "items",
+            "ids": [
+              "u-PAPER222"
+            ]
+          }
+        ],
+        "columns": [
+          {
+            "id": "_reference",
+            "header": "Reference",
+            "type": "reference",
+            "system": true
+          },
+          {
+            "id": "_year",
+            "header": "Year",
+            "type": "date",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "_identifier",
+            "header": "Identifier",
+            "type": "link",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "description": "What is the paper's main topic?",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean",
+            "description": "Is the paper open access?"
+          }
+        ],
+        "rows": [
+          {
+            "id": "r5f2c81a90b",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER222",
+              "attachment": {
+                "library_ref": "u",
+                "zotero_key": "PDF22222"
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Smith 2021",
+                  "title": "Sampling online panels",
+                  "item_type": "journalArticle",
+                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2021"
+                }
+              },
+              "_identifier": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "link",
+                  "url": "https://doi.org/10.1000/smith",
+                  "label": "10.1000/smith"
+                }
+              },
+              "topic": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "select",
+                  "label": "Methods"
+                },
+                "evidence": [
+                  {
+                    "locator": "s4-s5",
+                    "quote": "We compare three sampling designs.",
+                    "page": 0,
+                    "boxes": [
+                      [
+                        72,
+                        300,
+                        520,
+                        330
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "open_access": {
+                "outcome": "not_reported",
+                "provenance": "metadata"
+              }
+            }
+          }
+        ],
+        "key": "ABCDEFGH",
+        "version": 3
+      },
+      "summary": {
+        "rows": 1,
+        "columns": 5,
+        "sources": 1,
+        "in_scope_rows": 1,
+        "failed_rows": 0,
+        "user_edits": 0,
+        "columns_detail": {
+          "_reference": {
+            "type": "reference",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "stale": 0,
+            "unsure": 0,
+            "metadata_only": 0,
+            "system": true
+          },
+          "_year": {
+            "type": "date",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "stale": 0,
+            "unsure": 0,
+            "metadata_only": 0,
+            "system": true
+          },
+          "_identifier": {
+            "type": "link",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "stale": 0,
+            "unsure": 0,
+            "metadata_only": 0,
+            "system": true
+          },
+          "topic": {
+            "type": "select",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "stale": 0,
+            "unsure": 0,
+            "metadata_only": 0,
+            "distribution": {
+              "Methods": 1
+            }
+          },
+          "open_access": {
+            "type": "boolean",
+            "answered": 0,
+            "not_reported": 1,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "stale": 0,
+            "unsure": 0,
+            "metadata_only": 1,
+            "distribution": {}
+          }
+        }
+      },
+      "zotero_item": {
+        "library_id": 47,
+        "library_ref": "u",
+        "zotero_key": "ABCDEFGH"
+      },
+      "operation": {
+        "operation_id": "operation",
+        "request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "version": 1,
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "replayed": true,
+      "saved": true
+    }
+  },
+  {
     "name": "write-replay-needs-bookkeeping",
     "request": {
       "event": "artifact_request",

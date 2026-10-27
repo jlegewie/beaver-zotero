@@ -49,6 +49,7 @@ import {
     cleanupReaderTableViewsForWindow,
     listReaderTableViews,
     openTableInReader,
+    setTableReaderRedirect,
 } from '../../../src/services/artifacts/view/readerTableView';
 
 let savedZotero: any;
@@ -280,6 +281,41 @@ describe('the reader table view registry', () => {
 
         expect(listReaderTableViews().map((view) => view.key)).toEqual(['KEY1']);
         expect(dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('hands a reader tab on a table to the Beaver tab instead of enhancing it', async () => {
+        const redirect = vi.fn(() => true);
+        setTableReaderRedirect(redirect);
+        try {
+            const reader = fakeReader(main.win, 5, 'tab-5');
+            readers.push(reader);
+            (Zotero.Reader as any).registerEventListener = vi.fn();
+            initReaderTableViews();
+            await vi.waitFor(() => expect(redirect).toHaveBeenCalledWith(reader, expect.objectContaining({ id: 5 })));
+            expect(enhanceTableDocument).not.toHaveBeenCalled();
+        } finally {
+            setTableReaderRedirect(null);
+        }
+    });
+
+    it('keeps enhancing a reader window, and the reader the dev endpoint opened on purpose', async () => {
+        const redirect = vi.fn(() => true);
+        setTableReaderRedirect(redirect);
+        try {
+            await openTableInReader(tableItem(1, 'KEY1'));
+            expect(enhanceTableDocument).toHaveBeenCalledOnce();
+
+            const windowReader = fakeReader(main.win, 6, undefined);
+            readers.push(windowReader);
+            (Zotero.Reader as any).registerEventListener = vi.fn();
+            const handler = () => vi.mocked(Zotero.Reader.registerEventListener).mock.calls[0][1] as any;
+            initReaderTableViews();
+            handler()({ reader: windowReader });
+            await vi.waitFor(() => expect(listReaderTableViews().map((v) => v.key)).toContain('KEY6'));
+            expect(redirect).not.toHaveBeenCalledWith(windowReader, expect.anything());
+        } finally {
+            setTableReaderRedirect(null);
+        }
     });
 
     it('disposes each view once, however many times cleanup runs', async () => {

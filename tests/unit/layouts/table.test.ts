@@ -15,6 +15,8 @@ import {
     filterRows,
     isCellEmpty,
     isColumnSortable,
+    isExtractionColumn,
+    isFillableColumn,
     isMetadataOnly,
     isRowInLibrary,
     normalizeSelectLabel,
@@ -280,6 +282,42 @@ describe("scope", () => {
         expect(rowDecision(table, filled)).toBeUndefined();
         expect(rowInScope(table, filled)).toBe(false);
         expect(rowInScope(table, decided(undefined))).toBe(false);
+    });
+});
+
+describe("column roles", () => {
+    const column = (role?: string, extra: Partial<Column> = {}): Column => ({
+        id: "c",
+        header: "C",
+        type: "select",
+        ...(role !== undefined ? { role } : {}),
+        ...extra,
+    });
+
+    it("fills extraction and criterion columns, and scopes only extraction columns", () => {
+        expect(isExtractionColumn(column())).toBe(true);
+        expect(isFillableColumn(column())).toBe(true);
+        expect(isExtractionColumn(column("criterion"))).toBe(false);
+        expect(isFillableColumn(column("criterion"))).toBe(true);
+        expect(isExtractionColumn(column("decision"))).toBe(false);
+        expect(isFillableColumn(column("decision"))).toBe(false);
+        expect(isFillableColumn(column(undefined, { system: true }))).toBe(false);
+    });
+
+    it("ignores a role this version does not know", () => {
+        const future = column("some_future_role");
+        expect(isExtractionColumn(future)).toBe(false);
+        expect(isFillableColumn(future)).toBe(false);
+    });
+
+    it("keeps an unknown role through readSpec", () => {
+        const raw = {
+            id: "t",
+            columns: [column("some_future_role")],
+            rows: [],
+        };
+        const read = readSpec(structuredClone(raw));
+        expect(read.ok && read.spec.columns[0].role).toBe("some_future_role");
     });
 });
 

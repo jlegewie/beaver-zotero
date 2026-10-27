@@ -39,6 +39,27 @@ import { checkLibraryExcluded } from './utils';
  */
 export const MAX_ITEM_DISPLAY_IDS = 1000;
 
+/** The attachment kinds a table row reads, in the backend's order of preference. */
+const ROW_DOCUMENT_KINDS: ReadonlySet<string> = new Set(['pdf', 'epub', 'snapshot']);
+
+/**
+ * Regular items with at least one PDF, EPUB or HTML snapshot attachment
+ * outside the trash — the documents a table row reads. From the attachment
+ * items alone: no file is opened, so a file not yet downloaded still counts.
+ */
+async function itemIdsWithDocument(items: Zotero.Item[]): Promise<Set<number>> {
+    const found = new Set<number>();
+    if (!items.length) return found;
+    await Zotero.Items.loadDataTypes(items, ['childItems']);
+    const attachmentIDs = items.flatMap((item) => item.getAttachments(false));
+    const attachments: Zotero.Item[] = attachmentIDs.length ? await Zotero.Items.getAsync(attachmentIDs) : [];
+    for (const attachment of attachments) {
+        if (!attachment || attachment.deleted || !attachment.parentItemID) continue;
+        if (ROW_DOCUMENT_KINDS.has(getContentKind(attachment))) found.add(attachment.parentItemID);
+    }
+    return found;
+}
+
 /** The row for one loaded item. Throws only if the item's fields are unreadable. */
 function toItemDisplayRow(item: Zotero.Item): ItemDisplayRow {
     const row: ItemDisplayRow = {
@@ -87,13 +108,18 @@ export async function handleItemDisplayRequest(
         const items: Zotero.Item[] = itemIDs.length ? await Zotero.Items.getAsync(itemIDs) : [];
 
         await loadQuickSearchHitData(items);
+        const withPdf = request.include_pdf
+            ? await itemIdsWithDocument(items.filter((item) => item.isRegularItem()))
+            : null;
 
         const rows: ItemDisplayRow[] = [];
         for (const item of items) {
             // One item whose fields cannot be read costs its own row, not the
             // whole answer.
             try {
-                rows.push(toItemDisplayRow(item));
+                const row = toItemDisplayRow(item);
+                if (withPdf && item.isRegularItem()) row.has_pdf = withPdf.has(item.id);
+                rows.push(row);
             } catch (error) {
                 logger(`handleItemDisplayRequest: Skipped ${item.key}: ${error}`, 1);
             }

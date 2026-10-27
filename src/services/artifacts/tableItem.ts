@@ -44,6 +44,7 @@ import {
     isTableItem,
     loadTableItemFields,
     tableFilePath,
+    tableFilesEditable,
     tableStorageDirectory,
     TableItemError,
     TABLE_TAG,
@@ -134,7 +135,7 @@ function checkTableLibrary(libraryID: number): ResolvedTableLibrary {
     if (libraryID !== Zotero.Libraries.userLibraryID &&
         library.libraryType !== 'group')
         return { error: 'unsupported_library' };
-    if (!library.editable || library.filesEditable === false)
+    if (!tableFilesEditable(library))
         return { error: 'no_writable_library' };
     return { libraryID };
 }

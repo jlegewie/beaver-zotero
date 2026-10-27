@@ -1,4 +1,5 @@
 import { getHostWindow, getWindowRuntime, tryGetWindowRuntime } from '../runtime/windowRuntime';
+import { collapseTableTabContextPane, isTableTabSelected, openTableTabContextPane } from '../../src/ui/tableTabContextPane';
 import { DOMElements, SidebarLocation, UIState, CollapseState } from './types';
 import { applyReaderPaneVisibility, isStackedLayout } from '../utils/zoteroLayout';
 
@@ -263,6 +264,8 @@ class UIManager {
                 return;
             }
             const readerPane = win.ZoteroContextPane;
+            // On a Beaver table tab the context pane holds only Beaver's chat.
+            const onTableTab = isTableTabSelected(win);
 
             if (show) {
                 // @ts-ignore: collapsed is not typed
@@ -270,6 +273,7 @@ class UIManager {
                 if (this.collapseState.reader) {
                     readerPane.togglePane();
                 }
+                if (onTableTab) openTableTabContextPane(win);
                 applyReaderPaneVisibility(win, true);
                 // Refresh cached element ref because applyReaderPaneVisibility
                 // may have moved the mount under a different parent in stacked
@@ -282,9 +286,12 @@ class UIManager {
                 // @ts-ignore: collapsed is not typed
                 if (this.collapseState.reader && !readerPane.collapsed) {
                     readerPane.togglePane();
+                    if (onTableTab) collapseTableTabContextPane(win);
                     return;
                 }
                 this.handleReaderCleanup();
+                // Closing the chat must not uncover the last reader's item.
+                if (onTableTab) collapseTableTabContextPane(win);
             }
         } catch (e) {
             // Silently handle errors

@@ -1,4 +1,4 @@
-import { isTableItemError } from '../../artifacts/tableItemIdentity';
+import { isTableItemError, tableFilePath } from '../../artifacts/tableItemIdentity';
 import type { Cell, Column, Row, TableSpec } from '@beaver/agent-core/layouts/table';
 import { allocateRowId, validateTableSpec, type Evidence, type RowRef } from '@beaver/agent-core/layouts/table';
 import { zoteroLinkScope, zoteroLinksFor } from '../../artifacts/view/tableLinks';
@@ -6,6 +6,7 @@ import type { TableMutation } from '@beaver/agent-core/layouts/tableMutations';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
 import { getSearchableLibraryIds } from '../../agentDataProvider/utils';
 import { inspectTableShadow, TABLE_SHADOW_MAX_PAYLOAD_BYTES, TABLE_SHADOW_RETENTION } from '../../artifacts/recoveryShadow';
+import { TABLE_BOOKKEEPING_FILE } from '../../artifacts/tableRenderer';
 import { buildTableDocument } from '../../artifacts/tableDocument';
 import { isTableItem, loadTableItemFields, readTableItemSpec, TABLE_TAG, tableHistoryPath, tableSidecarDirectory, tableStorageDirectory, tableVersionPath } from '../../artifacts/tableItem';
 import { getTablesApi, TABLES_API_UNAVAILABLE } from '../../artifacts/tablesApi';
@@ -888,6 +889,33 @@ export async function rollBackWholeDirectory(
     await IOUtils.makeDirectory(sidecar, { createAncestors: true, ignoreExisting: true });
     await IOUtils.writeUTF8(targetPath, serialized);
 
+    // The other device's `table.json`, which is the table: a download replaces
+    // the whole directory, so the table itself goes back to the target too. It
+    // keeps the creation marker and the receipts of versions it already had.
+    const filePath = tableFilePath(item);
+    let fileSha256: string | undefined;
+    if (filePath) {
+        const file = JSON.parse(await IOUtils.readUTF8(filePath).catch(() => '{}')) as {
+            receipts?: Array<{ version?: number }>;
+            creation?: unknown;
+        };
+        const receipts = Array.isArray(file.receipts)
+            ? file.receipts.filter((receipt) => typeof receipt?.version === 'number' && receipt.version <= target)
+            : undefined;
+        const downloaded = {
+            spec,
+            ...(receipts ? { receipts } : {}),
+            ...(file.creation ? { creation: file.creation } : {}),
+        };
+        await IOUtils.writeUTF8(filePath, JSON.stringify(downloaded));
+        fileSha256 = await sha256Hex(JSON.stringify(downloaded));
+        // The other device rendered its snapshot, so it arrives complete.
+        await IOUtils.writeUTF8(
+            PathUtils.join(sidecar, TABLE_BOOKKEEPING_FILE),
+            JSON.stringify({ sha256, file_sha256: fileSha256 }),
+        );
+    }
+
     // The log the other device would have shipped: everything up to the target,
     // with the target's entry describing the bytes just written.
     const history = JSON.parse(await IOUtils.readUTF8(historyPath).catch(() => '{}')) as {
@@ -919,6 +947,8 @@ export async function rollBackWholeDirectory(
     await Zotero.File.putContentsAsync(
         htmlPath,
         buildTableDocument(spec, {
+            specSha256: sha256,
+            ...(fileSha256 ? { fileSha256 } : {}),
             linksFor: zoteroLinksFor,
             citationScopeFor: zoteroLinkScope,
         }).html

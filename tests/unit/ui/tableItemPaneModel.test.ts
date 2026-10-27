@@ -492,6 +492,15 @@ describe('a table another device\'s copy replaced', () => {
         expect(fields.conflictLine).not.toContain('can be restored');
     });
 
+    it('says why a kept version cannot be restored into a library Beaver cannot write', () => {
+        const fields = buildTableSectionFields(
+            input({ conflict: { ...conflict, writable: false } })
+        );
+
+        expect(fields.conflictLine).toContain('cannot write to this library to restore it');
+        expect(fields.conflictLine).not.toContain('can be restored');
+    });
+
     it('distinguishes two devices that both numbered their edit the same', () => {
         const fields = buildTableSectionFields(
             input({

@@ -20,6 +20,7 @@ import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
  *   /beaver/test/list-actions   enumerate pending approvals + applied/rejected actions
  *   /beaver/test/approve-action approve or reject a pending write approval
  *   /beaver/test/confirm-credits continue or skip a pending credit confirmation
+ *   /beaver/test/table-card     answer a pending table card (create, with edits, or decline)
  *   /beaver/test/undo-action    undo an applied action
  *   /beaver/test/chat-drop-connection  lose the chat socket mid-run, to exercise run reattach
  *   /beaver/test/run-snapshot   the open chat's runs and the transport's reattach events
@@ -31,6 +32,19 @@ import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
  */
 
 import { store } from '../../store';
+import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
+import {
+    addColumn,
+    addItems,
+    addLibrarySource,
+    draftOptions,
+    initialTableCardDraft,
+    removeItem,
+    removeSource,
+    tableCardDecline,
+    tableCardResponse,
+    updateColumn,
+} from '@beaver/agent-core/run-state/tableCardDraft';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 import {
     newThreadAtom,
@@ -55,6 +69,7 @@ import {
     resumeFromRunAtom,
     sendApprovalResponseAtom,
     sendCreditConfirmationResponseAtom,
+    sendTableCardResponseAtom,
     stoppingPreviousRunAtom,
 } from '../../atoms/agentRunAtoms';
 import {
@@ -190,6 +205,7 @@ function currentIds() {
         lastRunId: runs.length ? runs[runs.length - 1].id : null,
         pendingApprovals: Array.from(approvals.values()).map(serializeApproval),
         pendingQuestionIds: Array.from(questions.keys()),
+        pendingTableCards: Array.from(store.get(pendingTableCardsAtom).values()),
         pendingCreditConfirmations: Array.from(creditConfirmations.values()).map((c) => ({
             confirmationId: c.confirmationId,
             title: c.title,
@@ -201,7 +217,7 @@ function currentIds() {
     };
 }
 
-type SettleReason = 'done' | 'approval' | 'question' | 'credit-confirmation' | 'timeout';
+type SettleReason = 'done' | 'approval' | 'question' | 'credit-confirmation' | 'table-card' | 'timeout';
 
 /**
  * Poll until the run settles: it finished streaming (`done`), paused for a write
@@ -216,6 +232,7 @@ async function waitForRunSettle(timeoutMs: number, pollMs = 300): Promise<Settle
         if (store.get(pendingApprovalsAtom).size > 0) return 'approval';
         if (store.get(pendingQuestionsAtom).size > 0) return 'question';
         if (store.get(pendingCreditConfirmationsAtom).size > 0) return 'credit-confirmation';
+        if (store.get(pendingTableCardsAtom).size > 0) return 'table-card';
         if (!store.get(isWSChatPendingAtom)) return 'done';
         await sleep(pollMs);
     }
@@ -554,6 +571,63 @@ export async function handleTestConfirmCreditsHttpRequest(request: any) {
     }
 
     return { ok: true, approved, actedOn: [confirmationId], settle, ...currentIds() };
+}
+
+/**
+ * Answer a pending table card so a headless run can continue.
+ *
+ * Body: { cardId?, action: 'create' | 'decline' (default 'create'), instructions?,
+ *         edits?: { title?, description?, removeItemIds?, addItemIds?,
+ *                   addScopes?: TableCardLibraryScope[], removeSourceIndexes?: number[],
+ *                   columns?: TableCardColumn[] }, waitForDone?, timeoutMs? }
+ *
+ * The reply is built by the card's own draft functions, so it is the reply the
+ * card would send for the same edits. Live counts are not taken here; the
+ * backend resolves the returned sources again either way.
+ */
+export async function handleTestTableCardHttpRequest(request: any) {
+    const pending = store.get(pendingTableCardsAtom);
+    if (pending.size === 0) return { ok: false, error: 'No pending table card', ...currentIds() };
+    const cardId: string = request?.cardId ?? Array.from(pending.keys())[0];
+    const card = pending.get(cardId);
+    if (!card) return { ok: false, error: `Unknown cardId: ${cardId}`, ...currentIds() };
+
+    let draft = initialTableCardDraft(card);
+    const edits = request?.edits ?? {};
+    if (typeof edits.title === 'string') draft = { ...draft, title: edits.title };
+    if (typeof edits.description === 'string') draft = { ...draft, description: edits.description };
+    for (const index of [...(edits.removeSourceIndexes ?? [])].sort((a: number, b: number) => b - a)) {
+        const source = draft.sources[index];
+        if (source) draft = removeSource(draft, source.key);
+    }
+    for (const id of edits.removeItemIds ?? []) draft = removeItem(draft, id);
+    if (Array.isArray(edits.addItemIds) && edits.addItemIds.length) draft = addItems(draft, edits.addItemIds);
+    for (const scope of edits.addScopes ?? []) draft = addLibrarySource(draft, scope).draft;
+    if (Array.isArray(edits.columns)) {
+        draft = { ...draft, columns: [] };
+        for (const column of edits.columns) {
+            const added = addColumn(draft);
+            draft = updateColumn(added.draft, added.key, {
+                header: column.header ?? '',
+                type: column.type ?? 'text',
+                description: column.description ?? '',
+                options: draftOptions(column.options),
+                unit: column.unit ?? null,
+            });
+        }
+    }
+    if (typeof request?.instructions === 'string') draft = { ...draft, instructions: request.instructions };
+
+    const decline = request?.action === 'decline';
+    const response = decline ? tableCardDecline(draft, card) : tableCardResponse(draft, card, 'create');
+    store.set(sendTableCardResponseAtom, response);
+
+    let settle: SettleReason | null = null;
+    if (request?.waitForDone === true) {
+        await sleep(400);
+        settle = await waitForRunSettle(typeof request?.timeoutMs === 'number' ? request.timeoutMs : 180000);
+    }
+    return { ok: true, cardId, response, settle, ...currentIds() };
 }
 
 /**

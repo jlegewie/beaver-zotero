@@ -50,15 +50,9 @@ function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
 }
 
 /** Table status messages shown with (or instead of) a table tool's result. */
-function tableMessages(result: ToolReturnPart, view: unknown): string[] {
+export function tableMessages(result: ToolReturnPart): string[] {
     if (!isTableToolName(result.tool_name)) return [];
-    const body = { ...tableResultBody(result.content) };
-    if (isToolResultView(view) && view.view_type === 'table') {
-        // The card retains repair status even after its body is dehydrated.
-        delete body.repair_warning;
-        delete body.saved;
-    }
-    return tableResultMessages(body);
+    return tableResultMessages(tableResultBody(result.content));
 }
 
 /**
@@ -70,7 +64,7 @@ function tableMessages(result: ToolReturnPart, view: unknown): string[] {
 export function hasRenderableResult(result: ToolReturnPart): boolean {
     const view = result.metadata?.view;
     if (isToolResultView(view) && renderFromView(view) !== null) return true;
-    return tableMessages(result, view).length > 0;
+    return tableMessages(result).length > 0;
 }
 
 /**
@@ -86,7 +80,7 @@ export function hasRenderableResult(result: ToolReturnPart): boolean {
  */
 export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
     const view = result.metadata?.view;
-    const notices = tableMessages(result, view).map((message, index) => (
+    const notices = tableMessages(result).map((message, index) => (
         <div key={index} role="status" className="px-3 py-2 text-sm font-color-secondary">{message}</div>
     ));
     const fromView = isToolResultView(view) ? renderFromView(view) : null;

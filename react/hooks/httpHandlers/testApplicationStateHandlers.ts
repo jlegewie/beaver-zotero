@@ -37,6 +37,7 @@ import {
 } from '../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { getCurrentReader } from '../../utils/readerUtils';
+import { selectedTableTabItemID } from '../../../src/ui/tableTabContextPane';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import {
     isBeaverUIVisibleAtom,
@@ -92,6 +93,13 @@ async function holdsFor(condition: () => boolean, durationMs: number): Promise<b
  */
 function expectedReaderAttachment(): { libraryID: number; key: string } | null {
     if (!store.get(isBeaverUIVisibleAtom)) return null;
+    // A selected Beaver tab makes its table the context, as a reader's file is.
+    const tableItemID = selectedTableTabItemID(getContextWindow());
+    if (tableItemID) {
+        const table = Zotero.Items.getLibraryAndKeyFromID(tableItemID);
+        if (!table || !store.get(searchableLibraryIdsAtom).includes(table.libraryID)) return null;
+        return { libraryID: table.libraryID, key: table.key };
+    }
     const reader = getCurrentReader();
     if (!reader) return null;
     if (!isReaderLibrarySearchable(store.get(searchableLibraryIdsAtom), reader)) return null;

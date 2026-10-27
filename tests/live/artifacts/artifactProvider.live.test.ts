@@ -84,11 +84,8 @@ describe("portable artifact provider in Zotero", () => {
                         cells: {
                             answer: {
                                 outcome: "not_reported",
-                                provenance: "extracted",
-                                details: {
-                                    kind: "text",
-                                    text: "The material supplies no answer.",
-                                },
+                                provenance: "document",
+                                reasoning: "The material supplies no answer.",
                             },
                         },
                     },
@@ -109,7 +106,7 @@ describe("portable artifact provider in Zotero", () => {
             saved: true,
             summary: {
                 columns_detail: {
-                    answer: { filled: 0, completed: 1, not_reported: 1 },
+                    answer: { answered: 0, not_reported: 1, unattempted: 0 },
                 },
             },
         });
@@ -126,7 +123,7 @@ describe("portable artifact provider in Zotero", () => {
                         {
                             row: "paper",
                             column: "answer",
-                            cell: { provenance: "user" },
+                            cell: { outcome: "cleared", provenance: "user" },
                         },
                     ],
                 },
@@ -141,6 +138,7 @@ describe("portable artifact provider in Zotero", () => {
             operation: written.operation,
         });
         expect(replay.spec.rows[0].cells.answer).toEqual({
+            outcome: "cleared",
             provenance: "user",
         });
         const conflict = await call("write", {

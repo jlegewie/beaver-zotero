@@ -39,6 +39,15 @@ export type TextRenderer = (text: string) => React.ReactNode;
 
 export const renderPlainText: TextRenderer = (text) => text;
 
+/**
+ * Whether a table is fitted to its width when the surface asks for it. Columns
+ * that do not fit are read in the expanded row, so a table whose rows do not
+ * expand scrolls sideways instead.
+ */
+export function fitsToWidth(table: { capabilities?: { expandable_rows?: boolean } | null }, requested: boolean): boolean {
+    return requested && (table.capabilities?.expandable_rows ?? true);
+}
+
 /** Width the rail column takes, and the floor a flexible column may shrink to. */
 const RAIL_WIDTH = "3.2rem";
 const FLEX_COLUMN_MIN = "14rem";
@@ -63,17 +72,29 @@ export function defaultColumnWidth(
             return "16rem";
         case "number":
         case "date":
-            return "6.5rem";
+            return headerWidth(column, 6.5);
         case "boolean":
             // Short header + sort control: 4rem collapsed the label to nothing.
-            return "5.5rem";
+            return headerWidth(column, 5.5);
         case "select":
-            return "9.5rem";
+            return headerWidth(column, 9.5);
         case "link":
             return "10rem";
         case "text":
             return undefined;
     }
+}
+
+/** Widest a short column grows to for its header; a longer header wraps. */
+const SHORT_COLUMN_MAX_REM = 12;
+
+/**
+ * A short column's width: its type's base, widened to fit the header on one
+ * line beside the sort control ("Uses US data" read as "Us…" at 5.5rem).
+ */
+function headerWidth(column: Column, baseRem: number): string {
+    const needed = (column.header ?? "").length * 0.55 + 2.6;
+    return `${Math.min(SHORT_COLUMN_MAX_REM, Math.max(baseRem, Math.ceil(needed * 2) / 2))}rem`;
 }
 
 /**
@@ -97,4 +118,56 @@ export function tableMinWidth(
         );
     }
     return `calc(${parts.join(" + ")})`;
+}
+
+/** A `defaultColumnWidth` (or {@link FLEX_COLUMN_MIN}) value in pixels. */
+function widthInPx(width: string, remPx: number): number {
+    const value = parseFloat(width);
+    if (!Number.isFinite(value)) return 0;
+    return width.endsWith("rem") ? value * remPx : value;
+}
+
+/**
+ * The columns that fit a surface which never scrolls sideways, in their order,
+ * and the ones that do not.
+ *
+ * Each column is counted at the width {@link tableMinWidth} gives it — its
+ * declared or default width, or the flexible minimum — and columns are taken
+ * in order until the next one would overflow `availablePx`. The anchor always
+ * stays: it carries the row's identity. A column that does not fit is not
+ * dropped; the grid lists it in the expanded row, as it does on a narrow
+ * surface.
+ */
+export function fitColumns(
+    columns: Column[],
+    anchorId: string | undefined,
+    availablePx: number,
+    remPx: number,
+): { fit: Column[]; overflow: Column[] } {
+    let used = widthInPx(RAIL_WIDTH, remPx);
+    const anchor = columns.find((c) => c.id === anchorId);
+    if (anchor)
+        used += widthInPx(
+            defaultColumnWidth(anchor, true) ?? FLEX_COLUMN_MIN,
+            remPx,
+        );
+    const fit: Column[] = [];
+    const overflow: Column[] = [];
+    for (const column of columns) {
+        if (column.id === anchorId) {
+            fit.push(column);
+            continue;
+        }
+        const width = widthInPx(
+            defaultColumnWidth(column, false) ?? FLEX_COLUMN_MIN,
+            remPx,
+        );
+        if (overflow.length === 0 && used + width <= availablePx) {
+            used += width;
+            fit.push(column);
+        } else {
+            overflow.push(column);
+        }
+    }
+    return { fit, overflow };
 }

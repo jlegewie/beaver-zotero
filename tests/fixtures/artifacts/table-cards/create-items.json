@@ -1,0 +1,407 @@
+{
+  "description": "Selected items, approved as proposed with Create; cost is null.",
+  "request": {
+    "event": "table_card_request",
+    "card_id": "00000000-0000-4000-8000-0000000000c1",
+    "run_id": "00000000-0000-4000-8000-0000000000a1",
+    "thread_id": "00000000-0000-4000-8000-0000000000b1",
+    "toolcall_id": "test-tool-call-id",
+    "scope": "create",
+    "title": "Comparison",
+    "description": "Sample sizes across the papers.",
+    "destination": {
+      "library_ref": "u",
+      "library_name": "My Library",
+      "collection_key": null,
+      "collection_name": null,
+      "explicit": false
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "ids": [
+          "u-PAPER001",
+          "u-PAPER002"
+        ],
+        "scope": null,
+        "resolved": {
+          "count": 2,
+          "total": 2,
+          "truncated": false,
+          "without_pdf": 1,
+          "sample": [
+            {
+              "id": "u-PAPER001",
+              "title": "A study called paper001 of things"
+            },
+            {
+              "id": "u-PAPER002",
+              "title": "A study called paper002 of things"
+            }
+          ],
+          "error": null
+        }
+      }
+    ],
+    "merge": {
+      "rows": 2,
+      "duplicates": 0
+    },
+    "row_cap": 1000,
+    "total": 2,
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants took part?",
+        "options": null,
+        "unit": null
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT",
+            "description": null
+          },
+          {
+            "label": "Observational",
+            "description": null
+          },
+          {
+            "label": "Other",
+            "description": null
+          }
+        ],
+        "unit": null
+      }
+    ],
+    "cost": null,
+    "user_instructions_prefill": "",
+    "timeout_seconds": 600.0
+  },
+  "reply": {
+    "type": "table_card_response",
+    "card_id": "00000000-0000-4000-8000-0000000000c1",
+    "approved": true,
+    "choice": "create",
+    "title": "Comparison",
+    "description": "Sample sizes across the papers.",
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "ids": [
+          "u-PAPER001",
+          "u-PAPER002"
+        ]
+      }
+    ],
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants took part?"
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT"
+          },
+          {
+            "label": "Observational"
+          },
+          {
+            "label": "Other"
+          }
+        ]
+      }
+    ]
+  },
+  "record": {
+    "reference": {
+      "kind": "table",
+      "key": "u-TABLE222",
+      "title": "Comparison"
+    },
+    "change": "Created table",
+    "description": "Sample sizes across the papers.",
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "rows": 2
+      }
+    ],
+    "columns": [
+      {
+        "id": "sample_size",
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants took part?"
+      },
+      {
+        "id": "design",
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          "RCT",
+          "Observational",
+          "Other"
+        ]
+      }
+    ],
+    "summary": {
+      "rows": 2,
+      "columns": 5,
+      "sources": 1,
+      "in_scope_rows": 2,
+      "failed_rows": 0,
+      "user_edits": 0,
+      "columns_detail": {
+        "_reference": {
+          "type": "reference",
+          "answered": 2,
+          "not_reported": 0,
+          "failed": 0,
+          "cleared": 0,
+          "unattempted": 0,
+          "stale": 0,
+          "unsure": 0,
+          "metadata_only": 0,
+          "system": true
+        },
+        "_year": {
+          "type": "date",
+          "answered": 2,
+          "not_reported": 0,
+          "failed": 0,
+          "cleared": 0,
+          "unattempted": 0,
+          "stale": 0,
+          "unsure": 0,
+          "metadata_only": 0,
+          "system": true
+        },
+        "_identifier": {
+          "type": "link",
+          "answered": 0,
+          "not_reported": 0,
+          "failed": 0,
+          "cleared": 0,
+          "unattempted": 0,
+          "stale": 0,
+          "unsure": 0,
+          "metadata_only": 0,
+          "system": true
+        },
+        "sample_size": {
+          "type": "number",
+          "answered": 0,
+          "not_reported": 0,
+          "failed": 0,
+          "cleared": 0,
+          "unattempted": 2,
+          "stale": 0,
+          "unsure": 0,
+          "metadata_only": 0
+        },
+        "design": {
+          "type": "select",
+          "answered": 0,
+          "not_reported": 0,
+          "failed": 0,
+          "cleared": 0,
+          "unattempted": 2,
+          "stale": 0,
+          "unsure": 0,
+          "metadata_only": 0,
+          "distribution": {}
+        }
+      }
+    },
+    "changes": {
+      "rows_added": 2,
+      "rows_removed": 0,
+      "columns_added": 5,
+      "columns_removed": 0,
+      "columns_updated": 0,
+      "cells_changed": 4
+    },
+    "operation_id": "op-1",
+    "version": 1,
+    "saved": true,
+    "stages": {
+      "rows": 2,
+      "sources": 1,
+      "columns": 2,
+      "rows_without_document": 0,
+      "remaining_rows": 2,
+      "remaining_cells": 4,
+      "answered": 0,
+      "metadata_only": 0,
+      "failed": 0,
+      "stale": 0
+    },
+    "run": "none",
+    "next_step": "Created without a run. 2 of 2 rows have unanswered questions (4 cells). Filling cells is not available in this conversation yet.",
+    "as_of": "2026-10-24T12:00:00+00:00"
+  },
+  "created_spec": {
+    "id": "t-fixture",
+    "spec_version": 1,
+    "title": "Comparison",
+    "description": "Sample sizes across the papers.",
+    "columns": [
+      {
+        "id": "_reference",
+        "header": "Reference",
+        "type": "reference",
+        "system": true
+      },
+      {
+        "id": "_year",
+        "header": "Year",
+        "type": "date",
+        "system": true,
+        "priority": "secondary"
+      },
+      {
+        "id": "_identifier",
+        "header": "Identifier",
+        "type": "link",
+        "system": true,
+        "priority": "secondary"
+      },
+      {
+        "id": "sample_size",
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants took part?"
+      },
+      {
+        "id": "design",
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT"
+          },
+          {
+            "label": "Observational"
+          },
+          {
+            "label": "Other"
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "id": "r0000000001",
+        "ref": {
+          "library_ref": "u",
+          "zotero_key": "PAPER001",
+          "library_id": 1,
+          "kind": "item",
+          "attachment": {
+            "library_ref": "u",
+            "zotero_key": "ATTACH01",
+            "library_id": 1
+          }
+        },
+        "cells": {
+          "_reference": {
+            "outcome": "answered",
+            "value": {
+              "kind": "reference",
+              "display_name": "A study called paper001 of things",
+              "title": "A study called paper001 of things",
+              "item_type": "journalArticle"
+            },
+            "provenance": "system"
+          },
+          "_year": {
+            "outcome": "answered",
+            "value": {
+              "kind": "date",
+              "value": "2021"
+            },
+            "provenance": "system"
+          }
+        },
+        "in_library": true,
+        "origin": [
+          {
+            "source": "s1",
+            "date": "2026-10-24"
+          }
+        ]
+      },
+      {
+        "id": "r0000000002",
+        "ref": {
+          "library_ref": "u",
+          "zotero_key": "PAPER002",
+          "library_id": 1,
+          "kind": "item",
+          "attachment": {
+            "library_ref": "u",
+            "zotero_key": "ATTACH02",
+            "library_id": 1
+          }
+        },
+        "cells": {
+          "_reference": {
+            "outcome": "answered",
+            "value": {
+              "kind": "reference",
+              "display_name": "A study called paper002 of things",
+              "title": "A study called paper002 of things",
+              "item_type": "journalArticle"
+            },
+            "provenance": "system"
+          },
+          "_year": {
+            "outcome": "answered",
+            "value": {
+              "kind": "date",
+              "value": "2021"
+            },
+            "provenance": "system"
+          }
+        },
+        "in_library": true,
+        "origin": [
+          {
+            "source": "s1",
+            "date": "2026-10-24"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "ids": [
+          "u-PAPER001",
+          "u-PAPER002"
+        ]
+      }
+    ],
+    "anchor_column_id": "_reference"
+  },
+  "created_library_ref": "u",
+  "created_collection_key": null
+}

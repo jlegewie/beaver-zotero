@@ -102,6 +102,10 @@ export const MAX_EVIDENCE_BYTES = 6000;
 export const MAX_REASONING_BYTES = 1000;
 /** Compact JSON of the whole spec. */
 export const MAX_SPEC_BYTES = 10_000_000;
+/** Characters (code points) of one select option's definition. */
+export const MAX_SELECT_DEFINITION_CHARS = 300;
+/** Characters (code points) of all option definitions of one column. */
+export const MAX_SELECT_DEFINITIONS_CHARS = 3000;
 
 /**
  * Notion-style palette for `select` categories, in the order a writer hands
@@ -123,12 +127,23 @@ export type SelectColor = (typeof SELECT_COLORS)[number];
 export interface SelectOption {
     label: string;
     color?: SelectColor;
+    /**
+     * What the category means, so it is applied the same way to every row.
+     * Part of the column's question ({@link questionHash}): changing it marks
+     * the column's cells stale.
+     */
+    description?: string;
 }
 
 /**
  * What a column *means* in a workflow. Persisted inside stored tables, so a
- * value may be added but never renamed. A reader that does not know a role
- * ignores it. `decision` drives the scope rule ({@link rowInScope}).
+ * value may be added but never renamed. `criterion` columns are filled over
+ * every row; `decision` drives the scope rule ({@link rowInScope}).
+ *
+ * A reader that does not know a role ignores the column: it renders as an
+ * ordinary read-only column, is never filled, never counts as unattempted and
+ * is not part of the scope rule. A newer client's role therefore cannot turn
+ * into an extraction question in an older one.
  */
 export type ColumnRole = string;
 
@@ -191,7 +206,7 @@ export interface ColumnProgress {
     total: number;
 }
 
-export type ExternalReferenceSource = "semantic_scholar" | "openalex";
+export type ExternalReferenceSource = "openalex";
 
 /**
  * A Zotero object as a stored table names it. `library_ref` (`u` /
@@ -720,6 +735,32 @@ export function normalizeSelectLabel(label: string): string {
 }
 
 /**
+ * The declared option a select cell's label names (exact match: writes store
+ * the option's own spelling), for its colour and definition in one lookup.
+ */
+export function selectOption(
+    column: Pick<Column, "options">,
+    label: string,
+): SelectOption | undefined {
+    return column.options?.find((option) => option.label === label);
+}
+
+/**
+ * A select column's defined categories as plain text: "Categories", then
+ * `Label — definition` per defined option. Undefined when none is defined.
+ */
+export function categoriesText(
+    column: Pick<Column, "options">,
+): string | undefined {
+    const defined = (column.options ?? []).filter((option) => option.description);
+    if (!defined.length) return undefined;
+    return [
+        "Categories",
+        ...defined.map((option) => `${option.label} — ${option.description}`),
+    ].join("\n");
+}
+
+/**
  * Alignment of a column's values and its header.
  *
  * Boolean centres (a single glyph); number and date end; everything else
@@ -1077,24 +1118,59 @@ export function jsonBytes(value: unknown): number {
     return utf8Length(JSON.stringify(value) ?? "");
 }
 
+/** Length in code points, the unit the backend's character caps count in. */
+export function codePointLength(text: string): number {
+    let length = 0;
+    for (const _ of text) length += 1;
+    return length;
+}
+
+/** Orders strings by code point, as Python compares them. */
+function compareCodePoints(a: string, b: string): number {
+    const left = a[Symbol.iterator]();
+    const right = b[Symbol.iterator]();
+    for (;;) {
+        const x = left.next();
+        const y = right.next();
+        if (x.done || y.done) return x.done ? (y.done ? 0 : -1) : 1;
+        const diff = x.value.codePointAt(0)! - y.value.codePointAt(0)!;
+        if (diff !== 0) return diff;
+    }
+}
+
 /**
- * FNV-1a 64-bit hex digest of a column's question (`type` and `description`).
+ * FNV-1a 64-bit hex digest of a column's question.
+ *
+ * The question is `type` and `description`, then, only when an option has a
+ * definition, the definitions as compact JSON pairs `[key, definition]` sorted
+ * by {@link normalizeSelectLabel}. Recolouring, reordering or re-spelling an
+ * option, or adding one without a definition, leaves the digest unchanged.
  *
  * A filler sends it with each answer and the engine skips the write when the
  * column's question changed since. The backend computes the same digest; the
  * arithmetic runs on four 16-bit limbs because the core targets no BigInt.
  */
 export function questionHash(
-    column: Pick<Column, "type" | "description">,
+    column: Pick<Column, "type" | "description" | "options">,
 ): string {
+    let text = `${column.type}\n${column.description ?? ""}`;
+    const definitions = (column.options ?? [])
+        .filter((option) => option.description)
+        .map((option) => [
+            normalizeSelectLabel(option.label),
+            option.description as string,
+        ])
+        .sort(
+            (a, b) =>
+                compareCodePoints(a[0], b[0]) || compareCodePoints(a[1], b[1]),
+        );
+    if (definitions.length) text += `\n${JSON.stringify(definitions)}`;
     // Offset basis 0xcbf29ce484222325, least significant limb first.
     let h0 = 0x2325;
     let h1 = 0x8422;
     let h2 = 0x9ce4;
     let h3 = 0xcbf2;
-    for (const byte of utf8Bytes(
-        `${column.type}\n${column.description ?? ""}`,
-    )) {
+    for (const byte of utf8Bytes(text)) {
         h0 ^= byte;
         // Multiply by the prime 0x100000001b3: 0x1b3 at limb 0, 0x100 at limb 2.
         const t0 = h0 * 0x1b3;
@@ -1123,22 +1199,24 @@ export function allocateRowId(taken: ReadonlySet<string> = new Set()): string {
 // Scope
 // ---------------------------------------------------------------------------
 
-/** A question column the scope rule applies to. */
+/** A question column without a role: the ones the scope rule applies to. */
 export function isExtractionColumn(column: Column): boolean {
     return (
         !column.system &&
         MODEL_COLUMN_TYPES.includes(column.type) &&
-        column.role !== "criterion" &&
-        column.role !== "decision"
+        !column.role
     );
 }
 
-/** A column a filler answers: every question column except the decision. */
+/**
+ * A column a filler answers: an extraction column or a criterion. Roles are
+ * listed, not excluded, so a role this client does not know is never filled.
+ */
 export function isFillableColumn(column: Column): boolean {
     return (
         !column.system &&
         MODEL_COLUMN_TYPES.includes(column.type) &&
-        column.role !== "decision"
+        (!column.role || column.role === "criterion")
     );
 }
 
@@ -1507,4 +1585,34 @@ export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
         .join(",");
     const lines = fields.map((row) => pick(row).map(csvEscape).join(","));
     return [header, ...lines].join("\r\n");
+}
+
+/**
+ * The table as plain text for the clipboard: tab-separated, one header line of
+ * column headers, then one line per row in the given order. It carries what a
+ * reader sees in the grid — the value, or "Not reported" — and none of the
+ * evidence or state companions {@link toCsv} adds. Tabs and line breaks inside
+ * a value become spaces, so every row stays one line and pastes into a
+ * spreadsheet or a document table cell for cell.
+ */
+export function toPlainText(
+    spec: TableSpec,
+    rows: Row[] = spec.rows,
+    columns: Column[] = spec.columns,
+): string {
+    const flatten = (text: string) => text.replace(/[\t\r\n]+/g, " ").trim();
+    const header = columns.map((c) => flatten(c.header)).join("\t");
+    const lines = rows.map((row) =>
+        columns
+            .map((c) => {
+                const cell = row.cells[c.id];
+                return flatten(
+                    cell?.outcome === "not_reported"
+                        ? "Not reported"
+                        : cellValueText(cell?.value),
+                );
+            })
+            .join("\t"),
+    );
+    return [header, ...lines].join("\n");
 }

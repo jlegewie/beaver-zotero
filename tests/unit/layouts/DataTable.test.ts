@@ -199,6 +199,34 @@ describe("DataTable", () => {
         ).toBe("What method did the study use?");
     });
 
+    it("shows a select column's category definitions on its header and pills", () => {
+        const defined: TableSpec = {
+            ...spec,
+            columns: spec.columns.map((column) =>
+                column.id === "type"
+                    ? {
+                          ...column,
+                          description: "What kind of work is it?",
+                          options: [
+                              { label: "Article", color: "blue", description: "A peer-reviewed journal article." },
+                              { label: "Book" },
+                          ],
+                      }
+                    : column,
+            ),
+        };
+        mount(React.createElement(DataTable, { table: defined }));
+        expect(headerFor("Type").getAttribute("title")).toBe(
+            "What kind of work is it?\n\nCategories\nArticle — A peer-reviewed journal article.",
+        );
+        const rows = container!.querySelectorAll("tr.bt-row");
+        expect(rows[0].querySelector(".bt-pill-blue")?.getAttribute("title")).toContain(
+            "Article: A peer-reviewed journal article.",
+        );
+        // Without definitions the header says only the question.
+        expect(headerFor("Methods").getAttribute("title")).toBe("What method did the study use?");
+    });
+
     it("distinguishes filled, empty, not-reported and failed cells", () => {
         mount(React.createElement(DataTable, { table: spec }));
         const rows = container!.querySelectorAll("tr.bt-row");
@@ -950,7 +978,8 @@ describe("DataTable — density, columns and expansion", () => {
             .querySelector("table.bt-table")!
             .getAttribute("style")!;
         // Every column contributes, including a floor for the flexible one.
-        // rail 3.2 + anchor 20 + number 6.5 + select 9.5 + boolean 5.5 + text 14
-        expect(style).toContain("58.7rem");
+        // rail 3.2 + anchor 20 + number 8 ("Citations") + select 9.5
+        // + boolean 9 ("Open access") + text 14: short columns fit their header.
+        expect(style).toContain("63.7rem");
     });
 });
