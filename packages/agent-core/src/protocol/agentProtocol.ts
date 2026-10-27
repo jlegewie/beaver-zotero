@@ -1666,6 +1666,12 @@ export interface WSListItemsRequest extends WSBaseEvent {
     tag?: string | null;
     item_category: ZoteroItemCategory;
     include_children?: boolean;
+    /**
+     * With `include_children`: sort and page top-level items only and nest each
+     * item's children on its row (`attachments` / `notes`). Sent only to
+     * clients that declare `list_items_nested_children`.
+     */
+    nest_children?: boolean;
     /** Add `abstract` to every regular row. */
     include_abstract?: boolean;
     recursive: boolean;
@@ -1695,6 +1701,13 @@ export interface RegularListResultItem {
      * look it up another way.
      */
     abstract?: string;
+    /**
+     * Set only for a `nest_children` request: the item's attachments, primary
+     * first, then by title. Left out when its children could not be read.
+     */
+    attachments?: AttachmentRowResult[];
+    /** Set with `attachments`: the item's child notes, by title. */
+    notes?: NoteResultItem[];
 }
 
 /** Response to list_items request */
@@ -2940,6 +2953,13 @@ export const CLIENT_FEATURES = {
     /** Scoped collection resolution, stable mutation targets, and portable result readers. */
     COLLECTION_IDS: 'collection_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
+    /**
+     * `list_items` honors `nest_children`: an `include_children` listing pages
+     * top-level items only and nests their children on each row. A client
+     * without it returns children as rows of their own, sorted and paged with
+     * their parents.
+     */
+    LIST_ITEMS_NESTED_CHILDREN: 'list_items_nested_children',
     /**
      * `list_items` honors `special_collection`, listing a built-in view
      * (Unfiled Items, My Publications, Retracted Items) instead of a
