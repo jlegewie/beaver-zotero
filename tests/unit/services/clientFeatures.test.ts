@@ -54,9 +54,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // event a client only answers if it has the handler: a build that predates it
 // drops the unknown event silently, so the backend refuses the op up front
 // rather than letting the caller wait out the request timeout.
-// list_items_special_collections, list_collections_recursive,
-// list_tags_name_query and list_tags_types are declaration-only for the same
-// reason as list_items_include_children: they
+// list_items_nested_children, list_items_special_collections,
+// list_collections_recursive, list_tags_name_query and list_tags_types are
+// declaration-only for the same reason as list_items_include_children: they
 // gate request fields a client only honors if its handler implements them, and
 // a build that predates them drops the field and answers a narrower question
 // without saying so.
@@ -116,6 +116,7 @@ const DECLARATION_ONLY_FEATURES = [
     'portable_ids',
     'collection_ids',
     'list_items_include_children',
+    'list_items_nested_children',
     'list_items_special_collections',
     'create_note_tags_collections',
     'edit_note_batch',
