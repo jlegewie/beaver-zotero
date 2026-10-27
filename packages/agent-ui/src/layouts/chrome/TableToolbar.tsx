@@ -4,7 +4,7 @@ import {
     isColumnFilterable,
     isColumnSortable,
     selectLabelsInColumn,
-    selectOptionDefinition,
+    selectOption,
     type Column,
     type Filter,
     type TableSpec,
@@ -265,7 +265,7 @@ function buildFilterMenu(
                         label,
                         active,
                         () => state.toggleSelectFilter(column.id, label),
-                        selectOptionDefinition(column, label),
+                        selectOption(column, label)?.description || undefined,
                     ),
                 );
             }

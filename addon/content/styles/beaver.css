@@ -5271,7 +5271,8 @@
 }
 
 /* The options editor: one row per category, its definition indented below. */
-[id^="beaver-pane-"] .table-card-option-rows {
+[id^="beaver-pane-"] .table-card-option-rows,
+[id^="beaver-pane-"] .table-card-option-row {
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
@@ -5279,10 +5280,7 @@
 }
 
 [id^="beaver-pane-"] .table-card-option-row {
-    display: flex;
-    flex-direction: column;
     gap: 0.2rem;
-    min-width: 0;
 }
 
 /* Two classes: it must win over `.table-card-field`'s full width and zero margin. */

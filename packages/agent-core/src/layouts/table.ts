@@ -734,15 +734,15 @@ export function normalizeSelectLabel(label: string): string {
     return key || collapsed || lowered;
 }
 
-/** The definition of the option `label` names, if it has one. */
-export function selectOptionDefinition(
+/**
+ * The declared option a select cell's label names (exact match: writes store
+ * the option's own spelling), for its colour and definition in one lookup.
+ */
+export function selectOption(
     column: Pick<Column, "options">,
     label: string,
-): string | undefined {
-    return (
-        column.options?.find((option) => option.label === label)?.description ||
-        undefined
-    );
+): SelectOption | undefined {
+    return column.options?.find((option) => option.label === label);
 }
 
 /**

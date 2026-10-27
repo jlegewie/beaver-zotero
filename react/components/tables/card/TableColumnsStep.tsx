@@ -44,8 +44,8 @@ interface OptionFocus {
  * what counts as the category. Entry stays fast: Enter in a label adds a row
  * below it, Backspace in an empty label removes the row, and pasting several
  * lines into a label adds a row per line. A column without options still shows
- * one empty row; its key is the one its first option gets, so typing into it
- * keeps the focus. The forwarded ref is the last row's label.
+ * one empty row; typing into it makes it the first option under the same key,
+ * so the focus stays. The forwarded ref is the last row's label.
  */
 const OptionsEditor = React.forwardRef<HTMLInputElement, {
     options: DraftOption[];
@@ -53,7 +53,11 @@ const OptionsEditor = React.forwardRef<HTMLInputElement, {
     disabled: boolean;
     onChange: (options: DraftOption[]) => void;
 }>(function OptionsEditor({ options, columnIndex, disabled, onChange }, ref) {
-    const rows = options.length ? options : [{ key: newOptionKey([]), label: '', description: '' }];
+    // The empty row's key, replaced once typing has made it an option.
+    const placeholder = useRef<string | null>(null);
+    if (!placeholder.current || options.some((option) => option.key === placeholder.current))
+        placeholder.current = newOptionKey();
+    const rows = options.length ? options : [{ key: placeholder.current, label: '', description: '' }];
     const labels = useRef(new Map<string, HTMLInputElement>());
     const definitions = useRef(new Map<string, HTMLTextAreaElement>());
     // Definition fields opened (or cleared) in this editor session; a defined
@@ -86,8 +90,6 @@ const OptionsEditor = React.forwardRef<HTMLInputElement, {
         const index = rows.findIndex((row) => row.key === key);
         const remaining = rows.filter((row) => row.key !== key);
         const neighbour = remaining[Math.max(0, index - 1)];
-        // A later row may be given this key again; it must not open with its field.
-        setDefiningKey(key, false);
         change(remaining, focusNeighbour && neighbour ? { key: neighbour.key, field: 'label' } : undefined);
     };
     const addAfter = (index: number) => {

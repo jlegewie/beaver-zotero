@@ -494,12 +494,16 @@ export function draftOptions(options: readonly (TableCardOption | string)[] | nu
     );
 }
 
-/** A key no option of the column uses yet. */
-export function newOptionKey(options: readonly DraftOption[]): string {
-    const taken = new Set(options.map((option) => option.key));
-    let index = options.length;
-    while (taken.has(`o${index}`)) index += 1;
-    return `o${index}`;
+let optionKeys = 0;
+
+/**
+ * A key for a row added on the card. Never reused, so state a view keeps per
+ * row cannot carry over to a later one; the `n` prefix keeps it apart from the
+ * `o<index>` keys of {@link draftOptions}.
+ */
+export function newOptionKey(): string {
+    optionKeys += 1;
+    return `n${optionKeys}`;
 }
 
 /** `options` with new rows for `labels` inserted at `index`, and the new rows' keys. */
@@ -508,8 +512,7 @@ export function insertOptions(
     index: number,
     labels: readonly string[],
 ): { options: DraftOption[]; keys: string[] } {
-    const added: DraftOption[] = [];
-    for (const label of labels) added.push({ key: newOptionKey([...options, ...added]), label, description: '' });
+    const added = labels.map((label): DraftOption => ({ key: newOptionKey(), label, description: '' }));
     const next = [...options];
     next.splice(Math.max(0, Math.min(index, next.length)), 0, ...added);
     return { options: next, keys: added.map((option) => option.key) };

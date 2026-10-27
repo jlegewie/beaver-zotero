@@ -5,13 +5,12 @@ import {
     annotationTitle,
     annotationTypeLabel,
     columnWrap,
-    selectOptionDefinition,
+    selectOption,
     type Cell,
     type CellValue,
     type Column,
     type Details,
     type Row,
-    type SelectColor,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { itemTypeToIconName } from "@beaver/agent-core/types/citations";
@@ -311,10 +310,6 @@ export function CellValueView({
     }
 }
 
-function selectColor(label: string, column: Column): SelectColor {
-    return column.options?.find((o) => o.label === label)?.color ?? "gray";
-}
-
 function SelectPill({
     label,
     column,
@@ -324,9 +319,10 @@ function SelectPill({
     column: Column;
     onClick?: (label: string) => void;
 }): React.ReactElement {
-    const className = `bt-pill bt-pill-${selectColor(label, column)}`;
+    const option = selectOption(column, label);
+    const className = `bt-pill bt-pill-${option?.color ?? "gray"}`;
     // A defined category explains itself on hover.
-    const definition = selectOptionDefinition(column, label);
+    const definition = option?.description || undefined;
     if (!onClick)
         return (
             <span className={className} title={definition}>

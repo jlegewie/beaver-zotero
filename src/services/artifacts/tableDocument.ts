@@ -72,7 +72,7 @@ import {
     rowActions,
     rowPrimaryAction,
     selectLabelsInColumn,
-    selectOptionDefinition,
+    selectOption,
     sortRows,
     stripCitationTags,
     summarizeCoverage,
@@ -82,6 +82,7 @@ import {
     type Evidence,
     type Row,
     type RowAction,
+    type SelectOption,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
 import { citationForEvidence } from '@beaver/agent-core/layouts/tableCitations';
@@ -215,12 +216,12 @@ const SORT_BOTH_SVG =
 // ---------------------------------------------------------------------------
 
 /**
- * The pill colour for a select label. Checked against agent-core's palette
- * rather than a list restated here: a colour added there but missing from a
- * local copy renders as grey in every stored table.
+ * The pill colour of a select label's option. Checked against agent-core's
+ * palette rather than a list restated here: a colour added there but missing
+ * from a local copy renders as grey in every stored table.
  */
-function selectHue(label: string, column: Column): string {
-    const declared = column.options?.find((o) => o.label === label)?.color;
+function selectHue(option: SelectOption | undefined): string {
+    const declared = option?.color;
     return declared && (SELECT_COLORS as readonly string[]).includes(declared)
         ? declared
         : 'gray';
@@ -314,9 +315,9 @@ function renderCellValueInner(
                 : '<span class="bt-no"></span>';
 
         case 'select': {
-            const definition = selectOptionDefinition(column, value.label);
-            const title = definition ? ` title="${escapeHtml(definition)}"` : '';
-            return `<span class="bt-pill bt-pill--${selectHue(value.label, column)}"${title}>${escapeHtml(value.label)}</span>`;
+            const option = selectOption(column, value.label);
+            const title = option?.description ? ` title="${escapeHtml(option.description)}"` : '';
+            return `<span class="bt-pill bt-pill--${selectHue(option)}"${title}>${escapeHtml(value.label)}</span>`;
         }
 
         case 'reference': {
