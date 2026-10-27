@@ -455,7 +455,7 @@ export async function handleListItemsRequest(
                         try { title = item.getField('title', false, true) as string; }
                         catch { title = item.getDisplayTitle?.() || ''; }
 
-                        return {
+                        const row: RegularListResultItem = {
                             result_type: 'regular',
                             item_id: modelObjectId(library.libraryID, item.key),
                             library_ref: libraryRef,
@@ -466,6 +466,12 @@ export async function handleListItemsRequest(
                             date_added: item.dateAdded,
                             date_modified: item.dateModified,
                         };
+                        if (request.include_abstract === true) {
+                            // getField returns '' both for an empty abstract and for
+                            // an item type without the field.
+                            row.abstract = (item.getField('abstractNote') as string) || '';
+                        }
+                        return row;
                     }));
                 } catch (error) {
                     // Isolate the row so one unreadable record does not empty the page.

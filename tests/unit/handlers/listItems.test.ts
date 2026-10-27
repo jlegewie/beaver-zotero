@@ -388,6 +388,44 @@ describe('handleListItemsRequest', () => {
         }));
     });
 
+    describe('include_abstract', () => {
+        const listRequest = (includeAbstract?: boolean) => ({
+            event: 'list_items_request' as const,
+            request_id: 'req-abstract',
+            item_category: 'regular' as const,
+            recursive: true,
+            sort_by: 'dateAdded',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+            ...(includeAbstract === undefined ? {} : { include_abstract: includeAbstract }),
+        });
+
+        beforeEach(() => {
+            const withAbstract = makeItem({
+                id: 1,
+                key: 'WITHABS1',
+                getField: vi.fn((field: string) => (field === 'abstractNote' ? 'We study X.' : '')),
+            });
+            const withoutAbstract = makeItem({ id: 2, key: 'NOABS1', dateAdded: '2023-01-01' });
+            itemsById.set(withAbstract.id, withAbstract);
+            itemsById.set(withoutAbstract.id, withoutAbstract);
+            searchResults.push([withAbstract.id, withoutAbstract.id]);
+        });
+
+        it('adds the abstract to regular rows, "" when the item has none', async () => {
+            const response = await handleListItemsRequest(listRequest(true));
+
+            expect(response.items.map((row: any) => row.abstract)).toEqual(['We study X.', '']);
+        });
+
+        it('leaves abstract out when it was not requested', async () => {
+            const response = await handleListItemsRequest(listRequest());
+
+            expect(response.items.every((row: any) => !('abstract' in row))).toBe(true);
+        });
+    });
+
     it('degrades an unreadable attachment to a stub instead of failing the page', async () => {
         const good1 = makeItem({
             id: 1,
