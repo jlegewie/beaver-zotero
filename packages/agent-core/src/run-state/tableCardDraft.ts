@@ -13,12 +13,19 @@ import type {
     TableCardColumnType,
     TableCardDestination,
     TableCardLibraryScope,
+    TableCardOption,
     TableCardResolved,
     TableCardSource,
     WSTableCardRequest,
     WSTableCardResponse,
 } from '../protocol/tableCardProtocol';
-import { MAX_MODEL_COLUMNS, normalizeSelectLabel } from '../layouts/table';
+import {
+    codePointLength,
+    MAX_MODEL_COLUMNS,
+    MAX_SELECT_DEFINITION_CHARS,
+    MAX_SELECT_DEFINITIONS_CHARS,
+    normalizeSelectLabel,
+} from '../layouts/table';
 
 export type TableCardStep = 'sources' | 'screening' | 'columns';
 
@@ -47,12 +54,21 @@ export interface DraftSource {
     fromCard: boolean;
 }
 
+/** A select option as edited on the card. */
+export interface DraftOption {
+    /** Local, unique within its column and stable for the card's life. */
+    key: string;
+    label: string;
+    /** What counts as the category; empty means it has no definition. */
+    description: string;
+}
+
 export interface DraftColumn {
     key: string;
     header: string;
     type: TableCardColumnType;
     description: string;
-    options: string[];
+    options: DraftOption[];
     unit?: string | null;
 }
 
@@ -111,7 +127,7 @@ export function initialTableCardDraft(request: WSTableCardRequest): TableCardDra
         header: column.header,
         type: column.type,
         description: column.description ?? '',
-        options: [...(column.options ?? [])],
+        options: draftOptions(column.options),
         unit: column.unit ?? null,
     }));
     return {
@@ -466,6 +482,64 @@ export function removeColumn(draft: TableCardDraft, key: string): TableCardDraft
     return { ...draft, columns: draft.columns.filter((column) => column.key !== key) };
 }
 
+/**
+ * Draft rows for a column's options. A bare label is read as an option
+ * without a definition.
+ */
+export function draftOptions(options: readonly (TableCardOption | string)[] | null | undefined): DraftOption[] {
+    return (options ?? []).map((option, index) =>
+        typeof option === 'string'
+            ? { key: `o${index}`, label: option, description: '' }
+            : { key: `o${index}`, label: option.label ?? '', description: option.description ?? '' },
+    );
+}
+
+let optionKeys = 0;
+
+/**
+ * A key for a row added on the card. Never reused, so state a view keeps per
+ * row cannot carry over to a later one; the `n` prefix keeps it apart from the
+ * `o<index>` keys of {@link draftOptions}.
+ */
+export function newOptionKey(): string {
+    optionKeys += 1;
+    return `n${optionKeys}`;
+}
+
+/** `options` with new rows for `labels` inserted at `index`, and the new rows' keys. */
+export function insertOptions(
+    options: readonly DraftOption[],
+    index: number,
+    labels: readonly string[],
+): { options: DraftOption[]; keys: string[] } {
+    const added = labels.map((label): DraftOption => ({ key: newOptionKey(), label, description: '' }));
+    const next = [...options];
+    next.splice(Math.max(0, Math.min(index, next.length)), 0, ...added);
+    return { options: next, keys: added.map((option) => option.key) };
+}
+
+/**
+ * A paste of several lines into an option's label: the first line replaces the
+ * selection in that label, each further line becomes an option below it, and
+ * blank lines are dropped. Null for a single line, which pastes as usual.
+ */
+export function pasteIntoOption(
+    options: readonly DraftOption[],
+    key: string,
+    text: string,
+    selectionStart: number,
+    selectionEnd: number,
+): { options: DraftOption[]; focusKey: string } | null {
+    const lines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter(Boolean);
+    const index = options.findIndex((option) => option.key === key);
+    if (lines.length < 2 || index < 0) return null;
+    const current = options[index];
+    const label = `${current.label.slice(0, selectionStart)}${lines[0]}${current.label.slice(selectionEnd)}`;
+    const replaced = options.map((option) => (option.key === key ? { ...option, label } : option));
+    const inserted = insertOptions(replaced, index + 1, lines.slice(1));
+    return { options: inserted.options, focusKey: inserted.keys[inserted.keys.length - 1] };
+}
+
 /** The backend's limits on a select column's options. */
 export const MAX_CARD_SELECT_OPTIONS = 50;
 export const MAX_CARD_SELECT_LABEL_CHARS = 60;
@@ -474,20 +548,29 @@ export const MAX_CARD_SELECT_LABEL_CHARS = 60;
  * What keeps a column from being sent, or null. Select options are checked
  * the way the backend checks the reply: at most 50, each 1–60 characters
  * (code points, as Python counts them), and no two the same option under
- * {@link normalizeSelectLabel} — so `Yes` and `Yes.` are one option.
+ * {@link normalizeSelectLabel} — so `Yes` and `Yes.` are one option. A
+ * definition needs its label and stays within 300 characters, and one column's
+ * definitions within 3,000 together.
  */
 export function columnProblem(column: DraftColumn): string | null {
     if (!column.header.trim()) return 'Add a name.';
     if (!column.description.trim()) return 'Add the question this column asks.';
     if (column.type === 'select') {
-        const options = column.options.map((option) => option.trim()).filter(Boolean);
-        if (!options.length) return 'Add at least one option.';
-        if (options.length > MAX_CARD_SELECT_OPTIONS)
+        const labels = column.options.map((option) => option.label.trim()).filter(Boolean);
+        if (!labels.length) return 'Add at least one option.';
+        if (labels.length > MAX_CARD_SELECT_OPTIONS)
             return `Use at most ${MAX_CARD_SELECT_OPTIONS} options, or a text column.`;
-        if (options.some((option) => [...option].length > MAX_CARD_SELECT_LABEL_CHARS))
+        if (labels.some((label) => codePointLength(label) > MAX_CARD_SELECT_LABEL_CHARS))
             return `Keep each option to ${MAX_CARD_SELECT_LABEL_CHARS} characters.`;
-        const folded = options.map(normalizeSelectLabel);
+        const folded = labels.map(normalizeSelectLabel);
         if (new Set(folded).size !== folded.length) return 'Options must differ.';
+        const defined = column.options.filter((option) => option.description.trim());
+        if (defined.some((option) => !option.label.trim())) return 'Add a label to each defined option.';
+        const lengths = defined.map((option) => codePointLength(option.description.trim()));
+        if (lengths.some((length) => length > MAX_SELECT_DEFINITION_CHARS))
+            return `Keep each definition to ${MAX_SELECT_DEFINITION_CHARS} characters.`;
+        if (lengths.reduce((sum, length) => sum + length, 0) > MAX_SELECT_DEFINITIONS_CHARS)
+            return `Keep the definitions to ${MAX_SELECT_DEFINITIONS_CHARS.toLocaleString('en-US')} characters together.`;
     }
     return null;
 }
@@ -658,7 +741,12 @@ function wireColumn(column: DraftColumn): TableCardColumn {
         description: column.description.trim(),
     };
     if (column.type === 'select')
-        wire.options = column.options.map((option) => option.trim()).filter(Boolean);
+        wire.options = column.options.flatMap((option): TableCardOption[] => {
+            const label = option.label.trim();
+            const description = option.description.trim();
+            if (!label) return [];
+            return [description ? { label, description } : { label }];
+        });
     if (column.type === 'number' && column.unit?.trim()) wire.unit = column.unit.trim();
     return wire;
 }

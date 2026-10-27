@@ -65,6 +65,13 @@ export interface TableCardSource {
 
 export type TableCardColumnType = 'text' | 'number' | 'date' | 'boolean' | 'select';
 
+/** A select category on the card: its label and, optionally, its definition. */
+export interface TableCardOption {
+    label: string;
+    /** What counts as the category; absent or null when it has none. */
+    description?: string | null;
+}
+
 /** A question column as proposed and edited on the card. */
 export interface TableCardColumn {
     header: string;
@@ -72,7 +79,7 @@ export interface TableCardColumn {
     /** The question asked of every paper. */
     description?: string | null;
     /** Select options. */
-    options?: string[] | null;
+    options?: TableCardOption[] | null;
     /** Number unit. */
     unit?: string | null;
 }

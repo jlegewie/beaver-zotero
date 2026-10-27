@@ -60,6 +60,7 @@ import {
     annotationComment,
     annotationTitle,
     annotationTypeLabel,
+    categoriesText,
     cellExpandedFields,
     cellSortKey,
     defaultHiddenColumnIds,
@@ -71,6 +72,7 @@ import {
     rowActions,
     rowPrimaryAction,
     selectLabelsInColumn,
+    selectOption,
     sortRows,
     stripCitationTags,
     summarizeCoverage,
@@ -80,6 +82,7 @@ import {
     type Evidence,
     type Row,
     type RowAction,
+    type SelectOption,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
 import { citationForEvidence } from '@beaver/agent-core/layouts/tableCitations';
@@ -213,12 +216,12 @@ const SORT_BOTH_SVG =
 // ---------------------------------------------------------------------------
 
 /**
- * The pill colour for a select label. Checked against agent-core's palette
- * rather than a list restated here: a colour added there but missing from a
- * local copy renders as grey in every stored table.
+ * The pill colour of a select label's option. Checked against agent-core's
+ * palette rather than a list restated here: a colour added there but missing
+ * from a local copy renders as grey in every stored table.
  */
-function selectHue(label: string, column: Column): string {
-    const declared = column.options?.find((o) => o.label === label)?.color;
+function selectHue(option: SelectOption | undefined): string {
+    const declared = option?.color;
     return declared && (SELECT_COLORS as readonly string[]).includes(declared)
         ? declared
         : 'gray';
@@ -311,8 +314,11 @@ function renderCellValueInner(
                 ? '<span class="bt-yes" title="yes">✓</span>'
                 : '<span class="bt-no"></span>';
 
-        case 'select':
-            return `<span class="bt-pill bt-pill--${selectHue(value.label, column)}">${escapeHtml(value.label)}</span>`;
+        case 'select': {
+            const option = selectOption(column, value.label);
+            const title = option?.description ? ` title="${escapeHtml(option.description)}"` : '';
+            return `<span class="bt-pill bt-pill--${selectHue(option)}"${title}>${escapeHtml(value.label)}</span>`;
+        }
 
         case 'reference': {
             const authors = value.subtitle
@@ -986,9 +992,9 @@ export function renderTableHtml(
             const description = hasQuestions
                 ? `<span class="bt-q">${escapeHtml(column.description ?? '')}</span>`
                 : '';
-            const full = column.description
-                ? ` title="${escapeHtml(column.description)}"`
-                : '';
+            // The question in full, then the categories' definitions.
+            const hover = [column.description, categoriesText(column)].filter(Boolean).join('\n\n');
+            const full = hover ? ` title="${escapeHtml(hover)}"` : '';
             return `<span class="bt-c bt-h bt-h${i} bt-${columnAlign(column)} bt-hk-${column.type}${sort ? ' bt-sortable' : ''}${column.id === anchor?.id ? ' bt-anchor' : ''}"${full}><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
         }),
         '</div>',
@@ -1055,6 +1061,7 @@ export function renderTableHtml(
         rows.length === 0 ? '<p class="bt-none">No rows.</p>' : '',
         '</div>',
         '</div>',
+        renderCodebook(spec),
         renderBibliography(cites),
         `<footer class="bt-foot">${escapeHtml(footerParts.join(' · '))}</footer>`,
         '</section>',
@@ -1089,6 +1096,35 @@ function fitsBudget(
     const dynamic = renderDynamicCss(spec, prefix, groups).length;
     const fixed = countTopLevelCssRules(DOCUMENT_CSS + TABLE_CSS);
     return fixed + dynamic <= CSS_RULE_BUDGET;
+}
+
+/**
+ * How the table's categories were coded: each select column with a defined
+ * category, its question and every category with its definition. Collapsed
+ * under the table, and plain `<details>`, so the document needs no script.
+ */
+function renderCodebook(spec: TableSpec): string {
+    const coded = spec.columns.filter(
+        (column) => column.type === 'select' && column.options?.some((option) => option.description),
+    );
+    if (coded.length === 0) return '';
+    const columns = coded
+        .map((column) => {
+            const question = column.description
+                ? `<p class="bt-cb-q">${escapeHtml(column.description)}</p>`
+                : '';
+            const options = (column.options ?? [])
+                .map(
+                    (option) =>
+                        `<li><span class="bt-cb-l">${escapeHtml(option.label)}</span>${
+                            option.description ? ` — ${escapeHtml(option.description)}` : ''
+                        }</li>`,
+                )
+                .join('');
+            return `<div class="bt-cb-c"><h3 class="bt-cb-h">${escapeHtml(column.header)}</h3>${question}<ul class="bt-cb-o">${options}</ul></div>`;
+        })
+        .join('');
+    return `<details class="bt-codebook"><summary class="bt-codebook-h">Codebook</summary>${columns}</details>`;
 }
 
 /**
@@ -1391,6 +1427,14 @@ export const TABLE_CSS = `
 .bt-export::after { content: 'Export CSV'; }
 .bt-export:hover { border-color: currentColor; color: var(--t-fg); }
 html[data-beaver-active] .bt-export { display: inline-block; }
+.bt-codebook { padding: 14px 0 0; border-top: 1px solid var(--t-line); margin-top: 14px; font-size: 13px; }
+.bt-codebook-h { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--t-fade); font-weight: 650; }
+.bt-cb-c { margin: 10px 0 0; }
+.bt-cb-h { font-size: 13px; font-weight: 650; margin: 0; }
+.bt-cb-q { margin: 2px 0 0; color: var(--t-mut); }
+.bt-cb-o { margin: 4px 0 0; padding-left: 18px; }
+.bt-cb-l { font-weight: 600; }
 .bt-foot { padding: 8px 0 0; font-size: 12px; color: var(--t-fade); }
 .bt-none { padding: 28px 0; text-align: center; color: var(--t-fade); }
 .bt-wrap .bt-empty { color: var(--t-fade); }

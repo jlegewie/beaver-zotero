@@ -298,20 +298,129 @@ describe('TableCard', () => {
         expect(button('Next')).toBeUndefined();
     });
 
-    it('keeps a comma inside a choice option, one option per line', async () => {
-        render(fixture('create-items'));
-        await click('Next');
-        expect(container.querySelector('textarea[aria-label="Column 2 options"]')).toBeNull();
-        await clickElement(container.querySelectorAll('.table-card-column')[1]);
-        const field = container.querySelector('textarea[aria-label="Column 2 options"]') as HTMLTextAreaElement;
-        expect(field.value).toBe('RCT\nObservational\nOther');
-        await act(async () => {
-            const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-            setter.call(field, 'RCT\nBefore, after\n\nOther');
-            field.dispatchEvent(new Event('input', { bubbles: true }));
+    describe('category options as rows', () => {
+        const option = (n: number) =>
+            container.querySelector(`input[aria-label="Column 2 option ${n}"]`) as HTMLInputElement;
+        const labels = () =>
+            [...container.querySelectorAll('input[aria-label^="Column 2 option "]')].map(
+                (input) => (input as HTMLInputElement).value,
+            );
+        const openDesign = async (name = 'create-items') => {
+            render(fixture(name));
+            await click('Next');
+            await clickElement(container.querySelectorAll('.table-card-column')[1]);
+        };
+        async function paste(field: HTMLInputElement, text: string) {
+            await act(async () => {
+                const event = new Event('paste', { bubbles: true, cancelable: true });
+                Object.defineProperty(event, 'clipboardData', { value: { getData: () => text } });
+                field.dispatchEvent(event);
+            });
+        }
+
+        it('adds a row below on Enter and removes an empty row on Backspace', async () => {
+            await openDesign();
+            expect(labels()).toEqual(['RCT', 'Observational', 'Other']);
+            await press(option(1), 'Enter');
+            expect(labels()).toEqual(['RCT', '', 'Observational', 'Other']);
+            expect(container.ownerDocument.activeElement).toBe(option(2));
+            await typeInto(option(2), 'Before, after');
+            await press(option(2), 'Enter');
+            await press(option(3), 'Backspace');
+            expect(labels()).toEqual(['RCT', 'Before, after', 'Observational', 'Other']);
+            expect(container.ownerDocument.activeElement).toBe(option(2));
+            // A label with text is edited by Backspace, not removed.
+            await press(option(2), 'Backspace');
+            expect(labels()).toHaveLength(4);
+            await click('Create');
+            expect(sent[0].columns![1].options).toEqual([
+                { label: 'RCT' }, { label: 'Before, after' }, { label: 'Observational' }, { label: 'Other' },
+            ]);
         });
-        await click('Create');
-        expect(sent[0].columns![1].options).toEqual(['RCT', 'Before, after', 'Other']);
+
+        it('splits a multi-line paste into rows', async () => {
+            await openDesign();
+            const field = option(3);
+            field.setSelectionRange(0, field.value.length);
+            await paste(field, 'Cohort\n\nCase study\nCross-sectional');
+            expect(labels()).toEqual(['RCT', 'Observational', 'Cohort', 'Case study', 'Cross-sectional']);
+            expect(container.ownerDocument.activeElement).toBe(option(5));
+        });
+
+        it('leaves Enter and Backspace to an IME that is composing', async () => {
+            await openDesign();
+            await press(option(1), 'Enter');
+            const composing = (key: string) =>
+                new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, isComposing: true });
+            let enter!: KeyboardEvent;
+            await act(async () => {
+                enter = composing('Enter');
+                option(1).dispatchEvent(enter);
+            });
+            expect(enter.defaultPrevented).toBe(false);
+            expect(labels()).toEqual(['RCT', '', 'Observational', 'Other']);
+            let backspace!: KeyboardEvent;
+            await act(async () => {
+                backspace = composing('Backspace');
+                option(2).dispatchEvent(backspace);
+            });
+            expect(backspace.defaultPrevented).toBe(false);
+            expect(labels()).toEqual(['RCT', '', 'Observational', 'Other']);
+        });
+
+        it('adds a definition behind Define and sends it with the option', async () => {
+            await openDesign();
+            expect(container.querySelector('textarea[aria-label="Definition of RCT"]')).toBeNull();
+            await clickElement(container.querySelector('button[aria-label="Add a definition for RCT"]'));
+            const definition = container.querySelector('textarea[aria-label="Definition of RCT"]') as HTMLTextAreaElement;
+            expect(container.ownerDocument.activeElement).toBe(definition);
+            await typeInto(definition, ' Random assignment to arms. ');
+            await click('Done');
+            const chip = [...container.querySelectorAll('.table-card-option')].find((c) => c.textContent === 'RCT')!;
+            expect(chip.getAttribute('title')).toBe('RCT: Random assignment to arms.');
+            await click('Create');
+            expect(sent[0].columns![1].options![0]).toEqual({ label: 'RCT', description: 'Random assignment to arms.' });
+        });
+
+        it('opens no definition field on a new row that reuses a removed row\'s key', async () => {
+            await openDesign();
+            await click('Add option');
+            await typeInto(option(4), 'Cohort');
+            await clickElement(container.querySelector('button[aria-label="Add a definition for Cohort"]'));
+            await typeInto(container.querySelector('textarea[aria-label="Definition of Cohort"]') as HTMLTextAreaElement, 'Followed.');
+            await clickElement(container.querySelector('button[aria-label="Remove Cohort"]'));
+            await click('Add option');
+            expect(labels()).toEqual(['RCT', 'Observational', 'Other', '']);
+            expect(container.querySelector('textarea[aria-label="Definition of option 4"]')).toBeNull();
+            expect(container.querySelector('button[aria-label="Add a definition for option 4"]')).not.toBeNull();
+        });
+
+        it('shows proposed definitions and lets the user clear one', async () => {
+            await openDesign('create-items-with-definitions');
+            const rct = container.querySelector('textarea[aria-label="Definition of RCT"]') as HTMLTextAreaElement;
+            expect(rct.value).toBe('Units are randomly assigned to arms by the researchers or a lottery.');
+            expect(container.querySelector('button[aria-label="Add a definition for Other"]')).not.toBeNull();
+            await act(async () => rct.focus());
+            await typeInto(rct, '');
+            // Cleared to be retyped: the focused field stays.
+            expect(container.querySelector('textarea[aria-label="Definition of RCT"]')).toBe(rct);
+            expect(container.ownerDocument.activeElement).toBe(rct);
+            // Nor does a blur collapse it: the blur comes at mousedown, before the click lands.
+            await act(async () => rct.blur());
+            expect(container.querySelector('textarea[aria-label="Definition of RCT"]')).toBe(rct);
+            await click('Add option');
+            expect(labels()).toEqual(['RCT', 'Observational', 'Other', '']);
+            // Closing the editor forgets the empty field.
+            await click('Done');
+            await clickElement(container.querySelectorAll('.table-card-column')[1]);
+            expect(container.querySelector('textarea[aria-label="Definition of RCT"]')).toBeNull();
+            await click('Create');
+            expect(sent[0].columns![1].options).toEqual([
+                { label: 'RCT' },
+                { label: 'Observational', description: 'Exposure is not assigned; the study observes who has it.' },
+                { label: 'Other' },
+            ]);
+        });
     });
 
     it('adds a tag beside an existing collection instead of replacing it', async () => {

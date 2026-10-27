@@ -37,6 +37,7 @@ import {
     addColumn,
     addItems,
     addLibrarySource,
+    draftOptions,
     initialTableCardDraft,
     removeItem,
     removeSource,
@@ -610,7 +611,7 @@ export async function handleTestTableCardHttpRequest(request: any) {
                 header: column.header ?? '',
                 type: column.type ?? 'text',
                 description: column.description ?? '',
-                options: column.options ?? [],
+                options: draftOptions(column.options),
                 unit: column.unit ?? null,
             });
         }

@@ -1,0 +1,131 @@
+{
+  "description": "Selected items with a select column whose easily confused categories carry definitions; approved as proposed.",
+  "request": {
+    "event": "table_card_request",
+    "card_id": "00000000-0000-4000-8000-0000000000c1",
+    "run_id": "00000000-0000-4000-8000-0000000000a1",
+    "thread_id": "00000000-0000-4000-8000-0000000000b1",
+    "toolcall_id": "test-tool-call-id",
+    "scope": "create",
+    "title": "Comparison",
+    "description": "Sample sizes across the papers.",
+    "destination": {
+      "library_ref": "u",
+      "library_name": "My Library",
+      "collection_key": null,
+      "collection_name": null,
+      "explicit": false
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "ids": [
+          "u-PAPER001",
+          "u-PAPER002"
+        ],
+        "scope": null,
+        "resolved": {
+          "count": 2,
+          "total": 2,
+          "truncated": false,
+          "without_pdf": 1,
+          "sample": [
+            {
+              "id": "u-PAPER001",
+              "title": "A study called paper001 of things"
+            },
+            {
+              "id": "u-PAPER002",
+              "title": "A study called paper002 of things"
+            }
+          ],
+          "error": null
+        }
+      }
+    ],
+    "merge": {
+      "rows": 2,
+      "duplicates": 0
+    },
+    "row_cap": 1000,
+    "total": 2,
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants took part?",
+        "options": null,
+        "unit": null
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT",
+            "description": "Units are randomly assigned to arms by the researchers or a lottery."
+          },
+          {
+            "label": "Observational",
+            "description": "Exposure is not assigned; the study observes who has it."
+          },
+          {
+            "label": "Other",
+            "description": null
+          }
+        ],
+        "unit": null
+      }
+    ],
+    "cost": null,
+    "user_instructions_prefill": "",
+    "timeout_seconds": 600.0
+  },
+  "reply": {
+    "type": "table_card_response",
+    "card_id": "00000000-0000-4000-8000-0000000000c1",
+    "approved": true,
+    "choice": "create",
+    "title": "Comparison",
+    "description": "Sample sizes across the papers.",
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "ids": [
+          "u-PAPER001",
+          "u-PAPER002"
+        ]
+      }
+    ],
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants took part?"
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT",
+            "description": "Units are randomly assigned to arms by the researchers or a lottery."
+          },
+          {
+            "label": "Observational",
+            "description": "Exposure is not assigned; the study observes who has it."
+          },
+          {
+            "label": "Other"
+          }
+        ]
+      }
+    ]
+  }
+}
