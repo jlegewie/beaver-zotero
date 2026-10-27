@@ -424,6 +424,51 @@ describe("the spec hash", () => {
     });
 });
 
+describe("category definitions", () => {
+    const coded: TableSpec = {
+        id: "c",
+        columns: [
+            {
+                id: "design",
+                header: "Design",
+                type: "select",
+                description: "What is the study design?",
+                options: [
+                    { label: "RCT", color: "blue", description: "Random <assignment> to arms." },
+                    { label: "Observational", color: "green" },
+                ],
+            },
+            { id: "notes", header: "Notes", type: "text" },
+        ],
+        rows: [{ id: "r1", cells: { design: answered({ kind: "select", label: "RCT" }) } }],
+    };
+
+    it("lists each select column's categories in a collapsed codebook under the table", () => {
+        const { html } = renderTableHtml(coded);
+        const codebook = html.slice(html.indexOf('<details class="bt-codebook">'));
+        expect(codebook).toMatch(/^<details class="bt-codebook"><summary class="bt-codebook-h">Codebook<\/summary>/);
+        expect(codebook).toContain('<h3 class="bt-cb-h">Design</h3><p class="bt-cb-q">What is the study design?</p>');
+        expect(codebook).toContain('<li><span class="bt-cb-l">RCT</span> — Random &lt;assignment&gt; to arms.</li>');
+        expect(codebook).toContain('<li><span class="bt-cb-l">Observational</span></li>');
+        expect(codebook).not.toContain("Notes");
+        expect(buildTableDocument(coded).html).not.toMatch(/<script/i);
+    });
+
+    it("shows definitions on the header and the pill", () => {
+        const { html } = renderTableHtml(coded);
+        expect(html).toContain('title="What is the study design?\n\nCategories\nRCT — Random &lt;assignment&gt; to arms."');
+        expect(cellHtml(html, "r1", "design")).toContain('title="Random &lt;assignment&gt; to arms."');
+    });
+
+    it("adds no codebook to a table without definitions", () => {
+        const plain: TableSpec = {
+            ...coded,
+            columns: [{ ...coded.columns[0], options: [{ label: "RCT" }, { label: "Observational" }] }],
+        };
+        expect(renderTableHtml(plain).html).not.toContain("bt-codebook");
+    });
+});
+
 describe("select pills", () => {
     it("renders every colour in the shared palette as itself, not as grey", () => {
         // The renderer checks a declared colour against agent-core's palette.

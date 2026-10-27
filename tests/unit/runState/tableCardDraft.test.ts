@@ -17,12 +17,15 @@ import {
     createBlocker,
     createBlockerReason,
     destinationLine,
+    draftOptions,
     initialTableCardDraft,
+    insertOptions,
     itemsSource,
     mergeLine,
     nextStep,
     overCapMessage,
     overCapSources,
+    pasteIntoOption,
     previousStep,
     removeColumn,
     removeItem,
@@ -231,14 +234,14 @@ describe('table card draft', () => {
         expect(createBlockerReason(draft, request)).toMatchObject({ part: 'columns' });
         draft = updateColumn(draft, added.key, { header: 'Design', description: 'What design?', type: 'select' });
         expect(createBlocker(draft, request)).toBe('Design: Add at least one option.');
-        draft = updateColumn(draft, added.key, { options: ['RCT', ' rct '] });
+        draft = updateColumn(draft, added.key, { options: draftOptions(['RCT', ' rct ']) });
         expect(createBlocker(draft, request)).toBe('Design: Options must differ.');
         const second = addColumn(draft);
         expect(createBlocker(second.draft, request)).toBe('2 columns are incomplete.');
-        draft = updateColumn(draft, added.key, { options: ['RCT', 'Other', ''] });
+        draft = updateColumn(draft, added.key, { options: draftOptions(['RCT', 'Other', '']) });
         expect(createBlocker(draft, request)).toBeNull();
         expect(tableCardResponse(draft, request, 'create').columns).toEqual([
-            { header: 'Design', type: 'select', description: 'What design?', options: ['RCT', 'Other'] },
+            { header: 'Design', type: 'select', description: 'What design?', options: [{ label: 'RCT' }, { label: 'Other' }] },
         ]);
         expect(removeColumn(draft, added.key).columns).toHaveLength(0);
     });
@@ -334,8 +337,8 @@ describe('table card draft', () => {
     });
 
     describe('select options, checked as the backend checks the reply', () => {
-        const select = (options: string[]) => ({
-            key: 'c', header: 'Design', type: 'select' as const, description: 'Which design?', options,
+        const select = (options: (string | { label: string; description?: string })[]) => ({
+            key: 'c', header: 'Design', type: 'select' as const, description: 'Which design?', options: draftOptions(options),
         });
 
         it('treats labels that differ only in case, spacing, dashes or trailing punctuation as one option', () => {
@@ -353,6 +356,19 @@ describe('table card draft', () => {
             expect(columnProblem(select(['😀'.repeat(60)]))).toBeNull();
         });
 
+        it('caps definitions at 300 characters each and 3,000 per column, and needs their labels', () => {
+            expect(columnProblem(select([{ label: 'RCT', description: 'x'.repeat(300) }]))).toBeNull();
+            expect(columnProblem(select([{ label: 'RCT', description: 'x'.repeat(301) }]))).toContain('300 characters');
+            // Code points, as Python counts them.
+            expect(columnProblem(select([{ label: 'RCT', description: '😀'.repeat(300) }]))).toBeNull();
+            const ten = Array.from({ length: 10 }, (_, i) => ({ label: `L${i}`, description: 'y'.repeat(300) }));
+            expect(columnProblem(select(ten))).toBeNull();
+            expect(columnProblem(select([...ten, { label: 'L10', description: 'z' }]))).toContain('3,000 characters');
+            expect(columnProblem(select(['RCT', { label: ' ', description: 'Orphan.' }]))).toBe(
+                'Add a label to each defined option.',
+            );
+        });
+
         it('blocks Create above the question-column cap', () => {
             const { request } = fixture('create-items');
             let draft = initialTableCardDraft(request);
@@ -361,6 +377,61 @@ describe('table card draft', () => {
                 draft = updateColumn(added.draft, added.key, { header: 'H', description: 'Q?' });
             }
             expect(createBlocker(draft, request)).toContain('at most 30 question columns');
+        });
+    });
+
+    describe('option definitions', () => {
+        it('reads proposed definitions, sends them trimmed and drops empty ones', () => {
+            const { request, reply } = fixture('create-items-with-definitions');
+            const draft = initialTableCardDraft(request);
+            const design = draft.columns.find((column) => column.header === 'Design')!;
+            expect(design.options.map((o) => [o.label, o.description])).toEqual([
+                ['RCT', 'Units are randomly assigned to arms by the researchers or a lottery.'],
+                ['Observational', 'Exposure is not assigned; the study observes who has it.'],
+                ['Other', ''],
+            ]);
+            expect(new Set(design.options.map((o) => o.key)).size).toBe(3);
+            expect(tableCardResponse(draft, request, 'create').columns).toEqual(reply!.columns);
+            const padded = updateColumn(draft, design.key, {
+                options: design.options.map((o) => ({ ...o, description: ` ${o.description}  ` })),
+            });
+            expect(tableCardResponse(padded, request, 'create').columns).toEqual(reply!.columns);
+        });
+
+        it('produces the edited-definition reply the backend fixture expects', () => {
+            const { request, reply } = fixture('create-items-definition-edited');
+            let draft = initialTableCardDraft(request);
+            const design = draft.columns.find((column) => column.header === 'Design')!;
+            const edited: Record<string, string> = {
+                RCT: 'Units are randomly assigned to arms by the researchers.',
+                Observational: '',
+                Other: 'Any design that is neither randomised nor observational.',
+            };
+            draft = updateColumn(draft, design.key, {
+                options: design.options.map((o) => ({ ...o, description: edited[o.label] })),
+            });
+            expect(tableCardResponse(draft, request, 'create').columns).toEqual(reply!.columns);
+        });
+
+        it('reads bare labels from an older request as options without definitions', () => {
+            expect(draftOptions(['A', { label: 'B', description: null }])).toEqual([
+                { key: 'o0', label: 'A', description: '' },
+                { key: 'o1', label: 'B', description: '' },
+            ]);
+        });
+
+        it('inserts rows with fresh keys, and splits a multi-line paste into rows', () => {
+            const options = draftOptions(['RCT', 'Other']);
+            const inserted = insertOptions(options, 1, ['', 'Cohort']);
+            expect(inserted.options.map((o) => o.label)).toEqual(['RCT', '', 'Cohort', 'Other']);
+            expect(new Set(inserted.options.map((o) => o.key)).size).toBe(4);
+            expect(inserted.keys).toEqual([inserted.options[1].key, inserted.options[2].key]);
+
+            const pasted = pasteIntoOption(options, 'o0', 'Randomised\r\n\n Cohort \nCase study\n', 0, 3);
+            expect(pasted!.options.map((o) => o.label)).toEqual(['Randomised', 'Cohort', 'Case study', 'Other']);
+            expect(pasted!.focusKey).toBe(pasted!.options[2].key);
+            // One line pastes as usual.
+            expect(pasteIntoOption(options, 'o0', 'Randomised', 0, 3)).toBeNull();
         });
     });
 

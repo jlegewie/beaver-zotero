@@ -1666,6 +1666,8 @@ export interface WSListItemsRequest extends WSBaseEvent {
     tag?: string | null;
     item_category: ZoteroItemCategory;
     include_children?: boolean;
+    /** Add `abstract` to every regular row. */
+    include_abstract?: boolean;
     recursive: boolean;
     sort_by: string;
     sort_order: string;
@@ -1687,6 +1689,12 @@ export interface RegularListResultItem {
     year?: number | null;
     date_added?: string | null;
     date_modified?: string | null;
+    /**
+     * Set only for an `include_abstract` request: "" when the item has no
+     * abstract. Left out when it could not be read, which tells the backend to
+     * look it up another way.
+     */
+    abstract?: string;
 }
 
 /** Response to list_items request */

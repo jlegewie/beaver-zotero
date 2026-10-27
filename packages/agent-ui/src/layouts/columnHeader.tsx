@@ -1,5 +1,6 @@
 import React from "react";
 import {
+    categoriesText,
     columnAlign,
     isColumnSortable,
     type Column,
@@ -63,7 +64,7 @@ export function ColumnHeaderCell({
     const details = detailsText(column);
     // The full text lives on the header itself: the visible line is clamped, and
     // a column's question is exactly the thing a reader will want in full.
-    const hoverText = [column.description, details]
+    const hoverText = [column.description, details, categoriesText(column)]
         .filter(Boolean)
         .join("\n\n");
 
