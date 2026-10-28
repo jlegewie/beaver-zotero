@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
     locateImportFile: vi.fn(),
     resolveImportItems: vi.fn(),
     checkUrlAllowed: vi.fn(),
+    createGuardedBrowser: vi.fn(),
+    landedOnBlockedHost: vi.fn(() => false),
     // utils / services
     cancelTasksForItem: vi.fn(),
     generateTaskId: vi.fn((...parts: unknown[]) => parts.join(':')),
@@ -49,7 +51,11 @@ vi.mock('../../../src/services/itemImport/provenance', () => ({
 }));
 vi.mock('../../../src/services/itemImport/recognizeFile', () => ({ locateImportFile: mocks.locateImportFile }));
 vi.mock('../../../src/services/itemImport/resolve', () => ({ resolveImportItems: mocks.resolveImportItems }));
-vi.mock('../../../src/services/itemImport/resolveUrl', () => ({ checkUrlAllowed: mocks.checkUrlAllowed }));
+vi.mock('../../../src/services/itemImport/resolveUrl', () => ({
+    checkUrlAllowed: mocks.checkUrlAllowed,
+    createGuardedBrowser: mocks.createGuardedBrowser,
+    landedOnBlockedHost: mocks.landedOnBlockedHost,
+}));
 vi.mock('../../../src/services/itemImport/duplicates', () => ({
     WEB_CONTENT_ITEM_TYPES: new Set(['webpage', 'blogPost', 'forumPost', 'newspaperArticle', 'magazineArticle', 'encyclopediaArticle', 'presentation']),
 }));
@@ -552,6 +558,104 @@ describe('writeImportItem attachments', () => {
         );
         expect(mocks.schedulePdfFetchTask).not.toHaveBeenCalled();
         expect(result.attachment_status).toBe('pending');
+    });
+
+    describe('snapshot failure reasons', () => {
+        const runSnapshot = async () => {
+            const onAttachmentResolved = vi.fn();
+            await writeImportItem(
+                journal({ item: { itemType: 'webpage', title: 'Page' }, snapshot_url: 'https://x.org/page' }),
+                { threadId: 't1', onAttachmentResolved },
+            );
+            const task = mocks.scheduleBackgroundTask.mock.calls[0][2];
+            await task(new AbortController().signal);
+            return onAttachmentResolved.mock.calls[0][0];
+        };
+        const browserThatLoads = (loaded: boolean) => {
+            mocks.createGuardedBrowser.mockResolvedValue({
+                browser: { load: vi.fn(async () => loaded), destroy: vi.fn() },
+                release: vi.fn(),
+                blocked: () => false,
+            });
+        };
+
+        beforeEach(() => {
+            mocks.checkUrlAllowed.mockResolvedValue({ ok: true });
+            mocks.loadWebTranslationModules.mockReturnValue({ HiddenBrowser: {} });
+            mocks.landedOnBlockedHost.mockReturnValue(false);
+        });
+
+        it('reports url_blocked when the URL is not allowed', async () => {
+            mocks.checkUrlAllowed.mockResolvedValue({ ok: false, message: 'private address' });
+            expect(await runSnapshot()).toMatchObject({ attachmentStatus: 'failed', failureReason: 'url_blocked' });
+        });
+
+        it('reports url_blocked when the page reached a private-network address', async () => {
+            browserThatLoads(true);
+            mocks.landedOnBlockedHost.mockReturnValue(true);
+            expect(await runSnapshot()).toMatchObject({ failureReason: 'url_blocked' });
+        });
+
+        it('reports url_blocked when the guard cancels the page and the load returns false', async () => {
+            mocks.createGuardedBrowser.mockResolvedValue({
+                browser: { load: vi.fn(async () => false), destroy: vi.fn() },
+                release: vi.fn(),
+                blocked: () => true,
+            });
+            expect(await runSnapshot()).toMatchObject({ failureReason: 'url_blocked' });
+        });
+
+        it('reports url_blocked when the guard cancels the page and the load rejects', async () => {
+            mocks.createGuardedBrowser.mockResolvedValue({
+                browser: { load: vi.fn(async () => { throw new Error('NS_BINDING_ABORTED'); }), destroy: vi.fn() },
+                release: vi.fn(),
+                blocked: () => true,
+            });
+            expect(await runSnapshot()).toMatchObject({ failureReason: 'url_blocked' });
+        });
+
+        it('reports page_load_failed when the page answers with an error status', async () => {
+            mocks.createGuardedBrowser.mockResolvedValue({
+                browser: {
+                    load: vi.fn(async () => {
+                        throw Object.assign(new Error('Invalid response 404 Not Found for https://x.org/page'), { status: 404 });
+                    }),
+                    destroy: vi.fn(),
+                },
+                release: vi.fn(),
+                blocked: () => false,
+            });
+            expect(await runSnapshot()).toMatchObject({ failureReason: 'page_load_failed' });
+        });
+
+        it('reports page_load_failed when the page does not load', async () => {
+            browserThatLoads(false);
+            expect(await runSnapshot()).toMatchObject({ failureReason: 'page_load_failed' });
+        });
+
+        it('reports timeout when the load budget elapses', async () => {
+            browserThatLoads(true);
+            mocks.withTimeout.mockImplementation(async (work: Promise<unknown>) => {
+                work.catch(() => {});
+                throw Object.assign(new Error('timed out'), { code: 'timeout' });
+            });
+            expect(await runSnapshot()).toMatchObject({ failureReason: 'timeout' });
+        });
+
+        it('reports error for any other failure and no reason when the snapshot is captured', async () => {
+            mocks.loadWebTranslationModules.mockReturnValue(null);
+            expect(await runSnapshot()).toMatchObject({ failureReason: 'error' });
+
+            vi.clearAllMocks();
+            browserThatLoads(true);
+            Z.Attachments.importFromDocument = vi.fn(async () => makeSavedItem({ id: 700, key: 'SNAP0001' }));
+            Z.Items.getByLibraryAndKeyAsync = vi.fn(async () => saved);
+            mocks.loadWebTranslationModules.mockReturnValue({ HiddenBrowser: {} });
+            mocks.checkUrlAllowed.mockResolvedValue({ ok: true });
+            const payload = await runSnapshot();
+            expect(payload).toMatchObject({ attachmentStatus: 'available', accessMethod: 'snapshot' });
+            expect(payload.failureReason).toBeUndefined();
+        });
     });
 
     it('treats an unset automaticSnapshots preference as on and false as off', async () => {

@@ -229,6 +229,11 @@ async function cleanupFailedImport(item: Zotero.Item | null): Promise<void> {
     }
 }
 
+/** An error that carries the `failure_reason` reported for a failed snapshot. */
+function snapshotFailure(message: string, failureReason: string): Error {
+    return Object.assign(new Error(message), { failureReason });
+}
+
 /** Capture a snapshot of `url` as a child attachment, in the background. */
 function scheduleSnapshotTask(libraryId: number, itemKey: string, url: string, options: WriteImportOptions): void {
     const generation = Zotero.Beaver.account?.getGeneration();
@@ -247,10 +252,11 @@ function scheduleSnapshotTask(libraryId: number, itemKey: string, url: string, o
         let browser: any = null;
         let release: () => void = () => {};
         let blocked: () => boolean = () => false;
+        let failureReason = 'error';
         try {
             assertAccess();
             const allowed = await checkUrlAllowed(url);
-            if (!allowed.ok) throw new Error(allowed.message);
+            if (!allowed.ok) throw snapshotFailure(allowed.message, 'url_blocked');
             const modules = loadWebTranslationModules();
             if (!modules) throw new Error('Hidden browser unavailable');
             // Only loading is bounded: once the capture is saving, it settles on its own.
@@ -263,9 +269,19 @@ function scheduleSnapshotTask(libraryId: number, itemKey: string, url: string, o
                     return;
                 }
                 ({ browser, release, blocked } = guarded);
-                const loaded = await browser.load(url, { requireSuccessfulStatus: true });
-                if (!loaded) throw new Error('Page did not load');
-                if (blocked() || landedOnBlockedHost(browser)) throw new Error('The page reached a private-network address');
+                const blockedFailure = () => snapshotFailure('The page reached a private-network address', 'url_blocked');
+                // The guard cancels a blocked document, which surfaces as a failed load.
+                // `load` returns false when navigation fails and throws on an error status.
+                let loaded: boolean;
+                try {
+                    loaded = await browser.load(url, { requireSuccessfulStatus: true });
+                } catch (error) {
+                    if (blocked()) throw blockedFailure();
+                    throw snapshotFailure(`Page did not load: ${(error as any)?.message ?? error}`, 'page_load_failed');
+                }
+                if (blocked()) throw blockedFailure();
+                if (!loaded) throw snapshotFailure('Page did not load', 'page_load_failed');
+                if (landedOnBlockedHost(browser)) throw blockedFailure();
             })(), SNAPSHOT_BUDGET_MS, 'Loading the page for its snapshot').catch((error) => {
                 abandoned = true;
                 throw error;
@@ -280,6 +296,7 @@ function scheduleSnapshotTask(libraryId: number, itemKey: string, url: string, o
                 }, { signal, assertCurrent: assertAccess });
             }
         } catch (error) {
+            failureReason = (error as any)?.failureReason ?? ((error as any)?.code === 'timeout' ? 'timeout' : 'error');
             if (looksLikeApiDrift(error)) markApiUnavailable('importFromDocument', error);
             logger(`itemImport/write: snapshot of ${url} for ${itemKey} failed: ${error}`, 1);
         } finally {
@@ -297,6 +314,7 @@ function scheduleSnapshotTask(libraryId: number, itemKey: string, url: string, o
                     attachmentKey: captured ? `${libraryId}-${captured.key}` : undefined,
                     accessMethod: captured ? 'snapshot' : undefined,
                     elapsedMs: Date.now() - startedAt,
+                    failureReason: captured ? undefined : failureReason,
                 });
             }
         }
