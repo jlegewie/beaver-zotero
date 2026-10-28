@@ -1,5 +1,5 @@
 import { citationsAtom, citationMapAtom, citationsByRunIdAtom } from "@beaver/agent-core/citations/atoms"
-import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom } from "../atoms/auth"
+import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom, sessionRestoreAtom } from "../atoms/auth"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, currentNoteTabItemKeyAtom } from "../atoms/messageComposition"
 import { supportedModelsAtom, selectedModelAtom, availableModelsAtom } from "../atoms/models"
 import { profileWithPlanAtom, isProfileLoadedAtom, updateRequiredAtom, minimumFrontendVersionAtom, processingModeAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedFreeAccessAtom, syncWithZoteroAtom } from "../atoms/profile"
@@ -19,6 +19,7 @@ export const atomRegistry = {
     isWaitingForProfile: isWaitingForProfileAtom,
     user: userAtom,
     authLoading: authLoadingAtom,
+    sessionRestore: sessionRestoreAtom,
 
     // Agent Runs
     threadRuns: threadRunsAtom,

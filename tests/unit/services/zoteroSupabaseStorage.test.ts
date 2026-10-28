@@ -4,8 +4,10 @@ const {
     mockSetSupabaseStorageAdapter,
     mockSetSupabaseReloadBridge,
     mockEncryptedStorageConstructed,
+    storageOptions,
     store,
 } = vi.hoisted(() => ({
+    storageOptions: [] as any[],
     mockSetSupabaseStorageAdapter: vi.fn(),
     mockSetSupabaseReloadBridge: vi.fn(),
     mockEncryptedStorageConstructed: vi.fn(),
@@ -23,8 +25,9 @@ vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
 
 vi.mock('../../../src/services/EncryptedStorage', () => ({
     EncryptedStorage: class MockEncryptedStorage {
-        constructor() {
+        constructor(options?: unknown) {
             mockEncryptedStorageConstructed();
+            storageOptions.push(options);
         }
 
         getItem = store.getItem;
@@ -38,6 +41,7 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({
 }));
 
 import { registerZoteroSupabaseStorage } from '../../../src/services/zoteroSupabaseStorage';
+import { getAuthDiagnostics, resetAuthDiagnosticsForTesting } from '../../../src/services/authDiagnostics';
 
 function registeredAdapter() {
     registerZoteroSupabaseStorage();
@@ -50,6 +54,8 @@ describe('registerZoteroSupabaseStorage', () => {
         store.getItem.mockReset();
         store.setItem.mockReset();
         store.removeItem.mockReset();
+        storageOptions.length = 0;
+        resetAuthDiagnosticsForTesting();
     });
 
     it('registers an EncryptedStorage-backed adapter with the storage-adapter interface', () => {
@@ -141,6 +147,55 @@ describe('registerZoteroSupabaseStorage', () => {
             store.removeItem.mockRejectedValue(new Error('locked'));
 
             await expect(registeredAdapter().removeItem('session')).resolves.toBeUndefined();
+        });
+    });
+
+    describe('diagnostics', () => {
+        const SESSION_KEY = 'sb-project-auth-token';
+        const events = () => getAuthDiagnostics().map((entry) => entry.event);
+
+        it('records an empty read of the session, but not of its companion entries', async () => {
+            store.getItem.mockResolvedValue(null);
+            const adapter = registeredAdapter();
+
+            await adapter.getItem(`${SESSION_KEY}-user`);
+            await adapter.getItem(`${SESSION_KEY}-code-verifier`);
+            expect(events()).toEqual([]);
+
+            await adapter.getItem(SESSION_KEY);
+            await adapter.getItem(SESSION_KEY);
+            expect(getAuthDiagnostics()).toEqual([
+                expect.objectContaining({ event: 'storage_read_empty', count: 2 }),
+            ]);
+        });
+
+        it('records which code removed the session', async () => {
+            store.removeItem.mockResolvedValue(undefined);
+
+            await registeredAdapter().removeItem(SESSION_KEY);
+
+            const [entry] = getAuthDiagnostics();
+            expect(entry.event).toBe('storage_removed');
+            expect(entry.detail).toContain('removeItem');
+            expect(entry.detail).not.toMatch(/:\/\/|\/Users\/|\.ts\b/);
+        });
+
+        it('records a write that could not be persisted', async () => {
+            store.setItem.mockRejectedValue(new Error('disk full'));
+
+            await registeredAdapter().setItem(SESSION_KEY, 'token');
+
+            expect(events()).toEqual(['storage_write_abandoned']);
+        });
+
+        it('records failures the encrypted store handles internally', () => {
+            registeredAdapter();
+
+            storageOptions[0].onFailure('decrypt', new Error('OperationError'));
+
+            expect(getAuthDiagnostics()).toEqual([
+                expect.objectContaining({ event: 'storage_decrypt_failed', detail: 'Error: OperationError' }),
+            ]);
         });
     });
 });

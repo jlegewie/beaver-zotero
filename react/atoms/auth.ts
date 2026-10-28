@@ -13,6 +13,7 @@ import {
 import { whereToStartVisibleAtom } from './whereToStart';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
+import type { SessionRestoreState } from '../../src/services/instanceAccount';
 
 /**
  * Atom representing the current authentication session
@@ -170,6 +171,13 @@ export const userIdAtom = atom<string | null>((get) => get(userAtom)?.id || null
  * Loading state atom to track auth initialization status
  */
 export const authLoadingAtom = atom<boolean>(true);
+
+/**
+ * Progress restoring the saved session while auth is still loading: null until
+ * the first restore attempt fails or runs long. Projected from the instance
+ * account; see `AccountSnapshot.restore`.
+ */
+export const sessionRestoreAtom = atom<SessionRestoreState | null>(null);
 
 /**
  * Atom setter for logging out, setting session and user atoms to null

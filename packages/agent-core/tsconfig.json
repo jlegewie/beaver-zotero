@@ -89,6 +89,7 @@
     "./src/transport/runLink.ts",
     "./src/transport/apiService.ts",
     "./src/transport/supabaseClient.ts",
+    "./src/transport/tokenRefreshFetch.ts",
     "./src/transport/credentials.ts",
     "./src/transport/otp.ts",
     "./src/transport/config.ts",

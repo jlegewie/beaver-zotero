@@ -91,13 +91,19 @@ const ErrorReportDialog: React.FC = () => {
             // preference carry custom-model API keys.
             const jotaiState = redactSecrets(getJotaiState());
             const preferences = redactSecrets(getPluginPreferences());
-            
+            // Recent sign-in and session-storage events, which explain
+            // unexpected sign-outs. Recorded by the plugin realm, so read
+            // through the instance account rather than a window-local copy.
+            const localState = {
+                auth_diagnostics: Zotero.Beaver?.account?.getAuthDiagnostics() ?? [],
+            };
+
             // Send error report to backend
             await accountService.reportError(
                 errorText.trim(),
                 jotaiState,
-                preferences
-                // localDbState can be added later if needed
+                preferences,
+                localState,
             );
 
             // Local logging
