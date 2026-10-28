@@ -19,6 +19,7 @@ import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/r
 import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
 import { getRunErrorTitle, stripRunErrorTypePrefix } from '@beaver/agent-core/run-state/runErrorCopy';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import {
     pendingCreditConfirmationsAtom,
     type PendingCreditConfirmation,
@@ -389,6 +390,7 @@ function useLiveCard(): RunStatusPopupCard | null {
     const threadName = useAtomValue(currentThreadNameAtom);
     const pendingApprovals = useAtomValue(pendingApprovalsAtom);
     const batchApprovals = useAtomValue(pendingBatchApprovalsAtom);
+    const tableCards = useAtomValue(pendingTableCardsAtom);
     const creditConfirmations = useAtomValue(pendingCreditConfirmationsAtom);
     const questions = useAtomValue(pendingQuestionsAtom);
     const completion = useAtomValue(runStatusPopupCompletionAtom);
@@ -402,6 +404,7 @@ function useLiveCard(): RunStatusPopupCard | null {
     const liveRun = isLive ? activeRun : null;
     const approvals = useMemo(() => [...pendingApprovals.values()], [pendingApprovals]);
     const batch = batchApprovals.values().next().value ?? null;
+    const tableCard = tableCards.values().next().value ?? null;
     const credit = creditConfirmations.values().next().value ?? null;
     const question = questions.values().next().value ?? null;
 
@@ -449,6 +452,7 @@ function useLiveCard(): RunStatusPopupCard | null {
         ? approvals.length > 0
             ? `approval:${approvals.map((approval) => approval.actionId).sort().join(',')}`
             : batch ? `batch:${batch.approvalId}`
+                : tableCard ? `table:${tableCard.card_id}`
                 : credit ? `credit:${credit.confirmationId}`
                     : question ? `question:${question.questionId}`
                         : `running:${liveRun.id}`
@@ -487,6 +491,14 @@ function useLiveCard(): RunStatusPopupCard | null {
         }
         if (batch) {
             return { ...base, kind: 'batch', approval: batch, onSubmit: onSubmitBatch, disabled: isReconnecting, onStop };
+        }
+        if (tableCard) {
+            // The card is edited in the sidebar; the popup only points there.
+            return {
+                ...base,
+                kind: 'running',
+                statusLine: tableCard.scope === 'fill' ? 'Review the proposed fill' : 'Review the proposed table',
+            };
         }
         if (credit) {
             return {

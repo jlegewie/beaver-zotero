@@ -36,6 +36,7 @@ import {
 import { captureInstanceOperation } from './operation';
 import { createEndpoint, registerEndpoint } from './registration';
 import { handleArtifactRequest } from '../artifacts/artifactProvider';
+import { handleTableTabProbe } from '../../ui/tableTabProbe';
 /** Local HTTP routes, owned by the plugin instance. */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -450,11 +451,15 @@ async function handleLibraryListHttpRequest(request: any) {
         special_collection: request.special_collection,
         tag: request.tag,
         item_category: request.item_category ?? 'regular',
+        include_children: request.include_children ?? false,
+        nest_children: request.nest_children ?? false,
+        include_abstract: request.include_abstract ?? false,
         recursive: request.recursive ?? true,
         sort_by: request.sort_by || 'dateModified',
         sort_order: request.sort_order || 'desc',
         limit: request.limit ?? 20,
         offset: request.offset ?? 0,
+        has_attachments: request.has_attachments ?? null,
     };
     
     const response = await handleListItemsRequest(wsRequest);
@@ -489,6 +494,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         any_conditions: request.any_conditions || [],
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         include_standalone_attachments: request.include_standalone_attachments ?? false,
+        skip_sibling_snapshots: request.skip_sibling_snapshots ?? false,
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
         exclude_item_ids: request.exclude_item_ids ?? [],
@@ -524,6 +530,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         // WIDER population than the caller described.
         any_conditions_applied: response.any_conditions_applied,
         standalone_attachments_included: response.standalone_attachments_included,
+        sibling_snapshots_skipped: response.sibling_snapshots_skipped,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,
@@ -1150,6 +1157,8 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/list-actions'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/list-actions', request));
         endpoints['/beaver/test/approve-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/approve-action', request));
         endpoints['/beaver/test/confirm-credits'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/confirm-credits', request));
+        endpoints['/beaver/test/table-card'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-card', request));
+        endpoints['/beaver/test/table-fill-progress'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-fill-progress', request));
         endpoints['/beaver/test/undo-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/undo-action', request));
         endpoints['/beaver/test/chat-drop-connection'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-drop-connection', request));
         endpoints['/beaver/test/run-snapshot'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-snapshot', request));
@@ -1174,6 +1183,10 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/table-read'] = createEndpoint(handleTestTableReadHttpRequest);
 
         endpoints['/beaver/test/table-list'] = createEndpoint(handleTestTableListHttpRequest);
+
+        // The Beaver tab (dev-only): fixed commands that open, close and time
+        // it through the product paths, and report its tabs and the session.
+        endpoints['/beaver/test/table-tab'] = createEndpoint(handleTableTabProbe);
 
         // The versioned store (dev-only): the write protocol, the version log,
         // revert, trash/restore, and the crash recovery `open` performs.

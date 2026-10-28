@@ -28,9 +28,11 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { citationsByKey } from '@beaver/agent-core/layouts/table';
+import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import { citationForEvidence } from '@beaver/agent-core/layouts/tableCitations';
 import type { Citation } from '@beaver/agent-core/types/citations';
-import { BEAVER_ACTIVE_ATTRIBUTE, TABLE_SPEC_SCRIPT_ID } from '../tableDocument';
+import { tableSpecHash } from '../recoveryShadow';
+import { BEAVER_ACTIVE_ATTRIBUTE, TABLE_SPEC_HASH_ATTRIBUTE } from '../tableDocument';
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 
@@ -57,6 +59,12 @@ export interface TableViewHost {
      * followed instead.
      */
     activateCitation?(citation: Citation): Promise<boolean>;
+    /**
+     * The stored table, read through the store. Citations are assembled from
+     * it, because the document carries markers, not the evidence behind them;
+     * a spec other than the one the document renders is not used.
+     */
+    readSpec?(): Promise<TableSpec | null>;
     /** Runs a document command (`data-bt-command`), such as an export. */
     runCommand?(command: string): void;
 }
@@ -85,19 +93,14 @@ export function isRoutedTableHref(href: string): boolean {
 }
 
 /**
- * The citations embedded in the document's spec, keyed as the markers name
- * them. Read from the document rather than the store: it is exactly the table
- * the user is looking at, even when the stored table has since changed.
+ * The citation a marker names: its `data-cite-key` is `<row>|<column>|<index>`
+ * into the table's evidence.
  */
-export function documentCitations(doc: Document): Record<string, Citation> {
-    try {
-        const raw = doc.getElementById(TABLE_SPEC_SCRIPT_ID)?.textContent;
-        if (!raw) return {};
-        const spec = JSON.parse(raw) as { citations?: Citation[] };
-        return citationsByKey(Array.isArray(spec?.citations) ? spec.citations : undefined);
-    } catch {
-        return {};
-    }
+export function citationForMarker(spec: TableSpec, key: string): Citation | null {
+    const [rowId, columnId, index] = key.split('|');
+    const row = spec.rows.find((candidate) => candidate.id === rowId);
+    const evidence = row?.cells[columnId]?.evidence?.[Number(index)];
+    return row && evidence ? citationForEvidence(row, evidence) : null;
 }
 
 /** Citation markers in the document, which is also what a host reports. */
@@ -182,7 +185,6 @@ export function enhanceTableDocument(doc: Document, host: TableViewHost): () => 
     // "Reveal in library". Left classified as internal, the same handler calls
     // `_handlePointerOverInternalLink`, which the snapshot view does not
     // override and which does nothing (`dom-view.tsx:888`).
-    let citations: Record<string, Citation> | null = null;
     const openLink = (href: string) => {
         try {
             host.openLink(href);
@@ -222,20 +224,25 @@ export function enhanceTableDocument(doc: Document, host: TableViewHost): () => 
         // A citation goes to its passage, highlighted, when the host can do
         // that; the marker's link only names the page.
         const key = anchor.getAttribute('data-cite-key');
-        if (key && host.activateCitation) {
-            citations ??= documentCitations(doc);
-            const citation = citations[key];
-            if (citation) {
-                host.activateCitation(citation)
-                    .catch((error) => {
-                        logger(`enhanceTableDocument: citation activation failed: ${error}`, 2);
-                        return false;
-                    })
-                    .then((handled) => {
-                        if (!handled) openLink(href);
-                    });
-                return;
-            }
+        if (key && host.activateCitation && host.readSpec) {
+            const activate = host.activateCitation.bind(host);
+            // A marker indexes the evidence of the revision this document
+            // renders; against a newer spec it could name another passage.
+            const displayed = doc.documentElement?.getAttribute(TABLE_SPEC_HASH_ATTRIBUTE);
+            host.readSpec()
+                .then(async (spec) => {
+                    if (!spec || !displayed || (await tableSpecHash(spec)) !== displayed) return false;
+                    const citation = citationForMarker(spec, key);
+                    return citation ? activate(citation) : false;
+                })
+                .catch((error) => {
+                    logger(`enhanceTableDocument: citation activation failed: ${error}`, 2);
+                    return false;
+                })
+                .then((handled) => {
+                    if (!handled) openLink(href);
+                });
+            return;
         }
         openLink(href);
     });

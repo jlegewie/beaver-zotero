@@ -11,7 +11,7 @@ import {
     type HelperInstaller,
 } from "./helperInstaller";
 import { runVoiceProcess } from "./voiceProcess";
-import { systemClock } from "./voiceService";
+import { monotonicNow, systemClock } from "./voiceService";
 
 /** Native resources live in the plugin realm, independently of React and login state. */
 export class NativeVoice {
@@ -63,7 +63,7 @@ export class NativeVoice {
             this.capture = new MacCaptureService(
                 {
                     clock,
-                    now: () => Cu.now(),
+                    now: monotonicNow,
                     token: () => {
                         const random = Cc[
                             "@mozilla.org/security/random-generator;1"

@@ -2,12 +2,15 @@ import React, { useCallback, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import type { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, type ToolResult } from '@beaver/agent-core/run-state/atoms';
-import { tableRecordFromMetadata, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
+import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
 import { TOOL_BASE_LABELS } from '@beaver/agent-core/run-state/toolCallRequest';
+import { parseItemReference, UNRESOLVED_LIBRARY_ID } from '@beaver/agent-core/identity/libraryRef';
 import { getHost } from '@beaver/agent-ui/host';
+import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { ToolResultView } from './ToolResultView';
+import { tableMessages } from './ToolResultView';
+import { TableResultView } from './toolResultViews/TableResultView';
 import {
     AlertIcon,
     ArrowDownIcon,
@@ -40,13 +43,15 @@ function requestedTitle(part: ToolCallPart): string | null {
 }
 
 /**
- * A table write (`create_table`, `edit_rows`, `edit_table`, `fill_table`) as a
- * card in the run, shaped like the agent-action cards for notes: a bordered
- * header carrying the tool label and the table title, an open control on the
- * right, and a body with the call's summary and any recovery notice.
+ * A table write (`create_table`, `edit_table`, `fill_table`) as a card in the
+ * run, shaped like the agent-action cards for notes: a bordered header with
+ * the tool label and the table title, an open link on the right, and a body
+ * with the call's summary above Reveal / Open buttons.
  *
- * The header opens the current snapshot through the navigation host; the body
- * is the ordinary tool-result view, so the outcome copy is defined once.
+ * The card starts collapsed: the table itself opens in a background tab when
+ * it is created, so the summary is there on demand rather than in the way of
+ * the answer. Status notices (declined, partial, rejected rows) sit under the title
+ * so they read without expanding.
  */
 export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     part,
@@ -57,17 +62,15 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
 }) => {
     const status = getToolCallStatusFromResult(result, runStatus);
     const hasResult = result !== undefined;
-    const record = result?.part_kind === 'tool-return' ? tableRecordFromMetadata(result.metadata) : null;
-    const notices = hasResult ? tableResultMessages(result.content) : [];
+    const isReturn = result?.part_kind === 'tool-return';
+    const record = isReturn ? tableRecordFromMetadata(result.metadata) : null;
+    const notices = isReturn ? tableMessages(result) : [];
 
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
-
-    // Both the summary and a recovery notice are short and actionable, so the
-    // card opens on arrival like a created note does; the user may fold it.
-    const canExpand = result?.part_kind === 'tool-return' && (record !== null || notices.length > 0);
-    const isExpanded = (expansionState[expansionKey] ?? canExpand) && canExpand;
+    const canExpand = record !== null;
+    const isExpanded = (expansionState[expansionKey] ?? false) && canExpand;
     const toggleExpanded = () => {
         if (canExpand) setExpanded({ key: expansionKey, expanded: !isExpanded });
     };
@@ -75,33 +78,52 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const [isHovered, setIsHovered] = useState(false);
     const [openMessage, setOpenMessage] = useState('');
     const tableKey = record?.reference.key ?? null;
-    const handleOpen = useCallback(async () => {
+
+    // The table opens beside the surface that was clicked, so the origin comes
+    // from the clicked element rather than the newest window.
+    const handleOpen = useCallback(async (event: React.SyntheticEvent) => {
         if (!tableKey) return;
+        const origin = (event.currentTarget as Element).ownerDocument?.defaultView ?? null;
         const open = getHost().navigation?.openTable;
         if (!open) {
             setOpenMessage('Table provider unavailable.');
             return;
         }
-        const outcome = await open(tableKey).catch(() => ({ error: 'Table provider unavailable.' }));
+        const outcome = await open(tableKey, origin)
+            .catch(() => ({ error: 'Table provider unavailable.' }));
         setOpenMessage('error' in outcome ? outcome.error : (outcome.warning ?? ''));
+    }, [tableKey]);
+
+    const handleReveal = useCallback(() => {
+        const parsed = tableKey ? parseItemReference(tableKey) : null;
+        if (!parsed) return;
+        getHost().navigation?.revealInLibrary({
+            library_id: parsed.library_id ?? UNRESOLVED_LIBRARY_ID,
+            library_ref: parsed.library_ref,
+            zotero_key: parsed.zotero_key,
+        });
     }, [tableKey]);
 
     const isInProgress = status === 'in_progress';
     const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
+    const isFailed = status === 'error' || (isReturn && !record && notices.length > 0);
     const getIcon = () => {
         if (isInProgress && (runStatus === 'canceled' || runStatus === 'error')) return AlertIcon;
         if (isInProgress) return Spinner;
         if (isHovered && canExpand) return isExpanded ? ArrowDownIcon : ArrowRightIcon;
-        if (status === 'error') return AlertIcon;
+        if (isFailed) return AlertIcon;
         return TableIcon;
     };
-    const iconClassName = status === 'error' && !(isHovered && canExpand) ? 'color-error' : undefined;
+    const iconClassName = isFailed && !(isHovered && canExpand) ? 'color-error' : undefined;
 
     const label = TOOL_BASE_LABELS[part.tool_name] ?? 'Table';
-    // A returned record always names its table, even when the stored title is
-    // empty; only a call still in flight falls back to the requested title.
-    const title = record ? (record.reference.title || 'Untitled table') : requestedTitle(part);
+    // The card renders the call as recorded, title included; only a call
+    // without a record falls back to the title the model asked for.
+    const title = record
+        ? (record.reference.title || 'Untitled table')
+        : requestedTitle(part);
     const progress = isInProgress && runStatus === 'in_progress' ? part.progress : undefined;
+    const statusLines = [openMessage, ...notices].filter(Boolean);
 
     return (
         <div
@@ -132,9 +154,11 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
                             {progress && (
                                 <span className="font-color-tertiary shimmer-text">{progress}</span>
                             )}
-                            {openMessage && (
-                                <span role="status" className="font-color-tertiary">{openMessage}</span>
-                            )}
+                            {statusLines.map((line, index) => (
+                                <span key={index} role="status" className="font-color-secondary text-sm">
+                                    {line}
+                                </span>
+                            ))}
                         </div>
                     </div>
                 </button>
@@ -158,9 +182,18 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
                 </div>
             </div>
 
-            {isExpanded && result?.part_kind === 'tool-return' && (
-                <div id={`tool-result-${part.tool_call_id}`}>
-                    <ToolResultView result={result} />
+            {isExpanded && record && (
+                <div id={`tool-result-${part.tool_call_id}`} className="display-flex flex-col">
+                    <TableResultView view={{ view_type: 'table', record }} />
+                    <div className="display-flex flex-row items-center gap-2 px-2 py-2">
+                        <div className="flex-1" />
+                        <Button variant="outline" onClick={handleReveal} className="flex-none whitespace-nowrap">
+                            Reveal
+                        </Button>
+                        <Button variant="outline" onClick={handleOpen} className="flex-none whitespace-nowrap">
+                            Open table
+                        </Button>
+                    </div>
                 </div>
             )}
         </div>

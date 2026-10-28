@@ -1,7 +1,6 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { NoteWriterHost, SaveNoteRequest, SavedNoteReference } from '@beaver/agent-ui/host/types';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
-import { getSelectedCollection as getSelectedZoteroCollection } from '../../../src/utils/zoteroSelection';
 import { isLibraryEditable } from '../../../src/utils/zoteroUtils';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { runWindowOperation } from '../../runtime/libraryMutation';
@@ -13,12 +12,7 @@ import {
     wrapWithSchemaVersion,
 } from '../../utils/noteActions';
 import { selectItem, selectItemById } from '../../utils/selectItem';
-import { getCurrentLibrary, getZoteroTargetContextSync } from '../../utils/zoteroTargetContext';
-
-function isInReader(): boolean {
-    const win = getContextWindow();
-    return win.Zotero_Tabs?.selectedType === 'reader';
-}
+import { getCurrentLibrary, getLibraryViewCollection, getZoteroTargetContextSync, isLibraryTabSelected } from '../../utils/zoteroTargetContext';
 
 function getThreadId(request: SaveNoteRequest): string | null {
     return request.format.threadId ?? store.get(currentThreadIdAtom) ?? null;
@@ -36,11 +30,6 @@ function assembleNoteHtml(request: SaveNoteRequest): string {
 
     const brandingHtml = threadId && runId ? getBeaverNoteFooterHTML(threadId, runId) : '';
     return `${request.contentHtml}${brandingHtml}`;
-}
-
-function getSelectedCollection(): Zotero.Collection | null {
-    const zp = getContextWindow()?.ZoteroPane;
-    return getSelectedZoteroCollection(zp);
 }
 
 /** Zotero implementation of {@link NoteWriterHost}. */
@@ -69,8 +58,11 @@ export const zoteroNoteWriter: NoteWriterHost = {
     async saveNote(request: SaveNoteRequest): Promise<SavedNoteReference | null> {
         const win = getContextWindow();
         const context = getZoteroTargetContextSync(win);
-        const selectedCollection = !request.asChild ? getSelectedCollection() : null;
-        const inReader = isInReader();
+        // Outside the library tab (a reader, a Beaver tab) the library pane's
+        // collection is hidden: the note is not filed there, and saving does
+        // not switch tabs to reveal it.
+        const inLibraryTab = isLibraryTabSelected(win);
+        const selectedCollection = !request.asChild ? getLibraryViewCollection(win) : null;
         if (typeof context.targetLibraryId !== 'number') {
             throw new Error('Could not determine target library');
         }
@@ -93,7 +85,7 @@ export const zoteroNoteWriter: NoteWriterHost = {
 
         // The note is already saved; a failed reveal must not invite a duplicate retry.
         try {
-            if (!inReader && !win.closed) {
+            if (inLibraryTab && !win.closed) {
                 if (parentReference) {
                     await selectItem(newNote, true, win);
                 } else {

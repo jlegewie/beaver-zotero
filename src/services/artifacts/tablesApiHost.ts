@@ -1,4 +1,4 @@
-import { registerTableShadowRestore } from './tableStore';
+import { checkShadowRestore, registerTableShadowRestore } from './tableStore';
 /**
  * Publishes the esbuild bundle's stored-table surfaces on the shared global.
  *
@@ -14,6 +14,7 @@ import { registerTableShadowRestore } from './tableStore';
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import { openTable } from '../../ui/openTable';
+import { listTableTabs } from '../../ui/tableTab';
 import {
     describeTableItemPane,
     isTableItemPaneRegistered,
@@ -22,7 +23,9 @@ import {
 import { inspectTableShadow } from './recoveryShadow';
 import {
     TABLE_SHADOW_RESTORE_UNAVAILABLE,
+    clearTableEditSessions,
     clearTableWriteLocks,
+    tableEditSessions,
     tableLocalCommands,
     getTableLocalCommands,
     getTableShadowRestore,
@@ -45,6 +48,9 @@ export function registerTablesApi(): void {
         local: { commands: getTableLocalCommands },
         listViews: () => listReaderTableViews(),
         openInReader: (item, options) => openTableInReader(item, options),
+        tabs: {
+            list: () => listTableTabs(),
+        },
         itemPane: {
             isRegistered: () => isTableItemPaneRegistered(),
             paneID: () => tableItemPaneID(),
@@ -53,6 +59,7 @@ export function registerTablesApi(): void {
         shadow: {
             // Reading the shadow is esbuild-safe, so it is answered here.
             inspect: (ref, observed) => inspectTableShadow(ref, observed ?? null),
+            check: (ref) => checkShadowRestore(ref),
             // The plugin-owned store coordinates restoration with every writer.
             restore: async (ref) => {
                 const restore = getTableShadowRestore();
@@ -71,6 +78,7 @@ export function registerTablesApi(): void {
     // Seed the registry in the plugin realm (`onShutdown` tears it down), not
     // in whichever window bundle first takes a lock.
     tableWriteLocks();
+    tableEditSessions();
     tableLocalCommands();
     logger('tablesApiHost: registered Zotero.__beaverTables', 3);
 }
@@ -90,6 +98,7 @@ export function unregisterTablesApi(): void {
     // Dropped with the realm that created it. Teardown means no write is in
     // flight to lose its turn.
     clearTableWriteLocks();
+    clearTableEditSessions();
 }
 
 /** Withdraw the plugin-owned shadow restore binding at plugin shutdown. */

@@ -84,6 +84,10 @@ async function itemIdsWithAttachments(itemIds: number[]): Promise<Set<number>> {
     return withAttachments;
 }
 
+/** Content types that make a web snapshot of the same item redundant. */
+const DOCUMENT_CONTENT_TYPES = new Set(['application/pdf', 'application/epub+zip']);
+const SNAPSHOT_CONTENT_TYPE = 'text/html';
+
 /**
  * The non-trashed file attachments of the given items, as item ids.
  * The population of an attachment scope: the filters describe bibliographic
@@ -93,28 +97,49 @@ async function itemIdsWithAttachments(itemIds: number[]): Promise<Set<number>> {
  * reading refuse them, and a library where each item has a web link (e.g. one
  * added by a sync tool) would otherwise spend a large share of every tranche on
  * rows that can only come back blocked.
+ *
+ * With `skipSiblingSnapshots`, a web snapshot is left out when its item also
+ * has a PDF or EPUB: the snapshot is usually the publisher's landing page, and
+ * working it beside the document treats one paper as two.
  */
-async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
-    const attachmentIds: number[] = [];
+async function attachmentIdsForItems(
+    itemIds: number[],
+    skipSiblingSnapshots = false,
+): Promise<{ ids: number[]; skippedSnapshots: number }> {
+    const rows: { itemID: number; parentItemID: number; contentType: string | null }[] = [];
 
     for (let i = 0; i < itemIds.length; i += SQL_CHUNK_SIZE) {
         const chunk = itemIds.slice(i, i + SQL_CHUNK_SIZE);
         const placeholders = chunk.map(() => '?').join(', ');
         await Zotero.DB.queryAsync(
-            'SELECT ia.itemID FROM itemAttachments ia '
+            'SELECT ia.itemID, ia.parentItemID, ia.contentType FROM itemAttachments ia '
                 + 'LEFT JOIN deletedItems di ON di.itemID = ia.itemID '
                 + `WHERE ia.parentItemID IN (${placeholders}) AND di.itemID IS NULL `
                 + 'AND ia.linkMode != ?',
             [...chunk, Zotero.Attachments.LINK_MODE_LINKED_URL],
             {
                 onRow: (row: any) => {
-                    attachmentIds.push(row.getResultByIndex(0));
+                    rows.push({
+                        itemID: row.getResultByIndex(0),
+                        parentItemID: row.getResultByIndex(1),
+                        contentType: row.getResultByIndex(2),
+                    });
                 },
             },
         );
     }
 
-    return attachmentIds;
+    if (!skipSiblingSnapshots) {
+        return { ids: rows.map(row => row.itemID), skippedSnapshots: 0 };
+    }
+    const parentsWithDocument = new Set(
+        rows
+            .filter(row => DOCUMENT_CONTENT_TYPES.has(row.contentType ?? ''))
+            .map(row => row.parentItemID),
+    );
+    const kept = rows.filter(row =>
+        row.contentType !== SNAPSHOT_CONTENT_TYPE || !parentsWithDocument.has(row.parentItemID));
+    return { ids: kept.map(row => row.itemID), skippedSnapshots: rows.length - kept.length };
 }
 
 /**
@@ -518,6 +543,7 @@ export async function handleResolvePopulationRequest(
         // 'regular' default: a bogus value must not widen the population.
         const itemCategory = request.item_category === 'attachment' ? 'attachment' : 'regular';
         const includeStandalone = itemCategory === 'attachment' && request.include_standalone_attachments === true;
+        const skipSiblingSnapshots = itemCategory === 'attachment' && request.skip_sibling_snapshots === true;
 
         // A filter this handler cannot apply must fail the request, never be
         // dropped: the population it resolves is about to be mutated, and a
@@ -804,9 +830,17 @@ export async function handleResolvePopulationRequest(
         if (standaloneIds.length > 0) {
             standaloneIds = await withoutLinkedUrlAttachments(standaloneIds);
         }
-        const matchedIds = itemCategory === 'attachment'
-            ? [...await attachmentIdsForItems(parentIds), ...standaloneIds]
-            : itemIds;
+        let matchedIds = itemIds;
+        let skippedSnapshots = 0;
+        if (itemCategory === 'attachment') {
+            const children = await attachmentIdsForItems(parentIds, skipSiblingSnapshots);
+            matchedIds = [...children.ids, ...standaloneIds];
+            skippedSnapshots = children.skippedSnapshots;
+        }
+        // Set only when asked for: presence tells the caller this build applied it.
+        const siblingSnapshots = skipSiblingSnapshots
+            ? { sibling_snapshots_skipped: skippedSnapshots }
+            : {};
 
         // 0 is a real cap (return no ids, still report the count). Only omit /
         // NaN / negative fall back to the backend default.
@@ -846,6 +880,7 @@ export async function handleResolvePopulationRequest(
                 // WIDEN the population.
                 any_conditions_applied: true,
                 standalone_attachments_included: includeStandalone,
+                ...siblingSnapshots,
                 excluded_count: 0,
             };
         }
@@ -901,6 +936,7 @@ export async function handleResolvePopulationRequest(
             // WIDEN the population.
             any_conditions_applied: true,
             standalone_attachments_included: includeStandalone,
+            ...siblingSnapshots,
             // Always set, including 0. Presence tells the caller this build
             // applied `exclude_item_ids`.
             excluded_count: excludedCount,

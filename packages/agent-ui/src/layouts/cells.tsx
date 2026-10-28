@@ -5,12 +5,12 @@ import {
     annotationTitle,
     annotationTypeLabel,
     columnWrap,
+    selectOption,
     type Cell,
     type CellValue,
     type Column,
     type Details,
     type Row,
-    type SelectColor,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { itemTypeToIconName } from "@beaver/agent-core/types/citations";
@@ -37,17 +37,15 @@ import { type TextRenderer } from "./tableView";
 export type CellVariant = "cell" | "detail";
 
 /**
- * One cell, in four states that must not be confused with one another:
+ * One cell, in states that must not be confused with one another:
  *
- * - **pending** — a producer is still filling it. A shimmer block sized like
- *   the text that is coming, not a spinner: a filling column would otherwise
- *   strobe once it has more than a handful of rows.
- * - **error** — the reason in words, with the retry the caller supplies. Never
+ * - **failed** — the reason in words, with the retry the caller supplies. Never
  *   a red wash and never a dimmed row: dimming hides the data that did arrive.
- * - **empty** — an em dash. In an extraction table this is a finding ("the
- *   paper does not report this"), so it has to read as a value.
- * - **filled** — the value, clamped to the row height unless the column opts
- *   out with `wrap: "nowrap"`.
+ * - **not reported** — a finding ("the paper does not report this"), so it
+ *   reads as a value; unattempted and cleared cells show nothing.
+ * - **answered** — the value, clamped to the row height unless the column opts
+ *   out with `wrap: "nowrap"`, marked when it was taken from title and abstract
+ *   only.
  */
 
 export interface CellViewProps {
@@ -76,23 +74,20 @@ export function CellView({
 }: CellViewProps): React.ReactElement {
     const states = (
         <>
-            {cell?.flag ? (
-                <small>
+            {cell?.unsure ? <small> · Unsure</small> : null}
+            {cell?.stale ? <small> · Stale</small> : null}
+            {cell?.provenance === "metadata" ? (
+                <small
+                    className="bt-metadata-only"
+                    title="Answered from the title and abstract; the paper itself was not read"
+                >
                     {" "}
-                    · {cell.flag === "unsure" ? "Unsure" : "Unsourced"}
+                    · From title and abstract
                 </small>
             ) : null}
-            {cell?.stale ? <small> · Stale</small> : null}
         </>
     );
-    if (cell?.status === "pending")
-        return (
-            <span>
-                <PendingCell />
-                {states}
-            </span>
-        );
-    if (cell?.status === "error")
+    if (cell?.outcome === "failed")
         return (
             <span>
                 <ErrorCell message={cell.error} onRetry={onRetry} />
@@ -108,7 +103,11 @@ export function CellView({
             <span className="bt-empty">
                 {cell?.outcome === "not_reported" ? "Not reported" : ""}
                 {states}
-                {cell?.provenance === "user" ? " · Edited by you" : ""}
+                {cell?.outcome === "cleared"
+                    ? " · Cleared by you"
+                    : cell?.provenance === "user"
+                      ? " · Edited by you"
+                      : ""}
             </span>
         );
 
@@ -154,15 +153,6 @@ function overflowClass(value: CellValue, column: Column): string {
     if (value.kind === "text" || value.kind === "link")
         return columnWrap(column) === "clamp" ? "bt-clamp" : "bt-nowrap";
     return "bt-nowrap";
-}
-
-function PendingCell(): React.ReactElement {
-    return (
-        <span className="bt-pending" role="img" aria-label="Filling">
-            <span className="bt-skeleton" style={{ width: "92%" }} />
-            <span className="bt-skeleton" style={{ width: "68%" }} />
-        </span>
-    );
 }
 
 function ErrorCell({
@@ -320,10 +310,6 @@ export function CellValueView({
     }
 }
 
-function selectColor(label: string, column: Column): SelectColor {
-    return column.options?.find((o) => o.label === label)?.color ?? "gray";
-}
-
 function SelectPill({
     label,
     column,
@@ -333,13 +319,25 @@ function SelectPill({
     column: Column;
     onClick?: (label: string) => void;
 }): React.ReactElement {
-    const className = `bt-pill bt-pill-${selectColor(label, column)}`;
-    if (!onClick) return <span className={className}>{label}</span>;
+    const option = selectOption(column, label);
+    const className = `bt-pill bt-pill-${option?.color ?? "gray"}`;
+    // A defined category explains itself on hover.
+    const definition = option?.description || undefined;
+    if (!onClick)
+        return (
+            <span className={className} title={definition}>
+                {label}
+            </span>
+        );
     return (
         <button
             type="button"
             className={`${className} bt-pill-button`}
-            title={`Filter by ${label}`}
+            title={
+                definition
+                    ? `${label}: ${definition}\n\nFilter by ${label}`
+                    : `Filter by ${label}`
+            }
             onClick={(e) => {
                 e.stopPropagation();
                 onClick(label);
@@ -383,7 +381,7 @@ function ReferenceValue({
                     <Icon icon={FileIcon} size={15} className="bt-ref-icon" />
                 )
             }
-            title={value.display_name}
+            title={value.title ?? value.display_name}
             meta={
                 value.subtitle || value.venue ? (
                     <>

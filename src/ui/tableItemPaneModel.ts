@@ -39,6 +39,10 @@ export interface TableSectionConflict {
     shadowVersion: number;
     /** Whether the retained spec is still here to be restored. */
     restorable: boolean;
+    /** False when the library is excluded or read-only, so nothing can be restored into it. */
+    writable?: boolean;
+    /** True when the table itself refuses the restore's write right now (e.g. it is in the trash). */
+    unavailable?: boolean;
 }
 
 export interface TableSectionInput {
@@ -93,7 +97,8 @@ export interface TableSectionFields {
     cells: number;
     filled: number;
     unsure: number;
-    unsourced: number;
+    /** Cells answered from title and abstract only. */
+    metadataOnly: number;
     stale: number;
     version: number | null;
     /** The oldest version still in the log, or null when the log is empty. */
@@ -111,7 +116,7 @@ export interface TableSectionFields {
     dimensionsLine: string;
     /** "58 of 84 cells filled", or empty when there are no cells. */
     coverageLine: string;
-    /** "3 unsure · 1 unsourced · 2 stale", or empty when nothing is flagged. */
+    /** "3 unsure · 1 from title and abstract · 2 stale", or empty when nothing is flagged. */
     flagsLine: string;
     /** "Version 12 · history goes back to v7", or empty when unknown. */
     versionLine: string;
@@ -255,7 +260,7 @@ function emptyFields(annotations: number): TableSectionFields {
         cells: 0,
         filled: 0,
         unsure: 0,
-        unsourced: 0,
+        metadataOnly: 0,
         stale: 0,
         version: null,
         oldestVersion: null,
@@ -330,25 +335,29 @@ export function buildTableSectionFields(
         return fields;
     }
 
+    // Counted over the question columns, as the chat's table cards count:
+    // reference, year and identifier are filled by Beaver, not answered.
+    const details = Object.values(summary.columns_detail ?? {});
+    const systemColumns = details.filter((detail) => detail?.system).length;
     const rows = Math.max(0, summary.rows);
-    const columns = Math.max(0, summary.columns);
+    const columns = Math.max(0, summary.columns - systemColumns);
     const cells = rows * columns;
 
     let filled = 0;
     let unsure = 0;
-    let unsourced = 0;
+    let metadataOnly = 0;
     let stale = 0;
-    for (const detail of Object.values(summary.columns_detail ?? {})) {
-        if (!detail) continue;
-        filled += detail.filled ?? 0;
+    for (const detail of details) {
+        if (!detail || detail.system) continue;
+        filled += detail.answered ?? 0;
         unsure += detail.unsure ?? 0;
-        unsourced += detail.unsourced ?? 0;
+        metadataOnly += detail.metadata_only ?? 0;
         stale += detail.stale ?? 0;
     }
 
     const flags: string[] = [];
     if (unsure) flags.push(`${unsure} unsure`);
-    if (unsourced) flags.push(`${unsourced} unsourced`);
+    if (metadataOnly) flags.push(`${metadataOnly} from title and abstract`);
     if (stale) flags.push(`${stale} stale`);
 
     const annotationWarning = annotationsBeforeLastWrite > 0;
@@ -360,7 +369,7 @@ export function buildTableSectionFields(
         cells,
         filled,
         unsure,
-        unsourced,
+        metadataOnly,
         stale,
         version,
         oldestVersion,
@@ -430,9 +439,13 @@ function conflictLineFor(conflict: TableSectionConflict): string {
             ? `Showing a different version ${conflict.documentVersion} from another device`
             : `Showing version ${conflict.documentVersion} from another device`;
     const wrote = `this device last wrote version ${conflict.shadowVersion}`;
-    const tail = conflict.restorable
-        ? `your version ${conflict.shadowVersion} is kept here and can be restored as a new version.`
-        : `but Beaver no longer keeps a copy of your version ${conflict.shadowVersion}.`;
+    const tail = !conflict.restorable
+        ? `but Beaver no longer keeps a copy of your version ${conflict.shadowVersion}.`
+        : conflict.writable === false
+            ? `your version ${conflict.shadowVersion} is kept here, but Beaver cannot write to this library to restore it.`
+            : conflict.unavailable
+                ? `your version ${conflict.shadowVersion} is kept here, but the table cannot be restored right now (it may be in the trash).`
+                : `your version ${conflict.shadowVersion} is kept here and can be restored as a new version.`;
     return `${showing}; ${wrote}. Nothing was merged and nothing was overwritten — ${tail}`;
 }
 

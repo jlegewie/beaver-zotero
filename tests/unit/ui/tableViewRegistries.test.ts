@@ -31,12 +31,17 @@ vi.mock('../../../src/services/artifacts/view/enhanceTableDocument', () => ({
     countCitationMarkers,
 }));
 
+const readTable = vi.hoisted(() => vi.fn());
+
 vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({
     isTableItem,
     loadTableItemFields: vi.fn(async () => undefined),
+    readTable,
 }));
 
+import { tableSpecHash } from '../../../src/services/artifacts/recoveryShadow';
 import {
+    checkSnapshotFreshness,
     markTableReadersStale,
     closeStaleTableReaders,
     initReaderTableViews,
@@ -44,6 +49,7 @@ import {
     cleanupReaderTableViewsForWindow,
     listReaderTableViews,
     openTableInReader,
+    setTableReaderRedirect,
 } from '../../../src/services/artifacts/view/readerTableView';
 
 let savedZotero: any;
@@ -194,6 +200,40 @@ describe('the reader table view registry', () => {
         expect(readers).not.toContain(reader);
     });
 
+    it('after a render, marks only snapshots that do not show the rendered spec', async () => {
+        await openTableInReader(tableItem(1, 'KEY1'));
+        const reader = readers[0];
+        const current = 'a'.repeat(64);
+        const doc = new JSDOM(`<html data-beaver-table="1" data-beaver-spec-sha256="${current}"><body>Answer</body></html>`).window.document;
+        reader._internalReader._primaryView.iframeDocument = doc;
+        markTableReadersStale({ libraryID: 1, key: 'KEY1' }, current);
+        expect(doc.querySelector('[data-beaver-table-outdated]')).toBeNull();
+        markTableReadersStale({ libraryID: 1, key: 'KEY1' }, 'b'.repeat(64));
+        expect(doc.querySelectorAll('[data-beaver-table-outdated]')).toHaveLength(1);
+    });
+
+    it('marks a natively opened snapshot of an older revision and asks for repair', async () => {
+        await openTableInReader(tableItem(1, 'KEY1'));
+        const reader = readers[0];
+        const spec = { spec_version: 2, key: 'KEY1', version: 3, columns: [], rows: [] };
+        readTable.mockResolvedValue({ spec, version: 3 });
+        const run = vi.fn(async () => ({ recovered: [] }));
+        (Zotero as any).Beaver = { ...(Zotero as any).Beaver, libraryOperations: { run } };
+        const ref = { libraryID: 1, key: 'KEY1' };
+
+        const current = new JSDOM(`<html data-beaver-table="1" data-beaver-spec-sha256="${await tableSpecHash(spec as any)}"><body>New</body></html>`).window.document;
+        reader._internalReader._primaryView.iframeDocument = current;
+        await checkSnapshotFreshness(ref, current);
+        expect(current.querySelector('[data-beaver-table-outdated]')).toBeNull();
+        expect(run).not.toHaveBeenCalled();
+
+        const older = new JSDOM(`<html data-beaver-table="1" data-beaver-spec-sha256="${'b'.repeat(64)}"><body>Old</body></html>`).window.document;
+        reader._internalReader._primaryView.iframeDocument = older;
+        await checkSnapshotFreshness(ref, older);
+        expect(older.querySelector('[data-beaver-table-outdated]')).not.toBeNull();
+        expect(run).toHaveBeenCalledWith('table_openTable', [ref]);
+    });
+
     it('recognizes an outdated notice left across plugin reload', async () => {
         const reader = fakeReader(main.win, 1, 'tab-1');
         reader._internalReader._primaryView.iframeDocument = new JSDOM('<body><div data-beaver-table-outdated="true">Reopen</div></body>').window.document;
@@ -241,6 +281,41 @@ describe('the reader table view registry', () => {
 
         expect(listReaderTableViews().map((view) => view.key)).toEqual(['KEY1']);
         expect(dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('hands a reader tab on a table to the Beaver tab instead of enhancing it', async () => {
+        const redirect = vi.fn(() => true);
+        setTableReaderRedirect(redirect);
+        try {
+            const reader = fakeReader(main.win, 5, 'tab-5');
+            readers.push(reader);
+            (Zotero.Reader as any).registerEventListener = vi.fn();
+            initReaderTableViews();
+            await vi.waitFor(() => expect(redirect).toHaveBeenCalledWith(reader, expect.objectContaining({ id: 5 })));
+            expect(enhanceTableDocument).not.toHaveBeenCalled();
+        } finally {
+            setTableReaderRedirect(null);
+        }
+    });
+
+    it('keeps enhancing a reader window, and the reader the dev endpoint opened on purpose', async () => {
+        const redirect = vi.fn(() => true);
+        setTableReaderRedirect(redirect);
+        try {
+            await openTableInReader(tableItem(1, 'KEY1'));
+            expect(enhanceTableDocument).toHaveBeenCalledOnce();
+
+            const windowReader = fakeReader(main.win, 6, undefined);
+            readers.push(windowReader);
+            (Zotero.Reader as any).registerEventListener = vi.fn();
+            const handler = () => vi.mocked(Zotero.Reader.registerEventListener).mock.calls[0][1] as any;
+            initReaderTableViews();
+            handler()({ reader: windowReader });
+            await vi.waitFor(() => expect(listReaderTableViews().map((v) => v.key)).toContain('KEY6'));
+            expect(redirect).not.toHaveBeenCalledWith(windowReader, expect.anything());
+        } finally {
+            setTableReaderRedirect(null);
+        }
     });
 
     it('disposes each view once, however many times cleanup runs', async () => {

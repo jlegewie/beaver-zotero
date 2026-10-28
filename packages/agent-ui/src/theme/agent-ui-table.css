@@ -1361,3 +1361,89 @@
     white-space: nowrap;
     border: 0;
 }
+
+/* ==========================================================================
+ * Full-size surface — the Beaver tab
+ * ========================================================================== */
+
+/* A warning about the whole table, between the toolbar and the grid. */
+.beaver-root .bt-notice {
+    flex: 0 0 auto;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.92rem;
+    color: var(--fill-primary);
+    background:
+        linear-gradient(
+            var(--tag-yellow-quarternary),
+            var(--tag-yellow-quarternary)
+        ),
+        var(--material-background);
+    border-bottom: 1px solid var(--tag-yellow-tertiary);
+}
+
+/* Fit to width: the table takes the surface's width and never scrolls
+   sideways; columns past it are listed in the expanded row. */
+.beaver-root .bt-surface-fit .bt-scroll {
+    overflow-x: hidden;
+}
+
+.beaver-root .bt-fit-note {
+    padding: 0.45rem 1.25rem;
+    font-size: 0.88rem;
+    color: var(--fill-secondary);
+    border-bottom: 1px solid var(--fill-quinary);
+}
+
+/* A windowed grid's stand-in for the rows it has not rendered. */
+.beaver-root .bt-spacer-row > td {
+    padding: 0;
+    border: 0;
+}
+
+/* The sort control at rest, where the surface wants sorting discoverable. */
+.beaver-root .bt-surface-discoverable .bt-th-sortable .bt-th-sort {
+    opacity: 0.35;
+}
+
+.beaver-root .bt-surface-discoverable .bt-th-sortable:hover .bt-th-sort {
+    opacity: 0.7;
+}
+
+/* Metadata-only cells: answered from the title and abstract, the paper itself
+   not read. Marked on the cell and counted in the column header. */
+.beaver-root .bt-td-metadata {
+    box-shadow: inset 3px 0 0 var(--tag-orange-secondary);
+}
+
+.beaver-root .bt-metadata-only {
+    color: var(--tag-orange-primary);
+    font-weight: 500;
+}
+
+/* A row answered from metadata whose item has since gained a document: a fill
+   now would read it. Worked out when the table is shown, never stored. */
+.beaver-root .bt-improvable {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    padding: 0 0.35rem;
+    border-radius: 0.3rem;
+    background: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.35rem;
+    white-space: nowrap;
+}
+
+.beaver-root .bt-th-meta {
+    flex: 0 0 auto;
+    padding: 0 0.35rem;
+    border-radius: 0.3rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.35rem;
+    white-space: nowrap;
+    color: var(--tag-orange-primary);
+    background: var(--tag-orange-quarternary);
+    cursor: help;
+}

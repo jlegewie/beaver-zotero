@@ -4,7 +4,10 @@ vi.mock("uuid", async (importOriginal) => {
     return { ...actual, v4: vi.fn(actual.v4) };
 });
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { VoiceService } from "../../../src/services/voice/voiceService";
+import {
+    monotonicNow,
+    VoiceService,
+} from "../../../src/services/voice/voiceService";
 import {
     DevelopmentVoiceHarness,
     type VoiceHarnessRequest,
@@ -416,4 +419,22 @@ it("preserves the active upload callback when another start is busy", () => {
     expect(h.service.uploadContext).toBe(context);
     h.service.dispose();
     expect(h.service.uploadContext).toBeUndefined();
+});
+
+describe("monotonicNow", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it("reads ChromeUtils.now on Firefox 153, where Cu.now is gone", () => {
+        vi.stubGlobal("ChromeUtils", { now: () => 42 });
+        vi.stubGlobal("Cu", {});
+        expect(monotonicNow()).toBe(42);
+    });
+
+    it("falls back to Cu.now on older platforms", () => {
+        vi.stubGlobal("ChromeUtils", {});
+        vi.stubGlobal("Cu", { now: () => 7 });
+        expect(monotonicNow()).toBe(7);
+    });
 });

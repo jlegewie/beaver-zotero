@@ -1,4 +1,10 @@
-import React, { useCallback, useMemo } from "react";
+import React, {
+    useCallback,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import {
     anchorColumn,
     cellExpandedFields,
@@ -6,10 +12,13 @@ import {
     columnAlign,
     isColumnFilterable,
     isColumnSortable,
+    isMetadataOnly,
     type Column,
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
+import { citationForEvidence } from "@beaver/agent-core/layouts/tableCitations";
+import Citation from "../chat/Citation";
 import { ArrowRightIcon, Icon, TickIcon } from "../icons";
 import type { MenuItem } from "../primitives/ContextMenu";
 import { CellView, DetailsView } from "./cells";
@@ -17,11 +26,14 @@ import { ColumnHeaderCell } from "./columnHeader";
 import { RowActionsView } from "./rowActions";
 import {
     defaultColumnWidth,
+    fitColumns,
+    fitsToWidth,
     renderPlainText,
     tableMinWidth,
     type TextRenderer,
 } from "./tableView";
 import { useOptionalTableState, type TableState } from "./useTableState";
+import { useRowWindow } from "./useRowWindow";
 
 export type { TableDensity } from "./tableView";
 
@@ -48,10 +60,27 @@ export interface DataTableProps {
     columnMenuItems?: (column: Column) => MenuItem[];
     /** Offered beside a cell error; absent ⇒ no retry control. */
     onRetryCell?: (row: Row, column: Column) => void;
+    /**
+     * Rows answered from title and abstract whose item has since gained a
+     * document, worked out by the host when the table is shown; a fill now
+     * would answer them from it. Marked "Can be improved" beside the anchor.
+     */
+    improvableRows?: ReadonlySet<string>;
     /** Shown when the table has no rows at all. */
     emptyText?: string;
     /** Shown when filters hide every row. */
     filteredEmptyText?: string;
+    /**
+     * Put only the rows near the viewport in the DOM. Needs a `.bt-scroll`
+     * ancestor (the surface's scroll container) to measure against; without
+     * one every row renders.
+     */
+    virtualize?: boolean;
+    /**
+     * Never scroll sideways: the table takes the surface's width, and columns
+     * that would overflow it are listed in the expanded row instead.
+     */
+    fitWidth?: boolean;
     className?: string;
 }
 
@@ -85,13 +114,20 @@ export function DataTable({
     renderRowDetail,
     columnMenuItems,
     onRetryCell,
+    improvableRows,
     emptyText = "No rows",
     filteredEmptyText = "No rows match these filters",
+    virtualize = false,
+    fitWidth: fitWidthRequested = false,
     className,
 }: DataTableProps): React.ReactElement {
     const state = useOptionalTableState(table, externalState);
+    const rootRef = useRef<HTMLDivElement>(null);
+    const bodyRef = useRef<HTMLTableSectionElement>(null);
 
     const capabilities = table.capabilities ?? {};
+    const fitWidth = fitsToWidth(table, fitWidthRequested);
+    const availableWidth = useAvailableWidth(rootRef, fitWidth);
     const sortable = capabilities.sortable ?? true;
     const filterable = capabilities.filterable ?? true;
     const density = state.density;
@@ -106,7 +142,7 @@ export function DataTable({
 
     // A narrow surface carries only the primary columns; the rest are listed in
     // the row detail rather than dropped, so nothing becomes unreachable.
-    const { visibleColumns, hiddenColumns } = useMemo(
+    const split = useMemo(
         () =>
             splitColumns(
                 table.columns,
@@ -116,6 +152,47 @@ export function DataTable({
             ),
         [table.columns, primaryColumnsOnly, anchor, state.hiddenColumns],
     );
+    // On a surface that never scrolls sideways, the columns past its width
+    // move into the expanded row with the others that are not columns here.
+    const { visibleColumns, hiddenColumns, overflowColumns } = useMemo(() => {
+        if (!fitWidth || !availableWidth)
+            return { ...split, overflowColumns: [] as Column[] };
+        const { fit, overflow } = fitColumns(
+            split.visibleColumns,
+            anchor?.id,
+            availableWidth.width,
+            availableWidth.remPx,
+        );
+        return {
+            visibleColumns: fit,
+            hiddenColumns: [...split.hiddenColumns, ...overflow],
+            overflowColumns: overflow,
+        };
+    }, [split, fitWidth, availableWidth, anchor]);
+
+    // How many cells of each column were answered from title and abstract
+    // alone, for the header. Over the whole table, not the filtered view: it
+    // describes the column.
+    const metadataCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        for (const row of table.rows)
+            for (const column of table.columns)
+                if (isMetadataOnly(row.cells[column.id]))
+                    counts.set(column.id, (counts.get(column.id) ?? 0) + 1);
+        return counts;
+    }, [table.rows, table.columns]);
+
+    const rowWindow = useRowWindow({
+        enabled: virtualize,
+        rows: state.rows,
+        expandedRows: state.expandedRows,
+        rootRef,
+        bodyRef,
+        layoutKey: `${density}|${visibleColumns.map((column) => column.id).join(",")}`,
+    });
+    const windowRows = virtualize
+        ? state.rows.slice(rowWindow.start, rowWindow.end)
+        : state.rows;
 
     const columnCount = visibleColumns.length + 1;
     const minWidth = useMemo(
@@ -123,18 +200,40 @@ export function DataTable({
         [visibleColumns, anchor],
     );
 
-    const selectClickFor = (column: Column) =>
-        filterable && isColumnFilterable(column)
-            ? (label: string) => state.toggleSelectFilter(column.id, label)
-            : undefined;
+    // Stable across renders that change nothing it reads, so a row whose own
+    // props did not change skips rendering (`TableRow` is memoised) — which is
+    // what keeps a windowed scroll to the rows entering the window.
+    const toggleSelectFilter = state.toggleSelectFilter;
+    const selectClickFor = useCallback(
+        (column: Column) =>
+            filterable && isColumnFilterable(column)
+                ? (label: string) => toggleSelectFilter(column.id, label)
+                : undefined,
+        [filterable, toggleSelectFilter],
+    );
 
     return (
         <div
-            className={`bt${className ? ` ${className}` : ""}`}
+            ref={rootRef}
+            className={`bt${fitWidth ? " bt-fit" : ""}${className ? ` ${className}` : ""}`}
             data-density={density}
             data-table-id={table.id}
         >
-            <table className="bt-table" style={{ minWidth }}>
+            {overflowColumns.length > 0 ? (
+                <div className="bt-fit-note" role="note">
+                    {overflowColumns.length === 1
+                        ? `${overflowColumns[0].header} does not fit beside the other columns; expand a row to read it, or hide a column to make room.`
+                        : `${overflowColumns.length} columns do not fit beside the others (${overflowColumns
+                              .map((c) => c.header)
+                              .join(
+                                  ", ",
+                              )}); expand a row to read them, or hide columns to make room.`}
+                </div>
+            ) : null}
+            <table
+                className="bt-table"
+                style={fitWidth ? undefined : { minWidth }}
+            >
                 <colgroup>
                     <col className="bt-col-rail" />
                     {visibleColumns.map((column) => (
@@ -176,18 +275,21 @@ export function DataTable({
                                 showDescription={hasQuestions}
                                 showProgress={hasProgress}
                                 menuItems={columnMenuItems?.(column)}
+                                metadataCount={metadataCounts.get(column.id)}
                             />
                         ))}
                     </tr>
                 </thead>
 
-                <tbody>
-                    {state.rows.map((row, index) => (
+                <tbody ref={bodyRef}>
+                    {rowWindow.padTop > 0 ? (
+                        <SpacerRow height={rowWindow.padTop} />
+                    ) : null}
+                    {windowRows.map((row) => (
                         <TableRow
                             key={row.id}
                             table={table}
                             row={row}
-                            index={index}
                             columns={visibleColumns}
                             hiddenColumns={hiddenColumns}
                             anchorId={anchor?.id}
@@ -196,11 +298,15 @@ export function DataTable({
                             renderRowDetail={renderRowDetail}
                             selectClickFor={selectClickFor}
                             onRetryCell={onRetryCell}
+                            improvable={improvableRows?.has(row.id) ?? false}
                             expandable={expandable}
                             sortable={sortable}
                             columnCount={columnCount}
                         />
                     ))}
+                    {rowWindow.padBottom > 0 ? (
+                        <SpacerRow height={rowWindow.padBottom} />
+                    ) : null}
 
                     {state.rows.length === 0 ? (
                         <tr>
@@ -218,6 +324,70 @@ export function DataTable({
             </table>
         </div>
     );
+}
+
+/**
+ * Stands in for the rows a windowed grid has not rendered, so the scroll
+ * height is the table's.
+ */
+function SpacerRow({ height }: { height: number }): React.ReactElement {
+    return (
+        <tr className="bt-spacer-row" aria-hidden="true" style={{ height }}>
+            <td />
+        </tr>
+    );
+}
+
+/**
+ * The grid root's width and the document's rem, for a surface that fits its
+ * columns to its width. Re-measured on resize; null until measured or when
+ * fitting is off.
+ */
+function useAvailableWidth(
+    rootRef: React.RefObject<HTMLDivElement | null>,
+    enabled: boolean,
+): { width: number; remPx: number } | null {
+    const [measured, setMeasured] = useState<{
+        width: number;
+        remPx: number;
+    } | null>(null);
+    useLayoutEffect(() => {
+        const root = rootRef.current;
+        if (!enabled || !root) {
+            setMeasured(null);
+            return;
+        }
+        const doc = root.ownerDocument;
+        const view = doc.defaultView;
+        const measure = () => {
+            const width = root.clientWidth;
+            const rootElement = doc.documentElement ?? root;
+            const remPx =
+                parseFloat(
+                    view?.getComputedStyle(rootElement)?.fontSize ?? "",
+                ) || 13;
+            if (width <= 0) return;
+            setMeasured((current) =>
+                current &&
+                Math.abs(current.width - width) < 1 &&
+                current.remPx === remPx
+                    ? current
+                    : { width, remPx },
+            );
+        };
+        measure();
+        view?.addEventListener("resize", measure);
+        const Observer = (
+            view as { ResizeObserver?: typeof ResizeObserver } | null
+        )?.ResizeObserver;
+        const observer = Observer ? new Observer(measure) : null;
+        observer?.observe(root);
+        return () => {
+            view?.removeEventListener("resize", measure);
+            observer?.disconnect();
+        };
+    }, [rootRef, enabled]);
+    return enabled ? measured : null;
 }
 
 /**
@@ -252,7 +422,6 @@ function splitColumns(
 interface TableRowProps {
     table: TableSpec;
     row: Row;
-    index: number;
     columns: Column[];
     hiddenColumns: Column[];
     anchorId: string | undefined;
@@ -261,15 +430,15 @@ interface TableRowProps {
     renderRowDetail?: (row: Row) => React.ReactNode;
     selectClickFor: (column: Column) => ((label: string) => void) | undefined;
     onRetryCell?: (row: Row, column: Column) => void;
+    improvable: boolean;
     expandable: boolean;
     sortable: boolean;
     columnCount: number;
 }
 
-function TableRow({
+const TableRow = React.memo(function TableRow({
     table,
     row,
-    index,
     columns,
     hiddenColumns,
     anchorId,
@@ -278,6 +447,7 @@ function TableRow({
     renderRowDetail,
     selectClickFor,
     onRetryCell,
+    improvable,
     expandable,
     sortable,
     columnCount,
@@ -316,6 +486,9 @@ function TableRow({
                         id={cellIdFor(row.id, column.id)}
                         className={[
                             "bt-td",
+                            isMetadataOnly(row.cells[column.id])
+                                ? "bt-td-metadata"
+                                : "",
                             `bt-align-${columnAlign(column)}`,
                             `bt-kind-${column.type}`,
                             // The header's sort control sits after its label, so
@@ -348,6 +521,14 @@ function TableRow({
                                             : undefined
                                     }
                                 />
+                                {improvable ? (
+                                    <small
+                                        className="bt-improvable"
+                                        title="Some answers came from the title and abstract, and the item now has a document. Filling the table again answers them from it."
+                                    >
+                                        Can be improved
+                                    </small>
+                                ) : null}
                                 <RowActionsView table={table} row={row} />
                             </div>
                         ) : (
@@ -370,7 +551,11 @@ function TableRow({
             </tr>
 
             {expanded ? (
-                <tr className="bt-detail-row" id={detailId}>
+                <tr
+                    className="bt-detail-row"
+                    id={detailId}
+                    data-detail-for={row.id}
+                >
                     <SpanningCell colSpan={columnCount}>
                         <RowDetail
                             table={table}
@@ -385,7 +570,7 @@ function TableRow({
             ) : null}
         </>
     );
-}
+});
 
 /**
  * A `<td>` that spans columns, setting `colspan` through the IDL property
@@ -516,19 +701,11 @@ function RowDetail({
     onRetryCell?: (row: Row, column: Column) => void;
     extra?: React.ReactNode;
 }): React.ReactElement {
-    // A column that failed or is still filling is exactly what the reader
-    // expanded the row to look at, so a status counts as content here.
-    const fields = table.columns.filter((column) => {
-        const cell = row.cells[column.id];
-        return (
-            !!cell?.value ||
-            !!cell?.details ||
-            !!cell?.status ||
-            !!cell?.outcome ||
-            cell?.provenance === "user" ||
-            hiddenColumns.includes(column)
-        );
-    });
+    // A failed cell is exactly what the reader expanded the row to look at,
+    // so every written cell counts as content here.
+    const fields = table.columns.filter(
+        (column) => !!row.cells[column.id] || hiddenColumns.includes(column),
+    );
 
     return (
         <div className="bt-detail">
@@ -557,10 +734,19 @@ function RowDetail({
                                             : undefined
                                     }
                                 />
-                                {cell?.details && !cell.details.label ? (
+                                {cell?.reasoning ? (
                                     <DetailsView
-                                        details={cell.details}
+                                        details={{
+                                            kind: "text",
+                                            text: cell.reasoning,
+                                        }}
                                         renderText={renderText}
+                                    />
+                                ) : null}
+                                {cell?.evidence?.length ? (
+                                    <EvidenceList
+                                        row={row}
+                                        columnId={column.id}
                                     />
                                 ) : null}
                             </dd>
@@ -584,6 +770,47 @@ function RowDetail({
             </dl>
 
             {extra ? <div className="bt-detail-extra">{extra}</div> : null}
+        </div>
+    );
+}
+
+/**
+ * A cell's evidence: each quote with the citation assembled from it, handed to
+ * the chat's `Citation` component directly. A tag names only a work and a
+ * locator, so two quotes of one work could not be told apart through the
+ * thread's citation store; the assembled citation carries its own quote,
+ * page and highlight.
+ */
+function EvidenceList({
+    row,
+    columnId,
+}: {
+    row: Row;
+    columnId: string;
+}): React.ReactElement {
+    const evidence = row.cells[columnId]?.evidence ?? [];
+    return (
+        <div className="bt-details">
+            <ul className="bt-details-list">
+                {evidence.map((entry, index) => {
+                    const citation = citationForEvidence(row, entry);
+                    return (
+                        <li key={index}>
+                            “{entry.quote.replace(/\s+/g, " ").trim()}”
+                            {entry.field ? ` (${entry.field})` : null}
+                            {citation ? (
+                                <span className="markdown">
+                                    {" "}
+                                    <Citation
+                                        citation={citation}
+                                        marker={String(index + 1)}
+                                    />
+                                </span>
+                            ) : null}
+                        </li>
+                    );
+                })}
+            </ul>
         </div>
     );
 }

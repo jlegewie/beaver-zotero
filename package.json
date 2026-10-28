@@ -1,7 +1,7 @@
 {
     "name": "beaver-zotero",
     "type": "module",
-    "version": "0.26.1-beta.1",
+    "version": "0.26.1",
     "description": "Academic research agent that lives in Zotero, instantly searching through all your documents and explaining complex concepts as you read.",
     "config": {
         "addonName": "Beaver",
@@ -84,7 +84,7 @@
         "remark-stringify": "^11.0.0",
         "unified": "^11.0.5",
         "uuid": "^11.0.5",
-        "zotero-plugin-toolkit": "^5.0.1"
+        "zotero-plugin-toolkit": "^5.2.0"
     },
     "devDependencies": {
         "@babel/core": "^7.26.9",

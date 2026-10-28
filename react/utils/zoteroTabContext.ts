@@ -10,6 +10,7 @@
  */
 
 import { getContextWindow } from '../runtime/windowRuntime';
+import { TABLE_TAB_TYPE } from '../../src/ui/tableTabContextPane';
 
 export interface ReaderOrNoteContext {
     item: Zotero.Item;
@@ -21,8 +22,8 @@ export interface ReaderOrNoteContext {
 const NOTE_TAB_TYPES = new Set(['note', 'note-unloaded', 'note-loading']);
 
 /**
- * Resolves the item associated with a reader or note tab. Tries the reader
- * tab first, then falls back to a note tab lookup via `Zotero_Tabs._tabs`.
+ * Resolves the item associated with a reader, note or Beaver table tab. Tries
+ * the reader tab first, then falls back to a tab lookup via `Zotero_Tabs._tabs`.
  * Returns null when the tab isn't a reader/note tab or its item can't be
  * resolved.
  */
@@ -53,7 +54,10 @@ export function getReaderOrNoteContextItem(selectedTabId: string | null): Reader
     try {
         const mainWindow = getContextWindow();
         const tab = mainWindow?.Zotero_Tabs?._tabs?.find((t: any) => t.id === selectedTabId);
-        if (tab && NOTE_TAB_TYPES.has(tab.type) && tab.data?.itemID) {
+        // A Beaver tab stands for its table the way a reader stands for its
+        // file (a table used to open in a reader on its snapshot).
+        const isTable = tab?.type === TABLE_TAB_TYPE;
+        if (tab && (NOTE_TAB_TYPES.has(tab.type) || isTable) && tab.data?.itemID) {
             const item = Zotero.Items.get(tab.data.itemID);
             if (item) {
                 const keys = [item.key];
@@ -61,7 +65,7 @@ export function getReaderOrNoteContextItem(selectedTabId: string | null): Reader
                     const parent = Zotero.Items.get(item.parentItemID);
                     if (parent) keys.push(parent.key);
                 }
-                return { item, libraryId: item.libraryID, keys, source: 'note' };
+                return { item, libraryId: item.libraryID, keys, source: isTable ? 'reader' : 'note' };
             }
         }
     } catch (e) {

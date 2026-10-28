@@ -1,0 +1,102 @@
+{
+  "description": "A collection above the row cap: total exceeds row_cap and the card disables Create; the user declines with instructions.",
+  "request": {
+    "event": "table_card_request",
+    "card_id": "00000000-0000-4000-8000-0000000000c1",
+    "run_id": "00000000-0000-4000-8000-0000000000a1",
+    "thread_id": "00000000-0000-4000-8000-0000000000b1",
+    "toolcall_id": "test-tool-call-id",
+    "scope": "create",
+    "title": "Comparison",
+    "description": "Sample sizes across the papers.",
+    "table": null,
+    "destination": {
+      "library_ref": "u",
+      "library_name": "My Library",
+      "collection_key": "HUGECLL2",
+      "collection_name": "Everything",
+      "explicit": false
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "type": "library",
+        "ids": null,
+        "scope": {
+          "kind": "collection",
+          "library_ref": "u",
+          "key": "HUGECLL2",
+          "name": "Everything"
+        },
+        "resolved": {
+          "count": 1,
+          "total": 1840,
+          "truncated": true,
+          "without_pdf": 0,
+          "sample": [
+            {
+              "id": "u-PAPER001",
+              "title": "A study called paper001 of things"
+            }
+          ],
+          "error": null
+        }
+      }
+    ],
+    "merge": {
+      "rows": 1,
+      "duplicates": 0
+    },
+    "row_cap": 1000,
+    "total": 1840,
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants took part?",
+        "options": null,
+        "unit": null
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT",
+            "description": null
+          },
+          {
+            "label": "Observational",
+            "description": null
+          },
+          {
+            "label": "Other",
+            "description": null
+          }
+        ],
+        "unit": null
+      }
+    ],
+    "cost": {
+      "extraction": {
+        "rows": 1,
+        "documents": 1,
+        "no_input": 0,
+        "upper_bound": false
+      },
+      "screening": null,
+      "credits": null,
+      "estimate_id": "00000000-0000-4000-8000-0000000000e7"
+    },
+    "user_instructions_prefill": "",
+    "timeout_seconds": 600.0
+  },
+  "reply": {
+    "type": "table_card_response",
+    "card_id": "00000000-0000-4000-8000-0000000000c1",
+    "approved": false,
+    "user_instructions": "Use the methods collection instead."
+  }
+}

@@ -47,6 +47,7 @@ import {
     isReattachRequest,
 } from '../protocol/agentProtocol';
 import { REATTACH_CLOSE_CODES, RunLink, RunReply, answeredPromptKey, executedAction, promptKey } from './runLink';
+import type { WSTableCardEstimateRequest, WSTableCardResponse } from '../protocol/tableCardProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
@@ -509,6 +510,7 @@ export class AgentService {
             if (!run || run.runId !== request.run_id || run.state !== 'reattaching') {
                 throw new Error(`Run ${request.run_id} is not waiting to be reattached`);
             }
+            run.reattachAttempts++;
         } else {
             this.run = new RunLink(request.run_id, callbacks);
             // The run this one waited for is gone now, and its stop with it
@@ -807,8 +809,11 @@ export class AgentService {
                 // A replayed event this run has already handled. Checked again
                 // when the event's turn comes: one handled on the lost socket
                 // may still be finishing when its replay arrives.
+                // The backend numbers only events that ask for no answer, so a
+                // `seq` on a request would be its payload, never a replay
+                // position.
                 const rawSeq = (parsed as { seq?: unknown }).seq;
-                const seq = typeof rawSeq === 'number' ? rawSeq : null;
+                const seq = typeof rawSeq === 'number' && !isBackendRequestEvent(parsed.event) ? rawSeq : null;
                 const run = seq !== null ? this.reattachableRun() : null;
                 if (run && seq !== null && seq <= run.lastSeq) {
                     logger(`AgentService: Ignoring "${parsed.event}" seq ${seq}, already handled`, 1);
@@ -1007,6 +1012,8 @@ export class AgentService {
             run.state = 'reattaching';
             run.detachedAt = now;
             run.dropEvidence = evidence;
+            run.losses = 0;
+            run.reattachAttempts = 0;
             run.deadline = now + graceMs;
             run.deadlineTimer = setTimeout(() => {
                 if (this.run === run && run.state === 'reattaching') {
@@ -1017,7 +1024,10 @@ export class AgentService {
         } else if (run.deadline !== null && now >= run.deadline) {
             return false;
         }
-        logger(`AgentService: Run ${run.runId} lost its connection (code ${code}); reattaching from seq ${run.lastSeq}`, 1);
+        // Counted for every loss: a socket opened to reattach can reach
+        // `ready` and be lost before the server's confirmation arrives.
+        run.losses++;
+        logger(`AgentService: Run ${run.runId} lost its connection (code ${code}, loss ${run.losses}); reattaching from seq ${run.lastSeq}`, 1);
         // Reset before notifying: the callback starts the reattach, which must
         // find this socket's state already gone.
         this.resetConnectionState({ keepRunQueues: true });
@@ -1153,6 +1163,8 @@ export class AgentService {
             reason,
             evidence: run.dropEvidence ?? baselineConnectionEvidence('mid_run'),
             gapMs: run.detachedAt !== null ? Math.max(0, Date.now() - run.detachedAt) : 0,
+            attempts: run.reattachAttempts,
+            losses: run.losses,
         });
     }
 
@@ -1165,7 +1177,7 @@ export class AgentService {
         run.detachedAt = null;
         run.deadline = null;
         run.clearDeadline();
-        logger(`AgentService: Reattached run ${run.runId} after ${gapMs}ms; ${event.replayed} event(s) replayed`, 1);
+        logger(`AgentService: Reattached run ${run.runId} after ${gapMs}ms on socket ${run.reattachAttempts} (${run.losses} lost); ${event.replayed} event(s) replayed`, 1);
         this.noteRunEvent(run.runId, 'reattached', `${event.replayed} replayed`);
         if (run.cancelRequested) {
             // Stopped while reconnecting. The user has already left the run,
@@ -1184,6 +1196,8 @@ export class AgentService {
             evidence: run.dropEvidence ?? baselineConnectionEvidence('mid_run'),
             gapMs,
             replayed: event.replayed,
+            attempts: run.reattachAttempts,
+            losses: run.losses,
         });
     }
 
@@ -1750,6 +1764,38 @@ export class AgentService {
                     this.callbacks?.onBatchApprovalStale?.(event);
                     break;
 
+                case 'table_card_request':
+                    logger("AgentService: Received table_card_request", { card_id: event.card_id, sources: event.sources.length }, 1);
+                    if (this.callbacks?.onTableCardRequest) {
+                        this.callbacks.onTableCardRequest(event);
+                    } else {
+                        // A client that cannot show the card declines: nothing
+                        // is created, and the run is not stalled for the card's
+                        // whole timeout.
+                        logger("AgentService: No table card handler, declining", 1);
+                        this.sendDecision({
+                            type: 'table_card_response',
+                            card_id: event.card_id,
+                            approved: false,
+                        });
+                    }
+                    break;
+
+                case 'table_card_stale':
+                    logger("AgentService: Received table_card_stale", event, 1);
+                    this.callbacks?.onTableCardStale?.(event);
+                    break;
+
+                case 'table_card_estimate_result':
+                    logger("AgentService: Received table_card_estimate_result", { card_id: event.card_id, request_id: event.request_id, error: event.error ?? null }, 1);
+                    this.callbacks?.onTableCardEstimateResult?.(event);
+                    break;
+
+                case 'table_fill_started':
+                    logger("AgentService: Received table_fill_started", { toolcall_id: event.toolcall_id, rows: event.rows }, 1);
+                    this.callbacks?.onTableFillStarted?.(event);
+                    break;
+
                 case 'ask_user_question_request':
                     logger("AgentService: Received ask_user_question_request", event, 1);
                     // This event is handled by the UI via callback
@@ -2057,17 +2103,38 @@ export class AgentService {
         approved: boolean,
         mode: BatchApprovalMode,
         userInstructions?: string | null,
-        table?: import('../protocol/artifactProtocol').TableApprovalIdentity,
     ): boolean {
         logger(`AgentService: Sending batch approval response for ${approvalId}: ${approved} (${mode})${userInstructions ? ' (with instructions)' : ''}`, 1);
         return this.sendDecision({
             type: 'batch_approval_response',
-            ...(table ? { table } : {}),
             approval_id: approvalId,
             approved,
             mode,
             user_instructions: userInstructions,
         });
+    }
+
+    /**
+     * Send the answer to a table card: the edited input on an approval, or a
+     * decline with optional instructions. Correlated by `card_id`.
+     * @returns false if the socket was not open, so the answer never left the
+     *   client.
+     */
+    sendTableCardResponse(response: WSTableCardResponse): boolean {
+        logger(`AgentService: Sending table card response for ${response.card_id}: ${response.approved ? response.choice ?? 'create' : 'declined'}`, 1);
+        return this.sendDecision(response);
+    }
+
+    /**
+     * Ask the tool call waiting on a table card for a new cost for the card's
+     * draft. Not a decision: it is never held for a reattach, since an
+     * estimate for a connection that has gone is worth nothing; the card asks
+     * again or keeps its run button disabled.
+     * @returns false if the message did not leave the client.
+     */
+    sendTableCardEstimate(message: WSTableCardEstimateRequest): boolean {
+        if (this.reattachableRun()?.state === 'reattaching') return false;
+        return this.send(message);
     }
 
     /**

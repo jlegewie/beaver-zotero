@@ -1,0 +1,93 @@
+{
+  "description": "A fill card over an existing table: thirty rows read from their PDFs and two answered from title and abstract; the fill exceeds the run's authorization, so the cost quotes credits. Approved with the run button.",
+  "request": {
+    "event": "table_card_request",
+    "card_id": "00000000-0000-4000-8000-0000000000c9",
+    "run_id": "00000000-0000-4000-8000-0000000000a1",
+    "thread_id": "00000000-0000-4000-8000-0000000000b1",
+    "toolcall_id": "test-tool-call-id",
+    "scope": "fill",
+    "title": "Comparison",
+    "description": "Sample sizes and designs.",
+    "table": {
+      "key": "u-TABLE222",
+      "title": "Comparison"
+    },
+    "destination": null,
+    "sources": [],
+    "merge": null,
+    "row_cap": null,
+    "total": null,
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants?",
+        "options": null,
+        "unit": null
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT",
+            "description": "Random assignment of units to arms."
+          },
+          {
+            "label": "Observational",
+            "description": null
+          }
+        ],
+        "unit": null
+      }
+    ],
+    "cost": {
+      "extraction": {
+        "rows": 32,
+        "documents": 30,
+        "no_input": 0,
+        "upper_bound": false
+      },
+      "screening": null,
+      "credits": 7.0,
+      "estimate_id": "00000000-0000-4000-8000-0000000000f1"
+    },
+    "user_instructions_prefill": "",
+    "timeout_seconds": 600.0
+  },
+  "reply": {
+    "type": "table_card_response",
+    "card_id": "00000000-0000-4000-8000-0000000000c9",
+    "approved": true,
+    "choice": "fill",
+    "estimate_id": "00000000-0000-4000-8000-0000000000f1",
+    "title": "Comparison",
+    "description": "Sample sizes and designs.",
+    "sources": [],
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants?"
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT",
+            "description": "Random assignment of units to arms."
+          },
+          {
+            "label": "Observational"
+          }
+        ]
+      }
+    ]
+  }
+}

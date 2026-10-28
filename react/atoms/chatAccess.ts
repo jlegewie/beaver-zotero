@@ -5,7 +5,7 @@
  * prompt tells the user which screen that is and opens Beaver to it.
  */
 import { atom } from 'jotai';
-import { isAuthenticatedAtom } from './auth';
+import { authLoadingAtom, isAuthenticatedAtom } from './auth';
 import {
     hasAuthorizedFreeAccessAtom,
     isMigratingDataAtom,
@@ -18,10 +18,13 @@ import { isLoadingThreadAtom } from './threads';
 /**
  * What stands between the user and a chat, in the order the sidebar resolves
  * them. `loading` covers a thread being opened and data being migrated;
- * `connecting` an authenticated account whose profile has not arrived.
+ * `restoring` the saved sign-in still being restored, before Beaver knows
+ * whether the user is signed in; `connecting` an authenticated account whose
+ * profile has not arrived.
  */
 export type ChatAccessGate =
     | 'loading'
+    | 'restoring'
     | 'signed-out'
     | 'connecting'
     | 'update-required'
@@ -30,7 +33,7 @@ export type ChatAccessGate =
 
 export const chatAccessGateAtom = atom<ChatAccessGate | null>((get) => {
     if (get(isLoadingThreadAtom) || get(isMigratingDataAtom)) return 'loading';
-    if (!get(isAuthenticatedAtom)) return 'signed-out';
+    if (!get(isAuthenticatedAtom)) return get(authLoadingAtom) ? 'restoring' : 'signed-out';
     if (!get(isProfileLoadedAtom)) return 'connecting';
     if (get(updateRequiredAtom)) return 'update-required';
     if (get(pendingDowngradeAckAtom)) return 'downgrade-ack';

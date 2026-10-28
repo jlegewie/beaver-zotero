@@ -39,13 +39,14 @@
  * This module is free of Zotero APIs — callers pass prebuilt link URIs and a
  * library-scope resolver, exactly as `reportHtml.ts` does.
  *
- * ## The document is the table
+ * ## The document is a rendering
  *
- * A stored table is a snapshot attachment and nothing else: no database row, no
- * server copy. So the document carries the spec it was rendered from, and
- * {@link parseTableDocument} reads it back — see {@link buildTableDocument}.
+ * A stored table is `table.json` in the attachment's storage directory; this
+ * document is what the store's renderer writes beside it, for readers without
+ * Beaver and for full-text indexing. It carries no state of its own, only the
+ * hash of the spec it shows (see {@link buildTableDocument}).
  *
- * That makes rendering a **pure function of its inputs**: no clock, no random
+ * Rendering is a **pure function of its inputs**: no clock, no random
  * ids, no iteration over anything whose order is not fixed by the spec, so the
  * same spec always produces the same bytes and a re-render never moves text
  * that annotations are anchored to. The deliberate exceptions are the two
@@ -59,36 +60,33 @@ import {
     annotationComment,
     annotationTitle,
     annotationTypeLabel,
+    categoriesText,
     cellExpandedFields,
     cellSortKey,
     defaultHiddenColumnIds,
-    citationsByKey,
     columnAlign,
     compareSortKeys,
     isColumnFilterable,
     isColumnSortable,
-    readSpec,
+    isMetadataOnly,
     rowActions,
     rowPrimaryAction,
     selectLabelsInColumn,
+    selectOption,
     sortRows,
+    stripCitationTags,
     summarizeCoverage,
-    CITATION_TAG_RE,
     SELECT_COLORS,
-    TABLE_SPEC_VERSION,
     type Cell,
     type Column,
+    type Evidence,
     type Row,
     type RowAction,
+    type SelectOption,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
-import {
-    baseCitationKey,
-    normalizeCitationTag,
-    parseRawCitationAttributes,
-    requestedCitationKey,
-    type CitationRef,
-} from '@beaver/agent-core/citations/citationGrammar';
+import { citationForEvidence } from '@beaver/agent-core/layouts/tableCitations';
+import { baseCitationKey } from '@beaver/agent-core/citations/citationGrammar';
 import { getCitationPages, type Citation } from '@beaver/agent-core/types/citations';
 import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from '../../utils/html';
 
@@ -99,56 +97,18 @@ import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from '../../utils/
  */
 export type TableHtmlLinks = Partial<Record<RowAction, string | null>>;
 
-/** Durable acknowledgements committed atomically with the table document. */
-export interface TableOperationReceipt {
-    operation_id: string;
-    request_sha256: string;
-    version: number;
-    sha256: string;
-}
-
-export interface TableDocumentState {
-    operations?: TableOperationReceipt[];
-    creation?: {
-        operation_id: string;
-        request_sha256: string;
-        complete: boolean;
-        meta?: { actor: 'agent' | 'user' | 'system'; run_id?: string; thread_id?: string; change?: string };
-    };
-}
-
-export const TABLE_STORE_SCRIPT_ID = 'beaver-table-store';
-const STORE_SCRIPT_RE = new RegExp(
-    `<script\\b[^>]*\\bid="${TABLE_STORE_SCRIPT_ID}"[^>]*>([\\s\\S]*?)</script\\s*>`,
-    'i'
-);
-
-function isReceipt(value: unknown): value is TableOperationReceipt {
-    if (!value || typeof value !== 'object') return false;
-    const receipt = value as Partial<TableOperationReceipt>;
-    return typeof receipt.operation_id === 'string' &&
-        typeof receipt.request_sha256 === 'string' &&
-        typeof receipt.version === 'number' &&
-        typeof receipt.sha256 === 'string';
-}
-
-export function parseTableDocumentState(html: string): TableDocumentState {
-    const match = html.match(STORE_SCRIPT_RE);
-    if (!match) return {};
-    const state = JSON.parse(match[1]);
-    if (!state || typeof state !== 'object' || Array.isArray(state)) {
-        throw new Error('Invalid table operation receipts');
-    }
-    if (state.operations !== undefined &&
-        (!Array.isArray(state.operations) || !state.operations.every(isReceipt))) {
-        throw new Error('Invalid table operation receipts');
-    }
-    return state;
-}
-
 export interface TableHtmlOptions {
-    /** Store bookkeeping; excluded from the portable table spec. */
-    storeState?: TableDocumentState;
+    /**
+     * SHA-256 of the spec being rendered, written as a root attribute so the
+     * snapshot names the table state it shows. See {@link renderedSpecHash}.
+     */
+    specSha256?: string;
+    /**
+     * SHA-256 of the whole committed `table.json`. Zotero syncs a snapshot
+     * when its main file changes, so a commit that changes only the file's
+     * receipts must still change the HTML.
+     */
+    fileSha256?: string;
     /**
      * Emits the sort, filter and row-height controls. Off gives a plain
      * document sorted as the producer intended — the tier for a renderer that
@@ -256,12 +216,12 @@ const SORT_BOTH_SVG =
 // ---------------------------------------------------------------------------
 
 /**
- * The pill colour for a select label. Checked against agent-core's palette
- * rather than a list restated here: a colour added there but missing from a
- * local copy renders as grey in every stored table.
+ * The pill colour of a select label's option. Checked against agent-core's
+ * palette rather than a list restated here: a colour added there but missing
+ * from a local copy renders as grey in every stored table.
  */
-function selectHue(label: string, column: Column): string {
-    const declared = column.options?.find((o) => o.label === label)?.color;
+function selectHue(option: SelectOption | undefined): string {
+    const declared = option?.color;
     return declared && (SELECT_COLORS as readonly string[]).includes(declared)
         ? declared
         : 'gray';
@@ -295,28 +255,37 @@ function safeHref(uri: string | null | undefined): string | null {
 }
 
 /**
- * One cell's value. In the expanded row (`detail`) an annotation names only
- * what it is and where it sits: its passage and comment are listed as fields
- * of their own there (`cellExpandedFields`).
+ * One cell's value, followed by the markers of its evidence and its state. In
+ * the expanded row (`detail`) an annotation names only what it is and where it
+ * sits: its passage and comment are listed as fields of their own there
+ * (`cellExpandedFields`).
  */
-function renderCellValue(cell: Cell | undefined, column: Column, cites?: CitationNumbering, variant: 'cell' | 'detail' = 'cell'): string {
-    const html = renderCellValueInner(cell, column, cites, variant);
-    if (!cell) return html;
-    const states = [cell.flag === 'unsure' ? 'Unsure' : cell.flag === 'unsourced' ? 'Unsourced' : '', cell.stale ? 'Stale' : '', cell.provenance === 'user' ? 'Edited by you' : ''].filter(Boolean);
-    return html + (states.length ? `<small class="bt-cell-state"> · ${states.join(' · ')}</small>` : '');
-}
-
-function renderCellValueInner(
+function renderCellValue(
+    row: Row,
     cell: Cell | undefined,
     column: Column,
     cites?: CitationNumbering,
     variant: 'cell' | 'detail' = 'cell'
 ): string {
-    if (cell?.status === 'pending') {
-        return '<span class="bt-pending">Filling…</span>';
-    }
-    if (cell?.status === 'error') {
-        return `<span class="bt-err">${escapeHtml(cell.error ?? 'Could not be extracted')}</span>`;
+    const html = renderCellValueInner(cell, column, variant);
+    if (!cell) return html;
+    const markers = cites ? cites.markers(row, column.id) : '';
+    const states = [
+        cell.unsure ? 'Unsure' : '',
+        cell.stale ? 'Stale' : '',
+        isMetadataOnly(cell) ? 'From title and abstract' : '',
+        cell.outcome === 'cleared' ? 'Cleared by you' : cell.provenance === 'user' ? 'Edited by you' : '',
+    ].filter(Boolean);
+    return html + markers + (states.length ? `<small class="bt-cell-state"> · ${states.join(' · ')}</small>` : '');
+}
+
+function renderCellValueInner(
+    cell: Cell | undefined,
+    column: Column,
+    variant: 'cell' | 'detail' = 'cell'
+): string {
+    if (cell?.outcome === 'failed') {
+        return `<span class="bt-err">${escapeHtml(cell.error ?? 'Could not be answered')}</span>`;
     }
     // Nothing at all, rather than a placeholder glyph: a column of em dashes
     // reads as noise across a wide table, and the footer already counts what
@@ -326,9 +295,7 @@ function renderCellValueInner(
 
     switch (value.kind) {
         case 'text':
-            return `<span class="bt-clamp">${
-                cites ? cites.render(value.text) : escapeHtml(value.text)
-            }</span>`;
+            return `<span class="bt-clamp">${escapeHtml(stripCitationTags(value.text))}</span>`;
 
         case 'number': {
             const shown = value.display ?? formatNumber(value.value);
@@ -347,8 +314,11 @@ function renderCellValueInner(
                 ? '<span class="bt-yes" title="yes">✓</span>'
                 : '<span class="bt-no"></span>';
 
-        case 'select':
-            return `<span class="bt-pill bt-pill--${selectHue(value.label, column)}">${escapeHtml(value.label)}</span>`;
+        case 'select': {
+            const option = selectOption(column, value.label);
+            const title = option?.description ? ` title="${escapeHtml(option.description)}"` : '';
+            return `<span class="bt-pill bt-pill--${selectHue(option)}"${title}>${escapeHtml(value.label)}</span>`;
+        }
 
         case 'reference': {
             const authors = value.subtitle
@@ -359,7 +329,7 @@ function renderCellValueInner(
                 : '';
             const meta =
                 authors || venue ? `<span class="bt-sub">${authors}${venue}</span>` : '';
-            return `<span class="bt-ref"><span class="bt-title">${escapeHtml(value.display_name)}</span>${meta}</span>`;
+            return `<span class="bt-ref"><span class="bt-title">${escapeHtml(value.title ?? value.display_name)}</span>${meta}</span>`;
         }
 
         case 'annotation': {
@@ -421,21 +391,30 @@ interface CitedSource {
 }
 
 /**
- * The work a citation belongs to: its owning item when the backend recorded
- * one, else the cited object itself. Passages from one paper's PDF and a
- * citation of the paper's own record therefore share a number, as they do in
- * the chat's sources list.
+ * The work a citation belongs to: its owning item when there is one, else the
+ * cited object itself. Passages from one paper's PDF and a citation of the
+ * paper's own record therefore share a number, as they do in the chat's
+ * sources list.
  */
-function citationSourceKey(citation: Citation | undefined, fallback: CitationRef): string {
-    const ref = citation?.parent_ref ?? citation?.resolved_ref ?? citation?.requested_ref ?? fallback;
-    return baseCitationKey(ref);
+function citationSourceKey(citation: Citation): string {
+    const ref = citation.parent_ref ?? citation.resolved_ref ?? citation.requested_ref;
+    return ref ? baseCitationKey(ref) : citation.citation_id;
 }
 
 /**
- * Numbers every cited source in the table and renders each tag as a marker.
+ * The key a marker carries so a host can find the evidence behind it:
+ * `<row id>|<column id>|<evidence index>`.
+ */
+export function evidenceKey(rowId: string, columnId: string, index: number): string {
+    return `${rowId}|${columnId}|${index}`;
+}
+
+/**
+ * Numbers every cited source in the table and renders each cell's evidence as
+ * markers.
  *
  * The marker is what the chat's `Citation` renders: a small number that says
- * where the claim came from, opens the cited passage when clicked, and shows
+ * where the answer came from, opens the cited passage when clicked, and shows
  * the source and the passage on hover. Here it is a `zotero://` link — which
  * navigates on its own from a content docshell — and a native `title`, because
  * the cell it sits in is clamped with `overflow: hidden` and would clip any
@@ -448,17 +427,12 @@ function citationSourceKey(citation: Citation | undefined, fallback: CitationRef
  * a person meets the sources.
  */
 class CitationNumbering {
-    private readonly byKey: Record<string, Citation>;
-    private readonly markers = new Map<string, CitedSource>();
+    private readonly sources = new Map<string, CitedSource>();
     private readonly scopeFor: (libraryId: number) => string;
     /** Every cited source, in the order its marker was assigned. */
     readonly cited: CitedSource[] = [];
 
-    constructor(
-        citations: Citation[] | undefined,
-        scopeFor: (libraryId: number) => string = USER_LIBRARY_SCOPE
-    ) {
-        this.byKey = citationsByKey(citations);
+    constructor(scopeFor: (libraryId: number) => string = USER_LIBRARY_SCOPE) {
         this.scopeFor = scopeFor;
     }
 
@@ -469,11 +443,12 @@ class CitationNumbering {
     hrefFor(citation: Citation | undefined): string | null {
         const ref = citation?.resolved_ref ?? citation?.requested_ref;
         if (!ref || !('zotero_key' in ref) || !ref.zotero_key) return null;
+        const scope = zoteroScopeOf(ref, this.scopeFor);
         if (citation?.citation_type === 'item') {
-            return `zotero://select/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
+            return `zotero://select/${scope}/items/${ref.zotero_key}`;
         }
         const page = getCitationPages(citation)[0];
-        const base = `zotero://open/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
+        const base = `zotero://open/${scope}/items/${ref.zotero_key}`;
         return page ? `${base}?page=${page}` : base;
     }
 
@@ -482,7 +457,7 @@ class CitationNumbering {
         for (const citation of source.citations) {
             const ref = citation.parent_ref ?? citation.resolved_ref ?? citation.requested_ref;
             if (ref && 'zotero_key' in ref && ref.zotero_key) {
-                return `zotero://select/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
+                return `zotero://select/${zoteroScopeOf(ref, this.scopeFor)}/items/${ref.zotero_key}`;
             }
         }
         return null;
@@ -495,56 +470,50 @@ class CitationNumbering {
             const ref = citation.resolved_ref ?? citation.requested_ref;
             if (!ref || !('zotero_key' in ref) || !ref.zotero_key) continue;
             return {
-                href: `zotero://open/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`,
-                label: citation.content_kind === 'pdf' ? 'Open PDF' : 'Open',
+                href: `zotero://open/${zoteroScopeOf(ref, this.scopeFor)}/items/${ref.zotero_key}`,
+                label: (citation.content_kind ?? 'pdf') === 'pdf' ? 'Open PDF' : 'Open',
             };
         }
         return null;
     }
 
-    private markerFor(key: string, ref: CitationRef): number {
-        const citation = this.byKey[key];
-        const sourceKey = citationSourceKey(citation, ref);
-        let source = this.markers.get(sourceKey);
+    private markerFor(citation: Citation): number {
+        const sourceKey = citationSourceKey(citation);
+        let source = this.sources.get(sourceKey);
         if (!source) {
-            source = { marker: this.markers.size + 1, key: sourceKey, citations: [] };
-            this.markers.set(sourceKey, source);
+            source = { marker: this.sources.size + 1, key: sourceKey, citations: [] };
+            this.sources.set(sourceKey, source);
             this.cited.push(source);
         }
-        if (citation && !source.citations.includes(citation)) source.citations.push(citation);
+        if (!source.citations.some((known) => known.citation_id === citation.citation_id))
+            source.citations.push(citation);
         return source.marker;
     }
 
-    /** Escapes `text` and swaps each citation tag for its marker. */
-    render(text: string): string {
+    /** The markers of one cell's evidence, in order. */
+    markers(row: Row, columnId: string): string {
+        const evidence = row.cells[columnId]?.evidence ?? [];
         let out = '';
-        let last = 0;
-        CITATION_TAG_RE.lastIndex = 0;
-        for (const match of text.matchAll(CITATION_TAG_RE)) {
-            const at = match.index ?? 0;
-            out += escapeHtml(text.slice(last, at));
-            last = at + match[0].length;
-
-            const normalized = normalizeCitationTag(
-                parseRawCitationAttributes(match[1] || '')
+        evidence.forEach((entry, index) => {
+            const citation = citationForEvidence(row, entry);
+            if (!citation) return;
+            out += this.marker(
+                this.markerFor(citation),
+                evidenceKey(row.id, columnId, index),
+                citation
             );
-            // An unparseable tag is dropped rather than shown raw: a stray
-            // `<citation …/>` in a cell is noise the reader cannot act on.
-            if (!normalized.ok) continue;
-            const key = requestedCitationKey(normalized.ref);
-            out += this.marker(this.markerFor(key, normalized.ref), key, this.byKey[key]);
-        }
-        return out + escapeHtml(text.slice(last));
+        });
+        return out;
     }
 
-    private marker(marker: number, key: string, citation: Citation | undefined): string {
+    private marker(marker: number, key: string, citation: Citation): string {
         const href = this.hrefFor(citation);
         const parts = citationParts(citation);
         const attrs = [
             `class="bt-cite bt-cite--${citationTone(citation)}"`,
-            // The citation's key in `spec.citations`, so a host can hand the
-            // full citation (with its passage locations) to its own navigation.
-            citation ? `data-cite-key="${escapeHtml(key)}"` : '',
+            // Where the evidence lives in the table, so a host can build the
+            // full citation (with its passage locations) for its own navigation.
+            `data-cite-key="${escapeHtml(key)}"`,
             // The tooltip's parts, kept apart so a host can lay them out the
             // way the app does; `title` is the fallback where none can.
             parts.name ? `data-cite-name="${escapeHtml(parts.name)}"` : '',
@@ -560,6 +529,22 @@ class CitationNumbering {
             ? `<a ${attrs} href="${escapeHtml(href)}">${marker}</a>`
             : `<span ${attrs}>${marker}</span>`;
     }
+}
+
+/**
+ * The `zotero://` scope a reference names. `library_ref` is the identity and
+ * names its scope without any lookup (`u` → `library`, `g<id>` → `groups/<id>`),
+ * which is what a table moved from another device carries; only a reference
+ * without one falls back to resolving its rowid.
+ */
+export function zoteroScopeOf(
+    ref: { library_id?: number; library_ref?: string },
+    scopeFor: (libraryId: number) => string = USER_LIBRARY_SCOPE
+): string {
+    if (ref.library_ref === 'u') return 'library';
+    const group = /^g([1-9][0-9]*)$/.exec(ref.library_ref ?? '');
+    if (group) return `groups/${group[1]}`;
+    return scopeFor(ref.library_id ?? 0);
 }
 
 /**
@@ -765,7 +750,7 @@ function resolveRowLinks(
  * enhances the document intercepts `data-bt-command` clicks and runs them.
  */
 export const TABLE_EXPORT_COMMAND = 'export-csv';
-const EXPORT_LINK = `<a class="bt-export" href="#" data-bt-command="${TABLE_EXPORT_COMMAND}" title="Export as CSV with sources and evidence" aria-label="Export CSV"></a>`;
+const EXPORT_LINK = `<a class="bt-export" href="#" data-bt-command="${TABLE_EXPORT_COMMAND}" title="Export as CSV with evidence and reasoning" aria-label="Export CSV"></a>`;
 
 /** Glyph and label of each verb a static rendering can draw as a link. */
 const ACTION_LINKS: Partial<Record<RowAction, { glyph: string; label: string }>> = {
@@ -808,29 +793,39 @@ function renderActions(row: Row, spec: TableSpec, links: TableHtmlLinks | null):
     return parts.join('');
 }
 
+/** One evidence entry in the expanded row: the quote, then its marker. */
+function renderEvidenceLine(evidence: Evidence, marker: string): string {
+    const quote = evidence.quote.replace(/\s+/g, ' ').trim();
+    const where = evidence.field === 'title' ? ' (title)' : evidence.field === 'abstract' ? ' (abstract)' : '';
+    return `<li>“${escapeHtml(quote)}”${escapeHtml(where)}${marker}</li>`;
+}
+
 function renderDetail(
     row: Row,
     spec: TableSpec,
     links: TableHtmlLinks | null,
     cites: CitationNumbering
 ): string {
-    const renderDetails = (details: NonNullable<Cell['details']>): string =>
+    const renderDetails = (details: { kind: 'text'; text: string } | { kind: 'list'; items: string[] }): string =>
         details.kind === 'text'
-            ? `<div class="bt-d-extra">${cites.render(details.text)}</div>`
+            ? `<div class="bt-d-extra">${escapeHtml(details.text)}</div>`
             : `<ul class="bt-d-list">${details.items
-                  .map((item) => `<li>${cites.render(item)}</li>`)
+                  .map((item) => `<li>${escapeHtml(item)}</li>`)
                   .join('')}</ul>`;
     const fields = spec.columns
-        .filter((column) => {
-            const cell = row.cells[column.id];
-            return !!cell?.value || !!cell?.details || !!cell?.status || !!cell?.outcome || cell?.provenance === 'user';
-        })
+        .filter((column) => !!row.cells[column.id])
         .map((column) => {
             const cell = row.cells[column.id];
-            // A labelled detail (an abstract) and an annotation's passage and
-            // comment are fields of their own, listed by name after their cell.
-            const inline =
-                cell?.details && !cell.details.label ? renderDetails(cell.details) : '';
+            // The answer's reasoning and its evidence sit under it; an
+            // annotation's passage and comment are fields of their own.
+            const reasoning = cell?.reasoning
+                ? `<div class="bt-d-extra">${escapeHtml(cell.reasoning)}</div>`
+                : '';
+            const evidence = cell?.evidence?.length
+                ? `<ul class="bt-d-list">${cell.evidence
+                      .map((entry) => renderEvidenceLine(entry, ''))
+                      .join('')}</ul>`
+                : '';
             const own = cellExpandedFields(cell)
                 .map(
                     (field) =>
@@ -839,7 +834,7 @@ function renderDetail(
                 .join('');
             return [
                 `<dt>${escapeHtml(column.header)}</dt>`,
-                `<dd>${renderCellValue(cell, column, cites, 'detail')}${inline}</dd>`,
+                `<dd>${renderCellValue(row, cell, column, cites, 'detail')}${reasoning}${evidence}</dd>`,
                 own,
             ].join('');
         })
@@ -870,7 +865,7 @@ export function renderTableHtml(
     const prefix = options.idPrefix ?? 'bt';
     const controls = options.controls ?? true;
     const anchor = anchorColumn(spec);
-    const cites = new CitationNumbering(spec.citations, options.citationScopeFor);
+    const cites = new CitationNumbering(options.citationScopeFor);
     const rows = sortRows(spec, spec.sort);
     const ranks = sortRanks(rows, spec.columns);
     // Asked once per row, used twice: the anchor cell draws the primary verb
@@ -966,10 +961,11 @@ export function renderTableHtml(
 
     const coverage = summarizeCoverage(spec, rows);
     const footerParts = [`${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`];
-    if (coverage.pending > 0) footerParts.push(`${coverage.pending} filling`);
     if (coverage.notReported > 0)
         footerParts.push(`${coverage.notReported} not reported`);
     if (coverage.error > 0) footerParts.push(`${coverage.error} failed`);
+    if (coverage.metadataOnly > 0)
+        footerParts.push(`${coverage.metadataOnly} from title and abstract`);
     if (coverage.errorRows > 0)
         footerParts.push(
             `${coverage.errorRows} ${coverage.errorRows === 1 ? 'row' : 'rows'} incomplete`
@@ -996,9 +992,9 @@ export function renderTableHtml(
             const description = hasQuestions
                 ? `<span class="bt-q">${escapeHtml(column.description ?? '')}</span>`
                 : '';
-            const full = column.description
-                ? ` title="${escapeHtml(column.description)}"`
-                : '';
+            // The question in full, then the categories' definitions.
+            const hover = [column.description, categoriesText(column)].filter(Boolean).join('\n\n');
+            const full = hover ? ` title="${escapeHtml(hover)}"` : '';
             return `<span class="bt-c bt-h bt-h${i} bt-${columnAlign(column)} bt-hk-${column.type}${sort ? ' bt-sortable' : ''}${column.id === anchor?.id ? ' bt-anchor' : ''}"${full}><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
         }),
         '</div>',
@@ -1027,7 +1023,7 @@ export function renderTableHtml(
                     // The anchor cell carries the row's primary verb, where the
                     // React grid draws it too.
                     const action = isAnchor ? renderPrimaryAction(row, spec, links) : '';
-                    return `<span class="bt-c bt-${columnAlign(column)} bt-k-${column.type}${sortable ? ' bt-sortable' : ''}${isAnchor ? ' bt-anchor' : ''}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column, cites)}${action}</span>`;
+                    return `<span class="bt-c bt-${columnAlign(column)} bt-k-${column.type}${sortable ? ' bt-sortable' : ''}${isAnchor ? ' bt-anchor' : ''}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row, row.cells[column.id], column, cites)}${action}</span>`;
                 })
                 .join('');
 
@@ -1045,7 +1041,7 @@ export function renderTableHtml(
 
     const title = spec.title
         ? `<div class="bt-title-bar"><h1 class="bt-t">${escapeHtml(spec.title)}</h1>${
-              spec.caption ? `<p class="bt-cap">${escapeHtml(spec.caption)}</p>` : ''
+              spec.description ? `<p class="bt-cap">${escapeHtml(spec.description)}</p>` : ''
           }</div>`
         : '';
 
@@ -1065,6 +1061,7 @@ export function renderTableHtml(
         rows.length === 0 ? '<p class="bt-none">No rows.</p>' : '',
         '</div>',
         '</div>',
+        renderCodebook(spec),
         renderBibliography(cites),
         `<footer class="bt-foot">${escapeHtml(footerParts.join(' · '))}</footer>`,
         '</section>',
@@ -1099,6 +1096,35 @@ function fitsBudget(
     const dynamic = renderDynamicCss(spec, prefix, groups).length;
     const fixed = countTopLevelCssRules(DOCUMENT_CSS + TABLE_CSS);
     return fixed + dynamic <= CSS_RULE_BUDGET;
+}
+
+/**
+ * How the table's categories were coded: each select column with a defined
+ * category, its question and every category with its definition. Collapsed
+ * under the table, and plain `<details>`, so the document needs no script.
+ */
+function renderCodebook(spec: TableSpec): string {
+    const coded = spec.columns.filter(
+        (column) => column.type === 'select' && column.options?.some((option) => option.description),
+    );
+    if (coded.length === 0) return '';
+    const columns = coded
+        .map((column) => {
+            const question = column.description
+                ? `<p class="bt-cb-q">${escapeHtml(column.description)}</p>`
+                : '';
+            const options = (column.options ?? [])
+                .map(
+                    (option) =>
+                        `<li><span class="bt-cb-l">${escapeHtml(option.label)}</span>${
+                            option.description ? ` — ${escapeHtml(option.description)}` : ''
+                        }</li>`,
+                )
+                .join('');
+            return `<div class="bt-cb-c"><h3 class="bt-cb-h">${escapeHtml(column.header)}</h3>${question}<ul class="bt-cb-o">${options}</ul></div>`;
+        })
+        .join('');
+    return `<details class="bt-codebook"><summary class="bt-codebook-h">Codebook</summary>${columns}</details>`;
 }
 
 /**
@@ -1401,6 +1427,14 @@ export const TABLE_CSS = `
 .bt-export::after { content: 'Export CSV'; }
 .bt-export:hover { border-color: currentColor; color: var(--t-fg); }
 html[data-beaver-active] .bt-export { display: inline-block; }
+.bt-codebook { padding: 14px 0 0; border-top: 1px solid var(--t-line); margin-top: 14px; font-size: 13px; }
+.bt-codebook-h { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--t-fade); font-weight: 650; }
+.bt-cb-c { margin: 10px 0 0; }
+.bt-cb-h { font-size: 13px; font-weight: 650; margin: 0; }
+.bt-cb-q { margin: 2px 0 0; color: var(--t-mut); }
+.bt-cb-o { margin: 4px 0 0; padding-left: 18px; }
+.bt-cb-l { font-weight: 600; }
 .bt-foot { padding: 8px 0 0; font-size: 12px; color: var(--t-fade); }
 .bt-none { padding: 28px 0; text-align: center; color: var(--t-fade); }
 .bt-wrap .bt-empty { color: var(--t-fade); }
@@ -1423,8 +1457,11 @@ html[data-beaver-active] .bt-export { display: inline-block; }
 // Document
 // ---------------------------------------------------------------------------
 
-/** Id of the `<script>` element that carries the embedded spec. */
-export const TABLE_SPEC_SCRIPT_ID = 'beaver-table-spec';
+/** Root attribute naming the SHA-256 of the spec the snapshot renders. */
+export const TABLE_SPEC_HASH_ATTRIBUTE = 'data-beaver-spec-sha256';
+
+/** Root attribute naming the SHA-256 of the `table.json` the snapshot was rendered from. */
+export const TABLE_FILE_HASH_ATTRIBUTE = 'data-beaver-file-sha256';
 
 /** Where the notice below sends a reader who does not have the plugin. */
 export const BEAVER_HOME_URL = 'https://www.beaverapp.ai';
@@ -1474,49 +1511,27 @@ function renderPluginNotice(): string {
 }
 
 /**
- * The spec as it is embedded in the document.
- *
- * Compact on purpose: the file already carries the rendered table, so the JSON
- * is machine state, and a large table would pay for every space twice — on disk
- * and in whatever later uploads the file.
- *
- * `<` is written as its JSON escape, which is what keeps the data from ending
- * the element it lives in: a cell containing `</script>` or `<!--` would
- * otherwise truncate the table's own state. `\u003c` decodes back to `<` under
- * `JSON.parse`, so the escape is lossless. Nothing else is escaped, and nothing
- * else should be: the reader below does `JSON.parse` and no unescaping, so any
- * other scheme would silently corrupt the values it was meant to protect.
- */
-function serializeSpec(spec: TableSpec): string {
-    return JSON.stringify(spec).replace(/</g, '\\u003c');
-}
-
-/**
  * A complete document, for a tab or a saved snapshot.
  *
- * The document is round-trippable: it embeds the spec it was rendered from, so
- * the stored `.html` is both a table anyone can read in a browser and the only
- * copy of the table's state Beaver needs to open it again. See
- * {@link parseTableDocument} for the way back in.
+ * The document is a rendering, not the table: `table.json` is the table, and
+ * the root names the hash of the spec this rendering shows, so a reader can
+ * tell a snapshot that is a render behind from a current one.
  */
 export function buildTableDocument(
     spec: TableSpec,
     options: TableHtmlOptions = {}
 ): RenderedTable {
     const table = renderTableHtml(spec, options);
-    // The file is the only copy of its state, so it says which format wrote it.
-    // A spec that already names a version keeps it — as do `key` and `version`,
-    // which belong to whatever stores the file rather than to the renderer.
-    const stored: TableSpec =
-        spec.spec_version == null
-            ? { ...spec, spec_version: TABLE_SPEC_VERSION }
-            : spec;
+    const digest = (attribute: string, value: string | undefined) =>
+        value && /^[a-f0-9]{64}$/.test(value) ? ` ${attribute}="${value}"` : '';
+    const hash = digest(TABLE_SPEC_HASH_ATTRIBUTE, options.specSha256)
+        + digest(TABLE_FILE_HASH_ATTRIBUTE, options.fileSha256);
 
     const html = [
         '<!DOCTYPE html>',
-        // Marks the document as one of ours, so a viewer can recognise it (and
-        // read the format version off it) without parsing the spec.
-        `<html lang="en" data-beaver-table="${escapeHtml(String(stored.spec_version))}">`,
+        // Marks the document as one of ours, so a viewer can recognise it
+        // without reading anything else.
+        `<html lang="en" data-beaver-table="${escapeHtml(String(spec.spec_version ?? 1))}"${hash}>`,
         '<head>',
         '<meta charset="utf-8">',
         `<title>${escapeHtml(spec.title ?? 'Table')}</title>`,
@@ -1528,18 +1543,6 @@ export function buildTableDocument(
         // bytes — the notice is a constant, not a decision made per file.
         renderPluginNotice(),
         table.html,
-        // Last in the body, after the table, and it has to stay there: snapshot
-        // annotations anchor by character offset into the document's text, so
-        // anything that could count as text must come after the content it
-        // would otherwise displace. Tidying this into <head> — or anywhere
-        // above the table — would silently break every annotation on every
-        // stored table.
-        `<script type="application/json" id="${TABLE_SPEC_SCRIPT_ID}">${serializeSpec(stored)}</script>`,
-        ...(options.storeState
-            ? [
-                  `<script type="application/json" id="${TABLE_STORE_SCRIPT_ID}">${JSON.stringify(options.storeState).replace(/</g, '\\u003c')}</script>`,
-              ]
-            : []),
         '</body>',
         '</html>',
         '',
@@ -1552,65 +1555,16 @@ export function buildTableDocument(
     };
 }
 
-export type ParsedTableDocument =
-    | { ok: true; spec: TableSpec }
-    | {
-          ok: false;
-          reason: 'no_spec' | 'unsupported_version' | 'invalid';
-          detail?: string;
-          specVersion?: number;
-      };
+/** The spec hash a rendered snapshot names, or null for one that names none. */
+export function renderedSpecHash(html: string): string | null {
+    const match = new RegExp(`<html\\b[^>]*\\b${TABLE_SPEC_HASH_ATTRIBUTE}="([a-f0-9]{64})"`).exec(html);
+    return match ? match[1] : null;
+}
 
-/**
- * The embedded spec, located by id. The document is our own deterministic
- * output, so the open tag is exact and the JSON body cannot contain `</script`
- * (see {@link serializeSpec}) — which is what makes the lazy match safe.
- */
-const SPEC_SCRIPT_RE = new RegExp(
-    `<script\\b[^>]*\\bid="${TABLE_SPEC_SCRIPT_ID}"[^>]*>([\\s\\S]*?)</script\\s*>`,
-    'i'
-);
-
-/**
- * Reads a built document back into the spec it was rendered from.
- *
- * This is not a convenience. It is the proof that the stored file is a faithful
- * representation of the table rather than a picture of one: everything the
- * table knows about itself survives a save and a load, so a snapshot can be
- * re-opened, re-sorted, extended with a column and written back without the
- * round trip losing anything.
- *
- * Deliberately without `DOMParser`: this module has to stay usable from the
- * esbuild bundle and from a plain Node unit test, and neither reliably has one.
- * The version guard is {@link readSpec}'s, and `unsupported_version` survives
- * with the version it read — a caller must be able to open a newer file
- * read-only instead of writing back something lossy.
- */
-export function parseTableDocument(html: string): ParsedTableDocument {
-    const match = SPEC_SCRIPT_RE.exec(html);
-    if (!match) return { ok: false, reason: 'no_spec' };
-
-    let raw: unknown;
-    try {
-        raw = JSON.parse(match[1]);
-    } catch (error) {
-        return {
-            ok: false,
-            reason: 'invalid',
-            detail: `embedded spec is not valid JSON: ${String(error)}`,
-        };
-    }
-
-    const read = readSpec(raw);
-    if (read.ok) return { ok: true, spec: read.spec };
-    if (read.reason === 'unsupported_version') {
-        return {
-            ok: false,
-            reason: 'unsupported_version',
-            specVersion: read.specVersion,
-        };
-    }
-    return { ok: false, reason: 'invalid', detail: read.detail };
+/** The `table.json` digest a rendered snapshot names on its root element, or null. */
+export function renderedFileHash(html: string): string | null {
+    const match = new RegExp(`<html\\b[^>]*\\b${TABLE_FILE_HASH_ATTRIBUTE}="([a-f0-9]{64})"`).exec(html);
+    return match ? match[1] : null;
 }
 
 /**

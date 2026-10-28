@@ -5,6 +5,7 @@ import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
+    type Citation as CitationMetadata,
 } from '@beaver/agent-core/types/citations';
 import {
     externalReferenceMappingAtom,
@@ -58,6 +59,12 @@ interface CitationProps {
     // Rendering options
     exportRendering?: boolean;
     children?: React.ReactNode;
+    /**
+     * An assembled citation, rendered without a tag or the thread's store, and
+     * the numeric marker its caller numbered it with.
+     */
+    citation?: CitationMetadata;
+    marker?: string;
 }
 
 /**
@@ -128,7 +135,10 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     // Get or assign numeric marker using base key (same item = same marker)
     // Uses markerKey (without sid/page) so all citations to the same item share a marker
-    const numericMarker = useCitationMarker(markerKey, exportRendering);
+    // A direct citation belongs to its caller (a table's evidence), which numbers
+    // it; it never takes a number from the thread's marker map.
+    const direct = props.citation !== undefined;
+    const numericMarker = useCitationMarker(direct ? '' : markerKey, exportRendering);
 
     // Whether the alternate-activation modifier is being held. Document-wide, so
     // every citation flips together and the hold reads as a mode.
@@ -153,7 +163,7 @@ const Citation: React.FC<CitationProps> = (props) => {
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
         // If key is missing (invalid/malformed citation) or invalid, show placeholder.
-        displayText = (markerKey && !isInvalid) ? numericMarker : '?';
+        displayText = (markerKey && !isInvalid) ? (direct ? props.marker ?? '?' : numericMarker) : '?';
     }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)

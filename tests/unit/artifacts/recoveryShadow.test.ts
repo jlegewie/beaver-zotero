@@ -12,7 +12,7 @@ import { installMutationInstance } from '../../helpers/mutationInstance';
  * So the fixture rolls the whole directory back together
  * ({@link resolveConflictTowardRemote}), exactly as the dev endpoint's
  * `sync_conflict` mode does, rather than damaging one file: a test that only
- * downgraded the document would be exercising crash recovery instead.
+ * downgraded `table.json` would be exercising crash recovery instead.
  *
  * The test that matters most is the one that asserts *silence*. A false
  * positive here would put "your work was replaced" on every table on every
@@ -48,10 +48,7 @@ vi.mock('../../../src/utils/prefs', () => ({
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableShadowRecord } from '../../../src/services/database';
-import {
-    buildTableDocument,
-    parseTableDocument,
-} from '../../../src/services/artifacts/tableDocument';
+import { buildTableDocument } from '../../../src/services/artifacts/tableDocument';
 import { TABLE_TAG } from '../../../src/services/artifacts/tableItem';
 import {
     detectTableSyncConflict,
@@ -60,6 +57,7 @@ import {
     TABLE_SHADOW_RETENTION,
 } from '../../../src/services/artifacts/recoveryShadow';
 import {
+    checkShadowRestore,
     createTable,
     deleteTable,
     openTable,
@@ -70,6 +68,7 @@ import {
     type TableWriteResult,
 } from '../../../src/services/artifacts/tableStore';
 import { readTableSectionData } from '../../../src/ui/tableItemPane';
+import { setTablesApi, type TablesApi } from '../../../src/services/artifacts/tablesApi';
 
 // ---------------------------------------------------------------------------
 // A temp profile and a temp storage directory
@@ -203,8 +202,9 @@ function demoSpec(text = 'One'): TableSpec {
                 id: 'r1',
                 cells: {
                     note: {
+                        outcome: 'answered',
                         value: { kind: 'text', text },
-                        provenance: 'asserted',
+                        provenance: 'document',
                     },
                 },
             },
@@ -219,25 +219,35 @@ function expectOk(result: TableWriteResult) {
     return result;
 }
 
-/** The version the stored document claims. */
-async function storedVersion(): Promise<number | undefined> {
-    const parsed = parseTableDocument(await readFile(htmlPath, 'utf8'));
-    return parsed.ok ? parsed.spec.version : undefined;
+/** `table.json`, the table itself. */
+function tablePath(): string {
+    return join(storageDir, 'table.json');
 }
 
-/** The text in the stored document's only cell. */
+async function storedSpec(): Promise<TableSpec | undefined> {
+    try {
+        return JSON.parse(await readFile(tablePath(), 'utf8')).spec;
+    } catch {
+        return undefined;
+    }
+}
+
+/** The version the stored table claims. */
+async function storedVersion(): Promise<number | undefined> {
+    return (await storedSpec())?.version;
+}
+
+/** The text in the stored table's only cell. */
 async function storedText(): Promise<string | undefined> {
-    const parsed = parseTableDocument(await readFile(htmlPath, 'utf8'));
-    if (!parsed.ok) return undefined;
-    const value = parsed.spec.rows[0]?.cells.note?.value;
+    const value = (await storedSpec())?.rows[0]?.cells.note?.value;
     return value && value.kind === 'text' ? value.text : undefined;
 }
 
 /**
  * Replaces the whole storage directory with `spec` at `version`, the way Zotero
- * does when the user keeps the remote copy: document, log and version files all
- * from the same source, agreeing with each other and mentioning nothing about
- * what this device had.
+ * does when the user keeps the remote copy: table, snapshot, log and version
+ * files all from the same source, agreeing with each other and mentioning
+ * nothing about what this device had.
  */
 async function resolveConflictTowardRemote(
     spec: TableSpec,
@@ -271,7 +281,10 @@ async function resolveConflictTowardRemote(
         if (match && Number(match[1]) > version) await rm(sidecar(name));
     }
 
-    await writeFile(htmlPath, buildTableDocument(stored).html, 'utf8');
+    const hash = await sha256(serialized);
+    await writeFile(tablePath(), JSON.stringify({ spec: stored }), 'utf8');
+    await writeFile(htmlPath, buildTableDocument(stored, { specSha256: hash }).html, 'utf8');
+    await writeFile(sidecar('bookkeeping.json'), JSON.stringify({ sha256: hash }), 'utf8');
 }
 
 beforeAll(() => {
@@ -313,7 +326,9 @@ beforeEach(async () => {
         hasTag: (name: string) => name === TABLE_TAG,
         getField: (field: string) =>
             field === 'url' ? 'beaver://table/demo-table' : '',
+        setField: vi.fn(),
         getFilePathAsync: async () => htmlPath,
+        getFilePath: () => htmlPath,
         addTag: vi.fn(),
         attachmentFilename: 'demo-table.html',
         saveTx: vi.fn(async () => undefined),
@@ -367,6 +382,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+    // A debounced render still pending would write into the deleted directory.
     await rm(storageDir, { recursive: true, force: true });
     await rm(profileDir, { recursive: true, force: true });
 });
@@ -520,8 +536,8 @@ describe('detecting a table that went backwards', () => {
     it('reports nothing on an ordinary open', async () => {
         // The one that matters. Every open of every table runs this comparison,
         // and the shadow's digest is over the bytes the store wrote while the
-        // open's is over the spec parsed back out of the document — so this is
-        // also the assertion that the document round-trips exactly.
+        // open's is over the spec parsed back out of `table.json` — so this is
+        // also the assertion that the table round-trips exactly.
         await createTable({ spec: demoSpec('One') });
         expect((await openTable(ref)).conflict).toBeNull();
 
@@ -557,9 +573,10 @@ describe('detecting a table that went backwards', () => {
             shadowVersion: 3,
             restorable: true,
         });
-        // Not folded in with the repairs: nothing was repaired, and the store
-        // is not going to decide this one.
-        expect(opened.recovered).toEqual([]);
+        // Not folded in with the repairs: the store is not going to decide this
+        // one. The snapshot is re-rendered only because this simulated sync
+        // carried the JSON without its rendering.
+        expect(opened.recovered).toEqual([{ kind: 'rerendered' }]);
     });
 
     it('reports a conflict when the version is the same but the content is not', async () => {
@@ -670,9 +687,23 @@ describe('restoring this device\'s version', () => {
  * runs on every table they select.
  */
 describe('what the item-pane section reports', () => {
+    beforeEach(() => {
+        // The section asks the store through the namespace, as in Zotero.
+        setTablesApi({ shadow: { check: checkShadowRestore } } as unknown as TablesApi);
+    });
+
+    /** Makes the table's library allow item edits but not file edits. */
+    function makeFilesReadOnly(): void {
+        (globalThis as any).Zotero.Libraries.get = vi.fn((id: number) =>
+            id === LIBRARY_ID
+                ? { libraryID: LIBRARY_ID, libraryType: 'user', editable: true, filesEditable: false }
+                : false
+        );
+    }
+
     /**
      * Commits a version and loses the log write, which is what an interrupted
-     * write leaves behind: the document is the new version, the log is a
+     * write leaves behind: `table.json` is the new version, the log is a
      * version behind it, and the next open repairs that silently.
      */
     async function commitWithoutTheLog(text: string): Promise<void> {
@@ -695,7 +726,7 @@ describe('what the item-pane section reports', () => {
 
         // The log's word for the tip is 2 and this device wrote 3 — which,
         // taken from the log, reads as a table that went backwards. It did not:
-        // the document is at 3.
+        // `table.json` is at 3.
         expect((await readHistory()).tip).toBe(2);
         expect((await lastTableShadow(ref))!.version).toBe(3);
         expect(await storedVersion()).toBe(3);
@@ -735,30 +766,102 @@ describe('what the item-pane section reports', () => {
         });
     });
 
-    it('does not present healthy history counts for a corrupt document', async () => {
+    it('does not present healthy history counts for a corrupt table file', async () => {
         await createTable({ spec: demoSpec('One') });
-        await writeFile(htmlPath, '<html>Broken table</html>');
+        await writeFile(tablePath(), '{"spec":');
         const data = await readTableSectionData(item);
         expect(data.reason).toBeTruthy();
         expect(data.fields.dimensionsLine).toBe('');
         expect(data.fields.conflict).toBeNull();
+        // This device wrote the table, so its last version can be written back.
+        expect(data.canRestore).toBe(true);
     });
 
-    it('validates the document once on an ordinary table', async () => {
+    it('does not offer a restore for a corrupt table whose retained copy is gone', async () => {
+        await createTable({ spec: demoSpec('One') });
+        await rm((await lastTableShadow(ref))!.payloadPath!);
+        await writeFile(tablePath(), '{"spec":');
+        expect(await checkShadowRestore(ref)).toBe('no_payload');
+        expect((await readTableSectionData(item)).canRestore).toBe(false);
+    });
+
+    it('does not offer a restore for a corrupt table in a library that cannot be written', async () => {
+        await createTable({ spec: demoSpec('One') });
+        await writeFile(tablePath(), '{"spec":');
+        makeFilesReadOnly();
+        expect(await checkShadowRestore(ref)).toBe('not_writable');
+        expect((await readTableSectionData(item)).canRestore).toBe(false);
+    });
+
+    it('does not offer a restore for a table in the trash, which the restore refuses', async () => {
+        await createTable({ spec: demoSpec('One') });
+        await writeFile(tablePath(), '{"spec":');
+        item.deleted = true;
+        expect(await checkShadowRestore(ref)).toBe('unavailable');
+        expect((await readTableSectionData(item)).canRestore).toBe(false);
+        const result = await restoreShadowVersion(ref);
+        expect(result).toMatchObject({ ok: false, code: 'write_refused' });
+    });
+
+    it('does not offer a restore over a table written by a newer format', async () => {
+        await createTable({ spec: demoSpec('One') });
+        await writeFile(tablePath(), JSON.stringify({ spec: { ...demoSpec('Newer'), spec_version: 99, key: KEY, version: 2 } }));
+        expect(await checkShadowRestore(ref)).toBe('unavailable');
+        expect((await readTableSectionData(item)).canRestore).toBe(false);
+        expect(await restoreShadowVersion(ref)).toMatchObject({ ok: false, code: 'write_refused' });
+    });
+
+    it('says a conflicted version is kept only while its copy still verifies', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Mine'), { actor: 'user' }));
+        await resolveConflictTowardRemote(demoSpec('Theirs'), 2);
+        expect((await readTableSectionData(item)).canRestore).toBe(true);
+
+        // A row whose copy is gone, as for a version over the retention cap.
+        await rm((await lastTableShadow(ref))!.payloadPath!);
+        const data = await readTableSectionData(item);
+        expect(data.fields.conflict).toMatchObject({ reason: 'diverged', restorable: false });
+        expect(data.canRestore).toBe(false);
+    });
+
+    it('keeps saying a conflicted version is kept when only the library blocks the restore', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Mine'), { actor: 'user' }));
+        await resolveConflictTowardRemote(demoSpec('Theirs'), 2);
+        makeFilesReadOnly();
+        const data = await readTableSectionData(item);
+        expect(data.fields.conflict).toMatchObject({ restorable: true, writable: false });
+        expect(data.fields.conflictLine).toContain('cannot write to this library');
+        expect(data.canRestore).toBe(false);
+    });
+
+    it('restores a corrupt table from the version this device wrote', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        await writeFile(tablePath(), '{"spec":');
+        const restored = await restoreShadowVersion(ref);
+        expect(restored).toMatchObject({ ok: true, restoredFrom: 2 });
+        const data = await readTableSectionData(item);
+        expect(data.reason).toBeNull();
+        expect(data.canRestore).toBe(false);
+    });
+
+    it('reads the table once on an ordinary table, and never the snapshot', async () => {
         await createTable({ spec: demoSpec('One') });
         expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
 
         const reads: string[] = [];
-        const getContentsAsync = (globalThis as any).Zotero.File.getContentsAsync;
-        (globalThis as any).Zotero.File.getContentsAsync = async (path: string) => {
+        const readUTF8 = (globalThis as any).IOUtils.readUTF8;
+        (globalThis as any).IOUtils.readUTF8 = async (path: string) => {
             reads.push(path);
-            return getContentsAsync(path);
+            return readUTF8(path);
         };
 
         const data = await readTableSectionData(item);
 
         expect(data.fields.conflict).toBeNull();
-        expect(reads.filter((path) => path === htmlPath)).toHaveLength(1);
+        expect(reads.filter((path) => path === tablePath())).toHaveLength(1);
+        expect(reads).not.toContain(htmlPath);
     });
 });
 
@@ -770,12 +873,12 @@ it('keeps the table intact when trim cannot retire the discarded recovery shadow
         run_id: 'discard',
         thread_id: 'thread',
     });
-    const before = await readFile(htmlPath, 'utf8');
+    const before = await readFile(tablePath(), 'utf8');
     vi.spyOn(db, 'deleteTableShadows').mockRejectedValueOnce(new Error('database unavailable'));
     await expect(trimTable(ref, { thread_id: 'thread', run_ids: ['discard'] })).rejects.toThrow(
         'database unavailable'
     );
-    expect(await readFile(htmlPath, 'utf8')).toBe(before);
+    expect(await readFile(tablePath(), 'utf8')).toBe(before);
     expect((await openTable(ref)).conflict).toBeNull();
 });
 
@@ -814,7 +917,8 @@ it.each(['history', 'save'])('repairs the recovery shadow when creation retries 
         if (to.endsWith('history.json')) throw new Error('interrupted');
         await realIOUtils.move(from, to);
     } };
-    expect(await createTable(options)).toMatchObject({ saved: false });
+    // The render inside the creation saves the item, so only the history step stays unsaved.
+    expect(await createTable(options)).toMatchObject({ saved: step === 'save' });
     if (step === 'history') expect(await lastTableShadow(ref)).toBeNull();
     (globalThis as any).IOUtils = realIOUtils;
     const replay = await openTable(ref);

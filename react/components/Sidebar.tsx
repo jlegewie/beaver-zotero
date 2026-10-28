@@ -3,10 +3,12 @@ import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
 import BatchApprovalPanel from "./input/BatchApprovalPanel"
 import CreditConfirmationPanel from "./input/CreditConfirmationPanel"
+import TableCardPanel from "./tables/card/TableCardPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
+import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
@@ -20,6 +22,7 @@ import { isThreadListViewAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import ProfileLoadingPage from './pages/ProfileLoadingPage';
+import SessionRestorePage from './pages/SessionRestorePage';
 import FreeOnboardingPage from './pages/FreeOnboardingPage';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
@@ -221,9 +224,11 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
     const pendingQuestionsMap = useAtomValue(pendingQuestionsAtom);
     const pendingBatchApprovalsMap = useAtomValue(pendingBatchApprovalsAtom);
     const pendingCreditConfirmationsMap = useAtomValue(pendingCreditConfirmationsAtom);
+    const pendingTableCardsMap = useAtomValue(pendingTableCardsAtom);
     const composerTakeover = selectComposerTakeover({
         pendingApprovalCount: pendingApprovalsMap.size,
         batchApprovals: pendingBatchApprovalsMap,
+        tableCards: pendingTableCardsMap,
         creditConfirmations: pendingCreditConfirmationsMap,
         questions: pendingQuestionsMap,
     });
@@ -278,6 +283,18 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
                         </span>
                     </div>
                 </div>
+            </SidebarShell>
+        );
+    }
+
+    {/* Saved sign-in still being restored: Beaver does not know yet whether
+        the user is signed out, so the sign-in form must not show. */}
+    if (chatAccessGate === 'restoring') {
+        return (
+            <SidebarShell isWindow={isWindow}>
+                {header}
+                <SessionRestorePage />
+                <DialogContainer />
             </SidebarShell>
         );
     }
@@ -427,6 +444,12 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
                                 <BatchApprovalPanel
                                     key={composerTakeover.approval.approvalId}
                                     approval={composerTakeover.approval}
+                                />
+                            ) : composerTakeover.kind === 'table-card' ? (
+                                // key resets the card's draft per request
+                                <TableCardPanel
+                                    key={composerTakeover.card.card_id}
+                                    card={composerTakeover.card}
                                 />
                             ) : composerTakeover.kind === 'credit-confirmation' ? (
                                 // key resets local decision state per confirmation

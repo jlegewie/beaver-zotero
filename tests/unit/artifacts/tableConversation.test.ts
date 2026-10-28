@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createStore } from "jotai";
 import {
     messageAttachmentIdentity,
     mergeMessageAttachments,
@@ -10,28 +9,12 @@ import {
     isToolResultView,
     tableResultMessages,
 } from "@beaver/agent-core/run-state/toolResultViews";
-import {
-    buildResponse,
-    initialDraft,
-} from "@beaver/agent-core/run-state/batchApprovalAnswers";
-import {
-    addPendingBatchApprovalAtom,
-    pendingBatchApprovalsAtom,
-} from "@beaver/agent-core/run-state/pendingBatchApprovals";
 import { isTableChatEnabled } from "../../../src/services/tableCapability";
 import { ZOTERO_PLUGIN_FEATURES } from "@beaver/agent-core/protocol/agentProtocol";
 
 const attachment: TableAttachment = {
     type: "table",
     reference: { kind: "table", key: "u-ABCDEFGH", title: "Observed title" },
-};
-const plan = {
-    reference: attachment.reference,
-    schema_id: "schema-1",
-    population_id: "population-1",
-    population_count: 3,
-    columns: [{ id: "design", question: "What is the study design?" }],
-    cost_estimate: "3 credits",
 };
 
 describe("table conversation contracts", () => {
@@ -82,35 +65,6 @@ describe("table conversation contracts", () => {
             }),
         ).toBe(false);
     });
-    it("retains the exact approved population and schema through pending state and response", () => {
-        const store = createStore();
-        store.set(addPendingBatchApprovalAtom, {
-            approval_id: "approval",
-            table: plan,
-        } as any);
-        const table = store
-            .get(pendingBatchApprovalsAtom)
-            .get("approval")!.table;
-        expect(table).toEqual(plan);
-        expect(
-            buildResponse(initialDraft("ask_each_time"), true, table),
-        ).toMatchObject({
-            approved: true,
-            table: {
-                key: "u-ABCDEFGH",
-                schema_id: "schema-1",
-                population_id: "population-1",
-            },
-        });
-        expect(
-            buildResponse(initialDraft("ask_each_time"), false, table).table,
-        ).toEqual(
-            buildResponse(initialDraft("ask_each_time"), true, table).table,
-        );
-        expect(
-            buildResponse(initialDraft("ask_each_time"), true),
-        ).not.toHaveProperty("table");
-    });
     it.each(["production", "test", undefined])(
         "keeps table activation off in %s",
         (env) => {
@@ -142,7 +96,7 @@ describe("table conversation contracts", () => {
             "Earlier committed answers remain",
         );
     });
-    it("keeps committed work successful despite repair or result-recording failures", () => {
+    it("keeps committed work successful despite bookkeeping or result-recording failures", () => {
         const result = {
             ok: true,
             saved: false,
@@ -150,7 +104,9 @@ describe("table conversation contracts", () => {
             rejected_count: 2,
         };
         const messages = tableResultMessages(JSON.stringify(result));
-        expect(messages.join(" ")).toContain("Changes are committed");
+        // Bookkeeping that failed after the commit is repaired when the table
+        // opens; it is not a chat status.
+        expect(messages.join(" ")).not.toContain("bookkeeping");
         expect(messages.join(" ")).toContain(
             "confirmed table outcome is unchanged",
         );

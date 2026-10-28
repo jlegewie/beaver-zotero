@@ -10,8 +10,8 @@ import {
     type ToolResultView as ToolResultViewModel,
 } from '@beaver/agent-core/run-state/toolResultViews';
 import { ToolResultView, hasRenderableResult } from './ToolResultView';
-import { TableToolCallView } from './TableToolCallView';
 import { GenericAgentActionView } from './GenericAgentActionView';
+import { TableToolCallView } from './TableToolCallView';
 import { getHost } from '@beaver/agent-ui/host';
 import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
 import {
@@ -96,7 +96,6 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Table tools (the writes render as TableToolCallView; read_table is a plain row)
     create_table: TableIcon,
     read_table: TableIcon,
-    edit_rows: TableIcon,
     edit_table: TableIcon,
     fill_table: TableIcon,
 
@@ -354,7 +353,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const setExpanded = useSetAtom(setToolExpandedAtom);
     // A failed table read can still carry recovery status worth opening.
     const hasTableStatus = isTableToolName(part.tool_name) && !!result
-        && tableResultMessages(result.content).length > 0;
+        && tableResultMessages(result.content, part.tool_name).length > 0;
     const isExpanded = expansionState[expansionKey] ?? hasTableStatus;
     const wasConfirmApprovalRef = useRef(isConfirmApproval);
 
@@ -420,7 +419,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
 
     // Table writes are cards like the note actions: the header names the table
-    // and opens it, the body carries the call's summary and recovery notices.
+    // and opens it, the body carries the call's summary and reveal / open.
     if (isTableWriteToolName(part.tool_name)) {
         return (
             <TableToolCallView

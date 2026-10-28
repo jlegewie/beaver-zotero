@@ -39,12 +39,27 @@ import type { TableRef } from './tableItemIdentity';
 import type { TableShadowReport, TableShadowObservation } from './recoveryShadow';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import type { Citation } from '@beaver/agent-core/types/citations';
+import type { SkippedCell } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableVersionEntry } from './tableItemIdentity';
-import type { TableWriteResult, TableShadowRestoreResult } from './tableStore';
+import type { TableWriteResult, TableShadowRestoreCheck, TableShadowRestoreResult } from './tableStore';
 import type { TableViewSummary } from './view/enhanceTableDocument';
 import type { ReaderTableDiagnostics } from './view/readerTableView';
-import type { OpenTableOutcome } from '../../ui/openTable';
+import type { OpenTableOptions, OpenTableOutcome } from '../../ui/openTable';
 import type { TableItemPaneReport } from '../../ui/tableItemPane';
+import type { TableTabRenderReport } from '../../ui/tableTabTypes';
+
+/** The table tabs, owned by `src/ui/tableTab.ts`. */
+export interface TablesTabsApi {
+    /** The open table tabs, for the dev endpoint. */
+    list(): Array<{
+        tabID: string;
+        libraryID: number;
+        key: string;
+        title: string;
+        mounted: boolean;
+        renders: TableTabRenderReport[];
+    }>;
+}
 
 /** The item-pane section, as the dev endpoint needs to see it. */
 export interface TablesItemPaneApi {
@@ -73,6 +88,11 @@ export interface TablesShadowApi {
         ref: TableRef,
         observed?: TableShadowObservation | null
     ): Promise<TableShadowReport>;
+    /**
+     * Whether {@link restore} would write a version back now. Ask this before
+     * offering or mentioning the restore.
+     */
+    check(ref: TableRef): Promise<TableShadowRestoreCheck>;
     /** Writes the retained spec back as a new version. */
     restore(ref: TableRef): Promise<TableShadowRestoreResult | TableShadowUnavailable>;
 }
@@ -85,29 +105,37 @@ export interface TableShadowUnavailable {
 }
 
 export interface TablesApi {
-    /** The single entry point for showing a stored table: the reader. */
-    openTable(ref: TableRef): Promise<OpenTableOutcome>;
+    /**
+     * The single entry point for showing a stored table: the Beaver tab, in
+     * the main window of `options.window` (the window the interaction came
+     * from). See `src/ui/openTable.ts`.
+     */
+    openTable(ref: TableRef, options?: OpenTableOptions): Promise<OpenTableOutcome>;
 
     /** Every table document currently enhanced. */
     listViews(): TableViewSummary[];
 
     /**
-     * Opens a stored table in the reader and reports what the enhancer
-     * attached. {@link openTable} is the product path; this one waits for the
-     * enhancement and describes it, which is what a dev endpoint needs.
+     * Opens a stored table in the reader — kept there, not replaced by the
+     * Beaver tab — and reports what the enhancer attached. Dev only;
+     * {@link openTable} is the product path.
      */
     openInReader(
         item: Zotero.Item,
         options?: { timeoutMs?: number }
     ): Promise<ReaderTableDiagnostics>;
 
-    /** Marks open snapshots as outdated after a persisted write. */
-    tableChanged(ref: TableRef): void;
+    /**
+     * Marks open snapshots as outdated after a persisted write. With `sha256`,
+     * only those not already showing that spec.
+     */
+    tableChanged(ref: TableRef, sha256?: string): void;
     local: {
         commands(win: Window): TableLocalCommands;
     };
     itemPane: TablesItemPaneApi;
     shadow: TablesShadowApi;
+    tabs: TablesTabsApi;
 }
 
 /** The plugin-owned recovery operation. */
@@ -178,6 +206,34 @@ export function tableWriteLocks(): Map<string, Promise<unknown>> {
 /** Drops the registry. Plugin teardown only — no write may be in flight. */
 export function clearTableWriteLocks(): void {
     Zotero.__beaverTableWriteLocks = undefined;
+}
+
+/** The last commit of a provider `edit` session, so a retry of it replays. */
+export interface TableEditSessionCommit {
+    seq: number;
+    /** Digest of the commit's mutations and meta, so a reused `seq` must match. */
+    request_sha256: string;
+    skipped: SkippedCell[];
+    saved: boolean;
+}
+
+/**
+ * The last commit of each provider `edit` session, keyed
+ * `<libraryID>/<key>|<operation_id>`, read and written only under the table's
+ * write lock. On the shared global for the same reason as
+ * {@link tableWriteLocks}, and owned by the plugin realm the same way.
+ *
+ * Process memory, not part of the table: a session lives as long as one fill
+ * on one connection. A retry after a restart finds no entry and applies its
+ * cell writes again, which writes the same cells.
+ */
+export function tableEditSessions(): Map<string, TableEditSessionCommit> {
+    return (Zotero.__beaverTableEditSessions ??= new Map());
+}
+
+/** Drops the registry. Plugin teardown only. */
+export function clearTableEditSessions(): void {
+    Zotero.__beaverTableEditSessions = undefined;
 }
 
 /**

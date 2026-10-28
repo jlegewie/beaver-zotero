@@ -180,6 +180,29 @@ import {
     removePendingBatchApprovalAtom,
     clearAllPendingBatchApprovalsAtom,
 } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import {
+    addPendingTableCardAtom,
+    clearAllPendingTableCardsAtom,
+    removePendingTableCardAtom,
+    removePendingTableCardForToolCallAtom,
+    tableCardDraftsAtom,
+} from '@beaver/agent-core/run-state/pendingTableCards';
+import {
+    addTableFillProgressAtom,
+    clearTableFillProgressAtom,
+    removeTableFillProgressAtom,
+} from '@beaver/agent-core/run-state/tableFillProgress';
+import {
+    applyEstimateResult,
+    failEstimate,
+    initialTableCardDraft,
+    startEstimate,
+} from '@beaver/agent-core/run-state/tableCardDraft';
+import { isCreateCard, isFillCard, type WSTableCreateCardRequest } from '@beaver/agent-core/protocol/tableCardProtocol';
+import { watchTableFillCommits } from './tableFillCommits';
+import type { WSTableCardEstimateResult, WSTableCardRequest, WSTableCardResponse, WSTableCardStale, WSTableFillStarted } from '@beaver/agent-core/protocol/tableCardProtocol';
+import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
+import { openStoredTable } from '../host/zotero/tables';
 import { readCreditThreshold } from '../utils/creditThreshold';
 import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQueue';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
@@ -1459,6 +1482,8 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
+    set(clearTableFillProgressAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
@@ -1485,11 +1510,27 @@ function findToolCallArgs(
     return null;
 }
 
+/** The tool a call in the run belongs to, or null when the call is not in it. */
+function findToolCallName(run: AgentRun | null, toolCallId: string): string | null {
+    if (!run) return null;
+    for (const message of run.model_messages) {
+        if (message.kind !== 'response') continue;
+        for (const part of message.parts) {
+            if (part.part_kind === 'tool-call' && part.tool_call_id === toolCallId) return part.tool_name;
+        }
+    }
+    return null;
+}
+
 /** How a reattach after a lost connection ended, for the failure report. */
 interface ReattachOutcome {
     /** `reattached`, `gave_up`, or `fallback:<reason>`. */
     outcome: string;
     gapMs: number;
+    /** Sockets opened to reattach the run. */
+    attempts: number;
+    /** Sockets the run lost, the first loss included. */
+    losses: number;
     /** The server ended the run and saved what it had, so it can be continued. */
     resumable?: boolean;
 }
@@ -1499,6 +1540,8 @@ function reattachFailureOutcome(info: WSReattachFailedInfo): ReattachOutcome {
     return {
         outcome: info.reason === 'gave_up' ? 'gave_up' : `fallback:${info.reason}`,
         gapMs: info.gapMs,
+        attempts: info.attempts,
+        losses: info.losses,
         // `expired` means the run ended on the server, which saves it the way
         // any interrupted run is saved.
         resumable: info.reason === 'expired',
@@ -1586,6 +1629,8 @@ function surfaceAndDiagnoseConnectionFailure(
         connect_attempts: connectAttempts ?? null,
         reattach_outcome: reattach?.outcome ?? null,
         reattach_gap_ms: reattach?.gapMs ?? null,
+        reattach_attempts: reattach?.attempts ?? null,
+        reattach_losses: reattach?.losses ?? null,
     }).then((diagnostic) => applyPresentation(diagnostic));
 }
 
@@ -1687,6 +1732,8 @@ export function createWSCallbacks(
         set(clearAllPendingQuestionsAtom);
         set(clearAllPendingCreditConfirmationsAtom);
         set(clearAllPendingBatchApprovalsAtom);
+        set(clearAllPendingTableCardsAtom);
+        set(clearTableFillProgressAtom);
         set(clearRunApprovalPolicyAtom);
 
         // A run that reached `completed` (run_complete processed) but whose
@@ -1741,13 +1788,15 @@ export function createWSCallbacks(
     const reportReattachOutcome = (info: WSReattachedInfo | WSReattachFailedInfo) => {
         const outcome: ReattachOutcome = 'reason' in info
             ? reattachFailureOutcome(info)
-            : { outcome: 'reattached', gapMs: info.gapMs };
+            : { outcome: 'reattached', gapMs: info.gapMs, attempts: info.attempts, losses: info.losses };
         void reportConnectionFailure({
             evidence: info.evidence,
             run_id: info.runId,
             connect_attempts: connectAttempts(),
             reattach_outcome: outcome.outcome,
             reattach_gap_ms: outcome.gapMs,
+            reattach_attempts: outcome.attempts,
+            reattach_losses: outcome.losses,
         });
     };
 
@@ -1852,6 +1901,19 @@ export function createWSCallbacks(
             if (event.part.part_kind === "tool-return") {
                 await processToolReturnResults(event.part, set);
 
+                // A table the user just approved opens in its Beaver tab,
+                // behind the selected tab so the answer stays in view.
+                if (event.part.tool_name === "create_table") {
+                    const created = tableRecordFromMetadata(event.part.metadata);
+                    if (created) {
+                        void openStoredTable(created.reference.key, getHostWindow(), { background: true })
+                            .then((outcome) => {
+                                if ("error" in outcome) logger(`WS onToolReturn: opening the new table failed: ${outcome.error}`, 1);
+                            })
+                            .catch((error) => logger(`WS onToolReturn: opening the new table failed: ${String(error)}`, 1));
+                    }
+                }
+
                 // Safety net: the current backend ships a hydrated `metadata.view`
                 // on every tool return, but synthesize one from the legacy summary
                 // when it is missing OR malformed so the shared render layer always
@@ -1902,6 +1964,12 @@ export function createWSCallbacks(
                         break;
                     }
                 }
+
+                // Same for a table card: create_table returns on the backend's
+                // timeout too, and the card must not outlive its call.
+                set(removePendingTableCardForToolCallAtom, toolCallId);
+                // A fill's progress panel ends with the call that ran it.
+                set(removeTableFillProgressAtom, toolCallId);
             }
         },
 
@@ -2060,6 +2128,8 @@ export function createWSCallbacks(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
+            set(clearAllPendingTableCardsAtom);
+            set(clearTableFillProgressAtom);
             set(clearRunApprovalPolicyAtom);
         },
 
@@ -2116,6 +2186,8 @@ export function createWSCallbacks(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
+            set(clearAllPendingTableCardsAtom);
+            set(clearTableFillProgressAtom);
             set(clearRunApprovalPolicyAtom);
 
             if (
@@ -2343,6 +2415,55 @@ export function createWSCallbacks(
             set(removePendingBatchApprovalAtom, event.approval_id);
         },
 
+        onTableCardRequest: (event: WSTableCardRequest) => {
+            logger('WS onTableCardRequest:', {
+                cardId: event.card_id,
+                runId: event.run_id,
+                toolcallId: event.toolcall_id,
+                scope: event.scope,
+                sources: event.sources.length,
+                columns: event.columns.length,
+            }, 1);
+            // A card this client cannot show is declined, as by a client
+            // without a table card handler: the run is not held for its timeout.
+            if (!isCreateCard(event) && !isFillCard(event)) {
+                agentService.sendTableCardResponse({ type: 'table_card_response', card_id: event.card_id, approved: false });
+                return;
+            }
+            set(addPendingTableCardAtom, event);
+        },
+
+        onTableCardEstimateResult: (event: WSTableCardEstimateResult) => {
+            const drafts = store.get(tableCardDraftsAtom);
+            const draft = drafts.get(event.card_id);
+            if (!draft) return;
+            const next = applyEstimateResult(draft, event);
+            if (next === draft) return;
+            const updated = new Map(drafts);
+            updated.set(event.card_id, next);
+            set(tableCardDraftsAtom, updated);
+        },
+
+        onTableFillStarted: (event: WSTableFillStarted) => {
+            logger('WS onTableFillStarted:', { toolcallId: event.toolcall_id, rows: event.rows, table: event.table.key }, 1);
+            watchTableFillCommits();
+            set(addTableFillProgressAtom, event);
+            // "Create and fill": the new table opens in its tab as the fill
+            // starts, behind the selected tab, so the user can watch it fill.
+            if (findToolCallName(store.get(activeRunAtom), event.toolcall_id) === 'create_table') {
+                void openStoredTable(event.table.key, getHostWindow(), { background: true })
+                    .then((outcome) => {
+                        if ('error' in outcome) logger(`WS onTableFillStarted: opening the new table failed: ${outcome.error}`, 1);
+                    })
+                    .catch((error) => logger(`WS onTableFillStarted: opening the new table failed: ${String(error)}`, 1));
+            }
+        },
+
+        onTableCardStale: (event: WSTableCardStale) => {
+            logger('WS onTableCardStale:', { cardId: event.card_id, reason: event.reason }, 1);
+            set(removePendingTableCardAtom, event.card_id);
+        },
+
         onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
             logger('WS onAskUserQuestionRequest:', {
                 questionId: event.question_id,
@@ -2395,7 +2516,7 @@ export function createWSCallbacks(
         },
 
         onReattached: (info: WSReattachedInfo) => {
-            logger(`WS onReattached: run ${info.runId} after ${info.gapMs}ms, ${info.replayed} event(s) replayed`, 1);
+            logger(`WS onReattached: run ${info.runId} after ${info.gapMs}ms (${info.attempts} socket(s), ${info.losses} lost), ${info.replayed} event(s) replayed`, 1);
             set(wsReconnectingAtom, null);
             set(isWSConnectedAtom, true);
             set(isWSReadyAtom, true);
@@ -2878,6 +2999,9 @@ const sendWSMessage = async (
         // never auto-attach a reader source in a library the user excluded from
         // Beaver — this path bypasses the currentMessageItems gate above.
         const readerAttachment = submissionReaderAttachment;
+        // Set when the tab's table is dropped below, so the captured
+        // application state stops naming it as the open table.
+        let droppedTableContextKey: string | null = null;
         if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
@@ -2897,8 +3021,28 @@ const sendWSMessage = async (
                 if (readerAttachment.parentItem) {
                     await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
                 }
-                const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
-                if (readerMessageAttachment) attachments.push(readerMessageAttachment);
+                // The tab context is attached automatically, so a table that
+                // stopped being sendable since it became the context (corrupt,
+                // write pending, newly cites an excluded library) is dropped
+                // with a notice instead of failing the whole send.
+                try {
+                    const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
+                    if (readerMessageAttachment) attachments.push(readerMessageAttachment);
+                } catch (error: any) {
+                    droppedTableContextKey = readerAttachment.key;
+                    logger(`sendWSMessageAtom: Dropping unavailable tab context ${readerKeys[0]}: ${error?.message ?? error}`, 1);
+                    // Stop offering it as context, so the next send does not
+                    // warn again; selecting the tab again re-checks it.
+                    if (get(currentReaderAttachmentAtom)?.id === readerAttachment.id) {
+                        set(currentReaderAttachmentAtom, null);
+                    }
+                    set(addPopupMessageAtom, {
+                        type: 'warning',
+                        title: 'Table not attached',
+                        text: 'The open table is unavailable and was not added to the message.',
+                        expire: true,
+                    });
+                }
             } else {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKeys[0]}`, 1);
             }
@@ -2966,7 +3110,11 @@ const sendWSMessage = async (
         // Application state (current view, reader/note state, library context,
         // indexing status). Built via the injectable provider so a non-Zotero
         // host can supply its own document state through the same slot.
-        const applicationState = await applicationStatePromise;
+        let applicationState = await applicationStatePromise;
+        if (droppedTableContextKey && applicationState?.table_state?.zotero_key === droppedTableContextKey) {
+            const { table_state: _dropped, ...rest } = applicationState;
+            applicationState = rest;
+        }
         // Build the message
         const userPrompt: BeaverAgentPrompt = {
             content: message,
@@ -3695,6 +3843,8 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
+    set(clearTableFillProgressAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
@@ -3821,6 +3971,8 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
+    set(clearTableFillProgressAtom);
     set(clearRunApprovalPolicyAtom);
 });
 
@@ -4119,9 +4271,8 @@ export const sendCreditConfirmationResponseAtom = atom(
  */
 export const sendBatchApprovalResponseAtom = atom(
     null,
-    (_get, set, { approvalId, approved, mode, userInstructions, table }: {
+    (_get, set, { approvalId, approved, mode, userInstructions }: {
         approvalId: string;
-        table?: import('@beaver/agent-core/protocol/artifactProtocol').TableApprovalIdentity;
         approved: boolean;
         mode: BatchApprovalMode;
         userInstructions?: string | null;
@@ -4133,12 +4284,71 @@ export const sendBatchApprovalResponseAtom = atom(
             approved,
             mode,
             userInstructions,
-            table,
         );
         if (!delivered) {
             logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);
         }
         set(removePendingBatchApprovalAtom, approvalId);
+    }
+);
+
+/**
+ * Send the answer to a table card and retire it.
+ *
+ * The card is removed even when the send fails: the answer can no longer
+ * reach the run, so leaving it up would strand the user on it.
+ */
+export const sendTableCardResponseAtom = atom(
+    null,
+    (_get, set, response: WSTableCardResponse) => {
+        if (!ownsWriter(currentWriter())) return;
+        const delivered = agentService.sendTableCardResponse(response);
+        if (!delivered) {
+            logger(`sendTableCardResponseAtom: Table card response for ${response.card_id} was not sent`, 1);
+        }
+        set(removePendingTableCardAtom, response.card_id);
+    }
+);
+
+/** How long a card waits for its estimate before it shows it failed. */
+const TABLE_CARD_ESTIMATE_TIMEOUT_MS = 20_000;
+let tableCardEstimateSequence = 0;
+
+/**
+ * Ask the tool call waiting on a create card for the cost of the card's draft
+ * as it is now. The draft is marked pending until the answer lands
+ * (`onTableCardEstimateResult`); an estimate that cannot be sent, or that does
+ * not come back in time, is marked failed, which keeps the run button
+ * disabled while "Create only" stays available. Returns the request id.
+ */
+export const requestTableCardEstimateAtom = atom(
+    null,
+    (get, set, card: WSTableCreateCardRequest): string | null => {
+        if (!ownsWriter(currentWriter())) return null;
+        const drafts = get(tableCardDraftsAtom);
+        const draft = drafts.get(card.card_id) ?? initialTableCardDraft(card);
+        const requestId = `estimate-${card.card_id}-${++tableCardEstimateSequence}`;
+        const started = startEstimate(draft, card, requestId);
+        const write = (update: (current: typeof draft) => typeof draft) => {
+            const current = get(tableCardDraftsAtom);
+            const existing = current.get(card.card_id);
+            if (!existing) return;
+            const next = update(existing);
+            if (next === existing) return;
+            const updated = new Map(current);
+            updated.set(card.card_id, next);
+            set(tableCardDraftsAtom, updated);
+        };
+        const next = new Map(drafts);
+        next.set(card.card_id, started.draft);
+        set(tableCardDraftsAtom, next);
+        if (!agentService.sendTableCardEstimate(started.message)) {
+            logger(`requestTableCardEstimateAtom: estimate for ${card.card_id} was not sent`, 1);
+            write((current) => failEstimate(current, requestId));
+            return requestId;
+        }
+        setTimeout(() => write((current) => failEstimate(current, requestId)), TABLE_CARD_ESTIMATE_TIMEOUT_MS);
+        return requestId;
     }
 );
 

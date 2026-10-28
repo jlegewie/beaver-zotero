@@ -37,6 +37,7 @@ interface BeaverWindow extends Window {
         renderAiSidebar: (container: Element, location: string) => any;
         renderGlobalInitializer: (container: Element) => any;
         renderWindowSidebar: (container: Element) => any;
+        renderTableTab?: import("./tableTabTypes").RenderTableTab;
         renderFloatingPopup: (container: Element) => any;
         renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null) => any;
         unmountFromElement: (container: Element) => boolean;
@@ -365,6 +366,14 @@ export class BeaverUIFactory {
         try {
             if (!win) {
                 return;
+            }
+
+            // The window's Beaver tabs are rendered by its bundle, which is
+            // about to go away; close them (unmounting their roots) first.
+            try {
+                Zotero.__beaverTabs?.closeForWindow(win);
+            } catch (e) {
+                ztoolkit.log(`removeChatPanel: closing Beaver tabs failed: ${e}`);
             }
 
             // Dismiss any active diff preview in note editors.

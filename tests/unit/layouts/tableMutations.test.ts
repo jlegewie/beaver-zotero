@@ -19,16 +19,21 @@ import {
     applyMutations,
     summarize,
     type ApplyErrorCode,
+    type SkippedCell,
     type TableMutation,
     type TableSummary,
 } from "@beaver/agent-core/layouts/tableMutations";
+import { questionHash } from "@beaver/agent-core/layouts/table";
 
 interface MutationFixture {
     name: string;
     before: TableSpec;
     mutations: TableMutation[];
     after?: TableSpec;
+    skipped?: SkippedCell[];
     error?: { code: ApplyErrorCode };
+    /** `edit` applies as the provider's `edit`; absent, a guarded `write`. */
+    operation?: "write" | "edit";
 }
 
 interface SummaryFixture {
@@ -107,7 +112,9 @@ describe("the table-mutation fixture corpus", () => {
             ).toEqual([]);
 
             const before = structuredClone(fixture.before);
-            const result = applyMutations(fixture.before, fixture.mutations);
+            const result = applyMutations(fixture.before, fixture.mutations, {
+                skipMissing: fixture.operation === "edit",
+            });
 
             if (fixture.error) {
                 if (result.ok) {
@@ -124,6 +131,7 @@ describe("the table-mutation fixture corpus", () => {
                     throw new Error(`${file} failed: ${result.error.message}`);
                 }
                 expect(result.spec).toEqual(fixture.after);
+                expect(result.skipped).toEqual(fixture.skipped ?? []);
                 // The invariant add-only options buy: no mutation can leave a
                 // cell holding a label its column does not offer, so a renderer
                 // never has to decide what a colourless, unfilterable category
@@ -151,6 +159,105 @@ describe("the table-summary fixture corpus", () => {
     }
 });
 
+describe("questionHash", () => {
+    // Pinned: the backend computes the same digests.
+    it("matches the backend's digests", () => {
+        expect(
+            questionHash({
+                type: "text",
+                description: "What method does the paper use?",
+            }),
+        ).toBe("5765cec3bb59ae1b");
+        expect(questionHash({ type: "text" })).toBe("6baca648789c851c");
+        expect(
+            questionHash({ type: "number", description: "Größe — n?" }),
+        ).toBe("d667836d03ab527c");
+    });
+
+    it("follows the type and the description", () => {
+        const column = { type: "text" as const, description: "Q?" };
+        expect(questionHash({ ...column, description: "Q2?" })).not.toBe(
+            questionHash(column),
+        );
+        expect(questionHash({ ...column, type: "number" })).not.toBe(
+            questionHash(column),
+        );
+    });
+
+    const design = {
+        type: "select" as const,
+        description: "What is the study design?",
+        options: [
+            {
+                label: "RCT",
+                color: "blue" as const,
+                description: "Units are randomly assigned to arms.",
+            },
+            { label: "Observational" },
+            {
+                label: "Quasi-experimental",
+                description: "Assignment follows an external rule.",
+            },
+        ],
+    };
+
+    it("matches the backend's digests for option definitions", () => {
+        expect(questionHash(design)).toBe("7dc398c2ee79acd0");
+        expect(
+            questionHash({
+                type: "select",
+                description: "Studiendesign?",
+                options: [
+                    {
+                        label: "Größe",
+                        description: 'Zeile eins\nZeile — zwei "zitiert"',
+                    },
+                    { label: "Ära 𝔸", description: "日本語の定義" },
+                ],
+            }),
+        ).toBe("e752f6b8da55d15c");
+    });
+
+    it("hashes a column without definitions exactly as before options counted", () => {
+        const plain = {
+            type: "select" as const,
+            description: "What method does the paper use?",
+        };
+        expect(
+            questionHash({
+                ...plain,
+                options: [{ label: "Survey", color: "blue" }],
+            }),
+        ).toBe(questionHash(plain));
+    });
+
+    it("ignores option order, colour, spelling and undefined labels", () => {
+        const hash = questionHash(design);
+        expect(
+            questionHash({ ...design, options: [...design.options].reverse() }),
+        ).toBe(hash);
+        expect(
+            questionHash({
+                ...design,
+                options: [
+                    { ...design.options[0], label: "rct.", color: "red" },
+                    ...design.options.slice(1),
+                    { label: "Case study" },
+                ],
+            }),
+        ).toBe(hash);
+        expect(
+            questionHash({
+                ...design,
+                options: [
+                    { ...design.options[0], description: "Lottery." },
+                    ...design.options.slice(1),
+                ],
+            }),
+        ).not.toBe(hash);
+    });
+});
+
 describe("applyMutations", () => {
     const spec: TableSpec = {
         id: "t",
@@ -169,8 +276,9 @@ describe("applyMutations", () => {
                 id: "r1",
                 cells: {
                     paper: {
+                        outcome: "answered",
                         value: { kind: "reference", display_name: "Alpha" },
-                        provenance: "imported",
+                        provenance: "system",
                     },
                 },
             },
@@ -178,8 +286,9 @@ describe("applyMutations", () => {
                 id: "r2",
                 cells: {
                     paper: {
+                        outcome: "answered",
                         value: { kind: "reference", display_name: "Beta" },
-                        provenance: "imported",
+                        provenance: "system",
                     },
                 },
             },
@@ -201,6 +310,7 @@ describe("applyMutations", () => {
                         row: "r1",
                         column: "notes",
                         cell: {
+                            outcome: "answered",
                             value: { kind: "text", text: "Worth reading" },
                             provenance: "user",
                         },
@@ -224,8 +334,9 @@ describe("applyMutations", () => {
                         row: "r1",
                         column: "method",
                         cell: {
+                            outcome: "answered",
                             value: { kind: "text", text: "Survey" },
-                            provenance: "extracted",
+                            provenance: "document",
                         },
                     },
                 ],
@@ -249,8 +360,9 @@ describe("applyMutations", () => {
                         row: "ghost",
                         column: "method",
                         cell: {
+                            outcome: "answered",
                             value: { kind: "text", text: "Survey" },
-                            provenance: "extracted",
+                            provenance: "document",
                         },
                     },
                 ],
@@ -276,8 +388,9 @@ describe("applyMutations", () => {
                         row: "r1",
                         column: "design",
                         cell: {
+                            outcome: "answered",
                             value: { kind: "select", label: "RCT" },
-                            provenance: "asserted",
+                            provenance: "metadata",
                         },
                     },
                 ],
@@ -306,5 +419,22 @@ describe("applyMutations", () => {
 
         if (!result.ok) throw new Error(result.error.message);
         expect(result.spec).toEqual(spec);
+        expect(result.skipped).toEqual([]);
+    });
+
+    it("refuses to grow a table past the row cap but lets it shrink", () => {
+        const rows = Array.from({ length: 1001 }, (_, i) => ({
+            id: `r${i}`,
+            cells: {},
+        }));
+        const grown = applyMutations(
+            { ...spec, rows: rows.slice(0, 1000) },
+            [{ op: "add_rows", rows: [rows[1000]] }],
+        );
+        expect(grown.ok ? null : grown.error.code).toBe("too_large");
+        const shrunk = applyMutations({ ...spec, rows }, [
+            { op: "remove_rows", rows: ["r0"] },
+        ]);
+        expect(shrunk.ok).toBe(true);
     });
 });

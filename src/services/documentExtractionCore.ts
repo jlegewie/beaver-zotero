@@ -899,7 +899,7 @@ async function extractAndCacheSnapshotDocumentImpl(
             return {
                 kind: 'response_error',
                 code: 'no_text_layer',
-                message: `The snapshot file for ${requestKey} contains no extractable text.`,
+                message: `The snapshot file for ${requestKey} contains no extractable text: the saved page is empty, likely a placeholder (such as a browser PDF viewer or a loading page) rather than the article.`,
                 resolvedAttachment,
                 contentKind: 'snapshot',
             };

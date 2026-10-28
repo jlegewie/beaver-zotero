@@ -75,6 +75,25 @@ declare namespace Zotero {
      * See `src/services/artifacts/tablesApi.ts`.
      */
     let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
+    /**
+     * The last commit of each provider `edit` session, so a retried commit
+     * replays. See `tableEditSessions` in `src/services/artifacts/tablesApi.ts`.
+     */
+    let __beaverTableEditSessions:
+        | Map<string, import("../src/services/artifacts/tablesApi").TableEditSessionCommit>
+        | undefined;
+    /**
+     * Identifies this run of Zotero. Set once per process and kept across
+     * plugin reloads, so a saved record can tell a reload from a restart.
+     * See `src/ui/tableTab.ts`.
+     */
+    let __beaverAppSessionID: string | undefined;
+    /**
+     * The Beaver tabs (every kind), published by the esbuild bundle while it
+     * runs. A window renderer closes its window's tabs through this before it
+     * goes away. See `src/ui/beaverTabs.ts`.
+     */
+    let __beaverTabs: { closeForWindow(win: Window): number } | undefined;
 
     namespace Beaver {
         let localEndpoints: import("../src/services/instanceLocalEndpoints").InstanceLocalEndpoints | undefined;

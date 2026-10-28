@@ -20,10 +20,14 @@ import type { TableVersionEntry } from '../../../src/services/artifacts/tableIte
 function column(overrides: Partial<TableSummaryColumn> = {}): TableSummaryColumn {
     return {
         type: 'text',
-        filled: 0,
-        unsure: 0,
-        unsourced: 0,
+        answered: 0,
+        not_reported: 0,
+        failed: 0,
+        cleared: 0,
+        unattempted: 0,
         stale: 0,
+        unsure: 0,
+        metadata_only: 0,
         ...overrides,
     };
 }
@@ -32,11 +36,13 @@ function summary(overrides: Partial<TableSummary> = {}): TableSummary {
     return {
         rows: 10,
         columns: 2,
+        sources: 1,
+        in_scope_rows: 10,
         failed_rows: 0,
         user_edits: 0,
         columns_detail: {
-            title: column({ filled: 10 }),
-            note: column({ filled: 4, unsure: 3 }),
+            title: column({ answered: 10 }),
+            note: column({ answered: 4, unsure: 3 }),
         },
         ...overrides,
     };
@@ -126,6 +132,21 @@ describe('buildTableSectionFields — dimensions and coverage', () => {
         expect(fields.coverageLine).toBe('14 of 20 cells filled');
     });
 
+    it('counts only answered cells as filled', () => {
+        const fields = buildTableSectionFields(
+            input({
+                summary: summary({
+                    columns_detail: {
+                        a: column({ answered: 3, not_reported: 2, failed: 1 }),
+                        b: column({ cleared: 1, unattempted: 9 }),
+                    },
+                }),
+            })
+        );
+        expect(fields.filled).toBe(3);
+        expect(fields.coverageLine).toBe('3 of 20 cells filled');
+    });
+
     it('says a table has no rows rather than showing a zero grid', () => {
         const fields = buildTableSectionFields(
             input({ summary: summary({ rows: 0, columns: 3 }) })
@@ -151,7 +172,7 @@ describe('buildTableSectionFields — dimensions and coverage', () => {
                 summary: summary({
                     rows: 1,
                     columns: 1,
-                    columns_detail: { title: column({ filled: 1 }) },
+                    columns_detail: { title: column({ answered: 1 }) },
                 }),
             })
         );
@@ -161,28 +182,28 @@ describe('buildTableSectionFields — dimensions and coverage', () => {
 });
 
 describe('buildTableSectionFields — trust counts', () => {
-    it('sums unsure, unsourced and stale and lists only what is non-zero', () => {
+    it('sums unsure, metadata-only and stale and lists only what is non-zero', () => {
         const fields = buildTableSectionFields(
             input({
                 summary: summary({
                     columns_detail: {
-                        a: column({ filled: 5, unsure: 2, stale: 1 }),
-                        b: column({ filled: 5, unsure: 1, unsourced: 4 }),
+                        a: column({ answered: 5, unsure: 2, stale: 1 }),
+                        b: column({ answered: 5, unsure: 1, metadata_only: 4 }),
                     },
                 }),
             })
         );
         expect(fields.unsure).toBe(3);
-        expect(fields.unsourced).toBe(4);
+        expect(fields.metadataOnly).toBe(4);
         expect(fields.stale).toBe(1);
-        expect(fields.flagsLine).toBe('3 unsure · 4 unsourced · 1 stale');
+        expect(fields.flagsLine).toBe('3 unsure · 4 from title and abstract · 1 stale');
     });
 
     it('leaves the flags line empty when nothing is flagged', () => {
         const fields = buildTableSectionFields(
             input({
                 summary: summary({
-                    columns_detail: { a: column({ filled: 10 }) },
+                    columns_detail: { a: column({ answered: 10 }) },
                 }),
             })
         );
@@ -269,8 +290,8 @@ describe('buildTableSectionFields — no summary', () => {
 describe('buildTableSectionFields — distributions', () => {
     const screening = column({
         type: 'select',
-        role: 'screening_decision',
-        filled: 9,
+        role: 'decision',
+        answered: 9,
         distribution: { Include: 5, Exclude: 3, Maybe: 1 },
     });
 
@@ -312,7 +333,7 @@ describe('buildTableSectionFields — distributions', () => {
                     columns_detail: {
                         reason: column({
                             type: 'select',
-                            filled: 15,
+                            answered: 15,
                             distribution: { a: 6, b: 4, c: 3, d: 2, e: 1, f: 1 },
                         }),
                     },
@@ -330,12 +351,12 @@ describe('buildTableSectionFields — distributions', () => {
                     columns_detail: {
                         open_access: column({
                             type: 'boolean',
-                            filled: 4,
+                            answered: 4,
                             distribution: { true: 3, false: 1 },
                         }),
                         peer_reviewed: column({
                             type: 'boolean',
-                            filled: 2,
+                            answered: 2,
                             distribution: { true: 2 },
                         }),
                         screening_decision: screening,
@@ -357,11 +378,11 @@ describe('buildTableSectionFields — distributions', () => {
                         year: column({
                             type: 'select',
                             system: true,
-                            filled: 8,
+                            answered: 8,
                             distribution: { '2024': 8 },
                         }),
                         verdict: column({ type: 'select', distribution: {} }),
-                        title: column({ filled: 4 }),
+                        title: column({ answered: 4 }),
                     },
                 }),
             })
@@ -468,6 +489,15 @@ describe('a table another device\'s copy replaced', () => {
         );
 
         expect(fields.conflictLine).toContain('no longer keeps a copy of your version 7');
+        expect(fields.conflictLine).not.toContain('can be restored');
+    });
+
+    it('says why a kept version cannot be restored into a library Beaver cannot write', () => {
+        const fields = buildTableSectionFields(
+            input({ conflict: { ...conflict, writable: false } })
+        );
+
+        expect(fields.conflictLine).toContain('cannot write to this library to restore it');
         expect(fields.conflictLine).not.toContain('can be restored');
     });
 

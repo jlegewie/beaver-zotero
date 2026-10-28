@@ -101,7 +101,16 @@ export interface AttachmentMatchNavigation {
  * components consume the same slice.
  */
 export interface NavigationHost {
-    openTable?(key: string): Promise<{ ok: true; warning?: string } | { error: string }>;
+    /**
+     * Opens a stored table in the client's table view. `origin` is the window
+     * the interaction happened in — derive it from the clicked element's
+     * `ownerDocument` — so the table opens beside the surface the user is
+     * looking at rather than in whichever window is newest.
+     */
+    openTable?(
+        key: string,
+        origin?: Window | null,
+    ): Promise<{ ok: true; warning?: string } | { error: string }>;
     /** Reveal/select the referenced item in the library view. */
     revealInLibrary(ref: ZoteroItemReference): void;
     /** Reveal/select the referenced library in the library view. */

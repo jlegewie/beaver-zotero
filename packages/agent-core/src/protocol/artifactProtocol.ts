@@ -1,5 +1,5 @@
 import type { TableSpec } from "../layouts/table";
-import type { TableSummary } from "../layouts/tableMutations";
+import type { SkippedCell, TableMutation, TableSummary } from "../layouts/tableMutations";
 
 /** Historical identity observed in a message or tool result. */
 export interface TableReference {
@@ -8,30 +8,107 @@ export interface TableReference {
     title: string;
 }
 
+/** Stage counts of a table, as of the call that recorded them. */
+export interface TableStages {
+    rows: number;
+    sources: number;
+    /** Question columns; system columns are not counted. */
+    columns: number;
+    /** Rows with no attachment to read, which a fill answers from metadata. */
+    rows_without_document: number;
+    /** The default row set of the next fill, and its cells. */
+    remaining_rows: number;
+    remaining_cells: number;
+    answered: number;
+    /** Answered cells taken from title and abstract only. */
+    metadata_only: number;
+    failed: number;
+    stale: number;
+}
+
+/** A question column as the recorded call left it. */
+export interface TableRecordColumn {
+    id: string;
+    header: string;
+    type: string;
+    /** The column's question. */
+    description?: string | null;
+    /** `select` columns: the category labels. */
+    options?: string[] | null;
+    role?: string | null;
+}
+
+/** A source entry as the recorded call left it. */
+export interface TableRecordSource {
+    id: string;
+    /** `items`, `library`, or a search type. */
+    type: string;
+    /** `library` entries: collection, tag or saved_search, and its display name. */
+    kind?: string | null;
+    name?: string | null;
+    library_ref?: string | null;
+    /** Rows this entry added; a row several entries found counts for each. */
+    rows: number;
+}
+
+/** What one fill call did, for the stage card. Cell counts unless named rows. */
+export interface TableFillRecord {
+    /** Rows the fill planned. */
+    rows: number;
+    rows_filled: number;
+    rows_failed: number;
+    /** Rows left unattempted, by reason: deadline, credits, cancel, stopped. */
+    rows_not_started: Record<string, number>;
+    /** Rows with neither a document nor an abstract, written not reported. */
+    rows_without_input: number;
+    /** Rows answered but not written, or whose commit outcome is unknown. */
+    rows_not_written: number;
+    rows_uncertain: number;
+    answered: number;
+    not_reported: number;
+    /** Answered cells taken from title and abstract only. */
+    from_metadata: number;
+    failed: number;
+    /** Cell writes the table refused, by reason. */
+    skipped: Record<string, number>;
+    documents_read: number;
+    credits_charged: number;
+    /** Why the fill ended early, when it did. */
+    stopped_by?: string | null;
+    /**
+     * How the credit confirmation that stopped the fill ended: `declined`,
+     * `timed_out`, `unreachable` or `no_credits`. Absent unless credits
+     * stopped it, and on records written before the field.
+     */
+    credit_confirmation?: string | null;
+}
+
 export interface TableRecord {
     reference: TableReference;
     change: string;
+    /**
+     * The table's description, sources and question columns as of the call.
+     * Absent on records written before they were recorded.
+     */
+    description?: string | null;
+    sources?: TableRecordSource[] | null;
+    columns?: TableRecordColumn[] | null;
     summary: Partial<TableSummary>;
     changes?: Record<string, number>;
     operation_id?: string | null;
     version?: number | null;
     saved?: boolean | null;
-}
-
-/** Immutable extraction plan shown for approval; identifiers are opaque to the client. */
-export interface TableBatchApproval {
-    reference: TableReference;
-    schema_id: string;
-    population_id: string;
-    population_count: number;
-    columns: Array<{ id: string; question: string }>;
-    cost_estimate: string;
-}
-
-export interface TableApprovalIdentity {
-    key: string;
-    schema_id: string;
-    population_id: string;
+    /** Absent from records written before stage counts existed. */
+    stages?: TableStages | null;
+    /**
+     * `none` when the call wrote the table without running the filler, `fill`
+     * when it ran it; `fill` then carries the call's own counts.
+     */
+    run?: 'none' | 'fill' | null;
+    fill?: TableFillRecord | null;
+    next_step?: string | null;
+    /** ISO time of the call the counts describe. */
+    as_of?: string | null;
 }
 
 /** Portable stored-document provider envelopes. Optional nulls are wire defaults. */
@@ -43,6 +120,8 @@ export interface ArtifactRequest {
     keys?: string[] | null;
     kind?: "table" | null;
     library_ref?: string | null;
+    /** `create`: bare key of the collection the new table is filed into. */
+    collection_key?: string | null;
     title?: string | null;
     spec?: Record<string, unknown> | null;
     meta?: {
@@ -57,7 +136,17 @@ export interface ArtifactRequest {
     to_version?: number | null;
     thread_id?: string | null;
     run_ids?: string[] | null;
+    /**
+     * `edit`: the commit's position in its session (`operation_id`), from 1.
+     * Not `seq`, which numbers run events on the chat socket.
+     */
+    edit_seq?: number | null;
+    /** `edit`: the mutations to commit; `set_cells` only. */
+    mutations?: TableMutation[] | null;
 }
+
+/** The mutations an `edit` may carry. */
+export const EDIT_MUTATION_OPS: readonly string[] = ["set_cells"];
 
 export interface ArtifactVersion {
     version: number;
@@ -119,6 +208,8 @@ export interface ArtifactResponse {
     trimmed_versions?: number[];
     trimmed_to?: number | null;
     retention_exhausted?: boolean;
+    /** `edit`: the cell writes the commit skipped, with the reason. */
+    skipped?: SkippedCell[];
 }
 
 const contracts: Record<string, [string[], string[]]> = {
@@ -127,7 +218,7 @@ const contracts: Record<string, [string[], string[]]> = {
     versions: [["key"], []],
     create: [
         ["kind", "library_ref", "title", "spec", "meta", "operation_id"],
-        [],
+        ["collection_key"],
     ],
     write: [
         [
@@ -140,6 +231,7 @@ const contracts: Record<string, [string[], string[]]> = {
         ],
         [],
     ],
+    edit: [["key", "operation_id", "edit_seq", "mutations", "meta"], []],
     revert: [["key", "to_version", "meta"], []],
     trim: [["key", "thread_id", "run_ids"], []],
     delete: [["key"], []],
@@ -183,6 +275,12 @@ export function validateArtifactRequest(
     )
         return "invalid_request";
     if (
+        raw.collection_key != null &&
+        (typeof raw.collection_key !== "string" ||
+            !/^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/.test(raw.collection_key))
+    )
+        return "invalid_request";
+    if (
         raw.keys != null &&
         (!Array.isArray(raw.keys) ||
             raw.keys.length > 200 ||
@@ -207,6 +305,22 @@ export function validateArtifactRequest(
             (!Number.isSafeInteger(raw[name]) || (raw[name] as number) < 1)
         )
             return "invalid_request";
+    if (
+        raw.edit_seq != null &&
+        (!Number.isSafeInteger(raw.edit_seq) || (raw.edit_seq as number) < 1)
+    )
+        return "invalid_request";
+    if (
+        raw.mutations != null &&
+        (!Array.isArray(raw.mutations) ||
+            !raw.mutations.length ||
+            !raw.mutations.every(
+                (mutation) =>
+                    object(mutation) &&
+                    EDIT_MUTATION_OPS.includes(mutation.op as string),
+            ))
+    )
+        return "invalid_request";
     if (
         raw.expected_sha256 != null &&
         (typeof raw.expected_sha256 !== "string" ||

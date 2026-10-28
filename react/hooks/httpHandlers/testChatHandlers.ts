@@ -20,6 +20,7 @@ import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
  *   /beaver/test/list-actions   enumerate pending approvals + applied/rejected actions
  *   /beaver/test/approve-action approve or reject a pending write approval
  *   /beaver/test/confirm-credits continue or skip a pending credit confirmation
+ *   /beaver/test/table-card     answer a pending table card (create, with edits, or decline)
  *   /beaver/test/undo-action    undo an applied action
  *   /beaver/test/chat-drop-connection  lose the chat socket mid-run, to exercise run reattach
  *   /beaver/test/run-snapshot   the open chat's runs and the transport's reattach events
@@ -31,6 +32,27 @@ import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
  */
 
 import { store } from '../../store';
+import { pendingTableCardsAtom, tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
+import {
+    addColumn,
+    addItems,
+    addLibrarySource,
+    draftOptions,
+    estimateStatus,
+    initialTableCardDraft,
+    needsEstimate,
+    removeItem,
+    removeSource,
+    setSourceResolved,
+    tableCardDecline,
+    tableCardResponse,
+    tableFillCardResponse,
+    updateColumn,
+    type TableCardDraft,
+} from '@beaver/agent-core/run-state/tableCardDraft';
+import { isCreateCard, isFillCard, type TableCardChoice } from '@beaver/agent-core/protocol/tableCardProtocol';
+import { tableFillProgressAtom } from '@beaver/agent-core/run-state/tableFillProgress';
+import { resolveItems as resolveCardItems, resolveLibraryScope } from '../../components/tables/card/liveSources';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 import {
     newThreadAtom,
@@ -55,6 +77,8 @@ import {
     resumeFromRunAtom,
     sendApprovalResponseAtom,
     sendCreditConfirmationResponseAtom,
+    sendTableCardResponseAtom,
+    requestTableCardEstimateAtom,
     stoppingPreviousRunAtom,
 } from '../../atoms/agentRunAtoms';
 import {
@@ -190,6 +214,7 @@ function currentIds() {
         lastRunId: runs.length ? runs[runs.length - 1].id : null,
         pendingApprovals: Array.from(approvals.values()).map(serializeApproval),
         pendingQuestionIds: Array.from(questions.keys()),
+        pendingTableCards: Array.from(store.get(pendingTableCardsAtom).values()),
         pendingCreditConfirmations: Array.from(creditConfirmations.values()).map((c) => ({
             confirmationId: c.confirmationId,
             title: c.title,
@@ -201,7 +226,7 @@ function currentIds() {
     };
 }
 
-type SettleReason = 'done' | 'approval' | 'question' | 'credit-confirmation' | 'timeout';
+type SettleReason = 'done' | 'approval' | 'question' | 'credit-confirmation' | 'table-card' | 'timeout';
 
 /**
  * Poll until the run settles: it finished streaming (`done`), paused for a write
@@ -216,6 +241,7 @@ async function waitForRunSettle(timeoutMs: number, pollMs = 300): Promise<Settle
         if (store.get(pendingApprovalsAtom).size > 0) return 'approval';
         if (store.get(pendingQuestionsAtom).size > 0) return 'question';
         if (store.get(pendingCreditConfirmationsAtom).size > 0) return 'credit-confirmation';
+        if (store.get(pendingTableCardsAtom).size > 0) return 'table-card';
         if (!store.get(isWSChatPendingAtom)) return 'done';
         await sleep(pollMs);
     }
@@ -554,6 +580,134 @@ export async function handleTestConfirmCreditsHttpRequest(request: any) {
     }
 
     return { ok: true, approved, actedOn: [confirmationId], settle, ...currentIds() };
+}
+
+/**
+ * Answer a pending table card so a headless run can continue.
+ *
+ * Body: { cardId?, action: 'create' | 'decline' (default 'create'),
+ *         choice?: 'create' | 'create_and_run' | 'fill', instructions?,
+ *         edits?: { title?, description?, removeItemIds?, addItemIds?,
+ *                   addScopes?: TableCardLibraryScope[], removeSourceIndexes?: number[],
+ *                   columns?: TableCardColumn[] },
+ *         estimateOnly?, waitForDone?, timeoutMs? }
+ *
+ * The reply is built by the card's own draft functions, so it is the reply the
+ * card would send for the same edits. A create card whose edits change its
+ * sources or columns resolves the changed sources' counts as the card does,
+ * asks the run for a new estimate and waits for it, so the reply names the
+ * estimate a user would have seen; `estimateOnly` returns that estimate
+ * without answering the card. A fill card takes `choice: 'fill'` (its
+ * default) or a decline; nothing on it is edited.
+ */
+export async function handleTestTableCardHttpRequest(request: any) {
+    const pending = store.get(pendingTableCardsAtom);
+    if (pending.size === 0) return { ok: false, error: 'No pending table card', ...currentIds() };
+    const cardId: string = request?.cardId ?? Array.from(pending.keys())[0];
+    const card = pending.get(cardId);
+    if (!card) return { ok: false, error: `Unknown cardId: ${cardId}`, ...currentIds() };
+    const decline = request?.action === 'decline';
+
+    if (isFillCard(card)) {
+        let draft = initialTableCardDraft(card);
+        if (typeof request?.instructions === 'string') draft = { ...draft, instructions: request.instructions };
+        const response = decline ? tableCardDecline(draft, card) : tableFillCardResponse(card);
+        store.set(sendTableCardResponseAtom, response);
+        return { ok: true, cardId, scope: card.scope, cost: card.cost, response, settle: await settleIfAsked(request), ...currentIds() };
+    }
+    if (!isCreateCard(card)) return { ok: false, error: `Unsupported card scope: ${card.scope}`, ...currentIds() };
+
+    let draft = store.get(tableCardDraftsAtom).get(cardId) ?? initialTableCardDraft(card);
+    const edits = request?.edits ?? {};
+    if (typeof edits.title === 'string') draft = { ...draft, title: edits.title };
+    if (typeof edits.description === 'string') draft = { ...draft, description: edits.description };
+    for (const index of [...(edits.removeSourceIndexes ?? [])].sort((a: number, b: number) => b - a)) {
+        const source = draft.sources[index];
+        if (source) draft = removeSource(draft, source.key);
+    }
+    for (const id of edits.removeItemIds ?? []) draft = removeItem(draft, id);
+    if (Array.isArray(edits.addItemIds) && edits.addItemIds.length) draft = addItems(draft, edits.addItemIds);
+    for (const scope of edits.addScopes ?? []) draft = addLibrarySource(draft, scope).draft;
+    if (Array.isArray(edits.columns)) {
+        draft = { ...draft, columns: [] };
+        for (const column of edits.columns) {
+            const added = addColumn(draft);
+            draft = updateColumn(added.draft, added.key, {
+                header: column.header ?? '',
+                type: column.type ?? 'text',
+                description: column.description ?? '',
+                options: draftOptions(column.options),
+                unit: column.unit ?? null,
+            });
+        }
+    }
+    if (typeof request?.instructions === 'string') draft = { ...draft, instructions: request.instructions };
+
+    // Count the sources the edits changed, as the card's live counts do.
+    for (const source of draft.sources) {
+        if (!source.counting) continue;
+        const live = source.type === 'items' ? await resolveCardItems(source.ids ?? []) : await resolveLibraryScope(source.scope!);
+        draft = setSourceResolved(draft, source.key, live.resolved, live.rows.map((row) => row.item_id));
+    }
+    // The run choice is made on the last step, where the card estimates.
+    draft = { ...draft, step: 'columns' };
+    draft = await estimateDraft(card, draft, typeof request?.estimateTimeoutMs === 'number' ? request.estimateTimeoutMs : 30000);
+    const estimate = { status: estimateStatus(draft, card), cost: draft.estimate.cost };
+    if (request?.estimateOnly === true) return { ok: true, cardId, scope: card.scope, estimate, ...currentIds() };
+
+    const choice: TableCardChoice = request?.choice ?? 'create';
+    if (!decline && choice === 'create_and_run' && estimate.status !== 'current')
+        return { ok: false, error: `The card's estimate is ${estimate.status}; the run button is disabled`, estimate, ...currentIds() };
+    const response = decline ? tableCardDecline(draft, card) : tableCardResponse(draft, card, choice);
+    store.set(sendTableCardResponseAtom, response);
+    return { ok: true, cardId, scope: card.scope, estimate, response, settle: await settleIfAsked(request), ...currentIds() };
+}
+
+/** Store the draft, ask for an estimate when the card would, and wait for its answer. */
+async function estimateDraft(
+    card: Parameters<typeof needsEstimate>[1],
+    draft: TableCardDraft,
+    timeoutMs: number,
+): Promise<TableCardDraft> {
+    const drafts = new Map(store.get(tableCardDraftsAtom));
+    drafts.set(card.card_id, draft);
+    store.set(tableCardDraftsAtom, drafts);
+    if (!needsEstimate(draft, card)) return draft;
+    const requestId = store.set(requestTableCardEstimateAtom, card);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const current = store.get(tableCardDraftsAtom).get(card.card_id);
+        if (!current || current.estimate.pending !== requestId) return current ?? draft;
+        await sleep(100);
+    }
+    return store.get(tableCardDraftsAtom).get(card.card_id) ?? draft;
+}
+
+async function settleIfAsked(request: any): Promise<SettleReason | null> {
+    if (request?.waitForDone !== true) return null;
+    await sleep(400);
+    return waitForRunSettle(typeof request?.timeoutMs === 'number' ? request.timeoutMs : 180000);
+}
+
+/**
+ * The live fill progress panels: the stamp of each fill and the rows its
+ * `edit` commits have written so far.
+ */
+export async function handleTestTableFillProgressHttpRequest() {
+    const fills = Array.from(store.get(tableFillProgressAtom).values()).map((progress) => ({
+        toolcall_id: progress.stamp.toolcall_id,
+        table: progress.stamp.table,
+        total: progress.stamp.rows,
+        cells: progress.stamp.cells,
+        documents: progress.stamp.documents,
+        no_input: progress.stamp.no_input,
+        columns: progress.stamp.columns,
+        rows_done: progress.rows.length,
+        failed_rows: progress.failedRows.length,
+        started_at: progress.startedAt,
+        updated_at: progress.updatedAt,
+    }));
+    return { ok: true, fills, ...currentIds() };
 }
 
 /**

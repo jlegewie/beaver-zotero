@@ -168,7 +168,9 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // `layouts/tableMutations.ts` is a root for the same reason as the table model
 // it edits: the mutation vocabulary is what a client (and the test corpus that
 // pins it) calls to change a stored table, and nothing inside the package
-// applies a mutation.
+// applies a mutation. `layouts/tableCitations.ts` is a root too: clients build
+// the citations a table's evidence renders as, and nothing inside the package
+// renders one.
 // `identity/itemLinks.ts` parses the Zotero object links the model writes in
 // chat markdown. Clients render and export them; nothing inside the package
 // follows a link, so it is a root too.
@@ -206,6 +208,9 @@ const entryPaths = [
   "src/run-state/pendingQuestions.ts",
   "src/run-state/pendingCreditConfirmations.ts",
   "src/run-state/pendingBatchApprovals.ts",
+  "src/run-state/pendingTableCards.ts",
+  "src/run-state/tableCardDraft.ts",
+  "src/run-state/tableFillProgress.ts",
   "src/run-state/runErrorCopy.ts",
   "src/run-state/runStatusCopy.ts",
   "src/run-state/runStatusVisibility.ts",
@@ -214,6 +219,7 @@ const entryPaths = [
   "src/citations/externalReferences.ts",
   "src/layouts/table.ts",
   "src/layouts/tableMutations.ts",
+  "src/layouts/tableCitations.ts",
   "src/identity/itemLinks.ts",
   "src/extract/pageLabels/printedPageLabels.ts",
 ].map((p) => path.join(pkgDir, p));

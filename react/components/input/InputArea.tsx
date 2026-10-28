@@ -26,6 +26,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import ThreadPresenceBar from './ThreadPresenceBar';
 import BatchProgressPanel from './BatchProgressPanel';
+import TableFillProgressPanel from './TableFillProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
@@ -627,6 +628,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             {/* Live batch progress. Above the band so it stacks as: what the
                 run is doing, then what it wants from the user. */}
             <BatchProgressPanel />
+            <TableFillProgressPanel />
 
             {/* One band, chosen by `composerBand`. Lowest priority first so
                 the winner sits on the composer. */}

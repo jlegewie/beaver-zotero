@@ -37,6 +37,10 @@ import {
     initTableItemPane,
 } from "./ui/tableItemPane";
 import { BeaverUIFactory } from "./ui/ui";
+import { openTable } from "./ui/openTable";
+import { cleanupBeaverTabs, initBeaverTabs, recoverTabsAfterBeaverTabs, restoreBeaverTabs } from "./ui/beaverTabs";
+import { cleanupTableTabs, initTableTabs } from "./ui/tableTab";
+import { stopTableTabProbe } from "./ui/tableTabProbe";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { compareVersions } from "./utils/compareVersions";
 import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
@@ -242,6 +246,14 @@ async function openPluginDatabase(dbConnection: _ZoteroTypes.DB): Promise<void> 
 }
 
 async function onStartup() {
+    // -------- Beaver tabs: Zotero tab hooks, before any await --------
+    // A main window restores its tabs as it loads, and a saved Beaver tab
+    // without its `restoreState` hook costs every tab after it. The earlier the
+    // hooks are in, the fewer windows can restore without them; the first
+    // window of a cold start is repaired in `onMainWindowLoad`.
+    initBeaverTabs();
+    initTableTabs((ref, options) => openTable(ref, options));
+
     await Promise.all([
         Zotero.initializationPromise,
         Zotero.unlockPromise,
@@ -383,10 +395,9 @@ async function onStartup() {
         // -------- "Export with Beaver" in the note editor's More menu --------
         initNoteEditorExportMenu();
 
-        // -------- Enhance stored tables opened in the reader --------
-        // The reader is the only surface a stored table has, so every way of
-        // opening one — double-click, `zotero://open`, the item pane — arrives
-        // here and needs no interception anywhere.
+        // -------- Enhance stored tables opened in a reader window --------
+        // Reader tabs on a table are replaced by the Beaver tab
+        // (`initTableTabs` above); reader windows keep the enhanced snapshot.
         initReaderTableViews();
 
         // -------- Describe a stored table in the item pane --------
@@ -501,6 +512,14 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     }
 
     BeaverUIFactory.registerChatPanel(win);
+
+    // Tabs a cold start's session restore lost to a saved Beaver tab, then
+    // the Beaver tabs a quit, plugin reload or last-window close left for this
+    // window (once its renderer can host them).
+    void recoverTabsAfterBeaverTabs(win)
+        .catch((error) => ztoolkit.log(`recoverTabsAfterBeaverTabs: ${error}`))
+        .then(() => restoreBeaverTabs(win))
+        .catch((error) => ztoolkit.log(`restoreBeaverTabs: ${error}`));
 
     ztoolkit.log("UI ready");
     
@@ -719,6 +738,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         //     views: one left behind holds its reader, that reader's document
         //     and the window both live in.
         cleanupReaderIntegration();
+        // The tabs close (and are remembered) while their kinds are still registered.
+        cleanupBeaverTabs();
+        cleanupTableTabs();
+        stopTableTabProbe();
         unregisterTablesApi();
         cleanupReaderTableViews();
         cleanupTableItemPane();
@@ -1004,6 +1027,13 @@ async function disposePlugin(): Promise<void> {
         unregisterQuitObserver();
         cleanupContextMenus();
         cleanupReaderIntegration();
+        // Rewrites the session without Beaver tabs: once Beaver is gone,
+        // nothing could restore one. Beaver reopens them itself when it
+        // starts again (`restoreBeaverTabs`). The tabs close while their
+        // kinds are still registered.
+        cleanupBeaverTabs({ saveSession: true });
+        cleanupTableTabs();
+        stopTableTabProbe();
         unregisterTablesApi();
         cleanupReaderTableViews();
         cleanupTableItemPane();

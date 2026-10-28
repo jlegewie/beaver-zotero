@@ -80,6 +80,8 @@ declare interface Response {
   readonly ok: boolean;
   readonly status: number;
   readonly statusText: string;
+  /** Read by the token-refresh guard to tell an auth-server answer from a proxy page. */
+  readonly headers: { get(name: string): string | null };
   text(): Promise<string>;
 }
 
