@@ -809,9 +809,9 @@ export class AgentService {
                 // A replayed event this run has already handled. Checked again
                 // when the event's turn comes: one handled on the lost socket
                 // may still be finishing when its replay arrives.
-                // The backend numbers only events that ask for no answer; a
-                // request keeps its own fields, and a `seq` on one (an `edit`
-                // commit's position in its session) is its payload.
+                // The backend numbers only events that ask for no answer, so a
+                // `seq` on a request would be its payload, never a replay
+                // position.
                 const rawSeq = (parsed as { seq?: unknown }).seq;
                 const seq = typeof rawSeq === 'number' && !isBackendRequestEvent(parsed.event) ? rawSeq : null;
                 const run = seq !== null ? this.reattachableRun() : null;

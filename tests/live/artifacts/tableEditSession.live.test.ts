@@ -2,7 +2,7 @@
  * The provider `edit` inside Zotero, as a fill drives it: a 1,000-row table
  * with abstracts, filled by 200 commits of ten rows each through
  * `/beaver/artifact`, with a retried commit (the reply lost after an
- * ambiguous timeout) and an older `seq` half-way through.
+ * ambiguous timeout) and an older `edit_seq` half-way through.
  *
  * Checks that the run's commits collapse into one retained version, that the
  * rendered snapshot names both hashes of the final `table.json`, and that the
@@ -95,7 +95,7 @@ const artifact = (op: string, fields: Record<string, unknown> = {}) =>
     );
 
 const edit = (seq: number, cells: unknown[]) =>
-    artifact('edit', { operation_id: sessionId, seq, mutations: [{ op: 'set_cells', cells }], meta });
+    artifact('edit', { operation_id: sessionId, edit_seq: seq, mutations: [{ op: 'set_cells', cells }], meta });
 
 function stats(values: number[]) {
     const sorted = [...values].sort((a, b) => a - b);

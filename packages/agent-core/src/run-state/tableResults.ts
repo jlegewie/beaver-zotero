@@ -111,7 +111,8 @@ export function tableResultMessages(value: unknown, toolName?: string): string[]
             );
             break;
         case "credits_declined":
-            messages.push("More credits were declined earlier in this run, so nothing was filled.");
+            // Also a run with no credits, or a confirmation nobody answered.
+            messages.push("No more credits can be spent in this run, so nothing was filled.");
             break;
         case "schema_changed":
             messages.push(

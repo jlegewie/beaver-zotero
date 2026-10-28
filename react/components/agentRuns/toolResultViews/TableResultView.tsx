@@ -1,5 +1,5 @@
 import React from "react";
-import type { TableRecordColumn, TableRecordSource } from "@beaver/agent-core/protocol/artifactProtocol";
+import type { TableFillRecord, TableRecordColumn, TableRecordSource } from "@beaver/agent-core/protocol/artifactProtocol";
 import type { TableView } from "@beaver/agent-core/run-state/toolResultViews";
 import { ColumnOptionChips, ColumnTypeTag } from "../../tables/columnTypes";
 import { sourceKindIcon } from "../../tables/sourceKinds";
@@ -125,6 +125,20 @@ const NOT_STARTED_REASONS: Record<string, string> = {
     stopped: "the fill stopped early",
 };
 
+/** The `credits` reason, by how the credit confirmation ended. */
+const CREDIT_CONFIRMATION_REASONS: Record<string, string> = {
+    declined: "more credits were declined",
+    timed_out: "the credit confirmation was not answered in time",
+    unreachable: "the connection closed before the credit confirmation was answered",
+    no_credits: "this run had no credits to spend",
+};
+
+function notStartedReason(reason: string, fill: TableFillRecord): string {
+    if (reason === "credits" && fill.credit_confirmation)
+        return CREDIT_CONFIRMATION_REASONS[fill.credit_confirmation] ?? NOT_STARTED_REASONS.credits;
+    return NOT_STARTED_REASONS[reason] ?? reason;
+}
+
 /** Why cell writes were skipped, as the stage card says it. */
 const SKIP_REASONS: Record<string, string> = {
     user_cell: "edited by you",
@@ -152,7 +166,7 @@ export function formatFillLines(record: TableRecord): string[] {
     if (fill.rows_failed > 0) lines.push(`${plural(fill.rows_failed, "row")} failed`);
     for (const [reason, rows] of Object.entries(fill.rows_not_started ?? {})) {
         if (rows > 0)
-            lines.push(`${plural(rows, "row")} not started: ${NOT_STARTED_REASONS[reason] ?? reason}`);
+            lines.push(`${plural(rows, "row")} not started: ${notStartedReason(reason, fill)}`);
     }
     const unsaved = fill.rows_not_written + fill.rows_uncertain;
     if (unsaved > 0) lines.push(`${plural(unsaved, "row")} answered but not confirmed saved`);

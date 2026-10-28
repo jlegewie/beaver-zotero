@@ -949,8 +949,9 @@ export function retryEstimate(draft: TableCardDraft): TableCardDraft {
 }
 
 /**
- * The row line: "Fills 180 rows: 150 from the PDF, 18 from title and
+ * The row line: "Fills 180 rows: 150 from the attachment, 18 from title and
  * abstract, 12 without either", with "up to" while the count is not exact.
+ * The attachment is whichever document the row reads: PDF, EPUB or snapshot.
  */
 export function costLine(cost: TableCardCost | null): string | null {
     const extraction = cost?.extraction;
@@ -959,7 +960,7 @@ export function costLine(cost: TableCardCost | null): string | null {
     const metadata = Math.max(0, rows - documents - no_input);
     const head = `Fills ${extraction.upper_bound ? 'up to ' : ''}${plural(rows, 'row')}`;
     const parts = [
-        documents > 0 ? `${format(documents)} from the PDF` : null,
+        documents > 0 ? `${format(documents)} from the attachment` : null,
         metadata > 0 ? `${format(metadata)} from title and abstract` : null,
         no_input > 0 ? `${format(no_input)} without either` : null,
     ].filter(Boolean);

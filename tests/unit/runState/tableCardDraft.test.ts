@@ -538,12 +538,12 @@ describe('table card draft', () => {
     describe('cost and the live estimate', () => {
         it('writes the row line, with "up to" while the count is not exact', () => {
             expect(costLine({ extraction: { rows: 180, documents: 150, no_input: 12 }, estimate_id: 'e' })).toBe(
-                'Fills 180 rows: 150 from the PDF, 18 from title and abstract, 12 without either',
+                'Fills 180 rows: 150 from the attachment, 18 from title and abstract, 12 without either',
             );
             expect(costLine({ extraction: { rows: 43, documents: 37, no_input: 0, upper_bound: true }, estimate_id: 'e' })).toBe(
-                'Fills up to 43 rows: 37 from the PDF, 6 from title and abstract',
+                'Fills up to 43 rows: 37 from the attachment, 6 from title and abstract',
             );
-            expect(costLine({ extraction: { rows: 1, documents: 1, no_input: 0 }, estimate_id: 'e' })).toBe('Fills 1 row: 1 from the PDF');
+            expect(costLine({ extraction: { rows: 1, documents: 1, no_input: 0 }, estimate_id: 'e' })).toBe('Fills 1 row: 1 from the attachment');
             expect(costLine(null)).toBeNull();
         });
 
@@ -629,7 +629,7 @@ describe('table card draft', () => {
             draft = applyEstimateResult(draft, estimate_result!);
             expect(estimateStatus(draft, request)).toBe('current');
             expect(draft.estimate.cost).toEqual(estimate_result!.cost);
-            expect(costLine(draft.estimate.cost)).toBe('Fills up to 43 rows: 37 from the PDF, 6 from title and abstract');
+            expect(costLine(draft.estimate.cost)).toBe('Fills up to 43 rows: 37 from the attachment, 6 from title and abstract');
             expect(createActions(draft, request).primary).toEqual({ label: 'Create and fill', choice: 'create_and_run' });
             const response = tableCardResponse(draft, request, 'create_and_run');
             expect(response.estimate_id).toBe(reply!.estimate_id);
@@ -680,7 +680,7 @@ describe('table card draft', () => {
                 estimate_id: reply!.estimate_id,
             });
             expect(fillActionLabel(request)).toBe('Fill 32');
-            expect(costLine(request.cost)).toBe('Fills 32 rows: 30 from the PDF, 2 from title and abstract');
+            expect(costLine(request.cost)).toBe('Fills 32 rows: 30 from the attachment, 2 from title and abstract');
         });
 
         it('declines with the instructions typed', () => {

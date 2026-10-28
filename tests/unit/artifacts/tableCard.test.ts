@@ -266,6 +266,18 @@ describe("fill stage card", () => {
         expect(formatFillLines(record)).toEqual([]);
     });
 
+    it("says how the credit confirmation that stopped a fill ended", async () => {
+        const { formatFillLines } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
+        const stopped = (credit_confirmation: string) =>
+            formatFillLines({ ...outcomes.fill_record, fill: { ...outcomes.fill_record.fill, credit_confirmation } })[1];
+        expect(stopped("timed_out")).toBe("9 rows not started: the credit confirmation was not answered in time");
+        expect(stopped("declined")).toBe("9 rows not started: more credits were declined");
+        expect(stopped("unreachable")).toBe(
+            "9 rows not started: the connection closed before the credit confirmation was answered",
+        );
+        expect(stopped("something_new")).toBe("9 rows not started: more credits were not approved");
+    });
+
     it("words a declined fill card as a fill, not a creation", () => {
         const html = renderToStaticMarkup(
             React.createElement(ToolResultView, {
@@ -289,7 +301,7 @@ describe("fill stage card", () => {
                 },
             }),
         );
-        expect(credits).toContain("More credits were declined earlier in this run");
+        expect(credits).toContain("No more credits can be spent in this run, so nothing was filled.");
     });
 
     it("says when a created table's fill did not run", () => {

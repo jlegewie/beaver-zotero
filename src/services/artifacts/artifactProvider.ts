@@ -283,12 +283,12 @@ export async function handleArtifactRequestUncoordinated(
         }
         if (request.op === "edit") {
             // No revision guard: the store skips per cell what moved under the
-            // fill, and a retry repeats the session's last `seq`.
+            // fill, and a retry repeats the session's last `edit_seq`.
             const result = await editTableSession(
                 ref,
                 {
                     operation_id: request.operation_id!,
-                    seq: request.seq!,
+                    seq: request.edit_seq!,
                     mutations: request.mutations!,
                 },
                 meta,

@@ -564,7 +564,7 @@ describe('TableCard', () => {
         await clickElement(toggle);
         expect(mocks.resolveLibraryScope).toHaveBeenCalledTimes(1);
         expect(container.textContent).toContain('Paper one');
-        expect(container.textContent).toContain('No PDF');
+        expect(container.textContent).toContain('No attachment');
         await clickElement(toggle);
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
     });
@@ -1006,7 +1006,7 @@ describe('TableCard', () => {
             expect(button('Create only')).toBeTruthy();
             expect(button('Create and fill')!.disabled).toBe(false);
             expect(container.querySelector('.table-card-cost')?.textContent).toBe(
-                'Fills 2 rows: 1 from the PDF, 1 without either',
+                'Fills 2 rows: 1 from the attachment, 1 without either',
             );
             expect(container.querySelector('.table-card-credit-chip')).toBeNull();
             await click('Create and fill');
@@ -1057,7 +1057,7 @@ describe('TableCard', () => {
                 });
                 expect(button('Create and fill')!.disabled).toBe(false);
                 expect(container.querySelector('.table-card-cost')?.textContent).toBe(
-                    'Fills up to 43 rows: 37 from the PDF, 6 from title and abstract',
+                    'Fills up to 43 rows: 37 from the attachment, 6 from title and abstract',
                 );
                 expect(container.querySelector('.table-card-credit-chip')?.textContent).toContain('Up to 9 this run');
                 await click('Create and fill');
@@ -1113,7 +1113,7 @@ describe('TableCard', () => {
             expect(container.textContent).toContain('Sample size');
             expect(container.textContent).toContain('Design');
             expect(container.querySelector('.table-card-cost')?.textContent).toBe(
-                'Fills 32 rows: 30 from the PDF, 2 from title and abstract',
+                'Fills 32 rows: 30 from the attachment, 2 from title and abstract',
             );
             expect(container.querySelector('.table-card-credit-chip')?.textContent).toContain('Up to 7 this run');
             // Nothing on it is editable.

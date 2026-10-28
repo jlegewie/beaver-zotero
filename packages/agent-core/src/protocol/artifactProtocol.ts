@@ -75,6 +75,12 @@ export interface TableFillRecord {
     credits_charged: number;
     /** Why the fill ended early, when it did. */
     stopped_by?: string | null;
+    /**
+     * How the credit confirmation that stopped the fill ended: `declined`,
+     * `timed_out`, `unreachable` or `no_credits`. Absent unless credits
+     * stopped it, and on records written before the field.
+     */
+    credit_confirmation?: string | null;
 }
 
 export interface TableRecord {
@@ -130,8 +136,11 @@ export interface ArtifactRequest {
     to_version?: number | null;
     thread_id?: string | null;
     run_ids?: string[] | null;
-    /** `edit`: the commit's position in its session (`operation_id`), from 1. */
-    seq?: number | null;
+    /**
+     * `edit`: the commit's position in its session (`operation_id`), from 1.
+     * Not `seq`, which numbers run events on the chat socket.
+     */
+    edit_seq?: number | null;
     /** `edit`: the mutations to commit; `set_cells` only. */
     mutations?: TableMutation[] | null;
 }
@@ -222,7 +231,7 @@ const contracts: Record<string, [string[], string[]]> = {
         ],
         [],
     ],
-    edit: [["key", "operation_id", "seq", "mutations", "meta"], []],
+    edit: [["key", "operation_id", "edit_seq", "mutations", "meta"], []],
     revert: [["key", "to_version", "meta"], []],
     trim: [["key", "thread_id", "run_ids"], []],
     delete: [["key"], []],
@@ -297,8 +306,8 @@ export function validateArtifactRequest(
         )
             return "invalid_request";
     if (
-        raw.seq != null &&
-        (!Number.isSafeInteger(raw.seq) || (raw.seq as number) < 1)
+        raw.edit_seq != null &&
+        (!Number.isSafeInteger(raw.edit_seq) || (raw.edit_seq as number) < 1)
     )
         return "invalid_request";
     if (

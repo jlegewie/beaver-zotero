@@ -335,7 +335,7 @@ describe('AgentService run reattach', () => {
         expect(replies[0]).toMatchObject({ request_id: 'req-exec', status: 'applied' });
     });
 
-    it('handles a table edit whose own commit number collides with the run\'s event numbers', async () => {
+    it('handles a request whose payload has a field named seq below the run\'s replay position', async () => {
         const edit = vi.fn(async (event: Record<string, unknown>) => ({
             type: 'artifact_response',
             request_id: event.request_id,
@@ -351,8 +351,8 @@ describe('AgentService run reattach', () => {
         first.emitMessage(part(2, 'Hello'));
         await flush();
 
-        // An `edit` carries its commit's position in its session as `seq`. The
-        // backend does not number requests, so it is not a replayed event.
+        // The backend does not number requests, so a `seq` in one is payload,
+        // never a replayed event.
         for (const seq of [1, 2, 7]) {
             first.emitMessage({
                 event: 'artifact_request',
@@ -360,6 +360,7 @@ describe('AgentService run reattach', () => {
                 op: 'edit',
                 key: 'u-ABCDEFGH',
                 operation_id: 'session',
+                edit_seq: seq,
                 seq,
                 mutations: [{ op: 'set_cells', cells: [] }],
                 meta: { actor: 'agent', run_id: RUN_ID, thread_id: 't' },

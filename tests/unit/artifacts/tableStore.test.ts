@@ -2450,7 +2450,7 @@ describe('provider edit sessions', () => {
             op: 'edit',
             key: remoteKey,
             operation_id: 'session-1',
-            seq,
+            edit_seq: seq,
             mutations: [{ op: 'set_cells', cells }],
             meta,
             ...fields,
@@ -2527,7 +2527,7 @@ describe('provider edit sessions', () => {
             op: 'edit',
             key: remoteKey,
             operation_id: 'session-2',
-            seq: 1,
+            edit_seq: 1,
             mutations: [{ op: 'set_cells', cells: [{ ...answer('r1', 'Old question'), question_hash: '0000000000000000' }] }],
             meta,
         });
@@ -2557,7 +2557,7 @@ describe('provider edit sessions', () => {
             op: 'edit',
             key: remoteKey,
             operation_id: 'session-1',
-            seq: 1,
+            edit_seq: 1,
             mutations: [{ op: 'set_meta', title: 'No' }],
             meta,
         });

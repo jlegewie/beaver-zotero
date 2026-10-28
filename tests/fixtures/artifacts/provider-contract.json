@@ -2387,7 +2387,7 @@
       "op": "edit",
       "key": "u-ABCDEFGH",
       "operation_id": "fill-session-1",
-      "seq": 1,
+      "edit_seq": 1,
       "mutations": [
         {
           "op": "set_cells",
@@ -2489,7 +2489,7 @@
       "op": "edit",
       "key": "u-ABCDEFGH",
       "operation_id": "fill-session-1",
-      "seq": 2,
+      "edit_seq": 2,
       "mutations": [
         {
           "op": "set_cells",
@@ -2684,7 +2684,7 @@
       "op": "edit",
       "key": "u-ABCDEFGH",
       "operation_id": "fill-session-1",
-      "seq": 2,
+      "edit_seq": 2,
       "mutations": [
         {
           "op": "set_cells",
@@ -2753,7 +2753,7 @@
       "op": "edit",
       "key": "u-ABCDEFGH",
       "operation_id": "fill-session-1",
-      "seq": 1,
+      "edit_seq": 1,
       "mutations": [
         {
           "op": "set_cells",
@@ -2802,7 +2802,7 @@
       "op": "edit",
       "ok": false,
       "error_code": "stale_seq",
-      "error": "seq 1 is older than the session's last commit (2)"
+      "error": "edit_seq 1 is older than the session's last commit (2)"
     }
   },
   {
@@ -2813,7 +2813,7 @@
       "op": "edit",
       "key": "u-ABCDEFGH",
       "operation_id": "fill-session-1",
-      "seq": 3,
+      "edit_seq": 3,
       "mutations": [
         {
           "op": "set_cells",
