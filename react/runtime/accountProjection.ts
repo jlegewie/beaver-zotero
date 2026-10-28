@@ -14,6 +14,7 @@ import { store } from "../store";
 import {
     sessionAtom,
     authLoadingAtom,
+    sessionRestoreAtom,
     loginLoadingAtom,
     resetLoginFormState,
     isWaitingForProfileAtom,
@@ -157,6 +158,7 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
         }
         store.set(sessionAtom, snapshot.session);
         store.set(authLoadingAtom, !snapshot.initialized);
+        store.set(sessionRestoreAtom, snapshot.restore);
         store.set(loginLoadingAtom, snapshot.authenticating);
     });
     Zotero.Beaver.runtime.addWindowCleanup(runtime, unsubscribe);

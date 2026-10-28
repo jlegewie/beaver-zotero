@@ -22,6 +22,7 @@ import { isThreadListViewAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import ProfileLoadingPage from './pages/ProfileLoadingPage';
+import SessionRestorePage from './pages/SessionRestorePage';
 import FreeOnboardingPage from './pages/FreeOnboardingPage';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
@@ -282,6 +283,18 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
                         </span>
                     </div>
                 </div>
+            </SidebarShell>
+        );
+    }
+
+    {/* Saved sign-in still being restored: Beaver does not know yet whether
+        the user is signed out, so the sign-in form must not show. */}
+    if (chatAccessGate === 'restoring') {
+        return (
+            <SidebarShell isWindow={isWindow}>
+                {header}
+                <SessionRestorePage />
+                <DialogContainer />
             </SidebarShell>
         );
     }
