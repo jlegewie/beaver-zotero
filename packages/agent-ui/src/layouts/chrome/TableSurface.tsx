@@ -57,6 +57,8 @@ export interface TableSurfaceProps {
     renderRowDetail?: (row: Row) => React.ReactNode;
     columnMenuItems?: (column: Column) => MenuItem[];
     onRetryCell?: (row: Row, column: Column) => void;
+    /** Rows marked "Can be improved" (`DataTableProps.improvableRows`). */
+    improvableRows?: ReadonlySet<string>;
 
     showSearch?: boolean;
     searchPlaceholder?: string;
@@ -110,6 +112,7 @@ export function TableSurface({
     renderRowDetail,
     columnMenuItems,
     onRetryCell,
+    improvableRows,
     showSearch,
     searchPlaceholder,
     showSortMenu,
@@ -195,6 +198,7 @@ export function TableSurface({
                     renderRowDetail={renderRowDetail}
                     columnMenuItems={columnMenuItems}
                     onRetryCell={onRetryCell}
+                    improvableRows={improvableRows}
                     emptyText={emptyText}
                     filteredEmptyText={filteredEmptyText}
                     virtualize={virtualize}

@@ -60,6 +60,12 @@ export interface DataTableProps {
     columnMenuItems?: (column: Column) => MenuItem[];
     /** Offered beside a cell error; absent ⇒ no retry control. */
     onRetryCell?: (row: Row, column: Column) => void;
+    /**
+     * Rows answered from title and abstract whose item has since gained a
+     * document, worked out by the host when the table is shown; a fill now
+     * would answer them from it. Marked "Can be improved" beside the anchor.
+     */
+    improvableRows?: ReadonlySet<string>;
     /** Shown when the table has no rows at all. */
     emptyText?: string;
     /** Shown when filters hide every row. */
@@ -108,6 +114,7 @@ export function DataTable({
     renderRowDetail,
     columnMenuItems,
     onRetryCell,
+    improvableRows,
     emptyText = "No rows",
     filteredEmptyText = "No rows match these filters",
     virtualize = false,
@@ -291,6 +298,7 @@ export function DataTable({
                             renderRowDetail={renderRowDetail}
                             selectClickFor={selectClickFor}
                             onRetryCell={onRetryCell}
+                            improvable={improvableRows?.has(row.id) ?? false}
                             expandable={expandable}
                             sortable={sortable}
                             columnCount={columnCount}
@@ -422,6 +430,7 @@ interface TableRowProps {
     renderRowDetail?: (row: Row) => React.ReactNode;
     selectClickFor: (column: Column) => ((label: string) => void) | undefined;
     onRetryCell?: (row: Row, column: Column) => void;
+    improvable: boolean;
     expandable: boolean;
     sortable: boolean;
     columnCount: number;
@@ -438,6 +447,7 @@ const TableRow = React.memo(function TableRow({
     renderRowDetail,
     selectClickFor,
     onRetryCell,
+    improvable,
     expandable,
     sortable,
     columnCount,
@@ -511,6 +521,14 @@ const TableRow = React.memo(function TableRow({
                                             : undefined
                                     }
                                 />
+                                {improvable ? (
+                                    <small
+                                        className="bt-improvable"
+                                        title="Some answers came from the title and abstract, and the item now has a document. Filling the table again answers them from it."
+                                    >
+                                        Can be improved
+                                    </small>
+                                ) : null}
                                 <RowActionsView table={table} row={row} />
                             </div>
                         ) : (

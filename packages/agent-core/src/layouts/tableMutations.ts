@@ -191,7 +191,11 @@ export interface ApplyError {
     message: string;
 }
 
-export type SkipReason = "user_cell" | "question_changed";
+export type SkipReason =
+    | "user_cell"
+    | "question_changed"
+    | "row_removed"
+    | "column_removed";
 
 /** A `set_cells` write the engine declined, reported to the writer. */
 export interface SkippedCell {
@@ -230,6 +234,8 @@ interface Draft {
     columnIndex: Map<string, number>;
     rowIndex: Map<string, number>;
     skipped: SkippedCell[];
+    /** `set_cells` skips writes to a removed row or column (the provider `edit`). */
+    skipMissing: boolean;
 }
 
 function indexById<T extends { id: string }>(items: T[]): Map<string, number> {
@@ -238,7 +244,7 @@ function indexById<T extends { id: string }>(items: T[]): Map<string, number> {
     return index;
 }
 
-function draftOf(spec: TableSpec): Draft {
+function draftOf(spec: TableSpec, skipMissing = false): Draft {
     return {
         spec: { ...spec },
         columnsCopied: false,
@@ -248,6 +254,7 @@ function draftOf(spec: TableSpec): Draft {
         columnIndex: indexById(spec.columns),
         rowIndex: indexById(spec.rows),
         skipped: [],
+        skipMissing,
     };
 }
 
@@ -314,7 +321,10 @@ function modelColumnCount(spec: TableSpec): number {
  *   deletion marked `reset` — an unmarked deletion carries no provenance, so
  *   it cannot remove a user's correction. A write whose `question_hash` no
  *   longer matches the column is skipped too. An unknown row or column still
- *   fails the whole batch.
+ *   fails the whole batch, except with `skipMissing` (the provider `edit`):
+ *   there a write to a row or column no longer in the table is skipped and
+ *   reported (`column_removed` first when both are gone), since during a fill
+ *   that is a race with another writer, and the rest of the batch applies.
  * - **`set_cells` on a `select` matches by {@link normalizeSelectLabel}** and
  *   stores the column's spelling. A label the column does not have is appended,
  *   taking the next colour from {@link SELECT_COLORS}.
@@ -335,8 +345,9 @@ function modelColumnCount(spec: TableSpec): number {
 export function applyMutations(
     spec: TableSpec,
     mutations: TableMutation[],
+    options: { skipMissing?: boolean } = {},
 ): ApplyResult {
-    const draft = draftOf(spec);
+    const draft = draftOf(spec, options.skipMissing === true);
     const before = { rows: spec.rows.length, columns: modelColumnCount(spec) };
     for (const mutation of mutations) {
         const failure = applyOne(draft, mutation);
@@ -950,12 +961,28 @@ function setCells(
         const column =
             columnAt === undefined ? undefined : draft.spec.columns[columnAt];
         if (!column) {
+            if (draft.skipMissing) {
+                draft.skipped.push({
+                    row: write.row,
+                    column: write.column,
+                    reason: "column_removed",
+                });
+                continue;
+            }
             return fail(
                 "unknown_column",
                 `set_cells: column "${write.column}" does not exist`,
             );
         }
         if (!draft.rowIndex.has(write.row)) {
+            if (draft.skipMissing) {
+                draft.skipped.push({
+                    row: write.row,
+                    column: write.column,
+                    reason: "row_removed",
+                });
+                continue;
+            }
             return fail(
                 "unknown_row",
                 `set_cells: row "${write.row}" does not exist`,

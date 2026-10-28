@@ -1,5 +1,5 @@
 import React from 'react';
-import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import type { TableSpec, ZoteroRowReference } from '@beaver/agent-core/layouts/table';
 import { ExtractionTable } from '@beaver/agent-ui/layouts';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 import {
@@ -13,6 +13,9 @@ import type { TableTabMountOptions, TableTabRenderReport } from '../../../src/ui
 import { getWindowRuntime } from '../../runtime/windowRuntime';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { selectItemById } from '../../utils/selectItem';
+import { describeItems } from './card/liveSources';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
+import { getContentKind } from '../../../src/services/documentExtraction/attachmentResolution';
 
 /** A value the tab's owner sets from outside React, read with `useSyncExternalStore`. */
 export interface TableTabWarningSource {
@@ -33,6 +36,132 @@ interface PendingReport {
     reason: TableTabRenderReport['reason'];
     started: number;
     readMs: number;
+}
+
+/** A row answered from title and abstract, and the attachment it names if any. */
+export interface MetadataRow {
+    rowId: string;
+    attachment?: ZoteroRowReference;
+}
+
+/**
+ * The item of each row with an answer from title and abstract: the rows a
+ * document gained since would improve. Keyed by the item's portable id.
+ */
+export function metadataAnsweredItems(spec: TableSpec | null): Map<string, MetadataRow[]> {
+    const byItem = new Map<string, MetadataRow[]>();
+    for (const row of spec?.rows ?? []) {
+        if (row.ref?.kind !== 'item') continue;
+        if (!Object.values(row.cells).some((cell) => cell?.provenance === 'metadata')) continue;
+        const id = `${row.ref.library_ref}-${row.ref.zotero_key}`;
+        byItem.set(id, [...(byItem.get(id) ?? []), { rowId: row.id, attachment: row.ref.attachment }]);
+    }
+    return byItem;
+}
+
+/** The kinds of attachment a row reads. */
+const ROW_DOCUMENT_KINDS: ReadonlySet<string> = new Set(['pdf', 'epub', 'snapshot']);
+
+/** Whether the attachment a row names is still a document outside the trash. */
+function namedDocumentPresent(attachment: ZoteroRowReference): boolean {
+    const libraryID = resolveLibraryRef(attachment);
+    if (!libraryID) return false;
+    const item = Zotero.Items.getByLibraryAndKey(libraryID, attachment.zotero_key) as Zotero.Item | false;
+    return !!item && !item.deleted && item.isAttachment() && ROW_DOCUMENT_KINDS.has(getContentKind(item));
+}
+
+/**
+ * Of the metadata-answered rows, those a fill now would answer from a
+ * document: the attachment the row names when it names one, otherwise any
+ * document of its item (`has_pdf` from the item display answer).
+ */
+export function improvableRowIds(
+    candidates: Map<string, MetadataRow[]>,
+    items: ReadonlyArray<{ item_id: string; has_pdf?: boolean }>,
+    namedPresent: (attachment: ZoteroRowReference) => boolean = namedDocumentPresent,
+): Set<string> {
+    const found = new Set<string>();
+    for (const item of items) {
+        for (const entry of candidates.get(item.item_id) ?? []) {
+            if (entry.attachment ? namedPresent(entry.attachment) : !!item.has_pdf) found.add(entry.rowId);
+        }
+    }
+    return found;
+}
+
+/**
+ * Rows answered from title and abstract whose item now has a PDF, EPUB or
+ * snapshot attachment, by the rule a fill uses to pick a row's document: a
+ * fill now would answer them from it. A row that names an attachment keeps
+ * reading that one, even once it is gone, so only it counts for that row.
+ * The lookup skips excluded libraries on purpose: the chip offers a fill, and
+ * a fill cannot read them. Worked out from the items when the table is shown,
+ * never stored; looked up again when the set of such rows changes or one of
+ * their items gains or loses an attachment.
+ */
+function useImprovableRows(spec: TableSpec | null): ReadonlySet<string> {
+    const candidates = React.useMemo(() => metadataAnsweredItems(spec), [spec]);
+    const key = React.useMemo(() => [...candidates.keys()].sort().join(','), [candidates]);
+    // The rows and the attachments they name, so a change to either looks again.
+    const rowsKey = React.useMemo(
+        () => JSON.stringify([...candidates.values()].flat().map((row) => [row.rowId, row.attachment?.zotero_key ?? null])),
+        [candidates],
+    );
+    const [improvable, setImprovable] = React.useState<ReadonlySet<string>>(new Set());
+    const [attachmentsChanged, setAttachmentsChanged] = React.useState(0);
+    const candidatesRef = React.useRef(candidates);
+    candidatesRef.current = candidates;
+
+    // An attachment added to, or trashed from, one of those items while the
+    // tab is open changes the answer: look again, once a burst has settled.
+    // The observer is an app-lifetime registry, so it leaves with the tab.
+    React.useEffect(() => {
+        if (!key) return;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const observerID = Zotero.Notifier.registerObserver(
+            {
+                notify: (event: string, _type: string, ids: Array<string | number>) => {
+                    if (!['add', 'modify', 'trash'].includes(event)) return;
+                    const touched = ids.some((id) => {
+                        const item = Zotero.Items.get(Number(id)) as Zotero.Item | false;
+                        const parent = item && item.parentItemID ? (Zotero.Items.get(item.parentItemID) as Zotero.Item | false) : false;
+                        const ref = parent ? libraryRefForLibraryID(parent.libraryID) : null;
+                        return !!parent && !!ref && candidatesRef.current.has(`${ref}-${parent.key}`);
+                    });
+                    if (!touched) return;
+                    if (timer) clearTimeout(timer);
+                    timer = setTimeout(() => setAttachmentsChanged((n) => n + 1), 500);
+                },
+            },
+            ['item'],
+            'beaver-table-improvable',
+        );
+        return () => {
+            if (timer) clearTimeout(timer);
+            Zotero.Notifier.unregisterObserver(observerID);
+        };
+    }, [key]);
+
+    React.useEffect(() => {
+        if (!key) {
+            setImprovable(new Set());
+            return;
+        }
+        let live = true;
+        describeItems(key.split(',')).then(
+            (rows) => {
+                if (!live) return;
+                setImprovable(improvableRowIds(candidatesRef.current, rows));
+            },
+            () => {
+                if (live) setImprovable(new Set());
+            },
+        );
+        return () => {
+            live = false;
+        };
+    }, [key, rowsKey, attachmentsChanged]);
+    return improvable;
 }
 
 function sameTable(a: Loaded, b: Loaded): boolean {
@@ -144,6 +273,7 @@ export default function TableTabView({
     }, [tableRef.libraryID, tableRef.key]);
 
     const table = state.kind === 'table' ? state.table : null;
+    const improvableRows = useImprovableRows(table?.spec ?? null);
 
     React.useEffect(() => {
         if (table) optionsRef.current.onTitle(table.spec.title || 'Table');
@@ -191,6 +321,7 @@ export default function TableTabView({
                 <ExtractionTable
                     table={state.table.spec}
                     renderText={renderCellText}
+                    improvableRows={improvableRows}
                     fullControls
                     virtualize
                     fitWidth

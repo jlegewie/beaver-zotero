@@ -1,0 +1,182 @@
+{
+  "description": "A create card whose user added a collection: the card asks its tool call for a new cost (rows add up the sources, an upper bound until the merge) and approves Create and fill naming the new estimate. A second estimate for a card nobody waits on is answered unknown_card.",
+  "request": {
+    "event": "table_card_request",
+    "card_id": "00000000-0000-4000-8000-0000000000cb",
+    "run_id": "00000000-0000-4000-8000-0000000000a1",
+    "thread_id": "00000000-0000-4000-8000-0000000000b1",
+    "toolcall_id": "test-tool-call-id",
+    "scope": "create",
+    "title": "Comparison",
+    "description": "Sample sizes.",
+    "table": null,
+    "destination": {
+      "library_ref": "u",
+      "library_name": "My Library",
+      "collection_key": null,
+      "collection_name": null,
+      "explicit": false
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "ids": [
+          "u-PAPER002",
+          "u-PAPER003",
+          "u-PAPER004"
+        ],
+        "scope": null,
+        "resolved": {
+          "count": 3,
+          "total": 3,
+          "truncated": false,
+          "without_pdf": 2,
+          "sample": [
+            {
+              "id": "u-PAPER002",
+              "title": "A study called paper002 of things"
+            },
+            {
+              "id": "u-PAPER003",
+              "title": "A study called paper003 of things"
+            },
+            {
+              "id": "u-PAPER004",
+              "title": "A study called paper004 of things"
+            }
+          ],
+          "error": null
+        }
+      }
+    ],
+    "merge": {
+      "rows": 3,
+      "duplicates": 0
+    },
+    "row_cap": 1000,
+    "total": 3,
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants?",
+        "options": null,
+        "unit": null
+      }
+    ],
+    "cost": {
+      "extraction": {
+        "rows": 3,
+        "documents": 1,
+        "no_input": 1,
+        "upper_bound": false
+      },
+      "screening": null,
+      "credits": null,
+      "estimate_id": "00000000-0000-4000-8000-0000000000f3"
+    },
+    "user_instructions_prefill": "",
+    "timeout_seconds": 600.0
+  },
+  "estimate_request": {
+    "type": "table_card_estimate",
+    "card_id": "00000000-0000-4000-8000-0000000000cb",
+    "request_id": "estimate-1",
+    "sources": [
+      {
+        "type": "items",
+        "ids": [
+          "u-PAPER002",
+          "u-PAPER003",
+          "u-PAPER004"
+        ],
+        "resolved": {
+          "count": 3,
+          "total": 3,
+          "truncated": false,
+          "without_pdf": 2,
+          "sample": []
+        }
+      },
+      {
+        "type": "library",
+        "scope": {
+          "kind": "collection",
+          "library_ref": "u",
+          "key": "CASHTRN2",
+          "name": "Cash transfers"
+        },
+        "resolved": {
+          "count": 40,
+          "total": 40,
+          "truncated": false,
+          "without_pdf": 4,
+          "sample": []
+        }
+      }
+    ],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants?",
+        "options": null,
+        "unit": null
+      }
+    ]
+  },
+  "estimate_result": {
+    "event": "table_card_estimate_result",
+    "card_id": "00000000-0000-4000-8000-0000000000cb",
+    "request_id": "estimate-1",
+    "cost": {
+      "extraction": {
+        "rows": 43,
+        "documents": 37,
+        "no_input": 0,
+        "upper_bound": true
+      },
+      "screening": null,
+      "credits": 9.0,
+      "estimate_id": "00000000-0000-4000-8000-0000000000f4"
+    },
+    "error": null
+  },
+  "estimate_unknown_card": {
+    "event": "table_card_estimate_result",
+    "card_id": "00000000-0000-4000-8000-0000000000cc",
+    "request_id": "estimate-2",
+    "cost": null,
+    "error": "unknown_card"
+  },
+  "reply": {
+    "type": "table_card_response",
+    "card_id": "00000000-0000-4000-8000-0000000000cb",
+    "approved": true,
+    "choice": "create_and_run",
+    "estimate_id": "00000000-0000-4000-8000-0000000000f4",
+    "title": "Comparison",
+    "description": "Sample sizes.",
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "ids": [
+          "u-PAPER002",
+          "u-PAPER003",
+          "u-PAPER004"
+        ]
+      }
+    ],
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "number",
+        "description": "How many participants?"
+      }
+    ]
+  }
+}

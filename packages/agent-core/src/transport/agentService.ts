@@ -47,7 +47,7 @@ import {
     isReattachRequest,
 } from '../protocol/agentProtocol';
 import { REATTACH_CLOSE_CODES, RunLink, RunReply, answeredPromptKey, executedAction, promptKey } from './runLink';
-import type { WSTableCardResponse } from '../protocol/tableCardProtocol';
+import type { WSTableCardEstimateRequest, WSTableCardResponse } from '../protocol/tableCardProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
@@ -809,8 +809,11 @@ export class AgentService {
                 // A replayed event this run has already handled. Checked again
                 // when the event's turn comes: one handled on the lost socket
                 // may still be finishing when its replay arrives.
+                // The backend numbers only events that ask for no answer; a
+                // request keeps its own fields, and a `seq` on one (an `edit`
+                // commit's position in its session) is its payload.
                 const rawSeq = (parsed as { seq?: unknown }).seq;
-                const seq = typeof rawSeq === 'number' ? rawSeq : null;
+                const seq = typeof rawSeq === 'number' && !isBackendRequestEvent(parsed.event) ? rawSeq : null;
                 const run = seq !== null ? this.reattachableRun() : null;
                 if (run && seq !== null && seq <= run.lastSeq) {
                     logger(`AgentService: Ignoring "${parsed.event}" seq ${seq}, already handled`, 1);
@@ -1783,6 +1786,16 @@ export class AgentService {
                     this.callbacks?.onTableCardStale?.(event);
                     break;
 
+                case 'table_card_estimate_result':
+                    logger("AgentService: Received table_card_estimate_result", { card_id: event.card_id, request_id: event.request_id, error: event.error ?? null }, 1);
+                    this.callbacks?.onTableCardEstimateResult?.(event);
+                    break;
+
+                case 'table_fill_started':
+                    logger("AgentService: Received table_fill_started", { toolcall_id: event.toolcall_id, rows: event.rows }, 1);
+                    this.callbacks?.onTableFillStarted?.(event);
+                    break;
+
                 case 'ask_user_question_request':
                     logger("AgentService: Received ask_user_question_request", event, 1);
                     // This event is handled by the UI via callback
@@ -2110,6 +2123,18 @@ export class AgentService {
     sendTableCardResponse(response: WSTableCardResponse): boolean {
         logger(`AgentService: Sending table card response for ${response.card_id}: ${response.approved ? response.choice ?? 'create' : 'declined'}`, 1);
         return this.sendDecision(response);
+    }
+
+    /**
+     * Ask the tool call waiting on a table card for a new cost for the card's
+     * draft. Not a decision: it is never held for a reattach, since an
+     * estimate for a connection that has gone is worth nothing; the card asks
+     * again or keeps its run button disabled.
+     * @returns false if the message did not leave the client.
+     */
+    sendTableCardEstimate(message: WSTableCardEstimateRequest): boolean {
+        if (this.reattachableRun()?.state === 'reattaching') return false;
+        return this.send(message);
     }
 
     /**

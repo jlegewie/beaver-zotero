@@ -200,8 +200,13 @@ beforeEach(async () => {
         isAttachment: () => true,
         isTopLevelItem: () => true,
         hasTag: (name: string) => name === TABLE_TAG || name === TABLE_EMOJI_TAG,
-        getField: (field: string) =>
-            field === 'url' ? 'beaver://table/demo-table' : '',
+        title: 'Demo table',
+        getField(field: string) {
+            return field === 'url' ? 'beaver://table/demo-table' : field === 'title' ? this.title : '';
+        },
+        setField: vi.fn(function (this: { title: string }, field: string, value: string) {
+            if (field === 'title') this.title = value;
+        }),
         // As in Zotero: the async form answers false for a missing file.
         getFilePathAsync: async () => ((await realIOUtils.exists(htmlPath)) ? htmlPath : false),
         getFilePath: () => htmlPath,
@@ -2414,5 +2419,181 @@ describe('table.json storage', () => {
         const edited = await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'answered', provenance: 'document', value: { kind: 'text', text: 'filler' } } }] }], { actor: 'agent', run_id: 'fill' });
         expect(edited).toMatchObject({ ok: true, skipped: [{ row: 'r1', column: 'note', reason: 'user_cell' }] });
         expect((await readTable(ref)).spec.rows[0].cells.note?.value).toEqual({ kind: 'text', text: 'mine' });
+    });
+});
+
+describe('item title', () => {
+    it('follows a rename of the table, saved with the render', async () => {
+        await editTable(ref, [{ op: 'set_meta', title: 'Renamed table' }], { actor: 'agent', run_id: 'run' });
+        expect(item.title).toBe('Renamed table');
+        expect(item.saveTx).toHaveBeenCalled();
+        item.setField.mockClear();
+        // An unchanged title is not written again.
+        await editTable(ref, [{ op: 'set_meta', description: 'Now described' }], { actor: 'agent', run_id: 'run' });
+        expect(item.setField).not.toHaveBeenCalled();
+    });
+});
+
+describe('provider edit sessions', () => {
+    const remoteKey = `u-${KEY}`;
+    const meta = { actor: 'agent', run_id: 'run-fill', thread_id: 'thread-fill', change: 'Filled table' };
+    const answer = (row: string, text: string, extra: Record<string, unknown> = {}) => ({
+        row,
+        column: 'note',
+        cell: { outcome: 'answered', value: { kind: 'text', text }, provenance: 'document' },
+        ...extra,
+    });
+    const edit = (seq: number, cells: unknown[], fields: Record<string, unknown> = {}) =>
+        handleArtifactRequest({
+            event: 'artifact_request',
+            request_id: `edit-${seq}-${Math.random()}`,
+            op: 'edit',
+            key: remoteKey,
+            operation_id: 'session-1',
+            seq,
+            mutations: [{ op: 'set_cells', cells }],
+            meta,
+            ...fields,
+        });
+
+    it('commits cell writes without a revision guard and renders the snapshot as part of the commit', async () => {
+        const response = await edit(1, [answer('r1', 'Filled')]);
+
+        expect(response).toMatchObject({ ok: true, op: 'edit', version: 2, saved: true, skipped: [], replayed: false });
+        // The result carries no spec or summary: a fill commits often.
+        expect(response.spec).toBeUndefined();
+        expect(response.summary).toBeUndefined();
+        const { spec } = await readTable(ref);
+        expect(spec.rows[0].cells.note.value).toEqual({ kind: 'text', text: 'Filled' });
+        const html = await readFile(htmlPath, 'utf8');
+        expect(html).toContain(`data-beaver-spec-sha256="${response.sha256}"`);
+        expect(html).toContain(`data-beaver-file-sha256="${await sha256(await readFile(tablePath(), 'utf8'))}"`);
+    });
+
+    it('collapses every commit of one run into one retained version', async () => {
+        for (let seq = 1; seq <= 5; seq++) {
+            const response = await edit(seq, [answer('r1', `Commit ${seq}`)]);
+            expect(response).toMatchObject({ ok: true, version: 2 });
+        }
+        expect((await readHistory()).versions.map((v) => v.version)).toEqual([1, 2]);
+        expect((await readTable(ref)).spec.rows[0].cells.note.value).toEqual({ kind: 'text', text: 'Commit 5' });
+    });
+
+    it('replays the session\'s last seq with its stored result and applies nothing', async () => {
+        const first = await edit(1, [answer('r1', 'Once')]);
+        await editTable(ref, [{ op: 'set_meta', title: 'Renamed meanwhile' }], { actor: 'user' });
+        const replay = await edit(1, [answer('r1', 'Once')]);
+
+        expect(replay).toMatchObject({ ok: true, replayed: true, saved: true, skipped: [] });
+        // The current state, which a user edit has moved past the commit.
+        expect(replay.version).toBe(3);
+        expect(replay.version).toBeGreaterThan(first.version);
+        expect((await readHistory()).versions.map((v) => v.version)).toEqual([1, 2, 3]);
+    });
+
+    it('refuses an older seq and a reused seq with other mutations', async () => {
+        await edit(1, [answer('r1', 'One')]);
+        await edit(2, [answer('r1', 'Two')]);
+
+        expect(await edit(1, [answer('r1', 'One')])).toMatchObject({ ok: false, error_code: 'stale_seq' });
+        expect(await edit(2, [answer('r1', 'Other')])).toMatchObject({ ok: false, error_code: 'operation_mismatch' });
+        expect((await readTable(ref)).spec.rows[0].cells.note.value).toEqual({ kind: 'text', text: 'Two' });
+    });
+
+    it('skips writes to a removed row or column and lands the rest of the commit', async () => {
+        const response = await edit(1, [
+            answer('gone', 'Lost row'),
+            { ...answer('r1', 'Lost column'), column: 'removed' },
+            answer('r1', 'Kept'),
+        ]);
+
+        expect(response).toMatchObject({ ok: true, version: 2 });
+        expect(response.skipped).toEqual([
+            { row: 'gone', column: 'note', reason: 'row_removed' },
+            { row: 'r1', column: 'removed', reason: 'column_removed' },
+        ]);
+        expect((await readTable(ref)).spec.rows[0].cells.note.value).toEqual({ kind: 'text', text: 'Kept' });
+    });
+
+    it('skips user cells and answers to a changed question', async () => {
+        await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'cleared', provenance: 'user' } }] }], { actor: 'user' });
+
+        const user = await edit(1, [answer('r1', 'Over the user')]);
+        expect(user.skipped).toEqual([{ row: 'r1', column: 'note', reason: 'user_cell' }]);
+
+        const stale = await handleArtifactRequest({
+            event: 'artifact_request',
+            request_id: 'stale-question',
+            op: 'edit',
+            key: remoteKey,
+            operation_id: 'session-2',
+            seq: 1,
+            mutations: [{ op: 'set_cells', cells: [{ ...answer('r1', 'Old question'), question_hash: '0000000000000000' }] }],
+            meta,
+        });
+        expect(stale.skipped).toEqual([{ row: 'r1', column: 'note', reason: 'user_cell' }]);
+        expect((await readTable(ref)).spec.rows[0].cells.note).toEqual({ outcome: 'cleared', provenance: 'user' });
+    });
+
+    it('reports a question changed under the fill', async () => {
+        const response = await edit(1, [{ ...answer('r1', 'Old question'), question_hash: '0000000000000000' }]);
+        expect(response.skipped).toEqual([{ row: 'r1', column: 'note', reason: 'question_changed' }]);
+        expect((await readTable(ref)).spec.rows[0].cells.note.value).toEqual({ kind: 'text', text: 'One' });
+    });
+
+    it('fails the whole commit on an invalid cell, with nothing written', async () => {
+        const response = await edit(1, [
+            answer('r1', 'Fine'),
+            { row: 'r1', column: 'note', cell: { outcome: 'answered', provenance: 'document' } },
+        ]);
+        expect(response).toMatchObject({ ok: false, error_code: 'invalid_mutation' });
+        expect(await storedVersion()).toBe(1);
+    });
+
+    it('refuses an edit carrying anything but set_cells', async () => {
+        const response = await handleArtifactRequest({
+            event: 'artifact_request',
+            request_id: 'meta-edit',
+            op: 'edit',
+            key: remoteKey,
+            operation_id: 'session-1',
+            seq: 1,
+            mutations: [{ op: 'set_meta', title: 'No' }],
+            meta,
+        });
+        expect(response).toMatchObject({ ok: false, error_code: 'invalid_request' });
+        expect(await storedVersion()).toBe(1);
+    });
+
+    it('refuses an edit to a table in an excluded library', async () => {
+        checkLibraryExcluded.mockReturnValue({ message: 'excluded' });
+        expect(await edit(1, [answer('r1', 'No')])).toMatchObject({ ok: false, error_code: 'library_excluded' });
+        checkLibraryExcluded.mockReturnValue(null);
+        expect(await storedVersion()).toBe(1);
+    });
+
+    it('publishes the update event after each commit with what the commit wrote', async () => {
+        const publish = vi.fn();
+        (globalThis as any).Zotero.Beaver.runtime = { publish };
+        await edit(1, [
+            answer('r1', 'Filled'),
+            { row: 'r1', column: 'note', cell: { outcome: 'failed', provenance: 'document', error: 'deadline' } },
+            answer('gone', 'Lost'),
+        ]);
+        expect(publish).toHaveBeenCalledTimes(1);
+        expect(publish).toHaveBeenCalledWith('beaverTableUpdated', expect.objectContaining({
+            key: KEY,
+            version: 2,
+            run_id: 'run-fill',
+            edit: { operation_id: 'session-1', seq: 1, rows: ['r1'], failed_rows: ['r1'] },
+        }));
+        // A replay applies nothing and announces nothing.
+        await edit(1, [
+            answer('r1', 'Filled'),
+            { row: 'r1', column: 'note', cell: { outcome: 'failed', provenance: 'document', error: 'deadline' } },
+            answer('gone', 'Lost'),
+        ]);
+        expect(publish).toHaveBeenCalledTimes(1);
+        delete (globalThis as any).Zotero.Beaver.runtime;
     });
 });

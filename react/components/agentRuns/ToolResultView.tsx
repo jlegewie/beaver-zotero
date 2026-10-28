@@ -52,7 +52,7 @@ function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
 /** Table status messages shown with (or instead of) a table tool's result. */
 export function tableMessages(result: ToolReturnPart): string[] {
     if (!isTableToolName(result.tool_name)) return [];
-    return tableResultMessages(tableResultBody(result.content));
+    return tableResultMessages(tableResultBody(result.content), result.tool_name);
 }
 
 /**

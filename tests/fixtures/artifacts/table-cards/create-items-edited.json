@@ -9,6 +9,7 @@
     "scope": "create",
     "title": "Comparison",
     "description": "Sample sizes across the papers.",
+    "table": null,
     "destination": {
       "library_ref": "u",
       "library_name": "My Library",
@@ -80,7 +81,17 @@
         "unit": null
       }
     ],
-    "cost": null,
+    "cost": {
+      "extraction": {
+        "rows": 2,
+        "documents": 1,
+        "no_input": 1,
+        "upper_bound": false
+      },
+      "screening": null,
+      "credits": null,
+      "estimate_id": "00000000-0000-4000-8000-0000000000e3"
+    },
     "user_instructions_prefill": "",
     "timeout_seconds": 600.0
   },
@@ -131,7 +142,8 @@
           }
         ]
       }
-    ]
+    ],
+    "estimate_id": "00000000-0000-4000-8000-0000000000e3"
   },
   "record": {
     "reference": {
@@ -268,7 +280,7 @@
       "stale": 0
     },
     "run": "none",
-    "next_step": "Created without a run. 3 of 3 rows have unanswered questions (6 cells). Filling cells is not available in this conversation yet.",
+    "next_step": "Created without a run. 3 of 3 rows have unanswered questions (6 cells); fill_table fills them.",
     "as_of": "2026-10-24T12:00:00+00:00"
   },
   "created_spec": {

@@ -117,6 +117,56 @@ export function formatTableStages(record: TableRecord): string[] {
     return lines;
 }
 
+/** Why rows were left unattempted, as the stage card says it. */
+const NOT_STARTED_REASONS: Record<string, string> = {
+    deadline: "the fill ran out of time",
+    credits: "more credits were not approved",
+    cancel: "the run was stopped",
+    stopped: "the fill stopped early",
+};
+
+/** Why cell writes were skipped, as the stage card says it. */
+const SKIP_REASONS: Record<string, string> = {
+    user_cell: "edited by you",
+    question_changed: "question changed during the fill",
+    row_removed: "row removed during the fill",
+    column_removed: "column removed during the fill",
+};
+
+function formatCredits(credits: number): string {
+    const rounded = Math.round(credits * 100) / 100;
+    return `${rounded} credit${rounded === 1 ? "" : "s"}`;
+}
+
+/**
+ * What the fill in this call did, for a record of a call that ran the filler:
+ * rows filled of those planned, rows failed, rows not started and why, rows
+ * without a document or abstract, answers from metadata, skipped cells, and
+ * the credits charged. Empty for a call that ran no fill.
+ */
+export function formatFillLines(record: TableRecord): string[] {
+    const fill = record.run === "fill" ? record.fill : null;
+    if (!fill) return [];
+    const lines: string[] = [];
+    lines.push(`Filled ${fill.rows_filled} of ${plural(fill.rows, "row")}`);
+    if (fill.rows_failed > 0) lines.push(`${plural(fill.rows_failed, "row")} failed`);
+    for (const [reason, rows] of Object.entries(fill.rows_not_started ?? {})) {
+        if (rows > 0)
+            lines.push(`${plural(rows, "row")} not started: ${NOT_STARTED_REASONS[reason] ?? reason}`);
+    }
+    const unsaved = fill.rows_not_written + fill.rows_uncertain;
+    if (unsaved > 0) lines.push(`${plural(unsaved, "row")} answered but not confirmed saved`);
+    if (fill.rows_without_input > 0)
+        lines.push(`${plural(fill.rows_without_input, "row")} without a document or abstract`);
+    if (fill.from_metadata > 0)
+        lines.push(`${plural(fill.from_metadata, "answer")} from title and abstract only`);
+    for (const [reason, cells] of Object.entries(fill.skipped ?? {})) {
+        if (cells > 0) lines.push(`${plural(cells, "cell")} skipped: ${SKIP_REASONS[reason] ?? reason}`);
+    }
+    if (fill.credits_charged > 0) lines.push(`${formatCredits(fill.credits_charged)} charged`);
+    return lines;
+}
+
 /** The name the create card gives a source. */
 function sourceName(source: TableRecordSource): string {
     if (source.type === "items") return "Selected items";
@@ -193,7 +243,12 @@ export function TableResultView({ view }: { view: TableView }) {
         ? null
         : record.change;
     const statusLine = [formatSize(record), formatTableChanges(record)].filter(Boolean).join(" · ");
-    const stageLines = formatTableStages(record);
+    const fillLines = formatFillLines(record);
+    // A fill's own lines say what it answered from metadata; the table's
+    // stage lines then add what is left and what failed overall.
+    const stageLines = formatTableStages(record).filter(
+        (line) => !(fillLines.length && line.endsWith("from title and abstract only")),
+    );
     const sources = record.sources ?? [];
     const columns = record.columns ?? [];
     return (
@@ -228,6 +283,16 @@ export function TableResultView({ view }: { view: TableView }) {
                             />
                         ))}
                     </div>
+                </div>
+            )}
+            {fillLines.length > 0 && (
+                <div className="table-record-section">
+                    <div className="table-record-label">Fill</div>
+                    {fillLines.map((line, index) => (
+                        <div key={line} className={index === 0 ? "font-color-primary" : "font-color-secondary"}>
+                            {line}
+                        </div>
+                    ))}
                 </div>
             )}
             {(statusLine || stageLines.length > 0) && (

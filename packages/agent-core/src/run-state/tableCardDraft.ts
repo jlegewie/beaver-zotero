@@ -11,13 +11,18 @@ import type {
     TableCardChoice,
     TableCardColumn,
     TableCardColumnType,
+    TableCardCost,
     TableCardDestination,
     TableCardLibraryScope,
     TableCardOption,
     TableCardResolved,
     TableCardSource,
+    WSTableCardEstimateRequest,
+    WSTableCardEstimateResult,
     WSTableCardRequest,
     WSTableCardResponse,
+    WSTableCreateCardRequest,
+    WSTableFillCardRequest,
 } from '../protocol/tableCardProtocol';
 import {
     codePointLength,
@@ -88,6 +93,29 @@ export interface TableCardDraft {
     instructions: string;
     /** Counter for local keys. */
     nextKey: number;
+    /** The cost the card shows, and the draft it was estimated for. */
+    estimate: DraftEstimate;
+}
+
+/**
+ * The card's cost. The backend owns the estimate: the request's cost holds
+ * for the proposal as sent, and after the sources or the column set change
+ * the card asks its waiting tool call for a new one (`table_card_estimate`).
+ */
+export interface DraftEstimate {
+    /** The newest cost the backend answered; the request's until then. */
+    cost: TableCardCost | null;
+    /** The draft `cost` was estimated for ({@link estimateBasis}). */
+    basis: string;
+    /** The request id of the estimate in flight, if any. */
+    pending: string | null;
+    /** The draft the estimate in flight was asked for. */
+    pendingBasis: string | null;
+    /**
+     * The draft the last estimate failed for. While the draft is unchanged the
+     * card offers a retry; an edit asks again.
+     */
+    failedBasis: string | null;
 }
 
 const ITEMS_KEY = 'items';
@@ -130,7 +158,7 @@ export function initialTableCardDraft(request: WSTableCardRequest): TableCardDra
         options: draftOptions(column.options),
         unit: column.unit ?? null,
     }));
-    return {
+    const draft: TableCardDraft = {
         title: request.title,
         description: request.description,
         sources,
@@ -141,7 +169,10 @@ export function initialTableCardDraft(request: WSTableCardRequest): TableCardDra
         cancelling: false,
         instructions: request.user_instructions_prefill ?? '',
         nextKey,
+        estimate: { cost: request.cost, basis: '', pending: null, pendingBasis: null, failedBasis: null },
     };
+    // The proposal as sent is what the request's cost was estimated for.
+    return { ...draft, estimate: { ...draft.estimate, basis: estimateBasis(draft) } };
 }
 
 // Steps ------------------------------------------------------------------------
@@ -389,7 +420,7 @@ export function cardTotals(draft: TableCardDraft): { count: number; total: numbe
  * source's items are known it is the sum of their counts, an upper bound.
  * The backend's merge can still fold two different items that share a DOI.
  */
-export function cardRowCount(draft: TableCardDraft, request: WSTableCardRequest): number {
+export function cardRowCount(draft: TableCardDraft, request: WSTableCreateCardRequest): number {
     if (!draft.sourcesEdited) return request.merge.rows;
     const distinct = distinctItemCount(draft);
     return distinct ?? cardTotals(draft).count;
@@ -400,7 +431,7 @@ export function cardRowCount(draft: TableCardDraft, request: WSTableCardRequest)
  * short, at least that source's full size — the rows alone would understate
  * what the user asked for.
  */
-export function cardPaperCount(draft: TableCardDraft, request: WSTableCardRequest): number {
+export function cardPaperCount(draft: TableCardDraft, request: WSTableCreateCardRequest): number {
     const rows = cardRowCount(draft, request);
     const cut = draft.sources.filter((source) => sourceTotal(source) > request.row_cap || source.resolved?.truncated);
     return Math.max(rows, ...cut.map(sourceTotal));
@@ -416,7 +447,7 @@ export function distinctItemCount(draft: TableCardDraft): number | null {
  * The sources that carry the row-cap warning: each source the cap cut short,
  * otherwise, when the table's rows exceed the cap, the largest source.
  */
-export function overCapSources(draft: TableCardDraft, request: WSTableCardRequest): string[] {
+export function overCapSources(draft: TableCardDraft, request: WSTableCreateCardRequest): string[] {
     const rowCap = request.row_cap;
     const cut = draft.sources.filter((source) => sourceTotal(source) > rowCap || source.resolved?.truncated);
     if (cut.length) return cut.map((source) => source.key);
@@ -430,7 +461,7 @@ export function overCapSources(draft: TableCardDraft, request: WSTableCardReques
  * items it would have, the maximum, and that removing sources fixes it.
  * Sources are taken as they are, so the card offers no other remedy.
  */
-export function overCapMessage(draft: TableCardDraft, request: WSTableCardRequest): string {
+export function overCapMessage(draft: TableCardDraft, request: WSTableCreateCardRequest): string {
     return `This table would have ${plural(cardPaperCount(draft, request), 'item')}; the maximum is ${format(request.row_cap)}. Remove sources to continue.`;
 }
 
@@ -438,7 +469,7 @@ export function overCapMessage(draft: TableCardDraft, request: WSTableCardReques
  * The line under the source list: the backend's merge for the proposal as
  * sent, or after an edit the sum with a note that duplicates merge on create.
  */
-export function mergeLine(draft: TableCardDraft, request: WSTableCardRequest): string | null {
+export function mergeLine(draft: TableCardDraft, request: WSTableCreateCardRequest): string | null {
     const several = draft.sources.length > 1;
     if (!draft.sourcesEdited) {
         const { rows, duplicates } = request.merge;
@@ -578,7 +609,7 @@ export function columnProblem(column: DraftColumn): string | null {
 // Summaries and the footer ---------------------------------------------------------
 
 /** One line for a completed step, so the card shows one part at a time. */
-export function stepSummary(draft: TableCardDraft, step: TableCardStep, request: WSTableCardRequest): string {
+export function stepSummary(draft: TableCardDraft, step: TableCardStep, request: WSTableCreateCardRequest): string {
     if (step === 'sources') {
         const count = cardPaperCount(draft, request);
         return `${plural(count, 'item')} from ${plural(draft.sources.length, 'source')}`;
@@ -591,7 +622,7 @@ export function stepSummary(draft: TableCardDraft, step: TableCardStep, request:
 }
 
 /** The number a step's heading shows: items, criteria, or questions. */
-export function stepCount(draft: TableCardDraft, step: TableCardStep, request: WSTableCardRequest): number {
+export function stepCount(draft: TableCardDraft, step: TableCardStep, request: WSTableCreateCardRequest): number {
     if (step === 'sources') return cardPaperCount(draft, request);
     if (step === 'screening') return (draft.criteria ?? []).length;
     return draft.columns.length;
@@ -614,7 +645,7 @@ export interface CreateBlocker {
  */
 export function createBlockerReason(
     draft: TableCardDraft,
-    request: WSTableCardRequest,
+    request: WSTableCreateCardRequest,
     libraryOf?: (ref: string) => DestinationLibrary | null,
 ): CreateBlocker | null {
     const sources = (message: string): CreateBlocker => ({ message, part: 'sources' });
@@ -645,7 +676,7 @@ export function createBlockerReason(
 /** {@link createBlockerReason}'s message alone. */
 export function createBlocker(
     draft: TableCardDraft,
-    request: WSTableCardRequest,
+    request: WSTableCreateCardRequest,
     libraryOf?: (ref: string) => DestinationLibrary | null,
 ): string | null {
     return createBlockerReason(draft, request, libraryOf)?.message ?? null;
@@ -658,9 +689,9 @@ export function createBlocker(
  */
 export function createActions(
     draft: TableCardDraft,
-    request: WSTableCardRequest,
+    request: WSTableCreateCardRequest,
 ): { primary: { label: string; choice: TableCardChoice }; secondary?: { label: string; choice: TableCardChoice } } {
-    if (!request.cost) return { primary: { label: 'Create', choice: 'create' } };
+    if (!draft.estimate.cost) return { primary: { label: 'Create', choice: 'create' } };
     const screens = (draft.criteria ?? []).length > 0;
     const fills = draft.columns.length > 0;
     const label = screens && fills ? 'Create and run' : screens ? 'Create and screen' : 'Create and fill';
@@ -694,7 +725,7 @@ export const NO_DESTINATION =
  */
 export function cardDestination(
     draft: TableCardDraft,
-    request: WSTableCardRequest,
+    request: WSTableCreateCardRequest,
     libraryOf: (ref: string) => DestinationLibrary | null,
 ): TableCardDestination | null {
     if (request.destination.explicit || !draft.sourcesEdited) return request.destination;
@@ -734,7 +765,7 @@ export function destinationLine(destination: TableCardDestination): string {
 
 // Replies ------------------------------------------------------------------------
 
-function wireColumn(column: DraftColumn): TableCardColumn {
+export function wireColumn(column: DraftColumn): TableCardColumn {
     const wire: TableCardColumn = {
         header: column.header.trim(),
         type: column.type,
@@ -754,7 +785,7 @@ function wireColumn(column: DraftColumn): TableCardColumn {
 /** The approval: every part as edited, and the choice. */
 export function tableCardResponse(
     draft: TableCardDraft,
-    request: WSTableCardRequest,
+    request: WSTableCreateCardRequest,
     choice: TableCardChoice,
 ): WSTableCardResponse {
     // Instructions travel only with a decline: an approval is the table as shown.
@@ -763,6 +794,8 @@ export function tableCardResponse(
         card_id: request.card_id,
         approved: true,
         choice,
+        // The estimate the card showed: approving grants its credits.
+        estimate_id: draft.estimate.cost?.estimate_id ?? null,
         title: draft.title.trim(),
         description: draft.description.trim(),
         sources: draft.sources.flatMap((source): TableCardSource[] => {
@@ -774,6 +807,26 @@ export function tableCardResponse(
     };
 }
 
+/**
+ * The approval of a fill card: nothing on it is editable, so it names the run
+ * and the estimate it showed.
+ */
+export function tableFillCardResponse(request: WSTableFillCardRequest): WSTableCardResponse {
+    return {
+        type: 'table_card_response',
+        card_id: request.card_id,
+        approved: true,
+        choice: 'fill',
+        estimate_id: request.cost.estimate_id,
+    };
+}
+
+/** "Fill 180": the fill card's run button, named for what runs. */
+export function fillActionLabel(request: WSTableFillCardRequest): string {
+    const rows = request.cost.extraction?.rows ?? 0;
+    return `Fill ${format(rows)}`;
+}
+
 /** The decline; instructions make it a request for something else. */
 export function tableCardDecline(draft: TableCardDraft, request: WSTableCardRequest): WSTableCardResponse {
     const instructions = draft.instructions.trim();
@@ -783,4 +836,155 @@ export function tableCardDecline(draft: TableCardDraft, request: WSTableCardRequ
         approved: false,
         user_instructions: instructions || null,
     };
+}
+
+// Cost and the live estimate ------------------------------------------------------
+
+/**
+ * What a cost depends on in the draft: the sources (their content and their
+ * resolved counts) and the set of columns. A header or question edit does not
+ * change it; adding or removing a column does.
+ */
+export function estimateBasis(draft: TableCardDraft): string {
+    return JSON.stringify({
+        sources: draft.sources.map((source) => [
+            source.type,
+            source.ids ?? null,
+            source.scope ? [source.scope.kind, source.scope.library_ref, source.scope.key ?? null, source.scope.tag ?? null] : null,
+            source.resolved ? [source.resolved.count, source.resolved.total, source.resolved.without_pdf] : null,
+        ]),
+        columns: draft.columns.map((column) => column.key),
+    });
+}
+
+/**
+ * Whether the card asks for estimates at all: when the request quoted a cost,
+ * or proposed no columns (nothing to run yet). A run that cannot pay for a
+ * fill is sent `cost: null` with its columns, and stays at "Create".
+ */
+export function canEstimate(request: WSTableCreateCardRequest): boolean {
+    return request.cost !== null || request.columns.length === 0;
+}
+
+/**
+ * Where the card's cost stands: `current` for the draft as it is, `pending`
+ * while an estimate is in flight, `failed` after one failed, `stale` when the
+ * draft changed since and no estimate was asked for yet.
+ */
+export function estimateStatus(
+    draft: TableCardDraft,
+    request: WSTableCreateCardRequest,
+): 'current' | 'pending' | 'failed' | 'stale' {
+    if (!canEstimate(request)) return 'current';
+    if (draft.estimate.pending) return 'pending';
+    const basis = estimateBasis(draft);
+    if (draft.estimate.basis === basis) return 'current';
+    return draft.estimate.failedBasis === basis ? 'failed' : 'stale';
+}
+
+/**
+ * Whether the card should ask for an estimate now: the draft differs from
+ * what the shown cost was estimated for, nothing is in flight, and every
+ * source has its count. Only on the last step, where the run choice is.
+ */
+export function needsEstimate(draft: TableCardDraft, request: WSTableCreateCardRequest): boolean {
+    if (!canEstimate(request) || draft.estimate.pending || draft.step !== 'columns') return false;
+    if (draft.sources.some((source) => source.counting || !source.resolved)) return false;
+    const basis = estimateBasis(draft);
+    return draft.estimate.basis !== basis && draft.estimate.failedBasis !== basis;
+}
+
+/** The estimate request for the draft as it is, and the draft marked pending. */
+export function startEstimate(
+    draft: TableCardDraft,
+    request: WSTableCreateCardRequest,
+    requestId: string,
+): { draft: TableCardDraft; message: WSTableCardEstimateRequest } {
+    const message: WSTableCardEstimateRequest = {
+        type: 'table_card_estimate',
+        card_id: request.card_id,
+        request_id: requestId,
+        sources: draft.sources.flatMap((source): TableCardSource[] => {
+            const resolved = source.resolved ?? undefined;
+            if (source.type === 'library') return [{ type: 'library', scope: { ...source.scope! }, resolved }];
+            return (source.ids ?? []).length ? [{ type: 'items', ids: [...source.ids!], resolved }] : [];
+        }),
+        columns: draft.columns.map(wireColumn),
+    };
+    return {
+        message,
+        draft: {
+            ...draft,
+            estimate: { ...draft.estimate, pending: requestId, pendingBasis: estimateBasis(draft), failedBasis: null },
+        },
+    };
+}
+
+/**
+ * Apply the backend's answer. A result for an estimate the card no longer
+ * waits on is dropped. The new cost holds for the draft the request was
+ * built from; if the draft has moved on since, the card asks again.
+ */
+export function applyEstimateResult(draft: TableCardDraft, result: WSTableCardEstimateResult): TableCardDraft {
+    const { estimate } = draft;
+    if (estimate.pending !== result.request_id) return draft;
+    if (result.error)
+        return { ...draft, estimate: { ...estimate, pending: null, pendingBasis: null, failedBasis: estimate.pendingBasis } };
+    return {
+        ...draft,
+        estimate: { cost: result.cost ?? null, basis: estimate.pendingBasis ?? '', pending: null, pendingBasis: null, failedBasis: null },
+    };
+}
+
+/** The estimate in flight did not come back: the card shows it failed and offers a retry. */
+export function failEstimate(draft: TableCardDraft, requestId: string): TableCardDraft {
+    const { estimate } = draft;
+    if (estimate.pending !== requestId) return draft;
+    return { ...draft, estimate: { ...estimate, pending: null, pendingBasis: null, failedBasis: estimate.pendingBasis } };
+}
+
+/** Ask again after a failure. */
+export function retryEstimate(draft: TableCardDraft): TableCardDraft {
+    return draft.estimate.failedBasis !== null ? { ...draft, estimate: { ...draft.estimate, failedBasis: null } } : draft;
+}
+
+/**
+ * The row line: "Fills 180 rows: 150 from the PDF, 18 from title and
+ * abstract, 12 without either", with "up to" while the count is not exact.
+ */
+export function costLine(cost: TableCardCost | null): string | null {
+    const extraction = cost?.extraction;
+    if (!extraction) return null;
+    const { rows, documents, no_input } = extraction;
+    const metadata = Math.max(0, rows - documents - no_input);
+    const head = `Fills ${extraction.upper_bound ? 'up to ' : ''}${plural(rows, 'row')}`;
+    const parts = [
+        documents > 0 ? `${format(documents)} from the PDF` : null,
+        metadata > 0 ? `${format(metadata)} from title and abstract` : null,
+        no_input > 0 ? `${format(no_input)} without either` : null,
+    ].filter(Boolean);
+    return parts.length ? `${head}: ${parts.join(', ')}` : head;
+}
+
+/** A credit figure without trailing-zero noise, as the batch card writes it. */
+function formatCredits(credits: number): string {
+    const rounded = Math.round(credits * 100) / 100;
+    return Number.isInteger(rounded) ? String(rounded) : String(Number(rounded.toPrecision(6)));
+}
+
+/** The credit chip, only when approving raises what the run authorizes. */
+export function creditChip(cost: TableCardCost | null): string | null {
+    return typeof cost?.credits === 'number' ? `Up to ${formatCredits(cost.credits)} this run` : null;
+}
+
+/** The sentence the chip abbreviates: what approving authorizes, not what it costs. */
+export function creditTooltip(cost: TableCardCost | null): string | null {
+    if (typeof cost?.credits !== 'number') return null;
+    const amount = formatCredits(cost.credits);
+    const word = Math.round(cost.credits * 100) / 100 === 1 ? 'credit' : 'credits';
+    return (
+        `Approving authorizes up to ${amount} ${word} for this run. ` +
+        "You are charged for what the run actually uses, which is usually less. " +
+        "You'll be asked again if the run uses more."
+    );
 }

@@ -2378,5 +2378,493 @@
         }
       ]
     }
+  },
+  {
+    "name": "edit-commit",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "edit-commit",
+      "op": "edit",
+      "key": "u-ABCDEFGH",
+      "operation_id": "fill-session-1",
+      "seq": 1,
+      "mutations": [
+        {
+          "op": "set_cells",
+          "cells": [
+            {
+              "row": "r1",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "number",
+                  "value": 120.0
+                },
+                "evidence": [
+                  {
+                    "locator": "s12-s13",
+                    "quote": "We enrolled 120 pupils.",
+                    "page": 3,
+                    "boxes": [
+                      [
+                        72,
+                        410,
+                        523,
+                        436
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            },
+            {
+              "row": "r2",
+              "column": "design",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "metadata",
+                "value": {
+                  "kind": "select",
+                  "label": "RCT"
+                },
+                "evidence": [
+                  {
+                    "quote": "A randomised trial in 40 schools.",
+                    "field": "abstract"
+                  }
+                ],
+                "reasoning": "The abstract says randomised.",
+                "unsure": true
+              },
+              "question_hash": "0b5e8a7d3c2f1e94"
+            },
+            {
+              "row": "r3",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "not_reported",
+                "provenance": "metadata"
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            },
+            {
+              "row": "r4",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "failed",
+                "provenance": "document",
+                "error": "deadline"
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            }
+          ]
+        }
+      ],
+      "meta": {
+        "actor": "agent",
+        "run_id": "run-1",
+        "thread_id": "thread-1",
+        "change": "Filled table"
+      }
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "edit-commit",
+      "op": "edit",
+      "ok": true,
+      "version": 5,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "saved": true,
+      "skipped": []
+    }
+  },
+  {
+    "name": "edit-skipped-cells",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "edit-skipped-cells",
+      "op": "edit",
+      "key": "u-ABCDEFGH",
+      "operation_id": "fill-session-1",
+      "seq": 2,
+      "mutations": [
+        {
+          "op": "set_cells",
+          "cells": [
+            {
+              "row": "r1",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "number",
+                  "value": 120.0
+                },
+                "evidence": [
+                  {
+                    "locator": "s12-s13",
+                    "quote": "We enrolled 120 pupils.",
+                    "page": 3,
+                    "boxes": [
+                      [
+                        72,
+                        410,
+                        523,
+                        436
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            },
+            {
+              "row": "r2",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "number",
+                  "value": 120.0
+                },
+                "evidence": [
+                  {
+                    "locator": "s12-s13",
+                    "quote": "We enrolled 120 pupils.",
+                    "page": 3,
+                    "boxes": [
+                      [
+                        72,
+                        410,
+                        523,
+                        436
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "question_hash": "ffffffffffffffff"
+            },
+            {
+              "row": "r9",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "number",
+                  "value": 120.0
+                },
+                "evidence": [
+                  {
+                    "locator": "s12-s13",
+                    "quote": "We enrolled 120 pupils.",
+                    "page": 3,
+                    "boxes": [
+                      [
+                        72,
+                        410,
+                        523,
+                        436
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            },
+            {
+              "row": "r3",
+              "column": "design",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "number",
+                  "value": 120.0
+                },
+                "evidence": [
+                  {
+                    "locator": "s12-s13",
+                    "quote": "We enrolled 120 pupils.",
+                    "page": 3,
+                    "boxes": [
+                      [
+                        72,
+                        410,
+                        523,
+                        436
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            },
+            {
+              "row": "r5",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "number",
+                  "value": 120.0
+                },
+                "evidence": [
+                  {
+                    "locator": "s12-s13",
+                    "quote": "We enrolled 120 pupils.",
+                    "page": 3,
+                    "boxes": [
+                      [
+                        72,
+                        410,
+                        523,
+                        436
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            }
+          ]
+        }
+      ],
+      "meta": {
+        "actor": "agent",
+        "run_id": "run-1",
+        "thread_id": "thread-1",
+        "change": "Filled table"
+      }
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "edit-skipped-cells",
+      "op": "edit",
+      "ok": true,
+      "version": 6,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "saved": true,
+      "skipped": [
+        {
+          "row": "r1",
+          "column": "sample_size",
+          "reason": "user_cell"
+        },
+        {
+          "row": "r2",
+          "column": "sample_size",
+          "reason": "question_changed"
+        },
+        {
+          "row": "r9",
+          "column": "sample_size",
+          "reason": "row_removed"
+        },
+        {
+          "row": "r3",
+          "column": "design",
+          "reason": "column_removed"
+        }
+      ]
+    }
+  },
+  {
+    "name": "edit-replay-last-seq",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "edit-replay-last-seq",
+      "op": "edit",
+      "key": "u-ABCDEFGH",
+      "operation_id": "fill-session-1",
+      "seq": 2,
+      "mutations": [
+        {
+          "op": "set_cells",
+          "cells": [
+            {
+              "row": "r5",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "number",
+                  "value": 120.0
+                },
+                "evidence": [
+                  {
+                    "locator": "s12-s13",
+                    "quote": "We enrolled 120 pupils.",
+                    "page": 3,
+                    "boxes": [
+                      [
+                        72,
+                        410,
+                        523,
+                        436
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            }
+          ]
+        }
+      ],
+      "meta": {
+        "actor": "agent",
+        "run_id": "run-1",
+        "thread_id": "thread-1",
+        "change": "Filled table"
+      }
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "edit-replay-last-seq",
+      "op": "edit",
+      "ok": true,
+      "version": 7,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "saved": true,
+      "skipped": [
+        {
+          "row": "r1",
+          "column": "sample_size",
+          "reason": "user_cell"
+        }
+      ],
+      "replayed": true
+    }
+  },
+  {
+    "name": "edit-older-seq-refused",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "edit-older-seq-refused",
+      "op": "edit",
+      "key": "u-ABCDEFGH",
+      "operation_id": "fill-session-1",
+      "seq": 1,
+      "mutations": [
+        {
+          "op": "set_cells",
+          "cells": [
+            {
+              "row": "r1",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "number",
+                  "value": 120.0
+                },
+                "evidence": [
+                  {
+                    "locator": "s12-s13",
+                    "quote": "We enrolled 120 pupils.",
+                    "page": 3,
+                    "boxes": [
+                      [
+                        72,
+                        410,
+                        523,
+                        436
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            }
+          ]
+        }
+      ],
+      "meta": {
+        "actor": "agent",
+        "run_id": "run-1",
+        "thread_id": "thread-1",
+        "change": "Filled table"
+      }
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "edit-older-seq-refused",
+      "op": "edit",
+      "ok": false,
+      "error_code": "stale_seq",
+      "error": "seq 1 is older than the session's last commit (2)"
+    }
+  },
+  {
+    "name": "edit-saved-false",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "edit-saved-false",
+      "op": "edit",
+      "key": "u-ABCDEFGH",
+      "operation_id": "fill-session-1",
+      "seq": 3,
+      "mutations": [
+        {
+          "op": "set_cells",
+          "cells": [
+            {
+              "row": "r6",
+              "column": "sample_size",
+              "cell": {
+                "outcome": "answered",
+                "provenance": "document",
+                "value": {
+                  "kind": "number",
+                  "value": 120.0
+                },
+                "evidence": [
+                  {
+                    "locator": "s12-s13",
+                    "quote": "We enrolled 120 pupils.",
+                    "page": 3,
+                    "boxes": [
+                      [
+                        72,
+                        410,
+                        523,
+                        436
+                      ]
+                    ]
+                  }
+                ]
+              },
+              "question_hash": "8f2d6c1a9b3e4f70"
+            }
+          ]
+        }
+      ],
+      "meta": {
+        "actor": "agent",
+        "run_id": "run-1",
+        "thread_id": "thread-1",
+        "change": "Filled table"
+      }
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "edit-saved-false",
+      "op": "edit",
+      "ok": true,
+      "version": 8,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "saved": false,
+      "skipped": []
+    }
   }
 ]

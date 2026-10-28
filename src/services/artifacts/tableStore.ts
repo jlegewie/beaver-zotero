@@ -128,7 +128,7 @@ import {
     type TableRef,
     type TableVersionEntry,
 } from './tableItem';
-import { getTablesApi, setTableShadowRestore, tableWriteLocks, tableLocalCommands, type TableLocalCommands } from './tablesApi';
+import { getTablesApi, setTableShadowRestore, tableEditSessions, tableWriteLocks, tableLocalCommands, type TableLocalCommands } from './tablesApi';
 
 // ---------------------------------------------------------------------------
 // Shape
@@ -1677,6 +1677,160 @@ export async function editTableUncoordinated(
     return result;
 }
 
+/** One commit of a provider `edit` session: a fill's cell writes. */
+export interface TableEditSessionRequest {
+    /** Names the session; one fill is one session. */
+    operation_id: string;
+    /** The commit's position in its session, from 1. */
+    seq: number;
+    mutations: TableMutation[];
+}
+
+export type TableEditSessionResult =
+    | {
+          ok: true;
+          /** The state after the commit; after a replay, the current state. */
+          version: number;
+          sha256: string;
+          spec: TableSpec;
+          saved: boolean;
+          skipped: SkippedCell[];
+          /** The session's last commit, repeated: nothing was applied. */
+          replayed: boolean;
+      }
+    | TableEditRejected;
+
+/** How many sessions {@link tableEditSessions} remembers across all tables. */
+const EDIT_SESSION_RETENTION = 64;
+
+/**
+ * One commit of a provider `edit` session, the filler's incremental write.
+ *
+ * Applies `mutations` to the current table under the lock with no revision
+ * guard: a cell write conflicts only with a change to that cell, its row or its
+ * column, and the engine handles each per cell (`skipMissing`), so a row or
+ * column removed while the fill ran is skipped and reported and the rest of
+ * the commit lands. It commits like every other write — `table.json`, the
+ * history, the shadow, then the render — collapses into the run's version, and
+ * emits the update event after the render.
+ *
+ * Commits of a session are numbered by `seq`. Repeating the session's last
+ * `seq` with the same mutations returns that commit's result against the
+ * current state and applies nothing, so a retry after an ambiguous timeout is
+ * safe; an older `seq` is refused with `stale_seq`, and a repeated `seq` with
+ * other mutations with `operation_mismatch`.
+ *
+ * The access guard covers the current and the resulting spec (inside the
+ * commit), not the retained versions a guarded `write` also inspects: a fill
+ * commits often, and the history is unchanged by it apart from the run's own
+ * version.
+ */
+export async function editTableSessionUncoordinated(
+    ref: TableRef,
+    request: TableEditSessionRequest,
+    meta: TableWriteMeta,
+    accessGuard?: TableAccessGuard
+): Promise<TableEditSessionResult> {
+    requireWritable(ref);
+    if (
+        typeof request.operation_id !== 'string' ||
+        !request.operation_id.trim() ||
+        !Number.isSafeInteger(request.seq) ||
+        request.seq < 1 ||
+        !Array.isArray(request.mutations)
+    ) {
+        throw new TableItemError('An edit requires operation_id, seq and mutations.', 'invalid_request');
+    }
+    const requestHash = await tableOperationHash({ mutations: request.mutations, meta });
+    const sessionKey = `${lockKey(ref)}|${request.operation_id}`;
+    const result = await withTableLock(ref, async (): Promise<TableEditSessionResult> => {
+        const sessions = tableEditSessions();
+        const last = sessions.get(sessionKey);
+        if (last && request.seq < last.seq) {
+            throw new TableItemError(
+                `Commit ${request.seq} is older than the session's last commit ${last.seq}.`,
+                'stale_seq'
+            );
+        }
+        if (last && request.seq === last.seq && last.request_sha256 !== requestHash) {
+            throw new TableItemError(
+                'The commit number was reused with different mutations.',
+                'operation_mismatch'
+            );
+        }
+        const { item, current } = await prepareWrite(ref);
+        if (!current.spec) {
+            throw new TableItemError(`Table ${ref.key} carries no readable spec to edit.`, 'no_spec');
+        }
+        if (last && request.seq === last.seq) {
+            accessGuard?.(current.spec);
+            return {
+                ok: true,
+                version: current.version,
+                sha256: await tableSpecHash(current.spec),
+                spec: current.spec,
+                saved: last.saved,
+                skipped: last.skipped,
+                replayed: true,
+            };
+        }
+
+        const applied = applyMutations(current.spec, request.mutations, { skipMissing: true });
+        if (!applied.ok) return { ok: false, error: applied.error };
+        const written = await commitWrite(ref, item, current, applied.spec, meta, undefined, undefined, accessGuard);
+        // Without an expected version the write cannot conflict; an unreadable
+        // table was refused above.
+        if (!written.ok) throw new TableItemError(`Table ${ref.key} could not be written.`, 'corrupt');
+
+        sessions.delete(sessionKey);
+        sessions.set(sessionKey, {
+            seq: request.seq,
+            request_sha256: requestHash,
+            skipped: applied.skipped,
+            saved: written.saved,
+        });
+        while (sessions.size > EDIT_SESSION_RETENTION) sessions.delete(sessions.keys().next().value!);
+        return {
+            ok: true,
+            version: written.version,
+            sha256: written.sha256,
+            spec: written.spec,
+            saved: written.saved,
+            skipped: applied.skipped,
+            replayed: false,
+        };
+    });
+    if (result.ok && !result.replayed) {
+        emitTableUpdated(ref, result.version, meta, editProgress(request, result.skipped));
+    }
+    return result;
+}
+
+/**
+ * What a commit of a fill wrote, for the progress panel: the rows it wrote a
+ * cell to, and of those the rows with a failed cell. Skipped writes do not
+ * count.
+ */
+function editProgress(request: TableEditSessionRequest, skipped: SkippedCell[]): TableEditProgress {
+    const declined = new Set(skipped.map((skip) => `${skip.row}\u0000${skip.column}`));
+    const rows = new Set<string>();
+    const failed = new Set<string>();
+    for (const mutation of request.mutations) {
+        if (mutation.op !== 'set_cells') continue;
+        for (const write of mutation.cells) {
+            if (declined.has(`${write.row}\u0000${write.column}`)) continue;
+            rows.add(write.row);
+            if (write.cell && (write.cell as { outcome?: string }).outcome === 'failed') failed.add(write.row);
+        }
+    }
+    return {
+        operation_id: request.operation_id,
+        seq: request.seq,
+        rows: [...rows],
+        failed_rows: [...failed],
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Reading
 // ---------------------------------------------------------------------------
@@ -2253,6 +2407,18 @@ export interface TableUpdatedDetail {
     version: number | null;
     actor: TableActor;
     run_id?: string;
+    /** Set when the change was a commit of a provider `edit` session (a fill). */
+    edit?: TableEditProgress;
+}
+
+/** What one `edit` commit wrote, so a fill's progress follows the commits. */
+export interface TableEditProgress {
+    operation_id: string;
+    seq: number;
+    /** Rows the commit wrote at least one cell to. */
+    rows: string[];
+    /** Of those, the rows with a failed cell. */
+    failed_rows: string[];
 }
 
 /**
@@ -2265,7 +2431,8 @@ export interface TableUpdatedDetail {
 function emitTableUpdated(
     ref: TableRef,
     version: number | null,
-    meta: TableWriteMeta
+    meta: TableWriteMeta,
+    edit?: TableEditProgress
 ): void {
     try {
         const detail: TableUpdatedDetail = {
@@ -2274,6 +2441,7 @@ function emitTableUpdated(
             version,
             actor: meta.actor,
             ...(meta.run_id ? { run_id: meta.run_id } : {}),
+            ...(edit ? { edit } : {}),
         };
         getTablesApi()?.tableChanged(ref);
         Zotero.Beaver?.runtime?.publish(TABLE_UPDATED_EVENT, detail);

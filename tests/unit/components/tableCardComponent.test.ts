@@ -3,7 +3,9 @@
 /**
  * The table card: a single Create while the request has no cost, the
  * destination line, the live count of a collection added on the card, the
- * over-cap warning disabling Create, and the reply it sends.
+ * over-cap warning disabling Create, and the reply it sends; with a cost,
+ * "Create and fill" beside "Create only", the row line, the credit chip and
+ * the live estimate that holds the run button back after an edit.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -11,7 +13,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Provider, createStore } from 'jotai';
-import type { WSTableCardRequest, WSTableCardResponse } from '@beaver/agent-core/protocol/tableCardProtocol';
+import type {
+    WSTableCardResponse,
+    WSTableCreateCardRequest,
+    WSTableFillCardRequest,
+} from '@beaver/agent-core/protocol/tableCardProtocol';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -20,7 +26,20 @@ const mocks = vi.hoisted(() => ({
     resolveItems: vi.fn(),
     describeItems: vi.fn(async (ids: string[]) => ids.map((id) => ({ item_id: id, display_name: `Paper ${id}`, has_pdf: true }))),
     target: null as any,
+    estimates: [] as unknown[],
 }));
+
+// The estimate goes over the run's socket; here it is recorded and the test
+// answers it by writing the draft as the socket handler does.
+vi.mock('../../../react/atoms/agentRunAtoms', async () => {
+    const { atom } = await import('jotai');
+    return {
+        requestTableCardEstimateAtom: atom(null, (_get, _set, card: unknown) => {
+            mocks.estimates.push(card);
+            return null;
+        }),
+    };
+});
 
 vi.mock('../../../react/components/tables/card/liveSources', () => ({
     resolveLibraryScope: mocks.resolveLibraryScope,
@@ -56,18 +75,24 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 }));
 
 import { setHost } from '@beaver/agent-ui/host';
+import { tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
+import { applyEstimateResult, startEstimate } from '@beaver/agent-core/run-state/tableCardDraft';
 import { TableCard } from '../../../react/components/tables/card/TableCard';
+import { TableFillCard } from '../../../react/components/tables/card/TableFillCard';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
 const FIXTURES = join(__dirname, '../../fixtures/artifacts/table-cards');
-const fixture = (name: string): WSTableCardRequest =>
-    JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8')).request;
+const read = (name: string) => JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8'));
+/** A create card as the backend sent it before the filler: no cost, a single Create. */
+const fixture = (name: string): WSTableCreateCardRequest => ({ ...read(name).request, cost: null });
+/** A create card with its cost, as the backend sends it now. */
+const costedFixture = (name: string): WSTableCreateCardRequest => read(name).request;
 
 let root: Root | null = null;
 let container: HTMLDivElement;
 let sent: WSTableCardResponse[];
 
-function render(request: WSTableCardRequest, store = createStore()) {
+function render(request: WSTableCreateCardRequest, store = createStore()) {
     sent = [];
     act(() => {
         root = createRoot(container);
@@ -970,5 +995,143 @@ describe('TableCard', () => {
         const question = container.querySelector(`textarea[aria-label="Column ${index} question"]`);
         expect(question).not.toBeNull();
         expect(document.activeElement).toBe(question);
+    });
+
+    describe('with a cost', () => {
+        it('offers "Create and fill" beside "Create only" with the row line, and no chip when the run fits', async () => {
+            const request = costedFixture('create-items');
+            render(request);
+            await click('Next');
+            expect(button('Create')).toBeUndefined();
+            expect(button('Create only')).toBeTruthy();
+            expect(button('Create and fill')!.disabled).toBe(false);
+            expect(container.querySelector('.table-card-cost')?.textContent).toBe(
+                'Fills 2 rows: 1 from the PDF, 1 without either',
+            );
+            expect(container.querySelector('.table-card-credit-chip')).toBeNull();
+            await click('Create and fill');
+            expect(sent[0]).toMatchObject({ approved: true, choice: 'create_and_run', estimate_id: request.cost!.estimate_id });
+        });
+
+        it('shows the credit chip when approving raises the authorization', async () => {
+            const request = costedFixture('create-items');
+            render({ ...request, cost: { ...request.cost!, credits: 12 } });
+            expect(container.querySelector('.table-card-credit-chip')?.textContent).toContain('Up to 12 this run');
+        });
+
+        it('asks for an estimate on the last step after a source edit, and holds the run button until it lands', async () => {
+            vi.useFakeTimers();
+            try {
+                mocks.estimates = [];
+                mocks.resolveLibraryScope.mockResolvedValue({
+                    resolved: { count: 40, total: 40, truncated: false, without_pdf: 4, sample: [] },
+                    rows: Array.from({ length: 40 }, (_, i) => ({ item_id: `u-COLL${String(i).padStart(4, '0')}`, display_name: `C${i}` })),
+                    name: 'Cash transfers',
+                });
+                const request = costedFixture('create-live-estimate');
+                const store = createStore();
+                render(request, store);
+                await act(async () => {
+                    mocks.target.pickCollection(41);
+                });
+                // Not on the sources step: the run choice is on the last.
+                await act(async () => {
+                    vi.advanceTimersByTime(1000);
+                });
+                expect(mocks.estimates).toHaveLength(0);
+                await click('Next');
+                expect(button('Create and fill')!.disabled).toBe(true);
+                expect(button('Create only')!.disabled).toBe(false);
+                expect(container.textContent).toContain('Updating the estimate…');
+                await act(async () => {
+                    vi.advanceTimersByTime(1000);
+                });
+                expect(mocks.estimates).toEqual([request]);
+
+                // The socket handler marks the draft pending, then applies the answer.
+                const { estimate_result } = read('create-live-estimate');
+                await act(async () => {
+                    const draft = store.get(tableCardDraftsAtom).get(request.card_id)!;
+                    const pending = startEstimate(draft, request, estimate_result.request_id).draft;
+                    store.set(tableCardDraftsAtom, new Map([[request.card_id, applyEstimateResult(pending, estimate_result)]]));
+                });
+                expect(button('Create and fill')!.disabled).toBe(false);
+                expect(container.querySelector('.table-card-cost')?.textContent).toBe(
+                    'Fills up to 43 rows: 37 from the PDF, 6 from title and abstract',
+                );
+                expect(container.querySelector('.table-card-credit-chip')?.textContent).toContain('Up to 9 this run');
+                await click('Create and fill');
+                expect(sent[0]).toMatchObject({ choice: 'create_and_run', estimate_id: estimate_result.cost.estimate_id });
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('lets a failed estimate be asked again and keeps "Create only" available', async () => {
+            const request = costedFixture('create-items');
+            const store = createStore();
+            render(request, store);
+            await click('Next');
+            await click('Add column');
+            await act(async () => {
+                const draft = store.get(tableCardDraftsAtom).get(request.card_id)!;
+                const pending = startEstimate(draft, request, 'r1').draft;
+                store.set(
+                    tableCardDraftsAtom,
+                    new Map([[request.card_id, applyEstimateResult(pending, { event: 'table_card_estimate_result', card_id: request.card_id, request_id: 'r1', error: 'unknown_card' } as any)]]),
+                );
+            });
+            expect(container.textContent).toContain('The estimate could not be updated.');
+            expect(button('Create and fill')!.disabled).toBe(true);
+            mocks.estimates = [];
+            await click('Try again');
+            expect(container.textContent).not.toContain('The estimate could not be updated.');
+        });
+    });
+
+    describe('the fill card', () => {
+        function renderFill(request: WSTableFillCardRequest) {
+            sent = [];
+            act(() => {
+                root = createRoot(container);
+                root.render(
+                    React.createElement(
+                        Provider,
+                        { store: createStore() },
+                        React.createElement(TableFillCard, { request, onSubmit: (r: WSTableCardResponse) => sent.push(r) }),
+                    ),
+                );
+            });
+        }
+
+        it('shows the columns, the row line, the credit chip and a run button named for the rows', async () => {
+            const { request, reply } = read('fill-with-credits');
+            const opened: unknown[] = [];
+            setHost({ navigation: { openTable: async (key: string) => { opened.push(key); return { ok: true }; } } } as any);
+            renderFill(request);
+            expect(container.textContent).toContain('Comparison');
+            expect(container.textContent).toContain('Sample size');
+            expect(container.textContent).toContain('Design');
+            expect(container.querySelector('.table-card-cost')?.textContent).toBe(
+                'Fills 32 rows: 30 from the PDF, 2 from title and abstract',
+            );
+            expect(container.querySelector('.table-card-credit-chip')?.textContent).toContain('Up to 7 this run');
+            // Nothing on it is editable.
+            expect(container.querySelector('input, textarea')).toBeNull();
+            await click('Open table');
+            expect(opened).toEqual(['u-TABLE222']);
+            await click('Fill 32');
+            expect(sent).toEqual([{ type: 'table_card_response', card_id: reply.card_id, approved: true, choice: 'fill', estimate_id: reply.estimate_id }]);
+        });
+
+        it('declines with instructions from the cancel view', async () => {
+            const { request, reply } = read('fill-declined');
+            renderFill(request);
+            expect(container.querySelector('.table-card-credit-chip')).toBeNull();
+            await click('Cancel');
+            await typeInto(instructionsField(), 'Try three papers first');
+            await click('Send');
+            expect(sent).toEqual([reply]);
+        });
     });
 });
