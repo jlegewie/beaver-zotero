@@ -70,7 +70,10 @@ vi.mock('../../../src/services/collections/collectionMutations', () => ({
     assertLibraryWritable: mocks.assertLibraryWritable,
     recheckExistingCollections: mocks.recheckExistingCollections,
 }));
-vi.mock('../../../src/services/libraryMutations', () => ({ coordinateLibraryMutation: mocks.coordinateLibraryMutation }));
+vi.mock('../../../src/services/libraryMutations', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/services/libraryMutations')>()),
+    coordinateLibraryMutation: mocks.coordinateLibraryMutation,
+}));
 vi.mock('../../../src/utils/attachmentFiles', () => ({ isPdfDocument: mocks.isPdfDocument }));
 
 import type { ImportItemProposedData } from '@beaver/agent-core/types/itemImport';
@@ -386,6 +389,15 @@ describe('writeImportItem saving', () => {
         Z.Tags.init.mockImplementation(async () => { cancelled = true; });
         const assertCurrent = () => { if (cancelled) throw Object.assign(new Error('Operation cancelled'), { code: 'operation_cancelled' }); };
         await expect(writeImportItem(journal({ tags: ['ethnobotany'] }), { assertCurrent })).rejects.toMatchObject({ code: 'operation_cancelled' });
+        expect(saved.save).toHaveBeenCalledOnce();
+    });
+
+    it('does not retry once the account changed during the tag cache rebuild, without a caller checkpoint', async () => {
+        saved.save.mockRejectedValueOnce(new Error(STALE_TAG_ERROR));
+        let generation = 1;
+        Z.Beaver.account = { getGeneration: () => generation };
+        Z.Tags.init.mockImplementation(async () => { generation = 2; });
+        await expect(writeImportItem(journal({ tags: ['ethnobotany'] }))).rejects.toMatchObject({ code: 'account_changed' });
         expect(saved.save).toHaveBeenCalledOnce();
     });
 

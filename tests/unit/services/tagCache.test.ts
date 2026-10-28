@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { isTagCacheError, rebuildTagCache, rebuildTagCacheQueued, withTagCacheRepair } from '../../../src/services/tagCache';
+import { assertTagsSaved, isTagCacheError, rebuildTagCache, rebuildTagCacheQueued, withTagCacheRepair } from '../../../src/services/tagCache';
 
 const Z = Zotero as any;
 
@@ -115,5 +115,38 @@ describe('withTagCacheRepair', () => {
         const save = vi.fn().mockRejectedValue(Object.assign(new Error(MAPPED_ID_WITHOUT_ROW), { committed: true }));
         await expect(withTagCacheRepair(save, 'test')).rejects.toThrow('FOREIGN KEY');
         expect(save).toHaveBeenCalledOnce();
+    });
+});
+
+describe('assertTagsSaved', () => {
+    const stored = (names: string[]) => {
+        Z.DB.queryAsync = vi.fn(async (_sql: string, _params: unknown[], opts?: { onRow?: (row: any) => void }) => {
+            for (const name of names) opts?.onRow?.({ getResultByIndex: () => name });
+        });
+    };
+
+    it('passes when every requested tag is stored, compared the way Zotero stores names', async () => {
+        stored(['ethnobotany', 'Café']);
+        await expect(assertTagsSaved(42, [' ethnobotany ', 'Cafe\u0301'])).resolves.toBeUndefined();
+        expect(Z.DB.queryAsync).toHaveBeenCalledWith(expect.stringContaining('itemTags'), [42], expect.anything());
+    });
+
+    it('accepts a tag Zotero matched to an existing row stored with whitespace or decomposed Unicode', async () => {
+        stored([' ethnobotany ', 'Cafe\u0301']);
+        await expect(assertTagsSaved(42, ['ethnobotany', 'Caf\u00e9'])).resolves.toBeUndefined();
+    });
+
+    it('throws a tag-cache error naming the missing tags', async () => {
+        stored(['ethnobotany']);
+        const error = await assertTagsSaved(42, ['ethnobotany', 'TB phytochemicals']).catch((e) => e);
+        expect(error.message).toBe('Requested tags were not saved on item 42: TB phytochemicals');
+        expect(isTagCacheError(error)).toBe(true);
+        expect(isTagCacheError(error.message)).toBe(true);
+    });
+
+    it('skips the read when no tags were requested', async () => {
+        stored([]);
+        await assertTagsSaved(42, ['  ']);
+        expect(Z.DB.queryAsync).not.toHaveBeenCalled();
     });
 });

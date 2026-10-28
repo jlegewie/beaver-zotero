@@ -29,8 +29,8 @@ import { getPref } from '../../utils/prefs';
 import type { TimingAccumulator } from '../../utils/timing';
 import type { AttachmentResolvedPayload } from '../attachmentResolved';
 import { assertLibraryWritable, recheckExistingCollections } from '../collections/collectionMutations';
-import { coordinateLibraryMutation } from '../libraryMutations';
 import { runCommittedTransaction } from '../committedTransaction';
+import { captureAccountCheck, coordinateLibraryMutation } from '../libraryMutations';
 import { withTagCacheRepair } from '../tagCache';
 import { isPdfDocument } from '../../utils/attachmentFiles';
 import { WEB_CONTENT_ITEM_TYPES } from './duplicates';
@@ -370,6 +370,8 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
     if (!data || !data.source) throw new ImportItemError('missing_item_data', 'No item data provided.');
     const libraryID = targetLibrary(data, options);
     assertWriteAccess(libraryID);
+    // Every caller gets the account check, whatever checkpoint it passes.
+    const assertAccount = captureAccountCheck();
     assertLibraryWritable(libraryID);
     const requested = data.collection_ids ?? data.collection_keys ?? [];
     // A collection deleted after approval is skipped and reported; the item is still created.
@@ -406,6 +408,7 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
     // Resolution can take seconds: the library may have been excluded or made
     // read-only meanwhile, so check again right before anything is written.
     const assertCanWrite = () => {
+        assertAccount();
         options.assertCurrent?.();
         assertWriteAccess(libraryID);
     };

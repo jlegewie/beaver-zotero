@@ -14,6 +14,12 @@
  *
  * Rebuilding the map from the database (`Zotero.Tags.init`) repairs it.
  *
+ * The failure is not always raised to the code that added the tag. Other
+ * plugins' Notifier observers save the same cached `Zotero.Item` object; if
+ * such a save carries pending tags and fails, Zotero reloads the item and the
+ * pending changes are discarded, so the caller's own save succeeds with
+ * nothing to write. `assertTagsSaved` detects that case.
+ *
  * Esbuild-safe: no `react/*` imports, no bare `addon`.
  */
 
@@ -22,10 +28,13 @@ import { logger } from '@beaver/agent-core/platform/logger';
 /** `error_code` for a write that failed on a stale tag cache. */
 export const TAG_CACHE_ERROR_CODE = 'tag_cache_out_of_sync';
 
+const TAGS_NOT_SAVED_MESSAGE = 'Requested tags were not saved';
+
 const TAG_CACHE_ERROR_PATTERNS = [
     /FOREIGN KEY constraint failed[\s\S]*\bitemTags\b/,
     /UNIQUE constraint failed: tags\.name/,
     /Invalid boolean parameter[\s\S]*\bitemTags\b/,
+    new RegExp(TAGS_NOT_SAVED_MESSAGE),
 ];
 
 function errorText(error: unknown): string {
@@ -38,6 +47,33 @@ function errorText(error: unknown): string {
 export function isTagCacheError(error: unknown): boolean {
     const text = errorText(error);
     return TAG_CACHE_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/** A tag name as Zotero matches it (`Zotero.Tags.cleanData`): trimmed, NFC. */
+function cleanTagName(name: unknown): string {
+    return String(name).trim().normalize();
+}
+
+/**
+ * Throw a tag-cache error unless every name in `tags` is stored on the item.
+ *
+ * Both sides are compared cleaned: Zotero matches a requested tag to an
+ * existing row by its cleaned name, but does not rewrite a row stored with
+ * surrounding whitespace or in decomposed Unicode.
+ */
+export async function assertTagsSaved(itemID: number, tags: readonly string[]): Promise<void> {
+    const expected = [...new Set(tags.map(cleanTagName).filter(Boolean))];
+    if (!expected.length) return;
+    const stored = new Set<string>();
+    await Zotero.DB.queryAsync(
+        'SELECT name FROM itemTags JOIN tags USING (tagID) WHERE itemID=?',
+        [itemID],
+        { onRow: (row: any) => { stored.add(cleanTagName(row.getResultByIndex(0))); } },
+    );
+    const missing = expected.filter((tag) => !stored.has(tag));
+    if (missing.length) {
+        throw new Error(`${TAGS_NOT_SAVED_MESSAGE} on item ${itemID}: ${missing.join(', ')}`);
+    }
 }
 
 // Concurrent callers share one rebuild.

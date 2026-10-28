@@ -1,5 +1,6 @@
 import { resolveCollection, type ResolvedCollection } from '../collections/collectionIdentity';
 import { recheckExistingCollections } from '../collections/collectionMutations';
+import { captureAccountCheck } from '../libraryMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
@@ -11,7 +12,7 @@ import { TimingAccumulator } from '../../utils/timing';
 import type { AttachmentResolvedPayload } from '../attachmentResolved';
 import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
 import { stampBeaverProvenanceExtra } from './provenance';
-import { withTagCacheRepair } from '../tagCache';
+import { assertTagsSaved, withTagCacheRepair } from '../tagCache';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 
@@ -55,7 +56,10 @@ export interface ImportItemOptions {
     runId?: string;
     /** Thread ID */
     threadId?: string;
-    /** Cancellation checkpoint, run before a failed save is retried. */
+    /**
+     * Cancellation checkpoint, run before a failed save is retried. A change
+     * of account is always checked there too.
+     */
     assertCurrent?: () => void;
 }
 
@@ -414,6 +418,13 @@ export async function applyCreateItemData(
 ): Promise<CreateItemResultData> {
     const itemData = proposedData.item;
     const timing = options?.timing;
+    // Every caller gets the account check, whatever checkpoint it passes.
+    const assertAccount = captureAccountCheck();
+    const callerCheck = options?.assertCurrent;
+    const assertCurrent = () => {
+        assertAccount();
+        callerCheck?.();
+    };
 
     const target = await trackWith(timing, 'resolve_target_ms', () => resolveImportTarget(options));
     // A requested collection that no longer exists (deleted after approval, or
@@ -430,7 +441,7 @@ export async function applyCreateItemData(
     );
     
     try {
-        return await finishCreateItemData(item, proposedData, options, memberships);
+        return await finishCreateItemData(item, proposedData, { ...options, assertCurrent }, memberships);
     } catch (error) {
         await cleanupFailedImport(item);
         throw error;
@@ -507,6 +518,9 @@ async function finishCreateItemData(
             await item.saveTx();
             logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
         }
+        // Another plugin can save this item object first and fail on the tag,
+        // which discards these changes and leaves nothing for our save to write.
+        await assertTagsSaved(item.id, proposedData.suggested_tags ?? []);
     };
     await trackWith(timing, 'post_save_ms', () => withTagCacheRepair(applyAndSave, 'create_item save', {
         beforeRetry: () => {
