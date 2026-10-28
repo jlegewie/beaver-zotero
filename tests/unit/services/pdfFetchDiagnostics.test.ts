@@ -112,6 +112,34 @@ describe('attempt tracking', () => {
         expect(diagnostics.attempts()).toEqual([{ accessMethod: 'doi', host: 'publisher.example', outcome: 'no_pdf_found' }]);
     });
 
+    it('reports a DOI walk that stops at doi.org as already_tried, not no_pdf_found', () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        diagnostics.onAccessMethodStart('openalex');
+        diagnostics.onBeforeRequest('https://www.science.org/doi/10.1126/x');
+        diagnostics.onAccessMethodStart('doi');
+        diagnostics.onBeforeRequest('https://doi.org/10.1126/x');
+        expect(diagnostics.attempts()).toEqual([
+            { accessMethod: 'openalex', host: 'www.science.org', outcome: 'no_pdf_found' },
+            { accessMethod: 'doi', host: 'doi.org', outcome: 'already_tried' },
+        ]);
+        expect(diagnostics.failureReason({ resolverCount: 2, threw: false })).toBe('no_pdf_found');
+    });
+
+    it('treats dx.doi.org like doi.org', () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        diagnostics.onAccessMethodStart('url');
+        diagnostics.onBeforeRequest('https://dx.doi.org/10.1/x');
+        expect(diagnostics.attempts()).toEqual([{ accessMethod: 'url', host: 'dx.doi.org', outcome: 'already_tried' }]);
+    });
+
+    it('still reports an error at doi.org, such as an unknown DOI', () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        diagnostics.onAccessMethodStart('doi');
+        diagnostics.onBeforeRequest('https://doi.org/10.1/missing');
+        diagnostics.onRequestError(xhrStatusError(404));
+        expect(diagnostics.attempts()).toEqual([{ accessMethod: 'doi', host: 'doi.org', outcome: 'not_found', status: 404 }]);
+    });
+
     it('attributes a DOI walk to the publisher host that refused the file, not doi.org', () => {
         const diagnostics = createPdfFetchDiagnostics();
         diagnostics.onAccessMethodStart('doi');
@@ -271,9 +299,10 @@ describe('failureReason', () => {
         return diagnostics;
     };
 
-    it('exposes the priority list with bot_challenge first and error last', () => {
+    it('exposes the priority list with bot_challenge first and already_tried last', () => {
         expect(PDF_FAILURE_PRIORITY[0]).toBe('bot_challenge');
-        expect(PDF_FAILURE_PRIORITY[PDF_FAILURE_PRIORITY.length - 1]).toBe('error');
+        expect(PDF_FAILURE_PRIORITY[PDF_FAILURE_PRIORITY.length - 1]).toBe('already_tried');
+        expect(PDF_FAILURE_PRIORITY.indexOf('error')).toBe(PDF_FAILURE_PRIORITY.length - 2);
         expect(PDF_FAILURE_PRIORITY.indexOf('rate_limited')).toBeLessThan(PDF_FAILURE_PRIORITY.indexOf('forbidden'));
         expect(PDF_FAILURE_PRIORITY.indexOf('no_pdf_found')).toBeLessThan(PDF_FAILURE_PRIORITY.indexOf('not_found'));
     });
@@ -342,6 +371,14 @@ describe('failureReason', () => {
         const diagnostics = failed([xhrStatusError(404)]);
         diagnostics.onAccessMethodStart('doi');
         diagnostics.onBeforeRequest('https://doi.org/x');
+        diagnostics.onBeforeRequest('https://publisher.example/article');
         expect(diagnostics.failureReason({ resolverCount: 2, threw: false })).toBe('no_pdf_found');
+    });
+
+    it('never lets a skipped DOI redirect stand in for a real failure', () => {
+        const diagnostics = failed([new Error('Request timed out')]);
+        diagnostics.onAccessMethodStart('doi');
+        diagnostics.onBeforeRequest('https://doi.org/10.1/x');
+        expect(diagnostics.failureReason({ resolverCount: 2, threw: false })).toBe('network_error');
     });
 });

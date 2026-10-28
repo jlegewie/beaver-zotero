@@ -20,6 +20,12 @@ export const MAX_PDF_FETCH_ATTEMPTS = 12;
  * different ways the earliest item here is reported as the task's reason.
  * `bot_challenge` outranks `captcha_skipped`, so a host that served a challenge
  * is never reported as merely skipped.
+ *
+ * - `not_pdf`: an HTML page came back instead of the file, usually a paywall or
+ *   access page.
+ * - `no_pdf_found`: a page loaded but had no PDF link.
+ * - `already_tried`: a DOI redirected to a page an earlier entry already tried,
+ *   so Zotero skipped it. It is last so it never stands in for a real failure.
  */
 export const PDF_FAILURE_PRIORITY = [
     'bot_challenge',
@@ -34,6 +40,7 @@ export const PDF_FAILURE_PRIORITY = [
     'network_error',
     'cancelled',
     'error',
+    'already_tried',
 ] as const;
 
 export type PdfFailureOutcome = (typeof PDF_FAILURE_PRIORITY)[number];
@@ -157,6 +164,10 @@ function responseHostOf(error: unknown): string | undefined {
     }
 }
 
+function isDoiResolverHost(host?: string): boolean {
+    return host === 'doi.org' || host === 'dx.doi.org';
+}
+
 interface Entry {
     accessMethod?: string;
     host?: string;
@@ -215,14 +226,17 @@ export function createPdfFetchDiagnostics(): PdfFetchDiagnostics {
     // also re-requests a refused redirect target), so it reports its most
     // informative error, with that error's status and host. An entry that made
     // requests without error and produced nothing is a page with no PDF link,
-    // unless the run was cut off while it was in flight.
+    // unless the run was cut off while it was in flight, or its last request
+    // was the DOI resolver: doi.org only redirects or errors, so ending there
+    // means Zotero skipped the redirect target as already tried.
     const resolve = (): PdfFetchAttempt[] => entries
         .filter(entry => entry.requests > 0)
         .map((entry, index, tried) => {
             const worst = entry.final ? undefined : mostInformative(entry.errors);
             const outcome: PdfFetchOutcome = entry.final
                 ?? worst?.outcome
-                ?? (stopped && index === tried.length - 1 ? 'cancelled' : 'no_pdf_found');
+                ?? (stopped && index === tried.length - 1 ? 'cancelled'
+                    : isDoiResolverHost(entry.host) ? 'already_tried' : 'no_pdf_found');
             const host = worst?.host ?? entry.host;
             return {
                 ...(entry.accessMethod ? { accessMethod: entry.accessMethod } : {}),

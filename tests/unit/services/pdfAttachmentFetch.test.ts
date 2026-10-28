@@ -186,7 +186,7 @@ describe('failure diagnostics', () => {
 
     it('reports no_pdf_found when a page yields no file and Zotero moves on silently', async () => {
         const diagnostics = createPdfFetchDiagnostics();
-        download.mockImplementation(driveEntries([{ method: 'doi', url: 'https://doi.org/10.1/x' }]));
+        download.mockImplementation(driveEntries([{ method: 'url', url: 'https://publisher.example/article' }]));
         await fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics);
         expect(diagnostics.failureReason({ resolverCount: 1, threw: false })).toBe('no_pdf_found');
     });
