@@ -326,6 +326,7 @@ beforeEach(async () => {
         hasTag: (name: string) => name === TABLE_TAG,
         getField: (field: string) =>
             field === 'url' ? 'beaver://table/demo-table' : '',
+        setField: vi.fn(),
         getFilePathAsync: async () => htmlPath,
         getFilePath: () => htmlPath,
         addTag: vi.fn(),

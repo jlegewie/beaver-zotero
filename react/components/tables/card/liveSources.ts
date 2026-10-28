@@ -4,7 +4,7 @@
  * A library source (collection, tag, saved search) goes through the same
  * population handler the backend asks over the socket, so the card counts what
  * the table will be built from; items go through the item display lookup. No
- * file is opened: the "No PDF" chip is attachment presence only, of any
+ * file is opened: the "No attachment" chip is attachment presence only, of any
  * document a row reads (PDF, EPUB or snapshot). The card's numbers are a
  * preview; the backend resolves the approved entries again.
  */

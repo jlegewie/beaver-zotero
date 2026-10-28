@@ -76,10 +76,10 @@ function sourceIcon(source: DraftSource): React.ReactNode {
     return <Icon icon={sourceKindIcon(source.type, source.scope?.kind)} className="table-card-source-icon" />;
 }
 
-/** "16 without PDF, answered from title and abstract". */
+/** "16 without an attachment, answered from title and abstract". */
 function withoutPdfLine(count: number): string | null {
     if (!count) return null;
-    return `${count.toLocaleString('en-US')} without PDF, answered from title and abstract`;
+    return `${count.toLocaleString('en-US')} without an attachment, answered from title and abstract`;
 }
 
 function ItemRow({
@@ -119,7 +119,7 @@ function ItemRow({
                 <div className="font-color-primary truncate">{row.display_name}</div>
                 {row.subtitle && <div className="text-sm font-color-secondary truncate">{row.subtitle}</div>}
             </div>
-            {row.has_pdf === false && <span className="table-card-chip flex-none">No PDF</span>}
+            {row.has_pdf === false && <span className="table-card-chip flex-none">No attachment</span>}
             {action}
         </div>
     );

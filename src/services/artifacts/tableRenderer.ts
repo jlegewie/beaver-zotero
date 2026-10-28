@@ -111,6 +111,10 @@ export async function renderTable(ref: TableRef): Promise<boolean> {
         item.addTag(TABLE_EMOJI_TAG, 1);
     }
     if (!mayRender(ref)) return false;
+    // One name: the item's title is the table's, so a rename reaches the
+    // library row with the snapshot that shows it.
+    const title = read.spec.title || 'Table';
+    if (item.getField('title') !== title) item.setField('title', title);
     item.attachmentSyncState = Zotero.Sync.Storage.Local.SYNC_STATE_TO_UPLOAD;
     await item.saveTx();
     await writeAtomic(

@@ -353,7 +353,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const setExpanded = useSetAtom(setToolExpandedAtom);
     // A failed table read can still carry recovery status worth opening.
     const hasTableStatus = isTableToolName(part.tool_name) && !!result
-        && tableResultMessages(result.content).length > 0;
+        && tableResultMessages(result.content, part.tool_name).length > 0;
     const isExpanded = expansionState[expansionKey] ?? hasTableStatus;
     const wasConfirmApprovalRef = useRef(isConfirmApproval);
 

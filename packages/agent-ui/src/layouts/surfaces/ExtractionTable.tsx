@@ -37,6 +37,8 @@ export interface ExtractionTableProps {
     onRemoveColumn?: (column: Column) => void;
     /** Re-runs a single cell — offered beside a cell that failed. */
     onRetryCell?: (row: Row, column: Column) => void;
+    /** Rows marked "Can be improved" (`DataTableProps.improvableRows`). */
+    improvableRows?: ReadonlySet<string>;
 
     onExport?: (csv: string, table: TableSpec) => void;
     /** Receives the current view as text for the clipboard. Absent ⇒ no control. */
@@ -91,6 +93,7 @@ export function ExtractionTable({
     onEditColumn,
     onRemoveColumn,
     onRetryCell,
+    improvableRows,
     onExport,
     onCopy,
     onShowInLibrary,
@@ -165,6 +168,7 @@ export function ExtractionTable({
             emptyText="Nothing extracted yet"
             columnMenuItems={columnMenuItems}
             onRetryCell={onRetryCell}
+            improvableRows={improvableRows}
             showSearch={fullControls}
             searchPlaceholder="Search rows"
             showSortMenu={fullControls}

@@ -94,7 +94,9 @@ export type TableItemErrorCode =
     /** The write would grow the table past a limit. */
     | 'too_large'
     /** A stored version's file disagrees with what the version log recorded. */
-    | 'version_corrupt';
+    | 'version_corrupt'
+    /** An `edit` whose `seq` is older than its session's last commit. */
+    | 'stale_seq';
 
 export class TableItemError extends Error {
     readonly code: TableItemErrorCode;

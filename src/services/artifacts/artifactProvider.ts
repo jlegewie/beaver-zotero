@@ -19,6 +19,7 @@ import { checkLibraryExcluded } from "../agentDataProvider/utils";
 import {
     createTableUncoordinated as createTable,
     writeTableUncoordinated as writeTable,
+    editTableSessionUncoordinated as editTableSession,
     openTableUncoordinated as openTable,
     revertTableUncoordinated as revertTable,
     trimTableUncoordinated as trimTable,
@@ -279,6 +280,30 @@ export async function handleArtifactRequestUncoordinated(
         if (request.op === "delete") {
             await deleteTable(ref);
             return success({ saved: true });
+        }
+        if (request.op === "edit") {
+            // No revision guard: the store skips per cell what moved under the
+            // fill, and a retry repeats the session's last `edit_seq`.
+            const result = await editTableSession(
+                ref,
+                {
+                    operation_id: request.operation_id!,
+                    seq: request.edit_seq!,
+                    mutations: request.mutations!,
+                },
+                meta,
+                guard,
+            );
+            if (!result.ok) return artifactFailure(request, result.error.code);
+            checkLibrary(ref.libraryID);
+            guard(result.spec);
+            return success({
+                version: result.version,
+                sha256: result.sha256,
+                saved: result.saved,
+                skipped: result.skipped,
+                replayed: result.replayed,
+            });
         }
         if (request.op === "trim") {
             const result = await trimTable(

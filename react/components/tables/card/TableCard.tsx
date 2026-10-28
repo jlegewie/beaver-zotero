@@ -6,8 +6,8 @@ import type {
     TableCardChoice,
     TableCardDestination,
     TableCardLibraryScope,
-    WSTableCardRequest,
     WSTableCardResponse,
+    WSTableCreateCardRequest,
 } from '@beaver/agent-core/protocol/tableCardProtocol';
 import {
     addColumn,
@@ -15,15 +15,18 @@ import {
     addLibrarySource,
     createActions,
     columnProblem,
+    costLine,
     createBlocker,
     createBlockerReason,
     cardDestination,
     destinationLine,
+    estimateStatus,
     goToStep,
     initialTableCardDraft,
     itemsSource,
     librarySourceKey,
     mergeLine,
+    needsEstimate,
     nextStep,
     overCapMessage,
     overCapSources,
@@ -32,6 +35,7 @@ import {
     removeItem,
     removeScreening,
     removeSource,
+    retryEstimate,
     sourceTotal,
     setCancelling,
     setDescription,
@@ -77,6 +81,8 @@ import {
     TableIcon,
 } from '../../icons/icons';
 import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSourcesMenu';
+import { requestTableCardEstimateAtom } from '../../../atoms/agentRunAtoms';
+import TableCardCreditChip from './TableCardCreditChip';
 import type { SourcesMenuEntries } from '../../ui/menus/hooks/useSourcesMenu';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
 import { paperOf, portableItemId, rowForItem } from './cardItems';
@@ -112,8 +118,11 @@ function stepHeadingCount(step: TableCardStep, count: number): string {
 const MAX_LOOKUP_ATTEMPTS = 3;
 const LOOKUP_RETRY_MS = 1000;
 
+/** How long the card waits after a column is added or removed before it asks for an estimate. */
+const ESTIMATE_DEBOUNCE_MS = 600;
+
 export interface TableCardProps {
-    request: WSTableCardRequest;
+    request: WSTableCreateCardRequest;
     onSubmit: (response: WSTableCardResponse) => void;
     /** Hold the answer back for now (the run's connection is being recovered). */
     disabled?: boolean;
@@ -489,12 +498,31 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const blockerReason = createBlockerReason(draft, request, libraryOf);
     const blocker = blockerReason?.message ?? null;
     const actions = createActions(draft, request);
+
+    // The live estimate: on the last step, once the sources or the column set
+    // differ from what the shown cost was estimated for, the card asks its
+    // waiting tool call for a new cost. Until it lands the run button waits;
+    // "Create only" does not.
+    const requestEstimate = useSetAtom(requestTableCardEstimateAtom);
+    const wantsEstimate = !locked && needsEstimate(draft, request);
+    useEffect(() => {
+        if (!wantsEstimate) return;
+        const win = containerRef.current?.ownerDocument.defaultView;
+        if (!win) return;
+        const timer = win.setTimeout(() => requestEstimate(request), ESTIMATE_DEBOUNCE_MS);
+        return () => win.clearTimeout(timer);
+    }, [wantsEstimate, draft.estimate.basis, draft.sources, draft.columns.length, request, requestEstimate]);
+    const estimate = estimateStatus(draft, request);
+    const runBlocked = estimate !== 'current';
+    const cost = draft.estimate.cost;
     const hasInstructions = draft.instructions.trim().length > 0;
 
     const decide = useCallback(
         (choice: TableCardChoice | null) => {
             if (decidedRef.current || disabled) return;
             if (choice && createBlocker(draft, request, libraryOf)) return;
+            // The run is approved only against the estimate for the draft as it is.
+            if (choice === 'create_and_run' && estimateStatus(draft, request) !== 'current') return;
             decidedRef.current = true;
             setIsDecided(true);
             onSubmit(
@@ -552,6 +580,12 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const merge = mergeLine(draft, request);
     const isLast = stepIndex === steps.length - 1;
 
+    const creditChipRow = cost?.credits != null ? (
+        <div className="table-card-credit-row">
+            <TableCardCreditChip cost={cost} />
+        </div>
+    ) : null;
+
     const header = (
         <div className="table-card-header">
             <div className="display-flex flex-row items-start min-w-0" style={{ gap: '0.45rem' }}>
@@ -581,6 +615,8 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     />
                 )}
             </div>
+            {/* What approving authorizes, only when it raises the run's authorization. */}
+            {!runBlocked && creditChipRow}
         </div>
     );
 
@@ -764,15 +800,43 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         </div>
     );
 
+    // The row line under the columns: what the run would fill and how. While
+    // the estimate is behind the draft it says so instead.
+    const rowLine = costLine(cost);
+    const costStatus =
+        estimate === 'pending' || (estimate === 'stale' && wantsEstimate) ? (
+            <div className="table-card-cost text-sm font-color-secondary display-flex items-center" role="status" style={{ gap: '0.35rem' }}>
+                <Spinner size={11} />
+                <span>Updating the estimate…</span>
+            </div>
+        ) : estimate === 'failed' ? (
+            <div className="table-card-cost text-sm font-color-secondary display-flex items-center" role="status" style={{ gap: '0.35rem' }}>
+                <span>The estimate could not be updated.</span>
+                <button
+                    type="button"
+                    className="table-card-warning-action"
+                    disabled={locked}
+                    onClick={() => setDraft((prev) => retryEstimate(prev))}
+                >
+                    Try again
+                </button>
+            </div>
+        ) : rowLine && draft.columns.length > 0 ? (
+            <div className="table-card-cost text-sm font-color-secondary">{rowLine}</div>
+        ) : null;
+
     const columnsStep = (
-        <TableColumnsStep
-            ref={columnsRef}
-            columns={draft.columns}
-            disabled={locked}
-            onAdd={() => setDraft((prev) => addColumn(prev).draft)}
-            onUpdate={(key, patch) => setDraft((prev) => updateColumn(prev, key, patch))}
-            onRemove={(key) => setDraft((prev) => removeColumn(prev, key))}
-        />
+        <div className="display-flex flex-col min-w-0" style={{ gap: '0.45rem' }}>
+            <TableColumnsStep
+                ref={columnsRef}
+                columns={draft.columns}
+                disabled={locked}
+                onAdd={() => setDraft((prev) => addColumn(prev).draft)}
+                onUpdate={(key, patch) => setDraft((prev) => updateColumn(prev, key, patch))}
+                onRemove={(key) => setDraft((prev) => removeColumn(prev, key))}
+            />
+            {costStatus}
+        </div>
     );
 
     // Why Create is disabled, in the pinned footer right above it, with a way
@@ -993,8 +1057,15 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                             variant="solid"
                             ariaLabel={`${actions.primary.label} the table`}
                             onClick={() => decide(actions.primary.choice)}
-                            disabled={locked || !!blocker}
-                            title={blocker ?? (disabled ? heldCaption : undefined)}
+                            disabled={locked || !!blocker || (actions.primary.choice === 'create_and_run' && runBlocked)}
+                            title={
+                                blocker ??
+                                (disabled
+                                    ? heldCaption
+                                    : actions.primary.choice === 'create_and_run' && runBlocked
+                                      ? 'Waiting for the updated estimate'
+                                      : undefined)
+                            }
                             className="flex-none whitespace-nowrap"
                             style={{ padding: '3px 8px' }}
                         >

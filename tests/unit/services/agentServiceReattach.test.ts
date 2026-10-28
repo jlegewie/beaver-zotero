@@ -335,6 +335,49 @@ describe('AgentService run reattach', () => {
         expect(replies[0]).toMatchObject({ request_id: 'req-exec', status: 'applied' });
     });
 
+    it('handles a request whose payload has a field named seq below the run\'s replay position', async () => {
+        const edit = vi.fn(async (event: Record<string, unknown>) => ({
+            type: 'artifact_response',
+            request_id: event.request_id,
+            op: 'edit',
+            ok: true,
+        }));
+        const provider: AgentDataProviderMap = {
+            artifact_request: { handle: edit, errorResponse: () => ({ type: 'artifact_response', ok: false }) },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitMessage(part(2, 'Hello'));
+        await flush();
+
+        // The backend does not number requests, so a `seq` in one is payload,
+        // never a replayed event.
+        for (const seq of [1, 2, 7]) {
+            first.emitMessage({
+                event: 'artifact_request',
+                request_id: `edit-${seq}`,
+                op: 'edit',
+                key: 'u-ABCDEFGH',
+                operation_id: 'session',
+                edit_seq: seq,
+                seq,
+                mutations: [{ op: 'set_cells', cells: [] }],
+                meta: { actor: 'agent', run_id: RUN_ID, thread_id: 't' },
+            });
+        }
+        await flush();
+        expect(edit).toHaveBeenCalledTimes(3);
+        expect(first.sentOfType('artifact_response').map((r) => r.request_id)).toEqual(['edit-1', 'edit-2', 'edit-7']);
+
+        // Nor does it move the run's replay position: the next event is handled.
+        first.emitMessage(part(3, 'Hello again'));
+        await flush();
+        expect(callbacks.onPart).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(first.sentOfType('ping').at(-1)).toEqual({ type: 'ping', last_seq: 3 });
+    });
+
     it('sends the result of an action still running at the reattach once, on the new socket', async () => {
         let finishExecute!: (value: Record<string, unknown>) => void;
         const execute = vi.fn(() => new Promise<Record<string, unknown>>((resolve) => { finishExecute = resolve; }));

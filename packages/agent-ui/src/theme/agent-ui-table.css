@@ -1420,6 +1420,21 @@
     font-weight: 500;
 }
 
+/* A row answered from metadata whose item has since gained a document: a fill
+   now would read it. Worked out when the table is shown, never stored. */
+.beaver-root .bt-improvable {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    padding: 0 0.35rem;
+    border-radius: 0.3rem;
+    background: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.35rem;
+    white-space: nowrap;
+}
+
 .beaver-root .bt-th-meta {
     flex: 0 0 auto;
     padding: 0 0.35rem;

@@ -85,19 +85,34 @@ export function tableResultBody(value: unknown): Record<string, unknown> {
         : {};
 }
 
-/** Compact status copy for table tools, independent of persisted document state. */
-export function tableResultMessages(value: unknown): string[] {
+/**
+ * Compact status copy for table tools, independent of persisted document
+ * state. `toolName` words a fill card's outcome as a fill rather than a
+ * creation.
+ */
+export function tableResultMessages(value: unknown, toolName?: string): string[] {
     const result = tableResultBody(value);
     const messages: string[] = [];
+    const fill = toolName === "fill_table";
     switch (result.error_code ?? result.status) {
         case "declined":
-            messages.push("The table was declined. Nothing was created.");
+            messages.push(fill ? "The fill was declined. Nothing was filled." : "The table was declined. Nothing was created.");
             break;
         case "card_timed_out":
-            messages.push("The table card was not answered in time. Nothing was created.");
+            messages.push(
+                fill
+                    ? "The fill card was not answered in time. Nothing was filled."
+                    : "The table card was not answered in time. Nothing was created.",
+            );
             break;
         case "card_unreachable":
-            messages.push("The table card could not be shown. Nothing was created.");
+            messages.push(
+                fill ? "The fill card could not be shown. Nothing was filled." : "The table card could not be shown. Nothing was created.",
+            );
+            break;
+        case "credits_declined":
+            // Also a run with no credits, or a confirmation nobody answered.
+            messages.push("No more credits can be spent in this run, so nothing was filled.");
             break;
         case "schema_changed":
             messages.push(
@@ -120,8 +135,14 @@ export function tableResultMessages(value: unknown): string[] {
                 "The table changed while this operation was running. Review the current table before requesting changes again.",
             );
             break;
+        case "zotero_unresponsive":
+            messages.push(
+                "Zotero stopped responding, so the table operation did not finish. Anything already saved stays in the table.",
+            );
+            break;
         case "provider_unavailable":
         case "provider_offline":
+        case "zotero_offline":
         case "disconnected":
         case "unsupported_op":
             messages.push(
@@ -129,6 +150,10 @@ export function tableResultMessages(value: unknown): string[] {
             );
             break;
     }
+    // Create and fill: the table was created, and the fill did not run. The
+    // error itself is written for the model.
+    if (typeof result.fill_error === "string" && result.fill_error)
+        messages.push("The table was created, but the fill did not run. Ask Beaver to fill it.");
     if (result.ok === false && messages.length === 0) {
         messages.push(
             typeof result.error === "string"

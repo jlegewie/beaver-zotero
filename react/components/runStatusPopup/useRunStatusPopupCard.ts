@@ -494,7 +494,11 @@ function useLiveCard(): RunStatusPopupCard | null {
         }
         if (tableCard) {
             // The card is edited in the sidebar; the popup only points there.
-            return { ...base, kind: 'running', statusLine: 'Review the proposed table' };
+            return {
+                ...base,
+                kind: 'running',
+                statusLine: tableCard.scope === 'fill' ? 'Review the proposed fill' : 'Review the proposed table',
+            };
         }
         if (credit) {
             return {

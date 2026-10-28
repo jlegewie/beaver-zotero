@@ -9,6 +9,7 @@
     "scope": "create",
     "title": "Comparison",
     "description": "Sample sizes across the papers.",
+    "table": null,
     "destination": {
       "library_ref": "u",
       "library_name": "My Library",

@@ -23,7 +23,9 @@ import {
 import { inspectTableShadow } from './recoveryShadow';
 import {
     TABLE_SHADOW_RESTORE_UNAVAILABLE,
+    clearTableEditSessions,
     clearTableWriteLocks,
+    tableEditSessions,
     tableLocalCommands,
     getTableLocalCommands,
     getTableShadowRestore,
@@ -76,6 +78,7 @@ export function registerTablesApi(): void {
     // Seed the registry in the plugin realm (`onShutdown` tears it down), not
     // in whichever window bundle first takes a lock.
     tableWriteLocks();
+    tableEditSessions();
     tableLocalCommands();
     logger('tablesApiHost: registered Zotero.__beaverTables', 3);
 }
@@ -95,6 +98,7 @@ export function unregisterTablesApi(): void {
     // Dropped with the realm that created it. Teardown means no write is in
     // flight to lose its turn.
     clearTableWriteLocks();
+    clearTableEditSessions();
 }
 
 /** Withdraw the plugin-owned shadow restore binding at plugin shutdown. */

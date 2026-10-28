@@ -9,6 +9,7 @@
     "scope": "create",
     "title": "Comparison",
     "description": "Sample sizes across the papers.",
+    "table": null,
     "destination": {
       "library_ref": "u",
       "library_name": "My Library",
@@ -80,7 +81,17 @@
         "unit": null
       }
     ],
-    "cost": null,
+    "cost": {
+      "extraction": {
+        "rows": 2,
+        "documents": 1,
+        "no_input": 1,
+        "upper_bound": false
+      },
+      "screening": null,
+      "credits": null,
+      "estimate_id": "00000000-0000-4000-8000-0000000000e2"
+    },
     "user_instructions_prefill": "",
     "timeout_seconds": 600.0
   },
@@ -126,6 +137,7 @@
           }
         ]
       }
-    ]
+    ],
+    "estimate_id": "00000000-0000-4000-8000-0000000000e2"
   }
 }

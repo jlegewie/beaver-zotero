@@ -4860,6 +4860,27 @@
     outline-offset: 0;
 }
 
+/* The credit chip, at the right under the title row, worded and drawn as the
+ * batch card's. */
+[id^="beaver-pane-"] .table-card-credit-row {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    margin-top: 0.3rem;
+}
+
+[id^="beaver-pane-"] .table-card-credit-chip {
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    padding: 2px 7px;
+    white-space: nowrap;
+}
+
+/* The row line under the columns: what the run would fill and how. */
+[id^="beaver-pane-"] .table-card-cost {
+    padding-top: 0.15rem;
+}
+
 [id^="beaver-pane-"] .table-card-head-action:disabled {
     cursor: default;
     opacity: 0.6;

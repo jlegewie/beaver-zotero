@@ -135,6 +135,7 @@
     "./src/run-state/pendingBatchApprovals.ts",
     "./src/run-state/pendingTableCards.ts",
     "./src/run-state/tableCardDraft.ts",
+    "./src/run-state/tableFillProgress.ts",
     "./src/protocol/tableCardProtocol.ts",
     "./src/run-state/toolLabels.ts",
     "./src/run-state/runErrorCopy.ts",

@@ -32,6 +32,8 @@ interface MutationFixture {
     after?: TableSpec;
     skipped?: SkippedCell[];
     error?: { code: ApplyErrorCode };
+    /** `edit` applies as the provider's `edit`; absent, a guarded `write`. */
+    operation?: "write" | "edit";
 }
 
 interface SummaryFixture {
@@ -110,7 +112,9 @@ describe("the table-mutation fixture corpus", () => {
             ).toEqual([]);
 
             const before = structuredClone(fixture.before);
-            const result = applyMutations(fixture.before, fixture.mutations);
+            const result = applyMutations(fixture.before, fixture.mutations, {
+                skipMissing: fixture.operation === "edit",
+            });
 
             if (fixture.error) {
                 if (result.ok) {

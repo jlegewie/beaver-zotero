@@ -2,7 +2,7 @@ import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import React, { useState } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import type { ContinuationOffer } from '@beaver/agent-core/protocol/agentProtocol';
-import { Icon, AlertCircleIcon, ArrowRightIcon, LayersIcon } from '../icons/icons';
+import { Icon, AlertCircleIcon, ArrowRightIcon, LayersIcon, TableIcon } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import InstructionsDisclosure from '@beaver/agent-ui/primitives/InstructionsDisclosure';
 import { resumeFromRunAtom } from '../../atoms/agentRunAtoms';
@@ -23,6 +23,8 @@ const KIND_ICONS: Record<string, typeof AlertCircleIcon> = {
     // run the job's next segment.
     batch_approval: LayersIcon,
     batch_next_tranche: LayersIcon,
+    // A table fill that waited on the user: its card, or a credit confirmation.
+    table_fill: TableIcon,
 };
 const FALLBACK_ICON = AlertCircleIcon;
 

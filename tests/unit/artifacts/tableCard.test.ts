@@ -1,4 +1,6 @@
 import React from "react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { TableResultView } from "../../../react/components/agentRuns/toolResultViews/TableResultView";
@@ -214,5 +216,127 @@ describe("recorded columns", () => {
         expect(html).toContain("8/12");
         expect(html).toContain("12/12");
         expect(html).toContain("20 of 24 cells filled");
+    });
+});
+
+describe("fill stage card", () => {
+    const outcomes = JSON.parse(
+        readFileSync(join(__dirname, "../../fixtures/artifacts/table-tool-outcomes.json"), "utf8"),
+    );
+
+    it("says what the fill did from the recorded call", async () => {
+        const { formatFillLines } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
+        expect(formatFillLines(outcomes.fill_record)).toEqual([
+            "Filled 5 of 14 rows",
+            "9 rows not started: more credits were not approved",
+        ]);
+        const html = renderToStaticMarkup(
+            React.createElement(TableResultView, { view: { view_type: "table", record: outcomes.fill_record } }),
+        );
+        expect(html).toContain("Filled 5 of 14 rows");
+        expect(html).toContain("9 rows still to fill");
+    });
+
+    it("lists failures, skipped cells, metadata answers and credits, and nothing for a call that ran no fill", async () => {
+        const { formatFillLines } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
+        const fill = {
+            ...outcomes.fill_record.fill,
+            rows: 20,
+            rows_filled: 17,
+            rows_failed: 2,
+            rows_not_started: { deadline: 1 },
+            rows_without_input: 3,
+            rows_uncertain: 1,
+            from_metadata: 4,
+            skipped: { user_cell: 1, row_removed: 2 },
+            credits_charged: 6.5,
+        };
+        expect(formatFillLines({ ...outcomes.fill_record, fill })).toEqual([
+            "Filled 17 of 20 rows",
+            "2 rows failed",
+            "1 row not started: the fill ran out of time",
+            "1 row answered but not confirmed saved",
+            "3 rows without a document or abstract",
+            "4 answers from title and abstract only",
+            "1 cell skipped: edited by you",
+            "2 cells skipped: row removed during the fill",
+            "6.5 credits charged",
+        ]);
+        expect(formatFillLines({ ...outcomes.fill_record, run: "none" })).toEqual([]);
+        expect(formatFillLines(record)).toEqual([]);
+    });
+
+    it("says how the credit confirmation that stopped a fill ended", async () => {
+        const { formatFillLines } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
+        const stopped = (credit_confirmation: string) =>
+            formatFillLines({ ...outcomes.fill_record, fill: { ...outcomes.fill_record.fill, credit_confirmation } })[1];
+        expect(stopped("timed_out")).toBe("9 rows not started: the credit confirmation was not answered in time");
+        expect(stopped("declined")).toBe("9 rows not started: more credits were declined");
+        expect(stopped("unreachable")).toBe(
+            "9 rows not started: the connection closed before the credit confirmation was answered",
+        );
+        expect(stopped("something_new")).toBe("9 rows not started: more credits were not approved");
+    });
+
+    it("words a declined fill card as a fill, not a creation", () => {
+        const html = renderToStaticMarkup(
+            React.createElement(ToolResultView, {
+                result: {
+                    part_kind: "tool-return",
+                    tool_name: "fill_table",
+                    tool_call_id: "declined-fill",
+                    content: { ok: false, error_code: "declined", error: "The user declined the fill. Nothing was filled." },
+                },
+            }),
+        );
+        expect(html).toContain("The fill was declined. Nothing was filled.");
+        expect(html).not.toContain("Nothing was created");
+        const credits = renderToStaticMarkup(
+            React.createElement(ToolResultView, {
+                result: {
+                    part_kind: "tool-return",
+                    tool_name: "fill_table",
+                    tool_call_id: "credits",
+                    content: { ok: false, error_code: "credits_declined", error: "x" },
+                },
+            }),
+        );
+        expect(credits).toContain("No more credits can be spent in this run, so nothing was filled.");
+    });
+
+    it("says when a created table's fill did not run", () => {
+        const html = renderToStaticMarkup(
+            React.createElement(ToolResultView, {
+                result: {
+                    part_kind: "tool-return",
+                    tool_name: "create_table",
+                    tool_call_id: "create-and-fill",
+                    content: { ok: true, run: "none", fill_error: "Zotero stopped responding, so the fill did not run." },
+                },
+            }),
+        );
+        expect(html).toContain("The table was created, but the fill did not run.");
+        expect(html).not.toContain("Zotero stopped responding, so the fill");
+    });
+});
+
+describe("statuses written for the model", () => {
+    it("shows its own words when Zotero stopped responding, not the instructions to the model", () => {
+        const html = renderToStaticMarkup(
+            React.createElement(ToolResultView, {
+                result: {
+                    part_kind: "tool-return",
+                    tool_name: "fill_table",
+                    tool_call_id: "unresponsive",
+                    content: {
+                        ok: false,
+                        error_code: "zotero_unresponsive",
+                        error: "Zotero stopped responding, so the fill did not run. Do not retry this or any other change to the library in this turn; tell the user Zotero stopped responding.",
+                    },
+                },
+            }),
+        );
+        expect(html).toContain("Zotero stopped responding, so the table operation did not finish.");
+        expect(html).not.toContain("Do not retry");
     });
 });
