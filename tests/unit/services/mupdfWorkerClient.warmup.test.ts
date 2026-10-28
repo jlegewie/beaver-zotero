@@ -86,6 +86,39 @@ describe('MuPDFWorkerClient warm-up', () => {
         }
     });
 
+    it('reports warm only once a started worker finished its warm-up or an extraction', async () => {
+        const client = new MuPDFWorkerClient({ slotName: 'background' });
+        try {
+            expect(client.isWarm()).toBe(false);
+            const warmup = client.prewarm();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(client.isWarm()).toBe(false);
+            const worker = currentWorker();
+            replyTo(worker, '__warmup', { ok: true, result: WARMUP_RESULT });
+            await warmup;
+            expect(client.isWarm()).toBe(true);
+
+            // Aborting an op terminates the worker; the next use starts a cold one.
+            const controller = new AbortController();
+            const extraction = client.extractSerialized(new Uint8Array([1]), extractArgs, controller.signal);
+            await vi.advanceTimersByTimeAsync(0);
+            controller.abort();
+            await expect(extraction).rejects.toBeInstanceOf(WorkerAbortError);
+            expect(worker.terminate).toHaveBeenCalled();
+            expect(client.isWarm()).toBe(false);
+
+            const next = client.extractSerialized(new Uint8Array([2]), extractArgs);
+            await vi.advanceTimersByTimeAsync(0);
+            const fresh = currentWorker();
+            expect(fresh).not.toBe(worker);
+            replyTo(fresh, 'extractSerialized', { ok: true, result: serialized });
+            await next;
+            expect(client.isWarm()).toBe(true);
+        } finally {
+            client.dispose();
+        }
+    });
+
     it('prewarmMuPDFWorker warms the hot slot', async () => {
         prewarmMuPDFWorker();
         await vi.advanceTimersByTimeAsync(0);

@@ -154,6 +154,8 @@ function documentTimingsField(
         if (typeof ms === 'number') (wire as unknown as Record<string, number>)[to] = Math.round(ms);
     }
     if (timings.workerState) wire.worker_state = timings.workerState;
+    if (timings.workerSlot) wire.worker_slot = timings.workerSlot;
+    if (timings.overflowSkip) wire.overflow_skip = timings.overflowSkip;
     if (diagnosticsWaitMs !== undefined) wire.diagnostics_wait_ms = diagnosticsWaitMs;
     return { timings: wire };
 }
@@ -800,6 +802,7 @@ export async function handleZoteroDocumentRequest(
                 {
                     workerDispatched: result.workerDispatched === true,
                     leaseReaped: result.kind === 'timeout' && result.leaseReaped === true,
+                    slot: result.workerSlot,
                 },
             );
         }
@@ -1035,6 +1038,7 @@ async function handleExternalFileDocumentRequest(
                 {
                     workerDispatched: result.workerDispatched === true,
                     leaseReaped: result.kind === 'timeout' && result.leaseReaped === true,
+                    slot: result.workerSlot,
                 },
             );
         }

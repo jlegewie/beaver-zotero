@@ -7,9 +7,14 @@
  *
  * Routing: `workerName` selects which MuPDF worker the call uses
  * (`"hot"` is the default; `"background"` is reserved for the queue
- * processor). The shared core calls `getMuPDFWorkerClient(workerName)`
- * directly for every MuPDF op — never via `BeaverExtractor`, which
- * always uses the default `"hot"` slot internally.
+ * processor). Interactive requests on the hot slot may instead run on the
+ * idle background worker when hot is busy (`PdfRequestWorker`, interactive
+ * overflow). Interactive rules — the request-timeout clamp, the shared
+ * extraction budget, single-flight scope and the cache write after
+ * responding — follow `interactive`, whichever worker runs the request.
+ * The shared core calls the routed `MuPDFWorkerClient` directly for every
+ * MuPDF op — never via `BeaverExtractor`, which always uses the default
+ * `"hot"` slot internally.
  */
 
 import type {
@@ -24,8 +29,8 @@ import {
     StaleWorkerError,
     WorkerAbortError,
     WorkerSpawnError,
-    getMuPDFWorkerClient,
     isWorkerDeadlineError,
+    type MuPDFWorkerClient,
     type PDFWorkerSlotName,
     type WorkerCallTiming,
     type WorkerState,
@@ -66,6 +71,8 @@ import {
     unsupportedSchemaVersionMessage,
 } from './documentExtraction/shared/extractionSchemaVersions';
 import { recordReadingOutcome } from './documentExtraction/readingOutcome';
+import { PdfRequestWorker } from './documentExtraction/pdfRequestWorker';
+import type { OverflowSkipReason } from './backgroundQueue/interactiveOverflow';
 import {
     EpubStructureError,
     extractEpubDocumentFromFile,
@@ -80,13 +87,15 @@ import {
 } from './documentExtraction/snapshot';
 
 /**
- * Extra margin granted to a shared hot-slot extraction beyond the request's
+ * Extra margin granted to a shared interactive extraction beyond the request's
  * own deadline before the document cache aborts it (and the worker client
- * terminates the worker), freeing the interactive slot for the next read.
+ * terminates the worker), freeing the worker for the next read.
  * The request timeout plus this grace must stay below
  * DEFAULT_BUSY_LEASE_MS_HOT so the cache abort reclaims the slot before the
- * worker client's busy lease reaps the operation. Hot-slot request timeouts
- * are clamped to MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS to enforce this.
+ * worker client's busy lease reaps the operation. Interactive request timeouts
+ * are clamped to MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS to enforce this. The
+ * same budget bounds an interactive request that overflowed to the
+ * background worker, well inside that worker's longer lease.
  */
 export const HOT_SHARED_EXTRACTION_GRACE_MS = 2000;
 
@@ -183,6 +192,14 @@ export interface ExtractAndCacheArgs {
     timeoutSeconds: number;
     /** Default `"hot"`. Background processor sets `"background"`. */
     workerName?: PDFWorkerSlotName;
+    /**
+     * Interactive request (someone is waiting for it). Defaults to true unless
+     * `workerName` is `"background"`. Interactive requests are clamped to the
+     * interactive timeout, share single-flight extractions with each other on
+     * either worker, and write to the document cache after responding. On the
+     * hot slot they may overflow to an idle background worker.
+     */
+    interactive?: boolean;
     /**
      * Caller-supplied abort signal. When it fires, the in-flight
      * extraction returns `{ kind: 'external_abort' }` so the caller can
@@ -364,6 +381,13 @@ export interface PdfDocumentTimings {
     workerOpMs?: number;
     /** The worker when this request used it (see `WorkerCallTiming.workerState`). */
     workerState?: WorkerState;
+    /**
+     * The worker slot this request's ops ran on: `background` when an
+     * interactive request overflowed from a busy hot worker.
+     */
+    workerSlot?: PDFWorkerSlotName;
+    /** Why a request that found the hot worker busy still queued on it. */
+    overflowSkip?: OverflowSkipReason;
     /** The worker's WASM heap after this request's last worker op, MB. */
     workerHeapMb?: number;
     /** The largest WASM heap any worker of the slot has reported so far, MB. */
@@ -436,6 +460,8 @@ export type ExtractAndCacheResult =
            * the response never describes unrelated activity.
            */
           workerDispatched?: boolean;
+          /** The worker slot this request dispatched to, when it did. */
+          workerSlot?: PDFWorkerSlotName;
       }
     | {
           kind: 'external_abort';
@@ -444,6 +470,8 @@ export type ExtractAndCacheResult =
           resolvedAttachment: ResolvedAttachment | null;
           /** True when this request dispatched to the PDF worker before the external abort. */
           workerDispatched?: boolean;
+          /** The worker slot this request dispatched to, when it did. */
+          workerSlot?: PDFWorkerSlotName;
       };
 
 export type ExtractAndCacheEpubResult =
@@ -472,6 +500,11 @@ export type ExtractAndCacheEpubResult =
           contentKind?: ExtractContentKind;
       };
 
+/** See `ExtractAndCacheArgs.interactive`. */
+function isInteractive(args: Pick<ExtractAndCacheArgs, 'interactive' | 'workerName'>): boolean {
+    return args.interactive ?? (args.workerName ?? 'hot') !== 'background';
+}
+
 function isAbortError(error: unknown): boolean {
     return error instanceof Error && /abort/i.test(error.message);
 }
@@ -499,9 +532,7 @@ async function extractAndCacheDocumentOwned(
         args.timeoutSeconds,
         DEFAULT_PAGES_TIMEOUT_SECONDS,
         args.externalAbortSignal,
-        (args.workerName ?? 'hot') === 'hot'
-            ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS
-            : undefined,
+        isInteractive(args) ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS : undefined,
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
@@ -1052,6 +1083,10 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         externalAbortSignal,
     } = args;
     const workerName: PDFWorkerSlotName = args.workerName ?? 'hot';
+    const interactive = isInteractive(args);
+    // Interactive requests share single-flight extractions on either worker,
+    // so a hot request and an overflow request for one document run once.
+    const lockScope: PDFWorkerSlotName = interactive ? 'hot' : workerName;
     const requestKey = args.resolvedKey;
     const uncachedSchemaVersion = uncachedPdfSchemaVersion(args.schemaVersion);
     const unsupportedVersion = unsupportedSchemaVersionMessage('pdf', args.schemaVersion, mode);
@@ -1075,11 +1110,16 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         args.timeoutSeconds,
         DEFAULT_PAGES_TIMEOUT_SECONDS,
         externalAbortSignal,
-        workerName === 'hot' ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS : undefined,
+        interactive ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS : undefined,
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
-    const client = getMuPDFWorkerClient(workerName);
+    // Chooses the worker at the first op and keeps it for every later op. An
+    // overflow op on the background worker is bounded by this request's
+    // interactive deadline (`signal` / `sharedTimeoutMs`), not that worker's
+    // longer lease; aborting it terminates the background worker, and the
+    // next use starts a fresh one.
+    const worker = new PdfRequestWorker({ interactive, workerName });
     const startedAt = Date.now();
     const timings: PdfDocumentTimings = { source: 'extracted' };
     const pageCountTiming: WorkerCallTiming = {};
@@ -1112,21 +1152,22 @@ async function extractAndCacheResolvedPdfDocumentImpl(
     // Interactive requests respond before their result is written to the
     // document cache; requests that join meanwhile share the in-memory result.
     const cacheWrite = {
-        writeAfterResolve: workerName === 'hot',
+        writeAfterResolve: interactive,
         onCacheWrite: (ms: number) => {
             timings.cacheWriteMs = ms;
         },
     };
 
     // Budget for the shared (single-flight) extraction on the document cache.
-    // The hot slot serves interactive reads on the single interactive MuPDF
-    // worker: once every waiter has detached (request timed out), letting the
-    // shared extraction keep running up to MAX_PDF_TIMEOUT_SECONDS would
-    // head-of-line-block every subsequent interactive read. Cap it near this
-    // request's own deadline instead — the request's timeout path enqueues a
-    // background re-extraction, so the result is still produced and cached on
-    // the background slot. The background slot keeps the full ceiling.
-    const sharedTimeoutMs = workerName === 'hot'
+    // Interactive reads run on the hot worker (or an overflow background
+    // worker held exclusively for them): once every waiter has detached
+    // (request timed out), letting the shared extraction keep running up to
+    // MAX_PDF_TIMEOUT_SECONDS would head-of-line-block every subsequent
+    // interactive read. Cap it near this request's own deadline instead — the
+    // request's timeout path enqueues a background re-extraction, so the
+    // result is still produced and cached on the background slot. Background
+    // jobs keep the full ceiling.
+    const sharedTimeoutMs = interactive
         ? Math.round(timeoutSeconds * 1000) + HOT_SHARED_EXTRACTION_GRACE_MS
         : MAX_PDF_TIMEOUT_SECONDS * 1000;
 
@@ -1147,6 +1188,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 pageCount: totalPages,
                 resolvedAttachment,
                 workerDispatched,
+                workerSlot: worker.slot,
             };
         }
         return null;
@@ -1319,7 +1361,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 mode,
                 source: initialSourceIdentity,
                 serialized: args.serializedResult === true,
-                lockScope: workerName,
+                lockScope,
             })
             : null;
         const availableResult = cachedResult ?? unwrittenResult;
@@ -1406,7 +1448,8 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             loadedPdfData = pdfData;
             workerDispatched = true;
             const pageCountStartedAt = Date.now();
-            totalPages = await client.getPageCount(pdfData, signal, pageCountTiming);
+            const pageCountData = pdfData;
+            totalPages = await worker.run((client) => client.getPageCount(pageCountData, signal, pageCountTiming));
             timings.pageCountMs = elapsed(pageCountStartedAt);
             throwIfTimedOut('page_count_extraction');
         }
@@ -1484,7 +1527,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         }
 
         logger(
-            `extractAndCacheDocument: full-document extract for ${requestKey} mode=${mode} worker=${workerName}`,
+            `extractAndCacheDocument: full-document extract for ${requestKey} mode=${mode} worker=${workerName}${interactive ? ' interactive' : ''}`,
             3,
         );
         const pdfBytes = pdfData;
@@ -1504,17 +1547,17 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             // response carries the worker snapshot for that episode.
             workerDispatched = true;
             return args.serializedResult
-                ? runExtraction(() => client.extractSerialized(pdfBytes, extractArgs, extractSignal, extractTiming))
-                : runExtraction(() => client.extract(pdfBytes, extractArgs, extractSignal, extractTiming));
+                ? runExtraction(() => worker.run((client) => client.extractSerialized(pdfBytes, extractArgs, extractSignal, extractTiming)))
+                : runExtraction(() => worker.run((client) => client.extract(pdfBytes, extractArgs, extractSignal, extractTiming)));
         };
 
         const createUnsharedResult = async () => {
             workerDispatched = true;
             const extracted = args.serializedResult
                 ? serializedWorkerResultToCacheResult(
-                    await runExtraction(() => client.extractSerialized(pdfBytes, extractArgs, signal, extractTiming)),
+                    await runExtraction(() => worker.run((client) => client.extractSerialized(pdfBytes, extractArgs, signal, extractTiming))),
                 )
-                : await runExtraction(() => client.extract(pdfBytes, extractArgs, signal, extractTiming));
+                : await runExtraction(() => worker.run((client) => client.extract(pdfBytes, extractArgs, signal, extractTiming)));
             throwIfTimedOut('pdf_extract');
             return extracted;
         };
@@ -1533,11 +1576,11 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
                     contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
                     maxSourceSizeBytes,
-                    lockScope: workerName,
+                    lockScope,
                     sharedTimeoutMs,
                     abortSignal: signal,
                     expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
-                    create: createSharedResult as (extractSignal: AbortSignal) => ReturnType<typeof client.extractSerialized>,
+                    create: createSharedResult as (extractSignal: AbortSignal) => ReturnType<MuPDFWorkerClient['extractSerialized']>,
                     ...cacheWrite,
                 })
                 : cache.getOrCreateResult({
@@ -1547,7 +1590,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
                 contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
                 maxSourceSizeBytes,
-                lockScope: workerName,
+                lockScope,
                 sharedTimeoutMs,
                 abortSignal: signal,
                 expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
@@ -1564,7 +1607,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         mode,
                         `schema:${uncachedSchemaVersion}`,
                         args.serializedResult ? 'serialized' : 'object',
-                        `scope:${workerName}`,
+                        `scope:${lockScope}`,
                     ].join('/'),
                     sharedTimeoutMs,
                     abortSignal: signal,
@@ -1594,6 +1637,8 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         if (heapTiming.peakHeapBytes !== undefined) timings.workerPeakHeapMb = toMb(heapTiming.peakHeapBytes);
         const state = workerState();
         if (state) timings.workerState = state;
+        if (worker.slot) timings.workerSlot = worker.slot;
+        if (worker.overflowSkip) timings.overflowSkip = worker.overflowSkip;
 
         if (!result && uncachedSchemaVersion !== null) {
             // The shared uncached extraction was aborted after it finished.
@@ -1639,6 +1684,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 pageCount: totalPages,
                 resolvedAttachment,
                 workerDispatched,
+                workerSlot: worker.slot,
             };
         }
 
@@ -1657,6 +1703,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 pageCount: totalPages,
                 resolvedAttachment,
                 workerDispatched,
+                workerSlot: worker.slot,
             };
         }
 
@@ -1666,7 +1713,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             || error instanceof TimeoutError
             || isWorkerDeadlineError(error)
         ) {
-            logger(`extractAndCacheDocument[${workerName}]: Timed out after ${timeoutSeconds}s`, 1);
+            logger(`extractAndCacheDocument[${worker.slot ?? workerName}]: Timed out after ${timeoutSeconds}s`, 1);
             return {
                 kind: 'timeout',
                 phase: error instanceof TimeoutError ? error.phase : 'unknown',
@@ -1675,10 +1722,11 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 resolvedAttachment,
                 leaseReaped: isWorkerDeadlineError(error),
                 workerDispatched,
+                workerSlot: worker.slot,
             };
         }
 
-        logger(`extractAndCacheDocument[${workerName}]: Extraction failed: ${error}`, 1);
+        logger(`extractAndCacheDocument[${worker.slot ?? workerName}]: Extraction failed: ${error}`, 1);
         const errorKey = resolvedAttachment
             ? `${resolvedAttachment.libraryId}-${resolvedAttachment.zoteroKey}`
             : requestKey;
@@ -1815,7 +1863,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         // ExtractionError (handled above) is never misreported here.
         if (isWorkerLifecycleError(error)) {
             logger(
-                `extractAndCacheDocument[${workerName}]: local PDF engine unavailable for ${errorKey}: ${error}`,
+                `extractAndCacheDocument[${worker.slot ?? workerName}]: local PDF engine unavailable for ${errorKey}: ${error}`,
                 1,
             );
             return {
@@ -1836,7 +1884,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         const rawMessage = native ? native.message : String(error);
         const responseDetail = [
             native ? `${native.name}: ${native.message}` : rawMessage,
-            `(mode=${mode}, worker=${workerName}, pages=${totalPages ?? 'unknown'})`,
+            `(mode=${mode}, worker=${worker.slot ?? workerName}, pages=${totalPages ?? 'unknown'})`,
         ]
             .filter(Boolean)
             .join('\n');
@@ -1849,7 +1897,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             .filter(Boolean)
             .join('\n');
         logger(
-            `extractAndCacheDocument[${workerName}]: Unexpected extraction failure for ${errorKey}\n${diagnosticDetail}`,
+            `extractAndCacheDocument[${worker.slot ?? workerName}]: Unexpected extraction failure for ${errorKey}\n${diagnosticDetail}`,
             1,
         );
 
@@ -1868,6 +1916,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             resolvedAttachment,
         };
     } finally {
+        worker.close();
         if (ownsTimeout) {
             dispose();
         }

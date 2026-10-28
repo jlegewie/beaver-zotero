@@ -7,10 +7,7 @@
  * `Zotero.Beaver?.backgroundExtractor`.
  */
 
-import {
-    disposeMuPDFWorker,
-    getExistingMuPDFWorkerClient,
-} from '../beaver-extract';
+import { disposeMuPDFWorker } from '../beaver-extract';
 import type {
     BackgroundJobInput,
     BackgroundJobRecord,
@@ -25,6 +22,7 @@ import type {
     QueueDB,
 } from './backgroundQueue/jobExecutor';
 import { MuPDFSerialLane } from './backgroundQueue/muPDFSerialLane';
+import { InteractiveOverflow, type InteractiveOverflowStats } from './backgroundQueue/interactiveOverflow';
 import { isLibraryInScope, isLibraryScopeKnown } from './libraryScope';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { createAbortController } from '../utils/abortController';
@@ -55,6 +53,8 @@ const LOW_PRIORITY_CEILING = 100;
 const PREF_ENABLED = 'backgroundExtractorEnabled';
 const PREF_PROCESSING_ENABLED = 'backgroundProcessingEnabled';
 const COOPERATIVE_THROTTLE = true;
+/** Lanes whose jobs may use the background MuPDF worker. */
+const MUPDF_JOB_TYPES: readonly BackgroundJobType[] = ['document_extract', 'document_ocr'];
 
 export type ProcessOnceReason =
     | 'startup_delay'
@@ -143,6 +143,16 @@ export class BackgroundExtractor {
      */
     private readonly laneFreedAt = new Map<BackgroundJobType, number[]>();
     private readonly muPDFLane = new MuPDFSerialLane();
+    /**
+     * Routes interactive PDF requests that would queue behind the busy hot
+     * worker to the idle background worker. Shares `muPDFLane` with the jobs.
+     */
+    readonly interactiveOverflow = new InteractiveOverflow({
+        lane: this.muPDFLane,
+        isAvailable: () => this.started && !this.stopRequested && !this.shouldSkipDbWrites(),
+        hasWorkerJobInFlight: () => MUPDF_JOB_TYPES.some((type) => (this.laneInFlight.get(type)?.size ?? 0) > 0),
+        onDrained: () => this.notify(),
+    });
 
     constructor() {
         this.registerExecutor(new DocumentExtractExecutor(), { maxInFlight: 1 });
@@ -200,10 +210,9 @@ export class BackgroundExtractor {
         if (!this.prefEnabled || (!this.started && getPref(PREF_ENABLED) === false)) return 'disabled';
         if (includeStartup && Date.now() < this.startupDelayUntil) return 'startup_delay';
         if (this.syncInProgress) return 'sync_in_progress';
-        if (COOPERATIVE_THROTTLE) {
-            const hot = getExistingMuPDFWorkerClient('hot');
-            if (hot && hot.getStats().pendingCount > 0) return 'hot_busy';
-        }
+        // Interactive work first: hot has work pending or queued, an overflow
+        // request holds the background worker, or it is warming up for one.
+        if (COOPERATIVE_THROTTLE && this.interactiveOverflow.blocksBackgroundJobs()) return 'hot_busy';
         if (!isLibraryScopeKnown()) return 'library_scope_unknown';
         if (!Zotero.Beaver?.db || this.executors.size === 0) return 'empty';
         return null;
@@ -223,6 +232,11 @@ export class BackgroundExtractor {
             };
         }
         return status;
+    }
+
+    /** Interactive overflow routing counters, for diagnostics. */
+    getInteractiveOverflowStats(): InteractiveOverflowStats {
+        return this.interactiveOverflow.getStats();
     }
 
     /** Distinct attachments currently occupying the requested lanes. */
@@ -447,6 +461,11 @@ export class BackgroundExtractor {
         }
 
         await this.abortAndAwaitInFlight();
+        // Maintenance keeps interactive reads working: let an overflow request
+        // that holds the background worker finish (it is bounded by the
+        // interactive deadline) before the worker is disposed. New requests
+        // stop overflowing once `stopRequested` is set.
+        if (executorAction === 'suspend') await this.muPDFLane.run(async () => undefined);
         // Stop executor-owned background work (e.g. slot-free OCR trackers) that
         // lives outside the lane in-flight maps and so is untouched by the abort.
         let suspendFailed = false;
@@ -669,6 +688,12 @@ export class BackgroundExtractor {
                 if (this.executors.get(jobType) !== registration || this.laneCapacityFree(jobType, capacity) === 0) {
                     if (!this.shouldSkipDbWrites()) await options.db.releaseBackgroundJob(record.id, Date.now());
                     break;
+                }
+                // An interactive request may have taken the background worker
+                // while the claim was in flight; the job waits for it to drain.
+                if (MUPDF_JOB_TYPES.includes(jobType) && this.interactiveOverflow.blocksBackgroundJobs()) {
+                    if (!this.shouldSkipDbWrites()) await options.db.releaseBackgroundJob(record.id, Date.now());
+                    return launched;
                 }
                 if (!isLibraryScopeKnown()) {
                     // The scope went unknown (logout / account switch) while the

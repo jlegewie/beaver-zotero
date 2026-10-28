@@ -161,6 +161,9 @@ pref("mcpCreateNoteToolEnabled", false);
 
 // Background extractor kill-switch (drains the background_jobs queue)
 pref("backgroundExtractorEnabled", true);
+// Kill switch: a PDF request that would queue behind the busy interactive
+// MuPDF worker may run on the idle background worker instead.
+pref("pdf.backgroundOverflow", true);
 // Whole-library producers are an explicit opt-in. The dispatcher above remains
 // enabled so user-initiated extraction jobs still work when this is off.
 pref("backgroundProcessingEnabled", false);
