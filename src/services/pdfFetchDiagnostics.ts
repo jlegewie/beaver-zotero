@@ -26,6 +26,8 @@ export const MAX_PDF_FETCH_ATTEMPTS = 12;
  * - `no_pdf_found`: a page loaded but had no PDF link.
  * - `already_tried`: a DOI redirected to a page an earlier entry already tried,
  *   so Zotero skipped it. It is last so it never stands in for a real failure.
+ *   Only a skip on the first hop from doi.org is detected; a skip further along
+ *   a redirect chain still reads `no_pdf_found`.
  */
 export const PDF_FAILURE_PRIORITY = [
     'bot_challenge',
@@ -51,7 +53,11 @@ export type PdfFetchOutcome = 'ok' | PdfFailureOutcome;
 /** One resolver entry Zotero tried. Never carries a full URL. */
 export interface PdfFetchAttempt {
     accessMethod?: string;
-    /** Lowercase host of the entry's last request, where its outcome was decided (the publisher, not `doi.org`). */
+    /**
+     * Lowercase host of the entry's last request, where its outcome was decided:
+     * usually the publisher after redirects; `doi.org` when the DOI itself failed
+     * or its redirect was skipped.
+     */
     host?: string;
     outcome: PdfFetchOutcome;
     /** HTTP status of the error that decided the outcome, when it had one. */
@@ -227,8 +233,12 @@ export function createPdfFetchDiagnostics(): PdfFetchDiagnostics {
     // informative error, with that error's status and host. An entry that made
     // requests without error and produced nothing is a page with no PDF link,
     // unless the run was cut off while it was in flight, or its last request
-    // was the DOI resolver: doi.org only redirects or errors, so ending there
-    // means Zotero skipped the redirect target as already tried.
+    // was the DOI resolver: doi.org almost always redirects or errors, so
+    // ending there means Zotero skipped the redirect target as already tried.
+    // Zotero gives no signal when it skips, so a skip after a second redirect
+    // or a meta refresh ends on another host and still reads `no_pdf_found`,
+    // and a DOI that doi.org answers with a page of its own (several registered
+    // destinations) reads `already_tried`. Both are rare.
     const resolve = (): PdfFetchAttempt[] => entries
         .filter(entry => entry.requests > 0)
         .map((entry, index, tried) => {
