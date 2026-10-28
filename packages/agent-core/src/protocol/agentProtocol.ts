@@ -3494,6 +3494,13 @@ export interface WSReattachedInfo {
     gapMs: number;
     /** Events the server is replaying. */
     replayed: number;
+    /** Sockets opened to reattach the run since the loss. */
+    attempts: number;
+    /**
+     * Sockets the run lost since it was last live, the first loss included.
+     * More than one means a socket opened to reattach was lost as well.
+     */
+    losses: number;
 }
 
 /**
@@ -3515,6 +3522,10 @@ export interface WSReattachFailedInfo {
     evidence: ConnectionFailureEvidence;
     /** Milliseconds spent trying. */
     gapMs: number;
+    /** Sockets opened to reattach the run since the loss. */
+    attempts: number;
+    /** Sockets the run lost since it was last live, the first loss included. */
+    losses: number;
 }
 
 /** The action an `agent_action_execute` request applies, as the request describes it. */

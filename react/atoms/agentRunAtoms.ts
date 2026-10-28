@@ -1499,6 +1499,10 @@ interface ReattachOutcome {
     /** `reattached`, `gave_up`, or `fallback:<reason>`. */
     outcome: string;
     gapMs: number;
+    /** Sockets opened to reattach the run. */
+    attempts: number;
+    /** Sockets the run lost, the first loss included. */
+    losses: number;
     /** The server ended the run and saved what it had, so it can be continued. */
     resumable?: boolean;
 }
@@ -1508,6 +1512,8 @@ function reattachFailureOutcome(info: WSReattachFailedInfo): ReattachOutcome {
     return {
         outcome: info.reason === 'gave_up' ? 'gave_up' : `fallback:${info.reason}`,
         gapMs: info.gapMs,
+        attempts: info.attempts,
+        losses: info.losses,
         // `expired` means the run ended on the server, which saves it the way
         // any interrupted run is saved.
         resumable: info.reason === 'expired',
@@ -1595,6 +1601,8 @@ function surfaceAndDiagnoseConnectionFailure(
         connect_attempts: connectAttempts ?? null,
         reattach_outcome: reattach?.outcome ?? null,
         reattach_gap_ms: reattach?.gapMs ?? null,
+        reattach_attempts: reattach?.attempts ?? null,
+        reattach_losses: reattach?.losses ?? null,
     }).then((diagnostic) => applyPresentation(diagnostic));
 }
 
@@ -1751,13 +1759,15 @@ export function createWSCallbacks(
     const reportReattachOutcome = (info: WSReattachedInfo | WSReattachFailedInfo) => {
         const outcome: ReattachOutcome = 'reason' in info
             ? reattachFailureOutcome(info)
-            : { outcome: 'reattached', gapMs: info.gapMs };
+            : { outcome: 'reattached', gapMs: info.gapMs, attempts: info.attempts, losses: info.losses };
         void reportConnectionFailure({
             evidence: info.evidence,
             run_id: info.runId,
             connect_attempts: connectAttempts(),
             reattach_outcome: outcome.outcome,
             reattach_gap_ms: outcome.gapMs,
+            reattach_attempts: outcome.attempts,
+            reattach_losses: outcome.losses,
         });
     };
 
@@ -2440,7 +2450,7 @@ export function createWSCallbacks(
         },
 
         onReattached: (info: WSReattachedInfo) => {
-            logger(`WS onReattached: run ${info.runId} after ${info.gapMs}ms, ${info.replayed} event(s) replayed`, 1);
+            logger(`WS onReattached: run ${info.runId} after ${info.gapMs}ms (${info.attempts} socket(s), ${info.losses} lost), ${info.replayed} event(s) replayed`, 1);
             set(wsReconnectingAtom, null);
             set(isWSConnectedAtom, true);
             set(isWSReadyAtom, true);

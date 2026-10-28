@@ -510,6 +510,7 @@ export class AgentService {
             if (!run || run.runId !== request.run_id || run.state !== 'reattaching') {
                 throw new Error(`Run ${request.run_id} is not waiting to be reattached`);
             }
+            run.reattachAttempts++;
         } else {
             this.run = new RunLink(request.run_id, callbacks);
             // The run this one waited for is gone now, and its stop with it
@@ -1008,6 +1009,8 @@ export class AgentService {
             run.state = 'reattaching';
             run.detachedAt = now;
             run.dropEvidence = evidence;
+            run.losses = 0;
+            run.reattachAttempts = 0;
             run.deadline = now + graceMs;
             run.deadlineTimer = setTimeout(() => {
                 if (this.run === run && run.state === 'reattaching') {
@@ -1018,7 +1021,10 @@ export class AgentService {
         } else if (run.deadline !== null && now >= run.deadline) {
             return false;
         }
-        logger(`AgentService: Run ${run.runId} lost its connection (code ${code}); reattaching from seq ${run.lastSeq}`, 1);
+        // Counted for every loss: a socket opened to reattach can reach
+        // `ready` and be lost before the server's confirmation arrives.
+        run.losses++;
+        logger(`AgentService: Run ${run.runId} lost its connection (code ${code}, loss ${run.losses}); reattaching from seq ${run.lastSeq}`, 1);
         // Reset before notifying: the callback starts the reattach, which must
         // find this socket's state already gone.
         this.resetConnectionState({ keepRunQueues: true });
@@ -1154,6 +1160,8 @@ export class AgentService {
             reason,
             evidence: run.dropEvidence ?? baselineConnectionEvidence('mid_run'),
             gapMs: run.detachedAt !== null ? Math.max(0, Date.now() - run.detachedAt) : 0,
+            attempts: run.reattachAttempts,
+            losses: run.losses,
         });
     }
 
@@ -1166,7 +1174,7 @@ export class AgentService {
         run.detachedAt = null;
         run.deadline = null;
         run.clearDeadline();
-        logger(`AgentService: Reattached run ${run.runId} after ${gapMs}ms; ${event.replayed} event(s) replayed`, 1);
+        logger(`AgentService: Reattached run ${run.runId} after ${gapMs}ms on socket ${run.reattachAttempts} (${run.losses} lost); ${event.replayed} event(s) replayed`, 1);
         this.noteRunEvent(run.runId, 'reattached', `${event.replayed} replayed`);
         if (run.cancelRequested) {
             // Stopped while reconnecting. The user has already left the run,
@@ -1185,6 +1193,8 @@ export class AgentService {
             evidence: run.dropEvidence ?? baselineConnectionEvidence('mid_run'),
             gapMs,
             replayed: event.replayed,
+            attempts: run.reattachAttempts,
+            losses: run.losses,
         });
     }
 

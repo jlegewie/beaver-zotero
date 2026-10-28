@@ -508,6 +508,8 @@ describe('AgentService run reattach', () => {
                 runId: RUN_ID,
                 reason: 'expired',
                 evidence: expect.objectContaining({ stage: 'mid_run', closeCode: 1006 }),
+                attempts: 1,
+                losses: 1,
             }),
         );
         expect(second.close).toHaveBeenCalledWith(1000, 'Reattach failed');
@@ -1132,6 +1134,110 @@ describe('AgentService run reattach', () => {
         expect(callbacks.onClose).not.toHaveBeenCalled();
         expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
         expect(second.sentOfType('reattach')).toHaveLength(1);
+    });
+
+    describe('losing a socket opened to reattach', () => {
+        /** Lose the run's socket, then reattach on a new one that also dies after sending the reattach. */
+        async function loseTheReattachSocket(service: AgentService, callbacks: WSCallbacks): Promise<MockWebSocket> {
+            const first = await startRun(service, callbacks);
+            first.emitMessage(part(2, 'Hello'));
+            await flush();
+            first.emitClose(1006);
+
+            const { socket: second, loop } = await reattach(service);
+            await expect(loop).resolves.toBe('connected');
+            expect(second.sentOfType('reattach')).toHaveLength(1);
+            await vi.advanceTimersByTimeAsync(2_000);
+            second.emitClose(1006);
+            return second;
+        }
+
+        it('reattaches again, and the run goes on once the server confirms', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            const callbacks = createCallbacks();
+            const second = await loseTheReattachSocket(service, callbacks);
+
+            // The same loss goes on: a new reattach starts from the first loss.
+            const reattaching = vi.mocked(callbacks.onReattaching!);
+            expect(reattaching).toHaveBeenCalledTimes(2);
+            expect(reattaching.mock.calls[1][0]).toEqual(reattaching.mock.calls[0][0]);
+            expect(service.isReattaching(RUN_ID)).toBe(true);
+            expect(callbacks.onClose).not.toHaveBeenCalled();
+
+            // The server's answer on the lost socket never counts.
+            second.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 3, replayed: 1 });
+            await flush();
+            expect(callbacks.onReattached).not.toHaveBeenCalled();
+
+            // One attempt fails before its socket opens; the next gets through.
+            const loop = reattachWithRetry({
+                service,
+                runId: RUN_ID,
+                isStillWanted: () => true,
+                sleep: () => Promise.resolve(),
+                random: () => 0,
+            });
+            const count = MockWebSocket.instances.length;
+            for (let i = 0; i < 50 && MockWebSocket.instances.length === count; i++) await Promise.resolve();
+            MockWebSocket.instances[count].emitClose(1006);
+            const third = await acceptNextSocket(READY_WITH_REATTACH);
+            await expect(loop).resolves.toBe('connected');
+            expect(third.sentOfType('reattach')).toEqual([
+                { type: 'reattach', run_id: RUN_ID, reattach_token: TOKEN, last_seq: 2 },
+            ]);
+
+            third.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 3, replayed: 1 });
+            third.emitMessage({ event: 'done', seq: 3 });
+            await flush();
+
+            expect(callbacks.onReattached).toHaveBeenCalledTimes(1);
+            expect(callbacks.onReattached).toHaveBeenCalledWith(
+                expect.objectContaining({ runId: RUN_ID, replayed: 1, attempts: 3, losses: 2 }),
+            );
+            expect(callbacks.onDone).toHaveBeenCalledTimes(1);
+            expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
+            expect(callbacks.onClose).not.toHaveBeenCalled();
+        });
+
+        it('keeps the grace period of the first loss', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            const callbacks = createCallbacks();
+            await loseTheReattachSocket(service, callbacks);
+
+            const { detachedAt, graceMs } = vi.mocked(callbacks.onReattaching!).mock.calls[0][0];
+            expect(Date.now() - detachedAt).toBeGreaterThanOrEqual(2_000);
+            await vi.advanceTimersByTimeAsync(detachedAt + graceMs - Date.now() - 1);
+            expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+
+            expect(callbacks.onReattachFailed).toHaveBeenCalledWith(
+                expect.objectContaining({ runId: RUN_ID, reason: 'gave_up', attempts: 1, losses: 2 }),
+            );
+            expect(service.isReattaching(RUN_ID)).toBe(false);
+        });
+
+        it('counts a later loss of a reattached run from scratch', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            const callbacks = createCallbacks();
+            const first = await startRun(service, callbacks);
+            first.emitClose(1006);
+            const { socket: second } = await reattach(service);
+            second.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 1, replayed: 0 });
+            await flush();
+            expect(callbacks.onReattached).toHaveBeenLastCalledWith(
+                expect.objectContaining({ attempts: 1, losses: 1 }),
+            );
+
+            second.emitClose(1006);
+            const { socket: third } = await reattach(service);
+            third.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 1, replayed: 0 });
+            await flush();
+
+            expect(callbacks.onReattached).toHaveBeenCalledTimes(2);
+            expect(callbacks.onReattached).toHaveBeenLastCalledWith(
+                expect.objectContaining({ attempts: 1, losses: 1 }),
+            );
+        });
     });
 
     describe('reaching the server again after an outage', () => {

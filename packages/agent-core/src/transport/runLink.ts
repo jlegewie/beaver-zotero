@@ -85,6 +85,10 @@ export class RunLink {
     stopSettled = false;
     /** When the current loss was noticed. */
     detachedAt: number | null = null;
+    /** Sockets lost since the run was last live, the first loss included. */
+    losses = 0;
+    /** Sockets opened to reattach the run since the current loss. */
+    reattachAttempts = 0;
     /** `Date.now()` after which the client stops trying to reattach. */
     deadline: number | null = null;
     /** How the socket was lost. */
