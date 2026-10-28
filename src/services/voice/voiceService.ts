@@ -231,6 +231,14 @@ export function systemClock(): VoiceClock {
     };
 }
 
+/** Monotonic milliseconds in the plugin realm, which has no `performance`. */
+export function monotonicNow(): number {
+    // Firefox 153 (Zotero 11) moved `Cu.now()` to `ChromeUtils.now()`; older
+    // platforms only have `Cu.now()`.
+    const utils = ChromeUtils as typeof ChromeUtils & { now?: () => number };
+    return typeof utils.now === "function" ? utils.now() : Cu.now();
+}
+
 export function createVoiceService(
     adapters?: VoiceAdapters,
     clock: VoiceClock = systemClock(),

@@ -6,7 +6,7 @@ import {
     type VoiceEnvelope,
 } from "@beaver/agent-core/voice/contracts";
 import { microphoneHelp, type NativeVoice } from "./nativeVoice";
-import type { VoiceService } from "./voiceService";
+import { monotonicNow, type VoiceService } from "./voiceService";
 
 function recordingFormat() {
     const bytesPerSample = { pcm_s16le: 2 }[VOICE_FORMAT.encoding];
@@ -141,7 +141,7 @@ export class NativeCaptureHarness {
                 this.sessionId = result.sessionId;
                 this.retained = retainAudio ? [] : undefined;
                 this.retainedBytes = 0;
-                this.metrics = { startedAt: Cu.now() };
+                this.metrics = { startedAt: monotonicNow() };
             }
             return result;
         } finally {
@@ -168,7 +168,7 @@ export class NativeCaptureHarness {
         const metrics = this.metrics!;
         const { retentionLimit } = recordingFormat();
         const capture = this.native.createCapture(session, (event) => {
-            const elapsed = Cu.now() - metrics.startedAt;
+            const elapsed = monotonicNow() - metrics.startedAt;
             if (event.type === "ready") metrics.readyMs = elapsed;
             if (event.type === "frame") {
                 if (metrics.firstFrameMs === undefined)
@@ -189,9 +189,9 @@ export class NativeCaptureHarness {
             start: () => capture.start(),
             dispose: () => capture.dispose(),
             finish: async () => {
-                const at = Cu.now();
+                const at = monotonicNow();
                 await capture.finish();
-                metrics.stopMs = Cu.now() - at;
+                metrics.stopMs = monotonicNow() - at;
             },
         };
     }
