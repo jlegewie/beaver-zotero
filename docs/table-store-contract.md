@@ -317,9 +317,9 @@ cell is unattempted. `value` appears exactly with `answered`, `error` exactly wi
 `user`. A failed cell's `error` is the user-facing message clients show in the
 cell, written by the backend; its optional `error_code` (`download_failed`,
 `deadline`, …) is stable and appears only on failed cells. Raw diagnostics stay
-out of the table. Cells written before codes existed may hold a raw diagnostic,
-which `cellErrorMessage` replaces with a short message. A user clear stores `{outcome: "cleared", provenance: "user"}`; a reset
-deletes the cell so the next fill answers it. Summary columns count each outcome,
+out of the table. A user clear stores
+`{outcome: "cleared", provenance: "user"}`; a reset deletes the cell so the next
+fill answers it. Summary columns count each outcome,
 unattempted cells (in-scope rows for extraction columns), stale, unsure and
 metadata-only cells. The shared fixtures specify these semantics for other clients.
 

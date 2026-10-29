@@ -5,7 +5,6 @@ import {
     anchorColumn,
     annotationComment,
     annotationTitle,
-    cellErrorMessage,
     cellExpandedFields,
     cellIdFor,
     cellInvariantError,
@@ -378,56 +377,6 @@ describe("defaults", () => {
         expect(isCellEmpty(answered({ kind: "boolean", value: false }))).toBe(
             false,
         );
-    });
-});
-
-describe("cellErrorMessage", () => {
-    const failed = (error: string, error_code?: string): Cell => ({
-        outcome: "failed",
-        provenance: "document",
-        error,
-        ...(error_code ? { error_code } : {}),
-    });
-
-    it("shows a coded cell's message as written", () => {
-        expect(
-            cellErrorMessage(
-                failed(
-                    "The file is not on this computer and could not be downloaded.",
-                    "download_failed",
-                ),
-            ),
-        ).toBe("The file is not on this computer and could not be downloaded.");
-        // A code is what marks a message as written for display.
-        expect(cellErrorMessage(failed("deadline", "deadline"))).toBe(
-            "deadline",
-        );
-    });
-
-    it("replaces the raw diagnostics of cells written before codes", () => {
-        expect(
-            cellErrorMessage(
-                failed(
-                    "the document could not be read: Failed to download PDF for u-X8QE56E4 from remote storage: File not found on server (404)",
-                ),
-            ),
-        ).toBe("The document could not be read.");
-        expect(cellErrorMessage(failed("deadline"))).toBe(
-            "Ran out of time before this was answered.",
-        );
-        expect(cellErrorMessage(failed("the document has no text"))).toBe(
-            "The document has no readable text.",
-        );
-        expect(cellErrorMessage(failed("Zotero did not answer"))).toBe(
-            "Zotero did not answer",
-        );
-    });
-
-    it("has no message for a cell that did not fail", () => {
-        expect(cellErrorMessage(undefined)).toBeUndefined();
-        expect(
-            cellErrorMessage(answered({ kind: "text", text: "Survey" })),
-        ).toBeUndefined();
     });
 });
 

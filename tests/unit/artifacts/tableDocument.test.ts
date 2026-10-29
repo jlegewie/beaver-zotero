@@ -848,27 +848,6 @@ describe("cell states", () => {
         expect(html).toContain('<span class="bt-err">Could not be answered</span>');
     });
 
-    it("shows a short message, not the raw diagnostic, for a failure written before codes", () => {
-        const { html } = renderTableHtml({
-            id: "f",
-            columns: [{ id: "a", header: "Answer", type: "text" }],
-            rows: [
-                {
-                    id: "r",
-                    cells: {
-                        a: {
-                            outcome: "failed",
-                            provenance: "document",
-                            error: "the document could not be read: Failed to download PDF for u-X8QE56E4 from remote storage",
-                        },
-                    },
-                },
-            ],
-        });
-        expect(html).toContain('<span class="bt-err">The document could not be read.</span>');
-        expect(html).not.toContain("u-X8QE56E4");
-    });
-
     it("preserves every outcome and who wrote it in the snapshot", () => {
         const states: TableSpec = {
             id: "outcomes",
