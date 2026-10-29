@@ -34,6 +34,9 @@ import {
     normalizeSelectLabel,
     isExtractionColumn,
     isFillableColumn,
+    isStale,
+    isTitleAbstractOnly,
+    needsReview,
     codePointLength,
     jsonBytes,
     questionHash,
@@ -48,12 +51,14 @@ import {
     MAX_SPEC_BYTES,
     SELECT_COLORS,
     WRITE_BLOCKING_ISSUES,
+    type AnsweredCell,
     type Cell,
     type CellOutcome,
     type Column,
     type ColumnRole,
     type ColumnType,
     type Row,
+    type RowFailure,
     type SelectColor,
     type SelectOption,
     type TableCapabilities,
@@ -137,11 +142,39 @@ export interface CellWrite {
      * cell. Any other deletion of a user cell is skipped. Carries no cell.
      */
     reset?: boolean;
+    /**
+     * The row's documents when the answer was produced (null or `[]`: none).
+     * A row that names others now (as a set) skips the write
+     * (`documents_changed`), so a fill that read an older document never
+     * replaces answers read from a newer one.
+     */
+    expected_documents?: string[] | null;
 }
 
 export interface SetCellsMutation {
     op: "set_cells";
     cells: CellWrite[];
+}
+
+/**
+ * The row fields a fill writes: the documents the row is filled from and its
+ * failure. Only the named fields move; null clears one. Changing `documents`
+ * (as a set) clears the row's failure, unless the same mutation sets one: a
+ * failure is about the document that was read.
+ */
+export interface UpdateRowMutation {
+    op: "update_row";
+    /** Row id. */
+    row: string;
+    documents?: string[] | null;
+    failure?: RowFailure | null;
+    /**
+     * The documents the writer saw on the row (null or `[]`: none). When the
+     * row names others now (as a set), the update is skipped and reported
+     * (`documents_changed`): a failure, or a switch, decided for one document
+     * never lands on another a concurrent writer chose.
+     */
+    expected_documents?: string[] | null;
 }
 
 /** Table-level metadata. Only the named fields move; null clears one. */
@@ -168,6 +201,7 @@ export type TableMutation =
     | AddRowsMutation
     | RemoveRowsMutation
     | SetCellsMutation
+    | UpdateRowMutation
     | SetMetaMutation
     | RemoveSourcesMutation;
 
@@ -195,12 +229,17 @@ export type SkipReason =
     | "user_cell"
     | "question_changed"
     | "row_removed"
-    | "column_removed";
+    | "column_removed"
+    /** A write or `update_row` whose `expected_documents` no longer match the row. */
+    | "documents_changed";
 
-/** A `set_cells` write the engine declined, reported to the writer. */
+/**
+ * A `set_cells` write or `update_row` the engine declined, reported to the
+ * writer. A skipped `update_row` names no column.
+ */
 export interface SkippedCell {
     row: string;
-    column: string;
+    column?: string;
     reason: SkipReason;
 }
 
@@ -234,7 +273,10 @@ interface Draft {
     columnIndex: Map<string, number>;
     rowIndex: Map<string, number>;
     skipped: SkippedCell[];
-    /** `set_cells` skips writes to a removed row or column (the provider `edit`). */
+    /**
+     * `set_cells` and `update_row` skip writes to a removed row or column (the
+     * provider `edit`).
+     */
     skipMissing: boolean;
 }
 
@@ -325,6 +367,9 @@ function modelColumnCount(spec: TableSpec): number {
  *   there a write to a row or column no longer in the table is skipped and
  *   reported (`column_removed` first when both are gone), since during a fill
  *   that is a race with another writer, and the rest of the batch applies.
+ *   `update_row` of a removed row is skipped the same way.
+ * - **`update_row` that changes `documents` clears the row's `failure`**,
+ *   unless the same mutation sets one.
  * - **`set_cells` on a `select` matches by {@link normalizeSelectLabel}** and
  *   stores the column's spelling. A label the column does not have is appended,
  *   taking the next colour from {@link SELECT_COLORS}.
@@ -332,7 +377,8 @@ function modelColumnCount(spec: TableSpec): number {
  * - **An empty cell deletes**: `{ row, column, cell: {} }` (or null) removes the
  *   entry, so the cell counts as unattempted again.
  * - **A write clears `stale`**, because the cell has just been answered against
- *   the current question.
+ *   the current question, and **drops an empty `documents` list** (an answer
+ *   from title and abstract names none).
  * - **`update_column` that changes `description` sets `stale` on every existing
  *   cell of that column.**
  * - **`remove_columns` clears a `sort` or `anchor_column_id`** that pointed at
@@ -433,6 +479,8 @@ function applyOne(draft: Draft, mutation: TableMutation): Failure | undefined {
             return removeRows(draft, mutation);
         case "set_cells":
             return setCells(draft, mutation);
+        case "update_row":
+            return updateRow(draft, mutation);
         case "set_meta":
             return setMeta(draft, mutation);
         case "remove_sources":
@@ -532,6 +580,8 @@ function canonicalCell(
     if (tooLarge) return tooLarge;
     const stored: Cell = { ...cell };
     delete stored.stale;
+    if (Array.isArray(stored.documents) && stored.documents.length === 0)
+        delete stored.documents;
     const value = stored.value;
     if (column.type !== "select" || value?.kind !== "select") return stored;
 
@@ -758,7 +808,7 @@ function applyOptions(draft: Draft, column: Column, plan: OptionsPlan): void {
         const writable = writableRow(draft, row.id);
         if (!writable) continue;
         writable.cells[column.id] = {
-            ...writable.cells[column.id],
+            ...(writable.cells[column.id] as AnsweredCell),
             value: { ...value, label },
         };
     }
@@ -914,19 +964,126 @@ function addRows(draft: Draft, mutation: AddRowsMutation): Failure | undefined {
             cells[columnId] = canonical;
         }
 
+        const fields = withoutEmptyDocuments(incoming);
         const existing = writableRow(draft, incoming.id);
         if (existing) {
             // Upsert: the incoming cells win, everything the incoming row does
-            // not mention survives.
-            const { cells: _cells, ...fields } = incoming;
-            Object.assign(existing, fields);
+            // not mention survives. Empty documents say the row has none.
+            const { cells: _cells, ...rest } = fields;
+            Object.assign(existing, rest);
+            if (clearsDocuments(incoming)) delete existing.documents;
             existing.cells = { ...existing.cells, ...cells };
             continue;
         }
         const rows = rowsOf(draft);
         draft.rowIndex.set(incoming.id, rows.length);
         draft.ownRows.add(incoming.id);
-        rows.push({ ...incoming, cells });
+        rows.push({ ...fields, cells });
+    }
+    return undefined;
+}
+
+/** Whether the row names its documents as none: an empty list or null. */
+function clearsDocuments(row: Row): boolean {
+    return (
+        "documents" in row &&
+        (row.documents === null ||
+            (Array.isArray(row.documents) && row.documents.length === 0))
+    );
+}
+
+/** The row without an empty `documents` list (or null), which means none. */
+function withoutEmptyDocuments(row: Row): Row {
+    if (!clearsDocuments(row)) return row;
+    const { documents: _documents, ...rest } = row;
+    return rest;
+}
+
+function sameDocuments(
+    a: readonly string[] | undefined,
+    b: readonly string[] | undefined,
+): boolean {
+    const left = new Set(a ?? []);
+    const right = new Set(b ?? []);
+    return left.size === right.size && [...left].every((id) => right.has(id));
+}
+
+function updateRow(
+    draft: Draft,
+    mutation: UpdateRowMutation,
+): Failure | undefined {
+    if (!draft.rowIndex.has(mutation.row)) {
+        if (draft.skipMissing) {
+            draft.skipped.push({ row: mutation.row, reason: "row_removed" });
+            return undefined;
+        }
+        return fail(
+            "unknown_row",
+            `update_row: row "${mutation.row}" does not exist`,
+        );
+    }
+    const documents = mutation.documents;
+    if (
+        documents !== undefined &&
+        documents !== null &&
+        !(
+            Array.isArray(documents) &&
+            documents.every((id) => typeof id === "string" && id.length > 0)
+        )
+    )
+        return fail(
+            "invalid_mutation",
+            `update_row: the documents of "${mutation.row}" are a list of document ids`,
+        );
+    const failure = mutation.failure;
+    if (
+        failure !== undefined &&
+        failure !== null &&
+        !(
+            typeof failure === "object" &&
+            typeof failure.code === "string" &&
+            failure.code.length > 0 &&
+            typeof failure.message === "string" &&
+            failure.message.length > 0
+        )
+    )
+        return fail(
+            "invalid_mutation",
+            `update_row: the failure of "${mutation.row}" names a code and a message`,
+        );
+    const expected = mutation.expected_documents;
+    if (
+        expected !== undefined &&
+        expected !== null &&
+        !(
+            Array.isArray(expected) &&
+            expected.every((id) => typeof id === "string" && id.length > 0)
+        )
+    )
+        return fail(
+            "invalid_mutation",
+            `update_row: the expected documents of "${mutation.row}" are a list of document ids`,
+        );
+    const current = draft.spec.rows[draft.rowIndex.get(mutation.row)!];
+    if (
+        expected !== undefined &&
+        !sameDocuments(expected ?? undefined, current.documents)
+    ) {
+        draft.skipped.push({ row: mutation.row, reason: "documents_changed" });
+        return undefined;
+    }
+    const row = writableRow(draft, mutation.row)!;
+    if (documents !== undefined) {
+        const next = documents?.length ? [...documents] : undefined;
+        // A failure is about the document that was read, so new documents
+        // get a fresh try.
+        if (!sameDocuments(next, row.documents)) delete row.failure;
+        if (next) row.documents = next;
+        else delete row.documents;
+    }
+    if (failure !== undefined) {
+        if (failure === null) delete row.failure;
+        else row.failure = { code: failure.code, message: failure.message };
     }
     return undefined;
 }
@@ -1035,6 +1192,20 @@ function setCells(
             });
             continue;
         }
+        if (
+            write.expected_documents !== undefined &&
+            !sameDocuments(
+                write.expected_documents ?? undefined,
+                draft.spec.rows[rowAt].documents,
+            )
+        ) {
+            draft.skipped.push({
+                row: write.row,
+                column: write.column,
+                reason: "documents_changed",
+            });
+            continue;
+        }
 
         const row = writableRow(draft, write.row)!;
         if (deletion) {
@@ -1117,24 +1288,33 @@ function removeSources(
 // ---------------------------------------------------------------------------
 
 /**
- * Per-column counts, so a header can say "3 unsure" without walking the rows.
- * `unattempted` counts only the rows a filler would cover: in-scope rows for
- * extraction columns, every row for other question columns. `distribution` is
- * present only where a column has a countable vocabulary.
+ * Per-column counts, so a header can say "3 to review" without walking the
+ * rows. `unattempted` counts only the rows a filler would cover: in-scope rows
+ * for extraction columns, every row for other question columns; those of rows
+ * with a `failure` count as `in_failed_rows` instead. `distribution` is
+ * present only where a column has a countable vocabulary; an absent no counts
+ * with the other no answers.
  */
 export interface TableSummaryColumn {
     type: ColumnType;
     role?: ColumnRole;
     system?: true;
     answered: number;
+    /** Answered cells that rest on the paper's silence. */
+    absent: number;
     not_reported: number;
+    /** Failed answers; failed rows are `in_failed_rows`. */
     failed: number;
     cleared: number;
     unattempted: number;
+    /** Unattempted cells of rows with a `failure`. */
+    in_failed_rows: number;
+    /** By {@link isStale}: the question or the row's documents changed. */
     stale: number;
-    unsure: number;
-    /** Cells answered (or found not reported) from metadata only. */
-    metadata_only: number;
+    /** Filler cells with the review mark ({@link needsReview}). */
+    needs_review: number;
+    /** Filler answers read from the title and abstract only. */
+    title_abstract_only: number;
     distribution?: Record<string, number>;
 }
 
@@ -1146,7 +1326,7 @@ export interface TableSummary {
     sources: number;
     /** Rows in scope for extraction columns. */
     in_scope_rows: number;
-    /** Rows whose `status` is `"error"`. */
+    /** Rows with a `failure`. */
     failed_rows: number;
     /** Cells whose `provenance` is `"user"`. */
     user_edits: number;
@@ -1181,13 +1361,15 @@ export function summarize(spec: TableSpec): TableSummary {
         const detail: TableSummaryColumn = {
             type: column.type,
             answered: 0,
+            absent: 0,
             not_reported: 0,
             failed: 0,
             cleared: 0,
             unattempted: 0,
+            in_failed_rows: 0,
             stale: 0,
-            unsure: 0,
-            metadata_only: 0,
+            needs_review: 0,
+            title_abstract_only: 0,
         };
         if (column.role) detail.role = column.role;
         if (column.system) detail.system = true;
@@ -1197,7 +1379,8 @@ export function summarize(spec: TableSpec): TableSummary {
     }
 
     spec.rows.forEach((row, index) => {
-        if (row.status === "error") summary.failed_rows += 1;
+        const failedRow = row.failure != null;
+        if (failedRow) summary.failed_rows += 1;
         for (const column of spec.columns) {
             const detail = summary.columns_detail[column.id];
             const cell = row.cells[column.id];
@@ -1205,15 +1388,19 @@ export function summarize(spec: TableSpec): TableSummary {
                 if (
                     isFillableColumn(column) &&
                     (inScope[index] || !isExtractionColumn(column))
-                )
-                    detail.unattempted += 1;
+                ) {
+                    if (failedRow) detail.in_failed_rows += 1;
+                    else detail.unattempted += 1;
+                }
                 continue;
             }
             if (OUTCOME_COUNTS.includes(cell.outcome))
                 detail[cell.outcome] += 1;
-            if (cell.stale) detail.stale += 1;
-            if (cell.unsure) detail.unsure += 1;
-            if (cell.provenance === "metadata") detail.metadata_only += 1;
+            if (cell.absent) detail.absent += 1;
+            if (isStale(row, cell)) detail.stale += 1;
+            if (needsReview(column, cell)) detail.needs_review += 1;
+            if (cell.outcome === "answered" && isTitleAbstractOnly(cell))
+                detail.title_abstract_only += 1;
             if (cell.provenance === "user") summary.user_edits += 1;
             const value = cell.value;
             if (!value || !detail.distribution) continue;

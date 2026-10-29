@@ -21,13 +21,15 @@ function column(overrides: Partial<TableSummaryColumn> = {}): TableSummaryColumn
     return {
         type: 'text',
         answered: 0,
+        absent: 0,
         not_reported: 0,
         failed: 0,
         cleared: 0,
         unattempted: 0,
+        in_failed_rows: 0,
         stale: 0,
-        unsure: 0,
-        metadata_only: 0,
+        needs_review: 0,
+        title_abstract_only: 0,
         ...overrides,
     };
 }
@@ -42,7 +44,7 @@ function summary(overrides: Partial<TableSummary> = {}): TableSummary {
         user_edits: 0,
         columns_detail: {
             title: column({ answered: 10 }),
-            note: column({ answered: 4, unsure: 3 }),
+            note: column({ answered: 4, needs_review: 3 }),
         },
         ...overrides,
     };
@@ -182,21 +184,34 @@ describe('buildTableSectionFields — dimensions and coverage', () => {
 });
 
 describe('buildTableSectionFields — trust counts', () => {
-    it('sums unsure, metadata-only and stale and lists only what is non-zero', () => {
+    it('sums answers to review, from title and abstract and stale, and rows that could not be read', () => {
         const fields = buildTableSectionFields(
             input({
                 summary: summary({
+                    failed_rows: 2,
                     columns_detail: {
-                        a: column({ answered: 5, unsure: 2, stale: 1 }),
-                        b: column({ answered: 5, unsure: 1, metadata_only: 4 }),
+                        a: column({ answered: 5, needs_review: 2, stale: 1 }),
+                        b: column({ answered: 5, needs_review: 1, title_abstract_only: 4 }),
+                        // System columns are filled by Beaver, not answered.
+                        _year: column({ answered: 9, needs_review: 9, system: true }),
                     },
                 }),
             })
         );
-        expect(fields.unsure).toBe(3);
-        expect(fields.metadataOnly).toBe(4);
+        expect(fields.needsReview).toBe(3);
+        expect(fields.titleAbstractOnly).toBe(4);
         expect(fields.stale).toBe(1);
-        expect(fields.flagsLine).toBe('3 unsure · 4 from title and abstract · 1 stale');
+        expect(fields.failedRows).toBe(2);
+        expect(fields.flagsLine).toBe(
+            '3 to review · 4 from title and abstract · 1 stale · 2 papers could not be read'
+        );
+    });
+
+    it('says one paper could not be read in the singular', () => {
+        const fields = buildTableSectionFields(
+            input({ summary: summary({ failed_rows: 1, columns_detail: { a: column({ answered: 1 }) } }) })
+        );
+        expect(fields.flagsLine).toBe('1 paper could not be read');
     });
 
     it('leaves the flags line empty when nothing is flagged', () => {

@@ -1,8 +1,8 @@
 {
-    "name": "a metadata answer cites the title or abstract, with reasoning and unsure",
+    "name": "an absent no may rest on its reasoning alone",
     "before": {
         "id": "t1",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Sampling methods",
         "description": "How the papers sampled their respondents.",
         "anchor_column_id": "_reference",
@@ -43,6 +43,12 @@
                 "header": "Method",
                 "type": "text",
                 "description": "What method does the paper use?"
+            },
+            {
+                "id": "costs",
+                "header": "Costs",
+                "type": "boolean",
+                "description": "Does the study report monetary costs?"
             }
         ],
         "rows": [
@@ -54,12 +60,8 @@
                     "zotero_key": "AAA",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-AAAPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -91,13 +93,17 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Telephone survey"
                         },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-AAAPDF",
                                 "locator": "s12-s13",
                                 "quote": "Respondents were sampled by random digit dialing.",
                                 "page": 3,
@@ -112,7 +118,14 @@
                             }
                         ]
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r2",
@@ -122,13 +135,6 @@
                     "zotero_key": "BBB",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -150,19 +156,20 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Mail survey"
-                        },
-                        "evidence": [
-                            {
-                                "quote": "A mail survey of 2,000 households.",
-                                "field": "abstract"
-                            }
-                        ]
+                        }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r3",
@@ -172,13 +179,6 @@
                     "zotero_key": "CCC",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -198,7 +198,14 @@
                             "value": "2021"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         ]
     },
@@ -207,23 +214,21 @@
             "op": "set_cells",
             "cells": [
                 {
-                    "row": "r3",
-                    "column": "method",
+                    "row": "r1",
+                    "column": "costs",
                     "cell": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
-                            "kind": "text",
-                            "text": "Register study"
+                            "kind": "boolean",
+                            "value": false
                         },
-                        "evidence": [
-                            {
-                                "quote": "Using population registers",
-                                "field": "title"
-                            }
+                        "documents": [
+                            "u-AAAPDF"
                         ],
-                        "reasoning": "The title names registers; no other method is mentioned.",
-                        "unsure": true
+                        "absent": true,
+                        "confidence": "medium",
+                        "reasoning": "The paper describes costs only as cheap; no amounts are given."
                     }
                 }
             ]
@@ -231,7 +236,7 @@
     ],
     "after": {
         "id": "t1",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Sampling methods",
         "description": "How the papers sampled their respondents.",
         "anchor_column_id": "_reference",
@@ -272,6 +277,12 @@
                 "header": "Method",
                 "type": "text",
                 "description": "What method does the paper use?"
+            },
+            {
+                "id": "costs",
+                "header": "Costs",
+                "type": "boolean",
+                "description": "Does the study report monetary costs?"
             }
         ],
         "rows": [
@@ -283,12 +294,8 @@
                     "zotero_key": "AAA",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-AAAPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -320,13 +327,17 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Telephone survey"
                         },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-AAAPDF",
                                 "locator": "s12-s13",
                                 "quote": "Respondents were sampled by random digit dialing.",
                                 "page": 3,
@@ -340,8 +351,29 @@
                                 ]
                             }
                         ]
+                    },
+                    "costs": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "boolean",
+                            "value": false
+                        },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
+                        "absent": true,
+                        "confidence": "medium",
+                        "reasoning": "The paper describes costs only as cheap; no amounts are given."
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r2",
@@ -351,13 +383,6 @@
                     "zotero_key": "BBB",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -379,19 +404,20 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Mail survey"
-                        },
-                        "evidence": [
-                            {
-                                "quote": "A mail survey of 2,000 households.",
-                                "field": "abstract"
-                            }
-                        ]
+                        }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r3",
@@ -401,13 +427,6 @@
                     "zotero_key": "CCC",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -426,24 +445,15 @@
                             "kind": "date",
                             "value": "2021"
                         }
-                    },
-                    "method": {
-                        "outcome": "answered",
-                        "provenance": "metadata",
-                        "value": {
-                            "kind": "text",
-                            "text": "Register study"
-                        },
-                        "evidence": [
-                            {
-                                "quote": "Using population registers",
-                                "field": "title"
-                            }
-                        ],
-                        "reasoning": "The title names registers; no other method is mentioned.",
-                        "unsure": true
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         ]
     }

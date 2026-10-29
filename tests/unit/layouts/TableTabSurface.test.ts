@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * What the full-size table surface (the Beaver tab) adds to the shared grid:
- * row windowing, fitting the columns to the width, the metadata-only marks,
+ * row windowing, fitting the columns to the width, the title-and-abstract marks,
  * the value filters, and copying the view as text.
  */
 
@@ -18,16 +18,22 @@ import { setHost } from '@beaver/agent-ui/host';
 const h = React.createElement;
 
 function rows(count: number): Row[] {
-    return Array.from({ length: count }, (_, i) => ({
-        id: `r${i}`,
-        cells: {
-            ref: { outcome: 'answered', provenance: 'system', value: { kind: 'reference', display_name: `Paper ${i}` } },
-            finding: i % 3 === 0
-                ? { outcome: 'answered', provenance: 'metadata', value: { kind: 'text', text: `From abstract ${i}` }, evidence: [{ field: 'abstract', quote: 'q' }] }
-                : { outcome: 'answered', provenance: 'document', value: { kind: 'text', text: `Finding ${i}` } },
-            note: i % 2 === 0 ? { outcome: 'answered', provenance: 'document', value: { kind: 'text', text: 'Note\twith tab' } } : { outcome: 'not_reported', provenance: 'document' },
-        },
-    })) as Row[];
+    return Array.from({ length: count }, (_, i) => {
+        // Every third row has no document and is answered from title and abstract.
+        const documents = i % 3 === 0 ? undefined : [`u-DOC${i}`];
+        const read = documents ? { documents } : {};
+        return {
+            id: `r${i}`,
+            ...read,
+            cells: {
+                ref: { outcome: 'answered', provenance: 'system', value: { kind: 'reference', display_name: `Paper ${i}` } },
+                finding: documents
+                    ? { outcome: 'answered', provenance: 'model', ...read, value: { kind: 'text', text: `Finding ${i}` } }
+                    : { outcome: 'answered', provenance: 'model', value: { kind: 'text', text: `From abstract ${i}` } },
+                note: i % 2 === 0 ? { outcome: 'answered', provenance: 'system', value: { kind: 'text', text: 'Note\twith tab' } } : { outcome: 'not_reported', provenance: 'model', documents: [`u-DOC${i}`] },
+            },
+        };
+    }) as Row[];
 }
 
 const columns: Column[] = [
@@ -133,15 +139,15 @@ describe('fitting the width', () => {
     });
 });
 
-describe('metadata-only cells', () => {
+describe('cells from title and abstract', () => {
     it('marks the cell and counts it in the column header', () => {
         mount(h(DataTable, { table: spec(6) }));
-        expect(container!.querySelectorAll('td.bt-td-metadata')).toHaveLength(2);
+        expect(container!.querySelectorAll('td.bt-td-title-abstract')).toHaveLength(2);
         const finding = Array.from(container!.querySelectorAll('th.bt-th')).find(
             (th) => th.querySelector('.bt-th-label')?.textContent === 'Finding',
         )!;
         expect(finding.querySelector('.bt-th-meta')?.textContent).toBe('2 from abstract');
-        expect(container!.querySelector('td.bt-td-metadata .bt-metadata-only')?.textContent).toContain('From title and abstract');
+        expect(container!.querySelector('td.bt-td-title-abstract .bt-title-abstract')?.textContent).toContain('From title and abstract');
     });
 });
 

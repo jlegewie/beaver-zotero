@@ -23,8 +23,9 @@ const externalRef: ExternalReference = {
     library_items: [],
 };
 
+/** An answer the producer filled, which carries no marks. */
 function answered(value: CellValue): Cell {
-    return { outcome: "answered", provenance: "document", value };
+    return { outcome: "answered", provenance: "system", value };
 }
 
 const spec: TableSpec = {
@@ -62,6 +63,7 @@ const spec: TableSpec = {
                 source_id: "W1",
                 reference: externalRef,
             },
+            documents: ["u-ATTACH01"],
             cells: {
                 ref: {
                     outcome: "answered",
@@ -77,11 +79,13 @@ const spec: TableSpec = {
                 oa: answered({ kind: "boolean", value: true }),
                 methods: {
                     outcome: "answered",
-                    provenance: "document",
+                    provenance: "model",
+                    documents: ["u-ATTACH01"],
                     value: { kind: "text", text: "Survey" },
                     reasoning: "The methods section names one instrument.",
                     evidence: [
                         {
+                            document: "u-ATTACH01",
                             locator: "s3",
                             quote: "We surveyed 1,200 adults.",
                             page: 2,
@@ -98,6 +102,7 @@ const spec: TableSpec = {
                 zotero_key: "K2",
                 library_ref: "u",
             },
+            documents: ["u-ATTACH02"],
             cells: {
                 ref: {
                     outcome: "answered",
@@ -107,13 +112,12 @@ const spec: TableSpec = {
                 cites: answered({ kind: "number", value: 7 }),
                 type: answered({ kind: "select", label: "Book" }),
                 oa: answered({ kind: "boolean", value: false }),
-                methods: { outcome: "not_reported", provenance: "document" },
+                methods: { outcome: "not_reported", provenance: "model", documents: ["u-ATTACH02"] },
             },
         },
         {
             id: "r3",
-            status: "error",
-            error: "No text layer",
+            failure: { code: "no_text_layer", message: "No text layer" },
             cells: {
                 ref: {
                     outcome: "answered",
@@ -123,7 +127,8 @@ const spec: TableSpec = {
                 type: answered({ kind: "select", label: "Article" }),
                 methods: {
                     outcome: "failed",
-                    provenance: "document",
+                    provenance: "model",
+                    error_code: "no_locator",
                     error: "Extraction failed",
                 },
             },
@@ -236,8 +241,8 @@ describe("DataTable", () => {
         );
         expect(rows[0].querySelector(".bt-bool-yes")).not.toBeNull();
 
-        // False renders the marker with no glyph — the check is the signal.
-        expect(rows[1].querySelector(".bt-bool-no")?.textContent).toBe("");
+        // False is the word, muted, never an empty cell.
+        expect(rows[1].querySelector(".bt-bool-no")?.textContent).toBe("No");
         // Not reported is a finding, so it reads as a value.
         expect(
             rows[1].querySelector('[id="rK2/methods"] .bt-empty')?.textContent,
@@ -334,7 +339,7 @@ describe("DataTable", () => {
         mount(React.createElement(DataTable, { table: spec }));
         click(container!.querySelectorAll(".bt-rail-chevron")[2]);
         expect(container!.querySelector(".bt-detail-error")?.textContent).toBe(
-            "No text layer",
+            "Could not be read. No text layer",
         );
     });
 
@@ -611,32 +616,48 @@ describe("DataTable", () => {
         ).not.toBeNull();
     });
 
-    it("marks unsure, stale, metadata-only and user-owned cells", () => {
+    it("marks answers to review, stale, from title and abstract and user-owned cells", () => {
         const text = (value: string): CellValue => ({
             kind: "text",
             text: value,
         });
+        const read = (value: CellValue, extra: Record<string, unknown> = {}) =>
+            ({ outcome: "answered", provenance: "model", documents: ["u-DOC1"], value, ...extra }) as Cell;
         const table: TableSpec = {
             id: "states",
-            columns: [{ id: "m", header: "Methods", type: "text" }],
+            columns: [
+                { id: "m", header: "Methods", type: "text" },
+                { id: "n", header: "Sample", type: "number" },
+            ],
             rows: [
                 {
-                    id: "unsure",
-                    cells: { m: { ...answered(text("Survey")), unsure: true } },
+                    id: "review",
+                    documents: ["u-DOC1"],
+                    cells: {
+                        m: read(text("Survey"), { confidence: "low" }),
+                        // Medium marks a number, never prose.
+                        n: read({ kind: "number", value: 40 }, { confidence: "medium" }),
+                    },
+                },
+                {
+                    id: "medium",
+                    documents: ["u-DOC1"],
+                    cells: { m: read(text("Cohort"), { confidence: "medium" }) },
                 },
                 {
                     id: "stale",
-                    cells: { m: { ...answered(text("Panel")), stale: true } },
+                    documents: ["u-DOC1"],
+                    cells: { m: read(text("Panel"), { stale: true }) },
+                },
+                {
+                    id: "moved",
+                    documents: ["u-DOC2"],
+                    cells: { m: read(text("Diary")) },
                 },
                 {
                     id: "metadata",
                     cells: {
-                        m: {
-                            outcome: "answered",
-                            provenance: "metadata",
-                            value: text("Interviews"),
-                            evidence: [{ quote: "Interviews", field: "abstract" }],
-                        },
+                        m: { outcome: "answered", provenance: "model", value: text("Interviews") },
                     },
                 },
                 {
@@ -645,6 +666,7 @@ describe("DataTable", () => {
                 },
                 {
                     id: "edited",
+                    documents: ["u-DOC2"],
                     cells: {
                         m: {
                             outcome: "answered",
@@ -660,20 +682,168 @@ describe("DataTable", () => {
             ],
         };
         mount(React.createElement(DataTable, { table }));
-        const cell = (rowId: string) =>
-            container!.querySelector(`[id="${rowId}/m"]`)!;
+        const cell = (rowId: string, column = "m") =>
+            container!.querySelector(`[id="${rowId}/${column}"]`)!;
 
-        expect(cell("unsure").textContent).toBe("Survey · Unsure");
+        expect(cell("review").textContent).toBe("Survey · To review");
+        expect(cell("review").querySelector(".bt-review")?.getAttribute("title")).toBe(
+            "Beaver is not confident in this answer; check it against the paper",
+        );
+        expect(cell("review", "n").textContent).toBe("40 · To review");
+        expect(cell("medium").textContent).toBe("Cohort");
         expect(cell("stale").textContent).toBe("Panel · Stale");
+        expect(cell("stale").querySelector(".bt-stale")?.getAttribute("title")).toBe("The question changed");
+        expect(cell("moved").querySelector(".bt-stale")?.getAttribute("title")).toBe(
+            "The paper's document changed",
+        );
         expect(
-            cell("metadata").querySelector(".bt-metadata-only")?.textContent,
+            cell("metadata").querySelector(".bt-title-abstract")?.textContent,
         ).toBe(" · From title and abstract");
+        expect(cell("metadata").closest("td")?.classList.contains("bt-td-title-abstract")).toBe(true);
         expect(cell("cleared").textContent).toBe(" · Cleared by you");
         expect(cell("edited").querySelector(".bt-edited")).not.toBeNull();
+        // A user's answer is never stale by the row rule.
+        expect(cell("edited").querySelector(".bt-stale")).toBeNull();
         expect(
             cell("edited").querySelector('.bt-edit-mark[title="Edited by you"]'),
         ).not.toBeNull();
         expect(cell("blanked").textContent).toBe("Not reported · Edited by you");
+    });
+
+    it("reads an absence as an answer, with the reason first and the closest passages after", () => {
+        const table: TableSpec = {
+            id: "absent",
+            columns: [
+                { id: "rct", header: "RCT?", type: "boolean" },
+                { id: "funder", header: "Funder", type: "text" },
+            ],
+            rows: [
+                {
+                    id: "r",
+                    documents: ["u-DOC1"],
+                    cells: {
+                        rct: {
+                            outcome: "answered",
+                            provenance: "model",
+                            documents: ["u-DOC1"],
+                            value: { kind: "boolean", value: false },
+                            absent: true,
+                            reasoning: "No randomisation is described.",
+                            evidence: [{ document: "u-DOC1", locator: "s7", quote: "Participants chose a group." }],
+                        },
+                        funder: {
+                            outcome: "not_reported",
+                            provenance: "model",
+                            documents: ["u-DOC1"],
+                            reasoning: "No funding statement.",
+                        },
+                    },
+                },
+            ],
+        };
+        mount(React.createElement(DataTable, { table }));
+        const rct = container!.querySelector('[id="r/rct"]')!;
+        expect(rct.querySelector(".bt-bool-no")?.textContent).toBe("No");
+        expect(rct.querySelector(".bt-absent")?.textContent).toBe(" · not in paper");
+        expect(container!.querySelector('[id="r/funder"]')?.textContent).toBe("Not reported");
+
+        click(container!.querySelector(".bt-rail-chevron"));
+        const [rctDetail, funderDetail] = Array.from(container!.querySelectorAll(".bt-detail dd"));
+        const parts = Array.from(rctDetail.querySelectorAll(".bt-details-text, .bt-details-label, li")).map(
+            (el) => el.textContent,
+        );
+        expect(parts[0]).toBe("No randomisation is described.");
+        expect(parts[1]).toBe("Closest passages");
+        expect(parts[2]).toContain("“Participants chose a group.”");
+        // A not-reported cell shows its reason.
+        expect(funderDetail.querySelector(".bt-details-text")?.textContent).toBe("No funding statement.");
+    });
+
+    it("shows a number's display text as is, and the unit only beside a bare number", () => {
+        const table: TableSpec = {
+            id: "numbers",
+            columns: [{ id: "share", header: "Share", type: "number", unit: "%" }],
+            rows: [
+                { id: "worded", cells: { share: answered({ kind: "number", value: 90, display: "90% or higher" }) } },
+                { id: "bare", cells: { share: answered({ kind: "number", value: 12 }) } },
+            ],
+        };
+        mount(React.createElement(DataTable, { table }));
+        const worded = container!.querySelector('[id="worded/share"]')!;
+        expect(worded.textContent).toBe("90% or higher");
+        expect(worded.querySelector(".bt-unit")).toBeNull();
+        expect(container!.querySelector('[id="bare/share"] .bt-unit')?.textContent).toBe("%");
+    });
+
+    it("sets a cited table row's caption and header rows above its quote", () => {
+        const table: TableSpec = {
+            id: "context",
+            columns: [{ id: "share", header: "Share", type: "number" }],
+            rows: [
+                {
+                    id: "r",
+                    documents: ["u-DOC1"],
+                    cells: {
+                        share: {
+                            outcome: "answered",
+                            provenance: "model",
+                            documents: ["u-DOC1"],
+                            value: { kind: "number", value: 41 },
+                            evidence: [
+                                {
+                                    document: "u-DOC1",
+                                    locator: "s30",
+                                    quote: "Women 41",
+                                    context: "Table 2. Participants | Group | %",
+                                },
+                            ],
+                        },
+                    },
+                },
+            ],
+        };
+        mount(React.createElement(DataTable, { table }));
+        click(container!.querySelector(".bt-rail-chevron"));
+        const entry = container!.querySelector(".bt-detail .bt-details-list li")!;
+        expect(entry.firstElementChild?.className).toBe("bt-evidence-context");
+        expect(entry.firstElementChild?.textContent).toBe("Table 2. Participants | Group | %");
+        expect(entry.textContent).toContain("“Women 41”");
+        // Not a "closest passages" list: this is the answer's support.
+        expect(container!.querySelector(".bt-detail .bt-details-label")).toBeNull();
+    });
+
+    it("tells a row with nothing to read from one whose document could not be read", () => {
+        const table: TableSpec = {
+            id: "failures",
+            columns: [{ id: "m", header: "Methods", type: "text" }],
+            rows: [
+                {
+                    id: "empty",
+                    failure: { code: "no_source", message: "This item has no document or abstract to read." },
+                    cells: {},
+                },
+                {
+                    id: "locked",
+                    documents: ["u-DOC1"],
+                    failure: { code: "encrypted", message: "The PDF is password-protected." },
+                    cells: {},
+                },
+            ],
+        };
+        mount(React.createElement(DataTable, { table }));
+        const rows = container!.querySelectorAll("tr.bt-row");
+        expect(rows[0].classList.contains("bt-row-error")).toBe(true);
+        expect(rows[1].classList.contains("bt-row-error")).toBe(true);
+        // Its unattempted cells stay empty.
+        expect(container!.querySelector('[id="locked/m"]')?.textContent).toBe("");
+        click(container!.querySelectorAll(".bt-rail-chevron")[0]);
+        click(container!.querySelectorAll(".bt-rail-chevron")[1]);
+        expect(
+            Array.from(container!.querySelectorAll(".bt-detail-error")).map((el) => el.textContent),
+        ).toEqual([
+            "Nothing to read. This item has no document or abstract to read.",
+            "Could not be read. The PDF is password-protected.",
+        ]);
     });
 
     it("renders the empty text for a table without rows", () => {

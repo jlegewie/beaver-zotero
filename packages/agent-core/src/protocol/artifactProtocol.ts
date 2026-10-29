@@ -14,14 +14,20 @@ export interface TableStages {
     sources: number;
     /** Question columns; system columns are not counted. */
     columns: number;
-    /** Rows with no attachment to read, which a fill answers from metadata. */
+    /** Rows with no document to read, which a fill answers from title and abstract. */
     rows_without_document: number;
+    /**
+     * Rows whose last fill stopped before they were answered (`Row.failure`).
+     * Absent on records written before the field.
+     */
+    failed_rows?: number;
     /** The default row set of the next fill, and its cells. */
     remaining_rows: number;
     remaining_cells: number;
     answered: number;
-    /** Answered cells taken from title and abstract only. */
-    metadata_only: number;
+    /** Filler answers read from the title and abstract only. */
+    title_abstract_only: number;
+    /** Failed answers; rows that could not be read are `failed_rows`. */
     failed: number;
     stale: number;
 }
@@ -56,18 +62,23 @@ export interface TableFillRecord {
     /** Rows the fill planned. */
     rows: number;
     rows_filled: number;
+    /**
+     * Rows the fill could not answer: their document could not be read, the
+     * model gave no answer, or time ran out. Rows without input are apart.
+     */
     rows_failed: number;
     /** Rows left unattempted, by reason: deadline, credits, cancel, stopped. */
     rows_not_started: Record<string, number>;
-    /** Rows with neither a document nor an abstract, written not reported. */
+    /** Rows with neither a document nor an abstract (failure `no_source`). */
     rows_without_input: number;
     /** Rows answered but not written, or whose commit outcome is unknown. */
     rows_not_written: number;
     rows_uncertain: number;
     answered: number;
     not_reported: number;
-    /** Answered cells taken from title and abstract only. */
-    from_metadata: number;
+    /** Answered cells read from the title and abstract only. */
+    from_title_abstract: number;
+    /** Failed answers (cells). */
     failed: number;
     /** Cell writes the table refused, by reason. */
     skipped: Record<string, number>;
@@ -141,12 +152,12 @@ export interface ArtifactRequest {
      * Not `seq`, which numbers run events on the chat socket.
      */
     edit_seq?: number | null;
-    /** `edit`: the mutations to commit; `set_cells` only. */
+    /** `edit`: the mutations to commit; `set_cells` and `update_row` only. */
     mutations?: TableMutation[] | null;
 }
 
-/** The mutations an `edit` may carry. */
-export const EDIT_MUTATION_OPS: readonly string[] = ["set_cells"];
+/** The mutations an `edit` may carry: a fill's cell writes and row updates. */
+export const EDIT_MUTATION_OPS: readonly string[] = ["set_cells", "update_row"];
 
 export interface ArtifactVersion {
     version: number;

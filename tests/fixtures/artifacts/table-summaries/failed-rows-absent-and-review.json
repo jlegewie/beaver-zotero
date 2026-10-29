@@ -1,0 +1,357 @@
+{
+    "name": "row failures, absent answers counted with the other no answers, review marks and title and abstract answers",
+    "spec": {
+        "id": "t1",
+        "spec_version": 2,
+        "anchor_column_id": "_reference",
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            },
+            {
+                "id": "n",
+                "header": "Sample",
+                "type": "number",
+                "unit": "participants",
+                "description": "How many participants?"
+            },
+            {
+                "id": "costs",
+                "header": "Costs",
+                "type": "boolean",
+                "description": "Does the study report monetary costs?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA"
+                },
+                "documents": [
+                    "u-PDF1"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "AAA"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Survey"
+                        },
+                        "documents": [
+                            "u-PDF1"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF1",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ],
+                        "confidence": "high"
+                    },
+                    "n": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "number",
+                            "value": 120
+                        },
+                        "documents": [
+                            "u-PDF1"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF1",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ],
+                        "confidence": "medium"
+                    },
+                    "costs": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "boolean",
+                            "value": false
+                        },
+                        "documents": [
+                            "u-PDF1"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF1",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ],
+                        "absent": true,
+                        "confidence": "medium",
+                        "reasoning": "Costs are described only in words."
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB"
+                },
+                "documents": [
+                    "u-PDF2"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "BBB"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Interviews"
+                        },
+                        "documents": [
+                            "u-PDF2"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF2",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ],
+                        "confidence": "medium"
+                    },
+                    "n": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "number",
+                            "value": 40
+                        },
+                        "documents": [
+                            "u-PDF2"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF2",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ],
+                        "confidence": "high"
+                    },
+                    "costs": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "boolean",
+                            "value": false
+                        },
+                        "documents": [
+                            "u-PDF2"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF2",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ],
+                        "confidence": "low"
+                    }
+                }
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCC"
+                },
+                "documents": [
+                    "u-PDF3"
+                ],
+                "failure": {
+                    "code": "encrypted",
+                    "message": "The PDF is password-protected."
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "CCC"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Register"
+                        },
+                        "confidence": "low"
+                    }
+                }
+            },
+            {
+                "id": "r4",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "DDD"
+                },
+                "failure": {
+                    "code": "no_source",
+                    "message": "There is no document or abstract to read."
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "DDD"
+                        }
+                    }
+                }
+            },
+            {
+                "id": "r5",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "EEE"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "EEE"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Panel"
+                        }
+                    },
+                    "n": {
+                        "outcome": "not_reported",
+                        "provenance": "model",
+                        "confidence": "low",
+                        "reasoning": "The abstract gives no sample size."
+                    },
+                    "costs": {
+                        "outcome": "answered",
+                        "provenance": "user",
+                        "value": {
+                            "kind": "boolean",
+                            "value": false
+                        }
+                    }
+                }
+            }
+        ]
+    },
+    "summary": {
+        "rows": 5,
+        "columns": 4,
+        "sources": 0,
+        "in_scope_rows": 5,
+        "failed_rows": 2,
+        "user_edits": 1,
+        "columns_detail": {
+            "_reference": {
+                "type": "reference",
+                "answered": 5,
+                "absent": 0,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "system": true
+            },
+            "method": {
+                "type": "text",
+                "answered": 4,
+                "absent": 0,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 1,
+                "stale": 1,
+                "needs_review": 1,
+                "title_abstract_only": 2
+            },
+            "n": {
+                "type": "number",
+                "answered": 2,
+                "absent": 0,
+                "not_reported": 1,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 2,
+                "stale": 0,
+                "needs_review": 2,
+                "title_abstract_only": 0
+            },
+            "costs": {
+                "type": "boolean",
+                "answered": 3,
+                "absent": 1,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 2,
+                "stale": 0,
+                "needs_review": 1,
+                "title_abstract_only": 0,
+                "distribution": {
+                    "false": 3
+                }
+            }
+        }
+    }
+}

@@ -5,8 +5,8 @@
  * Zotero shows for any snapshot: a file name, a URL, an "archived from" link.
  * None of that says anything about the table. This section replaces that
  * silence with the three facts a stored table has and a snapshot does not —
- * how big it is and how much of it is filled in, how much of it we are unsure
- * about, and which version it is at — plus the ways to open it.
+ * how big it is and how much of it is filled in, how much of it needs a
+ * second look, and which version it is at — plus the ways to open it.
  *
  * It is also where a table that went *backwards* is surfaced: a Zotero file
  * conflict resolved toward another device replaces the whole storage directory,

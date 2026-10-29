@@ -133,9 +133,9 @@ describe("historical table cards", () => {
 describe("stage lines", () => {
     const stages = {
         rows: 12, sources: 1, columns: 3, rows_without_document: 2,
-        remaining_rows: 12, remaining_cells: 36, answered: 0, metadata_only: 0, failed: 0, stale: 0,
+        remaining_rows: 12, remaining_cells: 36, answered: 0, title_abstract_only: 0, failed: 0, stale: 0,
     };
-    it("says what a partial fill left and what came from metadata, and never counts rows without attachments", async () => {
+    it("says what a partial fill left, which papers could not be read and what came from title and abstract, and never counts rows without attachments", async () => {
         const { formatTableStages } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
         expect(
             formatTableStages({ ...record, change: "Created table", run: "none", stages }),
@@ -144,8 +144,14 @@ describe("stage lines", () => {
             formatTableStages({ ...record, change: "Filled table", stages: { ...stages, answered: 9, remaining_rows: 9 } }),
         ).toEqual(["9 rows still to fill"]);
         expect(
-            formatTableStages({ ...record, change: "Read table", stages: { ...stages, answered: 4, remaining_rows: 0, metadata_only: 4 } }),
+            formatTableStages({ ...record, change: "Read table", stages: { ...stages, answered: 4, remaining_rows: 0, title_abstract_only: 4 } }),
         ).toEqual(["4 answers from title and abstract only"]);
+        expect(
+            formatTableStages({ ...record, change: "Filled table", stages: { ...stages, answered: 9, remaining_rows: 3, failed_rows: 2, failed: 1 } }),
+        ).toEqual(["3 rows still to fill", "2 papers could not be read", "1 cell failed"]);
+        expect(
+            formatTableStages({ ...record, change: "Filled table", stages: { ...stages, answered: 9, remaining_rows: 0, failed_rows: 1 } }),
+        ).toEqual(["1 paper could not be read"]);
         expect(formatTableStages(record)).toEqual([]);
     });
 });
@@ -237,7 +243,7 @@ describe("fill stage card", () => {
         expect(html).toContain("9 rows still to fill");
     });
 
-    it("lists failures, skipped cells, metadata answers and credits, and nothing for a call that ran no fill", async () => {
+    it("lists failures, skipped cells, title-and-abstract answers and credits, and nothing for a call that ran no fill", async () => {
         const { formatFillLines } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
         const fill = {
             ...outcomes.fill_record.fill,
@@ -247,7 +253,7 @@ describe("fill stage card", () => {
             rows_not_started: { deadline: 1 },
             rows_without_input: 3,
             rows_uncertain: 1,
-            from_metadata: 4,
+            from_title_abstract: 4,
             skipped: { user_cell: 1, row_removed: 2 },
             credits_charged: 6.5,
         };

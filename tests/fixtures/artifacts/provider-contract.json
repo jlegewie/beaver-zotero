@@ -16,7 +16,7 @@
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -75,18 +75,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -119,13 +111,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -142,9 +138,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ],
         "key": "ABCDEFGH",
@@ -161,49 +164,57 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_year": {
             "type": "date",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_identifier": {
             "type": "link",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "topic": {
             "type": "select",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {
               "Methods": 1
             }
@@ -211,13 +222,15 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
+            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
-            "stale": 0,
-            "unsure": 0,
-            "metadata_only": 1,
+            "in_failed_rows": 0,
+            "stale": 1,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {}
           }
         }
@@ -254,49 +267,57 @@
               "_reference": {
                 "type": "reference",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
               },
               "_year": {
                 "type": "date",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
               },
               "_identifier": {
                 "type": "link",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
               },
               "topic": {
                 "type": "select",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "distribution": {
                   "Methods": 1
                 }
@@ -304,13 +325,15 @@
               "open_access": {
                 "type": "boolean",
                 "answered": 0,
+                "absent": 0,
                 "not_reported": 1,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 1,
+                "needs_review": 0,
+                "title_abstract_only": 1,
                 "distribution": {}
               }
             }
@@ -331,7 +354,7 @@
       "title": "Comparison",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -390,18 +413,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -434,13 +449,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -457,9 +476,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ]
       },
@@ -479,7 +505,7 @@
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -538,18 +564,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -582,13 +600,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -605,9 +627,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ],
         "key": "ABCDEFGH",
@@ -624,49 +653,57 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_year": {
             "type": "date",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_identifier": {
             "type": "link",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "topic": {
             "type": "select",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {
               "Methods": 1
             }
@@ -674,13 +711,15 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
+            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
-            "stale": 0,
-            "unsure": 0,
-            "metadata_only": 1,
+            "in_failed_rows": 0,
+            "stale": 1,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {}
           }
         }
@@ -711,7 +750,7 @@
       "title": "Comparison",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -770,18 +809,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -814,13 +845,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -837,9 +872,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ]
       },
@@ -860,7 +902,7 @@
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -919,18 +961,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -963,13 +997,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -986,9 +1024,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ],
         "key": "ABCDEFGH",
@@ -1005,49 +1050,57 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_year": {
             "type": "date",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_identifier": {
             "type": "link",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "topic": {
             "type": "select",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {
               "Methods": 1
             }
@@ -1055,13 +1108,15 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
+            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
-            "stale": 0,
-            "unsure": 0,
-            "metadata_only": 1,
+            "in_failed_rows": 0,
+            "stale": 1,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {}
           }
         }
@@ -1090,7 +1145,7 @@
       "key": "u-ABCDEFGH",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -1149,18 +1204,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -1193,13 +1240,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -1216,9 +1267,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ],
         "key": "ABCDEFGH",
@@ -1242,7 +1300,7 @@
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -1301,18 +1359,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -1345,13 +1395,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -1368,9 +1422,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ],
         "key": "ABCDEFGH",
@@ -1387,49 +1448,57 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_year": {
             "type": "date",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_identifier": {
             "type": "link",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "topic": {
             "type": "select",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {
               "Methods": 1
             }
@@ -1437,13 +1506,15 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
+            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
-            "stale": 0,
-            "unsure": 0,
-            "metadata_only": 1,
+            "in_failed_rows": 0,
+            "stale": 1,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {}
           }
         }
@@ -1467,7 +1538,7 @@
       "key": "u-ABCDEFGH",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -1526,18 +1597,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -1570,13 +1633,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -1593,9 +1660,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ],
         "key": "ABCDEFGH",
@@ -1621,7 +1695,7 @@
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -1680,18 +1754,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -1724,13 +1790,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -1747,9 +1817,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ],
         "key": "ABCDEFGH",
@@ -1768,7 +1845,7 @@
       "title": "Comparison",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -1827,18 +1904,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -1871,13 +1940,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -1894,9 +1967,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ]
       },
@@ -1936,7 +2016,7 @@
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "spec": {
         "id": "t4",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Comparison",
         "description": "Open-access status and topic of the compared papers.",
         "anchor_column_id": "_reference",
@@ -1995,18 +2075,10 @@
             "ref": {
               "kind": "item",
               "library_ref": "u",
-              "zotero_key": "PAPER222",
-              "attachment": {
-                "library_ref": "u",
-                "zotero_key": "PDF22222"
-              }
+              "zotero_key": "PAPER222"
             },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
+            "documents": [
+              "u-PAPER222PDF"
             ],
             "cells": {
               "_reference": {
@@ -2039,13 +2111,17 @@
               },
               "topic": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "Methods"
                 },
+                "documents": [
+                  "u-PAPER222PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-PAPER222PDF",
                     "locator": "s4-s5",
                     "quote": "We compare three sampling designs.",
                     "page": 0,
@@ -2062,9 +2138,16 @@
               },
               "open_access": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               }
-            }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-09-10"
+              }
+            ]
           }
         ],
         "key": "ABCDEFGH",
@@ -2081,49 +2164,57 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_year": {
             "type": "date",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "_identifier": {
             "type": "link",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "system": true
           },
           "topic": {
             "type": "select",
             "answered": 1,
+            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
+            "in_failed_rows": 0,
             "stale": 0,
-            "unsure": 0,
-            "metadata_only": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {
               "Methods": 1
             }
@@ -2131,13 +2222,15 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
+            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
             "unattempted": 0,
-            "stale": 0,
-            "unsure": 0,
-            "metadata_only": 1,
+            "in_failed_rows": 0,
+            "stale": 1,
+            "needs_review": 0,
+            "title_abstract_only": 0,
             "distribution": {}
           }
         }
@@ -2226,49 +2319,57 @@
               "_reference": {
                 "type": "reference",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
               },
               "_year": {
                 "type": "date",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
               },
               "_identifier": {
                 "type": "link",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
               },
               "topic": {
                 "type": "select",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "distribution": {
                   "Methods": 1
                 }
@@ -2276,13 +2377,15 @@
               "open_access": {
                 "type": "boolean",
                 "answered": 0,
+                "absent": 0,
                 "not_reported": 1,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 1,
+                "needs_review": 0,
+                "title_abstract_only": 1,
                 "distribution": {}
               }
             }
@@ -2304,49 +2407,57 @@
                   "_reference": {
                     "type": "reference",
                     "answered": 1,
+                    "absent": 0,
                     "not_reported": 0,
                     "failed": 0,
                     "cleared": 0,
                     "unattempted": 0,
+                    "in_failed_rows": 0,
                     "stale": 0,
-                    "unsure": 0,
-                    "metadata_only": 0,
+                    "needs_review": 0,
+                    "title_abstract_only": 0,
                     "system": true
                   },
                   "_year": {
                     "type": "date",
                     "answered": 1,
+                    "absent": 0,
                     "not_reported": 0,
                     "failed": 0,
                     "cleared": 0,
                     "unattempted": 0,
+                    "in_failed_rows": 0,
                     "stale": 0,
-                    "unsure": 0,
-                    "metadata_only": 0,
+                    "needs_review": 0,
+                    "title_abstract_only": 0,
                     "system": true
                   },
                   "_identifier": {
                     "type": "link",
                     "answered": 1,
+                    "absent": 0,
                     "not_reported": 0,
                     "failed": 0,
                     "cleared": 0,
                     "unattempted": 0,
+                    "in_failed_rows": 0,
                     "stale": 0,
-                    "unsure": 0,
-                    "metadata_only": 0,
+                    "needs_review": 0,
+                    "title_abstract_only": 0,
                     "system": true
                   },
                   "topic": {
                     "type": "select",
                     "answered": 1,
+                    "absent": 0,
                     "not_reported": 0,
                     "failed": 0,
                     "cleared": 0,
                     "unattempted": 0,
+                    "in_failed_rows": 0,
                     "stale": 0,
-                    "unsure": 0,
-                    "metadata_only": 0,
+                    "needs_review": 0,
+                    "title_abstract_only": 0,
                     "distribution": {
                       "Methods": 1
                     }
@@ -2354,13 +2465,15 @@
                   "open_access": {
                     "type": "boolean",
                     "answered": 0,
+                    "absent": 0,
                     "not_reported": 1,
                     "failed": 0,
                     "cleared": 0,
                     "unattempted": 0,
+                    "in_failed_rows": 0,
                     "stale": 0,
-                    "unsure": 0,
-                    "metadata_only": 1,
+                    "needs_review": 0,
+                    "title_abstract_only": 1,
                     "distribution": {}
                   }
                 }
@@ -2397,13 +2510,17 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "number",
                   "value": 120.0
                 },
+                "documents": [
+                  "u-R1PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-R1PDF",
                     "locator": "s12-s13",
                     "quote": "We enrolled 120 pupils.",
                     "page": 3,
@@ -2425,19 +2542,13 @@
               "column": "design",
               "cell": {
                 "outcome": "answered",
-                "provenance": "metadata",
+                "provenance": "model",
                 "value": {
                   "kind": "select",
                   "label": "RCT"
                 },
-                "evidence": [
-                  {
-                    "quote": "A randomised trial in 40 schools.",
-                    "field": "abstract"
-                  }
-                ],
-                "reasoning": "The abstract says randomised.",
-                "unsure": true
+                "confidence": "low",
+                "reasoning": "The abstract says randomised."
               },
               "question_hash": "0b5e8a7d3c2f1e94"
             },
@@ -2446,7 +2557,7 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "not_reported",
-                "provenance": "metadata"
+                "provenance": "model"
               },
               "question_hash": "8f2d6c1a9b3e4f70"
             },
@@ -2455,7 +2566,8 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "failed",
-                "provenance": "document",
+                "provenance": "model",
+                "error_code": "no_answer",
                 "error": "deadline"
               },
               "question_hash": "8f2d6c1a9b3e4f70"
@@ -2499,13 +2611,17 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "number",
                   "value": 120.0
                 },
+                "documents": [
+                  "u-R1PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-R1PDF",
                     "locator": "s12-s13",
                     "quote": "We enrolled 120 pupils.",
                     "page": 3,
@@ -2527,13 +2643,17 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "number",
                   "value": 120.0
                 },
+                "documents": [
+                  "u-R2PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-R2PDF",
                     "locator": "s12-s13",
                     "quote": "We enrolled 120 pupils.",
                     "page": 3,
@@ -2555,13 +2675,17 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "number",
                   "value": 120.0
                 },
+                "documents": [
+                  "u-R9PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-R9PDF",
                     "locator": "s12-s13",
                     "quote": "We enrolled 120 pupils.",
                     "page": 3,
@@ -2583,13 +2707,17 @@
               "column": "design",
               "cell": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "number",
                   "value": 120.0
                 },
+                "documents": [
+                  "u-R3PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-R3PDF",
                     "locator": "s12-s13",
                     "quote": "We enrolled 120 pupils.",
                     "page": 3,
@@ -2611,13 +2739,17 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "number",
                   "value": 120.0
                 },
+                "documents": [
+                  "u-R5PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-R5PDF",
                     "locator": "s12-s13",
                     "quote": "We enrolled 120 pupils.",
                     "page": 3,
@@ -2694,13 +2826,17 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "number",
                   "value": 120.0
                 },
+                "documents": [
+                  "u-R5PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-R5PDF",
                     "locator": "s12-s13",
                     "quote": "We enrolled 120 pupils.",
                     "page": 3,
@@ -2763,13 +2899,17 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "number",
                   "value": 120.0
                 },
+                "documents": [
+                  "u-R1PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-R1PDF",
                     "locator": "s12-s13",
                     "quote": "We enrolled 120 pupils.",
                     "page": 3,
@@ -2823,13 +2963,17 @@
               "column": "sample_size",
               "cell": {
                 "outcome": "answered",
-                "provenance": "document",
+                "provenance": "model",
                 "value": {
                   "kind": "number",
                   "value": 120.0
                 },
+                "documents": [
+                  "u-R6PDF"
+                ],
                 "evidence": [
                   {
+                    "document": "u-R6PDF",
                     "locator": "s12-s13",
                     "quote": "We enrolled 120 pupils.",
                     "page": 3,

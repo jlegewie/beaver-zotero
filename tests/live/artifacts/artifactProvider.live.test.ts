@@ -19,6 +19,7 @@ let writeRequest: any;
 const operationId = `provider-live-${Date.now()}`;
 const spec = {
     id: operationId,
+    spec_version: 2,
     title: "Provider acceptance table",
     columns: [
         {
@@ -84,7 +85,7 @@ describe("portable artifact provider in Zotero", () => {
                         cells: {
                             answer: {
                                 outcome: "not_reported",
-                                provenance: "document",
+                                provenance: "model",
                                 reasoning: "The material supplies no answer.",
                             },
                         },

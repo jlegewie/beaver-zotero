@@ -1,0 +1,362 @@
+{
+    "name": "stale counts cells read from documents the row no longer names, and stored stale marks",
+    "spec": {
+        "id": "t1",
+        "spec_version": 2,
+        "anchor_column_id": "_reference",
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            },
+            {
+                "id": "n",
+                "header": "Sample",
+                "type": "number",
+                "unit": "participants",
+                "description": "How many participants?"
+            },
+            {
+                "id": "costs",
+                "header": "Costs",
+                "type": "boolean",
+                "description": "Does the study report monetary costs?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA"
+                },
+                "documents": [
+                    "u-PDF1"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "AAA"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Survey"
+                        },
+                        "documents": [
+                            "u-PDF1"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF1",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ]
+                    },
+                    "n": {
+                        "outcome": "not_reported",
+                        "provenance": "model",
+                        "documents": [
+                            "u-PDF1"
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB"
+                },
+                "documents": [
+                    "u-PDF3"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "BBB"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Interviews"
+                        },
+                        "documents": [
+                            "u-PDF2"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF2",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ]
+                    },
+                    "n": {
+                        "outcome": "not_reported",
+                        "provenance": "model",
+                        "documents": [
+                            "u-PDF2"
+                        ]
+                    },
+                    "costs": {
+                        "outcome": "answered",
+                        "provenance": "user",
+                        "value": {
+                            "kind": "boolean",
+                            "value": true
+                        }
+                    }
+                }
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCC"
+                },
+                "documents": [
+                    "u-PDF4",
+                    "u-PDF5"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "CCC"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Panel"
+                        },
+                        "documents": [
+                            "u-PDF4"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF4",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "r4",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "DDD"
+                },
+                "documents": [
+                    "u-PDF6"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "DDD"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Register"
+                        }
+                    },
+                    "n": {
+                        "outcome": "failed",
+                        "provenance": "model",
+                        "error_code": "no_locator",
+                        "error": "The answer could not be traced to a passage in the document."
+                    },
+                    "costs": {
+                        "outcome": "cleared",
+                        "provenance": "user"
+                    }
+                }
+            },
+            {
+                "id": "r5",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "EEE"
+                },
+                "documents": [
+                    "u-PDF7",
+                    "u-PDF8"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "EEE"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Survey"
+                        },
+                        "documents": [
+                            "u-PDF8",
+                            "u-PDF7"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF8",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ],
+                        "stale": true
+                    },
+                    "n": {
+                        "outcome": "not_reported",
+                        "provenance": "model",
+                        "documents": [
+                            "u-PDF8",
+                            "u-PDF7"
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "r6",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "FFF"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "FFF"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Mail survey"
+                        }
+                    },
+                    "n": {
+                        "outcome": "not_reported",
+                        "provenance": "model"
+                    }
+                }
+            }
+        ]
+    },
+    "summary": {
+        "rows": 6,
+        "columns": 4,
+        "sources": 0,
+        "in_scope_rows": 6,
+        "failed_rows": 0,
+        "user_edits": 2,
+        "columns_detail": {
+            "_reference": {
+                "type": "reference",
+                "answered": 6,
+                "absent": 0,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "system": true
+            },
+            "method": {
+                "type": "text",
+                "answered": 6,
+                "absent": 0,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 4,
+                "needs_review": 0,
+                "title_abstract_only": 2
+            },
+            "n": {
+                "type": "number",
+                "answered": 0,
+                "absent": 0,
+                "not_reported": 4,
+                "failed": 1,
+                "cleared": 0,
+                "unattempted": 1,
+                "in_failed_rows": 0,
+                "stale": 1,
+                "needs_review": 0,
+                "title_abstract_only": 0
+            },
+            "costs": {
+                "type": "boolean",
+                "answered": 1,
+                "absent": 0,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 1,
+                "unattempted": 4,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "distribution": {
+                    "true": 1
+                }
+            }
+        }
+    }
+}

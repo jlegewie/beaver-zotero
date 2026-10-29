@@ -1,9 +1,8 @@
 /**
  * Chat citations assembled from a table row and one piece of its evidence.
  *
- * Evidence is item-less: an entry says where in the row's attachment (or in
- * which metadata field) an answer was found, and the row says which work it is
- * and how it is cited. Joining the two gives a citation the chat's `Citation`
+ * An evidence entry says which document a passage is in and where, and the row
+ * says which work it is and how it is cited. Joining the two gives a citation the chat's `Citation`
  * component renders and navigates, with nothing loaded from Zotero — the table
  * view, the reader enhancement and the static document's reference list all
  * build their citations here. Surfaces hand the assembled citation to the
@@ -21,8 +20,10 @@ import {
 } from "../citations/citationGrammar";
 import { parseExtractIdValue } from "../extract/ids";
 import { UNRESOLVED_LIBRARY_ID } from "../identity/libraryRef";
+import { documentReference } from "./rowKinds";
 import {
     REFERENCE_COLUMN_ID,
+    isZoteroRowRef,
     type CellValue,
     type Evidence,
     type Row,
@@ -81,70 +82,68 @@ interface Target {
     type: CitationType;
 }
 
-/** What the evidence points into: the attachment that was read, or the work itself for metadata. */
-function targetOf(row: Row, evidence: Evidence): Target | undefined {
+/** The work above the document: the item of an item row, the parent of an attachment or annotation. */
+function parentOf(row: Row): ZoteroCitationRef | undefined {
     const ref = row.ref;
-    if (!ref) return undefined;
-    const fromDocument = !evidence.field;
-    // Page-only evidence still names its page, so its tag stays its own.
-    const loc = fromDocument
-        ? parseLoc(
-              evidence.locator ??
-                  (evidence.page != null
-                      ? `page${evidence.page + 1}`
-                      : undefined),
-          )
+    if (ref?.kind === "item") return zoteroRef(ref);
+    if (ref?.kind === "attachment" || ref?.kind === "annotation")
+        return ref.parent_item ? zoteroRef(ref.parent_item) : undefined;
+    return undefined;
+}
+
+/**
+ * The local rowid the row already knows for a document's library: the row's
+ * own reference names the same library (`library_ref`) on this device.
+ */
+function knownLibraryId(
+    row: Row,
+    file: { library_ref?: string; zotero_key: string },
+): number | undefined {
+    const ref = row.ref;
+    if (!ref || !isZoteroRowRef(ref)) return undefined;
+    if (ref.kind === "annotation" && ref.attachment.zotero_key === file.zotero_key)
+        return ref.attachment.library_id;
+    return file.library_ref && ref.library_ref === file.library_ref
+        ? ref.library_id
         : undefined;
-    switch (ref.kind) {
-        case "item":
-            if (fromDocument && ref.attachment)
-                return {
-                    resolved: zoteroRef(ref.attachment, loc),
-                    parent: zoteroRef(ref),
-                    type: "attachment",
-                };
-            return { resolved: zoteroRef(ref, loc), type: "item" };
-        case "attachment":
-            // Metadata (title, abstract) is the parent item's record.
-            if (!fromDocument && ref.parent_item)
-                return { resolved: zoteroRef(ref.parent_item), type: "item" };
-            return {
-                resolved: zoteroRef(ref, loc),
-                ...(ref.parent_item
-                    ? { parent: zoteroRef(ref.parent_item) }
-                    : {}),
-                type: "attachment",
-            };
-        case "annotation":
-            if (!fromDocument && ref.parent_item)
-                return { resolved: zoteroRef(ref.parent_item), type: "item" };
-            return {
-                resolved: zoteroRef(ref.attachment, loc),
-                ...(ref.parent_item
-                    ? { parent: zoteroRef(ref.parent_item) }
-                    : {}),
-                type: "attachment",
-            };
-        case "external":
-            return {
-                resolved: {
-                    kind: "external",
-                    external_id: ref.source_id,
-                    source: ref.source,
-                    ...(loc ? { loc } : {}),
-                },
-                type: "external_reference",
-            };
-        case "file":
-            return {
-                resolved: {
-                    kind: "external_file",
-                    ext_key: ref.ext_key,
-                    ...(loc ? { loc } : {}),
-                },
-                type: "external_file",
-            };
-    }
+}
+
+/**
+ * What the evidence points into: the document it names (`evidence.document`),
+ * not whichever document the row names now, so a citation still opens the
+ * file its passage came from after the row moved on.
+ */
+function targetOf(row: Row, evidence: Evidence): Target | undefined {
+    if (!row.ref) return undefined;
+    const document = evidence.document ?? row.documents?.[0];
+    // Page-only evidence still names its page, so its tag stays its own.
+    const loc = parseLoc(
+        evidence.locator ??
+            (evidence.page != null ? `page${evidence.page + 1}` : undefined),
+    );
+    if (document?.startsWith("ext-"))
+        return {
+            resolved: {
+                kind: "external_file",
+                ext_key: document.slice("ext-".length),
+                ...(loc ? { loc } : {}),
+            },
+            type: "external_file",
+        };
+    const file = documentReference(document);
+    if (!file) return undefined;
+    const parent = parentOf(row);
+    return {
+        resolved: {
+            kind: "zotero",
+            library_id: knownLibraryId(row, file) ?? file.library_id,
+            ...(file.library_ref ? { library_ref: file.library_ref } : {}),
+            zotero_key: file.zotero_key,
+            ...(loc ? { loc } : {}),
+        },
+        ...(parent ? { parent } : {}),
+        type: "attachment",
+    };
 }
 
 /**
@@ -186,7 +185,6 @@ function quoteHash(text: string): string {
 function citationIdFor(row: Row, target: Target, evidence: Evidence): string {
     const where =
         evidence.locator ??
-        evidence.field ??
         (evidence.page != null ? `page${evidence.page + 1}` : "doc");
     const what = JSON.stringify([
         evidence.quote,
@@ -227,21 +225,13 @@ export function citationForEvidence(
     if (displayName) citation.display_name = displayName;
     if (reference?.formatted_citation)
         citation.formatted_citation = reference.formatted_citation;
-    // A metadata citation of an attachment row names the parent item, so the
-    // attachment's own type and content kind would send it into the file.
-    const citesRowAttachment = !(
-        target.type === "item" && row.ref?.kind !== "item"
-    );
-    if (reference?.item_type && citesRowAttachment)
-        citation.item_type = reference.item_type;
-    if (reference?.content_kind && citesRowAttachment)
+    if (reference?.item_type) citation.item_type = reference.item_type;
+    if (reference?.content_kind)
         citation.content_kind =
             reference.content_kind as Citation["content_kind"];
     // The locator's page (`page12`, `s5.6`) when the evidence names no other.
     const locatedPage =
-        !evidence.field && evidence.page == null
-            ? pageOfLocator(evidence.locator)
-            : undefined;
+        evidence.page == null ? pageOfLocator(evidence.locator) : undefined;
     // 0-based, like `Evidence.page`.
     const pageIndex =
         evidence.page ?? (locatedPage ? locatedPage - 1 : undefined);
@@ -251,7 +241,7 @@ export function citationForEvidence(
         (pageIndex != null && evidence.boxes?.length
             ? `page${pageIndex + 1}`
             : undefined);
-    if (partId && !evidence.field) {
+    if (partId) {
         citation.locations = [
             {
                 part_id: partId,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
     cellInvariantError,
     REFERENCE_COLUMN_ID,
+    rowInvariantError,
     SELECT_COLORS,
     TABLE_SPEC_VERSION,
     type Cell,
@@ -10,6 +11,7 @@ import {
     type Evidence,
     type RowRef,
     type TableSpec,
+    validateTableSpec,
 } from "@beaver/agent-core/layouts/table";
 import {
     BEAVER_ACTIVE_ATTRIBUTE,
@@ -21,15 +23,15 @@ import {
     TABLE_CSS,
     TABLE_SPEC_HASH_ATTRIBUTE,
 } from "../../../src/services/artifacts/tableDocument";
-import { CSS_RULE_BUDGET } from "../../../src/utils/html";
+import { CSS_RULE_BUDGET, escapeHtml } from "../../../src/utils/html";
 
-/** A written cell with an answer. */
+/** A written cell with an answer; by default one the producer filled, which carries no marks. */
 function answered(
     value: CellValue,
-    provenance: CellProvenance = "document",
-    extra: Partial<Cell> = {},
+    provenance: CellProvenance = "system",
+    extra: Record<string, unknown> = {},
 ): Cell {
-    return { outcome: "answered", provenance, value, ...extra };
+    return { outcome: "answered", provenance, value, ...extra } as Cell;
 }
 
 /** The reference cell the producer fills for a row. */
@@ -37,18 +39,26 @@ function reference(display_name: string, extra: Record<string, string> = {}): Ce
     return answered({ kind: "reference", display_name, ...extra }, "system");
 }
 
-/** A library item row, optionally naming the attachment that was read. */
-function itemRef(key: string, attachment?: string, libraryId = 1, libraryRef = "u"): RowRef {
+/** A library item row's reference. */
+function itemRef(key: string, libraryId = 1, libraryRef = "u"): RowRef {
+    return { kind: "item", library_ref: libraryRef, library_id: libraryId, zotero_key: key };
+}
+
+/** An item row's fields, naming the attachment it is filled from when there is one. */
+function itemRow(
+    key: string,
+    attachment?: string,
+    libraryId = 1,
+    libraryRef = "u",
+): { ref: RowRef; documents?: string[] } {
     return {
-        kind: "item",
-        library_ref: libraryRef,
-        library_id: libraryId,
-        zotero_key: key,
-        ...(attachment
-            ? { attachment: { library_ref: libraryRef, library_id: libraryId, zotero_key: attachment } }
-            : {}),
+        ref: itemRef(key, libraryId, libraryRef),
+        ...(attachment ? { documents: [`${libraryRef}-${attachment}`] } : {}),
     };
 }
+
+/** Evidence as a test writes it: the document defaults to the row's. */
+type TestEvidence = Omit<Evidence, "document"> & { document?: string };
 
 const spec: TableSpec = {
     id: "t",
@@ -535,20 +545,28 @@ describe("citations", () => {
         { id: "finding", header: "Finding", type: "text" },
     ];
 
-    /** A row whose finding rests on `evidence`. */
+    /**
+     * A row whose finding the filler read from the row's document, resting on
+     * `evidence`. A row without a document has none to cite.
+     */
     function citedRow(
         id: string,
-        ref: RowRef | undefined,
-        evidence: Evidence[],
+        place: { ref?: RowRef; documents?: string[] } | undefined,
+        evidence: TestEvidence[],
         referenceCell: Cell | null = reference(id),
-        provenance: CellProvenance = "document",
     ): TableSpec["rows"][number] {
+        const documents = place?.documents;
+        const entries = evidence.map((entry) => ({ document: documents?.[0] ?? "u-NODOC", ...entry }));
         return {
             id,
-            ...(ref ? { ref } : {}),
+            ...(place?.ref ? { ref: place.ref } : {}),
+            ...(documents ? { documents } : {}),
             cells: {
                 ...(referenceCell ? { [REFERENCE_COLUMN_ID]: referenceCell } : {}),
-                finding: answered({ kind: "text", text: `Finding of ${id}.` }, provenance, { evidence }),
+                finding: answered({ kind: "text", text: `Finding of ${id}.` }, "model", {
+                    documents: [...new Set(entries.map((entry) => entry.document))],
+                    evidence: entries,
+                }),
             },
         };
     }
@@ -559,14 +577,14 @@ describe("citations", () => {
         rows: [
             citedRow(
                 "r1",
-                itemRef("P1", "K1"),
+                itemRow("P1", "K1"),
                 [{ locator: "s4", quote: "a 13% performance increase", page: 3 }],
                 reference("Bloom 2015", {
                     formatted_citation: "Bloom, N. 2015. Does working from home work?",
                     content_kind: "pdf",
                 }),
             ),
-            citedRow("r2", itemRef("P2", "K2"), [{ locator: "s1", quote: "no effect", page: 0 }], reference("Beta")),
+            citedRow("r2", itemRow("P2", "K2"), [{ locator: "s1", quote: "no effect", page: 0 }], reference("Beta")),
             // A row without a reference cannot be cited.
             citedRow("r3", undefined, [{ locator: "s1", quote: "uncitable" }]),
         ],
@@ -595,24 +613,26 @@ describe("citations", () => {
     it("gives every passage from one paper that paper's number and lists the paper once", () => {
         const paper: TableSpec = {
             id: "s",
-            columns: [...columns, { id: "abstract", header: "Abstract", type: "text" }],
+            columns: [...columns, { id: "method", header: "Method", type: "text" }],
             rows: [
                 {
                     id: "r",
-                    ref: itemRef("P1", "A1"),
+                    ...itemRow("P1", "A1"),
                     cells: {
                         [REFERENCE_COLUMN_ID]: reference("Paper One", {
                             formatted_citation: "Paper One",
                             content_kind: "pdf",
                         }),
-                        finding: answered({ kind: "text", text: "One." }, "document", {
+                        finding: answered({ kind: "text", text: "One." }, "model", {
+                            documents: ["u-A1"],
                             evidence: [
-                                { locator: "s1", quote: "first", page: 0 },
-                                { locator: "s9", quote: "second", page: 2 },
+                                { document: "u-A1", locator: "s1", quote: "first", page: 0 },
+                                { document: "u-A1", locator: "s9", quote: "second", page: 2 },
                             ],
                         }),
-                        abstract: answered({ kind: "text", text: "Two." }, "metadata", {
-                            evidence: [{ field: "abstract", quote: "from the abstract" }],
+                        method: answered({ kind: "text", text: "Two." }, "model", {
+                            documents: ["u-A1"],
+                            evidence: [{ document: "u-A1", locator: "s20", quote: "a survey", page: 5 }],
                         }),
                     },
                 },
@@ -620,12 +640,12 @@ describe("citations", () => {
         };
         const { html } = renderTableHtml(paper, { controls: false });
         const markers = [...html.matchAll(/data-bt-cite="(\d+)"/g)].map((m) => m[1]);
-        // The passages and the metadata answer are all the one paper's.
+        // The passages of both answers are all the one paper's.
         expect(new Set(markers)).toEqual(new Set(["1"]));
         // Each marker still names its own evidence for the host to navigate to.
         expect(html).toContain('data-cite-key="r|finding|0"');
         expect(html).toContain('data-cite-key="r|finding|1"');
-        expect(html).toContain('data-cite-key="r|abstract|0"');
+        expect(html).toContain('data-cite-key="r|method|0"');
         const sources = html.slice(html.indexOf('class="bt-srcs"'));
         expect(sources.match(/<li /g)).toHaveLength(1);
         // The entry reveals the paper; the file it was read from is a separate link.
@@ -638,7 +658,7 @@ describe("citations", () => {
             id: "t",
             columns,
             rows: [
-                citedRow("r1", itemRef("P1", "K1"), [
+                citedRow("r1", itemRow("P1", "K1"), [
                     { locator: "s4", quote: "rose", page: 3 },
                     { locator: "s5", quote: "rose again", page: 3 },
                 ]),
@@ -653,7 +673,7 @@ describe("citations", () => {
             id: "l",
             columns,
             rows: [
-                citedRow("r1", itemRef("P1", "K1"), [
+                citedRow("r1", itemRow("P1", "K1"), [
                     { locator: "s3", quote: "the passage", page: 2, boxes: [[1, 2, 3, 4]] },
                 ]),
             ],
@@ -664,27 +684,28 @@ describe("citations", () => {
         expect(html).toContain('href="zotero://open/library/items/K1?page=3"');
     });
 
-    it("reveals the item for an answer taken from title and abstract", () => {
-        const metadata: TableSpec = {
+    it("marks an answer taken from title and abstract, which cites nothing", () => {
+        const fromAbstract: TableSpec = {
             id: "m",
             columns,
             rows: [
-                citedRow(
-                    "r1",
-                    itemRef("P1", "K1"),
-                    [{ field: "abstract", quote: "We study remote work." }],
-                    reference("Bloom 2015"),
-                    "metadata",
-                ),
+                {
+                    id: "r1",
+                    ref: itemRef("P1"),
+                    cells: {
+                        [REFERENCE_COLUMN_ID]: reference("Bloom 2015"),
+                        finding: answered({ kind: "text", text: "Remote work." }, "model", {
+                            reasoning: "The abstract says so.",
+                        }),
+                    },
+                },
             ],
         };
-        const { html } = renderTableHtml(metadata);
-        expect(html).toContain('href="zotero://select/library/items/P1"');
-        expect(html).not.toContain("zotero://open/");
-        expect(html).toContain("bt-cite bt-cite--item");
-        expect(html).toContain('data-cite-action="Click to show the item in your library"');
+        const { html } = renderTableHtml(fromAbstract);
         expect(cellHtml(html, "r1", "finding")).toContain("From title and abstract");
-        expect(detailHtml(html, "r1")).toContain("“We study remote work.” (abstract)");
+        expect(html).not.toContain("data-bt-cite");
+        expect(html).not.toContain("bt-srcs");
+        expect(detailHtml(html, "r1")).toContain("The abstract says so.");
     });
 
     it("opens the cited page, and carries the card's parts", () => {
@@ -706,26 +727,18 @@ describe("citations", () => {
             id: "x",
             columns,
             rows: [
-                citedRow("r1", itemRef("P1", "K1"), [{ locator: "s4", quote: "located", page: 3 }]),
-                citedRow(
-                    "r2",
-                    itemRef("P2"),
-                    [{ field: "title", quote: "A title" }],
-                    reference("Beta"),
-                    "metadata",
-                ),
+                citedRow("r1", itemRow("P1", "K1"), [{ locator: "s4", quote: "located", page: 3 }]),
                 citedRow(
                     "r3",
-                    { kind: "external", source: "openalex", source_id: "W1" },
-                    [{ locator: "p2", quote: "external", page: 1 }],
+                    { ref: { kind: "file", ext_key: "F1", label: "notes.pdf" }, documents: ["ext-F1"] },
+                    [{ locator: "s2", quote: "in a file", page: 1 }],
                 ),
             ],
         };
         const { html } = renderTableHtml(mixed, { controls: false });
         expect(cellHtml(html, "r1", "finding")).toContain("bt-cite bt-cite--locator");
-        expect(cellHtml(html, "r2", "finding")).toContain("bt-cite bt-cite--item");
-        // An external work has no link here; the marker is a span.
-        expect(cellHtml(html, "r3", "finding")).toContain('<span class="bt-cite bt-cite--external"');
+        // An attached file has no link here; the marker is a span.
+        expect(cellHtml(html, "r3", "finding")).toContain('<span class="bt-cite bt-cite--locator"');
     });
 
     it("lists the cited sources so a saved table stands on its own", () => {
@@ -734,7 +747,7 @@ describe("citations", () => {
             rows: [
                 ...cited.rows,
                 // A row with a reference but no reference cell has nothing to name it by.
-                citedRow("r4", itemRef("P4", "K4"), [{ locator: "s1", quote: "unnamed", page: 0 }], null),
+                citedRow("r4", itemRow("P4", "K4"), [{ locator: "s1", quote: "unnamed", page: 0 }], null),
             ],
         };
         const { html } = renderTableHtml(listed);
@@ -775,7 +788,7 @@ describe("citations", () => {
             rows: [
                 citedRow(
                     "r1",
-                    itemRef("P1", "K1", 7, "g4242"),
+                    itemRow("P1", "K1", 7, "g4242"),
                     [{ locator: "s4", quote: "a 13% performance increase", page: 3 }],
                 ),
             ],
@@ -815,7 +828,7 @@ describe("cell states", () => {
         { id: "a", header: "Answer", type: "text" },
     ];
 
-    it("shows uncertainty and staleness beside a failure's error", () => {
+    it("shows staleness beside a failure's error", () => {
         const { html } = renderTableHtml({
             id: "states",
             columns: [{ id: "a", header: "Answer", type: "text" }],
@@ -825,9 +838,9 @@ describe("cell states", () => {
                     cells: {
                         a: {
                             outcome: "failed",
-                            provenance: "document",
+                            provenance: "model",
+                            error_code: "no_locator",
                             error: "Failed inspection",
-                            unsure: true,
                             stale: true,
                         },
                     },
@@ -835,7 +848,7 @@ describe("cell states", () => {
             ],
         });
         expect(html).toContain(
-            'Failed inspection</span><small class="bt-cell-state"> · Unsure · Stale</small>',
+            'Failed inspection</span><small class="bt-cell-state"> · <span class="bt-stale" title="The question changed">Stale</span></small>',
         );
     });
 
@@ -843,7 +856,7 @@ describe("cell states", () => {
         const { html } = renderTableHtml({
             id: "f",
             columns: [{ id: "a", header: "Answer", type: "text" }],
-            rows: [{ id: "r", cells: { a: { outcome: "failed", provenance: "document" } as Cell } }],
+            rows: [{ id: "r", cells: { a: { outcome: "failed", provenance: "model" } as Cell } }],
         });
         expect(html).toContain('<span class="bt-err">Could not be answered</span>');
     });
@@ -854,15 +867,16 @@ describe("cell states", () => {
             columns,
             rows: [
                 {
-                    id: "absent",
-                    ref: itemRef("P1", "K1"),
+                    id: "unreported",
+                    ...itemRow("P1", "K1"),
                     cells: {
-                        [REFERENCE_COLUMN_ID]: reference("Absent 2020"),
+                        [REFERENCE_COLUMN_ID]: reference("Unreported 2020"),
                         a: {
                             outcome: "not_reported",
-                            provenance: "document",
+                            provenance: "model",
+                            documents: ["u-K1"],
                             reasoning: "The methods section names no sample.",
-                            evidence: [{ locator: "s12", quote: "We   surveyed\n firms.", page: 4 }],
+                            evidence: [{ document: "u-K1", locator: "s12", quote: "We   surveyed\n firms.", page: 4 }],
                         },
                     },
                 },
@@ -870,9 +884,11 @@ describe("cell states", () => {
                 { id: "mine", cells: { a: answered({ kind: "text", text: "My answer" }, "user") } },
                 {
                     id: "tentative",
+                    ...itemRow("P3", "K3"),
                     cells: {
-                        a: answered({ kind: "text", text: "Tentative answer" }, "document", {
-                            unsure: true,
+                        a: answered({ kind: "text", text: "Tentative answer" }, "model", {
+                            documents: ["u-K3"],
+                            confidence: "low",
                             stale: true,
                         }),
                     },
@@ -880,36 +896,36 @@ describe("cell states", () => {
                 {
                     id: "meta",
                     ref: itemRef("P2"),
-                    cells: {
-                        a: answered({ kind: "text", text: "From the abstract" }, "metadata", {
-                            evidence: [{ field: "abstract", quote: "An abstract." }],
-                        }),
-                    },
+                    cells: { a: answered({ kind: "text", text: "From the abstract" }, "model") },
                 },
                 {
                     id: "broken",
-                    cells: { a: { outcome: "failed", provenance: "document", error: "Timed out" } },
+                    cells: { a: { outcome: "failed", provenance: "model", error_code: "no_support", error: "Timed out" } },
                 },
             ],
         };
         const { html } = buildTableDocument(states);
 
-        expect(cellHtml(html, "absent", "a")).toContain("Not reported");
+        expect(cellHtml(html, "unreported", "a")).toContain("Not reported");
         // A not-reported finding still cites where it looked.
-        expect(cellHtml(html, "absent", "a")).toContain('data-cite-key="absent|a|0"');
+        expect(cellHtml(html, "unreported", "a")).toContain('data-cite-key="unreported|a|0"');
         expect(cellHtml(html, "blank", "a")).toContain("Cleared by you");
         expect(cellHtml(html, "mine", "a")).toContain("Edited by you");
-        expect(cellHtml(html, "tentative", "a")).toContain("Unsure · Stale");
+        expect(cellHtml(html, "tentative", "a")).toContain(
+            '<span class="bt-review" title="Beaver is not confident in this answer; check it against the paper">To review</span> · <span class="bt-stale" title="The question changed">Stale</span>',
+        );
         expect(cellHtml(html, "meta", "a")).toContain("From title and abstract");
         expect(cellHtml(html, "broken", "a")).toContain("Timed out");
 
-        // The expanded row shows the reasoning and the quotes behind the answer.
-        const detail = detailHtml(html, "absent");
-        expect(detail).toContain('<div class="bt-d-extra">The methods section names no sample.</div>');
+        // The expanded row shows the reason, then the closest passages.
+        const detail = detailHtml(html, "unreported");
+        expect(detail).toContain(
+            '<div class="bt-d-extra">The methods section names no sample.</div><div class="bt-d-h">Closest passages</div>',
+        );
         expect(detail).toContain("<li>“We surveyed firms.”</li>");
 
         const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
-        expect(footer).toBe("6 rows · 1 not reported · 1 failed · 1 from title and abstract");
+        expect(footer).toBe("6 rows · 1 not reported · 1 failed · 1 from title and abstract · 1 to review");
         expect(html).not.toContain("contenteditable");
         expect(html).not.toMatch(/<script\b/i);
     });
@@ -927,12 +943,192 @@ describe("cell states", () => {
     });
 });
 
+describe("how answers read", () => {
+    const columns: TableSpec["columns"] = [
+        { id: REFERENCE_COLUMN_ID, header: "Item", type: "reference", system: true },
+        { id: "rct", header: "RCT?", type: "boolean" },
+        { id: "share", header: "Share", type: "number", unit: "%" },
+        { id: "note", header: "Note", type: "text" },
+    ];
+    const doc = "u-K1";
+    const filler = (value: CellValue, extra: Record<string, unknown> = {}) =>
+        answered(value, "model", { documents: [doc], ...extra });
+    const row = (id: string, cells: Record<string, Cell>, extra: Record<string, unknown> = {}) => ({
+        id,
+        ...itemRow(`P${id}`, "K1"),
+        ...extra,
+        cells: { [REFERENCE_COLUMN_ID]: reference(id), ...cells },
+    });
+
+    it("writes a no as the word, in muted type, never as an empty cell", () => {
+        const { html } = renderTableHtml({
+            id: "b",
+            columns,
+            rows: [row("r", { rct: filler({ kind: "boolean", value: false }) })],
+        });
+        expect(cellHtml(html, "r", "rct")).toContain('<span class="bt-no">No</span>');
+        expect(TABLE_CSS).toContain(".bt-wrap .bt-no { color: var(--t-fade); }");
+    });
+
+    it("marks an answer resting on the paper's silence and heads its passages as the closest", () => {
+        const { html } = renderTableHtml({
+            id: "a",
+            columns,
+            rows: [
+                row("r", {
+                    rct: filler({ kind: "boolean", value: false }, {
+                        absent: true,
+                        reasoning: "No randomisation is described.",
+                        evidence: [{ document: doc, locator: "s7", quote: "Participants chose a group." }],
+                    }),
+                }),
+            ],
+        });
+        const cell = cellHtml(html, "r", "rct");
+        expect(cell).toContain('<span class="bt-no">No</span>');
+        expect(cell).toContain('<span class="bt-absent" title="The paper does not say; this answer rests on its silence">not in paper</span>');
+        const detail = detailHtml(html, "r");
+        const reasoning = detail.indexOf("No randomisation is described.");
+        const heading = detail.indexOf('<div class="bt-d-h">Closest passages</div>');
+        expect(reasoning).toBeGreaterThan(0);
+        expect(heading).toBeGreaterThan(reasoning);
+        expect(detail.indexOf("<li>“Participants chose a group.”")).toBeGreaterThan(heading);
+    });
+
+    it("gives the evidence of a plain answer no heading", () => {
+        const { html } = renderTableHtml({
+            id: "e",
+            columns,
+            rows: [
+                row("r", {
+                    rct: filler({ kind: "boolean", value: true }, {
+                        evidence: [{ document: doc, locator: "s7", quote: "Randomly assigned." }],
+                    }),
+                }),
+            ],
+        });
+        expect(detailHtml(html, "r")).not.toContain("Closest passages");
+    });
+
+    it("shows a number's display text as is, and appends the unit only to a bare number", () => {
+        const { html } = renderTableHtml({
+            id: "n",
+            columns,
+            rows: [
+                row("worded", { share: filler({ kind: "number", value: 90, display: "90% or higher" }) }),
+                row("bare", { share: filler({ kind: "number", value: 12 }) }),
+            ],
+        });
+        expect(cellHtml(html, "worded", "share")).toContain('<span class="bt-num">90% or higher</span>');
+        expect(cellHtml(html, "worded", "share")).not.toContain("bt-unit");
+        expect(cellHtml(html, "bare", "share")).toContain('<span class="bt-num">12<span class="bt-unit">%</span></span>');
+    });
+
+    it("marks low-confidence answers, and medium ones only in number columns, for review", () => {
+        const { html } = renderTableHtml({
+            id: "r",
+            columns,
+            rows: [
+                row("r", {
+                    share: filler({ kind: "number", value: 3 }, { confidence: "medium" }),
+                    note: filler({ kind: "text", text: "Medium prose" }, { confidence: "medium" }),
+                    rct: filler({ kind: "boolean", value: true }, { confidence: "low" }),
+                }),
+                // The user's own answer is never marked.
+                row("u", { note: answered({ kind: "text", text: "Mine" }, "user") }),
+            ],
+        });
+        expect(cellHtml(html, "r", "share")).toContain(">To review</span>");
+        expect(cellHtml(html, "r", "note")).not.toContain("To review");
+        expect(cellHtml(html, "r", "rct")).toContain(">To review</span>");
+        expect(cellHtml(html, "u", "note")).not.toContain("To review");
+        const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
+        expect(footer).toBe("2 rows · 2 to review");
+    });
+
+    it("sets a cited table row's caption and header rows in small type above the quote", () => {
+        const { html } = renderTableHtml({
+            id: "c",
+            columns,
+            rows: [
+                row("r", {
+                    share: filler({ kind: "number", value: 41 }, {
+                        evidence: [
+                            {
+                                document: doc,
+                                locator: "s30",
+                                quote: "Women 41",
+                                context: "Table 2. Participants | Group | %",
+                            },
+                        ],
+                    }),
+                }),
+            ],
+        });
+        expect(detailHtml(html, "r")).toContain(
+            '<li><span class="bt-ev-ctx">Table 2. Participants | Group | %</span>“Women 41”</li>',
+        );
+        expect(TABLE_CSS).toContain(".bt-ev-ctx { display: block; font-size: 12px; color: var(--t-fade); }");
+    });
+
+    it("says why a cell is stale", () => {
+        const { html } = renderTableHtml({
+            id: "s",
+            columns,
+            rows: [
+                row("question", { note: filler({ kind: "text", text: "Old question" }, { stale: true }) }),
+                // The row now names another document than the answer was read from.
+                row("moved", { note: filler({ kind: "text", text: "Old file" }) }, { documents: ["u-K2"] }),
+                // Answered from title and abstract, and the row has since gained a document.
+                row("gained", { note: answered({ kind: "text", text: "From abstract" }, "model") }),
+                // Never stale by the row rule: the user's own answer.
+                row("user", { note: answered({ kind: "text", text: "Mine" }, "user") }, { documents: ["u-K2"] }),
+            ],
+        });
+        expect(cellHtml(html, "question", "note")).toContain('<span class="bt-stale" title="The question changed">Stale</span>');
+        const documentChanged = `<span class="bt-stale" title="The paper${escapeHtml("'")}s document changed">Stale</span>`;
+        expect(cellHtml(html, "moved", "note")).toContain(documentChanged);
+        expect(cellHtml(html, "gained", "note")).toContain(documentChanged);
+        expect(cellHtml(html, "gained", "note")).toContain("From title and abstract");
+        expect(cellHtml(html, "user", "note")).not.toContain("Stale");
+    });
+
+    it("keeps a failed row's error style and says why it stopped, telling nothing to read from a read error", () => {
+        const { html } = renderTableHtml({
+            id: "f",
+            columns,
+            rows: [
+                row("empty", {}, {
+                    documents: undefined,
+                    failure: { code: "no_source", message: "This item has no document or abstract to read." },
+                }),
+                row("locked", {}, { failure: { code: "encrypted", message: "The PDF is password-protected." } }),
+                row("fine", { note: filler({ kind: "text", text: "Read" }) }),
+            ],
+        });
+        expect(html).toMatch(/<details class="bt-r[^"]* bt-r-err" id="empty"/);
+        expect(html).toMatch(/<details class="bt-r[^"]* bt-r-err" id="locked"/);
+        expect(html).not.toMatch(/<details class="[^"]*bt-r-err[^"]*" id="fine"/);
+        expect(detailHtml(html, "empty")).toContain(
+            '<p class="bt-d-err"><strong>Nothing to read.</strong> This item has no document or abstract to read.</p>',
+        );
+        expect(detailHtml(html, "locked")).toContain(
+            '<p class="bt-d-err"><strong>Could not be read.</strong> The PDF is password-protected.</p>',
+        );
+        // Its unattempted cells stay empty.
+        expect(cellHtml(html, "locked", "note")).toContain('<span class="bt-empty"></span>');
+        const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
+        expect(footer).toBe("3 rows · 2 papers could not be read");
+    });
+});
+
 /**
  * One spec that exercises every part of the model a stored table has to keep:
- * all seven cell kinds, every outcome and provenance, `unsure` and `stale`,
- * evidence from the document and from metadata, a select with a declared
- * vocabulary, a screening decision with its reasoning, a library row, an
- * external row, a context-file row, row origins and the approved sources.
+ * all seven cell kinds, every outcome and provenance, `confidence`, `absent`
+ * and `stale`, answers from the document and from title and abstract,
+ * evidence with table context, a select with a declared vocabulary, a
+ * screening decision with its reasoning, a library row, an external row, a
+ * context-file row with a row failure, row origins and the approved sources.
  */
 const fullSpec: TableSpec = {
     id: "full",
@@ -996,7 +1192,7 @@ const fullSpec: TableSpec = {
     rows: [
         {
             id: "a1b2c3",
-            ref: itemRef("K1", "A1"),
+            ...itemRow("K1", "A1"),
             in_library: true,
             origin: [{ source: "src1", date: "2026-10-01" }],
             cells: {
@@ -1013,26 +1209,41 @@ const fullSpec: TableSpec = {
                     },
                     "system",
                 ),
-                decision: answered({ kind: "select", label: "Include" }, "document", {
+                decision: answered({ kind: "select", label: "Include" }, "model", {
+                    documents: ["u-A1"],
+                    confidence: "high",
                     reasoning: "Randomised, and on topic.",
-                    evidence: [{ locator: "s12", quote: "Employees were randomly assigned.", page: 2 }],
+                    evidence: [{ document: "u-A1", locator: "s12", quote: "Employees were randomly assigned.", page: 2 }],
                 }),
-                n: answered({ kind: "number", value: 1200 }, "document", {
-                    unsure: true,
-                    evidence: [{ locator: "s3", quote: "1,200 employees", page: 1, boxes: [[10, 20, 30, 40]] }],
+                n: answered({ kind: "number", value: 1200, display: "about 1,200 employees" }, "model", {
+                    documents: ["u-A1"],
+                    confidence: "medium",
+                    evidence: [
+                        {
+                            document: "u-A1",
+                            locator: "s3",
+                            quote: "1,200",
+                            page: 1,
+                            boxes: [[10, 20, 30, 40]],
+                            context: "Table 1. Sample. | Group | N",
+                        },
+                    ],
                 }),
-                when: answered({ kind: "date", value: "2015-02", display: "Feb 2015" }, "metadata", {
-                    evidence: [{ field: "title", quote: "Does working from home work?" }],
+                when: answered({ kind: "date", value: "2015-02", display: "Feb 2015" }, "model"),
+                oa: answered({ kind: "boolean", value: false }, "model", {
+                    documents: ["u-A1"],
+                    absent: true,
+                    reasoning: "No open-access statement anywhere in the paper.",
                 }),
-                oa: answered({ kind: "boolean", value: true }, "user"),
                 finding: answered(
                     { kind: "text", text: "Performance rose 13%." },
-                    "document",
+                    "model",
                     {
+                        documents: ["u-A1"],
                         stale: true,
                         evidence: [
-                            { locator: "s40-s41", quote: "a 13% performance increase", page: 3 },
-                            { locator: "s52", quote: "of which 9% came from more minutes", page: 4 },
+                            { document: "u-A1", locator: "s40-s41", quote: "a 13% performance increase", page: 3 },
+                            { document: "u-A1", locator: "s52", quote: "of which 9% came from more minutes", page: 4 },
                         ],
                     },
                 ),
@@ -1069,19 +1280,19 @@ const fullSpec: TableSpec = {
                 decision: answered({ kind: "select", label: "Exclude" }, "user"),
                 n: {
                     outcome: "not_reported",
-                    provenance: "metadata",
+                    provenance: "model",
                     reasoning: "The abstract gives no sample size.",
                 },
-                when: answered({ kind: "date", value: "2019" }, "metadata"),
+                when: answered({ kind: "date", value: "2019" }, "model"),
                 oa: { outcome: "cleared", provenance: "user" },
-                finding: { outcome: "failed", provenance: "document", error: "Extraction failed" },
+                finding: { outcome: "failed", provenance: "model", error_code: "no_locator", error: "Extraction failed" },
             },
         },
         {
             id: "g7h8i9",
             ref: { kind: "file", ext_key: "f1", label: "protocol.pdf" },
-            status: "error",
-            error: "The file could not be read.",
+            documents: ["ext-f1"],
+            failure: { code: "encrypted", message: "The file could not be read." },
             cells: { ref: reference("protocol.pdf") },
         },
     ],
@@ -1099,7 +1310,9 @@ const fullSpec: TableSpec = {
 
 describe("a stored table's rendering", () => {
     it("is built from a spec every cell of which a store would accept", () => {
+        expect(validateTableSpec(fullSpec)).toEqual([]);
         for (const row of fullSpec.rows) {
+            expect(rowInvariantError(row)).toBeUndefined();
             for (const cell of Object.values(row.cells)) {
                 expect(cellInvariantError(cell)).toBeUndefined();
             }
@@ -1119,7 +1332,6 @@ describe("a stored table's rendering", () => {
             new Set([
                 "a1b2c3|decision|0",
                 "a1b2c3|n|0",
-                "a1b2c3|when|0",
                 "a1b2c3|finding|0",
                 "a1b2c3|finding|1",
             ]),

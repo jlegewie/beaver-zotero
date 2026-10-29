@@ -1,8 +1,8 @@
 {
-    "name": "every outcome, metadata-only, unsure, stale, user and unattempted counts",
+    "name": "every outcome, title and abstract answers, review marks, stale, user and unattempted counts",
     "spec": {
         "id": "t1",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Sampling methods",
         "description": "How the papers sampled their respondents.",
         "anchor_column_id": "_reference",
@@ -76,12 +76,8 @@
                     "zotero_key": "AAA",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-AAAPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -113,13 +109,17 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Telephone survey"
                         },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-AAAPDF",
                                 "locator": "s12-s13",
                                 "quote": "Respondents were sampled by random digit dialing.",
                                 "page": 3,
@@ -136,13 +136,18 @@
                     },
                     "design": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "select",
                             "label": "RCT"
                         },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
+                        "confidence": "low",
                         "evidence": [
                             {
+                                "document": "u-AAAPDF",
                                 "locator": "s12-s13",
                                 "quote": "Respondents were sampled by random digit dialing.",
                                 "page": 3,
@@ -155,8 +160,7 @@
                                     ]
                                 ]
                             }
-                        ],
-                        "unsure": true
+                        ]
                     },
                     "open_access": {
                         "outcome": "answered",
@@ -166,7 +170,14 @@
                             "value": true
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r2",
@@ -176,13 +187,6 @@
                     "zotero_key": "BBB",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -204,27 +208,28 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Mail survey"
-                        },
-                        "evidence": [
-                            {
-                                "quote": "A mail survey of 2,000 households.",
-                                "field": "abstract"
-                            }
-                        ]
+                        }
                     },
                     "design": {
                         "outcome": "not_reported",
-                        "provenance": "metadata"
+                        "provenance": "model"
                     },
                     "open_access": {
                         "outcome": "cleared",
                         "provenance": "user"
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r3",
@@ -234,12 +239,8 @@
                     "zotero_key": "CCC",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-CCCPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -262,18 +263,23 @@
                     },
                     "design": {
                         "outcome": "failed",
-                        "provenance": "document",
+                        "provenance": "model",
+                        "error_code": "deadline",
                         "error": "Deadline exceeded"
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Register study"
                         },
+                        "documents": [
+                            "u-CCCPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-CCCPDF",
                                 "locator": "s12-s13",
                                 "quote": "Respondents were sampled by random digit dialing.",
                                 "page": 3,
@@ -289,7 +295,14 @@
                         ],
                         "stale": true
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         ]
     },
@@ -304,60 +317,70 @@
             "_reference": {
                 "type": "reference",
                 "answered": 3,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
             },
             "_year": {
                 "type": "date",
                 "answered": 3,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
             },
             "_identifier": {
                 "type": "link",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
             },
             "method": {
                 "type": "text",
                 "answered": 3,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 1,
-                "unsure": 0,
-                "metadata_only": 1
+                "needs_review": 0,
+                "title_abstract_only": 1
             },
             "design": {
                 "type": "select",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 1,
                 "failed": 1,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 1,
-                "metadata_only": 1,
+                "needs_review": 1,
+                "title_abstract_only": 0,
                 "distribution": {
                     "RCT": 1
                 }
@@ -365,13 +388,15 @@
             "open_access": {
                 "type": "boolean",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 1,
                 "unattempted": 1,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "distribution": {
                     "true": 1
                 }

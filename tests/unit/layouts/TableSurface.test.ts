@@ -17,8 +17,9 @@ function system(value: CellValue): Cell {
     return { outcome: "answered", provenance: "system", value };
 }
 
+/** An answer the producer filled, which carries no marks. */
 function answered(value: CellValue): Cell {
-    return { outcome: "answered", provenance: "document", value };
+    return { outcome: "answered", provenance: "system", value };
 }
 
 const spec: TableSpec = {
@@ -69,7 +70,8 @@ const spec: TableSpec = {
                 type: answered({ kind: "select", label: "Article" }),
                 notes: {
                     outcome: "failed",
-                    provenance: "document",
+                    provenance: "model",
+                    error_code: "no_locator",
                     error: "Extraction failed",
                 },
             },
@@ -135,7 +137,7 @@ describe("table chrome", () => {
         expect(footer).not.toContain("title and abstract");
     });
 
-    it("counts not-reported and metadata-only cells in the footer", () => {
+    it("counts not-reported, title-and-abstract and to-review cells and unreadable papers in the footer", () => {
         mount(
             React.createElement(TableSurface, {
                 table: {
@@ -148,11 +150,14 @@ describe("table chrome", () => {
                                       ...row.cells,
                                       notes: {
                                           outcome: "not_reported",
-                                          provenance: "metadata",
+                                          provenance: "model",
+                                          confidence: "low",
                                       },
                                   },
                               }
-                            : row,
+                            : row.id === "r1"
+                              ? { ...row, failure: { code: "encrypted", message: "Locked." } }
+                              : row,
                     ),
                 },
             }),
@@ -160,7 +165,12 @@ describe("table chrome", () => {
         const footer = text(".bt-footer");
         expect(footer).toContain("1 not reported");
         expect(footer).toContain("1 failed");
-        expect(footer).toContain("1 from title and abstract");
+        // A finding is not an answer: only answers count as from title and
+        // abstract, as the table's summary counts them.
+        expect(footer).not.toContain("from title and abstract");
+        expect(footer).toContain("1 to review");
+        expect(footer).toContain("1 paper could not be read");
+        expect(footer).not.toContain("incomplete");
     });
 
     it("offers the columns menu whenever a column starts hidden, so it can be brought back", () => {

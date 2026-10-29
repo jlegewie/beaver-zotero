@@ -16,6 +16,7 @@ import { useCitationViewModel } from '@beaver/agent-ui/chat/useCitationViewModel
 const row: Row = {
     id: 'r1',
     ref: { kind: 'item', library_ref: 'u', library_id: 1, zotero_key: 'ITEM0001' },
+    documents: ['u-ATTACH01'],
     cells: {
         _reference: {
             outcome: 'answered',
@@ -35,8 +36,9 @@ function render(element: React.ReactElement): string {
 }
 
 describe('direct citations', () => {
-    const title = citationForEvidence(row, { quote: 'Sleep and memory', field: 'title' })!;
-    const abstract = citationForEvidence(row, { quote: 'A sample of 120 adults', field: 'abstract' })!;
+    // Two quotes at one place in one document.
+    const title = citationForEvidence(row, { document: 'u-ATTACH01', locator: 's3', quote: 'Sleep and memory' })!;
+    const abstract = citationForEvidence(row, { document: 'u-ATTACH01', locator: 's3', quote: 'A sample of 120 adults' })!;
 
     it('share a tag but keep their own quotes', () => {
         expect(title.raw_tag).toBe(abstract.raw_tag);

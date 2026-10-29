@@ -10,13 +10,6 @@
                     "library_ref": "u",
                     "zotero_key": "AAA"
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -36,7 +29,14 @@
                             "value": "2020"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             "identifiers": {
                 "isbn": "9780262033848"
@@ -50,13 +50,6 @@
                     "library_ref": "u",
                     "zotero_key": "BBB"
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -76,7 +69,14 @@
                             "value": "2020"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             "identifiers": {
                 "isbn": "9780262033848"
@@ -95,21 +95,21 @@
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
                             "display_name": "Chapter one on sampling frames",
                             "title": "Chapter one on sampling frames",
                             "item_type": "bookSection"
-                        },
-                        "provenance": "system"
+                        }
                     },
                     "_year": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "date",
                             "value": "2020"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": true,
@@ -130,21 +130,21 @@
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
                             "display_name": "Chapter two on nonresponse bias",
                             "title": "Chapter two on nonresponse bias",
                             "item_type": "bookSection"
-                        },
-                        "provenance": "system"
+                        }
                     },
                     "_year": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "date",
                             "value": "2020"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": true,

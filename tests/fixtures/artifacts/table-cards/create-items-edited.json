@@ -198,60 +198,70 @@
         "_reference": {
           "type": "reference",
           "answered": 3,
+          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,
           "unattempted": 0,
+          "in_failed_rows": 0,
           "stale": 0,
-          "unsure": 0,
-          "metadata_only": 0,
+          "needs_review": 0,
+          "title_abstract_only": 0,
           "system": true
         },
         "_year": {
           "type": "date",
           "answered": 3,
+          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,
           "unattempted": 0,
+          "in_failed_rows": 0,
           "stale": 0,
-          "unsure": 0,
-          "metadata_only": 0,
+          "needs_review": 0,
+          "title_abstract_only": 0,
           "system": true
         },
         "_identifier": {
           "type": "link",
           "answered": 0,
+          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,
           "unattempted": 0,
+          "in_failed_rows": 0,
           "stale": 0,
-          "unsure": 0,
-          "metadata_only": 0,
+          "needs_review": 0,
+          "title_abstract_only": 0,
           "system": true
         },
         "sample_size": {
           "type": "number",
           "answered": 0,
+          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,
           "unattempted": 3,
+          "in_failed_rows": 0,
           "stale": 0,
-          "unsure": 0,
-          "metadata_only": 0
+          "needs_review": 0,
+          "title_abstract_only": 0
         },
         "design": {
           "type": "select",
           "answered": 0,
+          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,
           "unattempted": 3,
+          "in_failed_rows": 0,
           "stale": 0,
-          "unsure": 0,
-          "metadata_only": 0,
+          "needs_review": 0,
+          "title_abstract_only": 0,
           "distribution": {}
         }
       }
@@ -275,9 +285,10 @@
       "remaining_rows": 3,
       "remaining_cells": 6,
       "answered": 0,
-      "metadata_only": 0,
+      "title_abstract_only": 0,
       "failed": 0,
-      "stale": 0
+      "stale": 0,
+      "failed_rows": 0
     },
     "run": "none",
     "next_step": "Created without a run. 3 of 3 rows have unanswered questions (6 cells); fill_table fills them.",
@@ -285,7 +296,7 @@
   },
   "created_spec": {
     "id": "t-fixture",
-    "spec_version": 1,
+    "spec_version": 2,
     "title": "Sample sizes in three trials",
     "description": "Sample sizes across the papers.",
     "columns": [
@@ -340,13 +351,11 @@
           "library_ref": "u",
           "zotero_key": "PAPER001",
           "library_id": 1,
-          "kind": "item",
-          "attachment": {
-            "library_ref": "u",
-            "zotero_key": "ATTACH01",
-            "library_id": 1
-          }
+          "kind": "item"
         },
+        "documents": [
+          "u-ATTACH01"
+        ],
         "cells": {
           "_reference": {
             "outcome": "answered",
@@ -381,13 +390,11 @@
           "library_ref": "u",
           "zotero_key": "PAPER002",
           "library_id": 1,
-          "kind": "item",
-          "attachment": {
-            "library_ref": "u",
-            "zotero_key": "ATTACH02",
-            "library_id": 1
-          }
+          "kind": "item"
         },
+        "documents": [
+          "u-ATTACH02"
+        ],
         "cells": {
           "_reference": {
             "outcome": "answered",

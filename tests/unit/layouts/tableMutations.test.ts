@@ -23,7 +23,11 @@ import {
     type TableMutation,
     type TableSummary,
 } from "@beaver/agent-core/layouts/tableMutations";
-import { questionHash } from "@beaver/agent-core/layouts/table";
+import {
+    isStale,
+    questionHash,
+    staleReason,
+} from "@beaver/agent-core/layouts/table";
 
 interface MutationFixture {
     name: string;
@@ -40,6 +44,13 @@ interface SummaryFixture {
     name: string;
     spec: TableSpec;
     summary: TableSummary;
+}
+
+/** `stale` lists every `[row, column]` cell {@link isStale} reports, in table order. */
+interface StalenessFixture {
+    name: string;
+    spec: TableSpec;
+    stale: [string, string][];
 }
 
 const fixturesDir = fileURLToPath(
@@ -89,6 +100,7 @@ function deepFreeze<T>(value: T): T {
 
 const mutationFixtures = loadFixtures<MutationFixture>("table-mutations");
 const summaryFixtures = loadFixtures<SummaryFixture>("table-summaries");
+const stalenessFixtures = loadFixtures<StalenessFixture>("table-staleness");
 
 describe("the table-mutation fixture corpus", () => {
     // A glob that matched nothing would otherwise make this whole file pass by
@@ -157,6 +169,43 @@ describe("the table-summary fixture corpus", () => {
             expect(summarize(fixture.spec)).toEqual(fixture.summary);
         });
     }
+});
+
+describe("the table-staleness fixture corpus", () => {
+    it("is not empty", () => {
+        expect(stalenessFixtures.length).toBeGreaterThan(0);
+    });
+
+    for (const { file, fixture } of stalenessFixtures) {
+        it(`${file}: ${fixture.name}`, () => {
+            const stale: [string, string][] = [];
+            for (const row of fixture.spec.rows)
+                for (const column of fixture.spec.columns)
+                    if (isStale(row, row.cells[column.id]))
+                        stale.push([row.id, column.id]);
+            expect(stale).toEqual(fixture.stale);
+        });
+    }
+
+    it("says whether the question or the row's document changed", () => {
+        const read = {
+            outcome: "answered",
+            provenance: "model",
+            value: { kind: "text", text: "Survey" },
+            documents: ["u-A"],
+        } as const;
+        expect(staleReason({ documents: ["u-A"] }, read)).toBeUndefined();
+        expect(staleReason({ documents: ["u-B"] }, read)).toBe("document");
+        expect(staleReason({ documents: ["u-A"] }, { ...read, stale: true })).toBe(
+            "question",
+        );
+        expect(
+            staleReason(
+                { documents: ["u-B"] },
+                { outcome: "answered", provenance: "user", value: read.value },
+            ),
+        ).toBeUndefined();
+    });
 });
 
 describe("questionHash", () => {
@@ -336,7 +385,7 @@ describe("applyMutations", () => {
                         cell: {
                             outcome: "answered",
                             value: { kind: "text", text: "Survey" },
-                            provenance: "document",
+                            provenance: "model",
                         },
                     },
                 ],
@@ -362,7 +411,7 @@ describe("applyMutations", () => {
                         cell: {
                             outcome: "answered",
                             value: { kind: "text", text: "Survey" },
-                            provenance: "document",
+                            provenance: "model",
                         },
                     },
                 ],
@@ -390,7 +439,7 @@ describe("applyMutations", () => {
                         cell: {
                             outcome: "answered",
                             value: { kind: "select", label: "RCT" },
-                            provenance: "metadata",
+                            provenance: "model",
                         },
                     },
                 ],

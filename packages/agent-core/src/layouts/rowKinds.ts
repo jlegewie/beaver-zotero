@@ -17,7 +17,10 @@
 
 import type { ExternalReference } from "../types/externalReferences";
 import type { ZoteroItemReference } from "../types/zotero";
-import { UNRESOLVED_LIBRARY_ID } from "../identity/libraryRef";
+import {
+    UNRESOLVED_LIBRARY_ID,
+    parseItemReference,
+} from "../identity/libraryRef";
 import type {
     CellValue,
     CellValueKind,
@@ -79,12 +82,14 @@ export interface RowKindDef<K extends RowKind = RowKind> {
     /**
      * Where `action` points for this ref, or `undefined` when the ref cannot
      * support it. This is the single source of applicability: a verb is offered
-     * exactly when it has a target.
+     * exactly when it has a target. `documents` are the row's
+     * (`Row.documents`).
      */
     target(
         ref: RefOf<K>,
         action: RowAction,
         inLibrary: boolean,
+        documents: readonly string[] | undefined,
     ): RowActionTarget | undefined;
     /**
      * The row's label in a `row_type` column ("Highlight", "Search result"),
@@ -175,6 +180,23 @@ function bare(
     };
 }
 
+/**
+ * The Zotero attachment a document id names (`u-KEY`, `g<groupID>-KEY`), or
+ * undefined for an attached file (`ext-KEY`) or a malformed id.
+ */
+export function documentReference(
+    document: string | undefined,
+): ZoteroItemReference | undefined {
+    if (!document || document.startsWith("ext-")) return undefined;
+    const parsed = parseItemReference(document);
+    if (!parsed) return undefined;
+    return {
+        library_id: parsed.library_id ?? UNRESOLVED_LIBRARY_ID,
+        zotero_key: parsed.zotero_key,
+        ...(parsed.library_ref ? { library_ref: parsed.library_ref } : {}),
+    };
+}
+
 export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
     item: {
         inLibrary: () => true,
@@ -183,18 +205,23 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
         // The item type's name is the host's to localise.
         typeLabel: () => undefined,
         typeColor: "gray",
-        target(ref, action, inLibrary) {
+        target(ref, action, inLibrary, documents) {
             // A producer that marks a library object as no longer in the
             // library (deleted, out of reach) takes its verbs with it.
             if (!inLibrary) return undefined;
             if (action === "reveal")
                 return { kind: "reveal_item", ref: bare(ref) };
-            if (action === "open")
+            if (action === "open") {
                 // With the file named, a static rendering can link to it;
                 // without, the host picks the best attachment when clicked.
-                return ref.attachment
-                    ? { kind: "open_file", ref: bare(ref.attachment) }
-                    : { kind: "open_item", ref: bare(ref) };
+                const file = documentReference(documents?.[0]);
+                if (!file) return { kind: "open_item", ref: bare(ref) };
+                // The item's rowid names the document's library too when
+                // both are in the same one.
+                if (file.library_ref === ref.library_ref && ref.library_id != null)
+                    file.library_id = ref.library_id;
+                return { kind: "open_file", ref: file };
+            }
             return undefined;
         },
     },
@@ -312,6 +339,7 @@ export function rowActionTarget(
         row.ref as never,
         action,
         isRowInLibrary(row),
+        row.documents,
     );
 }
 

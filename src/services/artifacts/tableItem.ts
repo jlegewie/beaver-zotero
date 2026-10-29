@@ -84,6 +84,22 @@ export {
     TABLE_TAG,
     TABLE_URL_PREFIX,
 } from './tableItemIdentity';
+
+/**
+ * The format version a spec is stored under: always this build's. A spec that
+ * names another version is refused rather than restamped, since its fields
+ * would be read with this format's assumptions. A spec that names none was
+ * built in this process and is stamped with the current one.
+ */
+export function storedSpecVersion(spec: Pick<TableSpec, 'spec_version'>): number {
+    if (spec.spec_version !== undefined && spec.spec_version !== TABLE_SPEC_VERSION) {
+        throw new TableItemError(
+            `This build stores tables in format ${TABLE_SPEC_VERSION}, not ${String(spec.spec_version)}.`,
+            'unsupported_version'
+        );
+    }
+    return TABLE_SPEC_VERSION;
+}
 export type {
     ReadTableItemResult,
     TableCreationState,
@@ -254,6 +270,8 @@ export async function createTableItem(
     options: CreateTableItemOptions
 ): Promise<CreatedTableItem> {
     const { spec, collectionID } = options;
+    // Before anything is imported: a refused spec must leave no item behind.
+    const specVersion = storedSpecVersion(spec);
 
     const resolved = resolveTableLibrary(options.libraryID);
     if ('error' in resolved) {
@@ -326,7 +344,7 @@ export async function createTableItem(
         // --- step 2: the table, which knows which item it is
         const stored: TableSpec = {
             ...named,
-            spec_version: named.spec_version ?? TABLE_SPEC_VERSION,
+            spec_version: specVersion,
             key: item.key,
             // A fresh item is revision 1 whatever the incoming spec claimed; a spec
             // copied from an existing table starts its own history here.

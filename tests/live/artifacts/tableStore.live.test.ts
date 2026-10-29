@@ -110,7 +110,7 @@ function spec(title: string, note: string) {
                     note: {
                         outcome: 'answered' as const,
                         value: { kind: 'text' as const, text: note },
-                        provenance: 'document' as const,
+                        provenance: 'model' as const,
                     },
                 },
             },

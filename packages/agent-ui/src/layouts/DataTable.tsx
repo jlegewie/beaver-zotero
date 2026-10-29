@@ -12,7 +12,7 @@ import {
     columnAlign,
     isColumnFilterable,
     isColumnSortable,
-    isMetadataOnly,
+    isTitleAbstractOnly,
     type Column,
     type Row,
     type TableSpec,
@@ -21,7 +21,7 @@ import { citationForEvidence } from "@beaver/agent-core/layouts/tableCitations";
 import Citation from "../chat/Citation";
 import { ArrowRightIcon, Icon, TickIcon } from "../icons";
 import type { MenuItem } from "../primitives/ContextMenu";
-import { CellView, DetailsView } from "./cells";
+import { CellView, DetailsView, rowFailureLabel } from "./cells";
 import { ColumnHeaderCell } from "./columnHeader";
 import { RowActionsView } from "./rowActions";
 import {
@@ -173,11 +173,14 @@ export function DataTable({
     // How many cells of each column were answered from title and abstract
     // alone, for the header. Over the whole table, not the filtered view: it
     // describes the column.
-    const metadataCounts = useMemo(() => {
+    const titleAbstractCounts = useMemo(() => {
         const counts = new Map<string, number>();
         for (const row of table.rows)
             for (const column of table.columns)
-                if (isMetadataOnly(row.cells[column.id]))
+                if (
+                    row.cells[column.id]?.outcome === "answered" &&
+                    isTitleAbstractOnly(row.cells[column.id])
+                )
                     counts.set(column.id, (counts.get(column.id) ?? 0) + 1);
         return counts;
     }, [table.rows, table.columns]);
@@ -275,7 +278,7 @@ export function DataTable({
                                 showDescription={hasQuestions}
                                 showProgress={hasProgress}
                                 menuItems={columnMenuItems?.(column)}
-                                metadataCount={metadataCounts.get(column.id)}
+                                titleAbstractCount={titleAbstractCounts.get(column.id)}
                             />
                         ))}
                     </tr>
@@ -461,7 +464,7 @@ const TableRow = React.memo(function TableRow({
             <tr
                 className={[
                     "bt-row",
-                    row.status === "error" ? "bt-row-error" : "",
+                    row.failure ? "bt-row-error" : "",
                     expanded ? "bt-row-open" : "",
                     selected ? "bt-row-selected" : "",
                 ]
@@ -486,8 +489,8 @@ const TableRow = React.memo(function TableRow({
                         id={cellIdFor(row.id, column.id)}
                         className={[
                             "bt-td",
-                            isMetadataOnly(row.cells[column.id])
-                                ? "bt-td-metadata"
+                            isTitleAbstractOnly(row.cells[column.id])
+                                ? "bt-td-title-abstract"
                                 : "",
                             `bt-align-${columnAlign(column)}`,
                             `bt-kind-${column.type}`,
@@ -709,8 +712,11 @@ function RowDetail({
 
     return (
         <div className="bt-detail">
-            {row.status === "error" && row.error ? (
-                <div className="bt-detail-error">{row.error}</div>
+            {row.failure ? (
+                <div className="bt-detail-error">
+                    <strong>{rowFailureLabel(row.failure)}.</strong>{" "}
+                    {row.failure.message}
+                </div>
             ) : null}
 
             <dl className="bt-detail-fields">
@@ -780,6 +786,11 @@ function RowDetail({
  * locator, so two quotes of one work could not be told apart through the
  * thread's citation store; the assembled citation carries its own quote,
  * page and highlight.
+ *
+ * The evidence of an answer resting on the paper's silence, and of a finding
+ * that the paper does not report something, is the closest the paper comes,
+ * not proof, so the list says so. A passage cited from a table carries the
+ * table's caption and header rows, shown above it so the quote can be read.
  */
 function EvidenceList({
     row,
@@ -788,16 +799,25 @@ function EvidenceList({
     row: Row;
     columnId: string;
 }): React.ReactElement {
-    const evidence = row.cells[columnId]?.evidence ?? [];
+    const cell = row.cells[columnId];
+    const evidence = cell?.evidence ?? [];
+    const closest = !!cell?.absent || cell?.outcome === "not_reported";
     return (
         <div className="bt-details">
+            {closest ? (
+                <div className="bt-details-label">Closest passages</div>
+            ) : null}
             <ul className="bt-details-list">
                 {evidence.map((entry, index) => {
                     const citation = citationForEvidence(row, entry);
                     return (
                         <li key={index}>
+                            {entry.context ? (
+                                <span className="bt-evidence-context">
+                                    {entry.context}
+                                </span>
+                            ) : null}
                             “{entry.quote.replace(/\s+/g, " ").trim()}”
-                            {entry.field ? ` (${entry.field})` : null}
                             {citation ? (
                                 <span className="markdown">
                                     {" "}

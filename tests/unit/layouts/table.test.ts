@@ -17,18 +17,22 @@ import {
     isColumnSortable,
     isExtractionColumn,
     isFillableColumn,
-    isMetadataOnly,
+    isStale,
+    isTitleAbstractOnly,
+    needsReview,
     isRowInLibrary,
     normalizeSelectLabel,
     readSpec,
     rowActionTarget,
     rowActions,
     rowDecision,
+    rowInvariantError,
     rowInScope,
     rowPrimaryAction,
     rowTypeLabel,
     selectLabelsInColumn,
     sortRows,
+    staleReason,
     stripCitationTags,
     summarizeCoverage,
     TABLE_SPEC_VERSION,
@@ -45,12 +49,12 @@ function row(id: string, cells: Row["cells"]): Row {
     return { id, cells };
 }
 
-/** An answered cell; the filler read the attachment unless told otherwise. */
+/** An answered cell; the producer filled it unless told otherwise. */
 function answered(
     value: CellValue,
-    provenance: Cell["provenance"] = "document",
+    provenance: Cell["provenance"] = "system",
 ): Cell {
-    return { outcome: "answered", provenance, value };
+    return { outcome: "answered", provenance, value } as Cell;
 }
 
 const spec: TableSpec = {
@@ -124,26 +128,44 @@ describe("ids", () => {
 });
 
 describe("readSpec", () => {
+    it("reads a table without a version as the first format, and a corrupt file as invalid", () => {
+        expect(readSpec({ id: "t1", columns: [], rows: [] })).toEqual({
+            ok: false,
+            reason: "unsupported_version",
+            specVersion: 1,
+        });
+        expect(readSpec({ broken: true })).toMatchObject({ ok: false, reason: "invalid" });
+        expect(readSpec({ id: "t1", spec_version: 1, columns: [], rows: [] })).toMatchObject({
+            reason: "unsupported_version",
+        });
+    });
+
     const stored = {
         id: "t1",
+        spec_version: TABLE_SPEC_VERSION,
         columns: [{ id: "a", header: "A", type: "text" }],
         rows: [{ id: "r", cells: {} }],
     };
 
-    it("opens a spec written without a version and one written by this build", () => {
+    it("opens a spec written by this build", () => {
         expect(readSpec(stored)).toEqual({ ok: true, spec: stored });
-        const versioned = { ...stored, spec_version: TABLE_SPEC_VERSION };
-        expect(readSpec(versioned)).toEqual({ ok: true, spec: versioned });
     });
 
-    it("refuses a spec from a newer format and reports the version it saw", () => {
-        expect(
-            readSpec({ ...stored, spec_version: TABLE_SPEC_VERSION + 1 }),
-        ).toEqual({
+    it("refuses a spec of an older or newer format and reports the version it saw", () => {
+        // No version means the first format, which this build has no reader for.
+        const { spec_version: _version, ...unversioned } = stored;
+        expect(readSpec(unversioned)).toEqual({
             ok: false,
             reason: "unsupported_version",
-            specVersion: TABLE_SPEC_VERSION + 1,
+            specVersion: 1,
         });
+        for (const specVersion of [1, TABLE_SPEC_VERSION + 1]) {
+            expect(readSpec({ ...stored, spec_version: specVersion })).toEqual({
+                ok: false,
+                reason: "unsupported_version",
+                specVersion,
+            });
+        }
     });
 
     it("keeps a role, outcome or provenance it does not recognise", () => {
@@ -313,6 +335,7 @@ describe("column roles", () => {
     it("keeps an unknown role through readSpec", () => {
         const raw = {
             id: "t",
+            spec_version: TABLE_SPEC_VERSION,
             columns: [column("some_future_role")],
             rows: [],
         };
@@ -364,15 +387,16 @@ describe("defaults", () => {
         expect(
             isCellEmpty({
                 outcome: "failed",
-                provenance: "document",
-                error: "no text layer",
+                provenance: "model",
+                error_code: "no_locator",
+                error: "The answer cited no passage.",
             }),
         ).toBe(true);
         expect(isCellEmpty({ outcome: "cleared", provenance: "user" })).toBe(
             true,
         );
         expect(
-            isCellEmpty({ outcome: "not_reported", provenance: "document" }),
+            isCellEmpty({ outcome: "not_reported", provenance: "model" }),
         ).toBe(false);
         expect(isCellEmpty(answered({ kind: "boolean", value: false }))).toBe(
             false,
@@ -578,37 +602,43 @@ describe("validateTableSpec", () => {
 
     it("reports a cell that breaks an outcome or provenance invariant", () => {
         const text = { kind: "text", text: "Survey" } as const;
-        const broken: Record<string, Cell> = {
-            answeredWithoutValue: {
-                outcome: "answered",
-                provenance: "document",
-            },
-            notReportedWithValue: {
-                outcome: "not_reported",
-                provenance: "document",
-                value: text,
-            },
-            failedWithoutError: { outcome: "failed", provenance: "document" },
+        const filler = { outcome: "answered", provenance: "model", value: text } as const;
+        const broken = {
+            answeredWithoutValue: { outcome: "answered", provenance: "model" },
+            notReportedWithValue: { outcome: "not_reported", provenance: "model", value: text },
+            failedWithoutError: { outcome: "failed", provenance: "model" },
+            failedWithoutCode: { outcome: "failed", provenance: "model", error: "x" },
             errorOnAnswer: { ...answered(text), error: "x" },
-            errorCodeOnNotReported: {
-                outcome: "not_reported",
-                provenance: "document",
-                error_code: "deadline",
+            errorCodeOnNotReported: { outcome: "not_reported", provenance: "model", error_code: "deadline" },
+            reasoningOnFailure: {
+                outcome: "failed",
+                provenance: "model",
+                error_code: "no_locator",
+                error: "x",
+                reasoning: "why",
             },
             evidenceOnUserCell: {
                 ...answered(text, "user"),
-                evidence: [{ locator: "s1", quote: "Survey" }],
+                evidence: [{ document: "u-D", locator: "s1", quote: "Survey" }],
             },
-            clearedByFiller: { outcome: "cleared", provenance: "document" },
-            unknownOutcome: {
-                outcome: "pending" as Cell["outcome"],
-                provenance: "document",
+            documentsOnSystemCell: { ...answered(text), documents: ["u-D"] },
+            evidenceOutsideItsDocuments: {
+                ...filler,
+                documents: ["u-D"],
+                evidence: [{ document: "u-E", locator: "s1", quote: "Survey" }],
             },
-            unknownProvenance: {
-                ...answered(text),
-                provenance: "extracted" as Cell["provenance"],
+            evidenceWithoutLocator: {
+                ...filler,
+                documents: ["u-D"],
+                evidence: [{ document: "u-D", quote: "Survey" }],
             },
-        };
+            absentNotReported: { outcome: "not_reported", provenance: "model", absent: true },
+            absentYes: { ...filler, value: { kind: "boolean", value: true }, absent: true },
+            unknownConfidence: { ...filler, confidence: "certain" },
+            clearedByFiller: { outcome: "cleared", provenance: "model" },
+            unknownOutcome: { outcome: "pending", provenance: "model" },
+            unknownProvenance: { ...answered(text), provenance: "extracted" },
+        } as unknown as Record<string, Cell>;
         const bad: TableSpec = {
             id: "t",
             columns: [{ id: "m", header: "M", type: "text" }],
@@ -617,14 +647,36 @@ describe("validateTableSpec", () => {
             ),
         };
         expect(
-            validateTableSpec(bad).map((i) => [i.code, i.row_id, i.column_id]),
+            validateTableSpec(bad)
+                .filter((i) => i.code === "invalid_cell")
+                .map((i) => [i.code, i.row_id, i.column_id]),
         ).toEqual(Object.keys(broken).map((id) => ["invalid_cell", id, "m"]));
         expect(cellInvariantError(broken.failedWithoutError)).toMatch(
-            /error exactly when its outcome is failed/,
+            /error and an error code exactly when its outcome is failed/,
         );
         expect(cellInvariantError(broken.errorCodeOnNotReported)).toMatch(
-            /Only a failed cell has an error code/,
+            /error and an error code exactly when its outcome is failed/,
         );
+        expect(cellInvariantError(broken.evidenceOutsideItsDocuments)).toMatch(
+            /names one of the cell's documents/,
+        );
+    });
+
+    it("reports a row whose documents or failure are malformed", () => {
+        const rows = [
+            { id: "documents", documents: [""], cells: {} },
+            { id: "failure", failure: { code: "encrypted" }, cells: {} },
+        ] as unknown as Row[];
+        expect(rowInvariantError(rows[0])).toMatch(/list of document ids/);
+        expect(
+            validateTableSpec({ id: "t", columns: [], rows }).map((i) => [i.code, i.row_id]),
+        ).toEqual([
+            ["invalid_row", "documents"],
+            ["invalid_row", "failure"],
+        ]);
+        expect(
+            rowInvariantError({ id: "ok", documents: ["u-D"], failure: { code: "encrypted", message: "Locked." }, cells: {} }),
+        ).toBeUndefined();
     });
 
     it("accepts every well-formed outcome", () => {
@@ -634,30 +686,41 @@ describe("validateTableSpec", () => {
             rows: [
                 row("doc", {
                     m: {
-                        ...answered({ kind: "text", text: "Survey" }),
+                        outcome: "answered",
+                        provenance: "model",
+                        value: { kind: "text", text: "Survey" },
+                        documents: ["u-D"],
                         evidence: [
-                            { locator: "s1", quote: "A survey", page: 0 },
+                            { document: "u-D", locator: "s1", quote: "A survey", page: 0, context: "Table 1. Methods" },
                         ],
                         reasoning: "Stated in the methods.",
-                        unsure: true,
+                        confidence: "low",
                         stale: true,
+                    },
+                }),
+                row("absent", {
+                    m: {
+                        outcome: "answered",
+                        provenance: "model",
+                        value: { kind: "text", text: "Not discussed" },
+                        documents: ["u-D"],
+                        absent: true,
+                        reasoning: "No section on it.",
                     },
                 }),
                 row("meta", {
                     m: {
                         outcome: "not_reported",
-                        provenance: "metadata",
-                        evidence: [
-                            { quote: "No method given", field: "abstract" },
-                        ],
+                        provenance: "model",
+                        reasoning: "The abstract gives no method.",
                     },
                 }),
                 row("failed", {
                     m: {
                         outcome: "failed",
-                        provenance: "document",
-                        error: "The PDF has no text layer. It may be a scan.",
-                        error_code: "no_text_layer",
+                        provenance: "model",
+                        error: "The answer cited no passage.",
+                        error_code: "no_locator",
                     },
                 }),
                 row("cleared", {
@@ -745,7 +808,7 @@ describe("plain text", () => {
 
     it("exports a CSV cell without the tags", () => {
         expect(toCsv(citedSpec)).toBe(
-            'Methods,Methods — state\r\n"Survey of 1,200 adults in 2019.",document',
+            'Methods,Methods — state\r\n"Survey of 1,200 adults in 2019.",system',
         );
     });
 });
@@ -758,13 +821,13 @@ describe("toCsv", () => {
         );
         expect(csv.split("\r\n")).toEqual([
             "Reference,Reference — state,Year,Year — state,Citations,Citations — state,Type,Type — state,Open access,Open access — state,Methods,Methods — state",
-            'Smith 2020 — Alpha,system,2020,system,120,document,Article,document,true,document,"Survey, n = 1,200",document',
-            "Jones 2018,system,2018-05,system,7,document,Book,document,false,document,,",
-            "adams 2022,system,2022-01-15,system,,,Article,document,,,Interviews,document",
+            'Smith 2020 — Alpha,system,2020,system,120,system,Article,system,true,system,"Survey, n = 1,200",system',
+            "Jones 2018,system,2018-05,system,7,system,Book,system,false,system,,",
+            "adams 2022,system,2022-01-15,system,,,Article,system,,,Interviews,system",
         ]);
     });
 
-    it("writes evidence, reasoning and state beside the value, escaping formula-like text", () => {
+    it("writes evidence, reasoning, absence, confidence and state beside the value, escaping formula-like text", () => {
         const table: TableSpec = {
             id: "outcomes",
             columns: [{ id: "a", header: "=Header", type: "text" }],
@@ -775,26 +838,46 @@ describe("toCsv", () => {
                     cells: {
                         a: {
                             outcome: "not_reported",
-                            provenance: "document",
+                            provenance: "model",
                             reasoning: "=Nothing on sample size",
                         },
                     },
                 },
                 {
                     id: "answer",
+                    documents: ["u-DOC1"],
                     cells: {
                         a: {
-                            ...answered({ kind: "text", text: "120 adults" }),
-                            unsure: true,
+                            outcome: "answered",
+                            provenance: "model",
+                            value: { kind: "text", text: "120 adults" },
+                            documents: ["u-DOC1"],
+                            confidence: "low",
                             stale: true,
                             evidence: [
                                 {
+                                    document: "u-DOC1",
                                     locator: "s1",
                                     page: 3,
                                     quote: 'The study enrolled "120" participants.',
+                                    context: "Table 1. Sample",
                                 },
-                                { quote: "120 adults", field: "abstract" },
+                                { document: "u-DOC1", locator: "s9", quote: "120 adults" },
                             ],
+                        },
+                    },
+                },
+                {
+                    id: "silent",
+                    documents: ["u-DOC1"],
+                    cells: {
+                        a: {
+                            outcome: "answered",
+                            provenance: "model",
+                            value: { kind: "text", text: "Not discussed" },
+                            documents: ["u-DOC1"],
+                            absent: true,
+                            confidence: "high",
                         },
                     },
                 },
@@ -803,8 +886,9 @@ describe("toCsv", () => {
                     cells: {
                         a: {
                             outcome: "failed",
-                            provenance: "metadata",
-                            error: "no abstract",
+                            provenance: "model",
+                            error_code: "no_locator",
+                            error: "no passage",
                         },
                     },
                 },
@@ -812,16 +896,17 @@ describe("toCsv", () => {
         };
         const lines = toCsv(table).split("\r\n");
         expect(lines[0]).toBe(
-            "'=Header,'=Header — evidence,'=Header — reasoning,'=Header — state",
+            "'=Header,'=Header — evidence,'=Header — reasoning,'=Header — absent,'=Header — confidence,'=Header — state",
         );
-        expect(lines[1]).toBe(",,,");
+        expect(lines[1]).toBe(",,,,,");
         expect(lines[2]).toBe(
-            "Not reported,,'=Nothing on sample size,not_reported; document",
+            "Not reported,,'=Nothing on sample size,,,not_reported; title and abstract; model",
         );
         expect(lines[3]).toBe(
-            '120 adults,"""The study enrolled ""120"" participants."" (p. 4, s1)\n""120 adults"" (abstract)",,unsure; stale; document',
+            '120 adults,"u-DOC1 s1: The study enrolled ""120"" participants. [Table 1. Sample]\nu-DOC1 s9: 120 adults",,,low,stale; model',
         );
-        expect(lines[4]).toBe(",,,failed; no abstract; metadata");
+        expect(lines[4]).toBe("Not discussed,,,absent,high,model");
+        expect(lines[5]).toBe(",,,,,failed; no passage; model");
     });
 });
 
@@ -951,12 +1036,15 @@ describe("row actions", () => {
 
     it("opens a library item's named file, and lets the host pick one otherwise", () => {
         const withFile = mkRow({
-            ref: { kind: "item", ...item, attachment: file },
+            ref: { kind: "item", ...item },
+            documents: ["u-F"],
         });
         expect(rowActions(spec, withFile)).toEqual(["reveal", "open"]);
+        // The document id names its library portably; the item's rowid
+        // stands for it in the same library.
         expect(rowActionTarget(withFile, "open")).toEqual({
             kind: "open_file",
-            ref: file,
+            ref: { library_ref: "u", library_id: 1, zotero_key: "F" },
         });
         const withoutFile = mkRow({ ref: { kind: "item", ...item } });
         expect(rowActionTarget(withoutFile, "open")).toEqual({
@@ -1355,7 +1443,7 @@ describe("column progress validation", () => {
 });
 
 describe("coverage", () => {
-    it("separates filled, not-reported, failed and metadata-only cells", () => {
+    it("separates filled, not-reported, failed, title-and-abstract and to-review cells", () => {
         const spec: TableSpec = {
             id: "t",
             columns: [
@@ -1371,21 +1459,23 @@ describe("coverage", () => {
             rows: [
                 {
                     id: "r1",
+                    documents: ["u-D1"],
                     cells: {
                         a: answered({ kind: "text", text: "x" }),
-                        b: { outcome: "not_reported", provenance: "document" },
+                        b: { outcome: "not_reported", provenance: "model", documents: ["u-D1"], confidence: "low" },
                     },
                 },
                 {
                     id: "r2",
-                    status: "error",
+                    failure: { code: "encrypted", message: "Locked." },
                     cells: {
                         a: {
                             outcome: "failed",
-                            provenance: "document",
-                            error: "no text layer",
+                            provenance: "model",
+                            error_code: "no_locator",
+                            error: "no passage",
                         },
-                        b: answered({ kind: "text", text: "y" }, "metadata"),
+                        b: answered({ kind: "text", text: "y" }, "model"),
                     },
                 },
                 {
@@ -1402,10 +1492,44 @@ describe("coverage", () => {
             notReported: 1,
             error: 1,
             errorRows: 1,
-            metadataOnly: 1,
+            titleAbstractOnly: 1,
+            needsReview: 1,
         });
-        expect(isMetadataOnly(spec.rows[1].cells.b)).toBe(true);
-        expect(isMetadataOnly(spec.rows[0].cells.a)).toBe(false);
+        expect(isTitleAbstractOnly(spec.rows[1].cells.b)).toBe(true);
+        expect(isTitleAbstractOnly(spec.rows[0].cells.a)).toBe(false);
+    });
+
+    it("says why a cell is stale: the question, or the row's documents, never for a user's cell", () => {
+        const read = (documents?: string[], extra: Record<string, unknown> = {}) =>
+            ({
+                outcome: "answered",
+                provenance: "model",
+                value: { kind: "text", text: "x" },
+                ...(documents ? { documents } : {}),
+                ...extra,
+            }) as Cell;
+        const named = { documents: ["u-A"] };
+        expect(staleReason(named, read(["u-A"]))).toBeUndefined();
+        expect(staleReason(named, read(["u-A"], { stale: true }))).toBe("question");
+        // a) another attachment; b) a second one; c) a title/abstract row gains one.
+        expect(staleReason({ documents: ["u-B"] }, read(["u-A"]))).toBe("document");
+        expect(staleReason({ documents: ["u-A", "u-B"] }, read(["u-A"]))).toBe("document");
+        expect(staleReason(named, read())).toBe("document");
+        expect(isStale({}, read())).toBe(false);
+        expect(isStale(named, answered({ kind: "text", text: "x" }, "user"))).toBe(false);
+        expect(
+            isStale(named, { outcome: "failed", provenance: "model", error_code: "x", error: "x" }),
+        ).toBe(false);
+    });
+
+    it("marks low confidence for review, and medium only in a number column", () => {
+        const cell = (confidence: string, provenance = "model") =>
+            ({ outcome: "answered", provenance, value: { kind: "number", value: 1 }, confidence }) as Cell;
+        expect(needsReview({ type: "text" }, cell("low"))).toBe(true);
+        expect(needsReview({ type: "text" }, cell("medium"))).toBe(false);
+        expect(needsReview({ type: "number" }, cell("medium"))).toBe(true);
+        expect(needsReview({ type: "number" }, cell("high"))).toBe(false);
+        expect(needsReview({ type: "text" }, cell("low", "user"))).toBe(false);
     });
 
     it("counts only the rows it is given, so a footer can report the filtered view", () => {

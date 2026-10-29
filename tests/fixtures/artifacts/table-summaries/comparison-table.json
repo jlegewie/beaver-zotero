@@ -2,7 +2,7 @@
     "name": "a comparison over two sources with system columns",
     "spec": {
         "id": "t1",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Sampling methods",
         "description": "How the papers sampled their respondents.",
         "anchor_column_id": "_reference",
@@ -63,12 +63,8 @@
                     "zotero_key": "AAA",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-AAAPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -100,13 +96,17 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Telephone survey"
                         },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-AAAPDF",
                                 "locator": "s12-s13",
                                 "quote": "Respondents were sampled by random digit dialing.",
                                 "page": 3,
@@ -121,7 +121,14 @@
                             }
                         ]
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r2",
@@ -131,13 +138,6 @@
                     "zotero_key": "BBB",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -159,19 +159,20 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Mail survey"
-                        },
-                        "evidence": [
-                            {
-                                "quote": "A mail survey of 2,000 households.",
-                                "field": "abstract"
-                            }
-                        ]
+                        }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r3",
@@ -181,13 +182,6 @@
                     "zotero_key": "CCC",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -207,7 +201,14 @@
                             "value": "2021"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r4",
@@ -216,13 +217,6 @@
                     "source": "openalex",
                     "source_id": "W123"
                 },
-                "in_library": false,
-                "origin": [
-                    {
-                        "source": "s2",
-                        "date": "2026-10-21"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -251,7 +245,14 @@
                             "label": "10.1000/delta"
                         }
                     }
-                }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
             }
         ]
     },
@@ -266,49 +267,57 @@
             "_reference": {
                 "type": "reference",
                 "answered": 4,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
             },
             "_year": {
                 "type": "date",
                 "answered": 4,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
             },
             "_identifier": {
                 "type": "link",
                 "answered": 2,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
             },
             "method": {
                 "type": "text",
                 "answered": 2,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 2,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 1
+                "needs_review": 0,
+                "title_abstract_only": 1
             }
         }
     }
