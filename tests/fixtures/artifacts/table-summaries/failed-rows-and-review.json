@@ -1,5 +1,5 @@
 {
-    "name": "row failures, absent answers counted with the other no answers, review marks and title and abstract answers",
+    "name": "row failures, review marks on filler answers and blanks read from a document outside text columns, and title and abstract answers",
     "spec": {
         "id": "t1",
         "spec_version": 2,
@@ -106,7 +106,6 @@
                                 "quote": "A quote."
                             }
                         ],
-                        "absent": true,
                         "confidence": "medium",
                         "reasoning": "Costs are described only in words."
                     }
@@ -151,23 +150,13 @@
                         "confidence": "medium"
                     },
                     "n": {
-                        "outcome": "answered",
+                        "outcome": "not_reported",
                         "provenance": "model",
-                        "value": {
-                            "kind": "number",
-                            "value": 40
-                        },
                         "documents": [
                             "u-PDF2"
                         ],
-                        "evidence": [
-                            {
-                                "document": "u-PDF2",
-                                "locator": "s1",
-                                "quote": "A quote."
-                            }
-                        ],
-                        "confidence": "high"
+                        "confidence": "medium",
+                        "reasoning": "The interviews are described, but their number is not given."
                     },
                     "costs": {
                         "outcome": "answered",
@@ -299,7 +288,6 @@
             "_reference": {
                 "type": "reference",
                 "answered": 5,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -313,21 +301,19 @@
             "method": {
                 "type": "text",
                 "answered": 4,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
                 "in_failed_rows": 1,
                 "stale": 1,
-                "needs_review": 1,
+                "needs_review": 0,
                 "title_abstract_only": 2
             },
             "n": {
                 "type": "number",
-                "answered": 2,
-                "absent": 0,
-                "not_reported": 1,
+                "answered": 1,
+                "not_reported": 2,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
@@ -339,14 +325,13 @@
             "costs": {
                 "type": "boolean",
                 "answered": 3,
-                "absent": 1,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
                 "in_failed_rows": 2,
                 "stale": 0,
-                "needs_review": 1,
+                "needs_review": 2,
                 "title_abstract_only": 0,
                 "distribution": {
                     "false": 3

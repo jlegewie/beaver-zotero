@@ -1,0 +1,274 @@
+{
+    "name": "a yes/no false and a category label opening with the word No, Not or None read as negative; nothing else does",
+    "cases": [
+        {
+            "column": {
+                "id": "costs",
+                "header": "Costs",
+                "type": "boolean",
+                "description": "Does the study report monetary costs?"
+            },
+            "value": {
+                "kind": "boolean",
+                "value": false
+            },
+            "reads_as_negative": true
+        },
+        {
+            "column": {
+                "id": "costs",
+                "header": "Costs",
+                "type": "boolean",
+                "description": "Does the study report monetary costs?"
+            },
+            "value": {
+                "kind": "boolean",
+                "value": true
+            },
+            "reads_as_negative": false
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "No case study"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "No case study"
+            },
+            "reads_as_negative": true
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "Not discussed"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "Not discussed"
+            },
+            "reads_as_negative": true
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "None"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "None"
+            },
+            "reads_as_negative": true
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "none reported"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "none reported"
+            },
+            "reads_as_negative": true
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "NOT ASSESSED"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "NOT ASSESSED"
+            },
+            "reads_as_negative": true
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "no significant difference"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "no significant difference"
+            },
+            "reads_as_negative": true
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "Nonetheless positive"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "Nonetheless positive"
+            },
+            "reads_as_negative": false
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "Notable"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "Notable"
+            },
+            "reads_as_negative": false
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "Noël effect"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "Noël effect"
+            },
+            "reads_as_negative": false
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "Absent"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "Absent"
+            },
+            "reads_as_negative": false
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "Case study"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "Case study"
+            },
+            "reads_as_negative": false
+        },
+        {
+            "column": {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "Partly not"
+                    }
+                ]
+            },
+            "value": {
+                "kind": "select",
+                "label": "Partly not"
+            },
+            "reads_as_negative": false
+        },
+        {
+            "column": {
+                "id": "n",
+                "header": "Sample size",
+                "type": "number",
+                "description": "How many participants?"
+            },
+            "value": {
+                "kind": "number",
+                "value": 0,
+                "display": "none"
+            },
+            "reads_as_negative": false
+        },
+        {
+            "column": {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            },
+            "value": {
+                "kind": "text",
+                "text": "No sampling was reported."
+            },
+            "reads_as_negative": false
+        }
+    ]
+}

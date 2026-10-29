@@ -50,10 +50,6 @@ export const STALE_REASON_TEXT: Record<"question" | "document", string> = {
 export const REVIEW_TEXT =
     "Beaver is not confident in this answer; check it against the paper";
 
-/** The "not in paper" marker's tooltip. */
-export const ABSENT_TEXT =
-    "The paper does not say; this answer rests on its silence";
-
 /**
  * What stopped a row, in a few words: a row with nothing to read (no document
  * and no abstract) is told apart from one whose document could not be read.
@@ -70,8 +66,8 @@ export function rowFailureLabel(failure: RowFailure): string {
  * - **not reported** — a finding ("the paper does not report this"), so it
  *   reads as a value; unattempted and cleared cells show nothing.
  * - **answered** — the value, clamped to the row height unless the column opts
- *   out with `wrap: "nowrap"`, marked when it rests on the paper's silence
- *   ("not in paper") and when it was taken from title and abstract only.
+ *   out with `wrap: "nowrap"`, and marked when it was taken from title and
+ *   abstract only.
  *
  * Any of them may carry the review mark ({@link needsReview}) and a stale
  * marker whose tooltip says what changed ({@link staleReason}).
@@ -104,12 +100,6 @@ export function CellView({
     const stale = staleReason(row, cell);
     const states = (
         <>
-            {cell?.absent ? (
-                <small className="bt-absent" title={ABSENT_TEXT}>
-                    {" "}
-                    · not in paper
-                </small>
-            ) : null}
             {needsReview(column, cell) ? (
                 <small className="bt-review" title={REVIEW_TEXT}>
                     {" "}
@@ -262,9 +252,11 @@ export function CellValueView({
         case "text":
             return <>{renderText(value.text)}</>;
 
+        // A `display` may be long: one ellipsised line in the grid, with the
+        // whole of it in the tooltip and in the expanded row.
         case "number":
             return (
-                <span className="bt-number">
+                <span className="bt-number" title={value.display}>
                     {value.display ?? value.value.toLocaleString()}
                     {column.unit && !value.display ? (
                         <span className="bt-unit">{column.unit}</span>
@@ -274,7 +266,7 @@ export function CellValueView({
 
         case "date":
             return (
-                <span className="bt-number">
+                <span className="bt-number" title={value.display}>
                     {value.display ?? value.value}
                 </span>
             );

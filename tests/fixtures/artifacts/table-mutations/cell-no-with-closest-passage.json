@@ -1,5 +1,5 @@
 {
-    "name": "an absent no may rest on its reasoning alone",
+    "name": "a no keeps its reasoning and its closest passage",
     "before": {
         "id": "t1",
         "spec_version": 2,
@@ -226,9 +226,16 @@
                         "documents": [
                             "u-AAAPDF"
                         ],
-                        "absent": true,
                         "confidence": "medium",
-                        "reasoning": "The paper describes costs only as cheap; no amounts are given."
+                        "reasoning": "The paper describes costs only as cheap; no amounts are given.",
+                        "evidence": [
+                            {
+                                "document": "u-AAAPDF",
+                                "locator": "s40",
+                                "quote": "A cheap alternative to clinic visits.",
+                                "page": 7
+                            }
+                        ]
                     }
                 }
             ]
@@ -362,9 +369,16 @@
                         "documents": [
                             "u-AAAPDF"
                         ],
-                        "absent": true,
                         "confidence": "medium",
-                        "reasoning": "The paper describes costs only as cheap; no amounts are given."
+                        "reasoning": "The paper describes costs only as cheap; no amounts are given.",
+                        "evidence": [
+                            {
+                                "document": "u-AAAPDF",
+                                "locator": "s40",
+                                "quote": "A cheap alternative to clinic visits.",
+                                "page": 7
+                            }
+                        ]
                     }
                 },
                 "in_library": true,

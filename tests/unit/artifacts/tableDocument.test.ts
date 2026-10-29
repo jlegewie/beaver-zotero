@@ -911,8 +911,9 @@ describe("cell states", () => {
         expect(cellHtml(html, "unreported", "a")).toContain('data-cite-key="unreported|a|0"');
         expect(cellHtml(html, "blank", "a")).toContain("Cleared by you");
         expect(cellHtml(html, "mine", "a")).toContain("Edited by you");
+        // Prose is never marked for review, whatever its confidence.
         expect(cellHtml(html, "tentative", "a")).toContain(
-            '<span class="bt-review" title="Beaver is not confident in this answer; check it against the paper">To review</span> · <span class="bt-stale" title="The question changed">Stale</span>',
+            '<small class="bt-cell-state"> · <span class="bt-stale" title="The question changed">Stale</span></small>',
         );
         expect(cellHtml(html, "meta", "a")).toContain("From title and abstract");
         expect(cellHtml(html, "broken", "a")).toContain("Timed out");
@@ -925,7 +926,7 @@ describe("cell states", () => {
         expect(detail).toContain("<li>“We surveyed firms.”</li>");
 
         const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
-        expect(footer).toBe("6 rows · 1 not reported · 1 failed · 1 from title and abstract · 1 to review");
+        expect(footer).toBe("6 rows · 1 not reported · 1 failed · 1 from title and abstract");
         expect(html).not.toContain("contenteditable");
         expect(html).not.toMatch(/<script\b/i);
     });
@@ -970,44 +971,58 @@ describe("how answers read", () => {
         expect(TABLE_CSS).toContain(".bt-wrap .bt-no { color: var(--t-fade); }");
     });
 
-    it("marks an answer resting on the paper's silence and heads its passages as the closest", () => {
+    it("heads a no's passages as related, after its reason, and shows an uncited no's reason alone", () => {
         const { html } = renderTableHtml({
             id: "a",
             columns,
             rows: [
                 row("r", {
                     rct: filler({ kind: "boolean", value: false }, {
-                        absent: true,
                         reasoning: "No randomisation is described.",
                         evidence: [{ document: doc, locator: "s7", quote: "Participants chose a group." }],
                     }),
                 }),
-            ],
-        });
-        const cell = cellHtml(html, "r", "rct");
-        expect(cell).toContain('<span class="bt-no">No</span>');
-        expect(cell).toContain('<span class="bt-absent" title="The paper does not say; this answer rests on its silence">not in paper</span>');
-        const detail = detailHtml(html, "r");
-        const reasoning = detail.indexOf("No randomisation is described.");
-        const heading = detail.indexOf('<div class="bt-d-h">Closest passages</div>');
-        expect(reasoning).toBeGreaterThan(0);
-        expect(heading).toBeGreaterThan(reasoning);
-        expect(detail.indexOf("<li>“Participants chose a group.”")).toBeGreaterThan(heading);
-    });
-
-    it("gives the evidence of a plain answer no heading", () => {
-        const { html } = renderTableHtml({
-            id: "e",
-            columns,
-            rows: [
-                row("r", {
-                    rct: filler({ kind: "boolean", value: true }, {
-                        evidence: [{ document: doc, locator: "s7", quote: "Randomly assigned." }],
+                row("u", {
+                    rct: filler({ kind: "boolean", value: false }, {
+                        reasoning: "Randomisation is never mentioned.",
                     }),
                 }),
             ],
         });
-        expect(detailHtml(html, "r")).not.toContain("Closest passages");
+        expect(cellHtml(html, "r", "rct")).toContain('<span class="bt-no">No</span>');
+        const detail = detailHtml(html, "r");
+        const reasoning = detail.indexOf("No randomisation is described.");
+        const heading = detail.indexOf('<div class="bt-d-h">Related passages</div>');
+        expect(reasoning).toBeGreaterThan(0);
+        expect(heading).toBeGreaterThan(reasoning);
+        expect(detail.indexOf("<li>“Participants chose a group.”")).toBeGreaterThan(heading);
+        const uncited = detailHtml(html, "u");
+        expect(uncited).toContain('<div class="bt-d-extra">Randomisation is never mentioned.</div>');
+        expect(uncited).not.toContain("bt-d-h");
+    });
+
+    it("heads a category negative's passages as related and a plain answer's as evidence", () => {
+        const design: TableSpec["columns"][number] = {
+            id: "design",
+            header: "Design",
+            type: "select",
+            options: [{ label: "No case study" }, { label: "Case study" }],
+        };
+        const quote = [{ document: doc, locator: "s7", quote: "Randomly assigned." }];
+        const { html } = renderTableHtml({
+            id: "e",
+            columns: [...columns, design],
+            rows: [
+                row("r", {
+                    rct: filler({ kind: "boolean", value: true }, { evidence: quote }),
+                    design: filler({ kind: "select", label: "No case study" }, { evidence: quote }),
+                }),
+            ],
+        });
+        const detail = detailHtml(html, "r");
+        expect(detail).toContain('<div class="bt-d-h">Evidence</div>');
+        expect(detail).toContain('<div class="bt-d-h">Related passages</div>');
+        expect(detail).not.toContain("Closest passages");
     });
 
     it("shows a number's display text as is, and appends the unit only to a bare number", () => {
@@ -1019,12 +1034,17 @@ describe("how answers read", () => {
                 row("bare", { share: filler({ kind: "number", value: 12 }) }),
             ],
         });
-        expect(cellHtml(html, "worded", "share")).toContain('<span class="bt-num">90% or higher</span>');
+        // One ellipsised line in the grid, the whole text in its tooltip and
+        // in the expanded row.
+        expect(cellHtml(html, "worded", "share")).toContain(
+            '<span class="bt-num" title="90% or higher">90% or higher</span>',
+        );
+        expect(TABLE_CSS).toContain(".bt-d .bt-num { display: inline; white-space: normal; }");
         expect(cellHtml(html, "worded", "share")).not.toContain("bt-unit");
         expect(cellHtml(html, "bare", "share")).toContain('<span class="bt-num">12<span class="bt-unit">%</span></span>');
     });
 
-    it("marks low-confidence answers, and medium ones only in number columns, for review", () => {
+    it("marks answers read from a document below high confidence for review, never prose", () => {
         const { html } = renderTableHtml({
             id: "r",
             columns,
@@ -1124,8 +1144,8 @@ describe("how answers read", () => {
 
 /**
  * One spec that exercises every part of the model a stored table has to keep:
- * all seven cell kinds, every outcome and provenance, `confidence`, `absent`
- * and `stale`, answers from the document and from title and abstract,
+ * all seven cell kinds, every outcome and provenance, `confidence` and
+ * `stale`, answers from the document and from title and abstract,
  * evidence with table context, a select with a declared vocabulary, a
  * screening decision with its reasoning, a library row, an external row, a
  * context-file row with a row failure, row origins and the approved sources.
@@ -1232,7 +1252,6 @@ const fullSpec: TableSpec = {
                 when: answered({ kind: "date", value: "2015-02", display: "Feb 2015" }, "model"),
                 oa: answered({ kind: "boolean", value: false }, "model", {
                     documents: ["u-A1"],
-                    absent: true,
                     reasoning: "No open-access statement anywhere in the paper.",
                 }),
                 finding: answered(

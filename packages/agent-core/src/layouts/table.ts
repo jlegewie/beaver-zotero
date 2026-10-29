@@ -463,12 +463,6 @@ export interface AnsweredCell extends CellBase {
      * answered from title and abstract.
      */
     documents?: DocumentId[];
-    /**
-     * The value says the paper does not do or report what was asked, and
-     * rests on the documents read: its evidence is the closest passages, not
-     * proof.
-     */
-    absent?: true;
     confidence?: Confidence;
     /** Why this answer; on a user correction, the user's stated reason. */
     reasoning?: string;
@@ -487,7 +481,6 @@ export interface NotReportedCell extends CellBase {
     /** The closest passages, when any. */
     evidence?: Evidence[];
     value?: never;
-    absent?: never;
     error?: never;
     error_code?: never;
 }
@@ -501,7 +494,6 @@ export interface FailedCell extends CellBase {
     error: string;
     value?: never;
     documents?: never;
-    absent?: never;
     confidence?: never;
     reasoning?: never;
     evidence?: never;
@@ -513,7 +505,6 @@ export interface ClearedCell extends CellBase {
     provenance: "user";
     value?: never;
     documents?: never;
-    absent?: never;
     confidence?: never;
     reasoning?: never;
     evidence?: never;
@@ -925,18 +916,52 @@ export function isStale(
 }
 
 /**
- * The review mark, a fixed rule: a filler cell of low confidence, or of
- * medium confidence in a number column.
+ * The review mark, a fixed rule: a filler answer or blank read from a
+ * document, of confidence below high, outside text columns.
  */
 export function needsReview(
     column: Pick<Column, "type">,
     cell: Cell | undefined,
 ): boolean {
-    if (cell?.provenance !== "model") return false;
     return (
-        cell.confidence === "low" ||
-        (cell.confidence === "medium" && column.type === "number")
+        cell?.provenance === "model" &&
+        (cell.outcome === "answered" || cell.outcome === "not_reported") &&
+        (cell.documents?.length ?? 0) > 0 &&
+        (cell.confidence === "medium" || cell.confidence === "low") &&
+        column.type !== "text"
     );
+}
+
+// A label opening with the word No, Not or None. The lookahead is Unicode
+// aware, so "Noël" does not read as "No".
+const NEGATIVE_LABEL = /^(?:no|not|none)(?![\p{L}\p{N}_])/iu;
+
+/**
+ * Whether a value's passages are headed "Related passages" rather than
+ * "Evidence": a yes/no false, or a category label starting with No, Not or
+ * None. Chooses the heading only, never a grade or the review mark.
+ */
+export function readsAsNegative(
+    _column: Pick<Column, "type">,
+    value: CellValue | undefined,
+): boolean {
+    if (value?.kind === "boolean") return value.value === false;
+    if (value?.kind === "select") return NEGATIVE_LABEL.test(value.label ?? "");
+    return false;
+}
+
+/**
+ * The heading over a cell's passages. A blank's passages are the closest the
+ * paper comes, and a negative answer's are related to it rather than proof.
+ */
+export function evidenceHeading(
+    column: Pick<Column, "type">,
+    cell: Cell | undefined,
+): "Evidence" | "Related passages" | "Closest passages" {
+    if (cell?.outcome === "not_reported") return "Closest passages";
+    if (cell?.outcome === "answered" && readsAsNegative(column, cell.value))
+        return "Related passages";
+    return "Evidence";
 }
 
 /**
@@ -1464,8 +1489,8 @@ function isDocumentList(value: unknown): value is DocumentId[] {
 
 /**
  * The first structural cell rule the cell breaks, or undefined. Only the
- * rules every reader depends on; what a filler should write (evidence for
- * every answer, reasoning for an absence) is the filler's policy.
+ * rules every reader depends on; what a filler should write (the evidence or
+ * reasoning behind each answer) is the filler's policy.
  */
 export function cellInvariantError(cell: Cell): string | undefined {
     // Read loosely: the cell may be any stored shape.
@@ -1484,12 +1509,12 @@ export function cellInvariantError(cell: Cell): string | undefined {
     const reasons = cell.outcome === "answered" || cell.outcome === "not_reported";
     if (raw.reasoning != null && !reasons)
         return "Only an answered or not-reported cell gives reasoning";
-    const modelFields = ["documents", "absent", "confidence", "evidence"].some(
+    const modelFields = ["documents", "confidence", "evidence"].some(
         (name) => raw[name] != null,
     );
     if (cell.provenance !== "model")
         return modelFields
-            ? "Only a filler cell carries documents, absent, confidence or evidence"
+            ? "Only a filler cell carries documents, confidence or evidence"
             : undefined;
     if (!reasons)
         return modelFields
@@ -1502,13 +1527,6 @@ export function cellInvariantError(cell: Cell): string | undefined {
         !CONFIDENCES.includes(raw.confidence as Confidence)
     )
         return "A cell names an unknown confidence";
-    if (raw.absent != null) {
-        if (raw.absent !== true) return "absent is true or omitted";
-        if (cell.outcome !== "answered") return "Only an answered cell is absent";
-        const value = raw.value as CellValue | undefined;
-        if (value?.kind === "boolean" && value.value !== false)
-            return "An absent yes/no answer is no";
-    }
     if (raw.evidence != null) {
         if (!Array.isArray(raw.evidence)) return "A cell's evidence is a list";
         if (raw.evidence.length > MAX_EVIDENCE_ENTRIES)
@@ -1783,9 +1801,9 @@ function evidenceLine(evidence: Evidence): string {
  * RFC 4180 CSV of the table: one header row of column headers, then one row per
  * table row in the given order. A number is written as its value, with the
  * paper's wording (`display`) in its own column. Companion fields carry each
- * cell's evidence, its reasoning, whether it rests on the paper's silence (`absent`), the
- * filler's confidence and its state; a companion column empty in every row is
- * omitted. Formula-like values are escaped.
+ * cell's evidence, its reasoning, the filler's confidence and its state; a
+ * companion column empty in every row is omitted. Formula-like values are
+ * escaped.
  */
 export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
     const fields = rows.map((row) =>
@@ -1803,7 +1821,6 @@ export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
                 value?.kind === "number" ? (value.display ?? "") : "",
                 (cell?.evidence ?? []).map(evidenceLine).join("\n"),
                 cell?.reasoning ?? "",
-                cell?.absent ? "absent" : "",
                 cell?.confidence ?? "",
                 [
                     cell && cell.outcome !== "answered" ? cell.outcome : "",
@@ -1824,7 +1841,6 @@ export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
         " — as reported",
         " — evidence",
         " — reasoning",
-        " — absent",
         " — confidence",
         " — state",
     ];

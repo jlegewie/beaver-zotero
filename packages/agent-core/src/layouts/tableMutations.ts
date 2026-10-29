@@ -1292,16 +1292,13 @@ function removeSources(
  * rows. `unattempted` counts only the rows a filler would cover: in-scope rows
  * for extraction columns, every row for other question columns; those of rows
  * with a `failure` count as `in_failed_rows` instead. `distribution` is
- * present only where a column has a countable vocabulary; an absent no counts
- * with the other no answers.
+ * present only where a column has a countable vocabulary.
  */
 export interface TableSummaryColumn {
     type: ColumnType;
     role?: ColumnRole;
     system?: true;
     answered: number;
-    /** Answered cells that rest on the paper's silence. */
-    absent: number;
     not_reported: number;
     /** Failed answers; failed rows are `in_failed_rows`. */
     failed: number;
@@ -1361,7 +1358,6 @@ export function summarize(spec: TableSpec): TableSummary {
         const detail: TableSummaryColumn = {
             type: column.type,
             answered: 0,
-            absent: 0,
             not_reported: 0,
             failed: 0,
             cleared: 0,
@@ -1396,7 +1392,6 @@ export function summarize(spec: TableSpec): TableSummary {
             }
             if (OUTCOME_COUNTS.includes(cell.outcome))
                 detail[cell.outcome] += 1;
-            if (cell.absent) detail.absent += 1;
             if (isStale(row, cell)) detail.stale += 1;
             if (needsReview(column, cell)) detail.needs_review += 1;
             if (cell.outcome === "answered" && isTitleAbstractOnly(cell))

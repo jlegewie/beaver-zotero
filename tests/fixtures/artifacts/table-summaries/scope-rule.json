@@ -242,7 +242,6 @@
             "_reference": {
                 "type": "reference",
                 "answered": 3,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -256,7 +255,6 @@
             "_year": {
                 "type": "date",
                 "answered": 3,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -270,7 +268,6 @@
             "_identifier": {
                 "type": "link",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -284,7 +281,6 @@
             "method": {
                 "type": "text",
                 "answered": 0,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -297,7 +293,6 @@
             "adults": {
                 "type": "select",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -314,7 +309,6 @@
             "decision": {
                 "type": "select",
                 "answered": 2,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,

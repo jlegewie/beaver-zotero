@@ -634,8 +634,8 @@ describe("DataTable", () => {
                     id: "review",
                     documents: ["u-DOC1"],
                     cells: {
+                        // Below high marks a number, never prose.
                         m: read(text("Survey"), { confidence: "low" }),
-                        // Medium marks a number, never prose.
                         n: read({ kind: "number", value: 40 }, { confidence: "medium" }),
                     },
                 },
@@ -685,11 +685,11 @@ describe("DataTable", () => {
         const cell = (rowId: string, column = "m") =>
             container!.querySelector(`[id="${rowId}/${column}"]`)!;
 
-        expect(cell("review").textContent).toBe("Survey · To review");
-        expect(cell("review").querySelector(".bt-review")?.getAttribute("title")).toBe(
+        expect(cell("review").textContent).toBe("Survey");
+        expect(cell("review", "n").textContent).toBe("40 · To review");
+        expect(cell("review", "n").querySelector(".bt-review")?.getAttribute("title")).toBe(
             "Beaver is not confident in this answer; check it against the paper",
         );
-        expect(cell("review", "n").textContent).toBe("40 · To review");
         expect(cell("medium").textContent).toBe("Cohort");
         expect(cell("stale").textContent).toBe("Panel · Stale");
         expect(cell("stale").querySelector(".bt-stale")?.getAttribute("title")).toBe("The question changed");
@@ -710,11 +710,12 @@ describe("DataTable", () => {
         expect(cell("blanked").textContent).toBe("Not reported · Edited by you");
     });
 
-    it("reads an absence as an answer, with the reason first and the closest passages after", () => {
+    it("heads a no's passages as related and a blank's as the closest, after the reason", () => {
         const table: TableSpec = {
-            id: "absent",
+            id: "negatives",
             columns: [
                 { id: "rct", header: "RCT?", type: "boolean" },
+                { id: "blinded", header: "Blinded?", type: "boolean" },
                 { id: "funder", header: "Funder", type: "text" },
             ],
             rows: [
@@ -727,15 +728,22 @@ describe("DataTable", () => {
                             provenance: "model",
                             documents: ["u-DOC1"],
                             value: { kind: "boolean", value: false },
-                            absent: true,
                             reasoning: "No randomisation is described.",
                             evidence: [{ document: "u-DOC1", locator: "s7", quote: "Participants chose a group." }],
+                        },
+                        blinded: {
+                            outcome: "answered",
+                            provenance: "model",
+                            documents: ["u-DOC1"],
+                            value: { kind: "boolean", value: false },
+                            reasoning: "Blinding is never mentioned.",
                         },
                         funder: {
                             outcome: "not_reported",
                             provenance: "model",
                             documents: ["u-DOC1"],
                             reasoning: "No funding statement.",
+                            evidence: [{ document: "u-DOC1", locator: "s40", quote: "We thank the reviewers." }],
                         },
                     },
                 },
@@ -743,20 +751,29 @@ describe("DataTable", () => {
         };
         mount(React.createElement(DataTable, { table }));
         const rct = container!.querySelector('[id="r/rct"]')!;
-        expect(rct.querySelector(".bt-bool-no")?.textContent).toBe("No");
-        expect(rct.querySelector(".bt-absent")?.textContent).toBe(" · not in paper");
+        expect(rct.textContent).toBe("No");
         expect(container!.querySelector('[id="r/funder"]')?.textContent).toBe("Not reported");
 
         click(container!.querySelector(".bt-rail-chevron"));
-        const [rctDetail, funderDetail] = Array.from(container!.querySelectorAll(".bt-detail dd"));
-        const parts = Array.from(rctDetail.querySelectorAll(".bt-details-text, .bt-details-label, li")).map(
-            (el) => el.textContent,
+        const [rctDetail, blindedDetail, funderDetail] = Array.from(
+            container!.querySelectorAll(".bt-detail dd"),
         );
-        expect(parts[0]).toBe("No randomisation is described.");
-        expect(parts[1]).toBe("Closest passages");
-        expect(parts[2]).toContain("“Participants chose a group.”");
-        // A not-reported cell shows its reason.
-        expect(funderDetail.querySelector(".bt-details-text")?.textContent).toBe("No funding statement.");
+        const parts = (dd: Element) =>
+            Array.from(dd.querySelectorAll(".bt-details-text, .bt-details-label, li")).map(
+                (el) => el.textContent,
+            );
+        expect(parts(rctDetail)).toEqual([
+            "No randomisation is described.",
+            "Related passages",
+            expect.stringContaining("“Participants chose a group.”"),
+        ]);
+        // An uncited no shows only its reason.
+        expect(parts(blindedDetail)).toEqual(["Blinding is never mentioned."]);
+        expect(parts(funderDetail)).toEqual([
+            "No funding statement.",
+            "Closest passages",
+            expect.stringContaining("“We thank the reviewers.”"),
+        ]);
     });
 
     it("shows a number's display text as is, and the unit only beside a bare number", () => {
@@ -771,8 +788,11 @@ describe("DataTable", () => {
         mount(React.createElement(DataTable, { table }));
         const worded = container!.querySelector('[id="worded/share"]')!;
         expect(worded.textContent).toBe("90% or higher");
+        // One ellipsised line in the grid, the whole text in its tooltip.
+        expect(worded.querySelector(".bt-nowrap .bt-number")?.getAttribute("title")).toBe("90% or higher");
         expect(worded.querySelector(".bt-unit")).toBeNull();
         expect(container!.querySelector('[id="bare/share"] .bt-unit')?.textContent).toBe("%");
+        expect(container!.querySelector('[id="bare/share"] .bt-number')?.hasAttribute("title")).toBe(false);
     });
 
     it("sets a cited table row's caption and header rows above its quote", () => {
@@ -808,8 +828,8 @@ describe("DataTable", () => {
         expect(entry.firstElementChild?.className).toBe("bt-evidence-context");
         expect(entry.firstElementChild?.textContent).toBe("Table 2. Participants | Group | %");
         expect(entry.textContent).toContain("“Women 41”");
-        // Not a "closest passages" list: this is the answer's support.
-        expect(container!.querySelector(".bt-detail .bt-details-label")).toBeNull();
+        // The answer's support, not its closest passages.
+        expect(container!.querySelector(".bt-detail .bt-details-label")?.textContent).toBe("Evidence");
     });
 
     it("tells a row with nothing to read from one whose document could not be read", () => {

@@ -253,8 +253,9 @@ React surfaces, the reader enhancement and the snapshot's source list all use it
 Snapshot markers carry `data-cite-key="<row>|<column>|<index>"`, and the reader
 enhancement resolves them against the spec read through the store.
 
-`tests/fixtures/artifacts/table-mutations`, `table-summaries` and `table-merges`
-are the language-neutral contract corpus shared with the backend; both sides run
+`tests/fixtures/artifacts/table-mutations`, `table-summaries`, `table-merges` and
+`table-negative-reads` (which values head their passages "Related passages") are
+the language-neutral contract corpus shared with the backend; both sides run
 every case.
 
 ## Development endpoints

@@ -198,7 +198,6 @@
         "_reference": {
           "type": "reference",
           "answered": 3,
-          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,
@@ -212,7 +211,6 @@
         "_year": {
           "type": "date",
           "answered": 3,
-          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,
@@ -226,7 +224,6 @@
         "_identifier": {
           "type": "link",
           "answered": 0,
-          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,
@@ -240,7 +237,6 @@
         "sample_size": {
           "type": "number",
           "answered": 0,
-          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,
@@ -253,7 +249,6 @@
         "design": {
           "type": "select",
           "answered": 0,
-          "absent": 0,
           "not_reported": 0,
           "failed": 0,
           "cleared": 0,

@@ -1323,7 +1323,8 @@
     white-space: normal;
 }
 
-.beaver-root .bt-detail .bt-nowrap {
+.beaver-root .bt-detail .bt-nowrap,
+.beaver-root .bt-detail .bt-number {
     white-space: normal;
 }
 
@@ -1418,11 +1419,6 @@
 .beaver-root .bt-title-abstract {
     color: var(--tag-orange-primary);
     font-weight: 500;
-}
-
-/* An answer resting on the paper's silence: still an answer, so only muted. */
-.beaver-root .bt-absent {
-    color: var(--fill-tertiary);
 }
 
 /* The review mark: an answer the filler was not confident in. */
