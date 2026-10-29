@@ -3,7 +3,7 @@
     "operation": "edit",
     "before": {
         "id": "t1",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Sampling methods",
         "description": "How the papers sampled their respondents.",
         "anchor_column_id": "_reference",
@@ -55,13 +55,6 @@
                     "zotero_key": "AAA",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -98,7 +91,14 @@
                             "text": "Phone survey (corrected)"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r2",
@@ -108,13 +108,6 @@
                     "zotero_key": "BBB",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -136,19 +129,20 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Mail survey"
-                        },
-                        "evidence": [
-                            {
-                                "quote": "A mail survey of 2,000 households.",
-                                "field": "abstract"
-                            }
-                        ]
+                        }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r3",
@@ -158,12 +152,8 @@
                     "zotero_key": "CCC",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-CCCPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -184,7 +174,14 @@
                             "value": "2021"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         ]
     },
@@ -197,13 +194,17 @@
                     "column": "method",
                     "cell": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Census register"
                         },
+                        "documents": [
+                            "u-R9PDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-R9PDF",
                                 "locator": "s4",
                                 "quote": "Households were drawn from the census register.",
                                 "page": 2
@@ -216,13 +217,17 @@
                     "column": "method",
                     "cell": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Register study"
                         },
+                        "documents": [
+                            "u-CCCPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-CCCPDF",
                                 "locator": "s4",
                                 "quote": "Households were drawn from the census register.",
                                 "page": 2
@@ -235,7 +240,7 @@
     ],
     "after": {
         "id": "t1",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Sampling methods",
         "description": "How the papers sampled their respondents.",
         "anchor_column_id": "_reference",
@@ -287,13 +292,6 @@
                     "zotero_key": "AAA",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -330,7 +328,14 @@
                             "text": "Phone survey (corrected)"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r2",
@@ -340,13 +345,6 @@
                     "zotero_key": "BBB",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -368,19 +366,20 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Mail survey"
-                        },
-                        "evidence": [
-                            {
-                                "quote": "A mail survey of 2,000 households.",
-                                "field": "abstract"
-                            }
-                        ]
+                        }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r3",
@@ -390,12 +389,8 @@
                     "zotero_key": "CCC",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-CCCPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -418,20 +413,31 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Register study"
                         },
+                        "documents": [
+                            "u-CCCPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-CCCPDF",
                                 "locator": "s4",
                                 "quote": "Households were drawn from the census register.",
                                 "page": 2
                             }
                         ]
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         ]
     },

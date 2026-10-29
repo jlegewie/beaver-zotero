@@ -340,8 +340,8 @@ const citedSpec: TableSpec = {
                 library_ref: "u",
                 library_id: 1,
                 zotero_key: "P1",
-                attachment: { library_ref: "u", library_id: 1, zotero_key: "K1" },
             },
+            documents: ["u-K1"],
             cells: {
                 _reference: {
                     outcome: "answered",
@@ -350,11 +350,12 @@ const citedSpec: TableSpec = {
                 },
                 finding: {
                     outcome: "answered",
-                    provenance: "document",
+                    provenance: "model",
+                    documents: ["u-K1"],
                     value: { kind: "text", text: "Rose 13%." },
                     evidence: [
-                        { locator: "s2", quote: "first passage", page: 1 },
-                        { locator: "s9", quote: "second passage", page: 4, boxes: [[1, 2, 3, 4]] },
+                        { document: "u-K1", locator: "s2", quote: "first passage", page: 1 },
+                        { document: "u-K1", locator: "s9", quote: "second passage", page: 4, boxes: [[1, 2, 3, 4]] },
                     ],
                 },
             },

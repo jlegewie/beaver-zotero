@@ -37,6 +37,7 @@ const sentence = (i: number, words: number) =>
 function tableSpec() {
     return {
         id: `edit-session-${stamp}`,
+        spec_version: 2,
         title: 'Edit session measurement',
         columns: [
             { id: 'abstract', header: 'Abstract', type: 'text', description: 'The abstract.' },
@@ -45,12 +46,13 @@ function tableSpec() {
         ],
         rows: Array.from({ length: ROWS }, (_, i) => ({
             id: `r${i}`,
+            documents: [`u-DOC${String(i).padStart(5, '0')}`],
             cells: {
+                // Answered from the title and abstract: no documents, no evidence.
                 abstract: {
                     outcome: 'answered',
-                    provenance: 'metadata',
+                    provenance: 'model',
                     value: { kind: 'text', text: sentence(i, 90) },
-                    evidence: [{ quote: sentence(i, 40), field: 'abstract' }],
                 },
             },
         })),
@@ -63,6 +65,7 @@ function commitCells(index: number) {
     const first = (index % (COMMITS / 2)) * ROWS_PER_COMMIT;
     return Array.from({ length: ROWS_PER_COMMIT }, (_, offset) => {
         const row = first + offset;
+        const document = `u-DOC${String(row).padStart(5, '0')}`;
         const cell =
             column === 'summary'
                 ? { kind: 'text', text: `Finding ${row}: ${sentence(row, 25)}` }
@@ -72,9 +75,10 @@ function commitCells(index: number) {
             column,
             cell: {
                 outcome: 'answered',
-                provenance: 'document',
+                provenance: 'model',
+                documents: [document],
                 value: cell,
-                evidence: [{ locator: `s${row % 50}-s${(row % 50) + 2}`, quote: sentence(row, 30), page: row % 12 }],
+                evidence: [{ document, locator: `s${row % 50}-s${(row % 50) + 2}`, quote: sentence(row, 30), page: row % 12 }],
                 reasoning: sentence(row + 7, 20),
             },
         };

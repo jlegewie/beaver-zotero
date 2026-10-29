@@ -10,13 +10,6 @@
                     "library_ref": "u",
                     "zotero_key": "AAA"
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -36,7 +29,14 @@
                             "value": "2020"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         },
         {
@@ -51,12 +51,8 @@
                         "zotero_key": "PDF1"
                     }
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-PDF1"
                 ],
                 "cells": {
                     "_reference": {
@@ -67,7 +63,14 @@
                             "text": "Highlighted passage"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         }
     ],
@@ -83,21 +86,21 @@
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
                             "display_name": "Sampling hard-to-reach groups online",
                             "title": "Sampling hard-to-reach groups online",
                             "item_type": "journalArticle"
-                        },
-                        "provenance": "system"
+                        }
                     },
                     "_year": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "date",
                             "value": "2020"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": true,
@@ -119,14 +122,17 @@
                         "zotero_key": "PDF1"
                     }
                 },
+                "documents": [
+                    "u-PDF1"
+                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "annotation",
                             "text": "Highlighted passage"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": true,

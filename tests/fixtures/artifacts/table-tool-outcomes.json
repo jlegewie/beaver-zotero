@@ -45,7 +45,7 @@
    "rows": 5,
    "answered": 10,
    "not_reported": 0,
-   "from_metadata": 0,
+   "from_title_abstract": 0,
    "failed": 0
   },
   "documents_read": 5,
@@ -92,9 +92,10 @@
    "remaining_rows": 9,
    "remaining_cells": 18,
    "answered": 10,
-   "metadata_only": 0,
+   "title_abstract_only": 0,
    "failed": 0,
-   "stale": 0
+   "stale": 0,
+   "failed_rows": 0
   },
   "next_step": "9 of 14 rows have unanswered questions (18 cells); fill_table fills them."
  },
@@ -150,60 +151,70 @@
     "_reference": {
      "type": "reference",
      "answered": 14,
+     "absent": 0,
      "not_reported": 0,
      "failed": 0,
      "cleared": 0,
      "unattempted": 0,
+     "in_failed_rows": 0,
      "stale": 0,
-     "unsure": 0,
-     "metadata_only": 0,
+     "needs_review": 0,
+     "title_abstract_only": 0,
      "system": true
     },
     "_year": {
      "type": "date",
      "answered": 0,
+     "absent": 0,
      "not_reported": 0,
      "failed": 0,
      "cleared": 0,
      "unattempted": 0,
+     "in_failed_rows": 0,
      "stale": 0,
-     "unsure": 0,
-     "metadata_only": 0,
+     "needs_review": 0,
+     "title_abstract_only": 0,
      "system": true
     },
     "_identifier": {
      "type": "link",
      "answered": 0,
+     "absent": 0,
      "not_reported": 0,
      "failed": 0,
      "cleared": 0,
      "unattempted": 0,
+     "in_failed_rows": 0,
      "stale": 0,
-     "unsure": 0,
-     "metadata_only": 0,
+     "needs_review": 0,
+     "title_abstract_only": 0,
      "system": true
     },
     "sample_size": {
      "type": "number",
      "answered": 5,
+     "absent": 0,
      "not_reported": 0,
      "failed": 0,
      "cleared": 0,
      "unattempted": 9,
+     "in_failed_rows": 0,
      "stale": 0,
-     "unsure": 0,
-     "metadata_only": 0
+     "needs_review": 0,
+     "title_abstract_only": 0
     },
     "design": {
      "type": "select",
      "answered": 5,
+     "absent": 0,
      "not_reported": 0,
      "failed": 0,
      "cleared": 0,
      "unattempted": 9,
+     "in_failed_rows": 0,
      "stale": 0,
-     "unsure": 0,
-     "metadata_only": 0,
+     "needs_review": 0,
+     "title_abstract_only": 0,
      "distribution": {
       "RCT": 5
      }
@@ -222,9 +233,10 @@
    "remaining_rows": 9,
    "remaining_cells": 18,
    "answered": 10,
-   "metadata_only": 0,
+   "title_abstract_only": 0,
    "failed": 0,
-   "stale": 0
+   "stale": 0,
+   "failed_rows": 0
   },
   "run": "fill",
   "fill": {
@@ -239,7 +251,7 @@
    "rows_uncertain": 0,
    "answered": 10,
    "not_reported": 0,
-   "from_metadata": 0,
+   "from_title_abstract": 0,
    "failed": 0,
    "skipped": {},
    "documents_read": 5,

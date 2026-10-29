@@ -10,12 +10,8 @@
                     "ext_key": "EXT1",
                     "label": "notes.pdf"
                 },
-                "in_library": false,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "ext-EXT1"
                 ],
                 "cells": {
                     "_reference": {
@@ -28,7 +24,14 @@
                             "item_type": "journalArticle"
                         }
                     }
-                }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         },
         {
@@ -44,13 +47,6 @@
                         "title": "Sampling hard-to-reach groups online"
                     }
                 },
-                "in_library": false,
-                "origin": [
-                    {
-                        "source": "s2",
-                        "date": "2026-10-21"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -70,7 +66,14 @@
                             "value": "2020"
                         }
                     }
-                }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
             }
         }
     ],
@@ -83,16 +86,19 @@
                     "ext_key": "EXT1",
                     "label": "notes.pdf"
                 },
+                "documents": [
+                    "ext-EXT1"
+                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
                             "display_name": "notes.pdf",
                             "title": "notes.pdf",
                             "item_type": "journalArticle"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": false,
@@ -120,21 +126,21 @@
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
                             "display_name": "Sampling hard-to-reach groups online",
                             "title": "Sampling hard-to-reach groups online",
                             "item_type": "journalArticle"
-                        },
-                        "provenance": "system"
+                        }
                     },
                     "_year": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "date",
                             "value": "2020"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": false,

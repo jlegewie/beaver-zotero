@@ -16,16 +16,19 @@
  *   unattempted; a written cell always names its `outcome` and `provenance`.
  * - A stored spec carries its own format version (`spec_version`), identity
  *   (`key`) and revision (`version`), and {@link readSpec} is the guarded way
- *   back in: a spec written by a newer format is refused rather than misread.
+ *   back in: a spec written in another format is refused rather than misread.
  * - Rows are discriminated by what they are about (`Row.ref`, a `RowRef`), and
  *   everything that depends on that — in-library state, which verbs apply and
  *   where they point — is answered by `./rowKinds`, never by branching on
  *   `ref.kind` in a renderer. Row ids are opaque.
  * - One column is the **anchor** (`anchor_column_id`): it owns row identity, is
  *   the sticky column under horizontal scroll and is the target of reveal.
- * - Evidence is item-less: each entry locates text in the attachment the row
- *   names, and `./tableCitations` assembles a chat citation from the row plus
- *   one entry.
+ * - Evidence names its document: each entry locates text in one of the
+ *   documents its cell was read from (`Evidence.document`), and
+ *   `./tableCitations` assembles a chat citation from the row plus one entry.
+ * - A row names the documents it is filled from (`Row.documents`); a filler
+ *   cell names the documents its answer was read from. {@link isStale}
+ *   compares the two.
  * - The engine in `./tableMutations` mirrors the backend's; the shared fixture
  *   corpus holds the two to the same results.
  */
@@ -65,7 +68,7 @@ export type {
  * an older reader would misread; see {@link readSpec}, which refuses anything
  * higher. Unrelated to `TableSpec.version`, which counts edits to one table.
  */
-export const TABLE_SPEC_VERSION = 1;
+export const TABLE_SPEC_VERSION = 2;
 
 export type ColumnType =
     | "text"
@@ -100,6 +103,10 @@ export const MAX_MODEL_COLUMNS = 30;
 export const MAX_EVIDENCE_BYTES = 6000;
 /** UTF-8 bytes of one cell's reasoning. */
 export const MAX_REASONING_BYTES = 1000;
+/** Evidence entries of one cell. */
+export const MAX_EVIDENCE_ENTRIES = 5;
+/** Characters (code points) of one evidence entry's table context. */
+export const MAX_CONTEXT_CHARS = 600;
 /** Compact JSON of the whole spec. */
 export const MAX_SPEC_BYTES = 10_000_000;
 /** Characters (code points) of one select option's definition. */
@@ -231,14 +238,12 @@ export type RowRef =
     | ExternalRowRef
     | FileRowRef;
 
-/** A regular (bibliographic) library item. */
+/**
+ * A regular (bibliographic) library item. The document it is filled from, which
+ * `open` targets, is `Row.documents`.
+ */
 export interface ItemRowRef extends ZoteroRowReference {
     kind: "item";
-    /**
-     * The attachment that was read for this row, which `open` targets. Absent ⇒
-     * the host picks the item's best attachment when clicked.
-     */
-    attachment?: ZoteroRowReference;
 }
 
 /** A file attachment in its own right, not folded onto its parent. */
@@ -296,6 +301,24 @@ export interface RowOrigin {
     date: string;
 }
 
+/**
+ * A document id: the portable id of a Zotero attachment (`u-KEY`,
+ * `g<groupID>-KEY`) or of an attached file (`ext-KEY`).
+ */
+export type DocumentId = string;
+
+/**
+ * Why the last fill of a row stopped before its questions were answered: an
+ * unreadable document, nothing to read, a deadline. Cleared by a successful
+ * answer, and by `update_row` when the row's documents change.
+ */
+export interface RowFailure {
+    /** A stable code, e.g. `encrypted` or `no_source`. */
+    code: string;
+    /** One short user-facing sentence, as the row shows it. */
+    message: string;
+}
+
 export interface Row {
     /**
      * Opaque, allocated when the row is created and never derived from the
@@ -304,6 +327,15 @@ export interface Row {
      */
     id: string;
     ref?: RowRef;
+    /**
+     * The documents this row is filled from. An attachment or file row names
+     * itself, an annotation row its attachment, an item row the attachment
+     * found for it. Absent ⇒ the row has none and is answered from its title
+     * and abstract.
+     */
+    documents?: DocumentId[];
+    /** Why the last fill stopped before the row was answered. */
+    failure?: RowFailure;
     /** Column id → cell. A missing entry is an unattempted cell. */
     cells: Record<string, Cell>;
     /**
@@ -315,14 +347,16 @@ export interface Row {
     origin?: RowOrigin[];
     /** Verbs for this row only. Absent ⇒ the table's `capabilities.row_actions`. */
     actions?: RowAction[];
-    /** Row-level outcome, e.g. the row could not be processed at all. */
-    status?: "error";
-    error?: string;
 }
 
 export type CellValue =
     /** Inline markdown. */
     | { kind: "text"; text: string }
+    /**
+     * `value` sorts, filters and counts; `display` is the full text to show,
+     * unit included, when the paper's wording says more than the number
+     * ("90% or higher"). Rendered as is.
+     */
     | { kind: "number"; value: number; display?: string }
     /** ISO `YYYY`, `YYYY-MM` or `YYYY-MM-DD`; sorts lexically. */
     | { kind: "date"; value: string; display?: string }
@@ -378,66 +412,120 @@ export type Details =
     | { kind: "list"; items: string[]; label?: string };
 
 /**
- * Text located in the attachment the row names, or a metadata field. Item-less:
- * the row supplies the item, so a full chat citation is assembled from the row
- * plus one entry (see `./tableCitations`).
+ * One cited passage. `document` + `locator` identify it; the row supplies the
+ * work, so a full chat citation is assembled from the row plus one entry (see
+ * `./tableCitations`).
  */
 export interface Evidence {
-    /** Locator in the citation grammar ("s243-s250", "s5.6", "p12"); absent for metadata. */
-    locator?: string;
-    /** The located text. */
+    /** The document the passage is in: one of the cell's `documents`. */
+    document: DocumentId;
+    /** Ids within that document's extraction ("s243-s250", "s5.6"). */
+    locator: string;
+    /** The exact text at the highlighted spot. */
     quote: string;
     /** 0-based page index (PDF). */
     page?: number;
     /** `[left, top, right, bottom]` in PDF points, top-left origin. */
     boxes?: number[][];
-    /** The metadata field a metadata answer rests on. */
-    field?: "title" | "abstract";
+    /**
+     * The caption and header rows of the table a cited row sits in, so the
+     * quote can be read. Not part of the quote.
+     */
+    context?: string;
 }
 
 export type CellOutcome = "answered" | "not_reported" | "failed" | "cleared";
 
 /**
- * Who wrote the cell and from what: the filler from the attachment text
- * (`document`) or from title and abstract (`metadata`), the user, or the
- * producer for the reference, year and identifier columns (`system`).
+ * Who wrote the cell: the filler (`model`), the user, or the producer for the
+ * reference, year and identifier columns (`system`).
  */
-export type CellProvenance = "document" | "metadata" | "user" | "system";
+export type CellProvenance = "model" | "user" | "system";
 
-/**
- * A written cell; absent means unattempted.
- *
- * Invariants, checked by {@link validateTableSpec} and enforced on every write:
- * `value` iff `answered`; `error` iff `failed`, and `error_code` only with
- * it; `evidence` only with `document` or `metadata`; `cleared` only with
- * `user`.
- */
-export interface Cell {
-    /**
-     * `not_reported`: the material does not say — a finding. `cleared`: a
-     * user-owned blank the filler never refills.
-     */
-    outcome: CellOutcome;
-    value?: CellValue;
-    evidence?: Evidence[];
-    /** Short reasoning wherever the answer needed judgment. */
-    reasoning?: string;
+/** How directly the filler's sources state its answer. */
+export type Confidence = "high" | "medium" | "low";
+
+interface CellBase {
     provenance: CellProvenance;
-    /** A best guess. */
-    unsure?: true;
     /**
-     * The cell was answered for an earlier version of the column's question and
-     * has not been re-answered since.
+     * The column's question changed after this cell was written. Set by
+     * `update_column`; a write never carries it. See {@link isStale}.
      */
     stale?: true;
-    /**
-     * Why a `failed` cell failed, as the cell shows it: one short user-facing
-     * sentence written by whoever failed the cell.
-     */
-    error?: string;
-    /** A stable code for the failure, e.g. `download_failed` or `deadline`. */
-    error_code?: string;
 }
+
+/** An answer. Filler cells also say what they were read from and how sure they are. */
+export interface AnsweredCell extends CellBase {
+    outcome: "answered";
+    value: CellValue;
+    /**
+     * Filler cells only: the documents the answer was read from. Absent ⇒
+     * answered from title and abstract.
+     */
+    documents?: DocumentId[];
+    /**
+     * The value says the paper does not do or report what was asked, and
+     * rests on the documents read: its evidence is the closest passages, not
+     * proof.
+     */
+    absent?: true;
+    confidence?: Confidence;
+    /** Why this answer; on a user correction, the user's stated reason. */
+    reasoning?: string;
+    evidence?: Evidence[];
+    error?: never;
+    error_code?: never;
+}
+
+/** The material does not say — a finding, not a failure. */
+export interface NotReportedCell extends CellBase {
+    outcome: "not_reported";
+    documents?: DocumentId[];
+    confidence?: Confidence;
+    /** Why there is no answer. */
+    reasoning?: string;
+    /** The closest passages, when any. */
+    evidence?: Evidence[];
+    value?: never;
+    absent?: never;
+    error?: never;
+    error_code?: never;
+}
+
+/** One answer failed; the rest of its row did not (see {@link RowFailure}). */
+export interface FailedCell extends CellBase {
+    outcome: "failed";
+    /** A stable code, e.g. `no_locator`. */
+    error_code: string;
+    /** One short user-facing sentence, as the cell shows it. */
+    error: string;
+    value?: never;
+    documents?: never;
+    absent?: never;
+    confidence?: never;
+    reasoning?: never;
+    evidence?: never;
+}
+
+/** A user-owned blank the filler never refills. */
+export interface ClearedCell extends CellBase {
+    outcome: "cleared";
+    provenance: "user";
+    value?: never;
+    documents?: never;
+    absent?: never;
+    confidence?: never;
+    reasoning?: never;
+    evidence?: never;
+    error?: never;
+    error_code?: never;
+}
+
+/**
+ * A written cell; absent means unattempted. The structural rules
+ * ({@link cellInvariantError}) hold on every write.
+ */
+export type Cell = AnsweredCell | NotReportedCell | FailedCell | ClearedCell;
 
 /** One collection, tag or saved search in one library. */
 export interface LibraryScope {
@@ -515,7 +603,7 @@ export interface TableSpec {
      * is {@link TableSpec.key}.
      */
     id: string;
-    /** Format version of this spec — absent ⇒ 1. */
+    /** Format version of this spec — absent ⇒ 1, which this build cannot read. */
     spec_version?: number;
     /**
      * Identity of the stored table: the Zotero item key of the attachment that
@@ -570,9 +658,9 @@ function isNonEmptyString(value: unknown): value is string {
  * this build can open it.
  *
  * A stored table is the only copy of its state, so the two failures it
- * distinguishes matter. `unsupported_version` means the file was written by a
- * newer format — the caller should open it read-only (or refuse) rather than
- * parse it with today's assumptions and write back something lossy.
+ * distinguishes matter. `unsupported_version` means the file was written in
+ * another format — the caller should refuse it (or open a newer one read-only)
+ * rather than parse it with today's assumptions and write back something lossy.
  * `invalid` means it is not a table at all.
  *
  * The check is deliberately shallow and forward-compatible: it never rejects an
@@ -588,7 +676,9 @@ export function readSpec(raw: unknown): ReadSpecResult {
     if (specVersion !== undefined) {
         if (typeof specVersion !== "number" || !Number.isFinite(specVersion))
             return invalidSpec("spec_version is not a number");
-        if (specVersion > TABLE_SPEC_VERSION)
+        // Another format is never misread: an older one has no reader in
+        // this build, and a newer one may carry fields it would drop.
+        if (specVersion !== TABLE_SPEC_VERSION)
             return { ok: false, reason: "unsupported_version", specVersion };
     }
 
@@ -611,6 +701,11 @@ export function readSpec(raw: unknown): ReadSpecResult {
             return invalidSpec(`row "${row.id}" has no cells map`);
     }
 
+    // A table without a version is in the first format, which this build
+    // has no reader for; checked after the shape, so a corrupt file still
+    // reads as invalid.
+    if (specVersion === undefined)
+        return { ok: false, reason: "unsupported_version", specVersion: 1 };
     return { ok: true, spec: raw as unknown as TableSpec };
 }
 
@@ -784,9 +879,64 @@ export function isCellEmpty(cell: Cell | undefined): boolean {
     return cell?.value == null && cell?.outcome !== "not_reported";
 }
 
-/** An answer or finding taken from title and abstract rather than the attachment. */
-export function isMetadataOnly(cell: Cell | undefined): boolean {
-    return cell?.provenance === "metadata";
+/**
+ * A filler answer or finding read from the title and abstract rather than a
+ * document: a model cell that names no documents.
+ */
+export function isTitleAbstractOnly(cell: Cell | undefined): boolean {
+    return (
+        cell?.provenance === "model" &&
+        (cell.outcome === "answered" || cell.outcome === "not_reported") &&
+        !cell.documents?.length
+    );
+}
+
+/**
+ * Why a cell is stale: `question` when the column's question changed since it
+ * was written (stored by `update_column`), `document` when it is a filler cell
+ * read from documents the row no longer names (derived, nothing stored).
+ * User, system, failed and cleared cells are never stale by the row rule.
+ * Undefined when the cell is current.
+ */
+export function staleReason(
+    row: Pick<Row, "documents">,
+    cell: Cell | undefined,
+): "question" | "document" | undefined {
+    if (!cell) return undefined;
+    if (cell.stale) return "question";
+    if (
+        cell.provenance !== "model" ||
+        (cell.outcome !== "answered" && cell.outcome !== "not_reported")
+    )
+        return undefined;
+    const read = new Set(cell.documents ?? []);
+    const named = new Set(row.documents ?? []);
+    if (read.size !== named.size) return "document";
+    for (const id of read) if (!named.has(id)) return "document";
+    return undefined;
+}
+
+/** Whether a cell answers an earlier question or an earlier document; see {@link staleReason}. */
+export function isStale(
+    row: Pick<Row, "documents">,
+    cell: Cell | undefined,
+): boolean {
+    return staleReason(row, cell) !== undefined;
+}
+
+/**
+ * The review mark, a fixed rule: a filler cell of low confidence, or of
+ * medium confidence in a number column.
+ */
+export function needsReview(
+    column: Pick<Column, "type">,
+    cell: Cell | undefined,
+): boolean {
+    if (cell?.provenance !== "model") return false;
+    return (
+        cell.confidence === "low" ||
+        (cell.confidence === "medium" && column.type === "number")
+    );
 }
 
 /**
@@ -838,9 +988,12 @@ export interface TableCoverage {
     notReported: number;
     /** Cells whose answer failed. */
     error: number;
+    /** Rows with a failure: the last fill could not read them. */
     errorRows: number;
-    /** Cells answered from metadata only. */
-    metadataOnly: number;
+    /** Filler answers read from the title and abstract only, as `summarize` counts them. */
+    titleAbstractOnly: number;
+    /** Filler cells with the review mark ({@link needsReview}). */
+    needsReview: number;
 }
 
 export function summarizeCoverage(
@@ -855,10 +1008,11 @@ export function summarizeCoverage(
         notReported: 0,
         error: 0,
         errorRows: 0,
-        metadataOnly: 0,
+        titleAbstractOnly: 0,
+        needsReview: 0,
     };
     for (const row of rows) {
-        if (row.status === "error") coverage.errorRows += 1;
+        if (row.failure) coverage.errorRows += 1;
         for (const column of spec.columns) {
             const cell = row.cells[column.id];
             if (cell?.outcome === "failed") coverage.error += 1;
@@ -867,7 +1021,9 @@ export function summarizeCoverage(
                 coverage.empty += 1;
                 if (cell?.outcome === "not_reported") coverage.notReported += 1;
             }
-            if (isMetadataOnly(cell)) coverage.metadataOnly += 1;
+            if (cell?.outcome === "answered" && isTitleAbstractOnly(cell))
+                coverage.titleAbstractOnly += 1;
+            if (needsReview(column, cell)) coverage.needsReview += 1;
         }
     }
     return coverage;
@@ -1269,6 +1425,7 @@ export interface TableSpecIssue {
         | "invalid_column_progress"
         | "missing_cost_estimate"
         | "invalid_cell"
+        | "invalid_row"
         | "invalid_cell_value"
         | "invalid_column_definition"
         | "duplicate_source_id"
@@ -1283,6 +1440,7 @@ export interface TableSpecIssue {
 export const WRITE_BLOCKING_ISSUES: ReadonlySet<TableSpecIssue["code"]> =
     new Set<TableSpecIssue["code"]>([
         "invalid_cell",
+        "invalid_row",
         "duplicate_source_id",
         "multiple_items_sources",
         "unknown_origin_source",
@@ -1294,33 +1452,103 @@ const OUTCOMES: readonly CellOutcome[] = [
     "failed",
     "cleared",
 ];
-const PROVENANCES: readonly CellProvenance[] = [
-    "document",
-    "metadata",
-    "user",
-    "system",
-];
+const PROVENANCES: readonly CellProvenance[] = ["model", "user", "system"];
+const CONFIDENCES: readonly Confidence[] = ["high", "medium", "low"];
 
-/** The first cell invariant the cell breaks, or undefined. */
+function isDocumentList(value: unknown): value is DocumentId[] {
+    return (
+        Array.isArray(value) &&
+        value.every((id) => typeof id === "string" && id.length > 0)
+    );
+}
+
+/**
+ * The first structural cell rule the cell breaks, or undefined. Only the
+ * rules every reader depends on; what a filler should write (evidence for
+ * every answer, reasoning for an absence) is the filler's policy.
+ */
 export function cellInvariantError(cell: Cell): string | undefined {
+    // Read loosely: the cell may be any stored shape.
+    const raw = cell as unknown as Record<string, unknown>;
     if (!OUTCOMES.includes(cell.outcome))
         return "A cell names an unknown outcome";
     if (!PROVENANCES.includes(cell.provenance))
         return "A cell names an unknown provenance";
-    if ((cell.value != null) !== (cell.outcome === "answered"))
+    if ((raw.value != null) !== (cell.outcome === "answered"))
         return "A cell has a value exactly when its outcome is answered";
-    if ((cell.error != null) !== (cell.outcome === "failed"))
-        return "A cell has an error exactly when its outcome is failed";
-    if (cell.error_code != null && cell.outcome !== "failed")
-        return "Only a failed cell has an error code";
-    if (
-        cell.evidence?.length &&
-        cell.provenance !== "document" &&
-        cell.provenance !== "metadata"
-    )
-        return "Only document or metadata cells carry evidence";
+    const failed = cell.outcome === "failed";
+    if (failed !== (raw.error != null) || failed !== (raw.error_code != null))
+        return "A cell has an error and an error code exactly when its outcome is failed";
     if (cell.outcome === "cleared" && cell.provenance !== "user")
         return "Only the user clears a cell";
+    const reasons = cell.outcome === "answered" || cell.outcome === "not_reported";
+    if (raw.reasoning != null && !reasons)
+        return "Only an answered or not-reported cell gives reasoning";
+    const modelFields = ["documents", "absent", "confidence", "evidence"].some(
+        (name) => raw[name] != null,
+    );
+    if (cell.provenance !== "model")
+        return modelFields
+            ? "Only a filler cell carries documents, absent, confidence or evidence"
+            : undefined;
+    if (!reasons)
+        return modelFields
+            ? "Only an answered or not-reported cell carries documents, confidence or evidence"
+            : undefined;
+    if (raw.documents != null && !isDocumentList(raw.documents))
+        return "A cell's documents are a list of document ids";
+    if (
+        raw.confidence != null &&
+        !CONFIDENCES.includes(raw.confidence as Confidence)
+    )
+        return "A cell names an unknown confidence";
+    if (raw.absent != null) {
+        if (raw.absent !== true) return "absent is true or omitted";
+        if (cell.outcome !== "answered") return "Only an answered cell is absent";
+        const value = raw.value as CellValue | undefined;
+        if (value?.kind === "boolean" && value.value !== false)
+            return "An absent yes/no answer is no";
+    }
+    if (raw.evidence != null) {
+        if (!Array.isArray(raw.evidence)) return "A cell's evidence is a list";
+        if (raw.evidence.length > MAX_EVIDENCE_ENTRIES)
+            return `A cell has at most ${MAX_EVIDENCE_ENTRIES} evidence entries`;
+        const named = new Set(
+            isDocumentList(raw.documents) ? raw.documents : [],
+        );
+        for (const entry of raw.evidence as unknown[]) {
+            if (!isPlainObject(entry)) return "An evidence entry is an object";
+            if (typeof entry.document !== "string" || !named.has(entry.document))
+                return "Every evidence entry names one of the cell's documents";
+            if (!isNonEmptyString(entry.locator))
+                return "Every evidence entry names its locator";
+            if (typeof entry.quote !== "string")
+                return "Every evidence entry quotes its passage";
+            if (
+                entry.context != null &&
+                (typeof entry.context !== "string" ||
+                    codePointLength(entry.context) > MAX_CONTEXT_CHARS)
+            )
+                return `An evidence context is at most ${MAX_CONTEXT_CHARS} characters`;
+        }
+    }
+    return undefined;
+}
+
+/** The first structural row rule the row breaks, or undefined. */
+export function rowInvariantError(row: Row): string | undefined {
+    if (row.documents != null && !isDocumentList(row.documents))
+        return "A row's documents are a list of document ids";
+    const failure = row.failure as unknown;
+    if (
+        failure != null &&
+        !(
+            isPlainObject(failure) &&
+            isNonEmptyString(failure.code) &&
+            isNonEmptyString(failure.message)
+        )
+    )
+        return "A row failure has a code and a message";
     return undefined;
 }
 
@@ -1435,6 +1663,15 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
         }
         rowIds.add(row.id);
 
+        const brokenRow = rowInvariantError(row);
+        if (brokenRow) {
+            issues.push({
+                code: "invalid_row",
+                row_id: row.id,
+                message: `Row ${row.id}: ${brokenRow}`,
+            });
+        }
+
         for (const origin of row.origin ?? []) {
             if (!sourceIds.has(origin.source)) {
                 issues.push({
@@ -1533,52 +1770,64 @@ function csvEscape(field: string): string {
     return /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
 }
 
-/** One evidence entry as a line: the quote and where it was found. */
+/** One evidence entry as a line: `document locator: quote`, with its table context. */
 function evidenceLine(evidence: Evidence): string {
-    const where = evidence.field
-        ? evidence.field
-        : [
-              evidence.page != null ? `p. ${evidence.page + 1}` : "",
-              evidence.locator ?? "",
-          ]
-              .filter(Boolean)
-              .join(", ");
-    return where ? `"${evidence.quote}" (${where})` : `"${evidence.quote}"`;
+    const where = [evidence.document, evidence.locator]
+        .filter(Boolean)
+        .join(" ");
+    const context = evidence.context ? ` [${evidence.context}]` : "";
+    return `${where}: ${evidence.quote}${context}`;
 }
 
 /**
  * RFC 4180 CSV of the table: one header row of column headers, then one row per
- * table row in the given order. Companion fields carry each cell's evidence,
- * its reasoning and its state; a companion column empty in every row is
+ * table row in the given order. A number is written as its value, with the
+ * paper's wording (`display`) in its own column. Companion fields carry each
+ * cell's evidence, its reasoning, whether it rests on the paper's silence (`absent`), the
+ * filler's confidence and its state; a companion column empty in every row is
  * omitted. Formula-like values are escaped.
  */
 export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
     const fields = rows.map((row) =>
         spec.columns.map((c) => {
             const cell = row.cells[c.id];
+            const value = cell?.value;
             return [
                 cell?.outcome === "not_reported"
                     ? "Not reported"
-                    : cellValueText(cell?.value),
+                    : value?.kind === "number"
+                      ? // The number itself, so the sheet can sort and sum it;
+                        // the paper's wording goes in its own column.
+                        String(value.value)
+                      : cellValueText(value),
+                value?.kind === "number" ? (value.display ?? "") : "",
                 (cell?.evidence ?? []).map(evidenceLine).join("\n"),
                 cell?.reasoning ?? "",
-                cell
-                    ? [
-                          cell.outcome === "answered" ? "" : cell.outcome,
-                          cell.error ?? "",
-                          cell.unsure ? "unsure" : "",
-                          cell.stale ? "stale" : "",
-                          cell.provenance,
-                      ]
-                          .filter(Boolean)
-                          .join("; ")
-                    : "",
+                cell?.absent ? "absent" : "",
+                cell?.confidence ?? "",
+                [
+                    cell && cell.outcome !== "answered" ? cell.outcome : "",
+                    cell?.error ?? "",
+                    isStale(row, cell) ? "stale" : "",
+                    isTitleAbstractOnly(cell) ? "title and abstract" : "",
+                    cell?.provenance ?? "",
+                ]
+                    .filter(Boolean)
+                    .join("; "),
             ];
         }),
     );
     // A companion column that is empty in every row is left out: it would only
     // widen the sheet. The value column is always written.
-    const suffixes = ["", " — evidence", " — reasoning", " — state"];
+    const suffixes = [
+        "",
+        " — as reported",
+        " — evidence",
+        " — reasoning",
+        " — absent",
+        " — confidence",
+        " — state",
+    ];
     const kept = spec.columns.map((_, ci) =>
         suffixes.map(
             (_, fi) => fi === 0 || fields.some((row) => row[ci][fi] !== ""),

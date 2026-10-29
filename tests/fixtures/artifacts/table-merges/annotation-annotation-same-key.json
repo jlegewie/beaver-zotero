@@ -14,12 +14,8 @@
                         "zotero_key": "PDF1"
                     }
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-PDF1"
                 ],
                 "cells": {
                     "_reference": {
@@ -30,7 +26,14 @@
                             "text": "Highlighted passage"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         },
         {
@@ -45,12 +48,8 @@
                         "zotero_key": "PDF1"
                     }
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s2",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-PDF1"
                 ],
                 "cells": {
                     "_reference": {
@@ -61,7 +60,14 @@
                             "text": "Highlighted passage"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         }
     ],
@@ -78,14 +84,17 @@
                         "zotero_key": "PDF1"
                     }
                 },
+                "documents": [
+                    "u-PDF1"
+                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "annotation",
                             "text": "Highlighted passage"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": true,

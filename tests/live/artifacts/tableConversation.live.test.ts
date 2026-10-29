@@ -46,6 +46,7 @@ describe("table composer state with the real Zotero provider", () => {
             meta: { actor: "user" },
             spec: {
                 id: operation,
+                spec_version: 2,
                 title: "Table conversation test",
                 columns: [{ id: "answer", header: "Answer", type: "text" }],
                 rows: [],

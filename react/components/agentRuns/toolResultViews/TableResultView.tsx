@@ -101,8 +101,9 @@ function formatTableChanges(record: TableRecord): string | null {
 
 /**
  * The stage lines of a record that carries stage counts: how much of the
- * table a partial fill left, the answers taken from metadata only, and the
- * cells that failed. Empty for records written before stage counts existed.
+ * table a partial fill left, the rows that could not be read, the answers
+ * read from the title and abstract only, and the answers that failed. Empty
+ * for records written before stage counts existed.
  */
 export function formatTableStages(record: TableRecord): string[] {
     const stages = record.stages;
@@ -111,8 +112,10 @@ export function formatTableStages(record: TableRecord): string[] {
     // Before anything is answered every row remains; the size line says so.
     if (stages.answered > 0 && stages.remaining_rows > 0)
         lines.push(`${plural(stages.remaining_rows, "row")} still to fill`);
-    if (stages.metadata_only > 0)
-        lines.push(`${plural(stages.metadata_only, "answer")} from title and abstract only`);
+    const failedRows = stages.failed_rows ?? 0;
+    if (failedRows > 0) lines.push(`${plural(failedRows, "paper")} could not be read`);
+    if (stages.title_abstract_only > 0)
+        lines.push(`${plural(stages.title_abstract_only, "answer")} from title and abstract only`);
     if (stages.failed > 0) lines.push(`${plural(stages.failed, "cell")} failed`);
     return lines;
 }
@@ -155,7 +158,7 @@ function formatCredits(credits: number): string {
 /**
  * What the fill in this call did, for a record of a call that ran the filler:
  * rows filled of those planned, rows failed, rows not started and why, rows
- * without a document or abstract, answers from metadata, skipped cells, and
+ * without a document or abstract, answers from title and abstract, skipped cells, and
  * the credits charged. Empty for a call that ran no fill.
  */
 export function formatFillLines(record: TableRecord): string[] {
@@ -172,8 +175,8 @@ export function formatFillLines(record: TableRecord): string[] {
     if (unsaved > 0) lines.push(`${plural(unsaved, "row")} answered but not confirmed saved`);
     if (fill.rows_without_input > 0)
         lines.push(`${plural(fill.rows_without_input, "row")} without a document or abstract`);
-    if (fill.from_metadata > 0)
-        lines.push(`${plural(fill.from_metadata, "answer")} from title and abstract only`);
+    if (fill.from_title_abstract > 0)
+        lines.push(`${plural(fill.from_title_abstract, "answer")} from title and abstract only`);
     for (const [reason, cells] of Object.entries(fill.skipped ?? {})) {
         if (cells > 0) lines.push(`${plural(cells, "cell")} skipped: ${SKIP_REASONS[reason] ?? reason}`);
     }

@@ -2,7 +2,7 @@
     "name": "a column whose role this version does not know is never counted as unattempted",
     "spec": {
         "id": "t1",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Sampling methods",
         "description": "How the papers sampled their respondents.",
         "anchor_column_id": "_reference",
@@ -112,12 +112,8 @@
                     "zotero_key": "AAA",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-AAAPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -157,28 +153,32 @@
                     },
                     "adults": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "select",
                             "label": "yes"
                         },
-                        "evidence": [
-                            {
-                                "quote": "A mail survey of 2,000 households.",
-                                "field": "abstract"
-                            }
-                        ],
                         "reasoning": "The abstract says adult respondents."
                     },
                     "ft_adults": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "select",
                             "label": "yes"
-                        }
+                        },
+                        "documents": [
+                            "u-AAAPDF"
+                        ]
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r2",
@@ -188,13 +188,6 @@
                     "zotero_key": "BBB",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -222,7 +215,14 @@
                             "label": "exclude"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r3",
@@ -232,13 +232,6 @@
                     "zotero_key": "CCC",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -258,7 +251,14 @@
                             "value": "2021"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         ]
     },
@@ -273,60 +273,70 @@
             "_reference": {
                 "type": "reference",
                 "answered": 3,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
             },
             "_year": {
                 "type": "date",
                 "answered": 3,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
             },
             "_identifier": {
                 "type": "link",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "system": true
             },
             "method": {
                 "type": "text",
                 "answered": 0,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 1,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0
+                "needs_review": 0,
+                "title_abstract_only": 0
             },
             "adults": {
                 "type": "select",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 2,
-                "stale": 0,
-                "unsure": 0,
-                "metadata_only": 1,
+                "in_failed_rows": 0,
+                "stale": 1,
+                "needs_review": 0,
+                "title_abstract_only": 1,
                 "role": "criterion",
                 "distribution": {
                     "yes": 1
@@ -335,13 +345,15 @@
             "decision": {
                 "type": "select",
                 "answered": 2,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "role": "decision",
                 "distribution": {
                     "include": 1,
@@ -351,13 +363,15 @@
             "ft_adults": {
                 "type": "select",
                 "answered": 1,
+                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
                 "unattempted": 0,
+                "in_failed_rows": 0,
                 "stale": 0,
-                "unsure": 0,
-                "metadata_only": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
                 "role": "some_future_role",
                 "distribution": {
                     "yes": 1

@@ -85,7 +85,7 @@ export type TableItemErrorCode =
     | 'not_a_table'
     /** The item carries no readable table. */
     | 'no_spec'
-    /** Written by a newer format than this build can read. */
+    /** Written in a format this build does not read (older or newer). */
     | 'unsupported_version'
     /** `table.json` is not a readable table. */
     | 'invalid_spec'
@@ -392,7 +392,7 @@ function specFor(item: Zotero.Item, raw: unknown): ReadTableItemResult {
                   ok: false,
                   code: 'unsupported_version',
                   specVersion: read.specVersion,
-                  message: `Table ${item.key} was written by a newer format (spec_version ${read.specVersion}).`,
+                  message: `Table ${item.key} was written in another format (spec_version ${read.specVersion}).`,
               }
             : { ok: false, code: 'invalid', message: read.detail };
     }

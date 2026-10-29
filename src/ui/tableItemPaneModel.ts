@@ -96,10 +96,14 @@ export interface TableSectionFields {
     /** `rows × columns` — the denominator for {@link filled}. */
     cells: number;
     filled: number;
-    unsure: number;
-    /** Cells answered from title and abstract only. */
-    metadataOnly: number;
+    /** Filler cells with the review mark: low confidence, or medium in a number column. */
+    needsReview: number;
+    /** Filler answers read from the title and abstract only. */
+    titleAbstractOnly: number;
+    /** Cells whose question or whose row's document changed since they were written. */
     stale: number;
+    /** Rows whose last fill stopped before they were answered. */
+    failedRows: number;
     version: number | null;
     /** The oldest version still in the log, or null when the log is empty. */
     oldestVersion: number | null;
@@ -116,7 +120,10 @@ export interface TableSectionFields {
     dimensionsLine: string;
     /** "58 of 84 cells filled", or empty when there are no cells. */
     coverageLine: string;
-    /** "3 unsure · 1 from title and abstract · 2 stale", or empty when nothing is flagged. */
+    /**
+     * "3 to review · 1 from title and abstract · 2 stale · 1 paper could not
+     * be read", or empty when nothing is flagged.
+     */
     flagsLine: string;
     /** "Version 12 · history goes back to v7", or empty when unknown. */
     versionLine: string;
@@ -259,9 +266,10 @@ function emptyFields(annotations: number): TableSectionFields {
         columns: 0,
         cells: 0,
         filled: 0,
-        unsure: 0,
-        metadataOnly: 0,
+        needsReview: 0,
+        titleAbstractOnly: 0,
         stale: 0,
+        failedRows: 0,
         version: null,
         oldestVersion: null,
         historyTruncated: false,
@@ -344,21 +352,24 @@ export function buildTableSectionFields(
     const cells = rows * columns;
 
     let filled = 0;
-    let unsure = 0;
-    let metadataOnly = 0;
+    let needsReview = 0;
+    let titleAbstractOnly = 0;
     let stale = 0;
     for (const detail of details) {
         if (!detail || detail.system) continue;
         filled += detail.answered ?? 0;
-        unsure += detail.unsure ?? 0;
-        metadataOnly += detail.metadata_only ?? 0;
+        needsReview += detail.needs_review ?? 0;
+        titleAbstractOnly += detail.title_abstract_only ?? 0;
         stale += detail.stale ?? 0;
     }
+    const failedRows = Math.max(0, summary.failed_rows ?? 0);
 
     const flags: string[] = [];
-    if (unsure) flags.push(`${unsure} unsure`);
-    if (metadataOnly) flags.push(`${metadataOnly} from title and abstract`);
+    if (needsReview) flags.push(`${needsReview} to review`);
+    if (titleAbstractOnly) flags.push(`${titleAbstractOnly} from title and abstract`);
     if (stale) flags.push(`${stale} stale`);
+    if (failedRows)
+        flags.push(`${plural(failedRows, 'paper', 'papers')} could not be read`);
 
     const annotationWarning = annotationsBeforeLastWrite > 0;
 
@@ -368,9 +379,10 @@ export function buildTableSectionFields(
         columns,
         cells,
         filled,
-        unsure,
-        metadataOnly,
+        needsReview,
+        titleAbstractOnly,
         stale,
+        failedRows,
         version,
         oldestVersion,
         historyTruncated,

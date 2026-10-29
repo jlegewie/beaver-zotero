@@ -19,10 +19,13 @@ const spec = {
             cells: {
                 a: {
                     outcome: "answered" as const,
-                    provenance: "document" as const,
+                    provenance: "model" as const,
+                    documents: ["u-ATTACH01"],
+                    confidence: "high" as const,
                     value: { kind: "text" as const, text: "Fresh answer" },
                     evidence: [
                         {
+                            document: "u-ATTACH01",
                             locator: "s3",
                             quote: 'Evidence, with "quotes"',
                             page: 1,
@@ -129,7 +132,11 @@ it("exports a fresh persisted spec after the originating window picker returns",
     );
     expect(IOUtils.writeUTF8).toHaveBeenCalledWith(
         "/tmp/comparison.csv",
-        expect.stringContaining('"""Evidence, with ""quotes"""" (p. 2, s3)"'),
+        expect.stringContaining('"u-ATTACH01 s3: Evidence, with ""quotes"""'),
+    );
+    expect(IOUtils.writeUTF8).toHaveBeenCalledWith(
+        "/tmp/comparison.csv",
+        expect.stringContaining("Answer — confidence"),
     );
     expect(root.textContent).toContain("evidence and reasoning columns");
 });

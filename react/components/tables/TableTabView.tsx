@@ -1,5 +1,5 @@
 import React from 'react';
-import type { TableSpec, ZoteroRowReference } from '@beaver/agent-core/layouts/table';
+import { isTitleAbstractOnly, type TableSpec } from '@beaver/agent-core/layouts/table';
 import { ExtractionTable } from '@beaver/agent-ui/layouts';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 import {
@@ -14,8 +14,7 @@ import { getWindowRuntime } from '../../runtime/windowRuntime';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { selectItemById } from '../../utils/selectItem';
 import { describeItems } from './card/liveSources';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
-import { getContentKind } from '../../../src/services/documentExtraction/attachmentResolution';
+import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 
 /** A value the tab's owner sets from outside React, read with `useSyncExternalStore`. */
 export interface TableTabWarningSource {
@@ -38,75 +37,54 @@ interface PendingReport {
     readMs: number;
 }
 
-/** A row answered from title and abstract, and the attachment it names if any. */
-export interface MetadataRow {
-    rowId: string;
-    attachment?: ZoteroRowReference;
-}
-
 /**
- * The item of each row with an answer from title and abstract: the rows a
- * document gained since would improve. Keyed by the item's portable id.
+ * The item of each row answered from title and abstract that names no
+ * document yet: the rows a document gained since would improve. Keyed by the
+ * item's portable id. A row that already names documents is left out, since
+ * a fill keeps reading those; its cells from title and abstract show as stale
+ * instead.
  */
-export function metadataAnsweredItems(spec: TableSpec | null): Map<string, MetadataRow[]> {
-    const byItem = new Map<string, MetadataRow[]>();
+export function titleAbstractAnsweredItems(spec: TableSpec | null): Map<string, string[]> {
+    const byItem = new Map<string, string[]>();
     for (const row of spec?.rows ?? []) {
-        if (row.ref?.kind !== 'item') continue;
-        if (!Object.values(row.cells).some((cell) => cell?.provenance === 'metadata')) continue;
+        if (row.ref?.kind !== 'item' || row.documents?.length) continue;
+        if (!Object.values(row.cells).some((cell) => isTitleAbstractOnly(cell))) continue;
         const id = `${row.ref.library_ref}-${row.ref.zotero_key}`;
-        byItem.set(id, [...(byItem.get(id) ?? []), { rowId: row.id, attachment: row.ref.attachment }]);
+        byItem.set(id, [...(byItem.get(id) ?? []), row.id]);
     }
     return byItem;
 }
 
-/** The kinds of attachment a row reads. */
-const ROW_DOCUMENT_KINDS: ReadonlySet<string> = new Set(['pdf', 'epub', 'snapshot']);
-
-/** Whether the attachment a row names is still a document outside the trash. */
-function namedDocumentPresent(attachment: ZoteroRowReference): boolean {
-    const libraryID = resolveLibraryRef(attachment);
-    if (!libraryID) return false;
-    const item = Zotero.Items.getByLibraryAndKey(libraryID, attachment.zotero_key) as Zotero.Item | false;
-    return !!item && !item.deleted && item.isAttachment() && ROW_DOCUMENT_KINDS.has(getContentKind(item));
-}
-
 /**
- * Of the metadata-answered rows, those a fill now would answer from a
- * document: the attachment the row names when it names one, otherwise any
- * document of its item (`has_pdf` from the item display answer).
+ * Of those rows, the ones a fill now would answer from a document: their item
+ * has one (`has_pdf` from the item display answer).
  */
 export function improvableRowIds(
-    candidates: Map<string, MetadataRow[]>,
+    candidates: Map<string, string[]>,
     items: ReadonlyArray<{ item_id: string; has_pdf?: boolean }>,
-    namedPresent: (attachment: ZoteroRowReference) => boolean = namedDocumentPresent,
 ): Set<string> {
     const found = new Set<string>();
     for (const item of items) {
-        for (const entry of candidates.get(item.item_id) ?? []) {
-            if (entry.attachment ? namedPresent(entry.attachment) : !!item.has_pdf) found.add(entry.rowId);
-        }
+        if (!item.has_pdf) continue;
+        for (const rowId of candidates.get(item.item_id) ?? []) found.add(rowId);
     }
     return found;
 }
 
 /**
- * Rows answered from title and abstract whose item now has a PDF, EPUB or
- * snapshot attachment, by the rule a fill uses to pick a row's document: a
- * fill now would answer them from it. A row that names an attachment keeps
- * reading that one, even once it is gone, so only it counts for that row.
- * The lookup skips excluded libraries on purpose: the chip offers a fill, and
- * a fill cannot read them. Worked out from the items when the table is shown,
- * never stored; looked up again when the set of such rows changes or one of
- * their items gains or loses an attachment.
+ * Rows answered from title and abstract, naming no document yet, whose item
+ * now has a PDF, EPUB or snapshot attachment: a fill now would pick it as the
+ * row's document and answer them from it. The lookup skips excluded libraries
+ * on purpose: the chip offers a fill, and a fill cannot read them. Worked out
+ * from the items when the table is shown, never stored; looked up again when
+ * the set of such rows changes or one of their items gains or loses an
+ * attachment.
  */
 function useImprovableRows(spec: TableSpec | null): ReadonlySet<string> {
-    const candidates = React.useMemo(() => metadataAnsweredItems(spec), [spec]);
+    const candidates = React.useMemo(() => titleAbstractAnsweredItems(spec), [spec]);
     const key = React.useMemo(() => [...candidates.keys()].sort().join(','), [candidates]);
-    // The rows and the attachments they name, so a change to either looks again.
-    const rowsKey = React.useMemo(
-        () => JSON.stringify([...candidates.values()].flat().map((row) => [row.rowId, row.attachment?.zotero_key ?? null])),
-        [candidates],
-    );
+    // The rows themselves, so a row gaining or losing such answers looks again.
+    const rowsKey = React.useMemo(() => JSON.stringify([...candidates.values()].flat()), [candidates]);
     const [improvable, setImprovable] = React.useState<ReadonlySet<string>>(new Set());
     const [attachmentsChanged, setAttachmentsChanged] = React.useState(0);
     const candidatesRef = React.useRef(candidates);

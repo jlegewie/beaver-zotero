@@ -2,7 +2,7 @@
     "name": "reordering, recolouring and re-spelling options with definitions keeps the answers fresh",
     "before": {
         "id": "t1",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Sampling methods",
         "description": "How the papers sampled their respondents.",
         "anchor_column_id": "_reference",
@@ -76,12 +76,8 @@
                     "zotero_key": "AAA",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-AAAPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -113,13 +109,17 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Telephone survey"
                         },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-AAAPDF",
                                 "locator": "s12-s13",
                                 "quote": "Respondents were sampled by random digit dialing.",
                                 "page": 3,
@@ -136,20 +136,31 @@
                     },
                     "design": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "select",
                             "label": "RCT"
                         },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-AAAPDF",
                                 "locator": "s4",
                                 "quote": "Households were randomly assigned.",
                                 "page": 2
                             }
                         ]
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r2",
@@ -159,13 +170,6 @@
                     "zotero_key": "BBB",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -187,27 +191,28 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Mail survey"
-                        },
-                        "evidence": [
-                            {
-                                "quote": "A mail survey of 2,000 households.",
-                                "field": "abstract"
-                            }
-                        ]
+                        }
                     },
                     "design": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "select",
                             "label": "Observational"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r3",
@@ -217,13 +222,6 @@
                     "zotero_key": "CCC",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -243,7 +241,14 @@
                             "value": "2021"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         ]
     },
@@ -268,7 +273,7 @@
     ],
     "after": {
         "id": "t1",
-        "spec_version": 1,
+        "spec_version": 2,
         "title": "Sampling methods",
         "description": "How the papers sampled their respondents.",
         "anchor_column_id": "_reference",
@@ -342,12 +347,8 @@
                     "zotero_key": "AAA",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "u-AAAPDF"
                 ],
                 "cells": {
                     "_reference": {
@@ -379,13 +380,17 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Telephone survey"
                         },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-AAAPDF",
                                 "locator": "s12-s13",
                                 "quote": "Respondents were sampled by random digit dialing.",
                                 "page": 3,
@@ -402,20 +407,31 @@
                     },
                     "design": {
                         "outcome": "answered",
-                        "provenance": "document",
+                        "provenance": "model",
                         "value": {
                             "kind": "select",
                             "label": "rct"
                         },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
                         "evidence": [
                             {
+                                "document": "u-AAAPDF",
                                 "locator": "s4",
                                 "quote": "Households were randomly assigned.",
                                 "page": 2
                             }
                         ]
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r2",
@@ -425,13 +441,6 @@
                     "zotero_key": "BBB",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -453,27 +462,28 @@
                     },
                     "method": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "text",
                             "text": "Mail survey"
-                        },
-                        "evidence": [
-                            {
-                                "quote": "A mail survey of 2,000 households.",
-                                "field": "abstract"
-                            }
-                        ]
+                        }
                     },
                     "design": {
                         "outcome": "answered",
-                        "provenance": "metadata",
+                        "provenance": "model",
                         "value": {
                             "kind": "select",
                             "label": "Observational"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             },
             {
                 "id": "r3",
@@ -483,13 +493,6 @@
                     "zotero_key": "CCC",
                     "library_id": 1
                 },
-                "in_library": true,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -509,7 +512,14 @@
                             "value": "2021"
                         }
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         ]
     }

@@ -45,7 +45,7 @@ vi.mock('../../../src/utils/prefs', () => ({
     clearPref: vi.fn(),
 }));
 
-import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import { TABLE_SPEC_VERSION, type TableSpec } from '@beaver/agent-core/layouts/table';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableShadowRecord } from '../../../src/services/database';
 import { buildTableDocument } from '../../../src/services/artifacts/tableDocument';
@@ -204,7 +204,7 @@ function demoSpec(text = 'One'): TableSpec {
                     note: {
                         outcome: 'answered',
                         value: { kind: 'text', text },
-                        provenance: 'document',
+                        provenance: 'model',
                     },
                 },
             },
@@ -253,7 +253,7 @@ async function resolveConflictTowardRemote(
     spec: TableSpec,
     version: number
 ): Promise<void> {
-    const stored = { ...spec, spec_version: 1, key: KEY, version };
+    const stored = { ...spec, spec_version: TABLE_SPEC_VERSION, key: KEY, version };
     const serialized = JSON.stringify(stored);
 
     await mkdir(sidecar(), { recursive: true });

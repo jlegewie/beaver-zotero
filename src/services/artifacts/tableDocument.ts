@@ -68,20 +68,24 @@ import {
     compareSortKeys,
     isColumnFilterable,
     isColumnSortable,
-    isMetadataOnly,
+    isTitleAbstractOnly,
+    needsReview,
     rowActions,
     rowPrimaryAction,
     selectLabelsInColumn,
     selectOption,
     sortRows,
+    staleReason,
     stripCitationTags,
     summarizeCoverage,
     SELECT_COLORS,
+    TABLE_SPEC_VERSION,
     type Cell,
     type Column,
     type Evidence,
     type Row,
     type RowAction,
+    type RowFailure,
     type SelectOption,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
@@ -254,11 +258,29 @@ function safeHref(uri: string | null | undefined): string | null {
     return /^(zotero:\/\/|https:\/\/)/i.test(uri) ? uri : null;
 }
 
+/** Why a cell is stale, as its marker's tooltip says it (the React grid says the same). */
+const STALE_REASON_TEXT: Record<'question' | 'document', string> = {
+    question: 'The question changed',
+    document: "The paper's document changed",
+};
+const REVIEW_TEXT = 'Beaver is not confident in this answer; check it against the paper';
+const ABSENT_TEXT = 'The paper does not say; this answer rests on its silence';
+
 /**
- * One cell's value, followed by the markers of its evidence and its state. In
- * the expanded row (`detail`) an annotation names only what it is and where it
- * sits: its passage and comment are listed as fields of their own there
- * (`cellExpandedFields`).
+ * What stopped a row, in a few words: a row with nothing to read (no document
+ * and no abstract) is told apart from one whose document could not be read.
+ */
+function rowFailureLabel(failure: RowFailure): string {
+    return failure.code === 'no_source' ? 'Nothing to read' : 'Could not be read';
+}
+
+/**
+ * One cell's value, followed by the markers of its evidence and its state:
+ * "not in paper" for an answer resting on the paper's silence, the review mark,
+ * staleness with what changed, an answer from title and abstract, and who edited
+ * it. In the expanded row (`detail`) an annotation names only what it is and
+ * where it sits: its passage and comment are listed as fields of their own
+ * there (`cellExpandedFields`).
  */
 function renderCellValue(
     row: Row,
@@ -270,11 +292,19 @@ function renderCellValue(
     const html = renderCellValueInner(cell, column, variant);
     if (!cell) return html;
     const markers = cites ? cites.markers(row, column.id) : '';
+    const stale = staleReason(row, cell);
+    const state = (text: string, className: string, title?: string): string =>
+        `<span class="${className}"${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(text)}</span>`;
     const states = [
-        cell.unsure ? 'Unsure' : '',
-        cell.stale ? 'Stale' : '',
-        isMetadataOnly(cell) ? 'From title and abstract' : '',
-        cell.outcome === 'cleared' ? 'Cleared by you' : cell.provenance === 'user' ? 'Edited by you' : '',
+        cell.absent ? state('not in paper', 'bt-absent', ABSENT_TEXT) : '',
+        needsReview(column, cell) ? state('To review', 'bt-review', REVIEW_TEXT) : '',
+        stale ? state('Stale', 'bt-stale', STALE_REASON_TEXT[stale]) : '',
+        isTitleAbstractOnly(cell) ? state('From title and abstract', 'bt-ta') : '',
+        cell.outcome === 'cleared'
+            ? state('Cleared by you', 'bt-by-user')
+            : cell.provenance === 'user'
+              ? state('Edited by you', 'bt-by-user')
+              : '',
     ].filter(Boolean);
     return html + markers + (states.length ? `<small class="bt-cell-state"> · ${states.join(' · ')}</small>` : '');
 }
@@ -309,10 +339,11 @@ function renderCellValueInner(
             return `<span class="bt-num">${escapeHtml(value.display ?? value.value)}</span>`;
 
         case 'boolean':
-            // The check is the signal; false is its absence.
+            // A check for yes and the word in muted text for no: a blank no
+            // could not be told from a cell that was never answered.
             return value.value
                 ? '<span class="bt-yes" title="yes">✓</span>'
-                : '<span class="bt-no"></span>';
+                : '<span class="bt-no">No</span>';
 
         case 'select': {
             const option = selectOption(column, value.label);
@@ -437,7 +468,7 @@ class CitationNumbering {
     }
 
     /**
-     * Attachment citations open their document; metadata citations reveal the item.
+     * Attachment citations open their document; item citations reveal the item.
      * Shared with the bibliography so a marker and its entry always agree.
      */
     hrefFor(citation: Citation | undefined): string | null {
@@ -793,11 +824,17 @@ function renderActions(row: Row, spec: TableSpec, links: TableHtmlLinks | null):
     return parts.join('');
 }
 
-/** One evidence entry in the expanded row: the quote, then its marker. */
+/**
+ * One evidence entry in the expanded row: the table context of a passage cited
+ * from a table (its caption and header rows) in small grey type, then the
+ * quote and its marker.
+ */
 function renderEvidenceLine(evidence: Evidence, marker: string): string {
     const quote = evidence.quote.replace(/\s+/g, ' ').trim();
-    const where = evidence.field === 'title' ? ' (title)' : evidence.field === 'abstract' ? ' (abstract)' : '';
-    return `<li>“${escapeHtml(quote)}”${escapeHtml(where)}${marker}</li>`;
+    const context = evidence.context
+        ? `<span class="bt-ev-ctx">${escapeHtml(evidence.context)}</span>`
+        : '';
+    return `<li>${context}“${escapeHtml(quote)}”${marker}</li>`;
 }
 
 function renderDetail(
@@ -817,12 +854,16 @@ function renderDetail(
         .map((column) => {
             const cell = row.cells[column.id];
             // The answer's reasoning and its evidence sit under it; an
-            // annotation's passage and comment are fields of their own.
+            // annotation's passage and comment are fields of their own. The
+            // evidence of an answer resting on the paper's silence, or of a
+            // finding that it does not report something, is the closest the
+            // paper comes, not proof.
             const reasoning = cell?.reasoning
                 ? `<div class="bt-d-extra">${escapeHtml(cell.reasoning)}</div>`
                 : '';
+            const closest = !!cell?.absent || cell?.outcome === 'not_reported';
             const evidence = cell?.evidence?.length
-                ? `<ul class="bt-d-list">${cell.evidence
+                ? `${closest ? '<div class="bt-d-h">Closest passages</div>' : ''}<ul class="bt-d-list">${cell.evidence
                       .map((entry) => renderEvidenceLine(entry, ''))
                       .join('')}</ul>`
                 : '';
@@ -840,10 +881,9 @@ function renderDetail(
         })
         .join('');
 
-    const error =
-        row.status === 'error' && row.error
-            ? `<p class="bt-d-err">${escapeHtml(row.error)}</p>`
-            : '';
+    const error = row.failure
+        ? `<p class="bt-d-err"><strong>${escapeHtml(rowFailureLabel(row.failure))}.</strong> ${escapeHtml(row.failure.message)}</p>`
+        : '';
 
     const actions = renderActions(row, spec, links);
     return `<div class="bt-d">${error}<dl class="bt-d-fields">${fields}</dl>${
@@ -964,11 +1004,12 @@ export function renderTableHtml(
     if (coverage.notReported > 0)
         footerParts.push(`${coverage.notReported} not reported`);
     if (coverage.error > 0) footerParts.push(`${coverage.error} failed`);
-    if (coverage.metadataOnly > 0)
-        footerParts.push(`${coverage.metadataOnly} from title and abstract`);
+    if (coverage.titleAbstractOnly > 0)
+        footerParts.push(`${coverage.titleAbstractOnly} from title and abstract`);
+    if (coverage.needsReview > 0) footerParts.push(`${coverage.needsReview} to review`);
     if (coverage.errorRows > 0)
         footerParts.push(
-            `${coverage.errorRows} ${coverage.errorRows === 1 ? 'row' : 'rows'} incomplete`
+            `${coverage.errorRows} ${coverage.errorRows === 1 ? 'paper' : 'papers'} could not be read`
         );
 
     // --- header
@@ -1011,7 +1052,7 @@ export function renderTableHtml(
                 ...rowRanks.desc.map((r, i) => `--p${i}:${r}`),
             ].join(';');
             const classes = ['bt-r', ...rowFilterClasses(row, spec, selectLabels)];
-            if (row.status === 'error') classes.push('bt-r-err');
+            if (row.failure) classes.push('bt-r-err');
 
             const links = rowLinks.get(row.id) ?? null;
             const cells = gridColumns
@@ -1394,6 +1435,8 @@ export const TABLE_CSS = `
 .bt-d .bt-sub { white-space: normal; }
 .bt-d-extra { margin-top: 4px; }
 .bt-d-list { margin: 4px 0 0; padding-left: 18px; }
+.bt-d-h { margin-top: 4px; font-size: 12px; color: var(--t-fade); }
+.bt-ev-ctx { display: block; font-size: 12px; color: var(--t-fade); }
 .bt-d-actions { margin-top: 10px; }
 /* The citation marker, as the chat renders it: a small raised number that says
    where a claim came from and opens the cited page. */
@@ -1443,6 +1486,8 @@ html[data-beaver-active] .bt-export { display: inline-block; }
 .bt-wrap .bt-d-err { color: var(--t-warn); margin: 0 0 8px; font-size: 13px; }
 .bt-wrap .bt-yes { color: #1f7a3d; }
 .bt-wrap .bt-no { color: var(--t-fade); }
+.bt-wrap .bt-absent { color: var(--t-fade); }
+.bt-wrap .bt-review { color: #98590c; }
 .bt-r.bt-r-err > .bt-row { box-shadow: inset 3px 0 0 #c0603f; }
 .bt-pill.bt-pill--blue { background: #e8f1fd; color: #1a5aa8; border-color: #cfe0f7; }
 .bt-pill.bt-pill--green { background: #e7f6ec; color: #1f7a3d; border-color: #cbe9d5; }
@@ -1529,9 +1574,10 @@ export function buildTableDocument(
 
     const html = [
         '<!DOCTYPE html>',
-        // Marks the document as one of ours, so a viewer can recognise it
-        // without reading anything else.
-        `<html lang="en" data-beaver-table="${escapeHtml(String(spec.spec_version ?? 1))}"${hash}>`,
+        // Marks the document as one of ours, and the format it renders, so a
+        // viewer can recognise it without reading anything else. A spec built
+        // in this process names no version and is this build's format.
+        `<html lang="en" data-beaver-table="${escapeHtml(String(spec.spec_version ?? TABLE_SPEC_VERSION))}"${hash}>`,
         '<head>',
         '<meta charset="utf-8">',
         `<title>${escapeHtml(spec.title ?? 'Table')}</title>`,

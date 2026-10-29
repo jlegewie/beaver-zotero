@@ -1,6 +1,6 @@
 import { isTableItemError, tableFilePath } from '../../artifacts/tableItemIdentity';
 import type { Cell, Column, Row, TableSpec } from '@beaver/agent-core/layouts/table';
-import { allocateRowId, validateTableSpec, type Evidence, type RowRef } from '@beaver/agent-core/layouts/table';
+import { allocateRowId, validateTableSpec, TABLE_SPEC_VERSION, type Evidence, type RowRef } from '@beaver/agent-core/layouts/table';
 import { zoteroLinkScope, zoteroLinksFor } from '../../artifacts/view/tableLinks';
 import type { TableMutation } from '@beaver/agent-core/layouts/tableMutations';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
@@ -104,9 +104,15 @@ export function yearOf(item: Zotero.Item): string {
     return parsed?.year ? String(parsed.year) : '';
 }
 
+/** The portable id of the item's PDF, the document its row is filled from. */
+export function documentIdFor(item: DemoItem): string | undefined {
+    return item.attachmentKey ? `${item.libraryRef ?? 'u'}-${item.attachmentKey}` : undefined;
+}
+
 /** Evidence for a demo answer: the quoted sentence on a page of the item's attachment. */
 export function evidenceFor(item: DemoItem, quote: string, index: number): Evidence[] {
-    return item.attachmentKey && quote ? [{ locator: `page${index + 1}`, quote, page: index }] : [];
+    const document = documentIdFor(item);
+    return document && quote ? [{ document, locator: `s${index + 1}`, quote, page: index }] : [];
 }
 
 export function sentence(text: string, index: number): string {
@@ -115,11 +121,16 @@ export function sentence(text: string, index: number): string {
     return picked.length > 150 ? `${picked.slice(0, 147)}…` : picked;
 }
 
+/**
+ * A filler answer: read from the documents its evidence names, or from the
+ * title and abstract (no documents) when it has none.
+ */
 export function textCell(text: string, evidence: Evidence[] = []): Cell | undefined {
     if (!text) return undefined;
-    return evidence.length
-        ? { outcome: 'answered', value: { kind: 'text', text }, provenance: 'document', evidence }
-        : { outcome: 'answered', value: { kind: 'text', text }, provenance: 'metadata' };
+    const documents = [...new Set(evidence.map((entry) => entry.document))];
+    return documents.length
+        ? { outcome: 'answered', value: { kind: 'text', text }, provenance: 'model', documents, confidence: 'high', evidence }
+        : { outcome: 'answered', value: { kind: 'text', text }, provenance: 'model', confidence: 'high' };
 }
 
 /** Sets a cell, leaving it unattempted when there is nothing to write. */
@@ -163,19 +174,17 @@ export async function buildDemoTable(
 }
 
 export function referenceRow(item: DemoItem): Row {
-    const libraryRef = item.libraryRef ?? 'u';
     const ref: RowRef = {
         kind: 'item',
         library_id: item.libraryID,
         zotero_key: item.key,
-        library_ref: libraryRef,
-        attachment: item.attachmentKey
-            ? { library_id: item.libraryID, zotero_key: item.attachmentKey, library_ref: libraryRef }
-            : undefined,
+        library_ref: item.libraryRef ?? 'u',
     };
+    const document = documentIdFor(item);
     return {
         id: allocateRowId(),
         ref,
+        ...(document ? { documents: [document] } : {}),
         cells: {
             ref: {
                 outcome: 'answered',
@@ -250,12 +259,12 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
         return row;
     });
 
-    // One row that could not be resolved, so the failed-row treatment is visible.
+    // One row that could not be read, so the failed-row treatment is visible.
+    // Its question cells stay unattempted: the failure is on the row.
     rows.push({
         id: 'ext:openalex:demo-failed',
         ref: { kind: 'external', source: 'openalex', source_id: 'demo-failed' },
-        status: 'error',
-        error: 'Metadata could not be retrieved from the source',
+        failure: { code: 'download_failed', message: 'The file could not be downloaded from the source.' },
         cells: {
             ref: {
                 outcome: 'answered',
@@ -267,12 +276,12 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
                 },
                 provenance: 'system',
             },
-            abstract: { outcome: 'failed', provenance: 'metadata', error: 'No abstract available' },
         },
     });
 
     return {
         id: 'demo-search',
+        spec_version: TABLE_SPEC_VERSION,
         title: 'External search — demo',
         description: 'Built from your library. Citation counts and OA flags are stand-ins.',
         anchor_column_id: 'ref',
@@ -342,23 +351,38 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
             const text = item.abstract ? sentence(item.abstract, index) : '';
             return textCell(text, evidenceFor(item, text, i));
         };
+        // A row with neither a document nor an abstract cannot be filled: the
+        // failure goes on the row and its question cells stay unattempted.
+        if (!item.attachmentKey && !item.abstract) {
+            row.failure = { code: 'no_source', message: 'This item has no document or abstract to read.' };
+            return row;
+        }
+        const documents = row.documents;
         const sample = answer(0);
         // One hand-edited cell, so a second provenance shows up.
-        put(row, 'sample', sample && i === 1
+        put(row, 'sample', sample?.outcome === 'answered' && i === 1
             ? { outcome: 'answered', value: sample.value, provenance: 'user' }
             : sample);
         row.cells.design = {
             outcome: 'answered',
             value: { kind: 'select', label: designs[i % designs.length] },
-            provenance: 'document',
+            provenance: 'model',
+            ...(documents ? { documents } : {}),
+            // Every fourth answer is a low-confidence one, so the review mark shows.
+            confidence: i % 4 === 1 ? 'low' : 'high',
             reasoning: 'Stand-in judgment for the demo.',
         };
         // A cell the paper reports nothing for is a finding, not a gap.
         put(row, 'effect',
             i === 2
-                ? { outcome: 'not_reported', provenance: 'document' }
+                ? {
+                      outcome: 'not_reported',
+                      provenance: 'model',
+                      ...(documents ? { documents } : {}),
+                      reasoning: 'The paper reports no effect size.',
+                  }
                 : i === 3
-                  ? { outcome: 'failed', provenance: 'document', error: 'The PDF has no extractable text layer' }
+                  ? { outcome: 'failed', provenance: 'model', error_code: 'no_locator', error: 'The answer cited no passage.' }
                   : answer(1));
         // The filling column: the first few are done, the rest unattempted.
         if (i < 3) put(row, 'retention', answer(2));
@@ -367,6 +391,7 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
 
     return {
         id: 'demo-extraction',
+        spec_version: TABLE_SPEC_VERSION,
         title: 'Extraction — demo',
         description: 'Built from your library. Cell contents are excerpts, not real extractions.',
         anchor_column_id: 'ref',

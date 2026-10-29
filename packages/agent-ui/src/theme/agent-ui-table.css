@@ -963,7 +963,7 @@
     color: var(--fill-tertiary);
 }
 
-/* A check or a short dash — never a checkbox, which reads as editable. */
+/* A check, or the word "No" — never a checkbox, which reads as editable. */
 .beaver-root .bt-bool-yes {
     display: inline-flex;
     color: var(--tag-green-primary);
@@ -1409,19 +1409,38 @@
     opacity: 0.7;
 }
 
-/* Metadata-only cells: answered from the title and abstract, the paper itself
-   not read. Marked on the cell and counted in the column header. */
-.beaver-root .bt-td-metadata {
+/* Cells answered from the title and abstract, the paper itself not read.
+   Marked on the cell and counted in the column header. */
+.beaver-root .bt-td-title-abstract {
     box-shadow: inset 3px 0 0 var(--tag-orange-secondary);
 }
 
-.beaver-root .bt-metadata-only {
+.beaver-root .bt-title-abstract {
     color: var(--tag-orange-primary);
     font-weight: 500;
 }
 
-/* A row answered from metadata whose item has since gained a document: a fill
-   now would read it. Worked out when the table is shown, never stored. */
+/* An answer resting on the paper's silence: still an answer, so only muted. */
+.beaver-root .bt-absent {
+    color: var(--fill-tertiary);
+}
+
+/* The review mark: an answer the filler was not confident in. */
+.beaver-root .bt-review {
+    color: var(--tag-orange-primary);
+    font-weight: 500;
+}
+
+/* A cited table row's caption and header rows, above the quote. */
+.beaver-root .bt-evidence-context {
+    display: block;
+    color: var(--fill-tertiary);
+    font-size: 0.82rem;
+}
+
+/* A row answered from the title and abstract whose item has since gained a
+   document: a fill now would read it. Worked out when the table is shown,
+   never stored. */
 .beaver-root .bt-improvable {
     flex: 0 0 auto;
     align-self: flex-start;

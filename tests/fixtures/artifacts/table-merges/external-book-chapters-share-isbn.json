@@ -21,13 +21,6 @@
                         }
                     }
                 },
-                "in_library": false,
-                "origin": [
-                    {
-                        "source": "s2",
-                        "date": "2026-10-21"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -47,7 +40,14 @@
                             "value": "2020"
                         }
                     }
-                }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
             }
         },
         {
@@ -69,13 +69,6 @@
                         }
                     }
                 },
-                "in_library": false,
-                "origin": [
-                    {
-                        "source": "s2",
-                        "date": "2026-10-21"
-                    }
-                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
@@ -95,7 +88,14 @@
                             "value": "2020"
                         }
                     }
-                }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
             }
         }
     ],
@@ -124,21 +124,21 @@
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
                             "display_name": "Chapter one on sampling frames",
                             "title": "Chapter one on sampling frames",
                             "item_type": "journalArticle"
-                        },
-                        "provenance": "system"
+                        }
                     },
                     "_year": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "date",
                             "value": "2020"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": false,
@@ -172,21 +172,21 @@
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
                             "display_name": "Chapter two on nonresponse bias",
                             "title": "Chapter two on nonresponse bias",
                             "item_type": "journalArticle"
-                        },
-                        "provenance": "system"
+                        }
                     },
                     "_year": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "date",
                             "value": "2020"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": false,

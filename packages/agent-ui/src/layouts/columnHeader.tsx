@@ -29,8 +29,8 @@ export interface ColumnHeaderCellProps {
     showProgress: boolean;
     /** When it returns items, the header gains a menu (edit / re-run / remove a column). */
     menuItems?: MenuItem[];
-    /** Cells in this column answered from the title and abstract only. */
-    metadataCount?: number;
+    /** Filler cells in this column read from the title and abstract only. */
+    titleAbstractCount?: number;
 }
 
 /**
@@ -54,7 +54,7 @@ export function ColumnHeaderCell({
     showDescription,
     showProgress,
     menuItems,
-    metadataCount,
+    titleAbstractCount,
 }: ColumnHeaderCellProps): React.ReactElement {
     const canSort = sortable && isColumnSortable(column);
     const direction =
@@ -136,12 +136,12 @@ export function ColumnHeaderCell({
                             {label}
                         </span>
                     )}
-                    {metadataCount ? (
+                    {titleAbstractCount ? (
                         <span
                             className="bt-th-meta"
-                            title={`${metadataCount} ${metadataCount === 1 ? "cell was" : "cells were"} answered from the title and abstract only; the paper itself was not read`}
+                            title={`${titleAbstractCount} ${titleAbstractCount === 1 ? "cell was" : "cells were"} answered from the title and abstract only; the paper itself was not read`}
                         >
-                            {metadataCount} from abstract
+                            {titleAbstractCount} from abstract
                         </span>
                     ) : null}
                     {details ? (

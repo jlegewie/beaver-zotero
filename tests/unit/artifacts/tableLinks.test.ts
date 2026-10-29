@@ -41,8 +41,8 @@ function stubLibraries(): void {
     };
 }
 
-function row(ref: Row['ref']): Row {
-    return { id: 'r', ref, cells: {} };
+function row(ref: Row['ref'], documents?: string[]): Row {
+    return { id: 'r', ref, ...(documents ? { documents } : {}), cells: {} };
 }
 
 beforeEach(() => {
@@ -58,13 +58,7 @@ describe('zoteroLinksFor', () => {
     it('links an item row to its named file, and only reveals one without', () => {
         expect(
             zoteroLinksFor(
-                row({
-                    kind: 'item',
-                    library_ref: 'u',
-                    library_id: LIBRARY_ID,
-                    zotero_key: 'AAA',
-                    attachment: { library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'FFF' },
-                })
+                row({ kind: 'item', library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'AAA' }, ['u-FFF'])
             )
         ).toEqual({
             reveal: 'zotero://select/library/items/AAA',
@@ -135,7 +129,7 @@ describe('a table moved from another device', () => {
 
     it('links rows into the group its references name', () => {
         expect(
-            zoteroLinksFor(row({ kind: 'item', ...groupRef, zotero_key: 'GGG', attachment: { ...groupRef, zotero_key: 'PDF' } }))
+            zoteroLinksFor(row({ kind: 'item', ...groupRef, zotero_key: 'GGG' }, [`g${GROUP_ID}-PDF`]))
         ).toEqual({
             reveal: `zotero://select/groups/${GROUP_ID}/items/GGG`,
             open: `zotero://open/groups/${GROUP_ID}/items/PDF`,
@@ -149,13 +143,15 @@ describe('a table moved from another device', () => {
             rows: [
                 {
                     id: 'r1',
-                    ref: { kind: 'item', ...groupRef, zotero_key: 'P1', attachment: { ...groupRef, zotero_key: 'K1' } },
+                    ref: { kind: 'item', ...groupRef, zotero_key: 'P1' },
+                    documents: [`g${GROUP_ID}-K1`],
                     cells: {
                         finding: {
                             outcome: 'answered',
-                            provenance: 'document',
+                            provenance: 'model',
+                            documents: [`g${GROUP_ID}-K1`],
                             value: { kind: 'text', text: 'Rose 13%.' },
-                            evidence: [{ locator: 'p4', quote: 'a 13% rise', page: 3 }],
+                            evidence: [{ document: `g${GROUP_ID}-K1`, locator: 'p4', quote: 'a 13% rise', page: 3 }],
                         },
                     },
                 },
@@ -190,18 +186,15 @@ describe('a citation into a group library', () => {
             rows: [
                 {
                     id: 'r1',
-                    ref: {
-                        kind: 'item',
-                        ...groupRef,
-                        zotero_key: 'P1',
-                        attachment: { ...groupRef, zotero_key: 'K1' },
-                    },
+                    ref: { kind: 'item', ...groupRef, zotero_key: 'P1' },
+                    documents: [`g${GROUP_ID}-K1`],
                     cells: {
                         finding: {
                             outcome: 'answered',
-                            provenance: 'document',
+                            provenance: 'model',
+                            documents: [`g${GROUP_ID}-K1`],
                             value: { kind: 'text', text: 'Rose 13%.' },
-                            evidence: [{ locator: 'p4', quote: 'a 13% rise', page: 3 }],
+                            evidence: [{ document: `g${GROUP_ID}-K1`, locator: 'p4', quote: 'a 13% rise', page: 3 }],
                         },
                     },
                 },
@@ -225,13 +218,7 @@ describe('a stored table with rows of every kind', () => {
             capabilities: { row_actions: ['reveal', 'open', 'import'] },
             columns: [{ id: 'note', header: 'Note', type: 'text' }],
             rows: [
-                row({
-                    kind: 'item',
-                    library_ref: 'u',
-                    library_id: LIBRARY_ID,
-                    zotero_key: 'AAA',
-                    attachment: { library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'FFF' },
-                }),
+                row({ kind: 'item', library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'AAA' }, ['u-FFF']),
                 { ...row({ kind: 'file', ext_key: 'AB12CD34' }), id: 'file' },
             ].map((r, i) => ({ ...r, id: `r${i}` })),
         };

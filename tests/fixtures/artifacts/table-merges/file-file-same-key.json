@@ -10,12 +10,8 @@
                     "ext_key": "EXT1",
                     "label": "notes.pdf"
                 },
-                "in_library": false,
-                "origin": [
-                    {
-                        "source": "s1",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "ext-EXT1"
                 ],
                 "cells": {
                     "_reference": {
@@ -28,7 +24,14 @@
                             "item_type": "journalArticle"
                         }
                     }
-                }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         },
         {
@@ -39,12 +42,8 @@
                     "ext_key": "EXT1",
                     "label": "notes.pdf"
                 },
-                "in_library": false,
-                "origin": [
-                    {
-                        "source": "s2",
-                        "date": "2026-10-20"
-                    }
+                "documents": [
+                    "ext-EXT1"
                 ],
                 "cells": {
                     "_reference": {
@@ -57,7 +56,14 @@
                             "item_type": "journalArticle"
                         }
                     }
-                }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         }
     ],
@@ -70,16 +76,19 @@
                     "ext_key": "EXT1",
                     "label": "notes.pdf"
                 },
+                "documents": [
+                    "ext-EXT1"
+                ],
                 "cells": {
                     "_reference": {
                         "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
                             "display_name": "notes.pdf",
                             "title": "notes.pdf",
                             "item_type": "journalArticle"
-                        },
-                        "provenance": "system"
+                        }
                     }
                 },
                 "in_library": false,

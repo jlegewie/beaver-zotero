@@ -108,6 +108,7 @@ import {
     resolveTableItem,
     resolveTableLibrary,
     restoreTableItem,
+    storedSpecVersion,
     TABLE_EMOJI_TAG,
     TABLE_TAG,
     TABLE_URL_PREFIX,
@@ -1025,6 +1026,7 @@ export async function createTableUncoordinated(options: CreateTableOptions): Pro
     const { operation_id, accessGuard, collectionKey, ...ordinary } = options;
     accessGuard?.(options.spec);
     const spec = options.spec;
+    storedSpecVersion(spec);
     const limit = checkTableLimits(null, spec);
     if (limit) throw new TableItemError(limit.message, 'too_large');
     if (operation_id === undefined) {
@@ -1509,7 +1511,7 @@ async function commitWrite(
     // which revision of it, and only the store gets to decide that.
     const stored: TableSpec = {
         ...spec,
-        spec_version: spec.spec_version ?? TABLE_SPEC_VERSION,
+        spec_version: storedSpecVersion(spec),
         key: item.key,
         version,
     };
@@ -1743,6 +1745,8 @@ export async function editTableSessionUncoordinated(
     }
     const requestHash = await tableOperationHash({ mutations: request.mutations, meta });
     const sessionKey = `${lockKey(ref)}|${request.operation_id}`;
+    // The table the commit applied to, for its progress event.
+    let appliedTo: TableSpec | undefined;
     const result = await withTableLock(ref, async (): Promise<TableEditSessionResult> => {
         const sessions = tableEditSessions();
         const last = sessions.get(sessionKey);
@@ -1775,6 +1779,7 @@ export async function editTableSessionUncoordinated(
             };
         }
 
+        appliedTo = current.spec;
         const applied = applyMutations(current.spec, request.mutations, { skipMissing: true });
         if (!applied.ok) return { ok: false, error: applied.error };
         const written = await commitWrite(ref, item, current, applied.spec, meta, undefined, undefined, accessGuard);
@@ -1800,34 +1805,62 @@ export async function editTableSessionUncoordinated(
             replayed: false,
         };
     });
-    if (result.ok && !result.replayed) {
-        emitTableUpdated(ref, result.version, meta, editProgress(request, result.skipped));
+    if (result.ok && !result.replayed && appliedTo) {
+        emitTableUpdated(ref, result.version, meta, editProgress(request, result.skipped, appliedTo, result.spec));
     }
     return result;
 }
 
 /**
  * What a commit of a fill wrote, for the progress panel: the rows it wrote a
- * cell to, and of those the rows with a failed cell. Skipped writes do not
- * count.
+ * cell to or gave a row outcome (`update_row` with a failure or a cleared
+ * one), and of those the rows it left failed, read from the committed table.
+ * A failed cell is one answer that failed in a row that was read, so it does
+ * not make its row a failed one. Skipped writes do not count; an update that
+ * only names documents is planning, not a finished row.
  */
-function editProgress(request: TableEditSessionRequest, skipped: SkippedCell[]): TableEditProgress {
-    const declined = new Set(skipped.map((skip) => `${skip.row}\u0000${skip.column}`));
+function editProgress(
+    request: TableEditSessionRequest,
+    skipped: SkippedCell[],
+    before: TableSpec,
+    committed: TableSpec,
+): TableEditProgress {
+    const declinedCells = new Set(
+        skipped.filter((skip) => skip.column !== undefined).map((skip) => `${skip.row}\u0000${skip.column}`)
+    );
+    // Which row updates applied, replayed in order as the engine decided them:
+    // a row that is gone, or whose documents no longer match an update's
+    // `expected_documents`, skips that update only.
+    const documents = new Map(before.rows.map((row) => [row.id, new Set(row.documents ?? [])]));
+    const sameAs = (current: Set<string>, ids: readonly string[] | null | undefined) => {
+        const next = new Set(ids ?? []);
+        return next.size === current.size && [...next].every((id) => current.has(id));
+    };
     const rows = new Set<string>();
-    const failed = new Set<string>();
+    const outcomes = new Set<string>();
     for (const mutation of request.mutations) {
-        if (mutation.op !== 'set_cells') continue;
-        for (const write of mutation.cells) {
-            if (declined.has(`${write.row}\u0000${write.column}`)) continue;
-            rows.add(write.row);
-            if (write.cell && (write.cell as { outcome?: string }).outcome === 'failed') failed.add(write.row);
+        if (mutation.op === 'set_cells') {
+            for (const write of mutation.cells) {
+                if (declinedCells.has(`${write.row}\u0000${write.column}`)) continue;
+                rows.add(write.row);
+            }
+        } else if (mutation.op === 'update_row') {
+            const current = documents.get(mutation.row);
+            if (!current) continue;
+            if (mutation.expected_documents !== undefined && !sameAs(current, mutation.expected_documents)) continue;
+            if (mutation.documents !== undefined) documents.set(mutation.row, new Set(mutation.documents ?? []));
+            if (mutation.failure !== undefined) {
+                rows.add(mutation.row);
+                outcomes.add(mutation.row);
+            }
         }
     }
+    const failureOf = new Map(committed.rows.map((row) => [row.id, row.failure]));
     return {
         operation_id: request.operation_id,
         seq: request.seq,
         rows: [...rows],
-        failed_rows: [...failed],
+        failed_rows: [...outcomes].filter((row) => failureOf.get(row) != null),
     };
 }
 
@@ -1982,7 +2015,7 @@ async function retainedShadow(
  * Why the table itself would refuse a restore's write, or null when it would
  * accept one: the checks {@link prepareWrite} makes on the item and its current
  * file — a trashed table, or a `table.json` that is missing beyond repair or
- * written by a newer format. Reads only, so it may run without the lock.
+ * written in another format. Reads only, so it may run without the lock.
  */
 async function restoreTargetRefusal(ref: TableRef): Promise<TableItemError | null> {
     try {
@@ -2166,7 +2199,7 @@ async function readStoredVersion(
     if (read.ok) return read.spec;
     if (read.reason === 'unsupported_version') {
         throw new TableItemError(
-            `Version ${version} of table ${ref.key} was written by a newer format (spec_version ${read.specVersion}).`,
+            `Version ${version} of table ${ref.key} was written in another format (spec_version ${read.specVersion}).`,
             'unsupported_version'
         );
     }
@@ -2415,9 +2448,9 @@ export interface TableUpdatedDetail {
 export interface TableEditProgress {
     operation_id: string;
     seq: number;
-    /** Rows the commit wrote at least one cell to. */
+    /** Rows the commit wrote at least one cell to or updated. */
     rows: string[];
-    /** Of those, the rows with a failed cell. */
+    /** Of those, the rows the commit gave a failure (`update_row`). */
     failed_rows: string[];
 }
 
