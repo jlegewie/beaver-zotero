@@ -144,8 +144,9 @@ export class BackgroundExtractor {
     private readonly laneFreedAt = new Map<BackgroundJobType, number[]>();
     private readonly muPDFLane = new MuPDFSerialLane();
     /**
-     * Routes interactive PDF requests that would queue behind the busy hot
-     * worker to the idle background worker. Shares `muPDFLane` with the jobs.
+     * Routes interactive PDF requests between the hot worker and the idle
+     * background worker, queueing them while both are busy. Shares
+     * `muPDFLane` with the jobs.
      */
     readonly interactiveOverflow = new InteractiveOverflow({
         lane: this.muPDFLane,
@@ -766,6 +767,9 @@ export class BackgroundExtractor {
             })
             .finally(() => {
                 lane.delete(record.id);
+                // Interactive requests waiting for a worker take the
+                // background worker before the dispatcher claims new work.
+                if (MUPDF_JOB_TYPES.includes(record.jobType)) this.interactiveOverflow.onJobSettled();
                 const freed = this.laneFreedAt.get(record.jobType) ?? [];
                 freed.push(Date.now());
                 // No more slots than the lane has can be waiting.

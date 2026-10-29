@@ -26,6 +26,7 @@ import {
 } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
+import { PdfRequestWorker } from '../documentExtraction/pdfRequestWorker';
 import {
     preflightZoteroAttachmentRequest,
     validateZoteroItemReference,
@@ -95,6 +96,8 @@ export async function handleZoteroAttachmentSearchRequest(
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     const workerDispatched = createWorkerDispatchFlag();
+    // The worker this request's ops run on (interactive routing).
+    let requestWorker: PdfRequestWorker | null = null;
 
     try {
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -248,7 +251,13 @@ export async function handleZoteroAttachmentSearchRequest(
         // Cold-cache path goes from 2 doc-opens (getPageCount + search) → 1.
         // The cache fast-path above (lines 157-165) already covers the
         // `cachedMeta.page_count > maxPageCount` case before any worker call.
-        const extractor = new BeaverExtractor();
+        requestWorker = new PdfRequestWorker({
+            interactive: true,
+            workerName: 'hot',
+            signal,
+            affinityKey: `${zoteroItem.libraryID}/${zoteroItem.key}`,
+        });
+        const extractor = new BeaverExtractor(requestWorker);
         const maxPageCount = effectiveMaxPageCount();
         workerDispatched.mark();
         const searchResult = await extractor.search(
@@ -315,7 +324,12 @@ export async function handleZoteroAttachmentSearchRequest(
                     'timeout',
                     totalPages,
                 ),
-                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
+                {
+                    // A request that timed out waiting for a free worker never reached one.
+                    workerDispatched: workerDispatched.value && requestWorker?.slot !== undefined,
+                    leaseReaped: isWorkerDeadlineError(error),
+                    slot: requestWorker?.slot,
+                },
             );
         }
 
@@ -377,6 +391,7 @@ export async function handleZoteroAttachmentSearchRequest(
             'search_failed'
         );
     } finally {
+        requestWorker?.close();
         dispose();
     }
 }

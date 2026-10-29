@@ -668,6 +668,8 @@ export class DocumentCache {
         readCached?: (ref: DocumentRef) => Promise<T | null>;
         create: (signal: AbortSignal) => Promise<T>;
         metadata: (result: T) => CacheMetadataInput;
+        /** Called when this caller joins another caller's in-flight extraction. */
+        onJoin?: () => void;
     } & SharedResultWriteOptions): Promise<T | null> {
         if (this.clearing) return null;
         const generation = this.extractionGeneration(input.item);
@@ -691,6 +693,7 @@ export class DocumentCache {
         const lockKey = this.extractionLockKey(ref, payloadKind, source, suffix, input.lockScope, generation);
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
         if (existing) {
+            input.onJoin?.();
             return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
         }
 
@@ -700,6 +703,7 @@ export class DocumentCache {
 
         const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
         if (refreshedExisting) {
+            input.onJoin?.();
             return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
         }
 
@@ -764,6 +768,8 @@ export class DocumentCache {
         abortSignal?: AbortSignal;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
         create: (signal: AbortSignal) => Promise<SerializedBeaverExtractResult>;
+        /** Called when this caller joins another caller's in-flight extraction. */
+        onJoin?: () => void;
     } & SharedResultWriteOptions): Promise<SerializedDocumentCacheResult | null> {
         if (this.clearing) return null;
         const generation = this.extractionGeneration(input.item);
@@ -787,6 +793,7 @@ export class DocumentCache {
         const lockKey = this.extractionLockKey(ref, payloadKind, source, '/serialized', input.lockScope, generation);
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
         if (existing) {
+            input.onJoin?.();
             return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
         }
 
@@ -796,6 +803,7 @@ export class DocumentCache {
 
         const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
         if (refreshedExisting) {
+            input.onJoin?.();
             return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
         }
 
@@ -948,9 +956,12 @@ export class DocumentCache {
         sharedTimeoutMs?: number;
         abortSignal?: AbortSignal;
         create: (signal: AbortSignal) => Promise<T>;
+        /** Called when this caller joins another caller's in-flight extraction. */
+        onJoin?: () => void;
     }): Promise<T | null> {
         const existing = this.uncachedExtractions.get(input.key) as ExtractionLockEntry<T> | undefined;
         if (existing) {
+            input.onJoin?.();
             return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
         }
         const controller = createAbortController();

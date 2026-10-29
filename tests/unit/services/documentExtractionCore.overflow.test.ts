@@ -110,10 +110,13 @@ function createDocumentCache() {
             lockScope?: string;
             abortSignal?: AbortSignal;
             create: (signal: AbortSignal) => Promise<unknown>;
+            onJoin?: () => void;
         }) => {
             const key = `${input.item.key}/${input.lockScope}`;
             let shared = inFlight.get(key);
-            if (!shared) {
+            if (shared) {
+                input.onJoin?.();
+            } else {
                 const controller = new AbortController();
                 input.abortSignal?.addEventListener('abort', () => controller.abort(), { once: true });
                 shared = input.create(controller.signal).finally(() => inFlight.delete(key));
@@ -261,6 +264,9 @@ describe('extractAndCacheResolvedPdfDocument interactive overflow', () => {
         // page count and then joins the running extraction.
         const second = runPdf();
         await vi.waitFor(() => expect(workers.background.getPageCount).toHaveBeenCalledTimes(1));
+        // Having joined, the second request no longer holds the background worker.
+        await vi.waitFor(() => expect(lane.isFree).toBe(true));
+        expect(overflow.getStats()).toMatchObject({ overflowRoutes: 0, hotRoutes: 1 });
         hotExtract.resolve(extractedResult(3));
 
         const [a, b] = await Promise.all([first, second]);
@@ -269,6 +275,79 @@ describe('extractAndCacheResolvedPdfDocument interactive overflow', () => {
         expect(workers.hot.extract).toHaveBeenCalledTimes(1);
         expect(workers.background.extract).not.toHaveBeenCalled();
         expect(lane.isFree).toBe(true);
+    });
+
+    it('lets a request that arrives while hot extracts wait for the cold background worker and run there', async () => {
+        const hotExtract = deferred<ReturnType<typeof extractedResult>>();
+        workers.hot.extract.mockImplementation(() => hotExtract.promise);
+        workers.background.warm = false;
+        let finishWarmup!: () => void;
+        workers.background.prewarm.mockImplementation(() => new Promise<void>((resolve) => {
+            finishWarmup = resolve;
+        }));
+        const other = {
+            kind: 'external' as const,
+            filePath: '/tmp/other.pdf',
+            itemRef: { id: 0, libraryID: -1, key: 'EXTKEY02' },
+        };
+
+        const first = runPdf();
+        await vi.waitFor(() => expect(workers.hot.extract).toHaveBeenCalledTimes(1));
+        const second = runPdf({ source: other, resolvedKey: 'ext-EXTKEY02' });
+        await vi.waitFor(() => expect(overflow.getStats().waiting).toBe(1));
+        expect(workers.background.prewarm).toHaveBeenCalledTimes(1);
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        workers.background.warm = true;
+        finishWarmup();
+        const b = await second;
+        expect(b).toMatchObject({ kind: 'ok', timings: { source: 'extracted', workerSlot: 'background' } });
+        expect((b as { timings: { clientQueueMs?: number } }).timings.clientQueueMs).toBeGreaterThanOrEqual(15);
+        expect(b).not.toHaveProperty('timings.overflowSkip');
+        expect(workers.background.getPageCount).toHaveBeenCalledTimes(1);
+        expect(workers.background.extract).toHaveBeenCalledTimes(1);
+
+        hotExtract.resolve(extractedResult(3));
+        expect(await first).toMatchObject({ kind: 'ok', timings: { workerSlot: 'hot' } });
+        expect(overflow.getStats()).toMatchObject({ waiting: 0, hotRoutes: 0, overflowRoutes: 0 });
+        expect(lane.isFree).toBe(true);
+    });
+
+    it('waits for a worker for a shared extraction on the extraction signal', async () => {
+        // Cached page count: the extraction is the request's first worker op.
+        documentCache.getMetadata.mockResolvedValue({ pageCount: 3, contentType: 'application/pdf' });
+        const createSignals: AbortSignal[] = [];
+        const getOrCreate = documentCache.getOrCreateResult.getMockImplementation()!;
+        documentCache.getOrCreateResult.mockImplementation((input: any) => getOrCreate({
+            ...input,
+            create: (signal: AbortSignal) => {
+                createSignals.push(signal);
+                return input.create(signal);
+            },
+        }));
+        const acquire = vi.spyOn(overflow, 'acquire');
+
+        const result = await runPdf();
+
+        expect(result).toMatchObject({ kind: 'ok', timings: { workerSlot: 'hot' } });
+        expect(workers.hot.getPageCount).not.toHaveBeenCalled();
+        expect(createSignals).toHaveLength(1);
+        expect(acquire).toHaveBeenCalledWith(expect.objectContaining({ signal: createSignals[0] }));
+    });
+
+    it('reports no worker for a request that timed out waiting for one', async () => {
+        const a = await overflow.acquire();
+        const b = await overflow.acquire();
+
+        const result = await runPdf({ timeoutSeconds: 0.2 });
+
+        expect(result).toMatchObject({ kind: 'timeout', workerDispatched: false });
+        expect(result).not.toHaveProperty('workerSlot', expect.anything());
+        expect(workers.hot.getPageCount).not.toHaveBeenCalled();
+        expect(workers.background.getPageCount).not.toHaveBeenCalled();
+        expect(overflow.getStats()).toMatchObject({ waiting: 0, decisions: { aborted: 1 } });
+        a.release();
+        b.release();
     });
 
     it('times out an overflow request at its own deadline, aborts the op and releases the lane', async () => {

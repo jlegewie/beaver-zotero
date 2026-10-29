@@ -372,7 +372,9 @@ export interface PdfDocumentTimings {
     /**
      * Waiting for other work, summed over this request's worker ops (page count
      * and extraction; see `WorkerCallTiming`): in the client's work queue, for
-     * the worker to start, and in the worker behind a running op.
+     * the worker to start, and in the worker behind a running op. The first
+     * (`clientQueueMs`) also includes waiting for a free worker before the
+     * request's first op (interactive routing).
      */
     clientQueueMs?: number;
     workerStartMs?: number;
@@ -1114,12 +1116,19 @@ async function extractAndCacheResolvedPdfDocumentImpl(
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
-    // Chooses the worker at the first op and keeps it for every later op. An
+    // Chooses the worker at the first op (waiting, within this request's
+    // deadline, while both workers are busy) and keeps it for every later op. An
     // overflow op on the background worker is bounded by this request's
     // interactive deadline (`signal` / `sharedTimeoutMs`), not that worker's
     // longer lease; aborting it terminates the background worker, and the
     // next use starts a fresh one.
-    const worker = new PdfRequestWorker({ interactive, workerName });
+    const sourceRef = args.source.kind === 'zotero' ? args.source.item : args.source.itemRef;
+    const worker = new PdfRequestWorker({
+        interactive,
+        workerName,
+        signal,
+        affinityKey: `${sourceRef.libraryID}/${sourceRef.key}`,
+    });
     const startedAt = Date.now();
     const timings: PdfDocumentTimings = { source: 'extracted' };
     const pageCountTiming: WorkerCallTiming = {};
@@ -1179,6 +1188,9 @@ async function extractAndCacheResolvedPdfDocumentImpl(
     let totalPages: number | null = null;
     let loadedPdfData: Uint8Array | null = null;
     let workerDispatched = false;
+    // Dispatched *and* given a worker: a request that timed out waiting for a
+    // free worker never touched one, so its timeout carries no worker snapshot.
+    const reachedWorker = () => workerDispatched && worker.slot !== undefined;
 
     const aborted = (): ExtractAndCacheResult | null => {
         if (externalAbortSignal?.aborted) {
@@ -1187,7 +1199,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 phase: 'external_pre_abort',
                 pageCount: totalPages,
                 resolvedAttachment,
-                workerDispatched,
+                workerDispatched: reachedWorker(),
                 workerSlot: worker.slot,
             };
         }
@@ -1546,9 +1558,17 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             // state to this request; if a shared extraction wedges, the leader request's timeout
             // response carries the worker snapshot for that episode.
             workerDispatched = true;
+            // The shared extraction outlives its leader while other requests
+            // wait for it, so its wait for a worker follows the shared signal.
             return args.serializedResult
-                ? runExtraction(() => worker.run((client) => client.extractSerialized(pdfBytes, extractArgs, extractSignal, extractTiming)))
-                : runExtraction(() => worker.run((client) => client.extract(pdfBytes, extractArgs, extractSignal, extractTiming)));
+                ? runExtraction(() => worker.run(
+                    (client) => client.extractSerialized(pdfBytes, extractArgs, extractSignal, extractTiming),
+                    { signal: extractSignal },
+                ))
+                : runExtraction(() => worker.run(
+                    (client) => client.extract(pdfBytes, extractArgs, extractSignal, extractTiming),
+                    { signal: extractSignal },
+                ));
         };
 
         const createUnsharedResult = async () => {
@@ -1561,6 +1581,10 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             throwIfTimedOut('pdf_extract');
             return extracted;
         };
+
+        // Joining another request's extraction: nothing left to run here, so
+        // this request's worker is free for others (including that extraction).
+        const onJoin = () => worker.releaseWorker();
 
         const createUncachedSharedResult = (extractSignal: AbortSignal) =>
             createSharedResult(extractSignal).then((extracted) => args.serializedResult
@@ -1581,6 +1605,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     abortSignal: signal,
                     expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                     create: createSharedResult as (extractSignal: AbortSignal) => ReturnType<MuPDFWorkerClient['extractSerialized']>,
+                    onJoin,
                     ...cacheWrite,
                 })
                 : cache.getOrCreateResult({
@@ -1596,6 +1621,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                 create: createSharedResult as (extractSignal: AbortSignal) => Promise<BeaverExtractResult>,
                 metadata: buildExtractedDocumentCacheMetadata,
+                onJoin,
                 ...cacheWrite,
             })
             : uncachedSchemaVersion !== null && documentCache
@@ -1612,6 +1638,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     sharedTimeoutMs,
                     abortSignal: signal,
                     create: createUncachedSharedResult,
+                    onJoin,
                 })
                 : createUnsharedResult();
         const result = documentCache
@@ -1624,7 +1651,11 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             waits.some((t) => t[part] !== undefined)
                 ? Math.round(waits.reduce((total, t) => total + (t[part] ?? 0), 0))
                 : undefined;
-        const clientQueueMs = sum('clientQueueMs');
+        // Waiting for a worker before the first op is queue time too.
+        const opQueueMs = sum('clientQueueMs');
+        const clientQueueMs = opQueueMs === undefined && worker.routeWaitMs === 0
+            ? undefined
+            : Math.round((opQueueMs ?? 0) + worker.routeWaitMs);
         const workerStartMs = sum('startMs');
         const workerQueueMs = sum('queueMs');
         if (clientQueueMs !== undefined) timings.clientQueueMs = clientQueueMs;
@@ -1683,7 +1714,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 phase: error.phase,
                 pageCount: totalPages,
                 resolvedAttachment,
-                workerDispatched,
+                workerDispatched: reachedWorker(),
                 workerSlot: worker.slot,
             };
         }
@@ -1702,7 +1733,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 phase: 'external_abort',
                 pageCount: totalPages,
                 resolvedAttachment,
-                workerDispatched,
+                workerDispatched: reachedWorker(),
                 workerSlot: worker.slot,
             };
         }
@@ -1721,7 +1752,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 pageCount: totalPages,
                 resolvedAttachment,
                 leaseReaped: isWorkerDeadlineError(error),
-                workerDispatched,
+                workerDispatched: reachedWorker(),
                 workerSlot: worker.slot,
             };
         }

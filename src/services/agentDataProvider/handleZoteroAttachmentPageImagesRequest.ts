@@ -25,6 +25,7 @@ import {
 } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
+import { PdfRequestWorker } from '../documentExtraction/pdfRequestWorker';
 import {
     preflightZoteroAttachmentRequest,
     resolveToPdfAttachment,
@@ -105,6 +106,8 @@ export async function handleZoteroAttachmentPageImagesRequest(
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     const workerDispatched = createWorkerDispatchFlag();
+    // The worker this request's ops run on (interactive routing); set once the PDF is resolved.
+    let requestWorker: PdfRequestWorker | null = null;
 
     try {
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -210,7 +213,13 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 5. Resolve page labels and (only if needed) page count up-front.
         // The response reports printed labels; a requested label also matches
         // the labels the PDF declares.
-        const extractor = new BeaverExtractor();
+        requestWorker = new PdfRequestWorker({
+            interactive: true,
+            workerName: 'hot',
+            signal,
+            affinityKey: `${pdfItem.libraryID}/${pdfItem.key}`,
+        });
+        const extractor = new BeaverExtractor(requestWorker);
         let pdfData: Uint8Array | null = null;
         // Metadata cached before printed labels were recorded recovers them
         // from its structured payload (once; the read backfills the record).
@@ -437,7 +446,12 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     'timeout',
                     resolvedCachedPageCount,
                 ),
-                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
+                {
+                    // A request that timed out waiting for a free worker never reached one.
+                    workerDispatched: workerDispatched.value && requestWorker?.slot !== undefined,
+                    leaseReaped: isWorkerDeadlineError(error),
+                    slot: requestWorker?.slot,
+                },
             );
         }
 
@@ -489,6 +503,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
             'render_failed'
         );
     } finally {
+        requestWorker?.close();
         dispose();
     }
 }

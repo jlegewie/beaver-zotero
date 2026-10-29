@@ -387,7 +387,7 @@ describe('BackgroundExtractor', () => {
             try {
                 mockState.background = backgroundClient(true);
                 mockState.hotPendingCount = 1;
-                const route = proc.interactiveOverflow.route();
+                const route = await proc.interactiveOverflow.acquire();
                 expect(route.slot).toBe('background');
                 // Hot drained, but the overflow request still owns the background worker.
                 mockState.hotPendingCount = 0;
@@ -417,7 +417,7 @@ describe('BackgroundExtractor', () => {
                     const record = await claim(...args);
                     // Interactive work arrives while the claim is in flight.
                     mockState.hotPendingCount = 1;
-                    route ??= proc.interactiveOverflow.route();
+                    route ??= await proc.interactiveOverflow.acquire();
                     mockState.hotPendingCount = 0;
                     return record;
                 });
@@ -448,7 +448,7 @@ describe('BackgroundExtractor', () => {
                     finishWarmup = resolve;
                 }));
                 mockState.hotPendingCount = 1;
-                const route = proc.interactiveOverflow.route();
+                const route = await proc.interactiveOverflow.acquire();
                 expect(route).toMatchObject({ slot: 'hot', overflowSkip: 'bg_not_warm' });
                 expect(mockState.background.prewarm).toHaveBeenCalledTimes(1);
 
@@ -508,13 +508,13 @@ describe('BackgroundExtractor', () => {
                 mockState.background = backgroundClient(true);
                 mockState.hotPendingCount = 1;
                 // Between lane uses: the lane is free, but the job is still running.
-                const between = proc.interactiveOverflow.route();
+                const between = await proc.interactiveOverflow.acquire();
                 expect(between).toMatchObject({ slot: 'hot', overflowSkip: 'lane_busy' });
                 between.release();
 
                 finishOcr();
                 await vi.waitFor(() => expect(inLane).toBe(true));
-                const inside = proc.interactiveOverflow.route();
+                const inside = await proc.interactiveOverflow.acquire();
                 expect(inside).toMatchObject({ slot: 'hot', overflowSkip: 'lane_busy' });
                 inside.release();
                 expect(mockState.background.prewarm).not.toHaveBeenCalled();
@@ -528,13 +528,68 @@ describe('BackgroundExtractor', () => {
             }
         });
 
+        it('hands the background worker to a waiting request when the running job settles, before new jobs', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'document_ocr',
+                libraryId: 1,
+                zoteroKey: 'BBBBBBBB',
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                payload: payload(),
+                now: 0,
+            });
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            try {
+                let finishOcr: (() => void) | undefined;
+                proc.registerExecutor(
+                    ocrExecutor(async (_record, ctx: JobExecutionContext) => ctx.runOnMuPDFWorker(async () => {
+                        await new Promise<void>((resolve) => {
+                            finishOcr = resolve;
+                        });
+                        return { kind: 'complete', reason: 'ocr_ok' };
+                    })),
+                    { maxInFlight: 1 },
+                );
+                const pass = proc.processOnce({ awaitLaunchedJobs: true });
+                await vi.waitFor(() => expect(finishOcr).toBeDefined());
+
+                mockState.background = backgroundClient(true);
+                const hot = await proc.interactiveOverflow.acquire();
+                expect(hot.slot).toBe('hot');
+                let claimed: { slot: string; release(): void } | undefined;
+                const waiting = proc.interactiveOverflow.acquire().then((route) => {
+                    claimed = route;
+                    return route;
+                });
+                await new Promise((resolve) => setTimeout(resolve, 0));
+                expect(claimed).toBeUndefined();
+                await enqueueExtract();
+
+                finishOcr!();
+                await pass;
+                expect((await waiting).slot).toBe('background');
+                // Interactive work still holds both workers; the queued job waits.
+                expect(await proc.processOnce()).toEqual({ processed: false, reason: 'hot_busy' });
+                expect(mockState.extractCalls).toHaveLength(0);
+
+                claimed!.release();
+                hot.release();
+                expect(await proc.processOnce()).toMatchObject({ processed: true });
+                expect(mockState.extractCalls).toHaveLength(1);
+            } finally {
+                await proc.stop();
+            }
+        });
+
         it('lets maintenance wait for an overflow request before disposing the background worker', async () => {
             const { BackgroundExtractor } = await loadProcessor();
             const proc = new BackgroundExtractor();
             proc.start();
             mockState.background = backgroundClient(true);
             mockState.hotPendingCount = 1;
-            const route = proc.interactiveOverflow.route();
+            const route = await proc.interactiveOverflow.acquire();
             expect(route.slot).toBe('background');
 
             let suspended = false;
@@ -546,7 +601,7 @@ describe('BackgroundExtractor', () => {
             expect(suspended).toBe(false);
             expect(mockState.disposeCalls).toEqual([]);
             // No new overflow while suspending.
-            expect(proc.interactiveOverflow.route()).toMatchObject({ slot: 'hot', overflowSkip: 'disabled' });
+            expect(await proc.interactiveOverflow.acquire()).toMatchObject({ slot: 'hot', overflowSkip: 'disabled' });
 
             route.release();
             await suspension;

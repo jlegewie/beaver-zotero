@@ -238,6 +238,33 @@ describe('MuPDFWorkerClient warm-up', () => {
         }
     });
 
+    it('retires an idle worker that is due for recycling and warms its replacement', async () => {
+        const client = new MuPDFWorkerClient({ slotName: 'background', recycleAfterDataOperations: 1, recycleHeapBytes: null });
+        try {
+            const extraction = client.extractSerialized(new Uint8Array([1]), extractArgs);
+            await vi.advanceTimersByTimeAsync(0);
+            const retiring = currentWorker();
+            replyTo(retiring, 'extractSerialized', { ok: true, result: serialized });
+            await extraction;
+            // The recycle is due but has not run yet; the worker is not warm for new work.
+            expect(client.getStats().proactiveRecyclePending).toBe(true);
+            expect(client.isWarm()).toBe(false);
+
+            const warmup = client.prewarm();
+            await vi.advanceTimersByTimeAsync(0);
+            const replacement = currentWorker();
+            expect(replacement).not.toBe(retiring);
+            expect(retiring.terminate).toHaveBeenCalled();
+            expect(opsPosted(replacement)).toEqual(['__warmup']);
+            replyTo(replacement, '__warmup', { ok: true, result: WARMUP_RESULT });
+            await warmup;
+            expect(client.isWarm()).toBe(true);
+            expect(client.getStats()).toMatchObject({ proactiveRecycleCount: 1, proactiveRecyclePending: false });
+        } finally {
+            client.dispose();
+        }
+    });
+
     it('never counts the warm-up toward recycling', async () => {
         const client = new MuPDFWorkerClient({ recycleAfterDataOperations: 1, recycleHeapBytes: null });
         try {

@@ -1096,6 +1096,13 @@ export class MuPDFWorkerClient {
      */
     async prewarm(): Promise<void> {
         if (this.disposed) return;
+        // A worker due for retirement would skip its warm-up and then be
+        // replaced by a cold one. Retire it now if it is idle, so the
+        // replacement is the worker that gets warmed.
+        if (this.worker && this.proactiveRecycleReason !== null) {
+            this.clearProactiveRecycleTimer();
+            this.performProactiveRecycle(this.worker);
+        }
         const worker = this.ensureWorker();
         const warmup = this.warmUpWorker(worker);
         // An idle worker that needs no warm-up restarts its idle timeout, so a
