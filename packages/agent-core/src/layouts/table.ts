@@ -408,8 +408,9 @@ export type CellProvenance = "document" | "metadata" | "user" | "system";
  * A written cell; absent means unattempted.
  *
  * Invariants, checked by {@link validateTableSpec} and enforced on every write:
- * `value` iff `answered`; `error` iff `failed`; `evidence` only with
- * `document` or `metadata`; `cleared` only with `user`.
+ * `value` iff `answered`; `error` iff `failed`, and `error_code` only with
+ * it; `evidence` only with `document` or `metadata`; `cleared` only with
+ * `user`.
  */
 export interface Cell {
     /**
@@ -429,8 +430,13 @@ export interface Cell {
      * has not been re-answered since.
      */
     stale?: true;
-    /** Why a `failed` cell failed. */
+    /**
+     * Why a `failed` cell failed, as the cell shows it: one short user-facing
+     * sentence written by whoever failed the cell.
+     */
     error?: string;
+    /** A stable code for the failure, e.g. `download_failed` or `deadline`. */
+    error_code?: string;
 }
 
 /** One collection, tag or saved search in one library. */
@@ -1305,6 +1311,8 @@ export function cellInvariantError(cell: Cell): string | undefined {
         return "A cell has a value exactly when its outcome is answered";
     if ((cell.error != null) !== (cell.outcome === "failed"))
         return "A cell has an error exactly when its outcome is failed";
+    if (cell.error_code != null && cell.outcome !== "failed")
+        return "Only a failed cell has an error code";
     if (
         cell.evidence?.length &&
         cell.provenance !== "document" &&

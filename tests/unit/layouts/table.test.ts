@@ -590,6 +590,11 @@ describe("validateTableSpec", () => {
             },
             failedWithoutError: { outcome: "failed", provenance: "document" },
             errorOnAnswer: { ...answered(text), error: "x" },
+            errorCodeOnNotReported: {
+                outcome: "not_reported",
+                provenance: "document",
+                error_code: "deadline",
+            },
             evidenceOnUserCell: {
                 ...answered(text, "user"),
                 evidence: [{ locator: "s1", quote: "Survey" }],
@@ -616,6 +621,9 @@ describe("validateTableSpec", () => {
         ).toEqual(Object.keys(broken).map((id) => ["invalid_cell", id, "m"]));
         expect(cellInvariantError(broken.failedWithoutError)).toMatch(
             /error exactly when its outcome is failed/,
+        );
+        expect(cellInvariantError(broken.errorCodeOnNotReported)).toMatch(
+            /Only a failed cell has an error code/,
         );
     });
 
@@ -648,7 +656,8 @@ describe("validateTableSpec", () => {
                     m: {
                         outcome: "failed",
                         provenance: "document",
-                        error: "no text layer",
+                        error: "The PDF has no text layer. It may be a scan.",
+                        error_code: "no_text_layer",
                     },
                 }),
                 row("cleared", {
