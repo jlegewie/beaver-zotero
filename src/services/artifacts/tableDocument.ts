@@ -61,6 +61,7 @@ import {
     annotationTitle,
     annotationTypeLabel,
     categoriesText,
+    cellErrorMessage,
     cellExpandedFields,
     cellSortKey,
     defaultHiddenColumnIds,
@@ -285,7 +286,7 @@ function renderCellValueInner(
     variant: 'cell' | 'detail' = 'cell'
 ): string {
     if (cell?.outcome === 'failed') {
-        return `<span class="bt-err">${escapeHtml(cell.error ?? 'Could not be answered')}</span>`;
+        return `<span class="bt-err">${escapeHtml(cellErrorMessage(cell) ?? 'Could not be answered')}</span>`;
     }
     // Nothing at all, rather than a placeholder glyph: a column of em dashes
     // reads as noise across a wide table, and the footer already counts what

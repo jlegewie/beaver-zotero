@@ -4,6 +4,7 @@ import {
     annotationComment,
     annotationTitle,
     annotationTypeLabel,
+    cellErrorMessage,
     columnWrap,
     selectOption,
     type Cell,
@@ -90,7 +91,7 @@ export function CellView({
     if (cell?.outcome === "failed")
         return (
             <span>
-                <ErrorCell message={cell.error} onRetry={onRetry} />
+                <ErrorCell message={cellErrorMessage(cell)} onRetry={onRetry} />
                 {states}
             </span>
         );

@@ -254,6 +254,27 @@ describe("DataTable", () => {
         expect(rows[2].classList.contains("bt-row-error")).toBe(true);
     });
 
+    it("shows a short message, not the raw diagnostic, for a failure written before codes", () => {
+        const legacy: TableSpec = {
+            ...spec,
+            rows: [
+                {
+                    id: "r1",
+                    cells: {
+                        methods: {
+                            outcome: "failed",
+                            provenance: "document",
+                            error: "the document could not be read: Failed to download PDF for u-X8QE56E4 from remote storage",
+                        },
+                    },
+                },
+            ],
+        };
+        mount(React.createElement(DataTable, { table: legacy }));
+        const text = container!.querySelector(".bt-cell-error-text")?.textContent;
+        expect(text).toBe("The document could not be read.");
+    });
+
     it("sorts on any column, cycling asc → desc → none", () => {
         mount(React.createElement(DataTable, { table: spec }));
 

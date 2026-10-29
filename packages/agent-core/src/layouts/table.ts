@@ -408,8 +408,9 @@ export type CellProvenance = "document" | "metadata" | "user" | "system";
  * A written cell; absent means unattempted.
  *
  * Invariants, checked by {@link validateTableSpec} and enforced on every write:
- * `value` iff `answered`; `error` iff `failed`; `evidence` only with
- * `document` or `metadata`; `cleared` only with `user`.
+ * `value` iff `answered`; `error` iff `failed`, and `error_code` only with
+ * it; `evidence` only with `document` or `metadata`; `cleared` only with
+ * `user`.
  */
 export interface Cell {
     /**
@@ -429,8 +430,17 @@ export interface Cell {
      * has not been re-answered since.
      */
     stale?: true;
-    /** Why a `failed` cell failed. */
+    /**
+     * Why a `failed` cell failed, as the cell shows it: one short user-facing
+     * sentence written by whoever failed the cell. Render it through
+     * {@link cellErrorMessage}.
+     */
     error?: string;
+    /**
+     * A stable code for the failure, e.g. `download_failed` or `deadline`.
+     * Absent on cells written before codes existed.
+     */
+    error_code?: string;
 }
 
 /** One collection, tag or saved search in one library. */
@@ -776,6 +786,25 @@ export function columnAlign(column: Column): "start" | "end" | "center" {
 /** True when the cell holds no answer: unattempted, failed or cleared. */
 export function isCellEmpty(cell: Cell | undefined): boolean {
     return cell?.value == null && cell?.outcome !== "not_reported";
+}
+
+/**
+ * The message a failed cell shows, or undefined for any other cell.
+ *
+ * A cell with an `error_code` carries a message written for display. Older
+ * cells carry the filler's raw diagnostic, which is replaced here by a short
+ * message; a refill rewrites them with a code.
+ */
+export function cellErrorMessage(cell: Cell | undefined): string | undefined {
+    if (cell?.outcome !== "failed" || cell.error == null) return undefined;
+    if (cell.error_code != null) return cell.error;
+    if (cell.error === "deadline")
+        return "Ran out of time before this was answered.";
+    if (cell.error.startsWith("the document could not be read"))
+        return "The document could not be read.";
+    if (cell.error === "the document has no text")
+        return "The document has no readable text.";
+    return cell.error;
 }
 
 /** An answer or finding taken from title and abstract rather than the attachment. */
@@ -1305,6 +1334,8 @@ export function cellInvariantError(cell: Cell): string | undefined {
         return "A cell has a value exactly when its outcome is answered";
     if ((cell.error != null) !== (cell.outcome === "failed"))
         return "A cell has an error exactly when its outcome is failed";
+    if (cell.error_code != null && cell.outcome !== "failed")
+        return "Only a failed cell has an error code";
     if (
         cell.evidence?.length &&
         cell.provenance !== "document" &&
@@ -1557,7 +1588,7 @@ export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
                 cell
                     ? [
                           cell.outcome === "answered" ? "" : cell.outcome,
-                          cell.error ?? "",
+                          cellErrorMessage(cell) ?? "",
                           cell.unsure ? "unsure" : "",
                           cell.stale ? "stale" : "",
                           cell.provenance,
