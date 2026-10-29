@@ -66,6 +66,7 @@ import {
     defaultHiddenColumnIds,
     columnAlign,
     compareSortKeys,
+    evidenceHeading,
     isColumnFilterable,
     isColumnSortable,
     isTitleAbstractOnly,
@@ -264,7 +265,6 @@ const STALE_REASON_TEXT: Record<'question' | 'document', string> = {
     document: "The paper's document changed",
 };
 const REVIEW_TEXT = 'Beaver is not confident in this answer; check it against the paper';
-const ABSENT_TEXT = 'The paper does not say; this answer rests on its silence';
 
 /**
  * What stopped a row, in a few words: a row with nothing to read (no document
@@ -276,9 +276,8 @@ function rowFailureLabel(failure: RowFailure): string {
 
 /**
  * One cell's value, followed by the markers of its evidence and its state:
- * "not in paper" for an answer resting on the paper's silence, the review mark,
- * staleness with what changed, an answer from title and abstract, and who edited
- * it. In the expanded row (`detail`) an annotation names only what it is and
+ * the review mark, staleness with what changed, an answer from title and
+ * abstract, and who edited it. In the expanded row (`detail`) an annotation names only what it is and
  * where it sits: its passage and comment are listed as fields of their own
  * there (`cellExpandedFields`).
  */
@@ -296,7 +295,6 @@ function renderCellValue(
     const state = (text: string, className: string, title?: string): string =>
         `<span class="${className}"${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(text)}</span>`;
     const states = [
-        cell.absent ? state('not in paper', 'bt-absent', ABSENT_TEXT) : '',
         needsReview(column, cell) ? state('To review', 'bt-review', REVIEW_TEXT) : '',
         stale ? state('Stale', 'bt-stale', STALE_REASON_TEXT[stale]) : '',
         isTitleAbstractOnly(cell) ? state('From title and abstract', 'bt-ta') : '',
@@ -307,6 +305,11 @@ function renderCellValue(
               : '',
     ].filter(Boolean);
     return html + markers + (states.length ? `<small class="bt-cell-state"> · ${states.join(' · ')}</small>` : '');
+}
+
+/** The tooltip carrying a value's `display` in full, which the grid may cut short. */
+function displayTitle(display: string | undefined): string {
+    return display ? ` title="${escapeHtml(display)}"` : '';
 }
 
 function renderCellValueInner(
@@ -330,13 +333,13 @@ function renderCellValueInner(
         case 'number': {
             const shown = value.display ?? formatNumber(value.value);
             if (shown === null) return '<span class="bt-empty"></span>';
-            return `<span class="bt-num">${escapeHtml(
+            return `<span class="bt-num"${displayTitle(value.display)}>${escapeHtml(
                 shown
             )}${column.unit && !value.display ? `<span class="bt-unit">${escapeHtml(column.unit)}</span>` : ''}</span>`;
         }
 
         case 'date':
-            return `<span class="bt-num">${escapeHtml(value.display ?? value.value)}</span>`;
+            return `<span class="bt-num"${displayTitle(value.display)}>${escapeHtml(value.display ?? value.value)}</span>`;
 
         case 'boolean':
             // A check for yes and the word in muted text for no: a blank no
@@ -853,17 +856,14 @@ function renderDetail(
         .filter((column) => !!row.cells[column.id])
         .map((column) => {
             const cell = row.cells[column.id];
-            // The answer's reasoning and its evidence sit under it; an
-            // annotation's passage and comment are fields of their own. The
-            // evidence of an answer resting on the paper's silence, or of a
-            // finding that it does not report something, is the closest the
-            // paper comes, not proof.
+            // The answer's reasoning and then its evidence sit under it, the
+            // evidence headed by what its passages are to the value; an
+            // annotation's passage and comment are fields of their own.
             const reasoning = cell?.reasoning
                 ? `<div class="bt-d-extra">${escapeHtml(cell.reasoning)}</div>`
                 : '';
-            const closest = !!cell?.absent || cell?.outcome === 'not_reported';
             const evidence = cell?.evidence?.length
-                ? `${closest ? '<div class="bt-d-h">Closest passages</div>' : ''}<ul class="bt-d-list">${cell.evidence
+                ? `<div class="bt-d-h">${evidenceHeading(column, cell)}</div><ul class="bt-d-list">${cell.evidence
                       .map((entry) => renderEvidenceLine(entry, ''))
                       .join('')}</ul>`
                 : '';
@@ -1386,7 +1386,11 @@ export const TABLE_CSS = `
 .bt-r[open] > .bt-row .bt-chev { transform: rotate(90deg); }
 .bt-start { text-align: left; }
 .bt-end { text-align: right; }
-.bt-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* A long display ellipsises to one line in the grid, whole in its tooltip, and
+   wraps in full in the expanded row. */
+.bt-num { display: inline-block; max-width: 100%; vertical-align: top; overflow: hidden;
+  text-overflow: ellipsis; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bt-d .bt-num { display: inline; white-space: normal; }
 .bt-unit { font-size: 11px; color: var(--t-mut); margin-left: 2px; }
 .bt-clamp { display: -webkit-box; -webkit-line-clamp: var(--lines);
   -webkit-box-orient: vertical; overflow: hidden; color: var(--t-mut); }
@@ -1486,7 +1490,6 @@ html[data-beaver-active] .bt-export { display: inline-block; }
 .bt-wrap .bt-d-err { color: var(--t-warn); margin: 0 0 8px; font-size: 13px; }
 .bt-wrap .bt-yes { color: #1f7a3d; }
 .bt-wrap .bt-no { color: var(--t-fade); }
-.bt-wrap .bt-absent { color: var(--t-fade); }
 .bt-wrap .bt-review { color: #98590c; }
 .bt-r.bt-r-err > .bt-row { box-shadow: inset 3px 0 0 #c0603f; }
 .bt-pill.bt-pill--blue { background: #e8f1fd; color: #1a5aa8; border-color: #cfe0f7; }

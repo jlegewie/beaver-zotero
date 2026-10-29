@@ -267,7 +267,6 @@
             "_reference": {
                 "type": "reference",
                 "answered": 4,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -281,7 +280,6 @@
             "_year": {
                 "type": "date",
                 "answered": 4,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -295,7 +293,6 @@
             "_identifier": {
                 "type": "link",
                 "answered": 2,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -309,7 +306,6 @@
             "method": {
                 "type": "text",
                 "answered": 2,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,

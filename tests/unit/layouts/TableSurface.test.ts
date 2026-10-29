@@ -146,8 +146,17 @@ describe("table chrome", () => {
                         row.id === "r2"
                             ? {
                                   ...row,
+                                  documents: ["u-DOC2"],
                                   cells: {
                                       ...row.cells,
+                                      type: {
+                                          outcome: "answered",
+                                          provenance: "model",
+                                          value: { kind: "select", label: "Book" },
+                                          documents: ["u-DOC2"],
+                                          confidence: "medium",
+                                      },
+                                      // From title and abstract, so not to review.
                                       notes: {
                                           outcome: "not_reported",
                                           provenance: "model",

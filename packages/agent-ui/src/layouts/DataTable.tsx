@@ -10,6 +10,7 @@ import {
     cellExpandedFields,
     cellIdFor,
     columnAlign,
+    evidenceHeading,
     isColumnFilterable,
     isColumnSortable,
     isTitleAbstractOnly,
@@ -750,10 +751,7 @@ function RowDetail({
                                     />
                                 ) : null}
                                 {cell?.evidence?.length ? (
-                                    <EvidenceList
-                                        row={row}
-                                        columnId={column.id}
-                                    />
+                                    <EvidenceList row={row} column={column} />
                                 ) : null}
                             </dd>
                             {expanded.map((field) => (
@@ -787,26 +785,24 @@ function RowDetail({
  * thread's citation store; the assembled citation carries its own quote,
  * page and highlight.
  *
- * The evidence of an answer resting on the paper's silence, and of a finding
- * that the paper does not report something, is the closest the paper comes,
- * not proof, so the list says so. A passage cited from a table carries the
- * table's caption and header rows, shown above it so the quote can be read.
+ * The list is headed by what its passages are to the value
+ * ({@link evidenceHeading}). A passage cited from a table carries the table's
+ * caption and header rows, shown above it so the quote can be read.
  */
 function EvidenceList({
     row,
-    columnId,
+    column,
 }: {
     row: Row;
-    columnId: string;
+    column: Column;
 }): React.ReactElement {
-    const cell = row.cells[columnId];
+    const cell = row.cells[column.id];
     const evidence = cell?.evidence ?? [];
-    const closest = !!cell?.absent || cell?.outcome === "not_reported";
     return (
         <div className="bt-details">
-            {closest ? (
-                <div className="bt-details-label">Closest passages</div>
-            ) : null}
+            <div className="bt-details-label">
+                {evidenceHeading(column, cell)}
+            </div>
             <ul className="bt-details-list">
                 {evidence.map((entry, index) => {
                     const citation = citationForEvidence(row, entry);

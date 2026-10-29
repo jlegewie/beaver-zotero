@@ -203,7 +203,7 @@
                         "outcome": "failed",
                         "provenance": "model",
                         "error_code": "no_support",
-                        "error": "The answer gave no reason or passage to rest on."
+                        "error": "The no answer gave no reason or passage to rest on."
                     },
                     "costs": {
                         "outcome": "answered",
@@ -276,7 +276,6 @@
                                 "quote": "A quote."
                             }
                         ],
-                        "absent": true,
                         "reasoning": "Never mentions costs."
                     }
                 }

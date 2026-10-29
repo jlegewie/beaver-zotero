@@ -304,7 +304,6 @@
             "_reference": {
                 "type": "reference",
                 "answered": 6,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -318,7 +317,6 @@
             "method": {
                 "type": "text",
                 "answered": 6,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -331,7 +329,6 @@
             "n": {
                 "type": "number",
                 "answered": 0,
-                "absent": 0,
                 "not_reported": 4,
                 "failed": 1,
                 "cleared": 0,
@@ -344,7 +341,6 @@
             "costs": {
                 "type": "boolean",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 1,

@@ -632,8 +632,6 @@ describe("validateTableSpec", () => {
                 documents: ["u-D"],
                 evidence: [{ document: "u-D", quote: "Survey" }],
             },
-            absentNotReported: { outcome: "not_reported", provenance: "model", absent: true },
-            absentYes: { ...filler, value: { kind: "boolean", value: true }, absent: true },
             unknownConfidence: { ...filler, confidence: "certain" },
             clearedByFiller: { outcome: "cleared", provenance: "model" },
             unknownOutcome: { outcome: "pending", provenance: "model" },
@@ -698,7 +696,8 @@ describe("validateTableSpec", () => {
                         stale: true,
                     },
                 }),
-                row("absent", {
+                // A key this build does not know is kept and ignored.
+                row("unknownKey", {
                     m: {
                         outcome: "answered",
                         provenance: "model",
@@ -706,7 +705,7 @@ describe("validateTableSpec", () => {
                         documents: ["u-D"],
                         absent: true,
                         reasoning: "No section on it.",
-                    },
+                    } as unknown as Cell,
                 }),
                 row("meta", {
                     m: {
@@ -827,7 +826,7 @@ describe("toCsv", () => {
         ]);
     });
 
-    it("writes evidence, reasoning, absence, confidence and state beside the value, escaping formula-like text", () => {
+    it("writes evidence, reasoning, confidence and state beside the value, escaping formula-like text", () => {
         const table: TableSpec = {
             id: "outcomes",
             columns: [{ id: "a", header: "=Header", type: "text" }],
@@ -876,7 +875,6 @@ describe("toCsv", () => {
                             provenance: "model",
                             value: { kind: "text", text: "Not discussed" },
                             documents: ["u-DOC1"],
-                            absent: true,
                             confidence: "high",
                         },
                     },
@@ -896,17 +894,17 @@ describe("toCsv", () => {
         };
         const lines = toCsv(table).split("\r\n");
         expect(lines[0]).toBe(
-            "'=Header,'=Header — evidence,'=Header — reasoning,'=Header — absent,'=Header — confidence,'=Header — state",
+            "'=Header,'=Header — evidence,'=Header — reasoning,'=Header — confidence,'=Header — state",
         );
-        expect(lines[1]).toBe(",,,,,");
+        expect(lines[1]).toBe(",,,,");
         expect(lines[2]).toBe(
-            "Not reported,,'=Nothing on sample size,,,not_reported; title and abstract; model",
+            "Not reported,,'=Nothing on sample size,,not_reported; title and abstract; model",
         );
         expect(lines[3]).toBe(
-            '120 adults,"u-DOC1 s1: The study enrolled ""120"" participants. [Table 1. Sample]\nu-DOC1 s9: 120 adults",,,low,stale; model',
+            '120 adults,"u-DOC1 s1: The study enrolled ""120"" participants. [Table 1. Sample]\nu-DOC1 s9: 120 adults",,low,stale; model',
         );
-        expect(lines[4]).toBe("Not discussed,,,absent,high,model");
-        expect(lines[5]).toBe(",,,,,failed; no passage; model");
+        expect(lines[4]).toBe("Not discussed,,,high,model");
+        expect(lines[5]).toBe(",,,,failed; no passage; model");
     });
 });
 
@@ -1451,7 +1449,7 @@ describe("coverage", () => {
                 {
                     id: "b",
                     header: "B",
-                    type: "text",
+                    type: "number",
                     description: "What is B?",
                 },
                 { id: "_year", header: "Year", type: "date", system: true },
@@ -1475,7 +1473,7 @@ describe("coverage", () => {
                             error_code: "no_locator",
                             error: "no passage",
                         },
-                        b: answered({ kind: "text", text: "y" }, "model"),
+                        b: answered({ kind: "number", value: 2 }, "model"),
                     },
                 },
                 {
@@ -1522,14 +1520,28 @@ describe("coverage", () => {
         ).toBe(false);
     });
 
-    it("marks low confidence for review, and medium only in a number column", () => {
-        const cell = (confidence: string, provenance = "model") =>
-            ({ outcome: "answered", provenance, value: { kind: "number", value: 1 }, confidence }) as Cell;
-        expect(needsReview({ type: "text" }, cell("low"))).toBe(true);
-        expect(needsReview({ type: "text" }, cell("medium"))).toBe(false);
-        expect(needsReview({ type: "number" }, cell("medium"))).toBe(true);
+    it("marks a filler answer or blank read from a document, below high confidence, outside text columns", () => {
+        const cell = (confidence: string, extra: Record<string, unknown> = {}) =>
+            ({
+                outcome: "answered",
+                provenance: "model",
+                value: { kind: "boolean", value: false },
+                documents: ["u-D"],
+                confidence,
+                ...extra,
+            }) as Cell;
+        expect(needsReview({ type: "boolean" }, cell("medium"))).toBe(true);
+        expect(needsReview({ type: "select" }, cell("low"))).toBe(true);
         expect(needsReview({ type: "number" }, cell("high"))).toBe(false);
-        expect(needsReview({ type: "text" }, cell("low", "user"))).toBe(false);
+        expect(needsReview({ type: "text" }, cell("low"))).toBe(false);
+        // From title and abstract.
+        expect(needsReview({ type: "boolean" }, cell("low", { documents: undefined }))).toBe(false);
+        expect(needsReview({ type: "boolean" }, cell("low", { documents: [] }))).toBe(false);
+        expect(
+            needsReview({ type: "number" }, cell("medium", { outcome: "not_reported", value: undefined })),
+        ).toBe(true);
+        expect(needsReview({ type: "boolean" }, cell("low", { provenance: "user", documents: undefined }))).toBe(false);
+        expect(needsReview({ type: "boolean" }, undefined)).toBe(false);
     });
 
     it("counts only the rows it is given, so a footer can report the filtered view", () => {

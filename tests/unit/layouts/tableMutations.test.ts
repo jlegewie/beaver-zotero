@@ -14,7 +14,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
-import type { TableSpec } from "@beaver/agent-core/layouts/table";
+import type {
+    CellValue,
+    Column,
+    TableSpec,
+} from "@beaver/agent-core/layouts/table";
 import {
     applyMutations,
     summarize,
@@ -26,6 +30,7 @@ import {
 import {
     isStale,
     questionHash,
+    readsAsNegative,
     staleReason,
 } from "@beaver/agent-core/layouts/table";
 
@@ -51,6 +56,12 @@ interface StalenessFixture {
     name: string;
     spec: TableSpec;
     stale: [string, string][];
+}
+
+/** Values whose passages are headed "Related passages" ({@link readsAsNegative}). */
+interface NegativeReadsFixture {
+    name: string;
+    cases: { column: Column; value: CellValue; reads_as_negative: boolean }[];
 }
 
 const fixturesDir = fileURLToPath(
@@ -101,6 +112,9 @@ function deepFreeze<T>(value: T): T {
 const mutationFixtures = loadFixtures<MutationFixture>("table-mutations");
 const summaryFixtures = loadFixtures<SummaryFixture>("table-summaries");
 const stalenessFixtures = loadFixtures<StalenessFixture>("table-staleness");
+const negativeReadsFixtures = loadFixtures<NegativeReadsFixture>(
+    "table-negative-reads",
+);
 
 describe("the table-mutation fixture corpus", () => {
     // A glob that matched nothing would otherwise make this whole file pass by
@@ -206,6 +220,22 @@ describe("the table-staleness fixture corpus", () => {
             ),
         ).toBeUndefined();
     });
+});
+
+describe("the table-negative-reads fixture corpus", () => {
+    it("is not empty", () => {
+        expect(negativeReadsFixtures.length).toBeGreaterThan(0);
+    });
+
+    for (const { file, fixture } of negativeReadsFixtures) {
+        it(`${file}: ${fixture.name}`, () => {
+            for (const { column, value, reads_as_negative } of fixture.cases)
+                expect(
+                    readsAsNegative(column, value),
+                    JSON.stringify(value),
+                ).toBe(reads_as_negative);
+        });
+    }
 });
 
 describe("questionHash", () => {

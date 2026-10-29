@@ -164,7 +164,6 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -178,7 +177,6 @@
           "_year": {
             "type": "date",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -192,7 +190,6 @@
           "_identifier": {
             "type": "link",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -206,7 +203,6 @@
           "topic": {
             "type": "select",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -222,7 +218,6 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
-            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
@@ -267,7 +262,6 @@
               "_reference": {
                 "type": "reference",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -281,7 +275,6 @@
               "_year": {
                 "type": "date",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -295,7 +288,6 @@
               "_identifier": {
                 "type": "link",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -309,7 +301,6 @@
               "topic": {
                 "type": "select",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -325,7 +316,6 @@
               "open_access": {
                 "type": "boolean",
                 "answered": 0,
-                "absent": 0,
                 "not_reported": 1,
                 "failed": 0,
                 "cleared": 0,
@@ -653,7 +643,6 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -667,7 +656,6 @@
           "_year": {
             "type": "date",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -681,7 +669,6 @@
           "_identifier": {
             "type": "link",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -695,7 +682,6 @@
           "topic": {
             "type": "select",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -711,7 +697,6 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
-            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
@@ -1050,7 +1035,6 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1064,7 +1048,6 @@
           "_year": {
             "type": "date",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1078,7 +1061,6 @@
           "_identifier": {
             "type": "link",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1092,7 +1074,6 @@
           "topic": {
             "type": "select",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1108,7 +1089,6 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
-            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
@@ -1448,7 +1428,6 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1462,7 +1441,6 @@
           "_year": {
             "type": "date",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1476,7 +1454,6 @@
           "_identifier": {
             "type": "link",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1490,7 +1467,6 @@
           "topic": {
             "type": "select",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1506,7 +1482,6 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
-            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
@@ -2164,7 +2139,6 @@
           "_reference": {
             "type": "reference",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -2178,7 +2152,6 @@
           "_year": {
             "type": "date",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -2192,7 +2165,6 @@
           "_identifier": {
             "type": "link",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -2206,7 +2178,6 @@
           "topic": {
             "type": "select",
             "answered": 1,
-            "absent": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -2222,7 +2193,6 @@
           "open_access": {
             "type": "boolean",
             "answered": 0,
-            "absent": 0,
             "not_reported": 1,
             "failed": 0,
             "cleared": 0,
@@ -2319,7 +2289,6 @@
               "_reference": {
                 "type": "reference",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -2333,7 +2302,6 @@
               "_year": {
                 "type": "date",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -2347,7 +2315,6 @@
               "_identifier": {
                 "type": "link",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -2361,7 +2328,6 @@
               "topic": {
                 "type": "select",
                 "answered": 1,
-                "absent": 0,
                 "not_reported": 0,
                 "failed": 0,
                 "cleared": 0,
@@ -2377,7 +2343,6 @@
               "open_access": {
                 "type": "boolean",
                 "answered": 0,
-                "absent": 0,
                 "not_reported": 1,
                 "failed": 0,
                 "cleared": 0,
@@ -2407,7 +2372,6 @@
                   "_reference": {
                     "type": "reference",
                     "answered": 1,
-                    "absent": 0,
                     "not_reported": 0,
                     "failed": 0,
                     "cleared": 0,
@@ -2421,7 +2385,6 @@
                   "_year": {
                     "type": "date",
                     "answered": 1,
-                    "absent": 0,
                     "not_reported": 0,
                     "failed": 0,
                     "cleared": 0,
@@ -2435,7 +2398,6 @@
                   "_identifier": {
                     "type": "link",
                     "answered": 1,
-                    "absent": 0,
                     "not_reported": 0,
                     "failed": 0,
                     "cleared": 0,
@@ -2449,7 +2411,6 @@
                   "topic": {
                     "type": "select",
                     "answered": 1,
-                    "absent": 0,
                     "not_reported": 0,
                     "failed": 0,
                     "cleared": 0,
@@ -2465,7 +2426,6 @@
                   "open_access": {
                     "type": "boolean",
                     "answered": 0,
-                    "absent": 0,
                     "not_reported": 1,
                     "failed": 0,
                     "cleared": 0,
