@@ -35,6 +35,22 @@ describe('DocumentCache.getOrCreateUncachedResult', () => {
         expect(create).toHaveBeenCalledOnce();
     });
 
+    it('tells only the callers that join an in-flight extraction', async () => {
+        const cache = cacheWithoutDatabase();
+        const pending = deferred<Result>();
+        const create = vi.fn(() => pending.promise);
+        const leaderJoin = vi.fn();
+        const followerJoin = vi.fn();
+
+        const first = cache.getOrCreateUncachedResult({ key: 'a/4', create, onJoin: leaderJoin });
+        const second = cache.getOrCreateUncachedResult({ key: 'a/4', create, onJoin: followerJoin });
+        pending.resolve({ schemaVersion: '4', label: 'shared' });
+        await Promise.all([first, second]);
+
+        expect(leaderJoin).not.toHaveBeenCalled();
+        expect(followerJoin).toHaveBeenCalledOnce();
+    });
+
     it('runs separate extractions for different keys and again after settling', async () => {
         const cache = cacheWithoutDatabase();
         const create = vi.fn(async () => ({ schemaVersion: '4', label: 'x' }));

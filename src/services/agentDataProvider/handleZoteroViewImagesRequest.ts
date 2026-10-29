@@ -47,6 +47,7 @@ import {
 } from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
+import { PdfRequestWorker } from '../documentExtraction/pdfRequestWorker';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
     MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
@@ -526,6 +527,8 @@ async function handleExternalFileViewRequest(
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     const workerDispatched = createWorkerDispatchFlag();
+    // The worker this request's ops run on (interactive routing).
+    let requestWorker: PdfRequestWorker | null = null;
 
     try {
         // Size check against the hard cap (the copy is always local).
@@ -593,7 +596,13 @@ async function handleExternalFileViewRequest(
 
         // PDF: render the requested contiguous range via the MuPDF worker.
         resolvedKind = 'pdf';
-        const extractor = new BeaverExtractor();
+        requestWorker = new PdfRequestWorker({
+            interactive: true,
+            workerName: 'hot',
+            signal,
+            affinityKey: `${EXTERNAL_LIBRARY_ID}/${extKey}`,
+        });
+        const extractor = new BeaverExtractor(requestWorker);
         workerDispatched.mark();
         const totalPages = await extractor.getPageCount(fileBytes, signal);
         throwIfTimedOut('page_count_extraction');
@@ -669,7 +678,12 @@ async function handleExternalFileViewRequest(
         ) {
             return withWorkerDiagnostics(
                 errorResponse(`Rendering timed out after ${timeoutSeconds} seconds`, 'timeout'),
-                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
+                {
+                    // A request that timed out waiting for a free worker never reached one.
+                    workerDispatched: workerDispatched.value && requestWorker?.slot !== undefined,
+                    leaseReaped: isWorkerDeadlineError(error),
+                    slot: requestWorker?.slot,
+                },
             );
         }
         if (isExtractionError(error)) {
@@ -708,6 +722,7 @@ async function handleExternalFileViewRequest(
             'view_failed',
         );
     } finally {
+        requestWorker?.close();
         dispose();
     }
 }

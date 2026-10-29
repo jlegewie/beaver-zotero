@@ -1161,6 +1161,18 @@ export interface WSDocumentTimings {
      * or `warm`.
      */
     worker_state?: 'starting' | 'first_extract' | 'warmed' | 'warm';
+    /**
+     * The worker slot the request's operations ran on: `hot`, or `background`
+     * when the hot worker was busy and the request ran on the idle background
+     * worker instead.
+     */
+    worker_slot?: 'hot' | 'background';
+    /**
+     * Set when the hot worker was busy but the request still queued on it:
+     * `lane_busy` (the background worker was in use), `bg_not_warm` (it was
+     * not started and warmed up yet), or `disabled`.
+     */
+    overflow_skip?: 'lane_busy' | 'bg_not_warm' | 'disabled';
     /** The worker's WASM heap after the request's last worker operation, MB. */
     worker_heap_mb?: number;
     /** The largest WASM heap a worker of this slot has reported so far, MB. */

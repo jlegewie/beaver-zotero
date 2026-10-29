@@ -10,7 +10,14 @@ const mockState = {
 };
 
 vi.mock('../../../src/beaver-extract', () => {
+    // Honors the per-request worker like the real one: every op runs through it.
     class MockPDFExtractor {
+        constructor(private readonly worker?: { run<T>(op: (client: unknown) => Promise<T>): Promise<T> }) {}
+
+        private through<T>(op: () => Promise<T>): Promise<T> {
+            return this.worker ? this.worker.run(() => op()) : op();
+        }
+
         async getPageCount(): Promise<number> {
             return mockState.cannedPageCount;
         }
@@ -19,19 +26,25 @@ vi.mock('../../../src/beaver-extract', () => {
             _pdfData: Uint8Array | ArrayBuffer,
             signal?: AbortSignal,
         ): Promise<{ pageCount: number; pageLabels: Record<number, string> }> {
-            if (mockState.metadataImpl) {
-                return mockState.metadataImpl(signal);
-            }
-            return {
-                pageCount: mockState.cannedPageCount,
-                pageLabels: mockState.cannedPageLabels,
-            };
+            return this.through(async () => {
+                if (mockState.metadataImpl) {
+                    return mockState.metadataImpl(signal);
+                }
+                return {
+                    pageCount: mockState.cannedPageCount,
+                    pageLabels: mockState.cannedPageLabels,
+                };
+            });
         }
 
         async renderPages(
             _pdfData: Uint8Array | ArrayBuffer,
             args: any,
         ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: any[] }> {
+            return this.through(() => this.render(args));
+        }
+
+        private async render(args: any): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: any[] }> {
             mockState.renderCalls.push(args);
             if (mockState.renderImpl) {
                 return mockState.renderImpl(args);
@@ -75,7 +88,9 @@ vi.mock('../../../src/beaver-extract', () => {
         // tests can simulate a busy-lease reap with a plain tagged Error.
         isWorkerDeadlineError: (error: unknown) =>
             (error as { name?: unknown } | null | undefined)?.name === 'WorkerDeadlineError',
-        getExistingMuPDFWorkerClient: () => ({
+        getMuPDFWorkerClient: (slot: string = 'hot') => ({ slot }),
+        getExistingMuPDFWorkerClient: (slot: string = 'hot') => ({
+            slot,
             getStats: () => ({
                 hasWorker: true,
                 spawnCount: 1,
@@ -408,6 +423,82 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             },
         });
         // The render call never happens — the eager load's rethrow short-circuits it.
+        expect(mockState.renderCalls).toHaveLength(0);
+    });
+
+    it('routes its worker ops through the interactive router and releases the route', async () => {
+        setupRequestScenario({ cachedPageCount: 3, cachedPageLabels: { 0: '1', 1: '2', 2: '3' } });
+        const release = vi.fn();
+        const acquire = vi.fn(async () => ({ slot: 'background', release }));
+        (globalThis as any).Zotero.Beaver.backgroundExtractor = { interactiveOverflow: { acquire } };
+
+        const response = await handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-routed',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: [1],
+            skip_local_limits: true,
+        });
+
+        expect(response.pages).toHaveLength(1);
+        expect(acquire).toHaveBeenCalledTimes(1);
+        expect(acquire).toHaveBeenCalledWith(expect.objectContaining({ affinityKey: '1/ABCD1234' }));
+        expect(release).toHaveBeenCalledTimes(1);
+    });
+
+    it('snapshots the background worker when a routed request times out', async () => {
+        vi.useFakeTimers();
+        setupRequestScenario({ cachedPageCount: null, cachedPageLabels: null });
+        const release = vi.fn();
+        (globalThis as any).Zotero.Beaver.backgroundExtractor = {
+            interactiveOverflow: { acquire: vi.fn(async () => ({ slot: 'background', release })) },
+        };
+        mockState.metadataImpl = (signal) => new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+
+        const pending = handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-routed-timeout',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: [1],
+            skip_local_limits: true,
+            prefer_page_labels: true,
+            timeout_seconds: 0.01,
+        });
+        await vi.advanceTimersByTimeAsync(10);
+
+        await expect(pending).resolves.toMatchObject({
+            error_code: 'timeout',
+            worker_diagnostics: { slot: 'background' },
+        });
+        expect(release).toHaveBeenCalledTimes(1);
+    });
+
+    it('attaches no worker snapshot when the request timed out waiting for a free worker', async () => {
+        vi.useFakeTimers();
+        setupRequestScenario({ cachedPageCount: 3, cachedPageLabels: { 0: '1', 1: '2', 2: '3' } });
+        // Both workers busy: the wait ends only with the request's deadline.
+        const acquire = vi.fn(({ signal }: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(
+                Object.assign(new Error('aborted'), { name: 'WorkerAbortError' }),
+            ), { once: true });
+        }));
+        (globalThis as any).Zotero.Beaver.backgroundExtractor = { interactiveOverflow: { acquire } };
+
+        const pending = handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-queue-timeout',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: [1],
+            skip_local_limits: true,
+            timeout_seconds: 0.01,
+        });
+        await vi.advanceTimersByTimeAsync(10);
+
+        const response = await pending;
+        expect(response.error_code).toBe('timeout');
+        expect(response).not.toHaveProperty('worker_diagnostics');
         expect(mockState.renderCalls).toHaveLength(0);
     });
 

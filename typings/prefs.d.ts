@@ -80,6 +80,7 @@ declare namespace _ZoteroTypes {
       "mcpServerEnabled": boolean;
       "mcpCreateNoteToolEnabled": boolean;
       "backgroundExtractorEnabled": boolean;
+      "pdf.backgroundOverflow": boolean;
       "backgroundProcessingEnabled": boolean;
       "backgroundProcessingSearchInitialized": boolean;
       "backgroundProcessingWelcomeAck": boolean;

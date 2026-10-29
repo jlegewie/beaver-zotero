@@ -104,6 +104,15 @@ describe('withWorkerDiagnostics', () => {
         expect(response.error).toBe('timed out');
     });
 
+    it('snapshots the slot an overflow request ran on', () => {
+        const response = withWorkerDiagnostics(
+            { error: 'timed out', error_code: 'timeout' } as TestResponse,
+            { workerDispatched: true, leaseReaped: false, slot: 'background' },
+        );
+        expect(getExistingMuPDFWorkerClient).toHaveBeenCalledWith('background');
+        expect(response.worker_diagnostics).toMatchObject({ slot: 'background' });
+    });
+
     it('returns the response unchanged when no client exists', () => {
         getExistingMuPDFWorkerClient.mockReturnValue(null);
         const original = { error: 'timed out' } as TestResponse;

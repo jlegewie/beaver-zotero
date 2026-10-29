@@ -172,6 +172,7 @@ describe('handleZoteroDocumentRequest (external files)', () => {
                 workerQueueMs: 12.4,
                 workerOpMs: 230.6,
                 workerState: 'warmed',
+                workerSlot: 'background',
                 workerHeapMb: 96,
                 workerPeakHeapMb: 310,
                 cacheWriteMs: 15,
@@ -192,6 +193,7 @@ describe('handleZoteroDocumentRequest (external files)', () => {
             worker_queue_ms: 12,
             worker_op_ms: 231,
             worker_state: 'warmed',
+            worker_slot: 'background',
             worker_heap_mb: 96,
             worker_peak_heap_mb: 310,
             cache_write_ms: 15,
@@ -199,6 +201,24 @@ describe('handleZoteroDocumentRequest (external files)', () => {
         expect(response.timings?.total_ms).toBeGreaterThanOrEqual(0);
         // External files carry no attachment diagnostics, so there is no wait to report.
         expect(response.timings).not.toHaveProperty('diagnostics_wait_ms');
+        expect(response.timings).not.toHaveProperty('overflow_skip');
+    });
+
+    it('reports why a request stayed on the busy hot worker', async () => {
+        vi.mocked(resolveExternalFile).mockResolvedValue({ ok: true, record: baseRecord });
+        vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
+            kind: 'ok',
+            cached: false,
+            result: { mode: 'markdown', schema_version: 'x', document: { pageCount: 12, pages: [] } } as any,
+            totalPages: 12,
+            resolvedAttachment: { libraryId: -1, zoteroKey: EXT_KEY },
+            contentType: 'application/pdf',
+            timings: { source: 'extracted', workerSlot: 'hot', overflowSkip: 'lane_busy' },
+        });
+
+        const response = await handleZoteroDocumentRequest(baseRequest());
+
+        expect(response.timings).toMatchObject({ worker_slot: 'hot', overflow_skip: 'lane_busy' });
     });
 
     it('omits timings when the extraction core reports none', async () => {

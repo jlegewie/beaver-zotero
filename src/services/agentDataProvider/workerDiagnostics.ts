@@ -49,7 +49,8 @@ export function collectWorkerDiagnostics(
 }
 
 /**
- * Attach a hot-slot worker snapshot to a timeout error response.
+ * Attach a snapshot of the worker slot the request ran on (default hot) to a
+ * timeout error response.
  *
  * Attaches only when the request actually entered the worker slot
  * (`workerDispatched`): a timeout during item lookup, file download, or a
@@ -61,10 +62,10 @@ export function withWorkerDiagnostics<
     T extends { worker_diagnostics?: WSWorkerDiagnostics | null },
 >(
     response: T,
-    opts: { workerDispatched: boolean; leaseReaped: boolean },
+    opts: { workerDispatched: boolean; leaseReaped: boolean; slot?: PDFWorkerSlotName },
 ): T {
     if (!opts.workerDispatched) return response;
-    const diagnostics = collectWorkerDiagnostics('hot', opts.leaseReaped);
+    const diagnostics = collectWorkerDiagnostics(opts.slot ?? 'hot', opts.leaseReaped);
     return diagnostics ? { ...response, worker_diagnostics: diagnostics } : response;
 }
 
