@@ -34,6 +34,12 @@ import {
 
 import { logger } from "@beaver/agent-core/platform/logger";
 import { waitForDeferredCommits } from "../committedTransaction";
+import {
+    isZoteroTransactionTimeout,
+    SNAPSHOT_TRANSACTION_WAIT_MS,
+    waitForOpenTransaction,
+    ZOTERO_TRANSACTION_WAIT_MS,
+} from "../openTransaction";
 import { nativeMergeTransaction } from "./nativeMergeTransaction";
 import { dismissNotePreviews } from "../notePreviews";
 
@@ -150,10 +156,13 @@ function validateChoices(
     )
         throw duplicateError("Creator source must be a member of this merge.");
 }
-export async function validateMergeItemsAction(
-    request: ActionValidateRequest,
-): Promise<WSAgentActionValidateResponse> {
-    const data = request.action_data as MergeItemsProposedData;
+/**
+ * The reviewed form of a merge: normalized member ids, the preview the user
+ * reviews, and the snapshot execute compares against before merging.
+ */
+async function buildMergeProposal(
+    data: MergeItemsProposedData,
+): Promise<MergeItemsProposedData> {
     const items = await loadDuplicateItems([
         data.master_item_id,
         ...(data.other_item_ids || []),
@@ -173,6 +182,15 @@ export async function validateMergeItemsAction(
     const affected = await affectedItems(items);
     const state = await snapshots(affected);
     checkWritable(items);
+    return { ...normalized, preview, snapshot: state };
+}
+export async function validateMergeItemsAction(
+    request: ActionValidateRequest,
+): Promise<WSAgentActionValidateResponse> {
+    const proposal = await buildMergeProposal(
+        request.action_data as MergeItemsProposedData,
+    );
+    const { preview, snapshot: _snapshot, ...normalized } = proposal;
     return {
         type: "agent_action_validate_response",
         request_id: request.request_id,
@@ -183,8 +201,105 @@ export async function validateMergeItemsAction(
             request.operation,
         ),
         current_value: preview,
-        normalized_action_data: { ...normalized, preview, snapshot: state },
+        normalized_action_data: proposal,
     };
+}
+/**
+ * Propose a merge again after its records changed: the same members and
+ * choices, with the current preview and snapshot. Waits for earlier writes to
+ * land first, as validation does, so the new snapshot is not stale on arrival.
+ */
+export async function refreshMergeProposal(
+    data: MergeItemsProposedData,
+): Promise<MergeItemsProposedData> {
+    await waitForDeferredCommits();
+    await waitForOpenTransaction(SNAPSHOT_TRANSACTION_WAIT_MS);
+    return buildMergeProposal(data);
+}
+
+/** An object whose current state differs from the reviewed snapshot. */
+export interface StaleMergeObject {
+    item_id: string;
+    /** `added`: entered the merge's inventory; `removed`: left it. */
+    change: "changed" | "added" | "removed";
+    /** Top-level item JSON keys that differ, for `changed`. */
+    fields?: string[];
+}
+
+/** The objects and keys that differ between two merge snapshots. Names only, never values. */
+export function snapshotChanges(
+    reviewed: Record<string, Record<string, unknown>>,
+    current: Record<string, Record<string, unknown>>,
+): StaleMergeObject[] {
+    const changes: StaleMergeObject[] = [];
+    const ids = [...new Set([...Object.keys(reviewed), ...Object.keys(current)])].sort();
+    for (const item_id of ids) {
+        const was = reviewed[item_id];
+        const now = current[item_id];
+        if (!was) {
+            changes.push({ item_id, change: "added" });
+            continue;
+        }
+        if (!now) {
+            changes.push({ item_id, change: "removed" });
+            continue;
+        }
+        const fields = [...new Set([...Object.keys(was), ...Object.keys(now)])]
+            .filter((field) => stableJSON(was[field]) !== stableJSON(now[field]))
+            .sort();
+        if (fields.length) changes.push({ item_id, change: "changed", fields });
+    }
+    return changes;
+}
+
+const MAX_DESCRIBED_OBJECTS = 3;
+const MAX_DESCRIBED_FIELDS = 6;
+
+function describeSnapshotChanges(changes: StaleMergeObject[]): string {
+    const parts = changes.slice(0, MAX_DESCRIBED_OBJECTS).map((c) => {
+        if (c.change === "added") return `${c.item_id}: now part of the merge`;
+        if (c.change === "removed") return `${c.item_id}: no longer part of the merge`;
+        const fields = c.fields ?? [];
+        const more = fields.length > MAX_DESCRIBED_FIELDS
+            ? ` +${fields.length - MAX_DESCRIBED_FIELDS} more`
+            : "";
+        return `${c.item_id}: ${fields.slice(0, MAX_DESCRIBED_FIELDS).join(", ")}${more}`;
+    });
+    if (changes.length > MAX_DESCRIBED_OBJECTS)
+        parts.push(`${changes.length - MAX_DESCRIBED_OBJECTS} more`);
+    return parts.join("; ");
+}
+
+/** Reserved from an execute deadline for the merge itself after waiting on the database. */
+const MERGE_RESERVE_MS = 10_000;
+
+const DB_BUSY_MESSAGE =
+    "Zotero is busy saving another change, so this merge did not start and nothing was changed. Try again in a moment.";
+
+function databaseBusy(): Error {
+    return duplicateError(DB_BUSY_MESSAGE, "db_busy", {
+        open_transaction_ms: Zotero.Beaver?.transactionWatch?.openAgeMs() ?? 0,
+    });
+}
+
+/**
+ * Wait for another write's transaction to settle, commit callbacks included,
+ * before starting the merge's own, within the execute deadline. Starting
+ * earlier would tangle the merge's native undo entry with that write's, and
+ * Zotero would otherwise wait 30 seconds itself and fail with an unexplained
+ * timeout.
+ */
+async function waitForDatabase(ctx?: TimeoutContext): Promise<void> {
+    if (!(Zotero.DB as any).inTransaction?.()) return;
+    const remaining = ctx
+        ? ctx.timeoutSeconds * 1000 - (Date.now() - ctx.startTime) - MERGE_RESERVE_MS
+        : ZOTERO_TRANSACTION_WAIT_MS;
+    ctx?.reportPhase?.("waiting_for_zotero_transaction");
+    const free = await waitForOpenTransaction(
+        Math.min(ZOTERO_TRANSACTION_WAIT_MS, remaining),
+    );
+    if (!free) throw databaseBusy();
+    ctx?.reportPhase?.("running");
 }
 export async function applyMerge(
     data: MergeItemsProposedData,
@@ -212,6 +327,7 @@ export async function applyMerge(
             "applyMerge: earlier writes are still delivering Notifier events; Zotero's own undo entry for this merge may be incomplete",
             1,
         );
+    await waitForDatabase(ctx);
     let mutationStarted = false;
     try {
         return await nativeMergeTransaction(
@@ -232,11 +348,15 @@ export async function applyMerge(
                         ),
                     ]),
                 );
-                if (stableJSON(before) !== stableJSON(reviewed))
+                if (stableJSON(before) !== stableJSON(reviewed)) {
+                    const changes = snapshotChanges(reviewed, before);
+                    const summary = describeSnapshotChanges(changes);
                     throw duplicateError(
-                        "Items changed since this merge was proposed. Inspect and propose the merge again.",
+                        `Items changed since this merge was proposed${summary ? ` (${summary})` : ""}. Inspect and propose the merge again.`,
                         "stale_snapshot",
+                        { stale_changes: changes },
                     );
+                }
                 // The high-water mark is read inside the native transaction, before
                 // any native saves. It identifies genuinely new objects, including
                 // embedded notes, independently of the scope of the before snapshot.
@@ -314,6 +434,10 @@ export async function applyMerge(
             await Promise.all(
                 affected.map((item) => (item as any).reload(undefined, true)),
             );
+        // Another write began after the wait above, and Zotero gave up waiting
+        // for it before the merge's transaction opened.
+        if (!mutationStarted && isZoteroTransactionTimeout(error))
+            throw databaseBusy();
         throw error;
     }
 }

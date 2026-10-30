@@ -269,6 +269,8 @@ async function onStartup() {
     }
 
     registerQuitObserver();
+    // Times the open Zotero transaction for the busy diagnostics.
+    addon.transactionWatch.start();
     // Capture staging diagnostics without changing the profile's logging preferences.
     if (process.env.BUILD_ENV === 'staging' && !Zotero.Debug.storing) {
         Zotero.Debug.setStore(true);
@@ -928,6 +930,7 @@ async function disposeAppServices(): Promise<void> {
     };
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
+    addon.transactionWatch.stop();
     await attempt('disposeAccount', disposeAccountServices);
     await attempt('cancelAllActiveTasks', () => cancelAllActiveTasks());
     await attempt('newItemWatcher.stop', () => addon.newItemWatcher?.stop());
@@ -962,6 +965,7 @@ async function disposePlugin(): Promise<void> {
     addon.itemImport.dispose();
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
+    addon.transactionWatch.stop();
     Zotero.__beaverShuttingDown = true;
     addon.data.alive = false;
     cancelAllActiveTasks();

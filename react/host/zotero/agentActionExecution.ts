@@ -1,5 +1,5 @@
 import { mergeItemsChoicesAtom, withMergeChoices } from '../../atoms/mergeItemsChoices';
-import { executeMergeItemsAction, undoMergeItemsAction } from '../../utils/mergeItemsActions';
+import { executeMergeItemsAction, refreshMergeItemsProposal, undoMergeItemsAction } from '../../utils/mergeItemsActions';
 import { atom, Getter, Setter } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { itemActionExternalId } from '@beaver/agent-core/agents/agentActionTypes';
@@ -9,6 +9,7 @@ import {
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
     undoAgentActionAtom,
+    updateAgentActionsAtom,
 } from '../../agents/agentActions';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
 import { currentThreadIdAtom } from '../../atoms/threads';
@@ -33,6 +34,7 @@ import {
 } from '../../utils/editNoteActions';
 import { confirmOverwriteManualChanges } from './components/agentActionViewHelpers';
 import { isUnconfirmedAction } from './components/reviewChangeRows';
+import { isStaleMergeProposal } from './components/mergeItemsErrors';
 import { dismissActiveEditNotePreview } from './editNotePreviewLifecycle';
 
 /**
@@ -304,6 +306,8 @@ async function applyClaimedActions(
         const stackTrace = error?.stack || '';
         logger(`agentActionExecution: Failed to apply actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
         const errorDetails = {
+            // A merge reports what changed since its proposal, by name only.
+            ...(error?.name === 'DuplicateError' && error.details ? error.details : {}),
             stack_trace: stackTrace,
             error_name: error?.name,
             ...(error?.code ? { error_code: error.code } : {}),
@@ -444,5 +448,58 @@ export const rejectAgentActionsAtom = atom(
             }
             set(rejectAgentActionAtom, action.id);
         }
+    }
+);
+
+export interface RefreshMergeProposalsResult {
+    refreshed: string[];
+    failed: AgentActionFailure[];
+}
+
+/**
+ * Propose stale merges again: the same members and reviewed choices, with the
+ * current preview and snapshot, so the user reviews what is in the library now
+ * before applying. Each refreshed action returns to `pending` with its new
+ * proposal.
+ *
+ * The refreshed proposal is held in this window's state only, since the
+ * server keeps the proposal it stored. A reload shows the merge as stale again,
+ * and Refresh works the same way from there. Applying records the result on
+ * the server as usual, and undo reads only that result.
+ */
+export const refreshMergeProposalsAtom = atom(
+    null,
+    async (get, set, { actions }: { actions: AgentAction[] }): Promise<RefreshMergeProposalsResult> => {
+        const claimed = claimActions(get, set, actions.filter(isStaleMergeProposal));
+        const refreshed: string[] = [];
+        const failed: AgentActionFailure[] = [];
+        try {
+            for (const action of claimed) {
+                try {
+                    const reviewed = withMergeChoices(action, get(mergeItemsChoicesAtom)[action.id]);
+                    const proposal = await refreshMergeItemsProposal(reviewed.proposed_data as any);
+                    set(updateAgentActionsAtom, [{
+                        id: action.id,
+                        status: 'pending',
+                        proposed_data: proposal,
+                        error_message: undefined,
+                        error_details: undefined,
+                    }]);
+                    refreshed.push(action.id);
+                } catch (error: any) {
+                    const message = error?.message || 'Failed to refresh the merge';
+                    const errorDetails = {
+                        error_name: error?.name,
+                        ...(error?.code ? { error_code: error.code } : {}),
+                    };
+                    logger(`agentActionExecution: Failed to refresh merge ${action.id}: ${message}`, 1);
+                    set(setAgentActionsToErrorAtom, [action.id], message, errorDetails);
+                    failed.push({ actionId: action.id, error: message, errorDetails });
+                }
+            }
+        } finally {
+            releaseActions(get, set, claimed);
+        }
+        return { refreshed, failed };
     }
 );

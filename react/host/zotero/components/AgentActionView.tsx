@@ -27,6 +27,7 @@ import {
 } from '../../../atoms/messageUIState';
 import {
     applyAgentActionsAtom,
+    refreshMergeProposalsAtom,
     rejectAgentActionsAtom,
     undoAgentActionsAtom,
 } from '../agentActionExecution';
@@ -185,7 +186,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const [isProcessingAction, setIsProcessingAction] = useState(false);
     const [isUndoError, setIsUndoError] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'refresh' | null>(null);
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
     const isRunPending = useAtomValue(isWSChatPendingAtom);
@@ -205,6 +206,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const refreshMergeProposals = useSetAtom(refreshMergeProposalsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const surfaceWindow = useSurfaceWindow();
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
@@ -358,11 +360,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
     const hasNoActionData = !action && !pendingApproval && !isStreaming;
     const baseConfig = getStatusConfig(status, actions);
+    // A stale merge fails the same way on every retry; Refresh proposes it
+    // again for review instead.
+    const isStaleMerge = actions.some(isStaleMergeProposal);
     const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
-        : actions.some(isStaleMergeProposal)
+        : isStaleMerge
             ? { ...baseConfig, showRetry: false }
             : baseConfig;
+    const showRefresh = isStaleMerge && !isConfirmAction && status === 'error';
     // Read off the records, like the Library changes row, so the choice between
     // re-applying and retrying undo survives a remount.
     const isUndoRetry = isUndoError || hasFailedUndo(actions);
@@ -501,6 +507,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             setClickedButton(null);
         }
     }, [action, actions, isProcessing, undoAgentActions]);
+
+    const handleRefresh = useCallback(async () => {
+        if (actions.length === 0 || isProcessing) return;
+
+        setIsProcessingAction(true);
+        setClickedButton('refresh');
+        try {
+            await refreshMergeProposals({ actions });
+        } finally {
+            setIsProcessingAction(false);
+            setClickedButton(null);
+        }
+    }, [actions, isProcessing, refreshMergeProposals]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoRetry) {
@@ -870,6 +889,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 className="flex-none whitespace-nowrap"
                             >
                                 {isUndoRetry ? 'Retry Undo' : 'Try Again'}
+                            </Button>
+                        )}
+
+                        {showRefresh && (
+                            <Button
+                                variant="outline"
+                                icon={RepeatIcon}
+                                onClick={handleRefresh}
+                                loading={isProcessing && clickedButton === 'refresh'}
+                                disabled={isProcessing}
+                                title="Check the records again and show the current merge for review"
+                                className="flex-none whitespace-nowrap"
+                            >
+                                Refresh
                             </Button>
                         )}
 

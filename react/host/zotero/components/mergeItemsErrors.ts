@@ -25,7 +25,7 @@ export function isFailedMergeUndo(action: AgentAction): boolean {
 /**
  * The records changed after the proposal was reviewed. The merge compares
  * against the proposal's snapshot, so retrying fails the same way every time;
- * only a new proposal helps.
+ * only a new proposal helps: the surfaces offer Refresh instead of Retry.
  */
 export function isStaleMergeProposal(action: AgentAction): boolean {
     if (action.action_type !== 'merge_items' || action.status !== 'error' || action.result_data != null)
@@ -47,11 +47,44 @@ const CHANGE_PHRASES: Record<string, string> = {
     tags: 'Tags changed',
 };
 
+/** Labels for the item JSON keys a stale merge can report that are not metadata fields. */
+const STALE_KEY_LABELS: Record<string, string> = {
+    relations: 'related items',
+    deleted: 'Trash status',
+    parentItem: 'parent record',
+    collections: 'collections',
+    tags: 'tags',
+    creators: 'creators',
+};
+
+const MAX_STALE_LABELS = 4;
+
+/**
+ * What changed since the proposal, as short labels, from the details a
+ * refused merge records (`stale_changes`). Empty when they are not recorded:
+ * an apply that ran through the backend keeps only the message.
+ */
+function staleChangeLabels(action: AgentAction): string[] {
+    const changes = (action.error_details as Record<string, unknown> | undefined)?.stale_changes;
+    if (!Array.isArray(changes)) return [];
+    const labels = new Set<string>();
+    for (const change of changes as Array<{ change?: string; fields?: unknown }>) {
+        if (change?.change === 'added' || change?.change === 'removed') labels.add('notes, attachments or links');
+        else if (Array.isArray(change?.fields))
+            for (const field of change.fields)
+                if (typeof field === 'string') labels.add(STALE_KEY_LABELS[field] ?? formatFieldName(field));
+    }
+    const all = [...labels];
+    return all.length > MAX_STALE_LABELS
+        ? [...all.slice(0, MAX_STALE_LABELS), `${all.length - MAX_STALE_LABELS} more`]
+        : all;
+}
+
 function isUndoError(action: AgentAction): boolean {
     return errorCode(action) === 'undo_conflict' || /\bundo|undone\b/i.test(action.error_message ?? '');
 }
 
-function mergeErrorReason(message: string, code: string | undefined): string {
+function mergeErrorReason(message: string, code: string | undefined, staleLabels: string[] = []): string {
     const text = message.replace(/\s*Undo was not applied\.?\s*$/i, '').trim();
     const field = text.match(/^An affected (\S+) changed after the merge/);
     if (field) {
@@ -62,8 +95,12 @@ function mergeErrorReason(message: string, code: string | undefined): string {
     // needs its own wording.
     if (code === 'library_excluded' || /is excluded from Beaver/i.test(text))
         return 'This library is excluded from Beaver. Re-enable it in Beaver Preferences, then retry.';
-    if (code === 'stale_snapshot' || code === 'snapshot_required' || /changed since this merge was proposed/i.test(text))
-        return 'The records changed after this merge was proposed. Ask Beaver to propose it again.';
+    if (code === 'stale_snapshot' || code === 'snapshot_required' || /changed since this merge was proposed/i.test(text)) {
+        const changed = staleLabels.length ? ` (${staleLabels.join(', ')})` : '';
+        return `The records changed after this merge was proposed${changed}. Refresh to review them again before applying.`;
+    }
+    if (code === 'db_busy' || /Zotero is busy saving another change/i.test(text))
+        return 'Zotero was busy saving another change, so nothing was changed. Try again in a moment.';
     if (code === 'item_unavailable' || /is unavailable or trashed/i.test(text))
         return 'A record in this merge is in the Trash or no longer exists.';
     if (/permanently deleted/i.test(text))
@@ -87,5 +124,5 @@ export function mergeErrorLine(action: AgentAction | undefined): string | null {
         : isUndoError(action)
           ? 'Undo not applied'
           : 'Merged, but an error occurred';
-    return `${lead}. ${mergeErrorReason(action.error_message, errorCode(action))}`;
+    return `${lead}. ${mergeErrorReason(action.error_message, errorCode(action), staleChangeLabels(action))}`;
 }
