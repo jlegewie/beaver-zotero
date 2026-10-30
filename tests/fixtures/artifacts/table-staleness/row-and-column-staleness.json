@@ -20,8 +20,7 @@
             {
                 "id": "n",
                 "header": "Sample",
-                "type": "number",
-                "unit": "participants",
+                "type": "text",
                 "description": "How many participants?"
             },
             {
@@ -202,8 +201,8 @@
                     "n": {
                         "outcome": "failed",
                         "provenance": "model",
-                        "error_code": "no_locator",
-                        "error": "The answer could not be traced to a passage in the document."
+                        "error_code": "no_answer",
+                        "error": "No answer could be produced."
                     },
                     "costs": {
                         "outcome": "cleared",

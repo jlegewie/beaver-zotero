@@ -206,8 +206,7 @@ export function ColumnHeaderCell({
 
 /**
  * `Column.details` as one string: the long form behind the header line — the
- * full prompt where the line is clamped, the coding rules, the unit
- * convention. Flattened because it is delivered through `title`, which the
+ * full prompt where the line is clamped, the coding rules. Flattened because it is delivered through `title`, which the
  * platform also exposes as the header's accessible description.
  */
 function detailsText(column: Column): string | undefined {

@@ -134,7 +134,8 @@ it("exports a fresh persisted spec after the originating window picker returns",
         "/tmp/comparison.csv",
         expect.stringContaining('"u-ATTACH01 s3: Evidence, with ""quotes"""'),
     );
-    expect(IOUtils.writeUTF8).toHaveBeenCalledWith(
+    // The filler's stored confidence is never exported.
+    expect(IOUtils.writeUTF8).not.toHaveBeenCalledWith(
         "/tmp/comparison.csv",
         expect.stringContaining("Answer — confidence"),
     );

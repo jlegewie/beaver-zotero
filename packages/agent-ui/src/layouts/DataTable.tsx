@@ -11,6 +11,7 @@ import {
     cellIdFor,
     columnAlign,
     evidenceHeading,
+    isUncitedAnswer,
     isColumnFilterable,
     isColumnSortable,
     isTitleAbstractOnly,
@@ -752,6 +753,10 @@ function RowDetail({
                                 ) : null}
                                 {cell?.evidence?.length ? (
                                     <EvidenceList row={row} column={column} />
+                                ) : isUncitedAnswer(cell) ? (
+                                    <div className="bt-details bt-uncited">
+                                        No passage cited
+                                    </div>
                                 ) : null}
                             </dd>
                             {expanded.map((field) => (
@@ -785,8 +790,7 @@ function RowDetail({
  * thread's citation store; the assembled citation carries its own quote,
  * page and highlight.
  *
- * The list is headed by what its passages are to the value
- * ({@link evidenceHeading}). A passage cited from a table carries the table's
+ * The list is headed by the cell's outcome ({@link evidenceHeading}). A passage cited from a table carries the table's
  * caption and header rows, shown above it so the quote can be read.
  */
 function EvidenceList({
@@ -800,9 +804,7 @@ function EvidenceList({
     const evidence = cell?.evidence ?? [];
     return (
         <div className="bt-details">
-            <div className="bt-details-label">
-                {evidenceHeading(column, cell)}
-            </div>
+            <div className="bt-details-label">{evidenceHeading(cell)}</div>
             <ul className="bt-details-list">
                 {evidence.map((entry, index) => {
                     const citation = citationForEvidence(row, entry);

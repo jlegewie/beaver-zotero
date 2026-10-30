@@ -70,7 +70,6 @@ export function defaultColumnWidth(
     switch (column.type) {
         case "reference":
             return "16rem";
-        case "number":
         case "date":
             return headerWidth(column, 6.5);
         case "boolean":

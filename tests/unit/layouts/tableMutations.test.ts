@@ -30,7 +30,6 @@ import {
 import {
     isStale,
     questionHash,
-    readsAsNegative,
     staleReason,
 } from "@beaver/agent-core/layouts/table";
 
@@ -56,12 +55,6 @@ interface StalenessFixture {
     name: string;
     spec: TableSpec;
     stale: [string, string][];
-}
-
-/** Values whose passages are headed "Related passages" ({@link readsAsNegative}). */
-interface NegativeReadsFixture {
-    name: string;
-    cases: { column: Column; value: CellValue; reads_as_negative: boolean }[];
 }
 
 const fixturesDir = fileURLToPath(
@@ -112,9 +105,6 @@ function deepFreeze<T>(value: T): T {
 const mutationFixtures = loadFixtures<MutationFixture>("table-mutations");
 const summaryFixtures = loadFixtures<SummaryFixture>("table-summaries");
 const stalenessFixtures = loadFixtures<StalenessFixture>("table-staleness");
-const negativeReadsFixtures = loadFixtures<NegativeReadsFixture>(
-    "table-negative-reads",
-);
 
 describe("the table-mutation fixture corpus", () => {
     // A glob that matched nothing would otherwise make this whole file pass by
@@ -222,22 +212,6 @@ describe("the table-staleness fixture corpus", () => {
     });
 });
 
-describe("the table-negative-reads fixture corpus", () => {
-    it("is not empty", () => {
-        expect(negativeReadsFixtures.length).toBeGreaterThan(0);
-    });
-
-    for (const { file, fixture } of negativeReadsFixtures) {
-        it(`${file}: ${fixture.name}`, () => {
-            for (const { column, value, reads_as_negative } of fixture.cases)
-                expect(
-                    readsAsNegative(column, value),
-                    JSON.stringify(value),
-                ).toBe(reads_as_negative);
-        });
-    }
-});
-
 describe("questionHash", () => {
     // Pinned: the backend computes the same digests.
     it("matches the backend's digests", () => {
@@ -249,8 +223,8 @@ describe("questionHash", () => {
         ).toBe("5765cec3bb59ae1b");
         expect(questionHash({ type: "text" })).toBe("6baca648789c851c");
         expect(
-            questionHash({ type: "number", description: "Größe — n?" }),
-        ).toBe("d667836d03ab527c");
+            questionHash({ type: "date", description: "Größe — n?" }),
+        ).toBe("436d71d9618fdb43");
     });
 
     it("follows the type and the description", () => {
@@ -258,7 +232,7 @@ describe("questionHash", () => {
         expect(questionHash({ ...column, description: "Q2?" })).not.toBe(
             questionHash(column),
         );
-        expect(questionHash({ ...column, type: "number" })).not.toBe(
+        expect(questionHash({ ...column, type: "date" })).not.toBe(
             questionHash(column),
         );
     });

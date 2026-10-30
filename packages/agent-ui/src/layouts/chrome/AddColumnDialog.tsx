@@ -28,7 +28,6 @@ export interface AddColumnDialogProps {
 
 const TYPE_OPTIONS: Array<{ type: ColumnType; label: string }> = [
     { type: "text", label: "Text" },
-    { type: "number", label: "Number" },
     { type: "date", label: "Date" },
     { type: "boolean", label: "Yes / no" },
     { type: "select", label: "Category" },

@@ -67,7 +67,7 @@ const spec: TableSpec = {
     anchor_column_id: "ref",
     columns: [
         { id: "ref", header: "Item", type: "reference" },
-        { id: "cites", header: "Citations", type: "number" },
+        { id: "cites", header: "Citations", type: "text" },
         {
             id: "type",
             header: "Type",
@@ -83,7 +83,7 @@ const spec: TableSpec = {
             ref: itemRef("K1"),
             cells: {
                 ref: reference("Alpha"),
-                cites: answered({ kind: "number", value: 10 }, "metadata"),
+                cites: answered({ kind: "text", text: "10" }, "metadata"),
                 type: answered({ kind: "select", label: "Article" }),
                 oa: answered({ kind: "boolean", value: true }),
                 abstract: answered({ kind: "text", text: "First abstract" }),
@@ -94,7 +94,7 @@ const spec: TableSpec = {
             ref: itemRef("K2"),
             cells: {
                 ref: reference("Beta"),
-                cites: answered({ kind: "number", value: 90 }, "metadata"),
+                cites: answered({ kind: "text", text: "90" }, "metadata"),
                 type: answered({ kind: "select", label: "Book" }),
                 oa: answered({ kind: "boolean", value: false }),
                 abstract: answered({ kind: "text", text: "Second abstract" }),
@@ -948,7 +948,7 @@ describe("how answers read", () => {
     const columns: TableSpec["columns"] = [
         { id: REFERENCE_COLUMN_ID, header: "Item", type: "reference", system: true },
         { id: "rct", header: "RCT?", type: "boolean" },
-        { id: "share", header: "Share", type: "number", unit: "%" },
+        { id: "share", header: "Share (%)", type: "text" },
         { id: "note", header: "Note", type: "text" },
     ];
     const doc = "u-K1";
@@ -971,7 +971,7 @@ describe("how answers read", () => {
         expect(TABLE_CSS).toContain(".bt-wrap .bt-no { color: var(--t-fade); }");
     });
 
-    it("heads a no's passages as related, after its reason, and shows an uncited no's reason alone", () => {
+    it("heads a no's passages as evidence, after its reason, and says when an answer cites none", () => {
         const { html } = renderTableHtml({
             id: "a",
             columns,
@@ -992,16 +992,18 @@ describe("how answers read", () => {
         expect(cellHtml(html, "r", "rct")).toContain('<span class="bt-no">No</span>');
         const detail = detailHtml(html, "r");
         const reasoning = detail.indexOf("No randomisation is described.");
-        const heading = detail.indexOf('<div class="bt-d-h">Related passages</div>');
+        const heading = detail.indexOf('<div class="bt-d-h">Evidence</div>');
         expect(reasoning).toBeGreaterThan(0);
         expect(heading).toBeGreaterThan(reasoning);
         expect(detail.indexOf("<li>“Participants chose a group.”")).toBeGreaterThan(heading);
         const uncited = detailHtml(html, "u");
         expect(uncited).toContain('<div class="bt-d-extra">Randomisation is never mentioned.</div>');
         expect(uncited).not.toContain("bt-d-h");
+        expect(uncited).toContain('<div class="bt-d-uncited">No passage cited</div>');
+        expect(detail).not.toContain("bt-d-uncited");
     });
 
-    it("heads a category negative's passages as related and a plain answer's as evidence", () => {
+    it("heads every answer's passages as evidence, a category negative's too", () => {
         const design: TableSpec["columns"][number] = {
             id: "design",
             header: "Design",
@@ -1020,37 +1022,18 @@ describe("how answers read", () => {
             ],
         });
         const detail = detailHtml(html, "r");
-        expect(detail).toContain('<div class="bt-d-h">Evidence</div>');
-        expect(detail).toContain('<div class="bt-d-h">Related passages</div>');
+        expect(detail.split('<div class="bt-d-h">Evidence</div>').length - 1).toBe(2);
+        expect(detail).not.toContain("Related passages");
         expect(detail).not.toContain("Closest passages");
     });
 
-    it("shows a number's display text as is, and appends the unit only to a bare number", () => {
-        const { html } = renderTableHtml({
-            id: "n",
-            columns,
-            rows: [
-                row("worded", { share: filler({ kind: "number", value: 90, display: "90% or higher" }) }),
-                row("bare", { share: filler({ kind: "number", value: 12 }) }),
-            ],
-        });
-        // One ellipsised line in the grid, the whole text in its tooltip and
-        // in the expanded row.
-        expect(cellHtml(html, "worded", "share")).toContain(
-            '<span class="bt-num" title="90% or higher">90% or higher</span>',
-        );
-        expect(TABLE_CSS).toContain(".bt-d .bt-num { display: inline; white-space: normal; }");
-        expect(cellHtml(html, "worded", "share")).not.toContain("bt-unit");
-        expect(cellHtml(html, "bare", "share")).toContain('<span class="bt-num">12<span class="bt-unit">%</span></span>');
-    });
-
-    it("marks answers read from a document below high confidence for review, never prose", () => {
+    it("never marks an answer for review, whatever its stored confidence", () => {
         const { html } = renderTableHtml({
             id: "r",
             columns,
             rows: [
                 row("r", {
-                    share: filler({ kind: "number", value: 3 }, { confidence: "medium" }),
+                    share: filler({ kind: "text", text: "3" }, { confidence: "medium" }),
                     note: filler({ kind: "text", text: "Medium prose" }, { confidence: "medium" }),
                     rct: filler({ kind: "boolean", value: true }, { confidence: "low" }),
                 }),
@@ -1058,12 +1041,10 @@ describe("how answers read", () => {
                 row("u", { note: answered({ kind: "text", text: "Mine" }, "user") }),
             ],
         });
-        expect(cellHtml(html, "r", "share")).toContain(">To review</span>");
-        expect(cellHtml(html, "r", "note")).not.toContain("To review");
-        expect(cellHtml(html, "r", "rct")).toContain(">To review</span>");
-        expect(cellHtml(html, "u", "note")).not.toContain("To review");
+        expect(html).not.toContain("To review");
+        expect(html).not.toContain("bt-review");
         const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
-        expect(footer).toBe("2 rows · 2 to review");
+        expect(footer).toBe("2 rows");
     });
 
     it("sets a cited table row's caption and header rows in small type above the quote", () => {
@@ -1072,7 +1053,7 @@ describe("how answers read", () => {
             columns,
             rows: [
                 row("r", {
-                    share: filler({ kind: "number", value: 41 }, {
+                    share: filler({ kind: "text", text: "41" }, {
                         evidence: [
                             {
                                 document: doc,
@@ -1180,8 +1161,7 @@ const fullSpec: TableSpec = {
         {
             id: "n",
             header: "Sample",
-            type: "number",
-            unit: "participants",
+            type: "text",
             align: "end",
             width: 120,
         },
@@ -1235,7 +1215,7 @@ const fullSpec: TableSpec = {
                     reasoning: "Randomised, and on topic.",
                     evidence: [{ document: "u-A1", locator: "s12", quote: "Employees were randomly assigned.", page: 2 }],
                 }),
-                n: answered({ kind: "number", value: 1200, display: "about 1,200 employees" }, "model", {
+                n: answered({ kind: "text", text: "about 1,200" }, "model", {
                     documents: ["u-A1"],
                     confidence: "medium",
                     evidence: [
@@ -1456,29 +1436,6 @@ describe("a stored table stands on its own", () => {
 });
 
 describe("things a stored table must survive", () => {
-    it("renders a number that no longer survives a save as no value at all", () => {
-        // JSON has no NaN, so `table.json` stores it as null and a reloaded
-        // table would render `null.toLocaleString()`. Both directions read as
-        // an empty cell instead of throwing.
-        const withNaN: TableSpec = {
-            id: "n",
-            columns: [{ id: "size", header: "Size", type: "number" }],
-            rows: [
-                {
-                    id: "r1",
-                    cells: { size: answered({ kind: "number", value: Number.NaN }) },
-                },
-            ],
-        };
-        expect(() => buildTableDocument(withNaN)).not.toThrow();
-
-        const reloaded = JSON.parse(JSON.stringify(withNaN)) as TableSpec;
-        expect(reloaded.rows[0].cells.size.value).toEqual({ kind: "number", value: null });
-        // Re-rendering what came back is the case that used to throw.
-        expect(() => buildTableDocument(reloaded)).not.toThrow();
-        expect(cellHtml(buildTableDocument(reloaded).html, "r1", "size")).toContain("bt-empty");
-    });
-
     it("points a filter chip at the rows that actually carry its label", () => {
         // The chip and the row class are two halves of one index. An open
         // select enumerated once over sorted rows and once over the spec's

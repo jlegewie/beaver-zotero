@@ -2472,8 +2472,8 @@
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
-                  "kind": "number",
-                  "value": 120.0
+                  "kind": "text",
+                  "text": "120"
                 },
                 "documents": [
                   "u-R1PDF"
@@ -2573,8 +2573,8 @@
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
-                  "kind": "number",
-                  "value": 120.0
+                  "kind": "text",
+                  "text": "120"
                 },
                 "documents": [
                   "u-R1PDF"
@@ -2605,8 +2605,8 @@
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
-                  "kind": "number",
-                  "value": 120.0
+                  "kind": "text",
+                  "text": "120"
                 },
                 "documents": [
                   "u-R2PDF"
@@ -2637,8 +2637,8 @@
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
-                  "kind": "number",
-                  "value": 120.0
+                  "kind": "text",
+                  "text": "120"
                 },
                 "documents": [
                   "u-R9PDF"
@@ -2669,8 +2669,8 @@
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
-                  "kind": "number",
-                  "value": 120.0
+                  "kind": "text",
+                  "text": "120"
                 },
                 "documents": [
                   "u-R3PDF"
@@ -2701,8 +2701,8 @@
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
-                  "kind": "number",
-                  "value": 120.0
+                  "kind": "text",
+                  "text": "120"
                 },
                 "documents": [
                   "u-R5PDF"
@@ -2788,8 +2788,8 @@
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
-                  "kind": "number",
-                  "value": 120.0
+                  "kind": "text",
+                  "text": "120"
                 },
                 "documents": [
                   "u-R5PDF"
@@ -2861,8 +2861,8 @@
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
-                  "kind": "number",
-                  "value": 120.0
+                  "kind": "text",
+                  "text": "120"
                 },
                 "documents": [
                   "u-R1PDF"
@@ -2925,8 +2925,8 @@
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
-                  "kind": "number",
-                  "value": 120.0
+                  "kind": "text",
+                  "text": "120"
                 },
                 "documents": [
                   "u-R6PDF"

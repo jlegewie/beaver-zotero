@@ -60,10 +60,9 @@
     "columns": [
       {
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants?",
-        "options": null,
-        "unit": null
+        "options": null
       }
     ],
     "cost": {
@@ -120,10 +119,9 @@
     "columns": [
       {
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants?",
-        "options": null,
-        "unit": null
+        "options": null
       }
     ]
   },
@@ -174,7 +172,7 @@
     "columns": [
       {
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants?"
       }
     ]

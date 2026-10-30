@@ -637,7 +637,6 @@ export async function handleTestTableCardHttpRequest(request: any) {
                 type: column.type ?? 'text',
                 description: column.description ?? '',
                 options: draftOptions(column.options),
-                unit: column.unit ?? null,
             });
         }
     }

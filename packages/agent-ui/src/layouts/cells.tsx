@@ -6,7 +6,6 @@ import {
     annotationTypeLabel,
     columnWrap,
     isTitleAbstractOnly,
-    needsReview,
     selectOption,
     staleReason,
     type Cell,
@@ -46,10 +45,6 @@ export const STALE_REASON_TEXT: Record<"question" | "document", string> = {
     document: "The paper's document changed",
 };
 
-/** The review mark's tooltip. */
-export const REVIEW_TEXT =
-    "Beaver is not confident in this answer; check it against the paper";
-
 /**
  * What stopped a row, in a few words: a row with nothing to read (no document
  * and no abstract) is told apart from one whose document could not be read.
@@ -69,8 +64,8 @@ export function rowFailureLabel(failure: RowFailure): string {
  *   out with `wrap: "nowrap"`, and marked when it was taken from title and
  *   abstract only.
  *
- * Any of them may carry the review mark ({@link needsReview}) and a stale
- * marker whose tooltip says what changed ({@link staleReason}).
+ * Any of them may carry a stale marker whose tooltip says what changed
+ * ({@link staleReason}).
  */
 
 export interface CellViewProps {
@@ -100,12 +95,6 @@ export function CellView({
     const stale = staleReason(row, cell);
     const states = (
         <>
-            {needsReview(column, cell) ? (
-                <small className="bt-review" title={REVIEW_TEXT}>
-                    {" "}
-                    · To review
-                </small>
-            ) : null}
             {stale ? (
                 <small className="bt-stale" title={STALE_REASON_TEXT[stale]}>
                     {" "}
@@ -251,18 +240,6 @@ export function CellValueView({
     switch (value.kind) {
         case "text":
             return <>{renderText(value.text)}</>;
-
-        // A `display` may be long: one ellipsised line in the grid, with the
-        // whole of it in the tooltip and in the expanded row.
-        case "number":
-            return (
-                <span className="bt-number" title={value.display}>
-                    {value.display ?? value.value.toLocaleString()}
-                    {column.unit && !value.display ? (
-                        <span className="bt-unit">{column.unit}</span>
-                    ) : null}
-                </span>
-            );
 
         case "date":
             return (

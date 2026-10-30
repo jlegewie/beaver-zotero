@@ -1,5 +1,5 @@
 {
-    "name": "a number keeps its value for sorting and the paper's wording to show",
+    "name": "a quantity is a text column that names its unit in the question, and its answer is the shortest string",
     "before": {
         "id": "t1",
         "spec_version": 2,
@@ -47,8 +47,7 @@
             {
                 "id": "interviews",
                 "header": "Interviews",
-                "type": "number",
-                "unit": "interviews",
+                "type": "text",
                 "description": "How many interviews were conducted?"
             }
         ],
@@ -221,9 +220,8 @@
                         "outcome": "answered",
                         "provenance": "model",
                         "value": {
-                            "kind": "number",
-                            "value": 100,
-                            "display": "over 100 interviews"
+                            "kind": "text",
+                            "text": "over 100"
                         },
                         "documents": [
                             "u-AAAPDF"
@@ -289,8 +287,7 @@
             {
                 "id": "interviews",
                 "header": "Interviews",
-                "type": "number",
-                "unit": "interviews",
+                "type": "text",
                 "description": "How many interviews were conducted?"
             }
         ],
@@ -365,9 +362,8 @@
                         "outcome": "answered",
                         "provenance": "model",
                         "value": {
-                            "kind": "number",
-                            "value": 100,
-                            "display": "over 100 interviews"
+                            "kind": "text",
+                            "text": "over 100"
                         },
                         "documents": [
                             "u-AAAPDF"

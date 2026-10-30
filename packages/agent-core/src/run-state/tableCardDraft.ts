@@ -74,7 +74,6 @@ export interface DraftColumn {
     type: TableCardColumnType;
     description: string;
     options: DraftOption[];
-    unit?: string | null;
 }
 
 export interface TableCardDraft {
@@ -156,7 +155,6 @@ export function initialTableCardDraft(request: WSTableCardRequest): TableCardDra
         type: column.type,
         description: column.description ?? '',
         options: draftOptions(column.options),
-        unit: column.unit ?? null,
     }));
     const draft: TableCardDraft = {
         title: request.title,
@@ -492,7 +490,7 @@ export function addColumn(draft: TableCardDraft): { draft: TableCardDraft; key: 
             nextKey: draft.nextKey + 1,
             columns: [
                 ...draft.columns,
-                { key, header: '', type: 'text', description: '', options: [], unit: null },
+                { key, header: '', type: 'text', description: '', options: [] },
             ],
         },
     };
@@ -778,7 +776,6 @@ export function wireColumn(column: DraftColumn): TableCardColumn {
             if (!label) return [];
             return [description ? { label, description } : { label }];
         });
-    if (column.type === 'number' && column.unit?.trim()) wire.unit = column.unit.trim();
     return wire;
 }
 

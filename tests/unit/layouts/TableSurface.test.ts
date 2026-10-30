@@ -29,7 +29,7 @@ const spec: TableSpec = {
     anchor_column_id: "ref",
     columns: [
         { id: "ref", header: "Item", type: "reference" },
-        { id: "year", header: "Year", type: "number" },
+        { id: "year", header: "Year", type: "text" },
         {
             id: "type",
             header: "Type",
@@ -48,7 +48,7 @@ const spec: TableSpec = {
             id: "r1",
             cells: {
                 ref: system({ kind: "reference", display_name: "Alpha" }),
-                year: answered({ kind: "number", value: 2020 }),
+                year: answered({ kind: "text", text: "2020" }),
                 type: answered({ kind: "select", label: "Article" }),
                 notes: answered({ kind: "text", text: "First" }),
             },
@@ -57,7 +57,7 @@ const spec: TableSpec = {
             id: "r2",
             cells: {
                 ref: system({ kind: "reference", display_name: "Beta" }),
-                year: answered({ kind: "number", value: 2021 }),
+                year: answered({ kind: "text", text: "2021" }),
                 type: answered({ kind: "select", label: "Book" }),
                 // `notes` absent — unattempted.
             },
@@ -66,7 +66,7 @@ const spec: TableSpec = {
             id: "r3",
             cells: {
                 ref: system({ kind: "reference", display_name: "Gamma" }),
-                year: answered({ kind: "number", value: 2022 }),
+                year: answered({ kind: "text", text: "2022" }),
                 type: answered({ kind: "select", label: "Article" }),
                 notes: {
                     outcome: "failed",
@@ -137,7 +137,7 @@ describe("table chrome", () => {
         expect(footer).not.toContain("title and abstract");
     });
 
-    it("counts not-reported, title-and-abstract and to-review cells and unreadable papers in the footer", () => {
+    it("counts not-reported and title-and-abstract cells and unreadable papers in the footer, and never a review count", () => {
         mount(
             React.createElement(TableSurface, {
                 table: {
@@ -156,7 +156,7 @@ describe("table chrome", () => {
                                           documents: ["u-DOC2"],
                                           confidence: "medium",
                                       },
-                                      // From title and abstract, so not to review.
+                                      // From title and abstract.
                                       notes: {
                                           outcome: "not_reported",
                                           provenance: "model",
@@ -177,7 +177,7 @@ describe("table chrome", () => {
         // A finding is not an answer: only answers count as from title and
         // abstract, as the table's summary counts them.
         expect(footer).not.toContain("from title and abstract");
-        expect(footer).toContain("1 to review");
+        expect(footer).not.toContain("to review");
         expect(footer).toContain("1 paper could not be read");
         expect(footer).not.toContain("incomplete");
     });

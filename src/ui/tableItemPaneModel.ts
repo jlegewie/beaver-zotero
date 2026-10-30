@@ -96,8 +96,6 @@ export interface TableSectionFields {
     /** `rows × columns` — the denominator for {@link filled}. */
     cells: number;
     filled: number;
-    /** Filler cells with the review mark: low confidence, or medium in a number column. */
-    needsReview: number;
     /** Filler answers read from the title and abstract only. */
     titleAbstractOnly: number;
     /** Cells whose question or whose row's document changed since they were written. */
@@ -121,8 +119,8 @@ export interface TableSectionFields {
     /** "58 of 84 cells filled", or empty when there are no cells. */
     coverageLine: string;
     /**
-     * "3 to review · 1 from title and abstract · 2 stale · 1 paper could not
-     * be read", or empty when nothing is flagged.
+     * "1 from title and abstract · 2 stale · 1 paper could not be read", or
+     * empty when nothing is flagged.
      */
     flagsLine: string;
     /** "Version 12 · history goes back to v7", or empty when unknown. */
@@ -266,7 +264,6 @@ function emptyFields(annotations: number): TableSectionFields {
         columns: 0,
         cells: 0,
         filled: 0,
-        needsReview: 0,
         titleAbstractOnly: 0,
         stale: 0,
         failedRows: 0,
@@ -352,20 +349,17 @@ export function buildTableSectionFields(
     const cells = rows * columns;
 
     let filled = 0;
-    let needsReview = 0;
     let titleAbstractOnly = 0;
     let stale = 0;
     for (const detail of details) {
         if (!detail || detail.system) continue;
         filled += detail.answered ?? 0;
-        needsReview += detail.needs_review ?? 0;
         titleAbstractOnly += detail.title_abstract_only ?? 0;
         stale += detail.stale ?? 0;
     }
     const failedRows = Math.max(0, summary.failed_rows ?? 0);
 
     const flags: string[] = [];
-    if (needsReview) flags.push(`${needsReview} to review`);
     if (titleAbstractOnly) flags.push(`${titleAbstractOnly} from title and abstract`);
     if (stale) flags.push(`${stale} stale`);
     if (failedRows)
@@ -379,7 +373,6 @@ export function buildTableSectionFields(
         columns,
         cells,
         filled,
-        needsReview,
         titleAbstractOnly,
         stale,
         failedRows,

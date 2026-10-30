@@ -443,20 +443,6 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
                     onChange={(e) => onUpdate({ description: e.target.value })}
                 />
             </label>
-            {column.type === 'number' && (
-                <label className="table-card-label">
-                    <span>Unit (optional)</span>
-                    <input
-                        className="table-card-field text-sm"
-                        value={column.unit ?? ''}
-                        placeholder="e.g. participants, USD, %"
-                        aria-label={`Column ${index + 1} unit`}
-                        disabled={disabled}
-                        onKeyDown={keepEnter}
-                        onChange={(e) => onUpdate({ unit: e.target.value })}
-                    />
-                </label>
-            )}
             {column.type === 'select' && (
                 // Not a <label>: it holds several fields and buttons.
                 <div className="table-card-label" role="group" aria-label={`Column ${index + 1} options`}>

@@ -72,7 +72,6 @@ export const TABLE_SPEC_VERSION = 2;
 
 export type ColumnType =
     | "text"
-    | "number"
     | "date"
     | "boolean"
     | "select"
@@ -82,7 +81,6 @@ export type ColumnType =
 /** Column types a filler answers; `reference` and `link` belong to system columns. */
 export const MODEL_COLUMN_TYPES: readonly ColumnType[] = [
     "text",
-    "number",
     "date",
     "boolean",
     "select",
@@ -179,8 +177,6 @@ export interface Column {
      * label as it meets it.
      */
     options?: SelectOption[];
-    /** `number` only: unit shown with the values ("%", "USD"). */
-    unit?: string;
     /** Default true for every type; set false to opt a column out. */
     sortable?: boolean;
     /** Default true. */
@@ -352,12 +348,6 @@ export interface Row {
 export type CellValue =
     /** Inline markdown. */
     | { kind: "text"; text: string }
-    /**
-     * `value` sorts, filters and counts; `display` is the full text to show,
-     * unit included, when the paper's wording says more than the number
-     * ("90% or higher"). Rendered as is.
-     */
-    | { kind: "number"; value: number; display?: string }
     /** ISO `YYYY`, `YYYY-MM` or `YYYY-MM-DD`; sorts lexically. */
     | { kind: "date"; value: string; display?: string }
     | { kind: "boolean"; value: boolean }
@@ -720,7 +710,6 @@ export function cellIdFor(rowId: string, columnId: string): string {
 const VALUE_KINDS_BY_COLUMN_TYPE: Record<ColumnType, readonly CellValueKind[]> =
     {
         text: ["text"],
-        number: ["number"],
         date: ["date"],
         boolean: ["boolean"],
         select: ["select"],
@@ -855,14 +844,14 @@ export function categoriesText(
 /**
  * Alignment of a column's values and its header.
  *
- * Boolean centres (a single glyph); number and date end; everything else
+ * Boolean centres (a single glyph); a date ends; everything else
  * starts. Header and cell, in both the React grid and the HTML snapshot, must
  * call this — a local copy is how they start to disagree.
  */
 export function columnAlign(column: Column): "start" | "end" | "center" {
     if (column.align) return column.align;
     if (column.type === "boolean") return "center";
-    return column.type === "number" || column.type === "date" ? "end" : "start";
+    return column.type === "date" ? "end" : "start";
 }
 
 /** True when the cell holds no answer: unattempted, failed or cleared. */
@@ -917,7 +906,8 @@ export function isStale(
 
 /**
  * The review mark, a fixed rule: a filler answer or blank read from a
- * document, of confidence below high, outside text columns.
+ * document, of confidence below high, outside text columns. Computed for
+ * evaluation and counted by `summarize`; no surface shows it.
  */
 export function needsReview(
     column: Pick<Column, "type">,
@@ -932,36 +922,27 @@ export function needsReview(
     );
 }
 
-// A label opening with the word No, Not or None. The lookahead is Unicode
-// aware, so "Noël" does not read as "No".
-const NEGATIVE_LABEL = /^(?:no|not|none)(?![\p{L}\p{N}_])/iu;
-
 /**
- * Whether a value's passages are headed "Related passages" rather than
- * "Evidence": a yes/no false, or a category label starting with No, Not or
- * None. Chooses the heading only, never a grade or the review mark.
+ * The heading over a cell's passages, by its outcome alone: a blank's
+ * passages are the closest the paper comes; an answer's are its evidence.
  */
-export function readsAsNegative(
-    _column: Pick<Column, "type">,
-    value: CellValue | undefined,
-): boolean {
-    if (value?.kind === "boolean") return value.value === false;
-    if (value?.kind === "select") return NEGATIVE_LABEL.test(value.label ?? "");
-    return false;
+export function evidenceHeading(
+    cell: Cell | undefined,
+): "Evidence" | "Closest passages" {
+    return cell?.outcome === "not_reported" ? "Closest passages" : "Evidence";
 }
 
 /**
- * The heading over a cell's passages. A blank's passages are the closest the
- * paper comes, and a negative answer's are related to it rather than proof.
+ * A filler answer read from a document that cites no passage: shown with its
+ * reasoning and "No passage cited", for the user to judge.
  */
-export function evidenceHeading(
-    column: Pick<Column, "type">,
-    cell: Cell | undefined,
-): "Evidence" | "Related passages" | "Closest passages" {
-    if (cell?.outcome === "not_reported") return "Closest passages";
-    if (cell?.outcome === "answered" && readsAsNegative(column, cell.value))
-        return "Related passages";
-    return "Evidence";
+export function isUncitedAnswer(cell: Cell | undefined): boolean {
+    return (
+        cell?.provenance === "model" &&
+        cell.outcome === "answered" &&
+        (cell.documents?.length ?? 0) > 0 &&
+        (cell.evidence?.length ?? 0) === 0
+    );
 }
 
 /**
@@ -974,8 +955,6 @@ export function cellValueText(value: CellValue | undefined): string {
     switch (value.kind) {
         case "text":
             return stripCitationTags(value.text);
-        case "number":
-            return value.display ?? String(value.value);
         case "date":
             return value.display ?? value.value;
         case "boolean":
@@ -1017,8 +996,6 @@ export interface TableCoverage {
     errorRows: number;
     /** Filler answers read from the title and abstract only, as `summarize` counts them. */
     titleAbstractOnly: number;
-    /** Filler cells with the review mark ({@link needsReview}). */
-    needsReview: number;
 }
 
 export function summarizeCoverage(
@@ -1034,7 +1011,6 @@ export function summarizeCoverage(
         error: 0,
         errorRows: 0,
         titleAbstractOnly: 0,
-        needsReview: 0,
     };
     for (const row of rows) {
         if (row.failure) coverage.errorRows += 1;
@@ -1048,7 +1024,6 @@ export function summarizeCoverage(
             }
             if (cell?.outcome === "answered" && isTitleAbstractOnly(cell))
                 coverage.titleAbstractOnly += 1;
-            if (needsReview(column, cell)) coverage.needsReview += 1;
         }
     }
     return coverage;
@@ -1058,7 +1033,32 @@ export function summarizeCoverage(
 // Sorting
 // ---------------------------------------------------------------------------
 
-type SortKey = number | string | null;
+/**
+ * A text cell's sort key: its prose, lowercased, and the number it opens with
+ * when it opens with one ("1,200" → 1200, "21.9", "10–20" → 10), so a
+ * quantity column sorts as numbers ("9" before "120", "950" before "1,200").
+ */
+export interface TextSortKey {
+    text: string;
+    lead?: number;
+}
+
+// A leading number: thousands groups and a decimal part, or a bare decimal
+// part (".05"), optionally signed.
+const LEADING_NUMBER =
+    /^[-−+]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)/;
+
+function textSortKey(text: string): TextSortKey {
+    const key: TextSortKey = { text: text.toLocaleLowerCase(SORT_LOCALE) };
+    const match = LEADING_NUMBER.exec(text);
+    if (match) {
+        const lead = Number(match[0].replace(/,/g, "").replace("−", "-"));
+        if (Number.isFinite(lead)) key.lead = lead;
+    }
+    return key;
+}
+
+type SortKey = number | string | TextSortKey | null;
 
 /**
  * The locale sorting is pinned to.
@@ -1073,20 +1073,27 @@ type SortKey = number | string | null;
  */
 export const SORT_LOCALE = "en";
 
+/**
+ * Compares text cells: digit runs as numbers ("about 9" before "about 120"),
+ * case and accents aside.
+ */
+const TEXT_COLLATOR = new Intl.Collator(SORT_LOCALE, {
+    numeric: true,
+    sensitivity: "base",
+});
+
 /** Sort key of a cell; `null` means empty and sorts last in either direction. */
 export function cellSortKey(cell: Cell | undefined): SortKey {
     const value = cell?.value;
     if (!value) return null;
     switch (value.kind) {
-        case "number":
-            return Number.isFinite(value.value) ? value.value : null;
         case "boolean":
             return value.value ? 1 : 0;
         case "date":
             return value.value;
         case "text":
             // Sorted on the prose, not on the markup wrapped around it.
-            return stripCitationTags(value.text).toLocaleLowerCase(SORT_LOCALE);
+            return textSortKey(stripCitationTags(value.text));
         case "select":
             return value.label.toLocaleLowerCase(SORT_LOCALE);
         case "reference":
@@ -1122,11 +1129,30 @@ export function compareSortKeys(
     if (a === null && b === null) return 0;
     if (a === null) return 1;
     if (b === null) return -1;
+    const text = (key: Exclude<SortKey, null>) =>
+        typeof key === "object" ? key.text : String(key);
     const cmp =
         typeof a === "number" && typeof b === "number"
             ? a - b
-            : String(a).localeCompare(String(b), SORT_LOCALE);
+            : typeof a === "object" && typeof b === "object"
+              ? compareText(a, b)
+              : text(a).localeCompare(text(b), SORT_LOCALE);
     return direction === "desc" ? -cmp : cmp;
+}
+
+/**
+ * Two text cells, numeric-aware. Answers that open with a number come first,
+ * by that number (the collator alone would put "1,200" before "950" and "1.5"
+ * before "1.25"), then by the collator; every other answer follows, by the
+ * collator. Grouping first keeps the order total: mixing the number and the
+ * collator across groups would let "+10" < "<2" < "2" < "+10".
+ */
+function compareText(a: TextSortKey, b: TextSortKey): number {
+    const aLead = a.lead !== undefined;
+    const bLead = b.lead !== undefined;
+    if (aLead !== bLead) return aLead ? -1 : 1;
+    if (aLead && bLead && a.lead !== b.lead) return a.lead! - b.lead!;
+    return TEXT_COLLATOR.compare(a.text, b.text);
 }
 
 /**
@@ -1155,9 +1181,9 @@ export function sortRows(spec: TableSpec, sort: TableSort | undefined): Row[] {
 // ---------------------------------------------------------------------------
 
 export type Filter =
-    /** Case-insensitive substring match on the value's text form. */
+    /** Case-insensitive substring match on the value's text form (text and number columns). */
     | { column_id: string; kind: "contains"; text: string }
-    /** Inclusive range on number or date values; either bound may be open. */
+    /** Inclusive range on date values; either bound may be open. */
     | {
           column_id: string;
           kind: "range";
@@ -1180,10 +1206,7 @@ function matchesFilter(cell: Cell | undefined, filter: Filter): boolean {
                 .toLocaleLowerCase()
                 .includes(filter.text.toLocaleLowerCase());
         case "range": {
-            const key =
-                value.kind === "number" || value.kind === "date"
-                    ? value.value
-                    : null;
+            const key = value.kind === "date" ? value.value : null;
             if (key == null) return false;
             if (filter.min != null && compareSortKeys(key, filter.min) < 0)
                 return false;
@@ -1464,6 +1487,9 @@ export interface TableSpecIssue {
 /** Issues no write may introduce: the engine rejects a batch whose result has one. */
 export const WRITE_BLOCKING_ISSUES: ReadonlySet<TableSpecIssue["code"]> =
     new Set<TableSpecIssue["code"]>([
+        // A column of an unsupported type (a `number` column) or without a
+        // text header: the backend's spec model refuses it as well.
+        "invalid_column_definition",
         "invalid_cell",
         "invalid_row",
         "duplicate_source_id",
@@ -1740,18 +1766,6 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
             if (!value) continue;
 
             if (
-                value.kind === "number" &&
-                (typeof value.value !== "number" ||
-                    !Number.isFinite(value.value))
-            ) {
-                issues.push({
-                    code: "invalid_cell_value",
-                    row_id: row.id,
-                    column_id: columnId,
-                    message: "A numeric answer must be finite.",
-                });
-            }
-            if (
                 !VALUE_KINDS_BY_COLUMN_TYPE[column.type]?.includes(value.kind)
             ) {
                 issues.push({
@@ -1799,11 +1813,10 @@ function evidenceLine(evidence: Evidence): string {
 
 /**
  * RFC 4180 CSV of the table: one header row of column headers, then one row per
- * table row in the given order. A number is written as its value, with the
- * paper's wording (`display`) in its own column. Companion fields carry each
- * cell's evidence, its reasoning, the filler's confidence and its state; a
+ * table row in the given order.
+ * Companion fields carry each cell's evidence, its reasoning and its state; a
  * companion column empty in every row is omitted. Formula-like values are
- * escaped.
+ * escaped. The filler's stored confidence is not exported.
  */
 export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
     const fields = rows.map((row) =>
@@ -1813,15 +1826,9 @@ export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
             return [
                 cell?.outcome === "not_reported"
                     ? "Not reported"
-                    : value?.kind === "number"
-                      ? // The number itself, so the sheet can sort and sum it;
-                        // the paper's wording goes in its own column.
-                        String(value.value)
-                      : cellValueText(value),
-                value?.kind === "number" ? (value.display ?? "") : "",
+                    : cellValueText(value),
                 (cell?.evidence ?? []).map(evidenceLine).join("\n"),
                 cell?.reasoning ?? "",
-                cell?.confidence ?? "",
                 [
                     cell && cell.outcome !== "answered" ? cell.outcome : "",
                     cell?.error ?? "",
@@ -1836,14 +1843,7 @@ export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
     );
     // A companion column that is empty in every row is left out: it would only
     // widen the sheet. The value column is always written.
-    const suffixes = [
-        "",
-        " — as reported",
-        " — evidence",
-        " — reasoning",
-        " — confidence",
-        " — state",
-    ];
+    const suffixes = ["", " — evidence", " — reasoning", " — state"];
     const kept = spec.columns.map((_, ci) =>
         suffixes.map(
             (_, fi) => fi === 0 || fields.some((row) => row[ci][fi] !== ""),
@@ -1852,7 +1852,9 @@ export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
     const pick = (values: string[][]) =>
         values.flatMap((group, ci) => group.filter((_, fi) => kept[ci][fi]));
     const header = pick(
-        spec.columns.map((c) => suffixes.map((suffix) => c.header + suffix)),
+        spec.columns.map((c) =>
+            suffixes.map((suffix) => c.header + suffix),
+        ),
     )
         .map(csvEscape)
         .join(",");

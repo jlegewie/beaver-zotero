@@ -20,8 +20,7 @@
             {
                 "id": "n",
                 "header": "Sample",
-                "type": "number",
-                "unit": "participants",
+                "type": "text",
                 "description": "How many participants?"
             },
             {
@@ -74,8 +73,8 @@
                         "outcome": "answered",
                         "provenance": "model",
                         "value": {
-                            "kind": "number",
-                            "value": 120
+                            "kind": "text",
+                            "text": "120"
                         },
                         "documents": [
                             "u-PDF1"
@@ -311,7 +310,7 @@
                 "title_abstract_only": 2
             },
             "n": {
-                "type": "number",
+                "type": "text",
                 "answered": 1,
                 "not_reported": 2,
                 "failed": 0,
@@ -319,7 +318,7 @@
                 "unattempted": 0,
                 "in_failed_rows": 2,
                 "stale": 0,
-                "needs_review": 2,
+                "needs_review": 0,
                 "title_abstract_only": 0
             },
             "costs": {
