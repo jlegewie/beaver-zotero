@@ -152,7 +152,7 @@ export async function executeRequest(
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: String(error),
+            error: typeof (error as Error)?.message === 'string' ? (error as Error).message : String(error),
             error_code: (error as { code?: string }).code ?? 'execution_failed',
             result_data: {
                 started_at: startTime,
@@ -199,7 +199,7 @@ export async function handleAgentActionExecuteRequest(
     } catch (error) {
         return {
             type: 'agent_action_execute_response', request_id: request.request_id,
-            success: false, error: String(error),
+            success: false, error: typeof (error as Error)?.message === 'string' ? (error as Error).message : String(error),
             error_code: (error as { code?: string }).code ?? 'execution_failed',
         };
     }
