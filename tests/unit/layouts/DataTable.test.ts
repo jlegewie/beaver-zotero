@@ -37,7 +37,7 @@ const spec: TableSpec = {
         {
             id: "cites",
             header: "Citations",
-            type: "number",
+            type: "text",
             priority: "primary",
         },
         {
@@ -74,7 +74,7 @@ const spec: TableSpec = {
                         subtitle: "Alpha",
                     },
                 },
-                cites: answered({ kind: "number", value: 120 }),
+                cites: answered({ kind: "text", text: "120" }),
                 type: answered({ kind: "select", label: "Article" }),
                 oa: answered({ kind: "boolean", value: true }),
                 methods: {
@@ -109,7 +109,7 @@ const spec: TableSpec = {
                     provenance: "system",
                     value: { kind: "reference", display_name: "Jones 2018" },
                 },
-                cites: answered({ kind: "number", value: 7 }),
+                cites: answered({ kind: "text", text: "7" }),
                 type: answered({ kind: "select", label: "Book" }),
                 oa: answered({ kind: "boolean", value: false }),
                 methods: { outcome: "not_reported", provenance: "model", documents: ["u-ATTACH02"] },
@@ -616,7 +616,7 @@ describe("DataTable", () => {
         ).not.toBeNull();
     });
 
-    it("marks answers to review, stale, from title and abstract and user-owned cells", () => {
+    it("marks stale, title-and-abstract and user-owned cells, and never a review mark", () => {
         const text = (value: string): CellValue => ({
             kind: "text",
             text: value,
@@ -627,16 +627,16 @@ describe("DataTable", () => {
             id: "states",
             columns: [
                 { id: "m", header: "Methods", type: "text" },
-                { id: "n", header: "Sample", type: "number" },
+                { id: "n", header: "Sample", type: "text" },
             ],
             rows: [
                 {
                     id: "review",
                     documents: ["u-DOC1"],
                     cells: {
-                        // Below high marks a number, never prose.
+                        // Stored confidence is shown nowhere.
                         m: read(text("Survey"), { confidence: "low" }),
-                        n: read({ kind: "number", value: 40 }, { confidence: "medium" }),
+                        n: read({ kind: "text", text: "40" }, { confidence: "medium" }),
                     },
                 },
                 {
@@ -686,10 +686,9 @@ describe("DataTable", () => {
             container!.querySelector(`[id="${rowId}/${column}"]`)!;
 
         expect(cell("review").textContent).toBe("Survey");
-        expect(cell("review", "n").textContent).toBe("40 · To review");
-        expect(cell("review", "n").querySelector(".bt-review")?.getAttribute("title")).toBe(
-            "Beaver is not confident in this answer; check it against the paper",
-        );
+        expect(cell("review", "n").textContent).toBe("40");
+        expect(container!.querySelector(".bt-review")).toBeNull();
+        expect(container!.textContent).not.toContain("To review");
         expect(cell("medium").textContent).toBe("Cohort");
         expect(cell("stale").textContent).toBe("Panel · Stale");
         expect(cell("stale").querySelector(".bt-stale")?.getAttribute("title")).toBe("The question changed");
@@ -710,7 +709,7 @@ describe("DataTable", () => {
         expect(cell("blanked").textContent).toBe("Not reported · Edited by you");
     });
 
-    it("heads a no's passages as related and a blank's as the closest, after the reason", () => {
+    it("heads an answer's passages as evidence and a blank's as the closest, after the reason, and says when an answer cites none", () => {
         const table: TableSpec = {
             id: "negatives",
             columns: [
@@ -764,11 +763,14 @@ describe("DataTable", () => {
             );
         expect(parts(rctDetail)).toEqual([
             "No randomisation is described.",
-            "Related passages",
+            "Evidence",
             expect.stringContaining("“Participants chose a group.”"),
         ]);
-        // An uncited no shows only its reason.
+        // An answer that cites nothing shows its reason and says so.
         expect(parts(blindedDetail)).toEqual(["Blinding is never mentioned."]);
+        expect(blindedDetail.querySelector(".bt-uncited")?.textContent).toBe("No passage cited");
+        expect(rctDetail.querySelector(".bt-uncited")).toBeNull();
+        expect(funderDetail.querySelector(".bt-uncited")).toBeNull();
         expect(parts(funderDetail)).toEqual([
             "No funding statement.",
             "Closest passages",
@@ -776,29 +778,10 @@ describe("DataTable", () => {
         ]);
     });
 
-    it("shows a number's display text as is, and the unit only beside a bare number", () => {
-        const table: TableSpec = {
-            id: "numbers",
-            columns: [{ id: "share", header: "Share", type: "number", unit: "%" }],
-            rows: [
-                { id: "worded", cells: { share: answered({ kind: "number", value: 90, display: "90% or higher" }) } },
-                { id: "bare", cells: { share: answered({ kind: "number", value: 12 }) } },
-            ],
-        };
-        mount(React.createElement(DataTable, { table }));
-        const worded = container!.querySelector('[id="worded/share"]')!;
-        expect(worded.textContent).toBe("90% or higher");
-        // One ellipsised line in the grid, the whole text in its tooltip.
-        expect(worded.querySelector(".bt-nowrap .bt-number")?.getAttribute("title")).toBe("90% or higher");
-        expect(worded.querySelector(".bt-unit")).toBeNull();
-        expect(container!.querySelector('[id="bare/share"] .bt-unit')?.textContent).toBe("%");
-        expect(container!.querySelector('[id="bare/share"] .bt-number')?.hasAttribute("title")).toBe(false);
-    });
-
     it("sets a cited table row's caption and header rows above its quote", () => {
         const table: TableSpec = {
             id: "context",
-            columns: [{ id: "share", header: "Share", type: "number" }],
+            columns: [{ id: "share", header: "Share", type: "text" }],
             rows: [
                 {
                     id: "r",
@@ -808,7 +791,7 @@ describe("DataTable", () => {
                             outcome: "answered",
                             provenance: "model",
                             documents: ["u-DOC1"],
-                            value: { kind: "number", value: 41 },
+                            value: { kind: "text", text: "41" },
                             evidence: [
                                 {
                                     document: "u-DOC1",
@@ -1168,8 +1151,8 @@ describe("DataTable — density, columns and expansion", () => {
             .querySelector("table.bt-table")!
             .getAttribute("style")!;
         // Every column contributes, including a floor for the flexible one.
-        // rail 3.2 + anchor 20 + number 8 ("Citations") + select 9.5
+        // rail 3.2 + anchor 20 + text 14 ("Citations") + select 9.5
         // + boolean 9 ("Open access") + text 14: short columns fit their header.
-        expect(style).toContain("63.7rem");
+        expect(style).toContain("69.7rem");
     });
 });

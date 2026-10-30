@@ -940,12 +940,6 @@
     white-space: nowrap;
 }
 
-.beaver-root .bt-unit {
-    margin-left: 0.15rem;
-    color: var(--fill-tertiary);
-    font-size: 0.8em;
-}
-
 /* Cell text is rendered by the client's markdown component, which wraps its
    output in blocks. Inside a clamped cell those must not add their own spacing,
    or the row height stops matching the line count it was measured against. */
@@ -1342,6 +1336,12 @@
     overflow-wrap: anywhere;
 }
 
+/* An answer whose locators resolved to no passage: muted, for the reader to judge. */
+.beaver-root .bt-uncited {
+    color: var(--fill-tertiary);
+    font-size: 0.82rem;
+}
+
 .beaver-root .bt-details-list {
     margin: 0;
     padding-left: 1.1rem;
@@ -1417,12 +1417,6 @@
 }
 
 .beaver-root .bt-title-abstract {
-    color: var(--tag-orange-primary);
-    font-weight: 500;
-}
-
-/* The review mark: an answer the filler was not confident in. */
-.beaver-root .bt-review {
     color: var(--tag-orange-primary);
     font-weight: 500;
 }

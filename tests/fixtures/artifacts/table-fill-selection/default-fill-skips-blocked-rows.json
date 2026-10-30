@@ -20,8 +20,7 @@
             {
                 "id": "n",
                 "header": "Sample",
-                "type": "number",
-                "unit": "participants",
+                "type": "text",
                 "description": "How many participants?"
             },
             {
@@ -202,8 +201,8 @@
                     "n": {
                         "outcome": "failed",
                         "provenance": "model",
-                        "error_code": "no_support",
-                        "error": "The no answer gave no reason or passage to rest on."
+                        "error_code": "no_answer",
+                        "error": "No answer could be produced."
                     },
                     "costs": {
                         "outcome": "answered",

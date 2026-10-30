@@ -189,8 +189,6 @@ export function TableFooter({
     if (coverage.error > 0) parts.push(`${coverage.error} failed`);
     if (coverage.titleAbstractOnly > 0)
         parts.push(`${coverage.titleAbstractOnly} from title and abstract`);
-    if (coverage.needsReview > 0)
-        parts.push(`${coverage.needsReview} to review`);
     if (coverage.errorRows > 0)
         parts.push(
             `${coverage.errorRows} ${coverage.errorRows === 1 ? "paper" : "papers"} could not be read`,

@@ -64,7 +64,8 @@ export interface TableCardSource {
     resolved?: TableCardResolved | null;
 }
 
-export type TableCardColumnType = 'text' | 'number' | 'date' | 'boolean' | 'select';
+/** A question's type; a quantity is a text question that names its unit. */
+export type TableCardColumnType = 'text' | 'date' | 'boolean' | 'select';
 
 /** A select category on the card: its label and, optionally, its definition. */
 export interface TableCardOption {
@@ -81,8 +82,6 @@ export interface TableCardColumn {
     description?: string | null;
     /** Select options. */
     options?: TableCardOption[] | null;
-    /** Number unit. */
-    unit?: string | null;
 }
 
 export interface TableCardDestination {

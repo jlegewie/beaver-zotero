@@ -78,10 +78,9 @@
     "columns": [
       {
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants took part?",
-        "options": null,
-        "unit": null
+        "options": null
       },
       {
         "header": "Design",
@@ -100,8 +99,7 @@
             "label": "Other",
             "description": null
           }
-        ],
-        "unit": null
+        ]
       }
     ],
     "cost": {
@@ -148,7 +146,7 @@
     "columns": [
       {
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants took part?"
       },
       {
@@ -197,7 +195,7 @@
       {
         "id": "sample_size",
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants took part?"
       },
       {
@@ -260,7 +258,7 @@
           "system": true
         },
         "sample_size": {
-          "type": "number",
+          "type": "text",
           "answered": 0,
           "not_reported": 0,
           "failed": 0,
@@ -343,7 +341,7 @@
       {
         "id": "sample_size",
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants took part?"
       },
       {

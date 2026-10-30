@@ -210,8 +210,7 @@
                 {
                     "id": "sample_size",
                     "header": "Sample size",
-                    "type": "number",
-                    "unit": "participants",
+                    "type": "text",
                     "description": "How many participants were analysed?"
                 }
             ]
@@ -264,8 +263,7 @@
             {
                 "id": "sample_size",
                 "header": "Sample size",
-                "type": "number",
-                "unit": "participants",
+                "type": "text",
                 "description": "How many participants were analysed?"
             }
         ],

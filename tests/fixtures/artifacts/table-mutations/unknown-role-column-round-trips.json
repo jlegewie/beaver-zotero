@@ -232,7 +232,7 @@
                 {
                     "id": "sample_size",
                     "header": "Sample size",
-                    "type": "number",
+                    "type": "text",
                     "description": "How many respondents?"
                 }
             ]
@@ -305,7 +305,7 @@
             {
                 "id": "sample_size",
                 "header": "Sample size",
-                "type": "number",
+                "type": "text",
                 "description": "How many respondents?"
             }
         ],

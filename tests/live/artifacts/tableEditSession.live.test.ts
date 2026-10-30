@@ -42,7 +42,7 @@ function tableSpec() {
         columns: [
             { id: 'abstract', header: 'Abstract', type: 'text', description: 'The abstract.' },
             { id: 'summary', header: 'Summary', type: 'text', description: 'What does the paper find?' },
-            { id: 'n', header: 'Sample size', type: 'number', description: 'How many participants?' },
+            { id: 'n', header: 'Sample size', type: 'text', description: 'How many participants?' },
         ],
         rows: Array.from({ length: ROWS }, (_, i) => ({
             id: `r${i}`,
@@ -69,7 +69,7 @@ function commitCells(index: number) {
         const cell =
             column === 'summary'
                 ? { kind: 'text', text: `Finding ${row}: ${sentence(row, 25)}` }
-                : { kind: 'number', value: 100 + row };
+                : { kind: 'text', text: String(100 + row) };
         return {
             row: `r${row}`,
             column,

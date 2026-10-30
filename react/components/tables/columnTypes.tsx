@@ -3,7 +3,6 @@ import type { TableCardColumnType } from '@beaver/agent-core/protocol/tableCardP
 import {
     CalendarIcon,
     CheckmarkCircleIcon,
-    HashtagIcon,
     Icon,
     ListBulletIcon,
     TextIcon,
@@ -14,7 +13,6 @@ type IconComponent = React.ComponentType<React.SVGProps<SVGSVGElement>>;
 /** Question column types in menu order, with the names the table view uses. */
 export const COLUMN_TYPES: { value: TableCardColumnType; label: string; icon: IconComponent }[] = [
     { value: 'text', label: 'Text', icon: TextIcon },
-    { value: 'number', label: 'Number', icon: HashtagIcon },
     { value: 'date', label: 'Date', icon: CalendarIcon },
     { value: 'boolean', label: 'Yes / no', icon: CheckmarkCircleIcon },
     { value: 'select', label: 'Category', icon: ListBulletIcon },

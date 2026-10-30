@@ -102,7 +102,6 @@ export interface UpdateColumnMutation {
     description?: string | null;
     /** Add-only: the list may re-spell and append, never drop a label in use. */
     options?: UpdateColumnOption[] | null;
-    unit?: string | null;
     priority?: "primary" | "secondary" | null;
 }
 
@@ -860,7 +859,6 @@ function updateColumn(
         setOptional(column, "description", mutation.description);
     if (options) applyOptions(draft, column, options);
     else if (mutation.options === null) setOptional(column, "options", null);
-    if (mutation.unit !== undefined) setOptional(column, "unit", mutation.unit);
     if (mutation.priority !== undefined)
         setOptional(column, "priority", mutation.priority);
 
@@ -1288,8 +1286,8 @@ function removeSources(
 // ---------------------------------------------------------------------------
 
 /**
- * Per-column counts, so a header can say "3 to review" without walking the
- * rows. `unattempted` counts only the rows a filler would cover: in-scope rows
+ * Per-column counts, so a header can say "3 not reported" without walking
+ * the rows. `unattempted` counts only the rows a filler would cover: in-scope rows
  * for extraction columns, every row for other question columns; those of rows
  * with a `failure` count as `in_failed_rows` instead. `distribution` is
  * present only where a column has a countable vocabulary.
@@ -1308,7 +1306,11 @@ export interface TableSummaryColumn {
     in_failed_rows: number;
     /** By {@link isStale}: the question or the row's documents changed. */
     stale: number;
-    /** Filler cells with the review mark ({@link needsReview}). */
+    /**
+     * Filler cells with the review mark ({@link needsReview}): kept for
+     * evaluation, shown by no surface and stripped before the chat model
+     * reads a summary.
+     */
     needs_review: number;
     /** Filler answers read from the title and abstract only. */
     title_abstract_only: number;

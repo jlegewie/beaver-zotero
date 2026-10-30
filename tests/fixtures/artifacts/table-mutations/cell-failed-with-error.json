@@ -216,7 +216,7 @@
                     "cell": {
                         "outcome": "failed",
                         "provenance": "model",
-                        "error_code": "no_locator",
+                        "error_code": "no_answer",
                         "error": "No resolvable locator"
                     }
                 }
@@ -421,7 +421,7 @@
                     "method": {
                         "outcome": "failed",
                         "provenance": "model",
-                        "error_code": "no_locator",
+                        "error_code": "no_answer",
                         "error": "No resolvable locator"
                     }
                 },

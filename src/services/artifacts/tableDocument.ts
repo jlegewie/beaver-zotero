@@ -67,10 +67,10 @@ import {
     columnAlign,
     compareSortKeys,
     evidenceHeading,
+    isUncitedAnswer,
     isColumnFilterable,
     isColumnSortable,
     isTitleAbstractOnly,
-    needsReview,
     rowActions,
     rowPrimaryAction,
     selectLabelsInColumn,
@@ -168,7 +168,6 @@ function columnWidth(column: Column, isAnchor: boolean): string {
     switch (column.type) {
         case 'reference':
             return 'minmax(11rem, 1fr)';
-        case 'number':
         case 'date':
             // Wider than the React grid's: the sort control sits in the header
             // here rather than appearing on hover, so the label needs room
@@ -232,22 +231,6 @@ function selectHue(option: SelectOption | undefined): string {
         : 'gray';
 }
 
-/**
- * Grouped digits in a fixed locale rather than the host's.
- *
- * The rendered document is stored and re-read, so it has to be the same
- * everywhere: a bare `toLocaleString()` groups by the install's locale (and in
- * some locales changes the digits themselves), which would make the same spec
- * render differently on two machines.
- */
-function formatNumber(value: number): string | null {
-    // JSON has no NaN or Infinity, so a non-finite value cannot survive a save:
-    // `JSON.stringify` writes it as `null`, and a reloaded table would then
-    // render `null.toLocaleString()`. Treated as no value in both directions,
-    // the way `cellSortKey` already treats it.
-    return Number.isFinite(value) ? value.toLocaleString('en-US') : null;
-}
-
 /** A colour is inlined into a style attribute, so only a hex literal passes. */
 function safeColor(color: string): string | null {
     return /^#[0-9a-f]{3,8}$/i.test(color) ? color : null;
@@ -264,7 +247,6 @@ const STALE_REASON_TEXT: Record<'question' | 'document', string> = {
     question: 'The question changed',
     document: "The paper's document changed",
 };
-const REVIEW_TEXT = 'Beaver is not confident in this answer; check it against the paper';
 
 /**
  * What stopped a row, in a few words: a row with nothing to read (no document
@@ -276,8 +258,8 @@ function rowFailureLabel(failure: RowFailure): string {
 
 /**
  * One cell's value, followed by the markers of its evidence and its state:
- * the review mark, staleness with what changed, an answer from title and
- * abstract, and who edited it. In the expanded row (`detail`) an annotation names only what it is and
+ * staleness with what changed, an answer from title and abstract, and who
+ * edited it. In the expanded row (`detail`) an annotation names only what it is and
  * where it sits: its passage and comment are listed as fields of their own
  * there (`cellExpandedFields`).
  */
@@ -295,7 +277,6 @@ function renderCellValue(
     const state = (text: string, className: string, title?: string): string =>
         `<span class="${className}"${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(text)}</span>`;
     const states = [
-        needsReview(column, cell) ? state('To review', 'bt-review', REVIEW_TEXT) : '',
         stale ? state('Stale', 'bt-stale', STALE_REASON_TEXT[stale]) : '',
         isTitleAbstractOnly(cell) ? state('From title and abstract', 'bt-ta') : '',
         cell.outcome === 'cleared'
@@ -307,7 +288,7 @@ function renderCellValue(
     return html + markers + (states.length ? `<small class="bt-cell-state"> · ${states.join(' · ')}</small>` : '');
 }
 
-/** The tooltip carrying a value's `display` in full, which the grid may cut short. */
+/** The tooltip carrying a date's `display` in full, which the grid may cut short. */
 function displayTitle(display: string | undefined): string {
     return display ? ` title="${escapeHtml(display)}"` : '';
 }
@@ -330,13 +311,6 @@ function renderCellValueInner(
         case 'text':
             return `<span class="bt-clamp">${escapeHtml(stripCitationTags(value.text))}</span>`;
 
-        case 'number': {
-            const shown = value.display ?? formatNumber(value.value);
-            if (shown === null) return '<span class="bt-empty"></span>';
-            return `<span class="bt-num"${displayTitle(value.display)}>${escapeHtml(
-                shown
-            )}${column.unit && !value.display ? `<span class="bt-unit">${escapeHtml(column.unit)}</span>` : ''}</span>`;
-        }
 
         case 'date':
             return `<span class="bt-num"${displayTitle(value.display)}>${escapeHtml(value.display ?? value.value)}</span>`;
@@ -857,16 +831,19 @@ function renderDetail(
         .map((column) => {
             const cell = row.cells[column.id];
             // The answer's reasoning and then its evidence sit under it, the
-            // evidence headed by what its passages are to the value; an
-            // annotation's passage and comment are fields of their own.
+            // evidence headed by the cell's outcome; an answer read from a
+            // document that cites nothing says so. An annotation's passage
+            // and comment are fields of their own.
             const reasoning = cell?.reasoning
                 ? `<div class="bt-d-extra">${escapeHtml(cell.reasoning)}</div>`
                 : '';
             const evidence = cell?.evidence?.length
-                ? `<div class="bt-d-h">${evidenceHeading(column, cell)}</div><ul class="bt-d-list">${cell.evidence
+                ? `<div class="bt-d-h">${evidenceHeading(cell)}</div><ul class="bt-d-list">${cell.evidence
                       .map((entry) => renderEvidenceLine(entry, ''))
                       .join('')}</ul>`
-                : '';
+                : isUncitedAnswer(cell)
+                  ? '<div class="bt-d-uncited">No passage cited</div>'
+                  : '';
             const own = cellExpandedFields(cell)
                 .map(
                     (field) =>
@@ -1006,7 +983,6 @@ export function renderTableHtml(
     if (coverage.error > 0) footerParts.push(`${coverage.error} failed`);
     if (coverage.titleAbstractOnly > 0)
         footerParts.push(`${coverage.titleAbstractOnly} from title and abstract`);
-    if (coverage.needsReview > 0) footerParts.push(`${coverage.needsReview} to review`);
     if (coverage.errorRows > 0)
         footerParts.push(
             `${coverage.errorRows} ${coverage.errorRows === 1 ? 'paper' : 'papers'} could not be read`
@@ -1391,7 +1367,6 @@ export const TABLE_CSS = `
 .bt-num { display: inline-block; max-width: 100%; vertical-align: top; overflow: hidden;
   text-overflow: ellipsis; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bt-d .bt-num { display: inline; white-space: normal; }
-.bt-unit { font-size: 11px; color: var(--t-mut); margin-left: 2px; }
 .bt-clamp { display: -webkit-box; -webkit-line-clamp: var(--lines);
   -webkit-box-orient: vertical; overflow: hidden; color: var(--t-mut); }
 .bt-ref { display: block; min-width: 0; }
@@ -1440,6 +1415,7 @@ export const TABLE_CSS = `
 .bt-d-extra { margin-top: 4px; }
 .bt-d-list { margin: 4px 0 0; padding-left: 18px; }
 .bt-d-h { margin-top: 4px; font-size: 12px; color: var(--t-fade); }
+.bt-d-uncited { margin-top: 4px; font-size: 12px; color: var(--t-fade); }
 .bt-ev-ctx { display: block; font-size: 12px; color: var(--t-fade); }
 .bt-d-actions { margin-top: 10px; }
 /* The citation marker, as the chat renders it: a small raised number that says
@@ -1490,7 +1466,6 @@ html[data-beaver-active] .bt-export { display: inline-block; }
 .bt-wrap .bt-d-err { color: var(--t-warn); margin: 0 0 8px; font-size: 13px; }
 .bt-wrap .bt-yes { color: #1f7a3d; }
 .bt-wrap .bt-no { color: var(--t-fade); }
-.bt-wrap .bt-review { color: #98590c; }
 .bt-r.bt-r-err > .bt-row { box-shadow: inset 3px 0 0 #c0603f; }
 .bt-pill.bt-pill--blue { background: #e8f1fd; color: #1a5aa8; border-color: #cfe0f7; }
 .bt-pill.bt-pill--green { background: #e7f6ec; color: #1f7a3d; border-color: #cbe9d5; }

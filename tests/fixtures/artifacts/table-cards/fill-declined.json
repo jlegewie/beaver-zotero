@@ -22,10 +22,9 @@
     "columns": [
       {
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants?",
-        "options": null,
-        "unit": null
+        "options": null
       },
       {
         "header": "Design",
@@ -40,8 +39,7 @@
             "label": "Observational",
             "description": null
           }
-        ],
-        "unit": null
+        ]
       }
     ],
     "cost": {

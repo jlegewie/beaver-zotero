@@ -213,8 +213,8 @@
                     "cell": {
                         "outcome": "failed",
                         "provenance": "model",
-                        "error_code": "no_locator",
-                        "error": "The answer could not be traced to a passage in the document.",
+                        "error_code": "no_answer",
+                        "error": "No answer could be produced.",
                         "reasoning": "x"
                     }
                 }

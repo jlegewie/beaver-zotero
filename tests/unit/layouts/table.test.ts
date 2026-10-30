@@ -9,8 +9,11 @@ import {
     cellIdFor,
     cellInvariantError,
     cellSortKey,
+    compareSortKeys,
     cellValueText,
     columnAlign,
+    evidenceHeading,
+    isUncitedAnswer,
     defaultHiddenColumnIds,
     filterRows,
     isCellEmpty,
@@ -37,6 +40,7 @@ import {
     summarizeCoverage,
     TABLE_SPEC_VERSION,
     toCsv,
+    toPlainText,
     validateTableSpec,
     type Cell,
     type CellValue,
@@ -62,7 +66,7 @@ const spec: TableSpec = {
     columns: [
         { id: "ref", header: "Reference", type: "reference" },
         { id: "year", header: "Year", type: "date" },
-        { id: "cites", header: "Citations", type: "number" },
+        { id: "cites", header: "Citations", type: "text" },
         {
             id: "type",
             header: "Type",
@@ -83,7 +87,7 @@ const spec: TableSpec = {
                 "system",
             ),
             year: answered({ kind: "date", value: "2020" }, "system"),
-            cites: answered({ kind: "number", value: 120 }),
+            cites: answered({ kind: "text", text: "120" }),
             type: answered({ kind: "select", label: "Article" }),
             oa: answered({ kind: "boolean", value: true }),
             methods: answered({ kind: "text", text: "Survey, n = 1,200" }),
@@ -94,7 +98,7 @@ const spec: TableSpec = {
                 "system",
             ),
             year: answered({ kind: "date", value: "2018-05" }, "system"),
-            cites: answered({ kind: "number", value: 7 }),
+            cites: answered({ kind: "text", text: "7" }),
             type: answered({ kind: "select", label: "Book" }),
             oa: answered({ kind: "boolean", value: false }),
         }),
@@ -360,13 +364,13 @@ describe("defaults", () => {
                 sortable: false,
             }),
         ).toBe(false);
-        expect(isColumnSortable({ id: "n", header: "", type: "number" })).toBe(
+        expect(isColumnSortable({ id: "n", header: "", type: "text" })).toBe(
             true,
         );
     });
 
-    it("right-aligns numbers and dates by default", () => {
-        expect(columnAlign({ id: "n", header: "", type: "number" })).toBe(
+    it("right-aligns dates by default", () => {
+        expect(columnAlign({ id: "d", header: "", type: "date" })).toBe(
             "end",
         );
         expect(columnAlign({ id: "t", header: "", type: "text" })).toBe(
@@ -376,7 +380,7 @@ describe("defaults", () => {
             columnAlign({
                 id: "n",
                 header: "",
-                type: "number",
+                type: "date",
                 align: "start",
             }),
         ).toBe("start");
@@ -405,7 +409,7 @@ describe("defaults", () => {
 });
 
 describe("sortRows", () => {
-    it("sorts numbers numerically and puts empty cells last in both directions", () => {
+    it("sorts a quantity column numerically and puts empty cells last in both directions", () => {
         expect(
             sortRows(spec, { column_id: "cites", direction: "asc" }).map(
                 (r) => r.id,
@@ -416,6 +420,46 @@ describe("sortRows", () => {
                 (r) => r.id,
             ),
         ).toEqual(["a", "b", "c"]);
+    });
+
+    it("sorts every text column numeric-aware, worded answers with the words", () => {
+        const order = (texts: string[]) =>
+            texts
+                .map((text) => answered({ kind: "text", text }))
+                .map((cell) => ({ cell, key: cellSortKey(cell) }))
+                .sort((a, b) => compareSortKeys(a.key, b.key))
+                .map(({ cell }) => (cell.value as { text: string }).text);
+        expect(order(["120", "9", "over 100", "about 4", "10–20", "21.9", "about 12"])).toEqual([
+            "9", "10–20", "21.9", "120", "about 4", "about 12", "over 100",
+        ]);
+        // Thousands groups and decimals compare as numbers.
+        expect(order(["1,200", "950", "12,000,000", "12,500", "1.5", "1.25", "815,383"])).toEqual([
+            "1.25", "1.5", "950", "1,200", "12,500", "815,383", "12,000,000",
+        ]);
+        expect(order(["1", "0.5", ".1", ".05", "+2", "-3", "−4"])).toEqual([
+            "−4", "-3", ".05", ".1", "0.5", "1", "+2",
+        ]);
+        // A total order: answers that open with a number first, by it, then
+        // the rest; every arrival order of the same answers sorts alike.
+        const mixed = ["+10", "<2", "2", "about 4", "≥3", "1,200", "Kenya", ".5"];
+        const expected = [".5", "2", "+10", "1,200", "<2", "≥3", "about 4", "Kenya"];
+        for (let shift = 0; shift < mixed.length; shift++) {
+            const rotated = [...mixed.slice(shift), ...mixed.slice(0, shift)];
+            expect(order(rotated)).toEqual(expected);
+            expect(order([...rotated].reverse())).toEqual(expected);
+        }
+        expect(order(["+10", "<2", "2"])).toEqual(["2", "+10", "<2"]);
+        // Case and accents aside, digit runs as numbers.
+        expect(order(["Study 10", "study 9", "Étude 2", "etude 1"])).toEqual([
+            "etude 1", "Étude 2", "study 9", "Study 10",
+        ]);
+        expect(cellSortKey(answered({ kind: "text", text: "Over 100" }))).toEqual({
+            text: "over 100",
+        });
+        expect(cellSortKey(answered({ kind: "text", text: "1,200" }))).toEqual({
+            text: "1,200",
+            lead: 1200,
+        });
     });
 
     it("sorts ISO dates of mixed precision lexically", () => {
@@ -484,12 +528,18 @@ describe("filterRows", () => {
         ).toEqual(["a"]);
     });
 
-    it("applies inclusive ranges to numbers and dates, excluding empty cells", () => {
+    it("filters a quantity column as text, and ranges only dates", () => {
+        expect(
+            filterRows(spec, [
+                { column_id: "cites", kind: "contains", text: "12" },
+            ]).map((r) => r.id),
+        ).toEqual(["a"]);
+        // A range is for dates: a quantity's text is not compared as a number.
         expect(
             filterRows(spec, [
                 { column_id: "cites", kind: "range", min: 7, max: 119 },
             ]).map((r) => r.id),
-        ).toEqual(["b"]);
+        ).toEqual([]);
         expect(
             filterRows(spec, [
                 { column_id: "year", kind: "range", min: "2020" },
@@ -567,7 +617,7 @@ describe("validateTableSpec", () => {
     it("reports a value kind that disagrees with the column type", () => {
         const bad: TableSpec = {
             id: "t",
-            columns: [{ id: "n", header: "N", type: "number" }],
+            columns: [{ id: "n", header: "N", type: "date" }],
             rows: [row("r", { n: answered({ kind: "text", text: "12" }) })],
         };
         expect(validateTableSpec(bad)).toMatchObject([
@@ -789,7 +839,7 @@ describe("plain text", () => {
                     text: '<citation external_id="W1"/>Zeta',
                 }),
             ),
-        ).toBe("zeta");
+        ).toEqual({ text: "zeta" });
     });
 
     it("does not let a text filter match the citation tags", () => {
@@ -826,7 +876,7 @@ describe("toCsv", () => {
         ]);
     });
 
-    it("writes evidence, reasoning, confidence and state beside the value, escaping formula-like text", () => {
+    it("writes evidence, reasoning and state beside the value, never confidence, escaping formula-like text", () => {
         const table: TableSpec = {
             id: "outcomes",
             columns: [{ id: "a", header: "=Header", type: "text" }],
@@ -894,24 +944,26 @@ describe("toCsv", () => {
         };
         const lines = toCsv(table).split("\r\n");
         expect(lines[0]).toBe(
-            "'=Header,'=Header — evidence,'=Header — reasoning,'=Header — confidence,'=Header — state",
+            "'=Header,'=Header — evidence,'=Header — reasoning,'=Header — state",
         );
-        expect(lines[1]).toBe(",,,,");
+        expect(lines[1]).toBe(",,,");
         expect(lines[2]).toBe(
-            "Not reported,,'=Nothing on sample size,,not_reported; title and abstract; model",
+            "Not reported,,'=Nothing on sample size,not_reported; title and abstract; model",
         );
         expect(lines[3]).toBe(
-            '120 adults,"u-DOC1 s1: The study enrolled ""120"" participants. [Table 1. Sample]\nu-DOC1 s9: 120 adults",,low,stale; model',
+            '120 adults,"u-DOC1 s1: The study enrolled ""120"" participants. [Table 1. Sample]\nu-DOC1 s9: 120 adults",,stale; model',
         );
-        expect(lines[4]).toBe("Not discussed,,,high,model");
-        expect(lines[5]).toBe(",,,,failed; no passage; model");
+        expect(lines[4]).toBe("Not discussed,,,model");
+        expect(lines[5]).toBe(",,,failed; no passage; model");
+        expect(toCsv(table)).not.toMatch(/confidence|\blow\b|\bhigh\b/);
     });
+
 });
 
 describe("anchor column", () => {
     it("prefers the declared anchor, then the first reference column, then the first column", () => {
         const columns: Column[] = [
-            { id: "year", header: "Year", type: "number" },
+            { id: "year", header: "Year", type: "date" },
             { id: "item", header: "Item", type: "reference" },
         ];
         const base: TableSpec = { id: "t", columns, rows: [] };
@@ -1440,8 +1492,42 @@ describe("column progress validation", () => {
     });
 });
 
+describe("column types", () => {
+    it("have no number type: a column of one is not a supported definition", () => {
+        const spec: TableSpec = {
+            id: "t",
+            columns: [{ id: "n", header: "N", type: "number" as never }],
+            rows: [],
+        };
+        expect(validateTableSpec(spec).map((i) => i.code)).toEqual(["invalid_column_definition"]);
+    });
+});
+
+describe("evidence heading and uncited answers", () => {
+    const base = { provenance: "model", documents: ["u-D"] } as const;
+
+    it("heads passages by outcome alone", () => {
+        expect(evidenceHeading({ ...base, outcome: "not_reported" } as Cell)).toBe("Closest passages");
+        for (const value of [
+            { kind: "boolean", value: false },
+            { kind: "select", label: "Not discussed" },
+            { kind: "text", text: "12" },
+        ])
+            expect(evidenceHeading({ ...base, outcome: "answered", value } as Cell)).toBe("Evidence");
+    });
+
+    it("tells a document answer without passages apart", () => {
+        const answer = { ...base, outcome: "answered", value: { kind: "boolean", value: false } } as Cell;
+        expect(isUncitedAnswer(answer)).toBe(true);
+        expect(isUncitedAnswer({ ...answer, evidence: [{ document: "u-D", locator: "s1", quote: "q" }] })).toBe(false);
+        expect(isUncitedAnswer({ ...answer, documents: undefined })).toBe(false);
+        expect(isUncitedAnswer({ ...answer, provenance: "user", documents: undefined })).toBe(false);
+        expect(isUncitedAnswer({ ...base, outcome: "not_reported" } as Cell)).toBe(false);
+    });
+});
+
 describe("coverage", () => {
-    it("separates filled, not-reported, failed, title-and-abstract and to-review cells", () => {
+    it("separates filled, not-reported, failed and title-and-abstract cells, and counts no review mark", () => {
         const spec: TableSpec = {
             id: "t",
             columns: [
@@ -1449,7 +1535,7 @@ describe("coverage", () => {
                 {
                     id: "b",
                     header: "B",
-                    type: "number",
+                    type: "text",
                     description: "What is B?",
                 },
                 { id: "_year", header: "Year", type: "date", system: true },
@@ -1473,7 +1559,7 @@ describe("coverage", () => {
                             error_code: "no_locator",
                             error: "no passage",
                         },
-                        b: answered({ kind: "number", value: 2 }, "model"),
+                        b: answered({ kind: "text", text: "2" }, "model"),
                     },
                 },
                 {
@@ -1491,7 +1577,6 @@ describe("coverage", () => {
             error: 1,
             errorRows: 1,
             titleAbstractOnly: 1,
-            needsReview: 1,
         });
         expect(isTitleAbstractOnly(spec.rows[1].cells.b)).toBe(true);
         expect(isTitleAbstractOnly(spec.rows[0].cells.a)).toBe(false);
@@ -1520,7 +1605,7 @@ describe("coverage", () => {
         ).toBe(false);
     });
 
-    it("marks a filler answer or blank read from a document, below high confidence, outside text columns", () => {
+    it("computes the review mark (kept for evaluation) on a filler answer or blank read from a document, below high confidence, outside text columns", () => {
         const cell = (confidence: string, extra: Record<string, unknown> = {}) =>
             ({
                 outcome: "answered",
@@ -1532,13 +1617,13 @@ describe("coverage", () => {
             }) as Cell;
         expect(needsReview({ type: "boolean" }, cell("medium"))).toBe(true);
         expect(needsReview({ type: "select" }, cell("low"))).toBe(true);
-        expect(needsReview({ type: "number" }, cell("high"))).toBe(false);
+        expect(needsReview({ type: "date" }, cell("high"))).toBe(false);
         expect(needsReview({ type: "text" }, cell("low"))).toBe(false);
         // From title and abstract.
         expect(needsReview({ type: "boolean" }, cell("low", { documents: undefined }))).toBe(false);
         expect(needsReview({ type: "boolean" }, cell("low", { documents: [] }))).toBe(false);
         expect(
-            needsReview({ type: "number" }, cell("medium", { outcome: "not_reported", value: undefined })),
+            needsReview({ type: "date" }, cell("medium", { outcome: "not_reported", value: undefined })),
         ).toBe(true);
         expect(needsReview({ type: "boolean" }, cell("low", { provenance: "user", documents: undefined }))).toBe(false);
         expect(needsReview({ type: "boolean" }, undefined)).toBe(false);

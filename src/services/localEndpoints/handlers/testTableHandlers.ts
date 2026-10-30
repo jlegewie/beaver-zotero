@@ -208,7 +208,7 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
         { id: 'ref', header: 'Item', type: 'reference', priority: 'primary' },
         typeColumn(items),
         { id: 'year', header: 'Year', type: 'date', priority: 'primary' },
-        { id: 'cites', header: 'Citations', type: 'number', priority: 'primary' },
+        { id: 'cites', header: 'Citations', type: 'text', priority: 'primary' },
         {
             id: 'type',
             header: 'Type',
@@ -232,7 +232,7 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
         // Stand-in metrics: the demo is about the rendering, not the numbers.
         row.cells.cites = {
             outcome: 'answered',
-            value: { kind: 'number', value: (i + 1) * 137 },
+            value: { kind: 'text', text: String((i + 1) * 137) },
             provenance: 'system',
         };
         row.cells.type = {
@@ -368,7 +368,7 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
             value: { kind: 'select', label: designs[i % designs.length] },
             provenance: 'model',
             ...(documents ? { documents } : {}),
-            // Every fourth answer is a low-confidence one, so the review mark shows.
+            // Stored for evaluation; no surface shows it.
             confidence: i % 4 === 1 ? 'low' : 'high',
             reasoning: 'Stand-in judgment for the demo.',
         };

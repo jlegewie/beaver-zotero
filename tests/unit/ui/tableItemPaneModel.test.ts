@@ -184,7 +184,7 @@ describe('buildTableSectionFields — dimensions and coverage', () => {
 });
 
 describe('buildTableSectionFields — trust counts', () => {
-    it('sums answers to review, from title and abstract and stale, and rows that could not be read', () => {
+    it('sums answers from title and abstract and stale, and rows that could not be read, never a review count', () => {
         const fields = buildTableSectionFields(
             input({
                 summary: summary({
@@ -198,12 +198,12 @@ describe('buildTableSectionFields — trust counts', () => {
                 }),
             })
         );
-        expect(fields.needsReview).toBe(3);
+        expect('needsReview' in fields).toBe(false);
         expect(fields.titleAbstractOnly).toBe(4);
         expect(fields.stale).toBe(1);
         expect(fields.failedRows).toBe(2);
         expect(fields.flagsLine).toBe(
-            '3 to review · 4 from title and abstract · 1 stale · 2 papers could not be read'
+            '4 from title and abstract · 1 stale · 2 papers could not be read'
         );
     });
 

@@ -966,11 +966,10 @@ describe('TableCard', () => {
 
     it('shows a column\'s type alone in its summary, with removal in the editor', async () => {
         const request = fixture('create-collection-destination');
-        request.columns[0] = { ...request.columns[0], unit: 'participants' };
         render(request);
         await click('Next');
         const first = container.querySelectorAll('.table-card-column')[0];
-        expect(first.querySelector('.table-card-type-tag')?.textContent).toBe('Number');
+        expect(first.querySelector('.table-card-type-tag')?.textContent).toBe('Text');
         expect(first.querySelector('button')).toBeNull();
         const before = container.querySelectorAll('.table-card-column').length;
         await clickElement(first);

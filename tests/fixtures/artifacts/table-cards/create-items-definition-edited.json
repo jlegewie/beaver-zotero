@@ -55,10 +55,9 @@
     "columns": [
       {
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants took part?",
-        "options": null,
-        "unit": null
+        "options": null
       },
       {
         "header": "Design",
@@ -77,8 +76,7 @@
             "label": "Other",
             "description": null
           }
-        ],
-        "unit": null
+        ]
       }
     ],
     "cost": {
@@ -116,7 +114,7 @@
     "columns": [
       {
         "header": "Sample size",
-        "type": "number",
+        "type": "text",
         "description": "How many participants took part?"
       },
       {
