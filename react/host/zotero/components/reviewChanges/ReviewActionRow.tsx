@@ -10,6 +10,7 @@ import {
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
+    refreshMergeProposalsAtom,
     rejectAgentActionsAtom,
     undoAgentActionsAtom,
 } from '../../agentActionExecution';
@@ -81,10 +82,11 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const runId = row.runId;
     const [isProcessing, setIsProcessing] = useState(false);
     const [isUndoError, setIsUndoError] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'refresh' | null>(null);
     const [isHovered, setIsHovered] = useState(false);
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const refreshMergeProposals = useSetAtom(refreshMergeProposalsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const surfaceWindow = useSurfaceWindow();
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
@@ -131,8 +133,11 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             : (getCreateAnnotationsDisplayStatus(firstAction) ?? firstAction.status);
     // A merge or note edit refused because its target changed since the
     // proposal fails the same way on every retry; only a new proposal helps.
+    // A merge can be proposed again from here (Refresh).
+    const isStaleMerge = row.actions.some(isStaleMergeProposal);
+    const showRefresh = isStaleMerge && status === 'error';
     const baseConfig = getStatusConfig(status, row.actions);
-    const config = row.actions.some((action) => isStaleMergeProposal(action) || isStaleNoteEdit(action))
+    const config = isStaleMerge || row.actions.some(isStaleNoteEdit)
         ? { ...baseConfig, showRetry: false }
         : baseConfig;
     const headerIcon = isBusy
@@ -187,6 +192,19 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             setClickedButton(null);
         }
     }, [isDisabled, row, undoAgentActions]);
+
+    const handleRefresh = useCallback(async () => {
+        if (isDisabled) return;
+
+        setIsProcessing(true);
+        setClickedButton('refresh');
+        try {
+            await refreshMergeProposals({ actions: row.actions });
+        } finally {
+            setIsProcessing(false);
+            setClickedButton(null);
+        }
+    }, [isDisabled, row, refreshMergeProposals]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoRetry) {
@@ -388,6 +406,21 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         >
                             {isUndoRetry ? 'Retry Undo' : 'Try Again'}
                         </Button>
+                    )}
+
+                    {showRefresh && (
+                        <Tooltip content="Check the records again and show the current merge for review" showArrow>
+                            <Button
+                                variant="ghost"
+                                icon={RepeatIcon}
+                                onClick={handleRefresh}
+                                disabled={isDisabled}
+                                loading={isBusy && activeButton === 'refresh'}
+                                style={GHOST_BUTTON_STYLE}
+                            >
+                                Refresh
+                            </Button>
+                        </Tooltip>
                     )}
 
                     {config.showReject && (!isBusy || activeButton === 'reject') && (

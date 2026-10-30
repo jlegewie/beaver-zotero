@@ -17,13 +17,22 @@ import {
 } from "../../utils/libraryIdentity";
 
 export class DuplicateError extends Error {
-    constructor(message: string, public readonly code: string) {
+    constructor(
+        message: string,
+        public readonly code: string,
+        /** Structured context for the action record; never item values. */
+        public readonly details?: Record<string, unknown>,
+    ) {
         super(message);
         this.name = "DuplicateError";
     }
 }
-export function duplicateError(message: string, code = "invalid_merge"): DuplicateError {
-    return new DuplicateError(message, code);
+export function duplicateError(
+    message: string,
+    code = "invalid_merge",
+    details?: Record<string, unknown>,
+): DuplicateError {
+    return new DuplicateError(message, code, details);
 }
 export function stableJSON(value: unknown): string {
     if (Array.isArray(value))

@@ -10,3 +10,12 @@ export function undoMergeItemsAction(
 ) {
     return runWindowOperation("undoMergeItemsAction", args);
 }
+/**
+ * A fresh proposal for a merge whose records changed. A read, so it runs here
+ * like the validation it repeats, outside the library mutation queue.
+ */
+export function refreshMergeItemsProposal(
+    ...args: Parameters<typeof operations.refreshMergeProposal>
+) {
+    return operations.refreshMergeProposal(...args);
+}

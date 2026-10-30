@@ -104,6 +104,7 @@ declare namespace Zotero {
         let notePreviews: import("../src/services/notePreviews").NotePreviews;
         let libraryOperations: import("../src/services/libraryOperations").LibraryOperations;
         const deferredCommits: import("../src/services/committedTransaction").DeferredCommits | undefined;
+        const transactionWatch: import("../src/services/openTransaction").OpenTransactionWatch | undefined;
         let itemImport: import("../src/services/itemImport/service").ItemImportService;
         let exporter: import("../src/services/export/instanceExport").InstanceExport;
         let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;
