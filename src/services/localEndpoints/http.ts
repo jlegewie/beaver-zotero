@@ -135,6 +135,10 @@ import {
     handleTestWorkerStatsHttpRequest,
     handleTestWorkerWedgeProbeHttpRequest,
 } from './handlers/testCacheHandlers';
+import {
+    handleTestZoteroFulltextSearchHttpRequest,
+    handleTestZoteroFulltextStateHttpRequest,
+} from './handlers/testFulltextHandlers';
 
 import {
     handleTestItemImportCapabilitiesHttpRequest,
@@ -874,6 +878,11 @@ export function registerEndpoints(): (() => void) | undefined {
         }
         endpoints['/beaver/test/ping'] =
             createEndpoint(handleTestPingHttpRequest);
+
+        endpoints['/beaver/test/zotero-fulltext-search'] =
+            createEndpoint(handleTestZoteroFulltextSearchHttpRequest);
+        endpoints['/beaver/test/zotero-fulltext-state'] =
+            createEndpoint(handleTestZoteroFulltextStateHttpRequest);
 
         endpoints['/beaver/test/cache-metadata'] =
             createEndpoint(handleTestCacheMetadataHttpRequest);

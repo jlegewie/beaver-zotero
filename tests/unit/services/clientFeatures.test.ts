@@ -101,6 +101,8 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // two_page_highlights is declaration-only because it gates a relocation shape
 // the client must apply: a build that predates it refuses a two-page highlight
 // destination, so the backend keeps rejecting those unless it is declared.
+// zotero_fulltext_search is declaration-only because it gates a data request
+// (zotero_fulltext_search_request) an older build has no handler for.
 // underline_annotations is declaration-only because a build that predates it
 // ignores `style` and writes highlights where the user asked for underlines.
 // run_reattach is declaration-only because it commits the client to answering a
@@ -139,6 +141,7 @@ const DECLARATION_ONLY_FEATURES = [
     'underline_annotations',
     'item_import_v2',
     'book_chapters',
+    'zotero_fulltext_search',
     'run_reattach',
     'undelivered_action_ack',
 ];

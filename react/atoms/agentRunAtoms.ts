@@ -1,5 +1,6 @@
 import { mergeItemsChoicesAtom } from './mergeItemsChoices';
 import { getSearchIndexState } from '../../src/services/searchIndexState';
+import { getZoteroFulltextState } from '../../src/services/zoteroFulltext/state';
 import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
 import {
     threadAdmissionAtom,
@@ -2707,11 +2708,16 @@ async function executeWSRequest(
         );
     };
 
-    const searchIndexState = await getSearchIndexState();
+    const [searchIndexState, zoteroFulltextState] = await Promise.all([
+        getSearchIndexState(),
+        getZoteroFulltextState(),
+    ]);
     assertWriter(requestWriter);
     if (clientShutDown || supersededByLiveRun()) return;
     delete request.search_index_state;
     if (searchIndexState) request.search_index_state = searchIndexState;
+    delete request.zotero_fulltext_state;
+    if (zoteroFulltextState) request.zotero_fulltext_state = zoteroFulltextState;
 
     // A run stopped while it was reconnecting holds this one back until the
     // server has its cancel; say so while the new message waits.
