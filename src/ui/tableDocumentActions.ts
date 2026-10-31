@@ -44,9 +44,16 @@ export async function exportTableCsv(
     return PathUtils.filename(picker.file);
 }
 
+/**
+ * The table's local actions: Export CSV, Version history (the retained
+ * versions, and restoring one), and Check / repair. `historyOnly` renders the
+ * version history alone and loads it at once, for the table tab's Version
+ * history panel.
+ */
 export function renderTableDocumentActions(
     doc: Document,
     ref: TableRef,
+    options: { historyOnly?: boolean } = {},
 ): HTMLElement {
     const root = doc.createElement("div");
     const status = doc.createElement("div");
@@ -104,7 +111,7 @@ export function renderTableDocumentActions(
     const versions = doc.createElement("select");
     versions.setAttribute("aria-label", "Retained version");
     versions.hidden = true;
-    const history = action("history", "Version history", async () => {
+    const loadHistory = async () => {
         const entries = await commands().history(ref);
         versions.replaceChildren();
         const choose = doc.createElement("option");
@@ -126,7 +133,8 @@ export function renderTableDocumentActions(
             : writable
               ? "Restoring a retained version creates a new current version."
               : "This library is read-only, so a retained version cannot be restored here.";
-    });
+    };
+    const history = action("history", "Version history", loadHistory);
     const restore = action(
         "restore-version",
         "Restore selected version",
@@ -161,6 +169,11 @@ export function renderTableDocumentActions(
               ? "Content is committed, but local bookkeeping still needs repair. Try again after resolving storage or sync errors."
               : TABLE_REPAIR_SKIPPED;
     });
+    if (options.historyOnly) {
+        root.append(versions, restore, status);
+        void run(loadHistory);
+        return root;
+    }
     root.append(exportButton, history, versions, restore, repair, status);
     return root;
 }

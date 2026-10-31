@@ -10,7 +10,7 @@
  * tell two quotes of one work apart.
  */
 
-import type { Citation, CitationType } from "../types/citations";
+import type { Citation, CitationType, ContentKind } from "../types/citations";
 import {
     locatorValues,
     parseLoc,
@@ -194,6 +194,17 @@ function citationIdFor(row: Row, target: Target, evidence: Evidence): string {
     return `table:${row.id}:${sourceKeyOf(target.resolved)}:${where}:${quoteHash(what)}`;
 }
 
+/** What the caller knows about the evidence's document beyond the row. */
+export interface EvidenceCitationOptions {
+    /**
+     * The kind of document the passage is in (`pdf`, `epub`, `snapshot`, …),
+     * when the caller has looked it up. A table stores no kind, and a citation
+     * without one is read as a PDF, so an EPUB or snapshot passage opens
+     * through its own reader only when this is given.
+     */
+    contentKind?: ContentKind;
+}
+
 /**
  * The chat citation for one evidence entry of a row, or null when the row has
  * no reference to cite.
@@ -201,6 +212,7 @@ function citationIdFor(row: Row, target: Target, evidence: Evidence): string {
 export function citationForEvidence(
     row: Row,
     evidence: Evidence,
+    options: EvidenceCitationOptions = {},
 ): Citation | null {
     const target = targetOf(row, evidence);
     if (!target) return null;
@@ -226,12 +238,16 @@ export function citationForEvidence(
     if (reference?.formatted_citation)
         citation.formatted_citation = reference.formatted_citation;
     if (reference?.item_type) citation.item_type = reference.item_type;
-    if (reference?.content_kind)
-        citation.content_kind =
-            reference.content_kind as Citation["content_kind"];
+    const contentKind =
+        options.contentKind ??
+        (reference?.content_kind as Citation["content_kind"] | undefined);
+    if (contentKind) citation.content_kind = contentKind;
     // The locator's page (`page12`, `s5.6`) when the evidence names no other.
+    // A snapshot has no pages: its passage is found by its text.
     const locatedPage =
-        evidence.page == null ? pageOfLocator(evidence.locator) : undefined;
+        evidence.page == null && contentKind !== "snapshot"
+            ? pageOfLocator(evidence.locator)
+            : undefined;
     // 0-based, like `Evidence.page`.
     const pageIndex =
         evidence.page ?? (locatedPage ? locatedPage - 1 : undefined);
@@ -254,11 +270,15 @@ export function citationForEvidence(
 }
 
 /** Every citation a cell's evidence yields, in order. */
-export function cellCitations(row: Row, columnId: string): Citation[] {
+export function cellCitations(
+    row: Row,
+    columnId: string,
+    options: EvidenceCitationOptions = {},
+): Citation[] {
     const evidence = row.cells[columnId]?.evidence ?? [];
     const citations: Citation[] = [];
     evidence.forEach((entry) => {
-        const citation = citationForEvidence(row, entry);
+        const citation = citationForEvidence(row, entry, options);
         if (citation) citations.push(citation);
     });
     return citations;

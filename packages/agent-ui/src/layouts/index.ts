@@ -14,6 +14,11 @@
 //              with that kind's verbs. This is where "a search result table has
 //              Export and Save, an extraction table has Add column" lives, and
 //              it is the only layer that should grow when a new kind arrives.
+//
+// The research table tab (`research/`) is the exception: its design differs
+// from the shared grid in every part (tags after each answer, a peek, hover
+// cards, an inspector), so it draws its own grid and reuses the view state,
+// row windowing, filter and sort menus and the chat's `Citation` activation.
 
 export { DataTable } from "./DataTable";
 export type { DataTableProps } from "./DataTable";
@@ -72,3 +77,36 @@ export type { SearchResultsTableProps } from "./surfaces/SearchResultsTable";
 
 export { ExtractionTable } from "./surfaces/ExtractionTable";
 export type { ExtractionTableProps } from "./surfaces/ExtractionTable";
+
+export { ResearchTable } from "./research/ResearchTable";
+export type {
+    NewPapersNotice,
+    ResearchTableFocus,
+    ResearchTableProps,
+} from "./research/ResearchTable";
+export { CellInspector } from "./research/CellInspector";
+export type { CellInspectorProps, InspectorView } from "./research/CellInspector";
+export {
+    cellState,
+    cellTags,
+    columnBadges,
+    documentNoun,
+    evidenceTagLabel,
+    inspectorContent,
+    isNewRow,
+    newBadgeText,
+    researchColumns,
+    rowDocumentLine,
+    staleBadgeText,
+    tagDefinition,
+} from "./research/cellModel";
+export type {
+    CellState,
+    CellTag,
+    ColumnBadges,
+    InspectorAnswer,
+    InspectorContent,
+    ResearchColumns,
+    TableDocumentInfo,
+    TableDocuments,
+} from "./research/cellModel";
