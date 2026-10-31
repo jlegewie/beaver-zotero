@@ -82,15 +82,11 @@
       }
     ],
     "cost": {
-      "extraction": {
-        "rows": 2,
-        "documents": 0,
-        "no_input": 2,
-        "upper_bound": false
-      },
-      "screening": null,
-      "credits": null,
-      "estimate_id": "00000000-0000-4000-8000-0000000000e1"
+      "rows": 2,
+      "documents": 0,
+      "title_abstract": 0,
+      "no_input": 2,
+      "credits": 0.0
     },
     "user_instructions_prefill": "",
     "timeout_seconds": 600.0
@@ -137,8 +133,7 @@
           }
         ]
       }
-    ],
-    "estimate_id": "00000000-0000-4000-8000-0000000000e1"
+    ]
   },
   "record": {
     "reference": {

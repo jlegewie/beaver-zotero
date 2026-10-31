@@ -15,6 +15,8 @@ import { MAX_PDF_TIMEOUT_SECONDS } from '../agentDataProvider/timeout';
 import { parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { documentSendable, lookupRowDocuments, rowSendable } from './documentLookup';
 import { InstanceTableFills, type TableFillDeps } from './service';
+import { DEFAULT_FILL_WAIT_MS } from './agentFill';
+import { getPref } from '../../utils/prefs';
 import { tableFillApiClient } from './tableFillApi';
 
 /** The page cap of a document a fill reads, as the backend's own. */
@@ -115,8 +117,14 @@ const deps: TableFillDeps = {
     now: () => Date.now(),
 };
 
+/** The safety deadline of a waiting `fill`, from the `tables.fillWaitSeconds` pref. */
+function fillWaitMs(): number {
+    const seconds = Number(getPref('tables.fillWaitSeconds'));
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_FILL_WAIT_MS;
+}
+
 export function createInstanceTableFills(): InstanceTableFills {
-    return new InstanceTableFills(deps);
+    return new InstanceTableFills(deps, undefined, fillWaitMs);
 }
 
 export type { InstanceTableFills } from './service';

@@ -184,22 +184,9 @@ import {
     clearAllPendingTableCardsAtom,
     removePendingTableCardAtom,
     removePendingTableCardForToolCallAtom,
-    tableCardDraftsAtom,
 } from '@beaver/agent-core/run-state/pendingTableCards';
-import {
-    addTableFillProgressAtom,
-    clearTableFillProgressAtom,
-    removeTableFillProgressAtom,
-} from '@beaver/agent-core/run-state/tableFillProgress';
-import {
-    applyEstimateResult,
-    failEstimate,
-    initialTableCardDraft,
-    startEstimate,
-} from '@beaver/agent-core/run-state/tableCardDraft';
-import { isCreateCard, isFillCard, type WSTableCreateCardRequest } from '@beaver/agent-core/protocol/tableCardProtocol';
-import { watchTableFillCommits } from './tableFillCommits';
-import type { WSTableCardEstimateResult, WSTableCardRequest, WSTableCardResponse, WSTableCardStale, WSTableFillStarted } from '@beaver/agent-core/protocol/tableCardProtocol';
+import { isCreateCard, isFillCard } from '@beaver/agent-core/protocol/tableCardProtocol';
+import type { WSTableCardRequest, WSTableCardResponse, WSTableCardStale } from '@beaver/agent-core/protocol/tableCardProtocol';
 import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
 import { openStoredTable } from '../host/zotero/tables';
 import { readCreditThreshold } from '../utils/creditThreshold';
@@ -1482,7 +1469,6 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
     set(clearAllPendingTableCardsAtom);
-    set(clearTableFillProgressAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
@@ -1510,7 +1496,7 @@ function findToolCallArgs(
 }
 
 /** The tool a call in the run belongs to, or null when the call is not in it. */
-function findToolCallName(run: AgentRun | null, toolCallId: string): string | null {
+export function findToolCallName(run: AgentRun | null, toolCallId: string): string | null {
     if (!run) return null;
     for (const message of run.model_messages) {
         if (message.kind !== 'response') continue;
@@ -1732,8 +1718,7 @@ export function createWSCallbacks(
         set(clearAllPendingCreditConfirmationsAtom);
         set(clearAllPendingBatchApprovalsAtom);
         set(clearAllPendingTableCardsAtom);
-        set(clearTableFillProgressAtom);
-        set(clearRunApprovalPolicyAtom);
+            set(clearRunApprovalPolicyAtom);
 
         // A run that reached `completed` (run_complete processed) but whose
         // terminal `done` never arrived — the socket closed while run_complete
@@ -1967,8 +1952,6 @@ export function createWSCallbacks(
                 // Same for a table card: create_table returns on the backend's
                 // timeout too, and the card must not outlive its call.
                 set(removePendingTableCardForToolCallAtom, toolCallId);
-                // A fill's progress panel ends with the call that ran it.
-                set(removeTableFillProgressAtom, toolCallId);
             }
         },
 
@@ -2128,8 +2111,7 @@ export function createWSCallbacks(
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
             set(clearAllPendingTableCardsAtom);
-            set(clearTableFillProgressAtom);
-            set(clearRunApprovalPolicyAtom);
+                    set(clearRunApprovalPolicyAtom);
         },
 
         onError: (event: WSErrorEvent) => {
@@ -2186,8 +2168,7 @@ export function createWSCallbacks(
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
             set(clearAllPendingTableCardsAtom);
-            set(clearTableFillProgressAtom);
-            set(clearRunApprovalPolicyAtom);
+                    set(clearRunApprovalPolicyAtom);
 
             if (
                 !isThreadConflict(event) &&
@@ -2430,32 +2411,6 @@ export function createWSCallbacks(
                 return;
             }
             set(addPendingTableCardAtom, event);
-        },
-
-        onTableCardEstimateResult: (event: WSTableCardEstimateResult) => {
-            const drafts = store.get(tableCardDraftsAtom);
-            const draft = drafts.get(event.card_id);
-            if (!draft) return;
-            const next = applyEstimateResult(draft, event);
-            if (next === draft) return;
-            const updated = new Map(drafts);
-            updated.set(event.card_id, next);
-            set(tableCardDraftsAtom, updated);
-        },
-
-        onTableFillStarted: (event: WSTableFillStarted) => {
-            logger('WS onTableFillStarted:', { toolcallId: event.toolcall_id, rows: event.rows, table: event.table.key }, 1);
-            watchTableFillCommits();
-            set(addTableFillProgressAtom, event);
-            // "Create and fill": the new table opens in its tab as the fill
-            // starts, behind the selected tab, so the user can watch it fill.
-            if (findToolCallName(store.get(activeRunAtom), event.toolcall_id) === 'create_table') {
-                void openStoredTable(event.table.key, getHostWindow(), { background: true })
-                    .then((outcome) => {
-                        if ('error' in outcome) logger(`WS onTableFillStarted: opening the new table failed: ${outcome.error}`, 1);
-                    })
-                    .catch((error) => logger(`WS onTableFillStarted: opening the new table failed: ${String(error)}`, 1));
-            }
         },
 
         onTableCardStale: (event: WSTableCardStale) => {
@@ -3838,7 +3793,6 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
     set(clearAllPendingTableCardsAtom);
-    set(clearTableFillProgressAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
@@ -3966,7 +3920,6 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
     set(clearAllPendingTableCardsAtom);
-    set(clearTableFillProgressAtom);
     set(clearRunApprovalPolicyAtom);
 });
 
@@ -4301,48 +4254,6 @@ export const sendTableCardResponseAtom = atom(
             logger(`sendTableCardResponseAtom: Table card response for ${response.card_id} was not sent`, 1);
         }
         set(removePendingTableCardAtom, response.card_id);
-    }
-);
-
-/** How long a card waits for its estimate before it shows it failed. */
-const TABLE_CARD_ESTIMATE_TIMEOUT_MS = 20_000;
-let tableCardEstimateSequence = 0;
-
-/**
- * Ask the tool call waiting on a create card for the cost of the card's draft
- * as it is now. The draft is marked pending until the answer lands
- * (`onTableCardEstimateResult`); an estimate that cannot be sent, or that does
- * not come back in time, is marked failed, which keeps the run button
- * disabled while "Create only" stays available. Returns the request id.
- */
-export const requestTableCardEstimateAtom = atom(
-    null,
-    (get, set, card: WSTableCreateCardRequest): string | null => {
-        if (!ownsWriter(currentWriter())) return null;
-        const drafts = get(tableCardDraftsAtom);
-        const draft = drafts.get(card.card_id) ?? initialTableCardDraft(card);
-        const requestId = `estimate-${card.card_id}-${++tableCardEstimateSequence}`;
-        const started = startEstimate(draft, card, requestId);
-        const write = (update: (current: typeof draft) => typeof draft) => {
-            const current = get(tableCardDraftsAtom);
-            const existing = current.get(card.card_id);
-            if (!existing) return;
-            const next = update(existing);
-            if (next === existing) return;
-            const updated = new Map(current);
-            updated.set(card.card_id, next);
-            set(tableCardDraftsAtom, updated);
-        };
-        const next = new Map(drafts);
-        next.set(card.card_id, started.draft);
-        set(tableCardDraftsAtom, next);
-        if (!agentService.sendTableCardEstimate(started.message)) {
-            logger(`requestTableCardEstimateAtom: estimate for ${card.card_id} was not sent`, 1);
-            write((current) => failEstimate(current, requestId));
-            return requestId;
-        }
-        setTimeout(() => write((current) => failEstimate(current, requestId)), TABLE_CARD_ESTIMATE_TIMEOUT_MS);
-        return requestId;
     }
 );
 

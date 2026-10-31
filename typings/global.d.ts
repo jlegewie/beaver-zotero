@@ -76,13 +76,6 @@ declare namespace Zotero {
      */
     let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
     /**
-     * The last commit of each provider `edit` session, so a retried commit
-     * replays. See `tableEditSessions` in `src/services/artifacts/tablesApi.ts`.
-     */
-    let __beaverTableEditSessions:
-        | Map<string, import("../src/services/artifacts/tablesApi").TableEditSessionCommit>
-        | undefined;
-    /**
      * Identifies this run of Zotero. Set once per process and kept across
      * plugin reloads, so a saved record can tell a reload from a restart.
      * See `src/ui/tableTab.ts`.

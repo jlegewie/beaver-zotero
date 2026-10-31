@@ -37,7 +37,7 @@ import {
 } from '@beaver/agent-core/transport/agentService';
 import { reattachWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
-import type { AgentDataProviderMap } from '@beaver/agent-core/transport/agentDataDispatch';
+import type { AgentDataProviderMap, AgentDataRequestContext } from '@beaver/agent-core/transport/agentDataDispatch';
 import type { AgentRunRequest, WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
 
 class MockWebSocket {
@@ -333,6 +333,89 @@ describe('AgentService run reattach', () => {
         const replies = second.sentOfType('agent_action_execute');
         expect(replies).toHaveLength(1);
         expect(replies[0]).toMatchObject({ request_id: 'req-exec', status: 'applied' });
+    });
+
+    it('answers a long fill re-sent after a reattach once, from the handler still running since its first arrival', async () => {
+        let finishFill!: (value: Record<string, unknown>) => void;
+        const contexts: AgentDataRequestContext[] = [];
+        const fill = vi.fn((_event: Record<string, unknown>, context?: AgentDataRequestContext) => {
+            if (context) contexts.push(context);
+            return new Promise<Record<string, unknown>>((resolve) => { finishFill = resolve; });
+        });
+        const provider: AgentDataProviderMap = {
+            artifact_request: { handle: fill, errorResponse: () => ({ type: 'artifact_response', ok: false }) },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const first = await startRun(service, createCallbacks());
+        first.emitMessage({ event: 'thread', thread_id: 'thread-1' });
+        const request = { event: 'artifact_request', request_id: 'req-fill', op: 'fill', plan_id: 'plan-1', tool_call_id: 'call-1', wait: true };
+        first.emitMessage(request);
+        await flush();
+        expect(fill).toHaveBeenCalledTimes(1);
+        // The handler's deadline counts from this first arrival.
+        const firstArrival = contexts[0].receivedAt;
+        expect(contexts[0].run).toEqual({ runId: RUN_ID, threadId: 'thread-1' });
+
+        first.emitClose(1006);
+        await vi.advanceTimersByTimeAsync(30_000);
+        const { socket: second } = await reattach(service);
+        second.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 1, replayed: 0 });
+        // The server re-sends the request it still waits on, with its id.
+        second.emitMessage(request);
+        await flush();
+        expect(fill).toHaveBeenCalledTimes(1);
+        expect(contexts).toHaveLength(1);
+        expect(contexts[0].receivedAt).toBe(firstArrival);
+
+        finishFill({ type: 'artifact_response', request_id: 'req-fill', op: 'fill', ok: true, status: 'done' });
+        await flush();
+        const replies = second.sentOfType('artifact_response');
+        expect(replies).toHaveLength(1);
+        expect(replies[0]).toMatchObject({ request_id: 'req-fill', status: 'done' });
+    });
+
+    it('gives a request its run, and aborts the run-stopped signal when the user stops the run', async () => {
+        const contexts: AgentDataRequestContext[] = [];
+        const provider: AgentDataProviderMap = {
+            artifact_request: {
+                handle: (_event, context) => {
+                    if (context) contexts.push(context);
+                    return new Promise(() => {});
+                },
+                errorResponse: () => ({ type: 'artifact_response', ok: false }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const socket = await startRun(service, createCallbacks());
+        socket.emitMessage({ event: 'thread', thread_id: 'thread-1' });
+        socket.emitMessage({ event: 'artifact_request', request_id: 'req-fill', op: 'fill', plan_id: 'p', tool_call_id: 'c', wait: true });
+        await flush();
+        const signal = contexts[0].runStopped!;
+        expect(signal.aborted).toBe(false);
+        const cancelling = service.cancel();
+        expect(signal.aborted).toBe(true);
+        await vi.advanceTimersByTimeAsync(250);
+        await cancelling;
+    });
+
+    it('does not abort the run-stopped signal when the socket drops', async () => {
+        const contexts: AgentDataRequestContext[] = [];
+        const provider: AgentDataProviderMap = {
+            artifact_request: {
+                handle: (_event, context) => {
+                    if (context) contexts.push(context);
+                    return new Promise(() => {});
+                },
+                errorResponse: () => ({ type: 'artifact_response', ok: false }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const socket = await startRun(service, createCallbacks());
+        socket.emitMessage({ event: 'artifact_request', request_id: 'req-fill', op: 'fill', plan_id: 'p', tool_call_id: 'c', wait: false });
+        await flush();
+        socket.emitClose(1006);
+        await flush();
+        expect(contexts[0].runStopped!.aborted).toBe(false);
     });
 
     it('handles a request whose payload has a field named seq below the run\'s replay position', async () => {

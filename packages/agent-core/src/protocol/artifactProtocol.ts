@@ -1,5 +1,11 @@
 import type { TableSpec } from "../layouts/table";
-import type { SkippedCell, TableMutation, TableSummary } from "../layouts/tableMutations";
+import type { PendingWork } from "../layouts/tableFill";
+import type { TableSummary } from "../layouts/tableMutations";
+import type {
+    TableFillProgress,
+    TableFillResult,
+    TableFillWirePlan,
+} from "./tableFillProtocol";
 
 /** Historical identity observed in a message or tool result. */
 export interface TableReference {
@@ -57,8 +63,14 @@ export interface TableRecordSource {
     rows: number;
 }
 
-/** What one fill call did, for the stage card. Cell counts unless named rows. */
+/**
+ * What the fill a call started did, for the stage card. Cell counts unless
+ * named rows. A fill still running when the call returned (`running`)
+ * carries the counts it had then.
+ */
 export interface TableFillRecord {
+    /** Absent on records of fills that ran inside the chat run: `done`. */
+    status?: 'done' | 'running';
     /** Rows the fill planned. */
     rows: number;
     rows_filled: number;
@@ -67,23 +79,29 @@ export interface TableFillRecord {
      * model gave no answer, or time ran out. Rows without input are apart.
      */
     rows_failed: number;
-    /** Rows left unattempted, by reason: deadline, credits, cancel, stopped. */
+    /**
+     * Rows never started, by reason: stopped, insufficient_credits,
+     * price_changed, account_changed, changed, unavailable, shutdown.
+     */
     rows_not_started: Record<string, number>;
     /** Rows with neither a document nor an abstract (failure `no_source`). */
     rows_without_input: number;
-    /** Rows answered but not written, or whose commit outcome is unknown. */
+    /** Rows answered whose commit did not land. */
     rows_not_written: number;
-    rows_uncertain: number;
+    /** Records of fills that ran inside the chat run only. */
+    rows_uncertain?: number;
     answered: number;
     not_reported: number;
     /** Answered cells read from the title and abstract only. */
     from_title_abstract: number;
-    /** Failed answers (cells). */
-    failed: number;
+    /** Records of fills that ran inside the chat run only: failed answers (cells). */
+    failed?: number;
     /** Cell writes the table refused, by reason. */
     skipped: Record<string, number>;
     documents_read: number;
+    /** The fill's own credits, charged per paper; never part of the run's. */
     credits_charged: number;
+    credits_planned?: number | null;
     /** Why the fill ended early, when it did. */
     stopped_by?: string | null;
     /**
@@ -148,16 +166,21 @@ export interface ArtifactRequest {
     thread_id?: string | null;
     run_ids?: string[] | null;
     /**
-     * `edit`: the commit's position in its session (`operation_id`), from 1.
-     * Not `seq`, which numbers run events on the chat socket.
+     * `fill_plan`: explicit row ids (every question cell of those rows) and
+     * question column ids; absent, the table's pending work.
      */
-    edit_seq?: number | null;
-    /** `edit`: the mutations to commit; `set_cells` and `update_row` only. */
-    mutations?: TableMutation[] | null;
+    rows?: string[] | null;
+    columns?: string[] | null;
+    /** `fill`: the approved plan. */
+    plan_id?: string | null;
+    /** `fill`: the tool call that starts it; one tool call is one job. */
+    tool_call_id?: string | null;
+    /**
+     * `fill`: answer `done` when the job ends (or `running` at the safety
+     * deadline); without it, `running` once the job has started.
+     */
+    wait?: boolean | null;
 }
-
-/** The mutations an `edit` may carry: a fill's cell writes and row updates. */
-export const EDIT_MUTATION_OPS: readonly string[] = ["set_cells", "update_row"];
 
 export interface ArtifactVersion {
     version: number;
@@ -219,8 +242,16 @@ export interface ArtifactResponse {
     trimmed_versions?: number[];
     trimmed_to?: number | null;
     retention_exhausted?: boolean;
-    /** `edit`: the cell writes the commit skipped, with the reason. */
-    skipped?: SkippedCell[];
+    /** The table's pending work beside `summary` (read, create, write, revert). */
+    pending?: PendingWork;
+    /** `fill_plan`. */
+    plan?: TableFillWirePlan;
+    /** `fill`: `done` with `result`, or `running`; both with the job's id and progress. */
+    status?: "done" | "running";
+    /** `fill`, and a `fill_in_progress` refusal: the job. */
+    job_id?: string;
+    progress?: TableFillProgress;
+    result?: TableFillResult;
 }
 
 const contracts: Record<string, [string[], string[]]> = {
@@ -242,10 +273,11 @@ const contracts: Record<string, [string[], string[]]> = {
         ],
         [],
     ],
-    edit: [["key", "operation_id", "edit_seq", "mutations", "meta"], []],
     revert: [["key", "to_version", "meta"], []],
     trim: [["key", "thread_id", "run_ids"], []],
     delete: [["key"], []],
+    fill_plan: [["key"], ["rows", "columns"]],
+    fill: [["plan_id", "tool_call_id", "wait"], []],
 };
 const handle = /^(u|g[1-9]\d*)-[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
 const nonempty = (value: unknown): value is string =>
@@ -308,30 +340,27 @@ export function validateArtifactRequest(
             !/^(u|g[1-9]\d*)$/.test(raw.library_ref))
     )
         return "invalid_request";
-    for (const name of ["thread_id", "operation_id"])
+    for (const name of ["thread_id", "operation_id", "plan_id", "tool_call_id"])
         if (raw[name] != null && !nonempty(raw[name])) return "invalid_request";
+    if (raw.wait != null && typeof raw.wait !== "boolean") return "invalid_request";
+    for (const [name, max] of [["rows", 1000], ["columns", 30]] as const) {
+        const list = raw[name];
+        if (
+            list != null &&
+            (!Array.isArray(list) ||
+                !list.length ||
+                list.length > max ||
+                new Set(list).size !== list.length ||
+                !list.every(nonempty))
+        )
+            return "invalid_request";
+    }
     for (const name of ["expected_version", "to_version"])
         if (
             raw[name] != null &&
             (!Number.isSafeInteger(raw[name]) || (raw[name] as number) < 1)
         )
             return "invalid_request";
-    if (
-        raw.edit_seq != null &&
-        (!Number.isSafeInteger(raw.edit_seq) || (raw.edit_seq as number) < 1)
-    )
-        return "invalid_request";
-    if (
-        raw.mutations != null &&
-        (!Array.isArray(raw.mutations) ||
-            !raw.mutations.length ||
-            !raw.mutations.every(
-                (mutation) =>
-                    object(mutation) &&
-                    EDIT_MUTATION_OPS.includes(mutation.op as string),
-            ))
-    )
-        return "invalid_request";
     if (
         raw.expected_sha256 != null &&
         (typeof raw.expected_sha256 !== "string" ||

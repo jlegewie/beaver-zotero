@@ -1,5 +1,5 @@
 import React from "react";
-import type { TableFillRecord, TableRecordColumn, TableRecordSource } from "@beaver/agent-core/protocol/artifactProtocol";
+import type { TableRecordColumn, TableRecordSource } from "@beaver/agent-core/protocol/artifactProtocol";
 import type { TableView } from "@beaver/agent-core/run-state/toolResultViews";
 import { ColumnOptionChips, ColumnTypeTag } from "../../tables/columnTypes";
 import { sourceKindIcon } from "../../tables/sourceKinds";
@@ -122,23 +122,20 @@ export function formatTableStages(record: TableRecord): string[] {
 
 /** Why rows were left unattempted, as the stage card says it. */
 const NOT_STARTED_REASONS: Record<string, string> = {
+    stopped: "the fill was stopped",
+    insufficient_credits: "out of credits",
+    price_changed: "prices changed",
+    account_changed: "the account changed",
+    changed: "they changed while the fill started",
+    unavailable: "Beaver could not reach its server",
+    shutdown: "Zotero was closed",
+    // Records of fills that ran inside the chat run.
     deadline: "the fill ran out of time",
     credits: "more credits were not approved",
     cancel: "the run was stopped",
-    stopped: "the fill stopped early",
 };
 
-/** The `credits` reason, by how the credit confirmation ended. */
-const CREDIT_CONFIRMATION_REASONS: Record<string, string> = {
-    declined: "more credits were declined",
-    timed_out: "the credit confirmation was not answered in time",
-    unreachable: "the connection closed before the credit confirmation was answered",
-    no_credits: "this run had no credits to spend",
-};
-
-function notStartedReason(reason: string, fill: TableFillRecord): string {
-    if (reason === "credits" && fill.credit_confirmation)
-        return CREDIT_CONFIRMATION_REASONS[fill.credit_confirmation] ?? NOT_STARTED_REASONS.credits;
+function notStartedReason(reason: string): string {
     return NOT_STARTED_REASONS[reason] ?? reason;
 }
 
@@ -148,6 +145,8 @@ const SKIP_REASONS: Record<string, string> = {
     question_changed: "question changed during the fill",
     row_removed: "row removed during the fill",
     column_removed: "column removed during the fill",
+    column_changed: "column changed during the fill",
+    documents_changed: "document changed during the fill",
 };
 
 function formatCredits(credits: number): string {
@@ -156,22 +155,27 @@ function formatCredits(credits: number): string {
 }
 
 /**
- * What the fill in this call did, for a record of a call that ran the filler:
- * rows filled of those planned, rows failed, rows not started and why, rows
- * without a document or abstract, answers from title and abstract, skipped cells, and
- * the credits charged. Empty for a call that ran no fill.
+ * What the fill this call started did: rows filled of those planned, rows
+ * failed, rows not started and why, rows without a document or abstract,
+ * answers from title and abstract, skipped cells, and the fill's credits. A
+ * fill still running when the call returned says so; its progress is in the
+ * panel above the composer. Empty for a call that started no fill.
  */
 export function formatFillLines(record: TableRecord): string[] {
     const fill = record.run === "fill" ? record.fill : null;
     if (!fill) return [];
     const lines: string[] = [];
+    if (fill.status === "running") {
+        lines.push(`Filling ${plural(fill.rows, "row")} in the background`);
+        return lines;
+    }
     lines.push(`Filled ${fill.rows_filled} of ${plural(fill.rows, "row")}`);
     if (fill.rows_failed > 0) lines.push(`${plural(fill.rows_failed, "row")} failed`);
     for (const [reason, rows] of Object.entries(fill.rows_not_started ?? {})) {
         if (rows > 0)
-            lines.push(`${plural(rows, "row")} not started: ${notStartedReason(reason, fill)}`);
+            lines.push(`${plural(rows, "row")} not started: ${notStartedReason(reason)}`);
     }
-    const unsaved = fill.rows_not_written + fill.rows_uncertain;
+    const unsaved = fill.rows_not_written + (fill.rows_uncertain ?? 0);
     if (unsaved > 0) lines.push(`${plural(unsaved, "row")} answered but not confirmed saved`);
     if (fill.rows_without_input > 0)
         lines.push(`${plural(fill.rows_without_input, "row")} without a document or abstract`);
@@ -180,7 +184,7 @@ export function formatFillLines(record: TableRecord): string[] {
     for (const [reason, cells] of Object.entries(fill.skipped ?? {})) {
         if (cells > 0) lines.push(`${plural(cells, "cell")} skipped: ${SKIP_REASONS[reason] ?? reason}`);
     }
-    if (fill.credits_charged > 0) lines.push(`${formatCredits(fill.credits_charged)} charged`);
+    if (fill.credits_charged > 0) lines.push(`Table fill · ${formatCredits(fill.credits_charged)}`);
     return lines;
 }
 

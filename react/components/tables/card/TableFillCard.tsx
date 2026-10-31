@@ -3,7 +3,6 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import type { WSTableCardResponse, WSTableFillCardRequest } from '@beaver/agent-core/protocol/tableCardProtocol';
 import {
-    costLine,
     fillActionLabel,
     initialTableCardDraft,
     setCancelling,
@@ -20,7 +19,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ArrowUpRightIcon, Icon, Spinner, StopStrokeIcon, TableIcon } from '../../icons/icons';
 import { ColumnTypeTag } from '../columnTypes';
 import AutoGrowTextarea from './AutoGrowTextarea';
-import TableCardCreditChip from './TableCardCreditChip';
+import TableCardCostBlock, { useFillPricing } from './TableCardCost';
 
 export interface TableFillCardProps {
     request: WSTableFillCardRequest;
@@ -34,9 +33,10 @@ export interface TableFillCardProps {
 /**
  * The fill card (`fill_table`): the same chrome as the create card with one
  * step and nothing to edit. Title and description, "Open table", the columns
- * being filled, the row line and the cost, and two buttons: Cancel, which asks
- * what Beaver should do instead, and one named for the run ("Fill 180"). It
- * asks for no estimate: nothing on it changes what runs.
+ * being filled, the plan's row line and exact cost with the balance and the
+ * pricing sentence, and two buttons: Cancel, which asks what Beaver should do
+ * instead, and one named for the run ("Fill 46"). Approving approves exactly
+ * the plan it shows: edits made meanwhile can only drop work from it.
  */
 export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop }) => {
     // Cancel view and typed instructions live in the renderer's store, keyed
@@ -55,6 +55,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
             }),
         [cardId, initialDraft, setDrafts],
     );
+    const prices = useFillPricing();
     const [isDecided, setIsDecided] = useState(false);
     const [openMessage, setOpenMessage] = useState('');
     const decidedRef = useRef(false);
@@ -123,11 +124,6 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                     <Icon icon={ArrowUpRightIcon} />
                 </button>
             </div>
-            {request.cost.credits != null && (
-                <div className="table-card-credit-row">
-                    <TableCardCreditChip cost={request.cost} />
-                </div>
-            )}
         </div>
     );
 
@@ -188,7 +184,6 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
         );
     }
 
-    const rowLine = costLine(request.cost);
     const runLabel = fillActionLabel(request);
     return (
         <div className="user-message-display table-card" role="group" aria-label="Proposed fill" aria-live="assertive">
@@ -216,7 +211,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                             </div>
                         ))}
                     </div>
-                    {rowLine && <div className="table-card-cost text-sm font-color-secondary">{rowLine}</div>}
+                    <TableCardCostBlock cost={request.cost} prices={prices} />
                     {openMessage && <div className="text-sm font-color-secondary">{openMessage}</div>}
                 </div>
             </div>
@@ -234,7 +229,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                 <div className="flex-1" />
                 <Button
                     variant="solid"
-                    ariaLabel={`${runLabel} rows`}
+                    ariaLabel={`${runLabel} papers`}
                     onClick={() => decide(true)}
                     disabled={locked}
                     title={disabled ? heldCaption : undefined}

@@ -32,6 +32,7 @@ import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { waitsOnFillAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { PromptOrigin } from '@beaver/agent-core/agents/types';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, backendHighTokenUsageRunsAtom } from '../../atoms/messageUIState';
@@ -87,6 +88,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const runIds = useAtomValue(threadRunIdsAtom);
     const hasWhereToStartRun = useAtomValue(hasWhereToStartRunAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
+    // While the response waits on a table fill, stopping it stops the fill too.
+    const waitsOnFill = useAtomValue(waitsOnFillAtom);
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
@@ -892,13 +895,19 @@ const InputArea: React.FC<InputAreaProps> = ({
                             </Button>
                         </>
                     ) : isPending ? (
-                        <IconButton
-                            icon={StopIcon}
-                            variant="surface"
-                            className="composer-send composer-send-stop"
-                            ariaLabel="Stop generating"
-                            onClick={handleStop}
-                        />
+                        <Tooltip
+                            content={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop response'}
+                            showArrow
+                            singleLine
+                        >
+                            <IconButton
+                                icon={StopIcon}
+                                variant="surface"
+                                className="composer-send composer-send-stop"
+                                ariaLabel={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop generating'}
+                                onClick={handleStop}
+                            />
+                        </Tooltip>
                     ) : (
                         <IconButton
                             icon={ArrowUpLineIcon}

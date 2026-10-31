@@ -229,6 +229,27 @@
             "distribution": {}
           }
         }
+      },
+      "pending": {
+        "rows": 3,
+        "cells": 6,
+        "new_rows": 1,
+        "columns": [
+          {
+            "id": "sample_size",
+            "header": "Sample size",
+            "reason": "changed",
+            "cells": 2
+          },
+          {
+            "id": "design",
+            "header": "Design",
+            "reason": "new",
+            "cells": 3
+          }
+        ],
+        "retry_rows": 0,
+        "blocked_rows": 1
       }
     }
   },
@@ -2453,522 +2474,357 @@
     }
   },
   {
-    "name": "edit-commit",
+    "name": "fill-plan-pending",
     "request": {
       "event": "artifact_request",
-      "request_id": "edit-commit",
-      "op": "edit",
-      "key": "u-ABCDEFGH",
-      "operation_id": "fill-session-1",
-      "edit_seq": 1,
-      "mutations": [
-        {
-          "op": "set_cells",
-          "cells": [
-            {
-              "row": "r1",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "text",
-                  "text": "120"
-                },
-                "documents": [
-                  "u-R1PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-R1PDF",
-                    "locator": "s12-s13",
-                    "quote": "We enrolled 120 pupils.",
-                    "page": 3,
-                    "boxes": [
-                      [
-                        72,
-                        410,
-                        523,
-                        436
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            },
-            {
-              "row": "r2",
-              "column": "design",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "select",
-                  "label": "RCT"
-                },
-                "confidence": "low",
-                "reasoning": "The abstract says randomised."
-              },
-              "question_hash": "0b5e8a7d3c2f1e94"
-            },
-            {
-              "row": "r3",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "not_reported",
-                "provenance": "model"
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            },
-            {
-              "row": "r4",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "failed",
-                "provenance": "model",
-                "error_code": "no_answer",
-                "error": "deadline"
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            }
-          ]
-        }
-      ],
-      "meta": {
-        "actor": "agent",
-        "run_id": "run-1",
-        "thread_id": "thread-1",
-        "change": "Filled table"
-      }
+      "request_id": "fill-plan-pending",
+      "op": "fill_plan",
+      "key": "u-ABCDEFGH"
     },
     "response": {
       "type": "artifact_response",
-      "request_id": "edit-commit",
-      "op": "edit",
+      "request_id": "fill-plan-pending",
+      "op": "fill_plan",
       "ok": true,
-      "version": 5,
-      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "saved": true,
-      "skipped": []
+      "plan": {
+        "plan_id": "plan-1",
+        "rows": 3,
+        "cells": 6,
+        "documents": 2,
+        "document_kinds": {
+          "pdf": 1,
+          "epub": 1
+        },
+        "title_abstract": 1,
+        "no_input": 0,
+        "unavailable": 0,
+        "columns": [
+          "sample_size",
+          "design"
+        ],
+        "credits": 0.45,
+        "prices": {
+          "document": 0.2,
+          "title_abstract": 0.05
+        },
+        "pending": {
+          "rows": 3,
+          "cells": 6,
+          "new_rows": 1,
+          "columns": [
+            {
+              "id": "sample_size",
+              "header": "Sample size",
+              "reason": "changed",
+              "cells": 2
+            },
+            {
+              "id": "design",
+              "header": "Design",
+              "reason": "new",
+              "cells": 3
+            }
+          ],
+          "retry_rows": 0,
+          "blocked_rows": 1
+        },
+        "balance": 12.5,
+        "expires_at": 1793530800000
+      }
     }
   },
   {
-    "name": "edit-skipped-cells",
+    "name": "fill-plan-rows-columns",
     "request": {
       "event": "artifact_request",
-      "request_id": "edit-skipped-cells",
-      "op": "edit",
+      "request_id": "fill-plan-rows-columns",
+      "op": "fill_plan",
       "key": "u-ABCDEFGH",
-      "operation_id": "fill-session-1",
-      "edit_seq": 2,
-      "mutations": [
-        {
-          "op": "set_cells",
-          "cells": [
-            {
-              "row": "r1",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "text",
-                  "text": "120"
-                },
-                "documents": [
-                  "u-R1PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-R1PDF",
-                    "locator": "s12-s13",
-                    "quote": "We enrolled 120 pupils.",
-                    "page": 3,
-                    "boxes": [
-                      [
-                        72,
-                        410,
-                        523,
-                        436
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            },
-            {
-              "row": "r2",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "text",
-                  "text": "120"
-                },
-                "documents": [
-                  "u-R2PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-R2PDF",
-                    "locator": "s12-s13",
-                    "quote": "We enrolled 120 pupils.",
-                    "page": 3,
-                    "boxes": [
-                      [
-                        72,
-                        410,
-                        523,
-                        436
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "question_hash": "ffffffffffffffff"
-            },
-            {
-              "row": "r9",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "text",
-                  "text": "120"
-                },
-                "documents": [
-                  "u-R9PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-R9PDF",
-                    "locator": "s12-s13",
-                    "quote": "We enrolled 120 pupils.",
-                    "page": 3,
-                    "boxes": [
-                      [
-                        72,
-                        410,
-                        523,
-                        436
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            },
-            {
-              "row": "r3",
-              "column": "design",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "text",
-                  "text": "120"
-                },
-                "documents": [
-                  "u-R3PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-R3PDF",
-                    "locator": "s12-s13",
-                    "quote": "We enrolled 120 pupils.",
-                    "page": 3,
-                    "boxes": [
-                      [
-                        72,
-                        410,
-                        523,
-                        436
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            },
-            {
-              "row": "r5",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "text",
-                  "text": "120"
-                },
-                "documents": [
-                  "u-R5PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-R5PDF",
-                    "locator": "s12-s13",
-                    "quote": "We enrolled 120 pupils.",
-                    "page": 3,
-                    "boxes": [
-                      [
-                        72,
-                        410,
-                        523,
-                        436
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            }
-          ]
-        }
+      "rows": [
+        "r1",
+        "r2"
       ],
-      "meta": {
-        "actor": "agent",
-        "run_id": "run-1",
-        "thread_id": "thread-1",
-        "change": "Filled table"
-      }
-    },
-    "response": {
-      "type": "artifact_response",
-      "request_id": "edit-skipped-cells",
-      "op": "edit",
-      "ok": true,
-      "version": 6,
-      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "saved": true,
-      "skipped": [
-        {
-          "row": "r1",
-          "column": "sample_size",
-          "reason": "user_cell"
-        },
-        {
-          "row": "r2",
-          "column": "sample_size",
-          "reason": "question_changed"
-        },
-        {
-          "row": "r9",
-          "column": "sample_size",
-          "reason": "row_removed"
-        },
-        {
-          "row": "r3",
-          "column": "design",
-          "reason": "column_removed"
-        }
+      "columns": [
+        "sample_size"
       ]
-    }
-  },
-  {
-    "name": "edit-replay-last-seq",
-    "request": {
-      "event": "artifact_request",
-      "request_id": "edit-replay-last-seq",
-      "op": "edit",
-      "key": "u-ABCDEFGH",
-      "operation_id": "fill-session-1",
-      "edit_seq": 2,
-      "mutations": [
-        {
-          "op": "set_cells",
-          "cells": [
-            {
-              "row": "r5",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "text",
-                  "text": "120"
-                },
-                "documents": [
-                  "u-R5PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-R5PDF",
-                    "locator": "s12-s13",
-                    "quote": "We enrolled 120 pupils.",
-                    "page": 3,
-                    "boxes": [
-                      [
-                        72,
-                        410,
-                        523,
-                        436
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            }
-          ]
-        }
-      ],
-      "meta": {
-        "actor": "agent",
-        "run_id": "run-1",
-        "thread_id": "thread-1",
-        "change": "Filled table"
-      }
     },
     "response": {
       "type": "artifact_response",
-      "request_id": "edit-replay-last-seq",
-      "op": "edit",
+      "request_id": "fill-plan-rows-columns",
+      "op": "fill_plan",
       "ok": true,
-      "version": 7,
-      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "saved": true,
-      "skipped": [
-        {
-          "row": "r1",
-          "column": "sample_size",
-          "reason": "user_cell"
-        }
-      ],
-      "replayed": true
+      "plan": {
+        "plan_id": "plan-2",
+        "rows": 2,
+        "cells": 2,
+        "documents": 2,
+        "document_kinds": {
+          "pdf": 2
+        },
+        "title_abstract": 0,
+        "no_input": 0,
+        "unavailable": 0,
+        "columns": [
+          "sample_size"
+        ],
+        "credits": 0.4,
+        "prices": {
+          "document": 0.2,
+          "title_abstract": 0.05
+        },
+        "pending": {
+          "rows": 3,
+          "cells": 6,
+          "new_rows": 1,
+          "columns": [
+            {
+              "id": "sample_size",
+              "header": "Sample size",
+              "reason": "changed",
+              "cells": 2
+            },
+            {
+              "id": "design",
+              "header": "Design",
+              "reason": "new",
+              "cells": 3
+            }
+          ],
+          "retry_rows": 0,
+          "blocked_rows": 1
+        },
+        "balance": 12.5,
+        "expires_at": 1793530800000
+      }
     }
   },
   {
-    "name": "edit-older-seq-refused",
+    "name": "fill-plan-unknown-column",
     "request": {
       "event": "artifact_request",
-      "request_id": "edit-older-seq-refused",
-      "op": "edit",
+      "request_id": "fill-plan-unknown-column",
+      "op": "fill_plan",
       "key": "u-ABCDEFGH",
-      "operation_id": "fill-session-1",
-      "edit_seq": 1,
-      "mutations": [
-        {
-          "op": "set_cells",
-          "cells": [
-            {
-              "row": "r1",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "text",
-                  "text": "120"
-                },
-                "documents": [
-                  "u-R1PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-R1PDF",
-                    "locator": "s12-s13",
-                    "quote": "We enrolled 120 pupils.",
-                    "page": 3,
-                    "boxes": [
-                      [
-                        72,
-                        410,
-                        523,
-                        436
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            }
-          ]
-        }
-      ],
-      "meta": {
-        "actor": "agent",
-        "run_id": "run-1",
-        "thread_id": "thread-1",
-        "change": "Filled table"
-      }
+      "columns": [
+        "gone"
+      ]
     },
     "response": {
       "type": "artifact_response",
-      "request_id": "edit-older-seq-refused",
-      "op": "edit",
+      "request_id": "fill-plan-unknown-column",
+      "op": "fill_plan",
       "ok": false,
-      "error_code": "stale_seq",
-      "error": "edit_seq 1 is older than the session's last commit (2)"
+      "conflict": false,
+      "error_code": "unknown_column",
+      "error": "Column gone does not exist."
     }
   },
   {
-    "name": "edit-saved-false",
+    "name": "fill-wait-done",
     "request": {
       "event": "artifact_request",
-      "request_id": "edit-saved-false",
-      "op": "edit",
-      "key": "u-ABCDEFGH",
-      "operation_id": "fill-session-1",
-      "edit_seq": 3,
-      "mutations": [
-        {
-          "op": "set_cells",
-          "cells": [
-            {
-              "row": "r6",
-              "column": "sample_size",
-              "cell": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "text",
-                  "text": "120"
-                },
-                "documents": [
-                  "u-R6PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-R6PDF",
-                    "locator": "s12-s13",
-                    "quote": "We enrolled 120 pupils.",
-                    "page": 3,
-                    "boxes": [
-                      [
-                        72,
-                        410,
-                        523,
-                        436
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "question_hash": "8f2d6c1a9b3e4f70"
-            }
-          ]
-        }
-      ],
-      "meta": {
-        "actor": "agent",
-        "run_id": "run-1",
-        "thread_id": "thread-1",
-        "change": "Filled table"
-      }
+      "request_id": "fill-wait-done",
+      "op": "fill",
+      "plan_id": "plan-1",
+      "tool_call_id": "call-1",
+      "wait": true
     },
     "response": {
       "type": "artifact_response",
-      "request_id": "edit-saved-false",
-      "op": "edit",
+      "request_id": "fill-wait-done",
+      "op": "fill",
       "ok": true,
-      "version": 8,
-      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "saved": false,
-      "skipped": []
+      "status": "done",
+      "job_id": "job-1",
+      "progress": {
+        "state": "done",
+        "rows_total": 3,
+        "rows_done": 3,
+        "rows_failed": 0,
+        "in_flight": 0,
+        "credits_charged": 0.45,
+        "credits_planned": 0.45,
+        "seconds_left": 0
+      },
+      "result": {
+        "rows_answered": 3,
+        "answered": 5,
+        "not_reported": 1,
+        "from_title_abstract": 2,
+        "documents_read": 2,
+        "credits_charged": 0.45,
+        "row_failures": {},
+        "failed_row_ids": [],
+        "not_started": {},
+        "not_written": 0,
+        "skipped_cells": {},
+        "pending": {
+          "rows": 0,
+          "cells": 0,
+          "new_rows": 0,
+          "columns": [],
+          "retry_rows": 0,
+          "blocked_rows": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "fill-wait-deadline-running",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "fill-wait-deadline-running",
+      "op": "fill",
+      "plan_id": "plan-3",
+      "tool_call_id": "call-3",
+      "wait": true
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "fill-wait-deadline-running",
+      "op": "fill",
+      "ok": true,
+      "status": "running",
+      "job_id": "job-3",
+      "progress": {
+        "state": "running",
+        "rows_total": 46,
+        "rows_done": 31,
+        "rows_failed": 1,
+        "in_flight": 3,
+        "credits_charged": 6.0,
+        "credits_planned": 9.2,
+        "seconds_left": 75
+      }
+    }
+  },
+  {
+    "name": "fill-no-wait-running",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "fill-no-wait-running",
+      "op": "fill",
+      "plan_id": "plan-4",
+      "tool_call_id": "call-4",
+      "wait": false
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "fill-no-wait-running",
+      "op": "fill",
+      "ok": true,
+      "status": "running",
+      "job_id": "job-4",
+      "progress": {
+        "state": "running",
+        "rows_total": 46,
+        "rows_done": 0,
+        "rows_failed": 0,
+        "in_flight": 3,
+        "credits_charged": 0,
+        "credits_planned": 9.2,
+        "seconds_left": null
+      }
+    }
+  },
+  {
+    "name": "fill-stopped-partial",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "fill-stopped-partial",
+      "op": "fill",
+      "plan_id": "plan-5",
+      "tool_call_id": "call-5",
+      "wait": true
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "fill-stopped-partial",
+      "op": "fill",
+      "ok": true,
+      "status": "done",
+      "job_id": "job-5",
+      "progress": {
+        "state": "done",
+        "rows_total": 30,
+        "rows_done": 13,
+        "rows_failed": 1,
+        "in_flight": 0,
+        "credits_charged": 2.4,
+        "credits_planned": 6.0,
+        "seconds_left": null
+      },
+      "result": {
+        "rows_answered": 12,
+        "answered": 22,
+        "not_reported": 2,
+        "from_title_abstract": 0,
+        "documents_read": 12,
+        "credits_charged": 2.4,
+        "row_failures": {
+          "encrypted": 1
+        },
+        "failed_row_ids": [
+          "r7"
+        ],
+        "not_started": {
+          "stopped": 17
+        },
+        "not_written": 0,
+        "skipped_cells": {
+          "question_changed": 1
+        },
+        "stopped_by": "stopped",
+        "pending": {
+          "rows": 17,
+          "cells": 34,
+          "new_rows": 17,
+          "columns": [],
+          "retry_rows": 0,
+          "blocked_rows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "fill-in-progress",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "fill-in-progress",
+      "op": "fill",
+      "plan_id": "plan-6",
+      "tool_call_id": "call-6",
+      "wait": true
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "fill-in-progress",
+      "op": "fill",
+      "ok": false,
+      "conflict": false,
+      "error_code": "fill_in_progress",
+      "error": "This table is already being filled.",
+      "job_id": "job-4"
+    }
+  },
+  {
+    "name": "fill-plan-expired",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "fill-plan-expired",
+      "op": "fill",
+      "plan_id": "plan-7",
+      "tool_call_id": "call-7",
+      "wait": false
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "fill-plan-expired",
+      "op": "fill",
+      "ok": false,
+      "conflict": false,
+      "error_code": "plan_expired",
+      "error": "This fill plan has expired. Plan the fill again."
     }
   }
 ]

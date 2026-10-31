@@ -226,7 +226,9 @@ export type TableFillStartError =
     | "table_unavailable"
     | "read_only"
     | "signed_out"
-    | "nothing_to_fill";
+    | "nothing_to_fill"
+    /** A chat run's fill: the user stopped the run before the job started. */
+    | "stopped";
 
 export type TableFillStartResult =
     | { ok: true; job: TableFillJobSnapshot }
@@ -237,6 +239,60 @@ export type TableFillStartResult =
           /** For `fill_in_progress`: the job that holds the table. */
           job_id?: string;
       };
+
+// ---------------------------------------------------------------------------
+// The provider operations `fill_plan` and `fill`
+// ---------------------------------------------------------------------------
+
+/**
+ * A plan as `fill_plan` answers it: the plan summary without the plugin's
+ * local identity of the table (the request named it), plus the question
+ * columns the plan answers.
+ */
+export interface TableFillWirePlan {
+    plan_id: string;
+    rows: number;
+    cells: number;
+    documents: number;
+    document_kinds: TableFillPlanSummary["document_kinds"];
+    title_abstract: number;
+    no_input: number;
+    unavailable: number;
+    /** The question columns the plan answers, in table order. */
+    columns: string[];
+    credits: number;
+    prices: TableFillPricing;
+    pending: PendingWork;
+    balance: number | null;
+    /** Epoch ms. */
+    expires_at: number;
+}
+
+/** A job's progress as `fill` answers it. */
+export interface TableFillProgress {
+    state: TableFillJobState;
+    rows_total: number;
+    rows_done: number;
+    rows_failed: number;
+    in_flight: number;
+    credits_charged: number;
+    credits_planned: number;
+    seconds_left: number | null;
+}
+
+/** The progress counts of a snapshot. */
+export function fillProgress(snapshot: TableFillJobSnapshot): TableFillProgress {
+    return {
+        state: snapshot.state,
+        rows_total: snapshot.rows_total,
+        rows_done: snapshot.rows_done,
+        rows_failed: snapshot.rows_failed,
+        in_flight: snapshot.in_flight,
+        credits_charged: snapshot.credits_charged,
+        credits_planned: snapshot.credits_planned,
+        seconds_left: snapshot.seconds_left,
+    };
+}
 
 /** The runtime notification a job publishes its snapshots on. */
 export const TABLE_FILL_CHANGED_EVENT = "table-fill:changed";

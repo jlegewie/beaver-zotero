@@ -43,15 +43,11 @@
       }
     ],
     "cost": {
-      "extraction": {
-        "rows": 32,
-        "documents": 30,
-        "no_input": 0,
-        "upper_bound": false
-      },
-      "screening": null,
-      "credits": 7.0,
-      "estimate_id": "00000000-0000-4000-8000-0000000000f1"
+      "rows": 32,
+      "documents": 30,
+      "title_abstract": 2,
+      "no_input": 0,
+      "credits": 6.1
     },
     "user_instructions_prefill": "",
     "timeout_seconds": 600.0
@@ -61,7 +57,6 @@
     "card_id": "00000000-0000-4000-8000-0000000000c9",
     "approved": true,
     "choice": "fill",
-    "estimate_id": "00000000-0000-4000-8000-0000000000f1",
     "title": "Comparison",
     "description": "Sample sizes and designs.",
     "sources": [],

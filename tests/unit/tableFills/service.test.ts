@@ -18,6 +18,8 @@ import {
     type TableFillDocumentRead,
 } from "../../../src/services/tableFills/service";
 import type { RowLookup } from "../../../src/services/tableFills/planner";
+import type { ArtifactRequest } from "@beaver/agent-core/protocol/artifactProtocol";
+import type { AgentDataRequestContext } from "@beaver/agent-core/transport/agentDataDispatch";
 
 vi.mock("@beaver/agent-core/platform/logger", () => ({ logger: vi.fn() }));
 
@@ -92,13 +94,16 @@ async function until(check: () => boolean, label = "condition"): Promise<void> {
     throw new Error(`timed out waiting for ${label}`);
 }
 
-function harness(rows: Row[], options: { lookups?: Record<string, RowLookup>; balance?: number | null } = {}) {
+function harness(
+    rows: Row[],
+    options: { lookups?: Record<string, RowLookup>; balance?: number | null; agentWaitMs?: () => number; now?: () => number } = {},
+) {
     const state = {
         table: makeTable(rows),
         generation: 1,
         requests: [] as TableFillRequest[],
         bodies: [] as string[],
-        commits: [] as { mutations: TableMutation[]; meta: Record<string, unknown>; seq: number; operation_id: string }[],
+        commits: [] as { mutations: TableMutation[]; meta: Record<string, unknown> }[],
         snapshots: [] as TableFillJobSnapshot[],
         excluded: new Set<string>(),
         signedIn: true,
@@ -150,14 +155,18 @@ function harness(rows: Row[], options: { lookups?: Record<string, RowLookup>; ba
         },
         publish: (snapshot) => state.snapshots.push(snapshot),
         newId: () => `id-${++id}`,
-        now: () => Date.now(),
+        now: options.now ?? (() => Date.now()),
     };
-    const fills = new InstanceTableFills(deps, {
-        ...DEFAULT_TABLE_FILL_SETTINGS,
-        concurrency: 1,
-        commitSeconds: 3600,
-        retryDelayMs: () => 0,
-    });
+    const fills = new InstanceTableFills(
+        deps,
+        {
+            ...DEFAULT_TABLE_FILL_SETTINGS,
+            concurrency: 1,
+            commitSeconds: 3600,
+            retryDelayMs: () => 0,
+        },
+        options.agentWaitMs,
+    );
     const switchAccount = () => {
         state.generation += 1;
         for (const listener of [...listeners]) listener();
@@ -226,7 +235,7 @@ describe("a fill", () => {
         expect(write.question_hash).toMatch(/^[0-9a-f]{16}$/);
         // Every commit collapses under the job's key.
         expect(new Set(state.commits.map((c) => c.meta.collapse_key))).toEqual(new Set([job.job_id]));
-        expect(state.commits.map((c) => c.seq)).toEqual([1, 2]);
+        expect(state.commits).toHaveLength(2);
         expect(state.requests[0]).toMatchObject({ job_id: job.job_id, row_id: "a", price: 0.2, table: { title: "Trials" }, document: { id: "u-PDFa", kind: "pdf", content: { doc: "u-PDFa" } } });
         expect(deps.account.refreshProfile).toHaveBeenCalledTimes(1);
         // The lease is released.
@@ -850,3 +859,291 @@ describe("shutdown", () => {
 beforeEach(() => {
     vi.clearAllMocks();
 });
+
+describe("a chat run's fill_plan and fill", () => {
+    const RUN = { runId: "run-1", threadId: "thread-1" };
+
+    function request(op: "fill_plan" | "fill", fields: Record<string, unknown>): ArtifactRequest {
+        return { event: "artifact_request", request_id: `${op}-${Math.random()}`, op, ...fields } as ArtifactRequest;
+    }
+
+    function context(overrides: Partial<AgentDataRequestContext> = {}): AgentDataRequestContext {
+        return { receivedAt: Date.now(), reportPhase: vi.fn(), run: RUN, ...overrides };
+    }
+
+    async function plan(fills: InstanceTableFills, fields: Record<string, unknown> = {}) {
+        const answer = await fills.agent.plan(request("fill_plan", { key: "u-TABLE001", ...fields }), TARGET);
+        if (!answer.ok || !answer.plan) throw new Error(answer.error);
+        return answer.plan;
+    }
+
+    it("answers a plan without the plugin's local identity, with the columns it answers", async () => {
+        const { fills } = harness([itemRow("a"), itemRow("b", { cells: { method: { outcome: "answered", provenance: "model", value: { kind: "text", text: "x" }, documents: ["u-PDFb"] } }, documents: ["u-PDFb"] })]);
+        const wire = await plan(fills, { columns: ["method"] });
+        expect(wire).toMatchObject({ rows: 1, documents: 1, columns: ["method"], credits: 0.2, prices: { document: 0.2, title_abstract: 0.05 } });
+        expect(wire).not.toHaveProperty("table");
+        expect(wire).not.toHaveProperty("scope");
+    });
+
+    it("answers a refused plan with its code", async () => {
+        const { fills } = harness([itemRow("a")]);
+        const answer = await fills.agent.plan(request("fill_plan", { key: "u-TABLE001", columns: ["nope"] }), TARGET);
+        expect(answer).toMatchObject({ ok: false, error_code: "unknown_column" });
+    });
+
+    it("with wait, answers done with the result once the job ends, and starts it as the run's", async () => {
+        const { state, fills } = harness([itemRow("a"), itemRow("b")]);
+        const wire = await plan(fills);
+        const answer = await fills.agent.fill(request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }), context());
+        expect(answer).toMatchObject({ ok: true, status: "done", progress: { state: "done", rows_total: 2, rows_done: 2 } });
+        expect(answer.result).toMatchObject({ rows_answered: 2, credits_charged: 0.4 });
+        expect(state.requests[0].run).toEqual({ run_id: "run-1", thread_id: "thread-1", tool_call_id: "call-1" });
+        expect(state.snapshots.at(-1)?.origin).toEqual({ kind: "agent", run: { run_id: "run-1", thread_id: "thread-1", tool_call_id: "call-1" } });
+    });
+
+    it("without wait, answers running as soon as the job has started", async () => {
+        const { state, fills } = harness([itemRow("a"), itemRow("b")]);
+        const held = deferred<void>();
+        state.respond = async (r) => {
+            await held.promise;
+            return answer(r);
+        };
+        const wire = await plan(fills);
+        const answered = await fills.agent.fill(request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: false }), context());
+        expect(answered).toMatchObject({ ok: true, status: "running", progress: { rows_total: 2 } });
+        expect(answered.result).toBeUndefined();
+        held.resolve();
+        await fills.wait(answered.job_id!);
+    });
+
+    it("answers running at the safety deadline, counted from the first arrival, and the job goes on", async () => {
+        let now = 1_000_000;
+        const { state, fills } = harness([itemRow("a")], { agentWaitMs: () => 60_000, now: () => now });
+        const held = deferred<void>();
+        state.respond = async (r) => {
+            await held.promise;
+            return answer(r);
+        };
+        const wire = await plan(fills);
+        // The request first arrived 59.99 s ago on this clock: little of the wait is left.
+        const answered = await fills.agent.fill(
+            request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }),
+            context({ receivedAt: now - 59_990 }),
+        );
+        expect(answered).toMatchObject({ ok: true, status: "running" });
+        expect(fills.getJob(answered.job_id!)?.state).toBe("running");
+        // A re-sent request after a reattach keeps the first arrival: past the deadline, it answers at once.
+        now += 30_000;
+        const again = await fills.agent.fill(
+            request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }),
+            context({ receivedAt: now }),
+        );
+        expect(again).toMatchObject({ ok: true, status: "running", job_id: answered.job_id });
+        held.resolve();
+        const done = await fills.wait(answered.job_id!);
+        expect(done?.state).toBe("done");
+    });
+
+    it("one tool call is one job: a re-sent fill answers from it and never starts another", async () => {
+        const { state, fills } = harness([itemRow("a")]);
+        const wire = await plan(fills);
+        const fill = request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true });
+        const [first, second] = await Promise.all([fills.agent.fill(fill, context()), fills.agent.fill({ ...fill, request_id: "again" }, context())]);
+        expect(first.job_id).toBe(second.job_id);
+        expect(first).toMatchObject({ status: "done" });
+        expect(second).toMatchObject({ status: "done" });
+        expect(state.requests).toHaveLength(1);
+        // Even after the job ended.
+        const third = await fills.agent.fill({ ...fill, request_id: "later" }, context());
+        expect(third).toMatchObject({ ok: true, status: "done", job_id: first.job_id });
+    });
+
+    it("answers a refused start with its code, and fill_in_progress with the holder", async () => {
+        const { state, fills } = harness([itemRow("a")]);
+        const held = deferred<void>();
+        state.respond = async (r) => {
+            await held.promise;
+            return answer(r);
+        };
+        const first = await plan(fills);
+        const second = await plan(fills);
+        const running = await fills.agent.fill(request("fill", { plan_id: first.plan_id, tool_call_id: "call-1", wait: false }), context());
+        const refused = await fills.agent.fill(request("fill", { plan_id: second.plan_id, tool_call_id: "call-2", wait: true }), context());
+        expect(refused).toMatchObject({ ok: false, error_code: "fill_in_progress", job_id: running.job_id });
+        const missing = await fills.agent.fill(request("fill", { plan_id: "gone", tool_call_id: "call-3", wait: true }), context());
+        expect(missing).toMatchObject({ ok: false, error_code: "plan_not_found" });
+        held.resolve();
+        await fills.wait(running.job_id!);
+    });
+
+    it("never answers pending work naming an excluded library's item, even of a column it does not fill", async () => {
+        const answered = { outcome: "answered", provenance: "model", value: { kind: "text", text: "x" }, documents: ["u-PDFa"] } as const;
+        // Row a is answered, so a column added since is pending work by name.
+        const { state, fills } = harness([itemRow("a", { documents: ["u-PDFa"], cells: { method: answered } }), itemRow("b")]);
+        state.table.columns.push({ id: "other", header: "Cited in u-SECRET22", type: "text", description: "?" });
+        state.excluded.add("SECRET22");
+        const refused = await fills.agent.plan(request("fill_plan", { key: "u-TABLE001", columns: ["method"] }), TARGET);
+        expect(refused).toMatchObject({ ok: false, error_code: "table_unavailable" });
+        expect(JSON.stringify(refused)).not.toContain("SECRET22");
+    });
+
+    it("keeps an excluded library's item out of a finished fill's pending work", async () => {
+        const { state, fills } = harness([itemRow("a")]);
+        const wire = await plan(fills);
+        // A column naming an excluded item is added while the fill runs.
+        state.table.columns.push({ id: "other", header: "Cited in u-SECRET22", type: "text", description: "?" });
+        state.excluded.add("SECRET22");
+        const answered = await fills.agent.fill(request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }), context());
+        expect(answered).toMatchObject({ ok: true, status: "done" });
+        expect(answered.result?.pending).toBeNull();
+        expect(JSON.stringify(answered)).not.toContain("SECRET22");
+    });
+
+    it("keeps a failed row id naming an excluded library's item on the device", async () => {
+        const { state, fills } = harness([itemRow("a"), itemRow("u-SECRET22")]);
+        state.respond = async (r) => (r.row_id === "a" ? answer(r) : { cells: {}, row_failure: { code: "no_answer", message: "No answer." }, charged: 0 });
+        const wire = await plan(fills);
+        state.excluded.add("SECRET22");
+        const answered = await fills.agent.fill(request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }), context());
+        expect(answered).toMatchObject({ ok: true, status: "done" });
+        expect(JSON.stringify(answered)).not.toContain("SECRET22");
+    });
+
+    it("answers a replayed fill from its result after the tab dismissed the job", async () => {
+        const { fills } = harness([itemRow("a")]);
+        const wire = await plan(fills);
+        const fill = request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true });
+        const first = await fills.agent.fill(fill, context());
+        fills.dismiss(first.job_id!);
+        expect(fills.getJob(first.job_id!)).toBeNull();
+        const replay = await fills.agent.fill({ ...fill, request_id: "replay" }, context());
+        expect(replay).toMatchObject({ ok: true, status: "done", job_id: first.job_id, request_id: "replay" });
+        expect(replay.result).toEqual(first.result);
+    });
+
+    it("answers a replayed background fill from its result after the tab dismissed the job", async () => {
+        const { state, fills } = harness([itemRow("a")]);
+        const held = deferred<void>();
+        state.respond = async (r) => {
+            await held.promise;
+            return answer(r);
+        };
+        const wire = await plan(fills);
+        const fill = request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: false });
+        const first = await fills.agent.fill(fill, context());
+        expect(first).toMatchObject({ ok: true, status: "running" });
+        held.resolve();
+        await fills.wait(first.job_id!);
+        fills.dismiss(first.job_id!);
+        expect(fills.getJob(first.job_id!)).toBeNull();
+        const replay = await fills.agent.fill({ ...fill, request_id: "replay" }, context());
+        expect(replay).toMatchObject({ ok: true, status: "done", job_id: first.job_id, result: { rows_answered: 1 } });
+        expect(state.requests).toHaveLength(1);
+    });
+
+    it("sends refusals with fixed text, never the service's own message", async () => {
+        const { deps, fills } = harness([itemRow("a")]);
+        deps.readTable = async () => {
+            throw new Error('row "g42-ABCDEFGH" has no cells map');
+        };
+        const refused = await fills.agent.plan(request("fill_plan", { key: "u-TABLE001" }), TARGET);
+        expect(refused).toMatchObject({ ok: false, error_code: "table_unavailable", error: "The table is not available for filling." });
+    });
+
+    it("sends no plan of a table whose library was excluded while it was planned", async () => {
+        const { deps, fills } = harness([itemRow("a")]);
+        const lookup = deps.lookupRows;
+        deps.lookupRows = async (rows) => {
+            deps.writeRefusal = (target) => (target.key === TARGET.key ? "table_unavailable" : null);
+            return lookup(rows);
+        };
+        // The service's own check ran before the lookup; the handler checks again after.
+        const answered = await fills.agent.plan(request("fill_plan", { key: "u-TABLE001" }), TARGET);
+        expect(answered).toMatchObject({ ok: false, error_code: "table_unavailable" });
+        expect(answered.plan).toBeUndefined();
+    });
+
+    it("sends nothing of a table whose library was excluded while it filled", async () => {
+        const { deps, fills } = harness([itemRow("a")]);
+        const wire = await plan(fills);
+        const fill = request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true });
+        await fills.agent.fill(fill, context());
+        deps.writeRefusal = () => "table_unavailable";
+        const replay = await fills.agent.fill({ ...fill, request_id: "replay" }, context());
+        expect(replay).toMatchObject({ ok: false, error_code: "table_unavailable" });
+        expect(replay.result).toBeUndefined();
+    });
+
+    it("starts each approved plan even when a model reuses the tool call id", async () => {
+        const { state, fills } = harness([itemRow("a"), itemRow("b")]);
+        const first = await plan(fills, { rows: ["a"] });
+        const one = await fills.agent.fill(request("fill", { plan_id: first.plan_id, tool_call_id: "functions.fill_table:0", wait: true }), context());
+        const second = await plan(fills, { rows: ["b"] });
+        const two = await fills.agent.fill(
+            request("fill", { plan_id: second.plan_id, tool_call_id: "functions.fill_table:0", wait: true }),
+            context({ run: { runId: "run-2", threadId: "thread-1" } }),
+        );
+        expect(two.job_id).not.toBe(one.job_id);
+        expect(two).toMatchObject({ ok: true, status: "done", result: { rows_answered: 1 } });
+        expect(state.requests.map((r) => r.row_id)).toEqual(["a", "b"]);
+    });
+
+    it("answers a refused start shared by two arrivals with each request's own id", async () => {
+        const { fills } = harness([itemRow("a")]);
+        const fill = request("fill", { plan_id: "gone", tool_call_id: "call-1", wait: true });
+        const [first, second] = await Promise.all([
+            fills.agent.fill(fill, context()),
+            fills.agent.fill({ ...fill, request_id: "again" }, context()),
+        ]);
+        expect(first).toMatchObject({ ok: false, error_code: "plan_not_found", request_id: fill.request_id });
+        expect(second).toMatchObject({ ok: false, error_code: "plan_not_found", request_id: "again" });
+    });
+
+    it("never starts a fill whose run was stopped before the job existed", async () => {
+        const { state, fills } = harness([itemRow("a")]);
+        const wire = await plan(fills);
+        const stopped = new AbortController();
+        stopped.abort();
+        const answered = await fills.agent.fill(request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }), context({ runStopped: stopped.signal }));
+        expect(answered).toMatchObject({ ok: false, error_code: "stopped" });
+        expect(state.requests).toHaveLength(0);
+        expect(fills.listJobs()).toHaveLength(0);
+    });
+
+    it("Stop response stops the fill the run waits on; rows in flight finish", async () => {
+        const { state, fills } = harness([itemRow("a"), itemRow("b"), itemRow("c")]);
+        const held = deferred<void>();
+        state.respond = async (r) => {
+            await held.promise;
+            return answer(r);
+        };
+        const wire = await plan(fills);
+        const stopped = new AbortController();
+        const pending = fills.agent.fill(request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }), context({ runStopped: stopped.signal }));
+        await until(() => state.requests.length === 1, "the first row in flight");
+        stopped.abort();
+        held.resolve();
+        const answered = await pending;
+        expect(answered).toMatchObject({ status: "done" });
+        expect(answered.result).toMatchObject({ rows_answered: 1, stopped_by: "stopped", not_started: { stopped: 2 } });
+        expect(state.requests).toHaveLength(1);
+    });
+
+    it("Stop fill ends the job and a waiting fill answers done with the partial result", async () => {
+        const { state, fills } = harness([itemRow("a"), itemRow("b")]);
+        const held = deferred<void>();
+        state.respond = async (r) => {
+            await held.promise;
+            return answer(r);
+        };
+        const wire = await plan(fills);
+        const pending = fills.agent.fill(request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }), context());
+        await until(() => state.requests.length === 1, "the first row in flight");
+        const job = fills.listJobs()[0];
+        fills.stop(job.job_id);
+        held.resolve();
+        const answered = await pending;
+        expect(answered).toMatchObject({ status: "done", result: { rows_answered: 1, stopped_by: "stopped" } });
+    });
+});
+

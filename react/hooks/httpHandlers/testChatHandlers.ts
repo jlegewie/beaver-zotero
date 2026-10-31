@@ -38,9 +38,8 @@ import {
     addItems,
     addLibrarySource,
     draftOptions,
-    estimateStatus,
+    draftCost,
     initialTableCardDraft,
-    needsEstimate,
     removeItem,
     removeSource,
     setSourceResolved,
@@ -51,7 +50,7 @@ import {
     type TableCardDraft,
 } from '@beaver/agent-core/run-state/tableCardDraft';
 import { isCreateCard, isFillCard, type TableCardChoice } from '@beaver/agent-core/protocol/tableCardProtocol';
-import { tableFillProgressAtom } from '@beaver/agent-core/run-state/tableFillProgress';
+import { chatFillsAtom, dismissChatFillAtom, panelFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { resolveItems as resolveCardItems, resolveLibraryScope } from '../../components/tables/card/liveSources';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 import {
@@ -78,7 +77,6 @@ import {
     sendApprovalResponseAtom,
     sendCreditConfirmationResponseAtom,
     sendTableCardResponseAtom,
-    requestTableCardEstimateAtom,
     stoppingPreviousRunAtom,
 } from '../../atoms/agentRunAtoms';
 import {
@@ -590,14 +588,13 @@ export async function handleTestConfirmCreditsHttpRequest(request: any) {
  *         edits?: { title?, description?, removeItemIds?, addItemIds?,
  *                   addScopes?: TableCardLibraryScope[], removeSourceIndexes?: number[],
  *                   columns?: TableCardColumn[] },
- *         estimateOnly?, waitForDone?, timeoutMs? }
+ *         costOnly?, waitForDone?, timeoutMs? }
  *
  * The reply is built by the card's own draft functions, so it is the reply the
  * card would send for the same edits. A create card whose edits change its
- * sources or columns resolves the changed sources' counts as the card does,
- * asks the run for a new estimate and waits for it, so the reply names the
- * estimate a user would have seen; `estimateOnly` returns that estimate
- * without answering the card. A fill card takes `choice: 'fill'` (its
+ * sources resolves the changed sources' counts as the card does and computes
+ * the cost the card would show at the user's prices; `costOnly` returns that
+ * cost without answering the card. A fill card takes `choice: 'fill'` (its
  * default) or a decline; nothing on it is edited.
  */
 export async function handleTestTableCardHttpRequest(request: any) {
@@ -648,38 +645,19 @@ export async function handleTestTableCardHttpRequest(request: any) {
         const live = source.type === 'items' ? await resolveCardItems(source.ids ?? []) : await resolveLibraryScope(source.scope!);
         draft = setSourceResolved(draft, source.key, live.resolved, live.rows.map((row) => row.item_id));
     }
-    // The run choice is made on the last step, where the card estimates.
+    // The run choice is made on the last step, under the card's cost.
     draft = { ...draft, step: 'columns' };
-    draft = await estimateDraft(card, draft, typeof request?.estimateTimeoutMs === 'number' ? request.estimateTimeoutMs : 30000);
-    const estimate = { status: estimateStatus(draft, card), cost: draft.estimate.cost };
-    if (request?.estimateOnly === true) return { ok: true, cardId, scope: card.scope, estimate, ...currentIds() };
-
-    const choice: TableCardChoice = request?.choice ?? 'create';
-    if (!decline && choice === 'create_and_run' && estimate.status !== 'current')
-        return { ok: false, error: `The card's estimate is ${estimate.status}; the run button is disabled`, estimate, ...currentIds() };
-    const response = decline ? tableCardDecline(draft, card) : tableCardResponse(draft, card, choice);
-    store.set(sendTableCardResponseAtom, response);
-    return { ok: true, cardId, scope: card.scope, estimate, response, settle: await settleIfAsked(request), ...currentIds() };
-}
-
-/** Store the draft, ask for an estimate when the card would, and wait for its answer. */
-async function estimateDraft(
-    card: Parameters<typeof needsEstimate>[1],
-    draft: TableCardDraft,
-    timeoutMs: number,
-): Promise<TableCardDraft> {
     const drafts = new Map(store.get(tableCardDraftsAtom));
     drafts.set(card.card_id, draft);
     store.set(tableCardDraftsAtom, drafts);
-    if (!needsEstimate(draft, card)) return draft;
-    const requestId = store.set(requestTableCardEstimateAtom, card);
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        const current = store.get(tableCardDraftsAtom).get(card.card_id);
-        if (!current || current.estimate.pending !== requestId) return current ?? draft;
-        await sleep(100);
-    }
-    return store.get(tableCardDraftsAtom).get(card.card_id) ?? draft;
+    const prices = await Zotero.Beaver.tableFills?.pricing().catch(() => null) ?? null;
+    const cost = draftCost(draft, card, prices);
+    if (request?.costOnly === true) return { ok: true, cardId, scope: card.scope, cost, ...currentIds() };
+
+    const choice: TableCardChoice = request?.choice ?? 'create';
+    const response = decline ? tableCardDecline(draft, card) : tableCardResponse(draft, card, choice, cost.cost);
+    store.set(sendTableCardResponseAtom, response);
+    return { ok: true, cardId, scope: card.scope, cost, response, settle: await settleIfAsked(request), ...currentIds() };
 }
 
 async function settleIfAsked(request: any): Promise<SettleReason | null> {
@@ -689,24 +667,30 @@ async function settleIfAsked(request: any): Promise<SettleReason | null> {
 }
 
 /**
- * The live fill progress panels: the stamp of each fill and the rows its
- * `edit` commits have written so far.
+ * The chat fills this renderer follows, and the one the progress panel shows
+ * in the current thread. Body: { dismiss?: jobId } closes a finished fill's
+ * result line, as its × does.
  */
-export async function handleTestTableFillProgressHttpRequest() {
-    const fills = Array.from(store.get(tableFillProgressAtom).values()).map((progress) => ({
-        toolcall_id: progress.stamp.toolcall_id,
-        table: progress.stamp.table,
-        total: progress.stamp.rows,
-        cells: progress.stamp.cells,
-        documents: progress.stamp.documents,
-        no_input: progress.stamp.no_input,
-        columns: progress.stamp.columns,
-        rows_done: progress.rows.length,
-        failed_rows: progress.failedRows.length,
-        started_at: progress.startedAt,
-        updated_at: progress.updatedAt,
+export async function handleTestTableFillProgressHttpRequest(request?: any) {
+    if (typeof request?.dismiss === 'string') store.set(dismissChatFillAtom, request.dismiss);
+    const all = store.get(chatFillsAtom);
+    const fills = Array.from(all.values()).map((fill) => ({
+        job_id: fill.snapshot.job_id,
+        thread_id: fill.threadId,
+        tool_call_id: fill.toolCallId,
+        run_id: fill.snapshot.origin.run?.run_id ?? null,
+        table: fill.snapshot.table,
+        state: fill.snapshot.state,
+        rows_total: fill.snapshot.rows_total,
+        rows_done: fill.snapshot.rows_done,
+        rows_failed: fill.snapshot.rows_failed,
+        in_flight: fill.snapshot.in_flight,
+        credits_charged: fill.snapshot.credits_charged,
+        dismissed: fill.dismissed,
+        result: fill.snapshot.result ?? null,
     }));
-    return { ok: true, fills, ...currentIds() };
+    const shown = panelFill(all, store.get(currentThreadIdAtom));
+    return { ok: true, fills, panel: shown ? shown.snapshot.job_id : null, ...currentIds() };
 }
 
 /**

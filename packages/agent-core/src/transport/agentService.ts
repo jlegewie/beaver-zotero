@@ -47,7 +47,7 @@ import {
     isReattachRequest,
 } from '../protocol/agentProtocol';
 import { REATTACH_CLOSE_CODES, RunLink, RunReply, answeredPromptKey, executedAction, promptKey } from './runLink';
-import type { WSTableCardEstimateRequest, WSTableCardResponse } from '../protocol/tableCardProtocol';
+import type { WSTableCardResponse } from '../protocol/tableCardProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
@@ -513,6 +513,7 @@ export class AgentService {
             run.reattachAttempts++;
         } else {
             this.run = new RunLink(request.run_id, callbacks);
+            this.run.threadId = (request as AgentRunRequest).thread_id ?? null;
             // The run this one waited for is gone now, and its stop with it
             // unless that was settled in time.
             if (stopping && !stopping.stopSettled) {
@@ -1639,6 +1640,7 @@ export class AgentService {
                     break;
 
                 case 'thread':
+                    if (this.run) this.run.threadId = event.thread_id;
                     this.callbacks.onThread(event.thread_id, event.retry_truncation);
                     break;
 
@@ -1786,16 +1788,6 @@ export class AgentService {
                     this.callbacks?.onTableCardStale?.(event);
                     break;
 
-                case 'table_card_estimate_result':
-                    logger("AgentService: Received table_card_estimate_result", { card_id: event.card_id, request_id: event.request_id, error: event.error ?? null }, 1);
-                    this.callbacks?.onTableCardEstimateResult?.(event);
-                    break;
-
-                case 'table_fill_started':
-                    logger("AgentService: Received table_fill_started", { toolcall_id: event.toolcall_id, rows: event.rows }, 1);
-                    this.callbacks?.onTableFillStarted?.(event);
-                    break;
-
                 case 'ask_user_question_request':
                     logger("AgentService: Received ask_user_question_request", event, 1);
                     // This event is handled by the UI via callback
@@ -1861,6 +1853,7 @@ export class AgentService {
                         run
                             ? this.run === run && !run.cancelRequested
                             : this.connectionId === requestConnectionId;
+                    const owner = this.run;
                     const context: AgentDataRequestContext = {
                         assertCurrent: () => {
                             if (!isCurrent()) {
@@ -1869,6 +1862,10 @@ export class AgentService {
                         },
                         receivedAt,
                         reportPhase: (phase) => keepalive.setPhase(phase),
+                        ...(owner ? {
+                            run: { runId: owner.runId, threadId: owner.threadId },
+                            runStopped: owner.stopSignal,
+                        } : {}),
                     };
                     const tracked = run && requestId !== null
                         ? run.trackReply(requestId, executedAction(eventName, dataEvent))
@@ -2013,6 +2010,7 @@ export class AgentService {
         if (this.run?.state === 'reattaching') {
             logger(`AgentService: Run ${this.run.runId} is reattaching; cancelling it once reattached`, 1);
             this.run.cancelRequested = true;
+            this.run.markStopped();
             return;
         }
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -2021,8 +2019,12 @@ export class AgentService {
             return;
         }
 
-        // Nothing queued for the run starts while the cancel is flushed.
-        if (this.run) this.run.cancelRequested = true;
+        // Nothing queued for the run starts while the cancel is flushed, and
+        // work its requests started stops.
+        if (this.run) {
+            this.run.cancelRequested = true;
+            this.run.markStopped();
+        }
 
         // Capture the generation being cancelled: if a new run connects
         // during the flush wait below, the deferred close must not tear it down.
@@ -2123,18 +2125,6 @@ export class AgentService {
     sendTableCardResponse(response: WSTableCardResponse): boolean {
         logger(`AgentService: Sending table card response for ${response.card_id}: ${response.approved ? response.choice ?? 'create' : 'declined'}`, 1);
         return this.sendDecision(response);
-    }
-
-    /**
-     * Ask the tool call waiting on a table card for a new cost for the card's
-     * draft. Not a decision: it is never held for a reattach, since an
-     * estimate for a connection that has gone is worth nothing; the card asks
-     * again or keeps its run button disabled.
-     * @returns false if the message did not leave the client.
-     */
-    sendTableCardEstimate(message: WSTableCardEstimateRequest): boolean {
-        if (this.reattachableRun()?.state === 'reattaching') return false;
-        return this.send(message);
     }
 
     /**
