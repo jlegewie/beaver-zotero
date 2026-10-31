@@ -58,6 +58,19 @@ export function checkTableAccess(
     spec: TableSpec,
     inspectLibrary: (id: number | null) => void = checkLibrary,
 ): void {
+    visitLibraryReferences(spec, inspectLibrary);
+}
+
+/**
+ * Calls `inspectLibrary` with the local library of every Zotero reference in
+ * `value`: item ids in text (`u-KEY`, `g<id>-KEY`), legacy citation tags'
+ * library numbers, and structured `library_ref` / `library_id` fields. Null
+ * for a reference to a library this device does not have.
+ */
+export function visitLibraryReferences(
+    value: unknown,
+    inspectLibrary: (id: number | null) => void,
+): void {
     const visit = (value: unknown): void => {
         if (typeof value === "string") {
             for (const match of value.matchAll(
@@ -82,7 +95,7 @@ export function checkTableAccess(
             inspectLibrary(resolveLibraryRef(ref));
         for (const nested of Object.values(value)) visit(nested);
     };
-    visit(spec);
+    visit(value);
 }
 
 /** Retain the libraries inspected through async history reads for a final policy check. */

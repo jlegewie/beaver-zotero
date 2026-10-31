@@ -26,6 +26,7 @@ import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
 import { createInstanceAccount } from './services/instanceAccount';
+import { createInstanceTableFills } from './services/tableFills';
 import { InstancePreferences } from './services/instancePreferences';
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { DevelopmentVoiceHarness } from "./services/voice/developmentHarness";
@@ -77,6 +78,33 @@ function withShutdownTimeout<T>(
 function ensureDocumentRuntime(): void {
     addon.documents ??= new InstanceDocuments();
     configurePDFForBeaver({ onWorkerStartFailure: info => addon.runtime.publish('document-worker:failure', info) });
+}
+
+/**
+ * Stops the fill jobs and flushes their last commits. Runs before the
+ * mutation queue and the document services are disposed, which those commits
+ * and reads need.
+ */
+let tableFillsDisposal: Promise<void> | undefined;
+
+/** Whether the fill service is up, or its disposal has started and may still be flushing. */
+function tableFillsPending(): boolean {
+    return !!addon.tableFills || !!tableFillsDisposal;
+}
+
+async function disposeTableFills(): Promise<void> {
+    // Shared by every shutdown path: a second window unloading during a quit
+    // waits for the first one's flush instead of closing the queue under it.
+    if (!tableFillsDisposal) {
+        const fills = addon.tableFills;
+        addon.tableFills = undefined;
+        // `dispose` bounds itself (`shutdownFlushMs`): the last commit
+        // renders the snapshot, which a generic shutdown timeout would cut.
+        tableFillsDisposal = fills
+            ? fills.dispose().catch((error) => ztoolkit.log(`disposeTableFills: ${error}`))
+            : Promise.resolve();
+    }
+    await tableFillsDisposal;
 }
 
 function stopLocalIngress(): void {
@@ -135,6 +163,15 @@ async function cleanupDevTemporaryAnnotations(
 
 let isAppQuitting = false;
 let quitObserverRegistered = false;
+
+/**
+ * Holds Zotero's quit until running table fills have flushed their last
+ * commits: a blocker of the `quit-application` phase, which Gecko waits for
+ * before tearing down the profile. The quit observer disposes the account
+ * and closes the plugin database only after the same flush.
+ */
+const tableFillsQuitBlocker = (): Promise<void> => (tableFillsPending() ? disposeTableFills() : Promise.resolve());
+let quitPhase: { addBlocker(name: string, blocker: () => Promise<void>): void; removeBlocker(blocker: () => Promise<void>): void } | undefined;
 const quitObserver = {
     observe(_subject: any, topic: string) {
         if (topic === "quit-application-granted" || topic === "quit-application") {
@@ -144,19 +181,25 @@ const quitObserver = {
         }
         // Close beaver.sqlite on quit-application, BEFORE the
         // profile-before-change barrier where Sqlite.sys.mjs waits for all
-        // connections.
+        // connections. A running table fill flushes first: its last commit
+        // needs the account and the plugin realm's services, and the quit
+        // blocker holds this phase until it has.
         if (topic === "quit-application") {
-            void disposeAccountServices();
-            try {
-                if (addon?.db) {
-                    addon.db.closeDatabase().catch((error: unknown) => {
-                        Zotero.logError(error as Error);
-                    });
-                    addon.db = undefined;
+            const teardown = () => {
+                void disposeAccountServices();
+                try {
+                    if (addon?.db) {
+                        addon.db.closeDatabase().catch((error: unknown) => {
+                            Zotero.logError(error as Error);
+                        });
+                        addon.db = undefined;
+                    }
+                } catch (_) {
+                    // Best-effort — process is dying
                 }
-            } catch (_) {
-                // Best-effort — process is dying
-            }
+            };
+            if (tableFillsPending()) void disposeTableFills().finally(teardown);
+            else teardown();
         }
     },
 };
@@ -170,9 +213,28 @@ function registerQuitObserver(): void {
     } catch (error) {
         ztoolkit.log(`registerQuitObserver: Failed to register quit observer: ${error}`);
     }
+    try {
+        const { AsyncShutdown } = ChromeUtils.importESModule('resource://gre/modules/AsyncShutdown.sys.mjs') as {
+            AsyncShutdown: { appShutdownConfirmed?: NonNullable<typeof quitPhase>; quitApplicationGranted?: NonNullable<typeof quitPhase> };
+        };
+        // The `quit-application` phase; older platforms only have the
+        // earlier `quitApplicationGranted`.
+        quitPhase = AsyncShutdown.appShutdownConfirmed ?? AsyncShutdown.quitApplicationGranted;
+        if (!quitPhase) throw new Error('no quit-granted shutdown phase');
+        quitPhase.addBlocker('Beaver: flush table fills', tableFillsQuitBlocker);
+    } catch (error) {
+        quitPhase = undefined;
+        ztoolkit.log(`registerQuitObserver: Failed to register the table fill quit blocker: ${error}`);
+    }
 }
 
 function unregisterQuitObserver(): void {
+    try {
+        quitPhase?.removeBlocker(tableFillsQuitBlocker);
+    } catch (error) {
+        ztoolkit.log(`unregisterQuitObserver: Failed to remove the table fill quit blocker: ${error}`);
+    }
+    quitPhase = undefined;
     if (!quitObserverRegistered) return;
     try {
         Services.obs.removeObserver(quitObserver, "quit-application-granted");
@@ -298,6 +360,10 @@ async function onStartup() {
     addon.account.start();
     addon.localEndpoints ??= new InstanceLocalEndpoints();
     addon.localEndpoints.start(addon.account, addon.preferences);
+    if (!addon.tableFills) {
+        tableFillsDisposal = undefined;
+        addon.tableFills = createInstanceTableFills();
+    }
     ztoolkit.log(`Plugin version: ${version}`);
 
     // -------- Initialize database --------
@@ -565,7 +631,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // this handler returns. Read quitting and the window count here — the
         // later scope check runs after those awaits.
         const appGoingAway = isAppQuitting || (Services?.startup?.shuttingDown ?? false);
-        if (appGoingAway) await addon.mutations.dispose();
+        if (appGoingAway) {
+            if (tableFillsPending()) await disposeTableFills();
+            await addon.mutations.dispose();
+        }
         const isLastMainWindow = Zotero.getMainWindows()
             .filter(w => w !== win && !w.closed).length === 0;
         // Record only when Beaver itself is going away. Closing one of several
@@ -926,6 +995,7 @@ async function disposeAppServices(): Promise<void> {
             ztoolkit.log(`onAppShutdown: ${label} failed:`, error);
         }
     };
+    if (tableFillsPending()) await disposeTableFills();
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
     await attempt('disposeAccount', disposeAccountServices);
@@ -960,6 +1030,7 @@ function onShutdown(): Promise<void> {
 async function disposePlugin(): Promise<void> {
     stopLocalIngress();
     addon.itemImport.dispose();
+    if (tableFillsPending()) await disposeTableFills();
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
     Zotero.__beaverShuttingDown = true;

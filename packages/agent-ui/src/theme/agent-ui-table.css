@@ -1456,3 +1456,139 @@
     background: var(--tag-orange-quarternary);
     cursor: help;
 }
+
+/* ==========================================================================
+ * Fill — the tab's Fill button, its plan popover and the result banner
+ * ========================================================================== */
+
+/* News about the table, under the toolbar: the last fill's result. */
+.beaver-root .bt-banner {
+    flex: 0 0 auto;
+    padding: 0.45rem 1.25rem;
+    font-size: 0.92rem;
+    color: var(--fill-primary);
+    background:
+        linear-gradient(var(--fill-quinary), var(--fill-quinary)),
+        var(--material-background);
+    border-bottom: 1px solid var(--color-border50);
+}
+
+.beaver-root .bt-fill-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+}
+
+.beaver-root .bt-fill-banner-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.beaver-root .bt-fill-banner-link,
+.beaver-root .bt-fill-banner-close {
+    flex: 0 0 auto;
+    padding: 0.1rem 0.3rem;
+    border: 0;
+    border-radius: 0.3rem;
+    background: transparent;
+    color: var(--fill-secondary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.beaver-root .bt-fill-banner-link {
+    color: var(--accent-blue);
+}
+
+.beaver-root .bt-fill-banner-link:hover,
+.beaver-root .bt-fill-banner-close:hover {
+    background: var(--fill-quinary);
+}
+
+/* The split button: one control, two halves. */
+.beaver-root .bt-fill {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.beaver-root .bt-fill-split {
+    display: inline-flex;
+    align-items: stretch;
+}
+
+.beaver-root .bt-fill-split .bt-fill-main {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.beaver-root .bt-fill-split .bt-fill-more {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    margin-left: 1px;
+    padding-left: 0.3rem;
+    padding-right: 0.3rem;
+}
+
+/* Nothing new or changed to fill: present, but quiet. */
+.beaver-root .bt-fill-idle {
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-fill-popover {
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    z-index: 30;
+    width: 22rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.6rem;
+    background: var(--material-background);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+    font-size: 0.92rem;
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-fill-title {
+    font-weight: 600;
+}
+
+.beaver-root .bt-fill-lines {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-fill-note {
+    font-size: 0.86rem;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-fill-reach {
+    color: var(--tag-orange-primary, var(--fill-primary));
+}
+
+.beaver-root .bt-fill-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-fill-error {
+    color: var(--tag-red-primary, var(--fill-primary));
+}
+
+.beaver-root .bt-fill-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    margin-top: 0.2rem;
+}

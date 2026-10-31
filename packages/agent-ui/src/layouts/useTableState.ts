@@ -82,6 +82,11 @@ export interface TableState {
 export interface UseTableStateOptions {
     /** Initial density. The chrome's density control moves it from there. */
     density?: TableDensity;
+    /**
+     * Show only these rows, on top of the viewer's own filters — a surface
+     * pointing at a set of rows ("Show" the rows a fill could not read).
+     */
+    onlyRows?: ReadonlySet<string> | null;
 }
 
 /** The table a hidden-column set was seeded for. */
@@ -265,14 +270,18 @@ export function useTableState(
         [],
     );
 
+    const onlyRows = options.onlyRows ?? null;
     const rows = useMemo(() => {
-        const filtered = filterRows(spec, filters);
+        const narrowed = onlyRows
+            ? { ...spec, rows: spec.rows.filter((row) => onlyRows.has(row.id)) }
+            : spec;
+        const filtered = filterRows(narrowed, filters);
         const quick = quickFilter.trim();
         const searched = quick
             ? filtered.filter((row) => matchesQuickFilter(spec, row, quick))
             : filtered;
         return sortRows({ ...spec, rows: searched }, sort);
-    }, [spec, filters, quickFilter, sort]);
+    }, [spec, filters, quickFilter, sort, onlyRows]);
 
     const toggleRow = useCallback(
         (rowId: string) => setExpandedRows((s) => toggleInSet(s, rowId)),

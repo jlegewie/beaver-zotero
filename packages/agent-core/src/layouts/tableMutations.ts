@@ -148,6 +148,13 @@ export interface CellWrite {
      * replaces answers read from a newer one.
      */
     expected_documents?: string[] | null;
+    /**
+     * The column's {@link Column.revision} when the answer was planned. A
+     * column that has changed since skips the write (`column_changed`), so
+     * an answer in flight while an option is renamed never writes the old
+     * label back.
+     */
+    revision?: number | null;
 }
 
 export interface SetCellsMutation {
@@ -226,6 +233,8 @@ export interface ApplyError {
 
 export type SkipReason =
     | "user_cell"
+    /** A write whose `revision` no longer matches the column's. */
+    | "column_changed"
     | "question_changed"
     | "row_removed"
     | "column_removed"
@@ -361,7 +370,8 @@ function modelColumnCount(spec: TableSpec): number {
  *   `user` is skipped and reported unless the write is itself a user cell or a
  *   deletion marked `reset` — an unmarked deletion carries no provenance, so
  *   it cannot remove a user's correction. A write whose `question_hash` no
- *   longer matches the column is skipped too. An unknown row or column still
+ *   longer matches the column is skipped too, and so is one whose `revision`
+ *   is not the column's. An unknown row or column still
  *   fails the whole batch, except with `skipMissing` (the provider `edit`):
  *   there a write to a row or column no longer in the table is skipped and
  *   reported (`column_removed` first when both are gone), since during a fill
@@ -379,7 +389,9 @@ function modelColumnCount(spec: TableSpec): number {
  *   the current question, and **drops an empty `documents` list** (an answer
  *   from title and abstract names none).
  * - **`update_column` that changes `description` sets `stale` on every existing
- *   cell of that column.**
+ *   cell of that column.** A change to its question or to its option labels
+ *   or definitions also increments its `revision`; a header or colour does
+ *   not.
  * - **`remove_columns` clears a `sort` or `anchor_column_id`** that pointed at
  *   a removed column.
  * - **`remove_sources` drops the entries** and every row whose only origin they
@@ -853,6 +865,7 @@ function updateColumn(
     }
 
     const question = questionHash(column);
+    const vocabulary = optionVocabulary(column);
 
     if (mutation.header !== undefined) column.header = mutation.header;
     if (mutation.description !== undefined)
@@ -862,11 +875,17 @@ function updateColumn(
     if (mutation.priority !== undefined)
         setOptional(column, "priority", mutation.priority);
 
+    // A write planned against the column before this change no longer
+    // lands: its question, or a label it may write, moved.
+    const questionChanged = questionHash(column) !== question;
+    if (questionChanged || optionVocabulary(column) !== vocabulary)
+        column.revision = (column.revision ?? 0) + 1;
+
     // The answers under the column were given to the previous question (its
     // description or an option definition), so they are marked rather than
     // dropped: the value is still the best thing anyone has until the column
     // is re-run. A header, colour or re-spelling is not a new question.
-    if (questionHash(column) !== question) {
+    if (questionChanged) {
         for (const row of draft.spec.rows) {
             if (!row.cells[column.id]) continue;
             const writable = writableRow(draft, row.id);
@@ -878,6 +897,46 @@ function updateColumn(
         }
     }
     return undefined;
+}
+
+/**
+ * The column's options as the revision sees them: each label exactly as
+ * spelled with its definition, in label order. A colour or the order of the
+ * list does not count; a re-spelling, a definition, an addition or a
+ * removal does.
+ */
+function optionVocabulary(column: Column): string {
+    return JSON.stringify(
+        (column.options ?? [])
+            .map((option) => [option.label, option.description ?? null])
+            .sort((a, b) => (a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0)),
+    );
+}
+
+/**
+ * `after` with each column's revision carried over from `before` and advanced
+ * where its question or option vocabulary changed between the two, however
+ * the change was made: a whole-spec write or a revert moves columns without
+ * `update_column`. Never lowers a revision. Returns `after` itself when
+ * nothing moves.
+ */
+export function carryColumnRevisions(before: TableSpec | null, after: TableSpec): TableSpec {
+    if (!before) return after;
+    const previous = new Map(before.columns.map((column) => [column.id, column]));
+    let changed = false;
+    const columns = after.columns.map((column) => {
+        const old = previous.get(column.id);
+        if (!old) return column;
+        const base = old.revision ?? 0;
+        const moved =
+            questionHash(old) !== questionHash(column) ||
+            optionVocabulary(old) !== optionVocabulary(column);
+        const revision = Math.max(column.revision ?? 0, moved ? base + 1 : base);
+        if (revision === (column.revision ?? 0)) return column;
+        changed = true;
+        return { ...column, revision };
+    });
+    return changed ? { ...after, columns } : after;
 }
 
 /**
@@ -1176,6 +1235,17 @@ function setCells(
                 row: write.row,
                 column: write.column,
                 reason: "user_cell",
+            });
+            continue;
+        }
+        if (
+            write.revision != null &&
+            write.revision !== (column.revision ?? 0)
+        ) {
+            draft.skipped.push({
+                row: write.row,
+                column: write.column,
+                reason: "column_changed",
             });
             continue;
         }

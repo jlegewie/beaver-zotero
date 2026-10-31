@@ -520,6 +520,62 @@ describe('writeTable', () => {
         expect(back.collapsed).toBe(false);
     });
 
+    it('collapses writes under one collapse key until someone else writes', async () => {
+        const meta = { actor: 'agent' as const, collapse_key: 'job-1', change: 'Filled' };
+        const first = expectOk(await writeTable(ref, demoSpec('One'), meta));
+        const second = expectOk(await writeTable(ref, demoSpec('Two'), meta));
+        expect([first.version, second.version]).toEqual([2, 2]);
+        expect(second.collapsed).toBe(true);
+        expect(second.entry.collapse_key).toBe('job-1');
+
+        // A tab edit in between: the job's next commit starts a new version,
+        // so history is never rewritten across someone else's change.
+        expectOk(await writeTable(ref, demoSpec('Edit'), { actor: 'user' }));
+        const after = expectOk(await writeTable(ref, demoSpec('Three'), meta));
+        expect(after.version).toBe(4);
+        expect(after.collapsed).toBe(false);
+        const again = expectOk(await writeTable(ref, demoSpec('Four'), meta));
+        expect([again.version, again.collapsed]).toEqual([4, true]);
+    });
+
+    it('advances a column revision when a whole-spec write changes its question', async () => {
+        const asked = (description: string): TableSpec => ({
+            ...demoSpec('One'),
+            columns: [{ id: 'note', header: 'Note', type: 'text', description }],
+        });
+        const first = expectOk(await writeTable(ref, asked('First?'), { actor: 'agent' }));
+        const changed = expectOk(await writeTable(ref, asked('Second?'), { actor: 'agent' }));
+        expect(changed.spec.columns[0].revision).toBe((first.spec.columns[0].revision ?? 0) + 1);
+        const kept = expectOk(await writeTable(ref, { ...asked('Second?'), title: 'Renamed' }, { actor: 'agent' }));
+        expect(kept.spec.columns[0].revision).toBe(changed.spec.columns[0].revision);
+    });
+
+    it('does not advance a revision when a fill\'s own answers grow an open select', async () => {
+        expectOk(await editTable(ref, [{ op: 'add_columns', columns: [{ id: 'kind', header: 'Kind', type: 'select' }] }], { actor: 'user' }));
+        const write = (label: string) =>
+            editTable(
+                ref,
+                [{ op: 'set_cells', cells: [{ row: 'r1', column: 'kind', revision: 0, cell: { outcome: 'answered', provenance: 'model', value: { kind: 'select', label } } }] }],
+                { actor: 'agent', collapse_key: 'job-1' },
+            );
+        const first = expectOk(await write('Survey'));
+        expect(first.spec.columns.find((c) => c.id === 'kind')?.revision).toBeUndefined();
+        const second = expectOk(await write('Panel'));
+        expect(second.skipped).toEqual([]);
+        expect(second.spec.rows[0].cells.kind?.value).toEqual({ kind: 'select', label: 'Panel' });
+    });
+
+    it('does not collapse a job onto a run that shares nothing but its run id', async () => {
+        await writeTable(ref, demoSpec('One'), { actor: 'agent', run_id: 'run-1' });
+        const fill = expectOk(
+            await writeTable(ref, demoSpec('Two'), { actor: 'agent', run_id: 'run-1', collapse_key: 'job-1' })
+        );
+        expect(fill.collapsed).toBe(false);
+        const run = expectOk(await writeTable(ref, demoSpec('Three'), { actor: 'agent', run_id: 'run-1' }));
+        expect(run.collapsed).toBe(false);
+        expect(run.version).toBe(4);
+    });
+
     it('gives every user edit its own version, even inside a run', async () => {
         await writeTable(ref, demoSpec('One'), { actor: 'agent', run_id: 'run-1' });
         const edit = expectOk(

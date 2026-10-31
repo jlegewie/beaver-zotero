@@ -65,6 +65,12 @@ export interface ExtractionTableProps {
     fitWidth?: boolean;
     /** A warning about the whole table, kept above the grid. */
     notice?: React.ReactNode;
+    /** News about the table under the toolbar (a fill's result). */
+    banner?: React.ReactNode;
+    /** Controls after the toolbar's own verbs (the Fill button). */
+    toolbarEnd?: React.ReactNode;
+    /** Show only these rows (`UseTableStateOptions.onlyRows`). */
+    onlyRows?: ReadonlySet<string> | null;
     /** Extra footer text. */
     footerNote?: React.ReactNode;
     className?: string;
@@ -105,10 +111,16 @@ export function ExtractionTable({
     virtualize,
     fitWidth,
     notice,
+    banner,
+    toolbarEnd,
+    onlyRows,
     footerNote,
     className,
 }: ExtractionTableProps): React.ReactElement {
-    const state = useTableState(table, { density: density ?? "tall" });
+    const state = useTableState(table, {
+        density: density ?? "tall",
+        onlyRows,
+    });
     const [composer, setComposer] = useState<Composer>(undefined);
 
     const canAddColumn =
@@ -176,6 +188,7 @@ export function ExtractionTable({
             virtualize={virtualize}
             fitWidth={fitWidth}
             notice={notice}
+            banner={banner}
             footerNote={footerNote}
             headerActions={
                 <TableHeaderActions
@@ -206,6 +219,7 @@ export function ExtractionTable({
                             Add column
                         </Button>
                     ) : null}
+                    {toolbarEnd}
                 </>
             }
             overlay={

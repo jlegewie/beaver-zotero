@@ -111,6 +111,8 @@ declare namespace Zotero {
         let syncPause: ReturnType<typeof import("../src/services/syncPause").createSyncPauseService>;
         const preferences: import("../src/services/instancePreferences").InstancePreferences | undefined;
         const account: import("../src/services/instanceAccount").InstanceAccount | undefined;
+        /** Table fill plans and jobs; plugin realm, reached from renderers through this slot. */
+        const tableFills: import("../src/services/tableFills/service").InstanceTableFills | undefined;
         const runtime: import("../src/runtime/instance").BeaverInstance;
         const voiceNative: import("../src/services/voice/nativeVoice").NativeVoice | undefined;
         const voice: import("../src/services/voice/voiceService").VoiceService | undefined;

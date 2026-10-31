@@ -65,6 +65,8 @@ import { getBestAttachmentBatch } from '../documentExtraction/attachmentInfoBatc
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
 import {
     createPreparedJsonMessage,
+    isPreparedJsonMessage,
+    preparedJsonEnvelope,
     type PreparedJsonMessage,
 } from '@beaver/agent-core/transport/preparedJsonMessage';
 
@@ -835,6 +837,57 @@ export async function handleZoteroDocumentRequest(
     } finally {
         timeout.dispose();
     }
+}
+
+/** A document in the form the backend reads, or why it could not be read. */
+export type BackendDocumentRead =
+    | {
+          ok: true;
+          /** The backend-bound extraction, serialized once, ready to splice into a body. */
+          json: string;
+          contentKind: ExtractContentKind;
+          totalPages: number | null;
+      }
+    | {
+          ok: false;
+          code: ZoteroDocumentErrorCode;
+          message: string;
+          contentKind?: ExtractContentKind;
+      };
+
+/**
+ * Extracts a document for the backend: the payload the chat socket sends for
+ * `zotero_document_request`, with the same resolution, cache, citation level,
+ * page and size limits, returned as serialized JSON rather than wrapped in a
+ * socket message. Callers that post a document over HTTP (a table fill) use
+ * it so the backend reads exactly what the chat path would have sent.
+ */
+export async function readBackendDocument(
+    request: WSZoteroDocumentRequest,
+): Promise<BackendDocumentRead> {
+    const response = await handleZoteroDocumentRequest(request, { responseMode: 'websocket' });
+    if (isPreparedJsonMessage(response)) {
+        const envelope = preparedJsonEnvelope(response) as Omit<WSZoteroDocumentResponse, 'result'>;
+        const json = response.rawFields.result;
+        if (!json || !envelope.content_kind) {
+            return { ok: false, code: 'extraction_failed', message: 'The document response carried no result.' };
+        }
+        return { ok: true, json, contentKind: envelope.content_kind, totalPages: envelope.total_pages ?? null };
+    }
+    if (response.error || response.result == null || !response.content_kind) {
+        return {
+            ok: false,
+            code: response.error_code ?? 'extraction_failed',
+            message: response.error ?? 'The document response carried no result.',
+            ...(response.content_kind ? { contentKind: response.content_kind } : {}),
+        };
+    }
+    return {
+        ok: true,
+        json: JSON.stringify(response.result),
+        contentKind: response.content_kind,
+        totalPages: response.total_pages ?? null,
+    };
 }
 
 /** Model-facing message for an external file whose managed copy is unavailable. */

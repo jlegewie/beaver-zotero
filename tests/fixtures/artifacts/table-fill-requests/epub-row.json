@@ -1,0 +1,124 @@
+{
+    "name": "a row read from an EPUB",
+    "request": {
+        "job_id": "job-1",
+        "row_id": "r2",
+        "price": 0.2,
+        "table": {
+            "title": "School meal trials",
+            "description": "Sample sizes and designs of school meal studies."
+        },
+        "columns": [
+            {
+                "id": "n",
+                "header": "Sample size",
+                "type": "text",
+                "description": "How many participants were analysed?",
+                "question_hash": "43a016f79f162aaa"
+            }
+        ],
+        "row": {
+            "reference": {
+                "title": "School meals and attendance",
+                "authors": "Okafor and Reyes",
+                "year": "2021",
+                "venue": "Journal of Development Studies",
+                "item_type": "journalArticle"
+            },
+            "abstract": "We study 120 pupils in a randomised trial of school meals in Kenya."
+        },
+        "document": {
+            "id": "g4242-EPUB1111",
+            "kind": "epub",
+            "content": {
+                "content_kind": "epub",
+                "schemaVersion": "2",
+                "sectionCount": 1,
+                "sections": [
+                    {
+                        "index": 0,
+                        "rawHref": "ch01.xhtml",
+                        "label": "Chapter 1",
+                        "items": [
+                            {
+                                "id": "p1",
+                                "kind": "text",
+                                "sectionIndex": 0,
+                                "order": 0,
+                                "text": "Teachers were surveyed. Forty replied.",
+                                "pageNumber": 1,
+                                "sentences": [
+                                    {
+                                        "id": "s1",
+                                        "text": "Teachers were surveyed."
+                                    },
+                                    {
+                                        "id": "s2",
+                                        "text": "Forty replied."
+                                    }
+                                ],
+                                "anchorId": "para1"
+                            }
+                        ]
+                    }
+                ],
+                "citationIndex": {
+                    "s1": {
+                        "id": "s1",
+                        "kind": "sentence",
+                        "sectionIndex": 0,
+                        "itemId": "p1",
+                        "sentenceId": "s1",
+                        "anchorId": "para1"
+                    },
+                    "s2": {
+                        "id": "s2",
+                        "kind": "sentence",
+                        "sectionIndex": 0,
+                        "itemId": "p1",
+                        "sentenceId": "s2",
+                        "anchorId": "para1"
+                    }
+                }
+            }
+        }
+    },
+    "model": [
+        {
+            "c1": {
+                "reasoning": "Forty of the surveyed teachers replied.",
+                "value": "40",
+                "locators": [
+                    "s1-s2"
+                ],
+                "confidence": "medium"
+            }
+        }
+    ],
+    "response": {
+        "cells": {
+            "n": {
+                "outcome": "answered",
+                "value": {
+                    "kind": "text",
+                    "text": "40"
+                },
+                "provenance": "model",
+                "documents": [
+                    "g4242-EPUB1111"
+                ],
+                "confidence": "medium",
+                "reasoning": "Forty of the surveyed teachers replied.",
+                "evidence": [
+                    {
+                        "document": "g4242-EPUB1111",
+                        "locator": "s1-s2",
+                        "quote": "Teachers were surveyed. Forty replied."
+                    }
+                ]
+            }
+        },
+        "row_failure": null,
+        "charged": 0.2
+    }
+}
