@@ -2855,8 +2855,6 @@ export type WSEvent =
     // Table card
     | import('./tableCardProtocol').WSTableCardRequest
     | import('./tableCardProtocol').WSTableCardStale
-    | import('./tableCardProtocol').WSTableCardEstimateResult
-    | import('./tableCardProtocol').WSTableFillStarted
     // User interaction events
     | WSAskUserQuestionRequest;
 
@@ -3738,12 +3736,6 @@ export interface WSCallbacks {
 
     /** Called when a table card answer arrived after the backend stopped waiting. */
     onTableCardStale?: (event: import('./tableCardProtocol').WSTableCardStale) => void;
-
-    /** Called with the backend's answer to a card's `table_card_estimate`. */
-    onTableCardEstimateResult?: (event: import('./tableCardProtocol').WSTableCardEstimateResult) => void;
-
-    /** Called when a table fill starts, with the totals its progress panel shows. */
-    onTableFillStarted?: (event: import('./tableCardProtocol').WSTableFillStarted) => void;
 
     /**
      * Called when the backend asks the user structured multiple-choice

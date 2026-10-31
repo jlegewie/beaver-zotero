@@ -10,6 +10,8 @@ import {
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { summarize } from "@beaver/agent-core/layouts/tableMutations";
+import { pendingWork } from "@beaver/agent-core/layouts/tableFill";
+import type { AgentDataRequestContext } from "@beaver/agent-core/transport/agentDataDispatch";
 import {
     parseItemReference,
     resolveLibraryRef,
@@ -19,7 +21,6 @@ import { checkLibraryExcluded } from "../agentDataProvider/utils";
 import {
     createTableUncoordinated as createTable,
     writeTableUncoordinated as writeTable,
-    editTableSessionUncoordinated as editTableSession,
     openTableUncoordinated as openTable,
     revertTableUncoordinated as revertTable,
     trimTableUncoordinated as trimTable,
@@ -149,17 +150,47 @@ function content(raw: unknown): TableSpec {
     return parsed.spec;
 }
 
-/** Executes access checks and table work in the plugin realm under one queue admission. */
+/**
+ * Executes access checks and table work in the plugin realm under one queue
+ * admission. `fill_plan` and `fill` are not table writes and take no
+ * admission: a fill job commits through the queue one commit at a time, and a
+ * waiting `fill` must not hold it.
+ */
 export async function handleArtifactRequest(
     raw: unknown,
-    options?: MutationOptions,
+    options?: MutationOptions & Partial<AgentDataRequestContext>,
 ): Promise<ArtifactResponse> {
     const invalid = validateArtifactRequest(raw);
     if (invalid) return artifactFailure(raw, invalid);
+    const request = raw as ArtifactRequest;
+    if (request.op === "fill_plan" || request.op === "fill")
+        return handleFillRequest(request, options);
     try {
         return await Zotero.Beaver.libraryOperations.run('artifact_request', [raw], options);
     } catch (error) {
         return artifactFailure(raw, errorCode(error));
+    }
+}
+
+/** The fill operations, served by the plugin's fill service. */
+async function handleFillRequest(
+    request: ArtifactRequest,
+    context?: Partial<AgentDataRequestContext>,
+): Promise<ArtifactResponse> {
+    const fills = Zotero.Beaver?.tableFills;
+    if (!fills)
+        return {
+            ...artifactFailure(request, "signed_out"),
+            error: "Sign in to Beaver to fill tables.",
+        };
+    try {
+        if (request.op === "fill_plan") {
+            const ref = target(request.key!);
+            return await fills.agent.plan(request, ref);
+        }
+        return await fills.agent.fill(request, context as AgentDataRequestContext | undefined);
+    } catch (error) {
+        return artifactFailure(request, errorCode(error));
     }
 }
 
@@ -267,6 +298,7 @@ export async function handleArtifactRequestUncoordinated(
                 sha256: created.sha256,
                 spec: created.spec,
                 summary: summarize(created.spec),
+                pending: pendingWork(created.spec),
                 zotero_item: itemIdentity({ libraryID, key: created.key }),
                 operation: created.operation,
                 replayed: created.replayed ?? false,
@@ -288,35 +320,12 @@ export async function handleArtifactRequestUncoordinated(
                       sha256: opened.sha256,
                       spec: opened.spec,
                       summary: summarize(opened.spec),
+                      pending: pendingWork(opened.spec),
                   });
         }
         if (request.op === "delete") {
             await deleteTable(ref);
             return success({ saved: true });
-        }
-        if (request.op === "edit") {
-            // No revision guard: the store skips per cell what moved under the
-            // fill, and a retry repeats the session's last `edit_seq`.
-            const result = await editTableSession(
-                ref,
-                {
-                    operation_id: request.operation_id!,
-                    seq: request.edit_seq!,
-                    mutations: request.mutations!,
-                },
-                meta,
-                guard,
-            );
-            if (!result.ok) return artifactFailure(request, result.error.code);
-            checkLibrary(ref.libraryID);
-            guard(result.spec);
-            return success({
-                version: result.version,
-                sha256: result.sha256,
-                saved: result.saved,
-                skipped: result.skipped,
-                replayed: result.replayed,
-            });
         }
         if (request.op === "trim") {
             const result = await trimTable(
@@ -359,6 +368,7 @@ export async function handleArtifactRequestUncoordinated(
             sha256: result.sha256,
             spec: result.spec,
             summary: summarize(result.spec),
+            pending: pendingWork(result.spec),
             saved: result.saved,
             ...(result.operation ? { operation: result.operation } : {}),
             replayed: result.replayed ?? false,

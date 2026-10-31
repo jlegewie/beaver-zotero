@@ -250,9 +250,10 @@ describe("fill stage card", () => {
             rows: 20,
             rows_filled: 17,
             rows_failed: 2,
-            rows_not_started: { deadline: 1 },
+            status: "done",
+            rows_not_started: { stopped: 1 },
             rows_without_input: 3,
-            rows_uncertain: 1,
+            rows_not_written: 1,
             from_title_abstract: 4,
             skipped: { user_cell: 1, row_removed: 2 },
             credits_charged: 6.5,
@@ -260,28 +261,31 @@ describe("fill stage card", () => {
         expect(formatFillLines({ ...outcomes.fill_record, fill })).toEqual([
             "Filled 17 of 20 rows",
             "2 rows failed",
-            "1 row not started: the fill ran out of time",
+            "1 row not started: the fill was stopped",
             "1 row answered but not confirmed saved",
             "3 rows without a document or abstract",
             "4 answers from title and abstract only",
             "1 cell skipped: edited by you",
             "2 cells skipped: row removed during the fill",
-            "6.5 credits charged",
+            "Table fill · 6.5 credits",
         ]);
         expect(formatFillLines({ ...outcomes.fill_record, run: "none" })).toEqual([]);
         expect(formatFillLines(record)).toEqual([]);
     });
 
-    it("says how the credit confirmation that stopped a fill ended", async () => {
+    it("says why a fill job stopped early, and that a fill still running goes on in the background", async () => {
         const { formatFillLines } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
-        const stopped = (credit_confirmation: string) =>
-            formatFillLines({ ...outcomes.fill_record, fill: { ...outcomes.fill_record.fill, credit_confirmation } })[1];
-        expect(stopped("timed_out")).toBe("9 rows not started: the credit confirmation was not answered in time");
-        expect(stopped("declined")).toBe("9 rows not started: more credits were declined");
-        expect(stopped("unreachable")).toBe(
-            "9 rows not started: the connection closed before the credit confirmation was answered",
-        );
-        expect(stopped("something_new")).toBe("9 rows not started: more credits were not approved");
+        const stopped = (reason: string) =>
+            formatFillLines({
+                ...outcomes.fill_record,
+                fill: { ...outcomes.fill_record.fill, status: "done", rows_not_started: { [reason]: 9 } },
+            })[1];
+        expect(stopped("insufficient_credits")).toBe("9 rows not started: out of credits");
+        expect(stopped("price_changed")).toBe("9 rows not started: prices changed");
+        expect(stopped("something_new")).toBe("9 rows not started: something_new");
+        expect(
+            formatFillLines({ ...outcomes.fill_record, fill: { ...outcomes.fill_record.fill, status: "running", rows: 46 } }),
+        ).toEqual(["Filling 46 rows in the background"]);
     });
 
     it("words a declined fill card as a fill, not a creation", () => {

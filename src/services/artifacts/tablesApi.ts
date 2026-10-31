@@ -208,34 +208,6 @@ export function clearTableWriteLocks(): void {
     Zotero.__beaverTableWriteLocks = undefined;
 }
 
-/** The last commit of a provider `edit` session, so a retry of it replays. */
-export interface TableEditSessionCommit {
-    seq: number;
-    /** Digest of the commit's mutations and meta, so a reused `seq` must match. */
-    request_sha256: string;
-    skipped: SkippedCell[];
-    saved: boolean;
-}
-
-/**
- * The last commit of each provider `edit` session, keyed
- * `<libraryID>/<key>|<operation_id>`, read and written only under the table's
- * write lock. On the shared global for the same reason as
- * {@link tableWriteLocks}, and owned by the plugin realm the same way.
- *
- * Process memory, not part of the table: a session lives as long as one fill
- * on one connection. A retry after a restart finds no entry and applies its
- * cell writes again, which writes the same cells.
- */
-export function tableEditSessions(): Map<string, TableEditSessionCommit> {
-    return (Zotero.__beaverTableEditSessions ??= new Map());
-}
-
-/** Drops the registry. Plugin teardown only. */
-export function clearTableEditSessions(): void {
-    Zotero.__beaverTableEditSessions = undefined;
-}
-
 /**
  * The message a caller shows when the esbuild half is not up. Named here so
  * every dev endpoint reports the same thing, and reports it rather than

@@ -64,6 +64,8 @@ export interface RunPrompt {
 
 export class RunLink {
     readonly runId: string;
+    /** The run's thread: the request's, or the one the server assigned. */
+    threadId: string | null = null;
     /** The callbacks the run was started with; a reattach reuses them. */
     readonly callbacks: WSCallbacks;
     /** From `request_ack`; a run without one cannot be reattached. */
@@ -98,6 +100,7 @@ export class RunLink {
     readonly ended: Promise<void>;
     private markEnded!: () => void;
 
+    private readonly stopController = new AbortController();
     private readonly replies = new Map<string, RunReply>();
     private readonly prompts = new Map<string, RunPrompt>();
     private held: Record<string, any>[] = [];
@@ -106,6 +109,16 @@ export class RunLink {
         this.runId = runId;
         this.callbacks = callbacks;
         this.ended = new Promise<void>((resolve) => { this.markEnded = resolve; });
+    }
+
+    /** Aborted once the user stops the run. */
+    get stopSignal(): AbortSignal {
+        return this.stopController.signal;
+    }
+
+    /** The user stopped the run: work its requests started stops too. */
+    markStopped(): void {
+        if (!this.stopController.signal.aborted) this.stopController.abort();
     }
 
     /** The service no longer carries this run. */

@@ -200,5 +200,9 @@ pref("maxAttachmentFileSizeMB", 100);
 // the user library. Never overrides a library the user excluded in Beaver
 // preferences — see resolveTableLibrary().
 pref("tables.defaultLibraryID", 0);
+// How long a chat's `fill_table` waits for a small fill before answering that
+// it runs on in the background, in seconds; stays under the backend's
+// ten-minute ceiling on a request.
+pref("tables.fillWaitSeconds", 480);
 
 pref("cloudPreparationConsent", "");

@@ -1,11 +1,9 @@
 /**
  * The table card on the chat socket: `table_card_request` from the backend,
  * `table_card_response` from the client, and `table_card_stale` for an answer
- * the backend stopped waiting for. Correlated by `card_id`. While a create
- * card waits, `table_card_estimate` asks its tool call for a new `cost` and
- * `table_card_estimate_result` answers. `table_fill_started` is the progress
- * stamp of a fill. Mirrors the backend's `app/models/ws_events.py`; the shared
- * fixtures in `tests/fixtures/artifacts/table-cards/` hold the two to one shape.
+ * the backend stopped waiting for. Correlated by `card_id`. Mirrors the
+ * backend's `app/models/ws_events.py`; the shared fixtures in
+ * `tests/fixtures/artifacts/table-cards/` hold the two to one shape.
  */
 
 import type { WSBaseEvent } from './agentProtocol';
@@ -96,30 +94,24 @@ export interface TableCardDestination {
     explicit?: boolean;
 }
 
-/** What the run would fill: its rows, and how each would be answered. */
-export interface TableCardExtractionCost {
-    /** Rows the run would fill. */
-    rows: number;
-    /** Of those, the rows read from a document. */
-    documents: number;
-    /** Of those, the rows with neither a document nor an abstract. */
-    no_input: number;
-    /** The count is not exact (sources edited on the card): the card says "up to". */
-    upper_bound?: boolean;
-}
-
 /**
- * What the run would do and what approving it authorizes. `credits` is a
- * high-end estimate of the run, set only when approving raises what the run
- * already authorizes; null when the run fits. The reply names the
- * `estimate_id` the card showed, and approving grants exactly that estimate.
+ * What filling costs: the rows, how each is answered, and the credits. A fill
+ * card's cost is its plan's, exact; approving it approves exactly that plan.
+ * A create card's is computed from the resolved sources at the user's prices,
+ * and the card recomputes it the same way after the user edits the sources.
+ * The credits are the fill's own, charged per paper as it is filled.
  */
 export interface TableCardCost {
-    extraction?: TableCardExtractionCost | null;
-    /** Rows the run would screen (from the screening milestone). */
-    screening?: { rows: number } | null;
-    credits?: number | null;
-    estimate_id: string;
+    /** Rows the fill works on. */
+    rows: number;
+    /** Rows read from a document. */
+    documents: number;
+    /** Rows answered from title and abstract. */
+    title_abstract: number;
+    /** Rows with neither, or that cannot be filled: marked, never charged. */
+    no_input: number;
+    /** The fill's cost in credits. */
+    credits: number;
 }
 
 /** The existing table a fill or edit card is about, for its "Open table" link. */
@@ -201,8 +193,8 @@ export interface WSTableCardResponse {
     card_id: string;
     approved: boolean;
     choice?: TableCardChoice | null;
-    /** The estimate the card showed; approving grants its credits. */
-    estimate_id?: string | null;
+    /** `create_and_run`: the cost the card showed, the ceiling of the fill it starts. */
+    cost?: TableCardCost | null;
     title?: string | null;
     description?: string | null;
     sources?: TableCardSource[] | null;
@@ -215,54 +207,4 @@ export interface WSTableCardStale extends WSBaseEvent {
     event: 'table_card_stale';
     card_id: string;
     reason: 'timed_out' | 'unknown';
-}
-
-/**
- * The card asking its waiting tool call for a new `cost` for the draft: its
- * sources with the `resolved` blocks the card resolved, and its columns.
- * `request_id` correlates the answer.
- */
-export interface WSTableCardEstimateRequest {
-    type: 'table_card_estimate';
-    card_id: string;
-    request_id: string;
-    sources: TableCardSource[];
-    columns: TableCardColumn[];
-}
-
-/**
- * The answer to `table_card_estimate`: a new `cost` (null when the draft has
- * nothing to run) or an error — `unknown_card` when no tool call waits on the
- * card, `invalid_request` when the draft could not be read.
- */
-export interface WSTableCardEstimateResult extends WSBaseEvent {
-    event: 'table_card_estimate_result';
-    card_id: string;
-    request_id: string;
-    cost?: TableCardCost | null;
-    error?: 'unknown_card' | 'invalid_request' | null;
-}
-
-/**
- * The progress stamp of a table fill, sent once when it starts. The panel
- * takes its totals from it; its progress comes from the `edit` commits the
- * plugin applies.
- */
-export interface WSTableFillStarted extends WSBaseEvent {
-    event: 'table_fill_started';
-    run_id: string;
-    toolcall_id: string;
-    table: TableCardTable;
-    /** Rows the fill works on. */
-    rows: number;
-    /** Cells the fill works on. */
-    cells: number;
-    /** Rows read from a document. */
-    documents: number;
-    /** Rows with neither a document nor an abstract. */
-    no_input: number;
-    /** Headers of the columns being filled. */
-    columns: string[];
-    /** ISO time the fill started. */
-    started_at: string;
 }

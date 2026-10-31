@@ -62,6 +62,7 @@ import {
     type RowPlan,
 } from './planner';
 import { classifyFillError, fillRequestBody, type SerializedFillDocument } from './tableFillApi';
+import { AgentTableFills } from './agentFill';
 
 /** A table as the store returns it. */
 export interface TableFillTableRead {
@@ -99,7 +100,7 @@ export interface TableFillDeps {
     fill(body: string, assertDispatch: () => void): Promise<TableFillResponse>;
     commit(
         target: TableFillTarget,
-        commit: { operation_id: string; seq: number; mutations: TableMutation[] },
+        commit: { mutations: TableMutation[] },
         meta: { actor: 'agent'; collapse_key: string; change: string; run_id?: string; thread_id?: string },
         /** The job's commit check, run at queue admission and by the store just before the write. */
         mayCommit: () => void,
@@ -241,7 +242,6 @@ class FillJob {
     private pendingCommit: PendingRow[] = [];
     private commitTimer?: ReturnType<typeof setTimeout>;
     private commitChain: Promise<void> = Promise.resolve();
-    private seq = 0;
     private wakers = new Set<() => void>();
     private finished!: Promise<void>;
     private result: TableFillResult = {
@@ -744,7 +744,7 @@ class FillJob {
             this.assertMayCommit();
             const result = await this.deps.commit(
                 this.plan.target,
-                { operation_id: this.id, seq: ++this.seq, mutations },
+                { mutations },
                 {
                     actor: 'agent',
                     collapse_key: this.id,
@@ -809,12 +809,16 @@ class FillJob {
         this.state = 'done';
         this.owner.jobEnded(this);
         this.publish();
+        // A chat run's tool call keeps the result, whether or not a request still waits on it.
+        this.owner.agent.noteEnded(this.snapshot);
         if (this.charged > 0 && !this.abandoned) this.deps.account.refreshProfile();
     }
 }
 
 /** Fill plans and jobs for the plugin's lifetime. */
 export class InstanceTableFills {
+    /** The provider operations a chat run's `fill_table` sends. */
+    readonly agent: AgentTableFills;
     private plans = new Map<string, StoredPlan>();
     /** Running jobs, and the last finished job of each table. */
     private jobs = new Map<string, FillJob>();
@@ -828,7 +832,9 @@ export class InstanceTableFills {
     constructor(
         private readonly deps: TableFillDeps,
         readonly settings: TableFillSettings = { ...DEFAULT_TABLE_FILL_SETTINGS },
+        agentWaitMs?: () => number,
     ) {
+        this.agent = new AgentTableFills(this, agentWaitMs, () => deps.now());
         let generation = deps.account.generation();
         this.unsubscribeAccount = deps.account.subscribe(() => {
             const next = deps.account.generation();
@@ -975,7 +981,12 @@ export class InstanceTableFills {
      * is now: cells whose row was removed or moved to other documents, whose
      * column changed, or that became the user's are dropped; nothing is added.
      */
-    async start(planId: string, origin: TableFillOrigin = { kind: 'user' }): Promise<TableFillStartResult> {
+    async start(
+        planId: string,
+        origin: TableFillOrigin = { kind: 'user' },
+        /** Checked last, before the job is created: false refuses the start. */
+        mayStart?: () => boolean,
+    ): Promise<TableFillStartResult> {
         this.prunePlans();
         const plan = this.plans.get(planId);
         if (!plan) return { ok: false, code: 'plan_not_found', message: 'This fill plan is no longer available. Plan the fill again.' };
@@ -1006,6 +1017,8 @@ export class InstanceTableFills {
         if (!this.plans.has(planId))
             return { ok: false, code: 'plan_not_found', message: 'This fill plan is no longer available. Plan the fill again.' };
 
+        if (mayStart && !mayStart())
+            return { ok: false, code: 'stopped', message: 'The run was stopped before the fill started.' };
         const { rows, dropped } = validatePlan(plan, spec);
         if (!rows.length)
             return { ok: false, code: 'nothing_to_fill', message: 'Nothing in this plan is left to fill.' };
@@ -1029,12 +1042,42 @@ export class InstanceTableFills {
         return { ok: true, job: job.snapshot };
     }
 
+    /**
+     * Whether `value` may leave the device: it names no item of a library
+     * Beaver may not read. For anything sent beyond a plan's own context.
+     */
+    sendable(value: unknown): boolean {
+        return this.deps.contextSendable(value);
+    }
+
+    /**
+     * Whether a table's data may still leave the device: its library is not
+     * excluded and the table still exists.
+     */
+    tableAvailable(target: TableFillTarget): boolean {
+        return this.deps.writeRefusal(target) !== 'table_unavailable';
+    }
+
+    /** The question columns a stored plan answers, in table order. */
+    plannedColumns(planId: string): string[] {
+        const plan = this.plans.get(planId);
+        if (!plan) return [];
+        const used = new Set(plan.rows.flatMap((row) => row.columns));
+        return [...plan.columns.keys()].filter((id) => used.has(id));
+    }
+
     /** Stops a job: no new rows; rows in flight finish. */
     stop(jobId: string): boolean {
         const job = this.jobs.get(jobId);
         if (!job || !job.running) return false;
         job.stop('stopped');
         return true;
+    }
+
+    /** Every job still kept: the running ones and the finished ones still shown. */
+    listJobs(): TableFillJobSnapshot[] {
+        this.prunePlans();
+        return [...this.jobs.values()].map((job) => job.snapshot);
     }
 
     getJob(jobId: string): TableFillJobSnapshot | null {
@@ -1102,6 +1145,7 @@ export class InstanceTableFills {
         if (this.disposed) return;
         this.disposed = true;
         this.unsubscribeAccount();
+        this.agent.dispose();
         const running = [...this.leases.values()];
         await Promise.all(running.map((job) => job.abandon(this.settings.shutdownFlushMs)));
         this.plans.clear();

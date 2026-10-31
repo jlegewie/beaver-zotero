@@ -105,7 +105,8 @@ mutation queue (`libraryOperations.run('table_editTableSession', …)`). Each
 `set_cells` write carries the column's `revision` and question hash as planned and
 the row's documents; a write whose column, question or row documents changed, a
 user cell, and a removed row or column are skipped and reported, and the rest of
-the commit lands.
+the commit lands. A job's commits are local and never repeated, so the session
+path keeps no replay state.
 
 Remote callers use:
 
@@ -306,7 +307,16 @@ identities. Request envelopes are defined in `agent-core/protocol/artifactProtoc
 `tests/fixtures/artifacts/provider-contract.json` records the transport examples.
 Non-applicable null fields are accepted. Malformed envelopes are refused before
 identity lookup. List is bounded to 200 explicit, unique keys and returns a status
-for each key; it does not enumerate a library.
+for each key; it does not enumerate a library. Reads, creates, writes and reverts
+carry the table's `pendingWork` as `pending` beside `summary`.
+
+`fill_plan` and `fill` are a chat run's `fill_table`: they reach the fill service
+(`addon.tableFills.agent`) without entering the instance mutation queue, since a
+waiting `fill` may last minutes and the job's own commits take the queue one at a
+time. One tool call is one job (keyed by its plan and tool call, since some
+models reuse tool call ids); a waiting `fill` answers `done` when the job ends
+or `running` at the `tables.fillWaitSeconds` deadline (eight minutes, from the
+request's first arrival), and the user stopping the run that waits stops the job.
 
 Explicit reads validate `table.json`'s key, version, format, and the attachment
 type; cosmetic tag removal does not invalidate a table. Automatic discovery may still

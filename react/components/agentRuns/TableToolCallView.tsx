@@ -3,6 +3,8 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import type { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, type ToolResult } from '@beaver/agent-core/run-state/atoms';
 import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
+import { chatFillsAtom, fillForToolCall, fillStatusLine } from '@beaver/agent-core/run-state/tableChatFills';
+import { resultText } from '@beaver/agent-core/run-state/tableFillCopy';
 import { TOOL_BASE_LABELS } from '@beaver/agent-core/run-state/toolCallRequest';
 import { parseItemReference, UNRESOLVED_LIBRARY_ID } from '@beaver/agent-core/identity/libraryRef';
 import { getHost } from '@beaver/agent-ui/host';
@@ -122,7 +124,20 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const title = record
         ? (record.reference.title || 'Untitled table')
         : requestedTitle(part);
-    const progress = isInProgress && runStatus === 'in_progress' ? part.progress : undefined;
+    // A fill shows a status line, never live counts: those are in the panel
+    // above the composer. While the call waits on its fill, "Filling 46
+    // papers…"; once it returned `running`, "Filling in the background".
+    const fills = useAtomValue(chatFillsAtom);
+    const fill = fillForToolCall(fills, part.tool_call_id, runId);
+    const waitingOnFill = isInProgress && runStatus === 'in_progress' && !hasResult && fill !== null && fill.snapshot.state !== 'done';
+    // A fill that went on in the background reads as finished once its live
+    // job has ended.
+    const backgroundDone = fill?.snapshot.state === 'done' ? resultText(fill.snapshot) : null;
+    const progress = waitingOnFill
+        ? fillStatusLine('waiting', fill!.snapshot.rows_total)
+        : record?.run === 'fill' && record.fill?.status === 'running'
+          ? backgroundDone ?? fillStatusLine(fill ? 'background' : 'started')
+          : isInProgress && runStatus === 'in_progress' ? part.progress : undefined;
     const statusLines = [openMessage, ...notices].filter(Boolean);
 
     return (
@@ -152,7 +167,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
                                 {title && <span className="font-color-secondary ml-15">{title}</span>}
                             </div>
                             {progress && (
-                                <span className="font-color-tertiary shimmer-text">{progress}</span>
+                                <span className={`font-color-tertiary${isInProgress ? ' shimmer-text' : ''}`}>{progress}</span>
                             )}
                             {statusLines.map((line, index) => (
                                 <span key={index} role="status" className="font-color-secondary text-sm">

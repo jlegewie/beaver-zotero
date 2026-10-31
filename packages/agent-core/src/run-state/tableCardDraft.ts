@@ -17,8 +17,6 @@ import type {
     TableCardOption,
     TableCardResolved,
     TableCardSource,
-    WSTableCardEstimateRequest,
-    WSTableCardEstimateResult,
     WSTableCardRequest,
     WSTableCardResponse,
     WSTableCreateCardRequest,
@@ -31,6 +29,8 @@ import {
     MAX_SELECT_DEFINITIONS_CHARS,
     normalizeSelectLabel,
 } from '../layouts/table';
+import type { TableFillPricing } from '../protocol/tableFillProtocol';
+import { creditsText, planRowLine } from './tableFillCopy';
 
 export type TableCardStep = 'sources' | 'screening' | 'columns';
 
@@ -92,29 +92,6 @@ export interface TableCardDraft {
     instructions: string;
     /** Counter for local keys. */
     nextKey: number;
-    /** The cost the card shows, and the draft it was estimated for. */
-    estimate: DraftEstimate;
-}
-
-/**
- * The card's cost. The backend owns the estimate: the request's cost holds
- * for the proposal as sent, and after the sources or the column set change
- * the card asks its waiting tool call for a new one (`table_card_estimate`).
- */
-export interface DraftEstimate {
-    /** The newest cost the backend answered; the request's until then. */
-    cost: TableCardCost | null;
-    /** The draft `cost` was estimated for ({@link estimateBasis}). */
-    basis: string;
-    /** The request id of the estimate in flight, if any. */
-    pending: string | null;
-    /** The draft the estimate in flight was asked for. */
-    pendingBasis: string | null;
-    /**
-     * The draft the last estimate failed for. While the draft is unchanged the
-     * card offers a retry; an edit asks again.
-     */
-    failedBasis: string | null;
 }
 
 const ITEMS_KEY = 'items';
@@ -156,7 +133,7 @@ export function initialTableCardDraft(request: WSTableCardRequest): TableCardDra
         description: column.description ?? '',
         options: draftOptions(column.options),
     }));
-    const draft: TableCardDraft = {
+    return {
         title: request.title,
         description: request.description,
         sources,
@@ -167,10 +144,7 @@ export function initialTableCardDraft(request: WSTableCardRequest): TableCardDra
         cancelling: false,
         instructions: request.user_instructions_prefill ?? '',
         nextKey,
-        estimate: { cost: request.cost, basis: '', pending: null, pendingBasis: null, failedBasis: null },
     };
-    // The proposal as sent is what the request's cost was estimated for.
-    return { ...draft, estimate: { ...draft.estimate, basis: estimateBasis(draft) } };
 }
 
 // Steps ------------------------------------------------------------------------
@@ -656,7 +630,7 @@ export function createBlockerReason(
     if (failed) return sources('Remove the source that cannot be used.');
     if (cardTotals(draft).count === 0) return sources('The sources contain no items.');
     if (overCapSources(draft, request).length) return sources(overCapMessage(draft, request));
-    if (!draft.columns.length) return { message: 'Add a question column.', part: 'columns' };
+    // No columns is allowed: the table is created without questions.
     if (draft.columns.length > MAX_MODEL_COLUMNS)
         return { message: `A table holds at most ${MAX_MODEL_COLUMNS} question columns.`, part: 'columns' };
     const incomplete = draft.columns.filter((column) => columnProblem(column));
@@ -681,15 +655,16 @@ export function createBlocker(
 }
 
 /**
- * The buttons on the last step. With no cost there is one, "Create"; once a
- * run can be approved the primary is named for what runs and "Create only"
- * creates without running.
+ * The buttons on the last step. Without a cost (the proposal had no columns)
+ * or with nothing to run there is one, "Create"; otherwise the primary is
+ * named for what runs and "Create only" creates without running.
  */
 export function createActions(
     draft: TableCardDraft,
     request: WSTableCreateCardRequest,
 ): { primary: { label: string; choice: TableCardChoice }; secondary?: { label: string; choice: TableCardChoice } } {
-    if (!draft.estimate.cost) return { primary: { label: 'Create', choice: 'create' } };
+    if (!request.cost || (!draft.columns.length && !(draft.criteria ?? []).length))
+        return { primary: { label: 'Create', choice: 'create' } };
     const screens = (draft.criteria ?? []).length > 0;
     const fills = draft.columns.length > 0;
     const label = screens && fills ? 'Create and run' : screens ? 'Create and screen' : 'Create and fill';
@@ -779,11 +754,15 @@ export function wireColumn(column: DraftColumn): TableCardColumn {
     return wire;
 }
 
-/** The approval: every part as edited, and the choice. */
+/**
+ * The approval: every part as edited, and the choice. "Create and fill"
+ * names the cost the card showed, which bounds the fill it starts.
+ */
 export function tableCardResponse(
     draft: TableCardDraft,
     request: WSTableCreateCardRequest,
     choice: TableCardChoice,
+    cost: TableCardCost | null = null,
 ): WSTableCardResponse {
     // Instructions travel only with a decline: an approval is the table as shown.
     return {
@@ -791,8 +770,7 @@ export function tableCardResponse(
         card_id: request.card_id,
         approved: true,
         choice,
-        // The estimate the card showed: approving grants its credits.
-        estimate_id: draft.estimate.cost?.estimate_id ?? null,
+        ...(choice === 'create_and_run' && cost ? { cost } : {}),
         title: draft.title.trim(),
         description: draft.description.trim(),
         sources: draft.sources.flatMap((source): TableCardSource[] => {
@@ -805,8 +783,8 @@ export function tableCardResponse(
 }
 
 /**
- * The approval of a fill card: nothing on it is editable, so it names the run
- * and the estimate it showed.
+ * The approval of a fill card: nothing on it is editable, so it names only
+ * the run. It approves exactly the plan the card shows.
  */
 export function tableFillCardResponse(request: WSTableFillCardRequest): WSTableCardResponse {
     return {
@@ -814,14 +792,13 @@ export function tableFillCardResponse(request: WSTableFillCardRequest): WSTableC
         card_id: request.card_id,
         approved: true,
         choice: 'fill',
-        estimate_id: request.cost.estimate_id,
     };
 }
 
-/** "Fill 180": the fill card's run button, named for what runs. */
+/** "Fill 180": the fill card's run button, named for the papers it reads. */
 export function fillActionLabel(request: WSTableFillCardRequest): string {
-    const rows = request.cost.extraction?.rows ?? 0;
-    return `Fill ${format(rows)}`;
+    const { rows, documents, title_abstract } = request.cost;
+    return `Fill ${format(documents + title_abstract || rows)}`;
 }
 
 /** The decline; instructions make it a request for something else. */
@@ -835,154 +812,64 @@ export function tableCardDecline(draft: TableCardDraft, request: WSTableCardRequ
     };
 }
 
-// Cost and the live estimate ------------------------------------------------------
+// Cost ---------------------------------------------------------------------------
 
-/**
- * What a cost depends on in the draft: the sources (their content and their
- * resolved counts) and the set of columns. A header or question edit does not
- * change it; adding or removing a column does.
- */
-export function estimateBasis(draft: TableCardDraft): string {
-    return JSON.stringify({
-        sources: draft.sources.map((source) => [
-            source.type,
-            source.ids ?? null,
-            source.scope ? [source.scope.kind, source.scope.library_ref, source.scope.key ?? null, source.scope.tag ?? null] : null,
-            source.resolved ? [source.resolved.count, source.resolved.total, source.resolved.without_pdf] : null,
-        ]),
-        columns: draft.columns.map((column) => column.key),
-    });
+/** The create card's cost for the draft as it is, and whether it is an upper bound. */
+export interface DraftCost {
+    cost: TableCardCost | null;
+    upperBound: boolean;
 }
 
 /**
- * Whether the card asks for estimates at all: when the request quoted a cost,
- * or proposed no columns (nothing to run yet). A run that cannot pay for a
- * fill is sent `cost: null` with its columns, and stays at "Create".
+ * The create card's cost. For the proposal as sent it is the backend's, from
+ * the merged rows; after the user edits the sources the card computes it the
+ * from the sources' counts at the user's prices: rows with a document are
+ * read from it, the rest are counted as answered from title and abstract (the
+ * card cannot tell which lack an abstract or which papers sources share), so
+ * it is an upper bound. Null without columns, when the proposal could not be filled, or
+ * while the prices are unknown after an edit.
  */
-export function canEstimate(request: WSTableCreateCardRequest): boolean {
-    return request.cost !== null || request.columns.length === 0;
-}
-
-/**
- * Where the card's cost stands: `current` for the draft as it is, `pending`
- * while an estimate is in flight, `failed` after one failed, `stale` when the
- * draft changed since and no estimate was asked for yet.
- */
-export function estimateStatus(
+export function draftCost(
     draft: TableCardDraft,
     request: WSTableCreateCardRequest,
-): 'current' | 'pending' | 'failed' | 'stale' {
-    if (!canEstimate(request)) return 'current';
-    if (draft.estimate.pending) return 'pending';
-    const basis = estimateBasis(draft);
-    if (draft.estimate.basis === basis) return 'current';
-    return draft.estimate.failedBasis === basis ? 'failed' : 'stale';
-}
-
-/**
- * Whether the card should ask for an estimate now: the draft differs from
- * what the shown cost was estimated for, nothing is in flight, and every
- * source has its count. Only on the last step, where the run choice is.
- */
-export function needsEstimate(draft: TableCardDraft, request: WSTableCreateCardRequest): boolean {
-    if (!canEstimate(request) || draft.estimate.pending || draft.step !== 'columns') return false;
-    if (draft.sources.some((source) => source.counting || !source.resolved)) return false;
-    const basis = estimateBasis(draft);
-    return draft.estimate.basis !== basis && draft.estimate.failedBasis !== basis;
-}
-
-/** The estimate request for the draft as it is, and the draft marked pending. */
-export function startEstimate(
-    draft: TableCardDraft,
-    request: WSTableCreateCardRequest,
-    requestId: string,
-): { draft: TableCardDraft; message: WSTableCardEstimateRequest } {
-    const message: WSTableCardEstimateRequest = {
-        type: 'table_card_estimate',
-        card_id: request.card_id,
-        request_id: requestId,
-        sources: draft.sources.flatMap((source): TableCardSource[] => {
-            const resolved = source.resolved ?? undefined;
-            if (source.type === 'library') return [{ type: 'library', scope: { ...source.scope! }, resolved }];
-            return (source.ids ?? []).length ? [{ type: 'items', ids: [...source.ids!], resolved }] : [];
-        }),
-        columns: draft.columns.map(wireColumn),
-    };
-    return {
-        message,
-        draft: {
-            ...draft,
-            estimate: { ...draft.estimate, pending: requestId, pendingBasis: estimateBasis(draft), failedBasis: null },
-        },
-    };
-}
-
-/**
- * Apply the backend's answer. A result for an estimate the card no longer
- * waits on is dropped. The new cost holds for the draft the request was
- * built from; if the draft has moved on since, the card asks again.
- */
-export function applyEstimateResult(draft: TableCardDraft, result: WSTableCardEstimateResult): TableCardDraft {
-    const { estimate } = draft;
-    if (estimate.pending !== result.request_id) return draft;
-    if (result.error)
-        return { ...draft, estimate: { ...estimate, pending: null, pendingBasis: null, failedBasis: estimate.pendingBasis } };
-    return {
-        ...draft,
-        estimate: { cost: result.cost ?? null, basis: estimate.pendingBasis ?? '', pending: null, pendingBasis: null, failedBasis: null },
-    };
-}
-
-/** The estimate in flight did not come back: the card shows it failed and offers a retry. */
-export function failEstimate(draft: TableCardDraft, requestId: string): TableCardDraft {
-    const { estimate } = draft;
-    if (estimate.pending !== requestId) return draft;
-    return { ...draft, estimate: { ...estimate, pending: null, pendingBasis: null, failedBasis: estimate.pendingBasis } };
-}
-
-/** Ask again after a failure. */
-export function retryEstimate(draft: TableCardDraft): TableCardDraft {
-    return draft.estimate.failedBasis !== null ? { ...draft, estimate: { ...draft.estimate, failedBasis: null } } : draft;
-}
-
-/**
- * The row line: "Fills 180 rows: 150 from the attachment, 18 from title and
- * abstract, 12 without either", with "up to" while the count is not exact.
- * The attachment is whichever document the row reads: PDF, EPUB or snapshot.
- */
-export function costLine(cost: TableCardCost | null): string | null {
-    const extraction = cost?.extraction;
-    if (!extraction) return null;
-    const { rows, documents, no_input } = extraction;
-    const metadata = Math.max(0, rows - documents - no_input);
-    const head = `Fills ${extraction.upper_bound ? 'up to ' : ''}${plural(rows, 'row')}`;
-    const parts = [
-        documents > 0 ? `${format(documents)} from the attachment` : null,
-        metadata > 0 ? `${format(metadata)} from title and abstract` : null,
-        no_input > 0 ? `${format(no_input)} without either` : null,
-    ].filter(Boolean);
-    return parts.length ? `${head}: ${parts.join(', ')}` : head;
-}
-
-/** A credit figure without trailing-zero noise, as the batch card writes it. */
-function formatCredits(credits: number): string {
-    const rounded = Math.round(credits * 100) / 100;
-    return Number.isInteger(rounded) ? String(rounded) : String(Number(rounded.toPrecision(6)));
-}
-
-/** The credit chip, only when approving raises what the run authorizes. */
-export function creditChip(cost: TableCardCost | null): string | null {
-    return typeof cost?.credits === 'number' ? `Up to ${formatCredits(cost.credits)} this run` : null;
-}
-
-/** The sentence the chip abbreviates: what approving authorizes, not what it costs. */
-export function creditTooltip(cost: TableCardCost | null): string | null {
-    if (typeof cost?.credits !== 'number') return null;
-    const amount = formatCredits(cost.credits);
-    const word = Math.round(cost.credits * 100) / 100 === 1 ? 'credit' : 'credits';
-    return (
-        `Approving authorizes up to ${amount} ${word} for this run. ` +
-        "You are charged for what the run actually uses, which is usually less. " +
-        "You'll be asked again if the run uses more."
+    prices: TableFillPricing | null,
+): DraftCost {
+    if (!request.cost || !draft.columns.length) return { cost: null, upperBound: false };
+    if (!draft.sourcesEdited) return { cost: request.cost, upperBound: false };
+    if (!prices) return { cost: null, upperBound: true };
+    const rows = cardRowCount(draft, request);
+    // The card cannot tell which papers two sources share, so it counts as
+    // many rows as it can as read from a document, the dearer kind: a bound
+    // that holds however the duplicates split.
+    const withDocument = draft.sources.reduce(
+        (total, source) => total + Math.max(0, sourceCount(source) - (source.resolved?.without_pdf ?? 0)),
+        0,
     );
+    const documents = Math.min(rows, withDocument);
+    const titleAbstract = rows - documents;
+    const credits = Math.round((documents * prices.document + titleAbstract * prices.title_abstract) * 100) / 100;
+    return {
+        cost: { rows, documents, title_abstract: titleAbstract, no_input: 0, credits },
+        upperBound: true,
+    };
+}
+
+/** The row line of a card's cost: "Reads 180 papers: 150 from their documents, 30 from title and abstract". */
+export function costLine(cost: TableCardCost | null, upperBound = false): string | null {
+    if (!cost) return null;
+    const line = planRowLine({
+        rows: cost.rows,
+        documents: cost.documents,
+        document_kinds: {},
+        title_abstract: cost.title_abstract,
+        no_input: cost.no_input,
+        unavailable: 0,
+    });
+    return upperBound ? line.replace(/^Reads /, 'Reads up to ') : line;
+}
+
+/** The credits line of a card's cost: "0.45 credits", "Up to 9.2 credits". */
+export function costCredits(cost: TableCardCost | null, upperBound = false): string | null {
+    if (!cost) return null;
+    return `${upperBound ? 'Up to ' : ''}${creditsText(cost.credits)}`;
 }

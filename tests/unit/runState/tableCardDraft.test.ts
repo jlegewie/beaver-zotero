@@ -2,8 +2,6 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type {
-    WSTableCardEstimateRequest,
-    WSTableCardEstimateResult,
     WSTableCardRequest,
     WSTableCardResponse,
     WSTableCreateCardRequest,
@@ -19,17 +17,11 @@ import {
     addItems,
     addLibrarySource,
     addScreening,
-    applyEstimateResult,
     cardTotals,
+    costCredits,
     costLine,
-    creditChip,
-    creditTooltip,
-    estimateStatus,
-    failEstimate,
+    draftCost,
     fillActionLabel,
-    needsEstimate,
-    retryEstimate,
-    startEstimate,
     tableFillCardResponse,
     columnProblem,
     createActions,
@@ -66,9 +58,6 @@ interface CardFixture {
     description: string;
     request: WSTableCreateCardRequest;
     reply?: WSTableCardResponse;
-    estimate_request?: WSTableCardEstimateRequest;
-    estimate_result?: WSTableCardEstimateResult;
-    estimate_unknown_card?: WSTableCardEstimateResult;
 }
 
 function fixture(name: string): CardFixture {
@@ -111,7 +100,6 @@ describe('table card draft', () => {
             card_id: reply!.card_id,
             approved: true,
             choice: 'create',
-            estimate_id: null,
             title: reply!.title,
             sources: [{ type: 'items', ids: request.sources[0].ids }],
             criteria: [],
@@ -119,17 +107,17 @@ describe('table card draft', () => {
         expect(response.columns).toEqual(reply!.columns);
     });
 
-    it('names the estimate it showed in the reply, as the backend fixture does', () => {
+    it('replies as the backend fixture does, with no estimate', () => {
         const { request, reply } = fixture('create-items');
         const draft = initialTableCardDraft(request);
         const response = tableCardResponse(draft, request, 'create');
-        expect(response.estimate_id).toBe(reply!.estimate_id);
+        expect(response).not.toHaveProperty('estimate_id');
         expect(response.choice).toBe(reply!.choice);
     });
 
     it('names the primary for what runs once the card carries a cost', () => {
         const { request } = fixture('create-items');
-        const costed = { ...request, cost: { extraction: { rows: 2, documents: 2, no_input: 0 }, credits: 4, estimate_id: 'e' } };
+        const costed = { ...request, cost: { rows: 2, documents: 2, title_abstract: 0, no_input: 0, credits: 0.4 } };
         const draft = initialTableCardDraft(costed);
         expect(createActions(draft, costed)).toEqual({
             primary: { label: 'Create and fill', choice: 'create_and_run' },
@@ -261,10 +249,11 @@ describe('table card draft', () => {
         );
     });
 
-    it('needs a finished question column', () => {
+    it('creates without questions, and needs any column it has to be finished', () => {
         const { request } = fixture('create-without-columns');
         let draft = initialTableCardDraft(request);
-        expect(createBlocker(draft, request)).toBe('Add a question column.');
+        expect(createBlocker(draft, request)).toBeNull();
+        expect(createActions(draft, request)).toEqual({ primary: { label: 'Create', choice: 'create' } });
         const added = addColumn(draft);
         draft = added.draft;
         // The blocker names the column and what it still needs.
@@ -535,140 +524,69 @@ describe('table card draft', () => {
         });
     });
 
-    describe('cost and the live estimate', () => {
-        it('writes the row line, with "up to" while the count is not exact', () => {
-            expect(costLine({ extraction: { rows: 180, documents: 150, no_input: 12 }, estimate_id: 'e' })).toBe(
-                'Fills 180 rows: 150 from the attachment, 18 from title and abstract, 12 without either',
+    describe('cost', () => {
+        const PRICES = { document: 0.2, title_abstract: 0.05 };
+
+        it('writes the row line and the credits, with "up to" while the count is not exact', () => {
+            const cost = { rows: 180, documents: 150, title_abstract: 18, no_input: 12, credits: 30.9 };
+            expect(costLine(cost)).toBe(
+                "Reads 168 papers: 150 from their documents, 18 from title and abstract. 12 papers can't be read and are skipped",
             );
-            expect(costLine({ extraction: { rows: 43, documents: 37, no_input: 0, upper_bound: true }, estimate_id: 'e' })).toBe(
-                'Fills up to 43 rows: 37 from the attachment, 6 from title and abstract',
-            );
-            expect(costLine({ extraction: { rows: 1, documents: 1, no_input: 0 }, estimate_id: 'e' })).toBe('Fills 1 row: 1 from the attachment');
+            expect(costLine(cost, true)).toMatch(/^Reads up to 168 papers/);
+            expect(costCredits(cost)).toBe('30.9 credits');
+            expect(costCredits(cost, true)).toBe('Up to 30.9 credits');
             expect(costLine(null)).toBeNull();
         });
 
-        it('shows the credit chip only when the cost quotes credits', () => {
-            const { request } = fillFixture('fill-with-credits');
-            expect(creditChip(request.cost)).toBe('Up to 7 this run');
-            expect(creditTooltip(request.cost)).toMatch(/^Approving authorizes up to 7 credits for this run\./);
-            expect(creditChip({ ...request.cost, credits: 1 })).toBe('Up to 1 this run');
-            expect(creditTooltip({ ...request.cost, credits: 1 })).toContain('up to 1 credit for');
-            expect(creditChip({ ...request.cost, credits: 2.5 })).toBe('Up to 2.5 this run');
-            expect(creditChip(fixture('create-items').request.cost)).toBeNull();
-            expect(creditTooltip(null)).toBeNull();
-        });
-
-        it('keeps the proposal\'s cost until the sources or the column set change', () => {
+        it('keeps the proposal\'s cost until the sources change; a question edit changes nothing', () => {
             const { request } = fixture('create-items');
             let draft = initialTableCardDraft(request);
-            expect(estimateStatus(draft, request)).toBe('current');
-            draft = { ...draft, step: 'columns' };
-            expect(needsEstimate(draft, request)).toBe(false);
-            // A question edit does not change what runs.
+            expect(draftCost(draft, request, PRICES)).toEqual({ cost: request.cost, upperBound: false });
             draft = updateColumn(draft, draft.columns[0].key, { header: 'Renamed', description: 'Another question?' });
-            expect(estimateStatus(draft, request)).toBe('current');
-            // Adding a column does.
             draft = addColumn(draft).draft;
-            expect(estimateStatus(draft, request)).toBe('stale');
-            expect(needsEstimate(draft, request)).toBe(true);
-            // Removing it again brings back the draft the cost was estimated for.
-            draft = removeColumn(draft, draft.columns[draft.columns.length - 1].key);
-            expect(estimateStatus(draft, request)).toBe('current');
+            expect(draftCost(draft, request, PRICES)).toEqual({ cost: request.cost, upperBound: false });
         });
 
-        it('asks only on the last step and once every source has its count', () => {
+        it('computes the cost of edited sources at the user\'s prices, as an upper bound', () => {
             const { request } = fixture('create-items');
             let draft = addLibrarySource(initialTableCardDraft(request), { kind: 'collection', library_ref: 'u', key: 'CASHTRN2' }).draft;
-            expect(estimateStatus(draft, request)).toBe('stale');
-            expect(needsEstimate(draft, request)).toBe(false);
-            draft = { ...draft, step: 'columns' };
-            // Still counting the added collection.
-            expect(needsEstimate(draft, request)).toBe(false);
-            draft = setSourceResolved(draft, draft.sources[1].key, resolved(40));
-            expect(needsEstimate(draft, request)).toBe(true);
-        });
-
-        it('sends the draft as the backend reads it and approves the estimate it answers', () => {
-            const { request, estimate_request, estimate_result, reply } = fixture('create-live-estimate');
-            let draft = addLibrarySource(initialTableCardDraft(request), {
-                kind: 'collection',
-                library_ref: 'u',
-                key: 'CASHTRN2',
-                name: 'Cash transfers',
-            }).draft;
             draft = setSourceResolved(draft, draft.sources[1].key, resolved(40, 40, { without_pdf: 4 }));
-            draft = { ...draft, step: 'columns' };
-
-            const started = startEstimate(draft, request, estimate_request!.request_id);
-            expect(started.message.type).toBe('table_card_estimate');
-            expect(started.message.card_id).toBe(estimate_request!.card_id);
-            expect(started.message.columns).toEqual(
-                estimate_request!.columns.map(({ header, type, description }) => ({ header, type, description })),
-            );
-            expect(
-                started.message.sources.map(({ type, ids, scope, resolved: r }) => ({
-                    type,
-                    ids,
-                    scope,
-                    resolved: r && { count: r.count, total: r.total, without_pdf: r.without_pdf },
-                })),
-            ).toEqual(
-                estimate_request!.sources.map(({ type, ids, scope, resolved: r }) => ({
-                    type,
-                    ids,
-                    scope,
-                    resolved: r && { count: r.count, total: r.total, without_pdf: r.without_pdf },
-                })),
-            );
-            draft = started.draft;
-            expect(estimateStatus(draft, request)).toBe('pending');
-            expect(needsEstimate(draft, request)).toBe(false);
-
-            // An answer for another request is dropped.
-            expect(applyEstimateResult(draft, { ...estimate_result!, request_id: 'other' })).toBe(draft);
-            draft = applyEstimateResult(draft, estimate_result!);
-            expect(estimateStatus(draft, request)).toBe('current');
-            expect(draft.estimate.cost).toEqual(estimate_result!.cost);
-            expect(costLine(draft.estimate.cost)).toBe('Fills up to 43 rows: 37 from the attachment, 6 from title and abstract');
-            expect(createActions(draft, request).primary).toEqual({ label: 'Create and fill', choice: 'create_and_run' });
-            const response = tableCardResponse(draft, request, 'create_and_run');
-            expect(response.estimate_id).toBe(reply!.estimate_id);
-            expect(response.choice).toBe(reply!.choice);
+            const { cost, upperBound } = draftCost(draft, request, PRICES);
+            expect(upperBound).toBe(true);
+            // The proposal's two items (one without a document) and the collection's 40 (4 without).
+            expect(cost).toEqual({ rows: 42, documents: 37, title_abstract: 5, no_input: 0, credits: 7.65 });
+            // Without prices the card cannot price the edit.
+            expect(draftCost(draft, request, null)).toEqual({ cost: null, upperBound: true });
         });
 
-        it('keeps the run button waiting after a failed estimate until a retry lands', () => {
-            const { request, estimate_unknown_card } = fixture('create-live-estimate');
-            let draft = addColumn({ ...initialTableCardDraft(request), step: 'columns' }).draft;
-            draft = startEstimate(draft, request, 'r1').draft;
-            draft = applyEstimateResult(draft, { ...estimate_unknown_card!, card_id: request.card_id, request_id: 'r1' });
-            expect(estimateStatus(draft, request)).toBe('failed');
-            expect(needsEstimate(draft, request)).toBe(false);
-            // The proposal's cost is not the draft's: it is not what the card offers to run.
-            expect(draft.estimate.cost).toEqual(request.cost);
-            draft = retryEstimate(draft);
-            expect(needsEstimate(draft, request)).toBe(true);
-            draft = startEstimate(draft, request, 'r2').draft;
-            expect(failEstimate(draft, 'r1')).toBe(draft);
-            draft = failEstimate(draft, 'r2');
-            expect(estimateStatus(draft, request)).toBe('failed');
-            // A further edit asks again without a retry.
-            draft = addColumn(draft).draft;
-            expect(estimateStatus(draft, request)).toBe('stale');
-            expect(needsEstimate(draft, request)).toBe(true);
-        });
-
-        it('does not estimate for a run that cannot pay for a fill', () => {
+        it('stays an upper bound however the papers two sources share split', () => {
             const { request } = fixture('create-items');
+            let draft = initialTableCardDraft(request);
+            draft = removeSource(draft, draft.sources[0].key);
+            const a = addLibrarySource(draft, { kind: 'collection', library_ref: 'u', key: 'COLLAAAA' });
+            draft = setSourceResolved(a.draft, a.key, resolved(4, 4, { without_pdf: 2 }), ['u-D1', 'u-D2', 'u-A1', 'u-A2']);
+            const b = addLibrarySource(draft, { kind: 'tag', library_ref: 'u', tag: 'shared' });
+            // The second source repeats the two papers without a document.
+            draft = setSourceResolved(b.draft, b.key, resolved(2, 2, { without_pdf: 2 }), ['u-A1', 'u-A2']);
+            const { cost } = draftCost(draft, request, PRICES);
+            expect(cost).toMatchObject({ rows: 4, documents: 2, title_abstract: 2 });
+            // What filling those four papers costs at most: two documents, two abstracts.
+            expect(cost!.credits).toBeGreaterThanOrEqual(0.5);
+        });
+
+        it('has no cost without columns or for a proposal that could not be filled', () => {
+            const { request } = fixture('create-items');
+            const draft = initialTableCardDraft(request);
+            expect(draftCost({ ...draft, columns: [] }, request, PRICES).cost).toBeNull();
+            expect(createActions({ ...draft, columns: [] }, request).primary.choice).toBe('create');
             const uncosted = { ...request, cost: null };
-            const draft = addColumn({ ...initialTableCardDraft(uncosted), step: 'columns' }).draft;
-            expect(estimateStatus(draft, uncosted)).toBe('current');
-            expect(needsEstimate(draft, uncosted)).toBe(false);
-            expect(createActions(draft, uncosted).primary.choice).toBe('create');
+            expect(draftCost(addColumn(initialTableCardDraft(uncosted)).draft, uncosted, PRICES).cost).toBeNull();
+            expect(createActions(addColumn(initialTableCardDraft(uncosted)).draft, uncosted).primary.choice).toBe('create');
         });
     });
 
     describe('the fill card', () => {
-        it('approves with fill, naming the estimate it showed', () => {
+        it('approves with fill: exactly the plan it shows', () => {
             const { request, reply } = fillFixture('fill-with-credits');
             expect(isFillCard(request)).toBe(true);
             expect(isCreateCard(request)).toBe(false);
@@ -677,10 +595,10 @@ describe('table card draft', () => {
                 card_id: reply!.card_id,
                 approved: true,
                 choice: reply!.choice,
-                estimate_id: reply!.estimate_id,
             });
             expect(fillActionLabel(request)).toBe('Fill 32');
-            expect(costLine(request.cost)).toBe('Fills 32 rows: 30 from the attachment, 2 from title and abstract');
+            expect(costLine(request.cost)).toBe('Reads 32 papers: 30 from their documents, 2 from title and abstract');
+            expect(costCredits(request.cost)).toBe('6.1 credits');
         });
 
         it('declines with the instructions typed', () => {

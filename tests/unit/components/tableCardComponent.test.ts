@@ -4,8 +4,8 @@
  * The table card: a single Create while the request has no cost, the
  * destination line, the live count of a collection added on the card, the
  * over-cap warning disabling Create, and the reply it sends; with a cost,
- * "Create and fill" beside "Create only", the row line, the credit chip and
- * the live estimate that holds the run button back after an edit.
+ * "Create and fill" beside "Create only", and the cost computed on the card
+ * after an edit at the user's prices.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -26,20 +26,7 @@ const mocks = vi.hoisted(() => ({
     resolveItems: vi.fn(),
     describeItems: vi.fn(async (ids: string[]) => ids.map((id) => ({ item_id: id, display_name: `Paper ${id}`, has_pdf: true }))),
     target: null as any,
-    estimates: [] as unknown[],
 }));
-
-// The estimate goes over the run's socket; here it is recorded and the test
-// answers it by writing the draft as the socket handler does.
-vi.mock('../../../react/atoms/agentRunAtoms', async () => {
-    const { atom } = await import('jotai');
-    return {
-        requestTableCardEstimateAtom: atom(null, (_get, _set, card: unknown) => {
-            mocks.estimates.push(card);
-            return null;
-        }),
-    };
-});
 
 vi.mock('../../../react/components/tables/card/liveSources', () => ({
     resolveLibraryScope: mocks.resolveLibraryScope,
@@ -56,7 +43,11 @@ vi.mock('../../../react/components/ui/menus/AddSourcesMenu', () => ({
 
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
-    return { searchableLibraryIdsAtom: atom([1, 5]) };
+    return {
+        searchableLibraryIdsAtom: atom([1, 5]),
+        profileWithPlanAtom: atom({ available_subscription_credits: 5, available_purchased_credits: 1 }),
+        remainingBeaverCreditsAtom: atom(6),
+    };
 });
 
 vi.mock('../../../react/utils/selectItem', () => ({
@@ -76,7 +67,6 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 
 import { setHost } from '@beaver/agent-ui/host';
 import { tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
-import { applyEstimateResult, startEstimate } from '@beaver/agent-core/run-state/tableCardDraft';
 import { TableCard } from '../../../react/components/tables/card/TableCard';
 import { TableFillCard } from '../../../react/components/tables/card/TableFillCard';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
@@ -997,94 +987,102 @@ describe('TableCard', () => {
     });
 
     describe('with a cost', () => {
-        it('offers "Create and fill" beside "Create only" with the row line, and no chip when the run fits', async () => {
+        const prices = { document: 0.2, title_abstract: 0.05 };
+        beforeEach(() => {
+            (globalThis as any).Zotero.Beaver = { tableFills: { pricing: async () => prices } };
+        });
+        afterEach(() => {
+            delete (globalThis as any).Zotero.Beaver;
+        });
+
+        it('offers "Create and fill" beside "Create only" with the cost, the pricing sentence and no estimate', async () => {
             const request = costedFixture('create-items');
             render(request);
             await click('Next');
             expect(button('Create')).toBeUndefined();
             expect(button('Create only')).toBeTruthy();
             expect(button('Create and fill')!.disabled).toBe(false);
-            expect(container.querySelector('.table-card-cost')?.textContent).toBe(
-                'Fills 2 rows: 1 from the attachment, 1 without either',
-            );
-            expect(container.querySelector('.table-card-credit-chip')).toBeNull();
+            const cost = container.querySelector('.table-card-cost')?.textContent ?? '';
+            expect(cost).toContain("Reads 1 paper: 1 from their documents. 1 paper can't be read and is skipped");
+            expect(cost).toContain('0.2 credits');
+            expect(cost).toContain('Filling costs 0.2 credits per paper, charged as each paper is filled.');
             await click('Create and fill');
-            expect(sent[0]).toMatchObject({ approved: true, choice: 'create_and_run', estimate_id: request.cost!.estimate_id });
+            expect(sent[0]).toMatchObject({ approved: true, choice: 'create_and_run' });
+            expect(sent[0]).not.toHaveProperty('estimate_id');
         });
 
-        it('shows the credit chip when approving raises the authorization', async () => {
+        it('says how far the balance reaches when the fill costs more', async () => {
             const request = costedFixture('create-items');
-            render({ ...request, cost: { ...request.cost!, credits: 12 } });
-            expect(container.querySelector('.table-card-credit-chip')?.textContent).toContain('Up to 12 this run');
+            render({ ...request, cost: { rows: 46, documents: 46, title_abstract: 0, no_input: 0, credits: 9.2 } });
+            await click('Next');
+            expect(container.querySelector('.table-card-cost')?.textContent).toContain('Your 6 credits cover about 30 of 46 papers');
         });
 
-        it('asks for an estimate on the last step after a source edit, and holds the run button until it lands', async () => {
+        it('holds the run choice while an edit cannot be priced, and keeps "Create only"', async () => {
+            (globalThis as any).Zotero.Beaver = { tableFills: { pricing: () => Promise.reject(new Error('offline')) } };
+            mocks.resolveLibraryScope.mockResolvedValue({
+                resolved: { count: 40, total: 40, truncated: false, without_pdf: 4, sample: [] },
+                rows: Array.from({ length: 40 }, (_, i) => ({ item_id: `u-COLL${String(i).padStart(4, '0')}`, display_name: `C${i}` })),
+                name: 'Cash transfers',
+            });
+            render(costedFixture('create-items'));
+            await act(async () => {
+                mocks.target.pickCollection(41);
+            });
+            await click('Next');
+            expect(button('Create and fill')!.disabled).toBe(true);
+            expect(button('Create only')!.disabled).toBe(false);
+            await click('Create and fill');
+            expect(sent).toEqual([]);
+        });
+
+        it('asks for the prices again after a failure, and the run choice comes back', async () => {
             vi.useFakeTimers();
             try {
-                mocks.estimates = [];
+                let calls = 0;
+                (globalThis as any).Zotero.Beaver = {
+                    tableFills: { pricing: () => (++calls === 1 ? Promise.reject(new Error('offline')) : Promise.resolve(prices)) },
+                };
                 mocks.resolveLibraryScope.mockResolvedValue({
                     resolved: { count: 40, total: 40, truncated: false, without_pdf: 4, sample: [] },
                     rows: Array.from({ length: 40 }, (_, i) => ({ item_id: `u-COLL${String(i).padStart(4, '0')}`, display_name: `C${i}` })),
                     name: 'Cash transfers',
                 });
-                const request = costedFixture('create-live-estimate');
-                const store = createStore();
-                render(request, store);
+                render(costedFixture('create-items'));
                 await act(async () => {
                     mocks.target.pickCollection(41);
                 });
-                // Not on the sources step: the run choice is on the last.
-                await act(async () => {
-                    vi.advanceTimersByTime(1000);
-                });
-                expect(mocks.estimates).toHaveLength(0);
                 await click('Next');
                 expect(button('Create and fill')!.disabled).toBe(true);
-                expect(button('Create only')!.disabled).toBe(false);
-                expect(container.textContent).toContain('Updating the estimate…');
                 await act(async () => {
-                    vi.advanceTimersByTime(1000);
+                    await vi.advanceTimersByTimeAsync(5_000);
                 });
-                expect(mocks.estimates).toEqual([request]);
-
-                // The socket handler marks the draft pending, then applies the answer.
-                const { estimate_result } = read('create-live-estimate');
-                await act(async () => {
-                    const draft = store.get(tableCardDraftsAtom).get(request.card_id)!;
-                    const pending = startEstimate(draft, request, estimate_result.request_id).draft;
-                    store.set(tableCardDraftsAtom, new Map([[request.card_id, applyEstimateResult(pending, estimate_result)]]));
-                });
+                expect(calls).toBeGreaterThanOrEqual(2);
                 expect(button('Create and fill')!.disabled).toBe(false);
-                expect(container.querySelector('.table-card-cost')?.textContent).toBe(
-                    'Fills up to 43 rows: 37 from the attachment, 6 from title and abstract',
-                );
-                expect(container.querySelector('.table-card-credit-chip')?.textContent).toContain('Up to 9 this run');
-                await click('Create and fill');
-                expect(sent[0]).toMatchObject({ choice: 'create_and_run', estimate_id: estimate_result.cost.estimate_id });
             } finally {
                 vi.useRealTimers();
             }
         });
 
-        it('lets a failed estimate be asked again and keeps "Create only" available', async () => {
-            const request = costedFixture('create-items');
-            const store = createStore();
-            render(request, store);
-            await click('Next');
-            await click('Add column');
-            await act(async () => {
-                const draft = store.get(tableCardDraftsAtom).get(request.card_id)!;
-                const pending = startEstimate(draft, request, 'r1').draft;
-                store.set(
-                    tableCardDraftsAtom,
-                    new Map([[request.card_id, applyEstimateResult(pending, { event: 'table_card_estimate_result', card_id: request.card_id, request_id: 'r1', error: 'unknown_card' } as any)]]),
-                );
+        it('computes the cost on the card after a source edit, without holding the run button', async () => {
+            mocks.resolveLibraryScope.mockResolvedValue({
+                resolved: { count: 40, total: 40, truncated: false, without_pdf: 4, sample: [] },
+                rows: Array.from({ length: 40 }, (_, i) => ({ item_id: `u-COLL${String(i).padStart(4, '0')}`, display_name: `C${i}` })),
+                name: 'Cash transfers',
             });
-            expect(container.textContent).toContain('The estimate could not be updated.');
-            expect(button('Create and fill')!.disabled).toBe(true);
-            mocks.estimates = [];
-            await click('Try again');
-            expect(container.textContent).not.toContain('The estimate could not be updated.');
+            const request = costedFixture('create-items');
+            render(request);
+            await act(async () => {
+                mocks.target.pickCollection(41);
+            });
+            await click('Next');
+            expect(button('Create and fill')!.disabled).toBe(false);
+            const cost = container.querySelector('.table-card-cost')?.textContent ?? '';
+            expect(cost).toContain('Reads up to 42 papers');
+            expect(cost).toContain('Up to 7.65 credits');
+            await click('Create and fill');
+            // The reply names the cost the card showed: the fill's ceiling.
+            expect(sent[0]).toMatchObject({ choice: 'create_and_run', cost: { rows: 42, credits: 7.65 } });
         });
     });
 
@@ -1103,7 +1101,7 @@ describe('TableCard', () => {
             });
         }
 
-        it('shows the columns, the row line, the credit chip and a run button named for the rows', async () => {
+        it('shows the columns, the plan\'s cost and a run button named for the papers', async () => {
             const { request, reply } = read('fill-with-credits');
             const opened: unknown[] = [];
             setHost({ navigation: { openTable: async (key: string) => { opened.push(key); return { ok: true }; } } } as any);
@@ -1111,22 +1109,22 @@ describe('TableCard', () => {
             expect(container.textContent).toContain('Comparison');
             expect(container.textContent).toContain('Sample size');
             expect(container.textContent).toContain('Design');
-            expect(container.querySelector('.table-card-cost')?.textContent).toBe(
-                'Fills 32 rows: 30 from the attachment, 2 from title and abstract',
-            );
-            expect(container.querySelector('.table-card-credit-chip')?.textContent).toContain('Up to 7 this run');
+            const cost = container.querySelector('.table-card-cost')?.textContent ?? '';
+            expect(cost).toContain('Reads 32 papers: 30 from their documents, 2 from title and abstract');
+            expect(cost).toContain('6.1 credits');
+            // The balance (6) does not cover the plan.
+            expect(cost).toContain('Your 6 credits cover about');
             // Nothing on it is editable.
             expect(container.querySelector('input, textarea')).toBeNull();
             await click('Open table');
             expect(opened).toEqual(['u-TABLE222']);
             await click('Fill 32');
-            expect(sent).toEqual([{ type: 'table_card_response', card_id: reply.card_id, approved: true, choice: 'fill', estimate_id: reply.estimate_id }]);
+            expect(sent).toEqual([{ type: 'table_card_response', card_id: reply.card_id, approved: true, choice: 'fill' }]);
         });
 
         it('declines with instructions from the cancel view', async () => {
             const { request, reply } = read('fill-declined');
             renderFill(request);
-            expect(container.querySelector('.table-card-credit-chip')).toBeNull();
             await click('Cancel');
             await typeInto(instructionsField(), 'Try three papers first');
             await click('Send');
