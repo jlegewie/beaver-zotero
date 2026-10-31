@@ -3,6 +3,7 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
+import { getAnnotationIDs } from '../../utils/zoteroDataLoading';
 import { modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import {
     formatZoteroCreatorsString,
@@ -81,7 +82,7 @@ export async function handleGetAnnotationsRequest(
         // whose items are not loaded yet are not in Zotero's object cache.
         // getAsync returns cached objects before newly loaded ones, so restore
         // the document order of the IDs.
-        const allAnnotationIds = attachment.getAnnotations(false, true);
+        const allAnnotationIds = await getAnnotationIDs(attachment);
         const totalCount = allAnnotationIds.length;
         const offset = Math.max(0, request.offset || 0);
         const limit = Math.max(0, request.limit || 0);

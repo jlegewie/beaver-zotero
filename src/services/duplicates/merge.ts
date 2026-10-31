@@ -42,6 +42,7 @@ import {
 } from "../openTransaction";
 import { nativeMergeTransaction } from "./nativeMergeTransaction";
 import { dismissNotePreviews } from "../notePreviews";
+import { getAnnotationIDs } from "../../utils/zoteroDataLoading";
 
 const OMIT = new Set(["key", "version", "dateModified", "lastRead"]);
 async function snapshot(
@@ -76,7 +77,7 @@ async function affectedItems(
         const ids: number[] = item.isRegularItem()
             ? [...item.getAttachments(true), ...item.getNotes(true)]
             : item.isFileAttachment()
-              ? (item as any).getAnnotations(true, true)
+              ? await getAnnotationIDs(item, true)
               : [];
         for (const child of await Zotero.Items.getAsync(ids))
             await visit(child);

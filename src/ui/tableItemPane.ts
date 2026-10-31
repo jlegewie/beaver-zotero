@@ -42,6 +42,7 @@
 
 import { renderTableDocumentActions, tableActionErrorMessage } from './tableDocumentActions';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { getAnnotationIDs } from '../utils/zoteroDataLoading';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import {
@@ -221,7 +222,7 @@ async function annotationDates(item: Zotero.Item): Promise<string[]> {
     try {
         if (!item.isFileAttachment()) return [];
         await item.loadDataType('childItems');
-        const annotations = await Zotero.Items.getAsync([...item.getAnnotations(false, true)]);
+        const annotations = await Zotero.Items.getAsync(await getAnnotationIDs(item));
         return annotations
             .map((annotation) => annotation?.dateAdded)
             .filter((date): date is string => typeof date === 'string' && !!date);

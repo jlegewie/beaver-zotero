@@ -181,7 +181,7 @@ export async function describeGroup(
             title: String(child.getField("title") || ""),
             item_type: child.itemType,
             annotation_count: child.isFileAttachment()
-                ? (child as any).getAnnotations(false, true).length
+                ? child.numAnnotations()
                 : 0,
         }));
         members.push(member);
