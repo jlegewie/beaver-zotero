@@ -94,6 +94,33 @@ export async function readWithDataReload<T>(
 }
 
 /**
+ * IDs of a file attachment's annotations, in Zotero's order, as a new array.
+ * The attachment's `childItems` data must be loaded.
+ *
+ * Zotero 9 added `getAnnotations(includeTrashed, asIDs)`. Zotero 7 and 8
+ * ignore `asIDs` and return items, which requires the library's items to be
+ * cached. Never pass that result to `Zotero.Items.getAsync`: it reads each item
+ * as `NaN`, the load fails with "no such column: NaN", and on Zotero 7 the
+ * failed load leaves every later `getAsync` waiting until Zotero restarts.
+ */
+export async function getAnnotationIDs(
+    attachment: Zotero.Item,
+    includeTrashed = false,
+): Promise<number[]> {
+    const read = () =>
+        attachment
+            .getAnnotations(includeTrashed, true)
+            .map((annotation) => (typeof annotation === 'number' ? annotation : annotation.id));
+    try {
+        return read();
+    } catch (error) {
+        if (!isUnloadedDataError(error)) throw error;
+        await ensureLibraryItemsLoaded([attachment.libraryID]);
+        return read();
+    }
+}
+
+/**
  * Run a synchronous read of an item's data, returning `fallback` when Zotero
  * reports the data as unloaded. For render paths that cannot await a load;
  * pair with {@link loadItemDisplayData} so the real value follows.

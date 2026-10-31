@@ -668,13 +668,15 @@ declare namespace Zotero {
         isInTrash(): boolean;
 
         /**
-         * Returns child annotation IDs for a file attachment. Requires the
-         * attachment's `childItems` data, but unlike the item-returning form it
-         * does not look the annotations up in the object cache, so it works in
-         * libraries whose items have not been loaded yet. The array is Zotero's
-         * internal cache: copy it before mutating.
+         * Zotero 9+ returns child annotation IDs for a file attachment without
+         * consulting the object cache; the array is Zotero's internal cache.
+         * Zotero 7 and 8 ignore `asIDs` and return items. Use
+         * `getAnnotationIDs()` from `src/utils/zoteroDataLoading.ts` instead.
          */
-        getAnnotations(includeTrashed: boolean | undefined, asIDs: true): readonly number[];
+        getAnnotations(
+            includeTrashed: boolean | undefined,
+            asIDs: true,
+        ): readonly number[] | Zotero.Item[];
     }
 
     interface Utilities {

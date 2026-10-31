@@ -196,6 +196,35 @@ describe("native merge action", () => {
         await undoMergeItemsAction({ result_data: result } as any);
         expect(items.map((i) => i.json)).toEqual(before);
     });
+    it("inventories annotations when Zotero returns them as items instead of IDs", async () => {
+        // Zotero 7 and 8 ignore getAnnotations' asIDs argument. Zotero loads a
+        // non-integer id as NaN, which fails and, on Zotero 7, stalls later loads.
+        const annotation = Object.assign(makeItem(11, "ANNO1111", { itemType: "annotation" }), {
+            isRegularItem: () => false,
+            isAnnotation: () => true,
+        });
+        const attachment = Object.assign(makeItem(10, "ATTA1111", { itemType: "attachment", title: "PDF" }), {
+            itemType: "attachment",
+            isRegularItem: () => false,
+            isAttachment: () => true,
+            isFileAttachment: () => true,
+            getAnnotations: () => [annotation],
+            numAnnotations: () => 1,
+        });
+        items[0].getAttachments = () => [10];
+        items.push(attachment, annotation);
+        const getAsync = Zotero.Items.getAsync;
+        Zotero.Items.getAsync = vi.fn(async (ids: unknown[]) => {
+            if (!ids.every(Number.isInteger)) throw new Error("no such column: NaN");
+            return getAsync(ids as number[]);
+        }) as any;
+
+        const data = await proposal();
+        expect(Object.keys(data.snapshot)).toContain("u-ANNO1111");
+        expect(data.preview.members[0].children[0].annotation_count).toBe(1);
+        await applyMerge(data);
+        expect(Zotero.Items.merge).toHaveBeenCalledOnce();
+    });
     it("rejects an edit made after proposal without invoking merge", async () => {
         const data = await proposal();
         items[1].json.title = "Changed";
