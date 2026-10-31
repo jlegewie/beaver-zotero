@@ -15,6 +15,7 @@ import { executeEditNoteBatchAction } from './actions/editNoteBatch';
 import { executeManageCollectionsAction } from './actions/manageCollections';
 import { executeManageTagsAction } from './actions/manageTags';
 import { executeOrganizeItemsAction } from './actions/organizeItems';
+import { isTagCacheError, rebuildTagCache, TAG_CACHE_ERROR_CODE, tagCacheErrorMessage } from '../tagCache';
 import type { ActionExecuteRequest } from './operationContext';
 import { prepareOperationRendering } from './prepareOperationRendering';
 import { DEFAULT_TIMEOUT_SECONDS, TimeoutContext, TimeoutError } from './timeout';
@@ -24,6 +25,24 @@ export const QUEUED_BEHIND_WRITE_PHASE = 'queued_behind_write';
 
 /** Socket receipt is optional: direct/MCP callers never stamped one. */
 type ExecuteContext = Omit<AgentDataRequestContext, 'receivedAt'> & { receivedAt?: number };
+
+/**
+ * Replace a raw SQL error from a stale Zotero tag cache with one the model can
+ * act on, after rebuilding the cache so a retry can succeed. Without this the
+ * model reads a constraint error, retries unchanged and fails every time.
+ */
+async function explainTagCacheFailure(result: WSAgentActionExecuteResponse): Promise<WSAgentActionExecuteResponse> {
+    if (result.success || !isTagCacheError(result.error)) return result;
+    let repaired = true;
+    try {
+        await rebuildTagCache();
+    } catch (error) {
+        repaired = false;
+        logger(`handleAgentActionExecuteRequest: tag cache rebuild failed: ${error}`, 1);
+    }
+    logger(`handleAgentActionExecuteRequest: ${result.error}`, 1);
+    return { ...result, error: tagCacheErrorMessage(repaired), error_code: TAG_CACHE_ERROR_CODE };
+}
 
 
 /**
@@ -125,7 +144,7 @@ export async function executeRequest(
             };
         }
 
-        return withTiming(result);
+        return withTiming(await explainTagCacheFailure(result));
     } catch (error) {
         const elapsedMs = Date.now() - startTime;
 
@@ -148,7 +167,7 @@ export async function executeRequest(
         }
 
         logger(`handleAgentActionExecuteRequest: Error after ${elapsedMs}ms: ${error}`, 1);
-        return withTiming({
+        return withTiming(await explainTagCacheFailure({
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
@@ -159,7 +178,7 @@ export async function executeRequest(
                 elapsed_ms: elapsedMs,
                 action_type: request.action_type,
             },
-        });
+        }));
     } finally {
         timers.clearTimeout(timer);
     }
