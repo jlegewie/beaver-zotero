@@ -79,14 +79,14 @@ export async function resolveItems(ids: string[]): Promise<LiveSource> {
     return { resolved: block(rows, ids.length, false), rows };
 }
 
-/** A collection, tag or saved search, as the population request resolves it. */
-export async function resolveLibraryScope(scope: TableCardLibraryScope): Promise<LiveSource> {
+/**
+ * The item ids a collection, tag or saved search holds, as the population
+ * request resolves it (regular items, subcollections included, at most the
+ * row cap), with the response for its names and totals.
+ */
+export async function resolveLibraryScopeIds(scope: TableCardLibraryScope) {
     const libraryID = resolveLibraryRef({ library_ref: scope.library_ref });
-    const failed = (error: string): LiveSource => ({
-        resolved: { count: 0, total: 0, truncated: false, without_pdf: 0, sample: [], error },
-        rows: [],
-    });
-    if (!libraryID) return failed('This library is not available.');
+    if (!libraryID) return { ok: false, error: 'This library is not available.' } as const;
     const response = await handleResolvePopulationRequest({
         event: 'resolve_population_request',
         request_id: requestId('population'),
@@ -104,8 +104,19 @@ export async function resolveLibraryScope(scope: TableCardLibraryScope): Promise
         item_category: 'regular',
         max_items: ROW_CAP,
     });
-    if (response.error) return failed(response.error);
-    const ids = response.item_ids ?? [];
+    if (response.error) return { ok: false, error: String(response.error) } as const;
+    return { ok: true, ids: response.item_ids ?? [], response } as const;
+}
+
+/** A collection, tag or saved search, as the population request resolves it. */
+export async function resolveLibraryScope(scope: TableCardLibraryScope): Promise<LiveSource> {
+    const failed = (error: string): LiveSource => ({
+        resolved: { count: 0, total: 0, truncated: false, without_pdf: 0, sample: [], error },
+        rows: [],
+    });
+    const found = await resolveLibraryScopeIds(scope);
+    if (!found.ok) return failed(found.error);
+    const { ids, response } = found;
     const rows = await describeItems(ids);
     const name =
         scope.kind === 'collection'

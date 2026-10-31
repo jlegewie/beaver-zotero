@@ -129,3 +129,18 @@ function importAction(row: Row, host: ClientHost): React.ReactElement | null {
         </React.Fragment>
     );
 }
+
+/**
+ * The host's Add control for a row the table lets the user import (an
+ * external work not yet in the library), or nothing.
+ */
+export function RowImportAction({
+    table,
+    row,
+}: {
+    table: TableSpec;
+    row: Row;
+}): React.ReactElement | null {
+    if (!rowActions(table, row).includes("import")) return null;
+    return importAction(row, getHost());
+}

@@ -153,7 +153,7 @@ export function TableToolbar({
  * narrowed table honest: the menu is out of sight once it closes, and a table
  * silently showing three of forty rows is how people misread a result set.
  */
-function FilterChips({
+export function FilterChips({
     table,
     state,
 }: {
@@ -209,7 +209,7 @@ function describeFilter(filter: Filter): string {
  * exist in the state hook but have no control yet — an honest gap rather than
  * a half-built one.
  */
-function buildFilterMenu(
+export function buildFilterMenu(
     table: TableSpec,
     state: TableState,
     valueFilters: boolean,
@@ -305,7 +305,7 @@ function buildFilterMenu(
  * One entry per sortable column in view; picking the sorted column again
  * flips its direction, and "Original order" restores the table's own.
  */
-function buildSortMenu(table: TableSpec, state: TableState): MenuItem[] {
+export function buildSortMenu(table: TableSpec, state: TableState): MenuItem[] {
     const items: MenuItem[] = [];
     for (const column of table.columns) {
         if (!isColumnSortable(column) || state.hiddenColumns.has(column.id))

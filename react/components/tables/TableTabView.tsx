@@ -1,6 +1,6 @@
 import React from 'react';
 import { isTitleAbstractOnly, type TableSpec } from '@beaver/agent-core/layouts/table';
-import { ExtractionTable } from '@beaver/agent-ui/layouts';
+import { ResearchTable } from '@beaver/agent-ui/layouts';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 import {
     isTableItemError,
@@ -18,6 +18,9 @@ import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { selectItemById } from '../../utils/selectItem';
 import { describeItems } from './card/liveSources';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
+import { exportTableCsv, renderTableDocumentActions, tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
+import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
+import { useNewPapers, useTableDocuments } from './tableTabData';
 
 /** A value the tab's owner sets from outside React, read with `useSyncExternalStore`. */
 export interface TableTabWarningSource {
@@ -167,6 +170,23 @@ const renderCellText = (text: string) => (
 );
 
 /**
+ * Mounts a DOM view built outside React (the item pane's version history)
+ * into the tab. Built once per mount, in the tab's own document.
+ */
+function DomView({ create }: { create: (doc: Document) => HTMLElement }): React.ReactElement {
+    const ref = React.useRef<HTMLDivElement>(null);
+    const createRef = React.useRef(create);
+    React.useEffect(() => {
+        const host = ref.current;
+        if (!host) return;
+        const view = createRef.current(host.ownerDocument);
+        host.replaceChildren(view);
+        return () => host.replaceChildren();
+    }, []);
+    return <div ref={ref} className="rt-dom-view" />;
+}
+
+/**
  * A stored table in the Beaver tab of a main window.
  *
  * It renders the store's last committed `table.json` and nothing else: the
@@ -175,11 +195,12 @@ const renderCellText = (text: string) => (
  * snapshot on disk is current by the time the tab re-reads. Reads are
  * sequenced: a read overtaken by a newer one is dropped.
  *
- * The surface is the shared extraction table at full size — rows windowed,
- * tall rows that fit the tab's width, search, sort and filter in the
- * toolbar. Evidence renders through the chat's `Citation` component with the
- * citation assembled from the row (inside `DataTable`), so nothing is added to
- * a thread's citation store.
+ * The surface is the shared research table (`ResearchTable`): the header and
+ * toolbar, the grid with its tags, peek and hover cards, and the cell
+ * inspector. What it shows beyond the spec is looked up here and handed in:
+ * the documents' names and kinds, papers new in a source, the fill. Evidence
+ * opens through the chat's `Citation` activation with the citation assembled
+ * from the row, so nothing is added to a thread's citation store.
  */
 export default function TableTabView({
     tableRef,
@@ -255,6 +276,9 @@ export default function TableTabView({
 
     const table = state.kind === 'table' ? state.table : null;
     const improvableRows = useImprovableRows(table?.spec ?? null);
+    const documents = useTableDocuments(table?.spec ?? null);
+    const newPapers = useNewPapers(table?.spec ?? null);
+    const [actionError, setActionError] = React.useState<string | null>(null);
     const fillEnabled = isTableChatEnabled();
     const fillJob = useTableFillJob(tableRef);
     // The finished job whose banner the user dismissed, and whether the table
@@ -303,7 +327,7 @@ export default function TableTabView({
         );
     }
 
-    const notices = [warning, state.error].filter(Boolean);
+    const notices = [warning, state.error, actionError].filter(Boolean);
     const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
     const library = Zotero.Libraries.get(tableRef.libraryID);
     const readOnly = library ? !tableFilesEditable(library) : false;
@@ -315,15 +339,14 @@ export default function TableTabView({
             data-beaver-table-tab={tableRef.key}
         >
             <div className="flex-1 min-h-0 min-w-0">
-                <ExtractionTable
+                <ResearchTable
                     table={state.table.spec}
                     renderText={renderCellText}
-                    improvableRows={improvableRows}
-                    fullControls
+                    documents={documents}
+                    newPapers={newPapers}
                     virtualize
-                    fitWidth
                     notice={notices.length ? notices.join(' ') : undefined}
-                    toolbarEnd={
+                    headerEnd={
                         fillEnabled ? (
                             <TableFillButton
                                 tableRef={tableRef}
@@ -348,13 +371,27 @@ export default function TableTabView({
                         ) : undefined
                     }
                     onlyRows={failedRows}
-                    footerNote={`Version ${state.table.version}`}
                     onCopy={(text) => Zotero.Utilities.Internal.copyTextToClipboard(text)}
+                    onExport={() => {
+                        const win = surfaceWindow;
+                        const api = getTablesApi();
+                        if (!win || !api) {
+                            setActionError('Export is unavailable right now.');
+                            return;
+                        }
+                        setActionError(null);
+                        exportTableCsv(win, tableRef, () => api.local.commands(win)).catch((error) =>
+                            setActionError(tableActionErrorMessage(error, tableRef)),
+                        );
+                    }}
                     onShowInLibrary={
                         itemID
                             ? () => void selectItemById(itemID, true, undefined, surfaceWindow)
                             : undefined
                     }
+                    renderVersionHistory={() => (
+                        <DomView create={(doc) => renderTableDocumentActions(doc, tableRef, { historyOnly: true })} />
+                    )}
                 />
             </div>
         </div>

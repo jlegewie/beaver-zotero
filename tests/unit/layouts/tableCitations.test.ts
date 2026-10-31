@@ -493,3 +493,24 @@ describe("cell citations", () => {
         expect(rowReference({ id: "r", cells: {} })).toBeUndefined();
     });
 });
+
+describe("the evidence document's kind", () => {
+    const passage: Evidence = { document: "u-ATT00001", locator: "s5.6", quote: "A passage." };
+
+    it("is read as a PDF when the caller does not know it", () => {
+        const citation = citationForEvidence(paper, passage)!;
+        expect(citation.content_kind).toBeUndefined();
+        expect(citation.pages).toEqual([5]);
+    });
+
+    it("carries the kind the caller looked up, so an EPUB opens in its reader", () => {
+        expect(citationForEvidence(paper, passage, { contentKind: "epub" })!.content_kind).toBe("epub");
+    });
+
+    it("gives a snapshot passage no page: it is found by its text", () => {
+        const citation = citationForEvidence(paper, passage, { contentKind: "snapshot" })!;
+        expect(citation.content_kind).toBe("snapshot");
+        expect(citation.pages).toBeUndefined();
+        expect(citation.preview).toBe("A passage.");
+    });
+});

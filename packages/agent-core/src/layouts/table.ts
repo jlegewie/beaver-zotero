@@ -466,11 +466,17 @@ export interface AnsweredCell extends CellBase {
     /** Why this answer; on a user correction, the user's stated reason. */
     reasoning?: string;
     evidence?: Evidence[];
+    /** User cells only: the model cell this answer replaced ({@link ReplacedCell}). */
+    replaced?: ReplacedCell;
     error?: never;
     error_code?: never;
 }
 
-/** The material does not say — a finding, not a failure. */
+/**
+ * The material does not say — a finding, not a failure. A user may mark a
+ * cell Not reported too: provenance `user`, no filler fields, an optional
+ * note as its `reasoning`, and `replaced` as for a correction.
+ */
 export interface NotReportedCell extends CellBase {
     outcome: "not_reported";
     documents?: DocumentId[];
@@ -479,6 +485,8 @@ export interface NotReportedCell extends CellBase {
     reasoning?: string;
     /** The closest passages, when any. */
     evidence?: Evidence[];
+    /** User cells only: the model cell this one replaced ({@link ReplacedCell}). */
+    replaced?: ReplacedCell;
     value?: never;
     error?: never;
     error_code?: never;
@@ -496,6 +504,7 @@ export interface FailedCell extends CellBase {
     confidence?: never;
     reasoning?: never;
     evidence?: never;
+    replaced?: never;
 }
 
 /** A user-owned blank the filler never refills. */
@@ -507,9 +516,22 @@ export interface ClearedCell extends CellBase {
     confidence?: never;
     reasoning?: never;
     evidence?: never;
+    /** The model cell the user cleared ({@link ReplacedCell}). */
+    replaced?: ReplacedCell;
     error?: never;
     error_code?: never;
 }
+
+/**
+ * The model cell a user cell replaced, kept on the user cell without its own
+ * `replaced`. It keeps Beaver's answer and evidence visible after a
+ * correction and is what Reset restores. Counts toward the cell's byte caps;
+ * over the cap its evidence is dropped first, then the field. When the
+ * column's question changes it is marked `stale` like the cell holding it.
+ */
+export type ReplacedCell =
+    | (Omit<AnsweredCell, "replaced"> & { provenance: "model" })
+    | (Omit<NotReportedCell, "replaced"> & { provenance: "model" });
 
 /**
  * A written cell; absent means unattempted. The structural rules

@@ -244,3 +244,12 @@ it("does not promise a repair where Beaver may not modify the table", async () =
     await click('repair');
     expect(root.textContent).toContain('does not modify tables');
 });
+it("renders only the version history, loaded at once, for the table tab", async () => {
+    const doc = root.ownerDocument;
+    const panel = renderTableDocumentActions(doc, ref, { historyOnly: true });
+    doc.body.append(panel);
+    await vi.waitFor(() => expect(panel.textContent).toContain("Version 1 · Initial comparison"));
+    expect(panel.querySelector('[data-beaver-action="export-csv"]')).toBeNull();
+    expect(panel.querySelector('[data-beaver-action="repair"]')).toBeNull();
+    expect(panel.querySelector('[data-beaver-action="restore-version"]')).not.toBeNull();
+});
