@@ -5,9 +5,12 @@ import MarkdownRenderer from '../messages/MarkdownRenderer';
 import {
     isTableItemError,
     readTable,
+    tableFilesEditable,
     unreadableTableRecovery,
     type TableRef,
 } from '../../../src/services/artifacts/tableItemIdentity';
+import { isTableChatEnabled } from '../../../src/services/tableCapability';
+import { TableFillBanner, TableFillButton, useTableFillJob } from './TableFillControl';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
 import type { TableTabMountOptions, TableTabRenderReport } from '../../../src/ui/tableTabTypes';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
@@ -252,6 +255,20 @@ export default function TableTabView({
 
     const table = state.kind === 'table' ? state.table : null;
     const improvableRows = useImprovableRows(table?.spec ?? null);
+    const fillEnabled = isTableChatEnabled();
+    const fillJob = useTableFillJob(tableRef);
+    // The finished job whose banner the user dismissed, and whether the table
+    // shows only the rows it could not read.
+    const [dismissedJob, setDismissedJob] = React.useState<string | null>(null);
+    const [showFailed, setShowFailed] = React.useState(false);
+    const finishedJob = fillJob?.state === 'done' && fillJob.job_id !== dismissedJob ? fillJob : null;
+    const failedRows = React.useMemo(
+        () => (showFailed && finishedJob?.result ? new Set(finishedJob.result.failed_row_ids) : null),
+        [showFailed, finishedJob],
+    );
+    React.useEffect(() => {
+        if (!finishedJob) setShowFailed(false);
+    }, [finishedJob]);
 
     React.useEffect(() => {
         if (table) optionsRef.current.onTitle(table.spec.title || 'Table');
@@ -288,6 +305,8 @@ export default function TableTabView({
 
     const notices = [warning, state.error].filter(Boolean);
     const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
+    const library = Zotero.Libraries.get(tableRef.libraryID);
+    const readOnly = library ? !tableFilesEditable(library) : false;
 
     return (
         <div
@@ -304,6 +323,31 @@ export default function TableTabView({
                     virtualize
                     fitWidth
                     notice={notices.length ? notices.join(' ') : undefined}
+                    toolbarEnd={
+                        fillEnabled ? (
+                            <TableFillButton
+                                tableRef={tableRef}
+                                table={state.table.spec}
+                                job={fillJob}
+                                improvableRows={improvableRows}
+                                disabledReason={readOnly ? 'This library is read-only.' : undefined}
+                            />
+                        ) : undefined
+                    }
+                    banner={
+                        fillEnabled && finishedJob ? (
+                            <TableFillBanner
+                                job={finishedJob}
+                                showingFailed={showFailed}
+                                onShowFailed={setShowFailed}
+                                onDismiss={() => {
+                                    setDismissedJob(finishedJob.job_id);
+                                    Zotero.Beaver.tableFills?.dismiss(finishedJob.job_id);
+                                }}
+                            />
+                        ) : undefined
+                    }
+                    onlyRows={failedRows}
                     footerNote={`Version ${state.table.version}`}
                     onCopy={(text) => Zotero.Utilities.Internal.copyTextToClipboard(text)}
                     onShowInLibrary={

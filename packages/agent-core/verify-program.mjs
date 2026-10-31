@@ -170,7 +170,10 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // pins it) calls to change a stored table, and nothing inside the package
 // applies a mutation. `layouts/tableCitations.ts` is a root too: clients build
 // the citations a table's evidence renders as, and nothing inside the package
-// renders one.
+// renders one. `layouts/tableFill.ts` (selection and pending work) and
+// `protocol/tableFillProtocol.ts` (the fill endpoint and the plugin's fill job)
+// are roots for the same reason: a client plans and shows fills with them, and
+// nothing inside the package runs one.
 // `identity/itemLinks.ts` parses the Zotero object links the model writes in
 // chat markdown. Clients render and export them; nothing inside the package
 // follows a link, so it is a root too.
@@ -211,6 +214,7 @@ const entryPaths = [
   "src/run-state/pendingTableCards.ts",
   "src/run-state/tableCardDraft.ts",
   "src/run-state/tableFillProgress.ts",
+  "src/run-state/tableFillCopy.ts",
   "src/run-state/runErrorCopy.ts",
   "src/run-state/runStatusCopy.ts",
   "src/run-state/runStatusVisibility.ts",
@@ -219,6 +223,8 @@ const entryPaths = [
   "src/citations/externalReferences.ts",
   "src/layouts/table.ts",
   "src/layouts/tableMutations.ts",
+  "src/layouts/tableFill.ts",
+  "src/protocol/tableFillProtocol.ts",
   "src/layouts/tableCitations.ts",
   "src/identity/itemLinks.ts",
   "src/extract/pageLabels/printedPageLabels.ts",

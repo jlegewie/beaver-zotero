@@ -249,6 +249,47 @@ describe('hooks auth lock shutdown cleanup', () => {
         await shutdown;
     });
 
+    it.each(['onShutdown', 'onAppShutdown'] as const)('flushes table fills before the mutation queue closes in %s', async entry => {
+        const hooks = await loadHooks();
+        const instance = (globalThis as any).addon;
+        const order: string[] = [];
+        let flushed!: () => void;
+        instance.tableFills = {
+            dispose: vi.fn(() => new Promise<void>(resolve => { order.push('fills'); flushed = resolve; })),
+        };
+        instance.mutations.dispose = vi.fn(async () => { order.push('mutations'); });
+        const shutdown = hooks[entry]();
+        await Promise.resolve();
+        expect(order).toEqual(['fills']);
+        flushed();
+        await shutdown;
+        expect(order).toEqual(['fills', 'mutations']);
+        expect(instance.tableFills).toBeUndefined();
+    });
+
+    it('makes a second shutdown path wait for the first one\'s fill flush', async () => {
+        const hooks = await loadHooks();
+        const instance = (globalThis as any).addon;
+        const order: string[] = [];
+        let flushed!: () => void;
+        const dispose = vi.fn(() => new Promise<void>(resolve => { flushed = resolve; }));
+        instance.tableFills = { dispose };
+        instance.mutations.dispose = vi.fn(async () => { order.push('mutations'); });
+        const first = hooks.onAppShutdown();
+        await Promise.resolve();
+        const second = hooks.onShutdown();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(order).toEqual([]);
+        order.push('flushed');
+        flushed();
+        await Promise.all([first, second]);
+        // Neither path closed the queue before the flush, and the service was disposed once.
+        expect(order[0]).toBe('flushed');
+        expect(order.filter((step) => step === 'mutations').length).toBeGreaterThan(0);
+        expect(dispose).toHaveBeenCalledTimes(1);
+    });
+
     beforeEach(() => {
         vi.resetModules();
         vi.clearAllMocks();
@@ -297,6 +338,41 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect((globalThis as any).addon.voiceHarness).toBeUndefined();
         const prefs = await import('../../src/utils/prefs');
         expect(prefs.clearPref).toHaveBeenCalledWith('backgroundProcessingContinuous');
+    });
+
+    it('holds the quit until running table fills have flushed, and disposes the account after', async () => {
+        (globalThis as any).__env__ = 'production';
+        (globalThis as any).Services.startup.shuttingDown = false;
+        (Zotero as any).DBConnection = vi.fn(function () { return { test: vi.fn().mockResolvedValue(undefined) }; });
+        (Zotero as any).PreferencePanes = { register: vi.fn().mockResolvedValue(undefined) };
+        const addBlocker = vi.fn();
+        (globalThis as any).ChromeUtils = {
+            importESModule: vi.fn(() => ({ AsyncShutdown: { appShutdownConfirmed: { addBlocker, removeBlocker: vi.fn() } } })),
+        };
+        try {
+            const hooks = await loadHooks();
+            await hooks.onStartup();
+            expect(addBlocker).toHaveBeenCalledWith('Beaver: flush table fills', expect.any(Function));
+            const blocker = addBlocker.mock.calls[0][1] as () => Promise<void>;
+            const observer = vi.mocked((globalThis as any).Services.obs.addObserver).mock.calls
+                .find(([, topic]: [unknown, string]) => topic === 'quit-application')![0] as { observe(s: unknown, t: string): void };
+            let flushed!: () => void;
+            const dispose = vi.fn(() => new Promise<void>((resolve) => { flushed = resolve; }));
+            (globalThis as any).addon.tableFills = { dispose };
+            // Gecko runs the blocker and the observer in the same phase.
+            const holding = blocker();
+            observer.observe(null, 'quit-application');
+            await Promise.resolve();
+            await Promise.resolve();
+            // The account outlives the flush: its last commit needs it.
+            expect(dispose).toHaveBeenCalledOnce();
+            expect((globalThis as any).addon.account.dispose).not.toHaveBeenCalled();
+            flushed();
+            await holding;
+            await vi.waitFor(() => expect((globalThis as any).addon.account.dispose).toHaveBeenCalledOnce());
+        } finally {
+            delete (globalThis as any).ChromeUtils;
+        }
     });
 
     it('continues window cleanup after voice unload throws', async () => {

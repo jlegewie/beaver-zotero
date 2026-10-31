@@ -493,6 +493,8 @@ export interface TableVersionEntry {
     actor: TableActor;
     run_id?: string;
     thread_id?: string;
+    /** The key consecutive writes collapse under (a fill's job id); see `writeTable`. */
+    collapse_key?: string;
     change?: string;
     /** ISO timestamp of the write. */
     at: string;

@@ -34,6 +34,7 @@ class Addon {
     public backgroundTasks = createBackgroundTaskSource();
     public preferences?: import("./services/instancePreferences").InstancePreferences;
     public account?: import("./services/instanceAccount").InstanceAccount;
+    public tableFills?: import("./services/tableFills/service").InstanceTableFills;
     public notePreviews = new NotePreviews();
     public syncPause = createSyncPauseService();
     public mutations = new LibraryMutations(

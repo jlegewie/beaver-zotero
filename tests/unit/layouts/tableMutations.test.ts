@@ -21,6 +21,7 @@ import type {
 } from "@beaver/agent-core/layouts/table";
 import {
     applyMutations,
+    carryColumnRevisions,
     summarize,
     type ApplyErrorCode,
     type SkippedCell,
@@ -94,6 +95,28 @@ function unknownSelectLabels(spec: TableSpec): string[] {
     return unknown;
 }
 
+/**
+ * The spec without the column revisions `expected` does not state. The
+ * backend's engine, which runs the same corpus, keeps a column's `revision`
+ * but does not count it; so a shared case is compared without the revisions
+ * it does not name, and the revision rules are tested on their own below.
+ */
+function withoutUnstatedRevisions(spec: TableSpec, expected: TableSpec): TableSpec {
+    const stated = new Set(
+        expected.columns
+            .filter((column) => column.revision !== undefined)
+            .map((column) => column.id),
+    );
+    return {
+        ...spec,
+        columns: spec.columns.map((column) => {
+            if (column.revision === undefined || stated.has(column.id)) return column;
+            const { revision: _revision, ...rest } = column;
+            return rest;
+        }),
+    };
+}
+
 /** Freezes an object graph, so any write into it throws under ES module strict mode. */
 function deepFreeze<T>(value: T): T {
     if (value === null || typeof value !== "object") return value;
@@ -146,7 +169,9 @@ describe("the table-mutation fixture corpus", () => {
                 if (!result.ok) {
                     throw new Error(`${file} failed: ${result.error.message}`);
                 }
-                expect(result.spec).toEqual(fixture.after);
+                expect(
+                    withoutUnstatedRevisions(result.spec, fixture.after!),
+                ).toEqual(fixture.after);
                 expect(result.skipped).toEqual(fixture.skipped ?? []);
                 // The invariant add-only options buy: no mutation can leave a
                 // cell holding a label its column does not offer, so a renderer
@@ -489,5 +514,200 @@ describe("applyMutations", () => {
             { op: "remove_rows", rows: ["r0"] },
         ]);
         expect(shrunk.ok).toBe(true);
+    });
+});
+
+describe("column revision", () => {
+    const base = (): TableSpec => ({
+        id: "t",
+        columns: [
+            {
+                id: "design",
+                header: "Design",
+                type: "select",
+                description: "What is the study design?",
+                options: [
+                    { label: "RCT", color: "blue" },
+                    { label: "Observational", color: "green", description: "No assignment." },
+                ],
+            },
+        ],
+        rows: [
+            {
+                id: "r1",
+                documents: ["u-PDF1"],
+                cells: {
+                    design: {
+                        outcome: "answered",
+                        provenance: "model",
+                        value: { kind: "select", label: "RCT" },
+                        documents: ["u-PDF1"],
+                    },
+                },
+            },
+        ],
+    });
+    const revisionAfter = (mutation: TableMutation): number | undefined => {
+        const result = applyMutations(base(), [mutation]);
+        if (!result.ok) throw new Error(result.error.message);
+        return result.spec.columns[0].revision;
+    };
+
+    it("increments on a changed question", () => {
+        expect(
+            revisionAfter({ op: "update_column", column: "design", description: "Which design?" }),
+        ).toBe(1);
+    });
+
+    it("increments on every option edit: a rename, an addition, a definition", () => {
+        expect(
+            revisionAfter({
+                op: "update_column",
+                column: "design",
+                options: [{ label: "rct" }, { label: "Observational" }],
+            }),
+        ).toBe(1);
+        expect(
+            revisionAfter({
+                op: "update_column",
+                column: "design",
+                options: [{ label: "RCT" }, { label: "Observational" }, { label: "Quasi" }],
+            }),
+        ).toBe(1);
+        expect(
+            revisionAfter({
+                op: "update_column",
+                column: "design",
+                options: [{ label: "RCT", description: "Random assignment." }, { label: "Observational" }],
+            }),
+        ).toBe(1);
+    });
+
+    it("does not move on a header, a colour or a reorder", () => {
+        expect(revisionAfter({ op: "update_column", column: "design", header: "Study design" })).toBeUndefined();
+        expect(
+            revisionAfter({
+                op: "update_column",
+                column: "design",
+                options: [{ label: "Observational" }, { label: "RCT", color: "red" }],
+            }),
+        ).toBeUndefined();
+        expect(
+            revisionAfter({ op: "update_column", column: "design", description: "What is the study design?" }),
+        ).toBeUndefined();
+    });
+
+    it("counts from the stored revision", () => {
+        const spec = base();
+        spec.columns[0].revision = 4;
+        const result = applyMutations(spec, [{ op: "update_column", column: "design", description: "Which design?" }]);
+        expect(result.ok && result.spec.columns[0].revision).toBe(5);
+    });
+
+    it("skips a write planned against an earlier revision as column_changed", () => {
+        const spec = base();
+        // The row is unanswered, so its label can be renamed away.
+        spec.rows[0].cells = {};
+        const planned = { revision: 0, hash: questionHash(spec.columns[0]) };
+        // While the answer is in flight, RCT is renamed: the hash ignores a
+        // label without a definition, the revision does not.
+        const renamed = applyMutations(spec, [
+            {
+                op: "update_column",
+                column: "design",
+                options: [{ label: "Randomized trial" }, { label: "Observational" }],
+            },
+        ]);
+        if (!renamed.ok) throw new Error(renamed.error.message);
+        expect(questionHash(renamed.spec.columns[0])).toBe(planned.hash);
+        const late = applyMutations(
+            renamed.spec,
+            [
+                {
+                    op: "set_cells",
+                    cells: [
+                        {
+                            row: "r1",
+                            column: "design",
+                            cell: {
+                                outcome: "answered",
+                                provenance: "model",
+                                value: { kind: "select", label: "RCT" },
+                                documents: ["u-PDF1"],
+                            },
+                            question_hash: planned.hash,
+                            revision: planned.revision,
+                            expected_documents: ["u-PDF1"],
+                        },
+                    ],
+                },
+            ],
+            { skipMissing: true },
+        );
+        if (!late.ok) throw new Error(late.error.message);
+        expect(late.skipped).toEqual([{ row: "r1", column: "design", reason: "column_changed" }]);
+        // The old label is never written back into the options.
+        expect(late.spec.columns[0].options!.map((o) => o.label)).toEqual(["Randomized trial", "Observational"]);
+        expect(late.spec.rows[0].cells.design).toBeUndefined();
+        // Without the revision the same write would land and restore it.
+        const unguarded = applyMutations(renamed.spec, [
+            {
+                op: "set_cells",
+                cells: [
+                    {
+                        row: "r1",
+                        column: "design",
+                        cell: {
+                            outcome: "answered",
+                            provenance: "model",
+                            value: { kind: "select", label: "RCT" },
+                            documents: ["u-PDF1"],
+                        },
+                        question_hash: planned.hash,
+                    },
+                ],
+            },
+        ]);
+        expect(unguarded.ok && unguarded.spec.columns[0].options!.map((o) => o.label)).toContain("RCT");
+    });
+
+    it("lands a write planned against the current revision", () => {
+        const spec = base();
+        spec.columns[0].revision = 2;
+        const result = applyMutations(spec, [
+            {
+                op: "set_cells",
+                cells: [
+                    {
+                        row: "r1",
+                        column: "design",
+                        cell: { outcome: "answered", provenance: "model", value: { kind: "select", label: "Observational" }, documents: ["u-PDF1"] },
+                        revision: 2,
+                    },
+                ],
+            },
+        ]);
+        expect(result.ok && result.skipped).toEqual([]);
+    });
+
+    it("is carried and advanced across a whole-spec write that changed the vocabulary", () => {
+        const before = base();
+        before.columns[0].revision = 3;
+        const after = base();
+        after.columns[0].options = [{ label: "Randomized trial" }, { label: "Observational", description: "No assignment." }];
+        expect(carryColumnRevisions(before, after).columns[0].revision).toBe(4);
+        const unchanged = base();
+        unchanged.columns[0].header = "Study design";
+        expect(carryColumnRevisions(before, unchanged).columns[0].revision).toBe(3);
+        const ahead = base();
+        ahead.columns[0].revision = 7;
+        expect(carryColumnRevisions(before, ahead).columns[0].revision).toBe(7);
+    });
+
+    it("refuses a revision that is not a whole number from 0", () => {
+        const spec = base();
+        spec.columns[0].revision = -1;
+        const result = applyMutations(spec, [{ op: "set_meta", title: "x" }]);
+        expect(result.ok).toBe(false);
     });
 });

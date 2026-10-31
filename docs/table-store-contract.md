@@ -85,7 +85,27 @@ still require an isolated sync-enabled test setup.
 SHA-256 digest of the stored spec’s JSON bytes, including store-assigned stamps —
 the bytes of `beaver/v<N>.json` and the snapshot's root attribute.
 Callers must echo it; they must not recreate it using another JSON serializer.
-History versions can collapse within one agent run, so a version alone is insufficient.
+History versions can collapse, so a version alone is insufficient.
+
+### Version collapse
+
+A write carries an optional `meta.collapse_key`. A write collapses onto the tip —
+rewriting that version in place instead of taking a new number — only when the tip
+is unsealed, was written by the same actor, and has the same key. Without an
+explicit key, an agent write's key is its run and thread. The plugin's fill job
+uses its job id, so a fill's consecutive commits are one version; a write by anyone
+else in between makes the job's next commit start a new version, so history is
+never rewritten across someone else's change.
+
+### Fill commits
+
+The plugin's fill job (`addon.tableFills`) commits through `editTableSession` —
+the session path with skip-missing semantics — after entering the instance
+mutation queue (`libraryOperations.run('table_editTableSession', …)`). Each
+`set_cells` write carries the column's `revision` and question hash as planned and
+the row's documents; a write whose column, question or row documents changed, a
+user cell, and a removed row or column are skipped and reported, and the rest of
+the commit lands.
 
 Remote callers use:
 
@@ -256,7 +276,10 @@ enhancement resolves them against the spec read through the store.
 `tests/fixtures/artifacts/table-mutations`, `table-summaries`, `table-merges` and
 `table-negative-reads` (which values head their passages "Related passages") are
 the language-neutral contract corpus shared with the backend; both sides run
-every case.
+every case. The backend's engine keeps a column's `revision` without counting it,
+so the plugin compares shared mutation cases without revisions they do not state.
+`table-fill-selection` and `table-fill-requests` come from the backend;
+`table-pending` (pending work) is the plugin's own.
 
 ## Development endpoints
 
@@ -265,6 +288,11 @@ every case.
 - `table-write`: accepts `expectedVersion`, `expected_sha256`, `operation_id` and
   returns the current digest plus operation acknowledgement/replay status.
 - `table-trim`: accepts `libraryID`, `key`, `thread_id`, `run_ids` and returns the trim result.
+- `table-fill`: drives the fill service with `action` — `plan` (`key`, `scope?`), `start`
+  (`planId`), `fill` (plan and start), `wait` (`jobId`, `timeoutMs?`), `stop`, `status`
+  (`jobId` or `key`), `dismiss` and `configure` (`settings`: concurrency, commit cadence,
+  retries).
+- `table-pending`: accepts `libraryID`, `key` and returns the table's pending work.
 
 The future wire adapter maps `expected_version` to `expectedVersion`, transports the
 same digest/operation fields and preserves the structured trim outcomes. In addition

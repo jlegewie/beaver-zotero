@@ -110,7 +110,10 @@ export async function gzipUtf8BytesChunked(
         : DEFAULT_GZIP_SLICE_CHARS;
     const yieldToEventLoop = options.yieldToEventLoop ?? defaultYieldToEventLoop;
 
-    const deflator = new (pako as any).Deflate({ gzip: true });
+    const deflator = new (pako as any).Deflate({
+        gzip: true,
+        ...(options.level === undefined ? {} : { level: options.level }),
+    });
     const chunks: Uint8Array[] = [];
 
     deflator.onData = (chunk: Uint8Array | ArrayBuffer) => {

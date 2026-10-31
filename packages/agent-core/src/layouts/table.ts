@@ -198,6 +198,15 @@ export interface Column {
     priority?: "primary" | "secondary";
     /** Overrides {@link columnAlign}, which centres a boolean and ends a number or date. */
     align?: "start" | "end";
+    /**
+     * Counts changes to the column's type, question or options (a label, a
+     * definition, a rename, an addition or a removal); absent means 0. Never
+     * moved by a header or colour change. A fill records it when it plans and
+     * its writes carry it, so an answer prepared against an earlier column is
+     * skipped where the question hash alone would let it land (a renamed
+     * option without a definition). See {@link questionHash}.
+     */
+    revision?: number;
     /** Absent ⇒ ready. `"filling"` means a producer is populating this column now. */
     status?: "filling";
     /** Progress of a `filling` column, so a header can show "6 of 9". */
@@ -1620,6 +1629,16 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
                 code: "invalid_column_definition",
                 column_id: column.id,
                 message: "Columns need a supported type and a text header.",
+            });
+        }
+        if (
+            column.revision !== undefined &&
+            !(Number.isSafeInteger(column.revision) && column.revision >= 0)
+        ) {
+            issues.push({
+                code: "invalid_column_definition",
+                column_id: column.id,
+                message: `Column "${column.id}" has revision ${String(column.revision)}; a revision is a whole number from 0.`,
             });
         }
         if (columns.has(column.id)) {

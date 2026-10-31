@@ -3,6 +3,7 @@ import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCac
 import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
 import { handleTestExportHttpRequest, handleTestExportNoteHttpRequest } from './handlers/testExportHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
+import { handleTestTableFillHttpRequest, handleTestTablePendingHttpRequest } from './handlers/testTableFillHandlers';
 import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
 import {
     handleTestAttachmentImageHttpRequest,
@@ -1186,6 +1187,10 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/table-write'] = createEndpoint(handleTestTableWriteHttpRequest);
 
         endpoints['/beaver/test/table-edit'] = createEndpoint(handleTestTableEditHttpRequest);
+        // Table fills (dev-only): plan, start, wait for, stop and inspect the
+        // plugin's fill jobs, and read a table's pending work.
+        endpoints['/beaver/test/table-fill'] = createEndpoint(handleTestTableFillHttpRequest);
+        endpoints['/beaver/test/table-pending'] = createEndpoint(handleTestTablePendingHttpRequest);
 
         endpoints['/beaver/test/table-versions'] = createEndpoint(handleTestTableVersionsHttpRequest);
 

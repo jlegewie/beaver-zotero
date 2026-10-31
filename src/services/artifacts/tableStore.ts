@@ -69,6 +69,7 @@ import {
 } from '@beaver/agent-core/layouts/table';
 import {
     applyMutations,
+    carryColumnRevisions,
     checkTableLimits,
     summarize,
     type ApplyError,
@@ -167,9 +168,15 @@ export type {
 
 export interface TableWriteMeta {
     actor: TableActor;
-    /** The agent run this write belongs to, if any. Drives version collapsing. */
+    /** The agent run this write belongs to, if any. */
     run_id?: string;
     thread_id?: string;
+    /**
+     * Writes with the same key collapse into one version while nobody else
+     * writes in between (a fill's job id). Without one, an agent write's
+     * run and thread are its key. See {@link writeTable}.
+     */
+    collapse_key?: string;
     /** One line describing what changed, for a history list. */
     change?: string;
 }
@@ -651,6 +658,7 @@ async function versionEntry(
         actor: meta.actor,
         ...(meta.run_id ? { run_id: meta.run_id } : {}),
         ...(meta.thread_id ? { thread_id: meta.thread_id } : {}),
+        ...(meta.collapse_key ? { collapse_key: meta.collapse_key } : {}),
         ...(meta.change ? { change: meta.change } : {}),
         at: new Date().toISOString(),
         sha256: await sha256Hex(serialized),
@@ -1335,13 +1343,14 @@ function unstampedSpec(spec: TableSpec): Omit<TableSpec, 'key' | 'version'> {
  * again. Its response pairs that acknowledgement with the current state.
  * Local editTable applies mutations under the lock and needs no precondition.
  *
- * ## A run's writes collapse
+ * ## Writes with one collapse key collapse
  *
- * When the tip is already owned by this run — `meta.run_id` matches the tip
- * entry's and that entry is not sealed — the version file and the log entry are
- * overwritten in place and the number does not advance. A run that fills a
- * column cell by cell would otherwise issue a hundred versions nobody wants to
- * revert to individually.
+ * When the tip was written under this write's collapse key by the same actor
+ * and is not sealed, the version file and the log entry are overwritten in
+ * place and the number does not advance. The key is `meta.collapse_key` (a
+ * fill's job id) or, for an agent write without one, its run and thread. A
+ * fill that commits every few rows would otherwise issue a hundred versions
+ * nobody wants to revert to individually.
  *
  * The rule that makes it safe is that the number is only ever reused while it
  * is still the run's own: once anyone else has written above it the next write
@@ -1369,10 +1378,23 @@ export async function writeTableUncoordinated(
         const { item, current } = await prepareWrite(ref);
         await guardStoredTable(ref, item, current, remote?.accessGuard);
         remote?.accessGuard?.(spec);
-        return commitWrite(ref, item, current, spec, meta, expectedVersion, remote);
+        return commitWrite(ref, item, current, spec, meta, expectedVersion, remote, remote?.accessGuard, true);
     });
     if (result.ok && !result.replayed) emitTableUpdated(ref, result.version, meta);
     return result;
+}
+
+/**
+ * The key a write or a version entry collapses under: its explicit
+ * `collapse_key`, else an agent write's run and thread; undefined for a write
+ * that always takes a new version.
+ */
+function collapseKeyOf(
+    entry: Pick<TableVersionEntry, 'actor' | 'run_id' | 'thread_id' | 'collapse_key'>
+): string | undefined {
+    if (entry.collapse_key) return `key:${entry.collapse_key}`;
+    if (entry.actor === 'agent' && entry.run_id) return `run:${entry.run_id}\u0000${entry.thread_id ?? ''}`;
+    return undefined;
 }
 
 interface PreparedWrite {
@@ -1398,7 +1420,8 @@ async function commitWrite(
     meta: TableWriteMeta,
     expectedVersion: number | undefined,
     remote?: TableRemoteWrite,
-    accessGuard: TableAccessGuard | undefined = remote?.accessGuard
+    accessGuard: TableAccessGuard | undefined = remote?.accessGuard,
+    carryRevisions = false
 ): Promise<TableWriteResult> {
     const reconciled = await reconcileLog(item, current);
     if (reconciled.repairs.length) {
@@ -1497,20 +1520,24 @@ async function commitWrite(
     if (limit) throw new TableItemError(limit.message, 'too_large');
 
     const tipEntry = versions.find((e) => e.version === tip);
+    const key = collapseKeyOf(meta);
     const collapse =
-        meta.actor === 'agent' &&
-        !!meta.run_id &&
+        key !== undefined &&
         !!tipEntry &&
-        tipEntry.actor === 'agent' &&
         !tipEntry.sealed &&
-        tipEntry.run_id === meta.run_id &&
-        tipEntry.thread_id === meta.thread_id;
+        tipEntry.actor === meta.actor &&
+        collapseKeyOf(tipEntry) === key;
     const version = collapse ? tip : tip + 1;
 
     // Never the caller's word for either: the file says which table it is and
-    // which revision of it, and only the store gets to decide that.
+    // which revision of it, and only the store gets to decide that. A
+    // whole-spec write or a revert changes columns without `update_column`,
+    // so their revisions are carried and advanced here, and a fill's answer
+    // planned against a column such a write changed is skipped. Mutation
+    // writes are left to the engine: a fill's own answers grow an open
+    // select's options, which must not invalidate the rest of that fill.
     const stored: TableSpec = {
-        ...spec,
+        ...(carryRevisions ? carryColumnRevisions(current.spec, spec) : spec),
         spec_version: storedSpecVersion(spec),
         key: item.key,
         version,
@@ -1679,7 +1706,7 @@ export async function editTableUncoordinated(
     return result;
 }
 
-/** One commit of a provider `edit` session: a fill's cell writes. */
+/** One commit of an edit session: a fill's cell and row writes. */
 export interface TableEditSessionRequest {
     /** Names the session; one fill is one session. */
     operation_id: string;
@@ -1706,15 +1733,17 @@ export type TableEditSessionResult =
 const EDIT_SESSION_RETENTION = 64;
 
 /**
- * One commit of a provider `edit` session, the filler's incremental write.
+ * One commit of an edit session, a fill's incremental write: the provider
+ * `edit` of an in-run fill, or a commit of the plugin's fill job.
  *
  * Applies `mutations` to the current table under the lock with no revision
  * guard: a cell write conflicts only with a change to that cell, its row or its
  * column, and the engine handles each per cell (`skipMissing`), so a row or
  * column removed while the fill ran is skipped and reported and the rest of
  * the commit lands. It commits like every other write — `table.json`, the
- * history, the shadow, then the render — collapses into the run's version, and
- * emits the update event after the render.
+ * history, the shadow, then the render — collapses by its collapse key (the
+ * job id, or the run) onto a tip nobody else wrote, and emits the update
+ * event after the render.
  *
  * Commits of a session are numbered by `seq`. Repeating the session's last
  * `seq` with the same mutations returns that commit's result against the
@@ -2157,7 +2186,7 @@ export async function revertTableUncoordinated(
         await guardStoredTable(ref, item, current, accessGuard);
         const spec = await readStoredVersion(ref, item, current, toVersion);
         accessGuard?.(spec);
-        return commitWrite(ref, item, current, spec, revertMeta, undefined, undefined, accessGuard);
+        return commitWrite(ref, item, current, spec, revertMeta, undefined, undefined, accessGuard, true);
     });
     if (result.ok) emitTableUpdated(ref, result.version, revertMeta);
     return result;
@@ -2564,6 +2593,10 @@ export function writeTable(...args: Parameters<typeof writeTableUncoordinated>):
 
 export function editTable(...args: Parameters<typeof editTableUncoordinated>): ReturnType<typeof editTableUncoordinated> {
     return Zotero.Beaver.libraryOperations.run('table_editTable', args);
+}
+
+export function editTableSession(...args: Parameters<typeof editTableSessionUncoordinated>): ReturnType<typeof editTableSessionUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_editTableSession', args);
 }
 
 export function openTable(...args: Parameters<typeof openTableUncoordinated>): ReturnType<typeof openTableUncoordinated> {

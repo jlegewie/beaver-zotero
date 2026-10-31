@@ -78,6 +78,11 @@ export interface TableSurfaceProps {
      * table as a whole, which must stay in view however far the grid scrolls.
      */
     notice?: React.ReactNode;
+    /**
+     * A neutral line under the toolbar, for news about the table rather than
+     * a warning: the result of the last fill.
+     */
+    banner?: React.ReactNode;
     className?: string;
 }
 
@@ -122,6 +127,7 @@ export function TableSurface({
     virtualize,
     fitWidth,
     notice,
+    banner,
     className,
 }: TableSurfaceProps): React.ReactElement {
     const state = useOptionalTableState(table, externalState, { density });
@@ -186,6 +192,12 @@ export function TableSurface({
             {notice ? (
                 <div className="bt-notice" role="status">
                     {notice}
+                </div>
+            ) : null}
+
+            {banner ? (
+                <div className="bt-banner" role="status">
+                    {banner}
                 </div>
             ) : null}
 
