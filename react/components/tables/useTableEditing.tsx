@@ -1,9 +1,9 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type { Column, RemovedPaper, Row, SourceEntry, TableSpec } from '@beaver/agent-core/layouts/table';
-import type { TableUserEdit } from '@beaver/agent-core/layouts/tableEdit';
+import type { TableCellEdit, TableUserEdit } from '@beaver/agent-core/layouts/tableEdit';
 import type { TableSourceDraft } from '@beaver/agent-core/protocol/tableEditProtocol';
 import type { TableCardLibraryScope } from '@beaver/agent-core/protocol/tableCardProtocol';
-import type { ResearchColumnType, ResearchTableEditing } from '@beaver/agent-ui/layouts';
+import type { CellEditInput, ResearchCellEditing, ResearchColumnType, ResearchTableEditing } from '@beaver/agent-ui/layouts';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { getHost } from '@beaver/agent-ui/host';
 import { DeleteIcon } from '../icons/icons';
@@ -13,6 +13,7 @@ import type { TableUndoTarget } from '../../../src/services/artifacts/tableStore
 import type { TableUserEditResult } from '../../../src/services/artifacts/tableUserEdits';
 import { tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
 import { TableColumnEditor, type ColumnEditorSave } from './TableColumnEditor';
+import { TableDocumentChooser, type RowDocumentChoice } from './TableDocumentChooser';
 import { TableAddSources, TableSourcesPopover, addPapersContent, removedPaperId, sourceEntryName } from './TableSources';
 import { wireColumn } from '@beaver/agent-core/run-state/tableCardDraft';
 import {
@@ -89,6 +90,8 @@ export function useTableEditing({
     const [error, setError] = useState<string | null>(null);
     const [editor, setEditor] = useState<EditorState | null>(null);
     const [saving, setSaving] = useState(false);
+    const [chooser, setChooser] = useState<{ row: Row; error?: string | null } | null>(null);
+    const [choosing, setChoosing] = useState(false);
     const specRef = useRef(spec);
     specRef.current = spec;
 
@@ -167,6 +170,66 @@ export function useTableEditing({
             setToast((current) => (current ? { ...current, undo: undefined, error: tableActionErrorMessage(thrown, tableRef) } : current));
         }
     }, [toast, commands, tableRef]);
+
+    // Cells ------------------------------------------------------------------
+
+    /**
+     * Writes cell edits (section 5): ordinary edits, collapsed into this tab
+     * session's version. Returns the refusal's message, if any, which is also
+     * shown over the table.
+     */
+    const editCells = useCallback(
+        async (edits: TableCellEdit[], change: string): Promise<string | null> => {
+            const local = commands();
+            let message: string | null = null;
+            if (!local) message = 'Editing is unavailable right now. Reload Beaver and try again.';
+            else {
+                try {
+                    const result = await local.editCells(tableRef, edits, { session, change });
+                    if (!result.ok) message = result.message;
+                } catch (thrown) {
+                    message = tableActionErrorMessage(thrown, tableRef);
+                }
+            }
+            setError(message);
+            return message;
+        },
+        [commands, tableRef, session],
+    );
+
+    const cellEditing: ResearchCellEditing = {
+        disabledReason,
+        onEdit: (row: Row, column: Column, input: CellEditInput) =>
+            editCells(
+                [{ ...input, row: row.id, column: column.id } as TableCellEdit],
+                input.op === 'clear' ? `Cleared a cell in “${column.header}”` : `Edited a cell in “${column.header}”`,
+            ),
+        onRestore: (row: Row, column: Column) =>
+            void editCells([{ op: 'restore', row: row.id, column: column.id }], `Restored Beaver’s answer in “${column.header}”`),
+        onChooseDocument: (row: Row) => setChooser({ row }),
+    };
+
+    const chooseDocument = useCallback(
+        async (choice: RowDocumentChoice) => {
+            // The documents the dialog shows as current, which the write
+            // expects the row still to name.
+            const row = chooser && specRef.current.rows.find((candidate) => candidate.id === chooser.row.id);
+            if (!row) return;
+            setChoosing(true);
+            const refused = await editCells(
+                [{ op: 'document', row: row.id, document: choice.id, expected: row.documents ?? [] }],
+                'Chose the document a row is read from',
+            );
+            setChoosing(false);
+            if (refused) {
+                setChooser((current) => (current ? { ...current, error: refused } : current));
+                return;
+            }
+            setChooser(null);
+            setToast({ text: `The row is read from “${choice.name}” now. Refill the row to update its answers.` });
+        },
+        [chooser, editCells],
+    );
 
     // Removals ---------------------------------------------------------------
 
@@ -375,6 +438,8 @@ export function useTableEditing({
         </div>
     ) : null;
 
+    // The row as the table holds it now: the chooser follows a re-read.
+    const chooserRow = chooser ? spec.rows.find((row) => row.id === chooser.row.id) : undefined;
     const overlay = editor ? (
         <TableColumnEditor
             spec={spec}
@@ -384,6 +449,14 @@ export function useTableEditing({
             error={editor.error}
             onCancel={() => setEditor(null)}
             onSave={(save) => void saveColumn(save)}
+        />
+    ) : chooser && chooserRow ? (
+        <TableDocumentChooser
+            row={chooserRow}
+            saving={choosing}
+            error={chooser.error}
+            onCancel={() => setChooser(null)}
+            onChoose={(choice) => void chooseDocument(choice)}
         />
     ) : null;
 
@@ -396,5 +469,5 @@ export function useTableEditing({
         [addSources],
     );
 
-    return { editing, selectionActions, rowMenuItems, toast: toastView, overlay, error, onDrop };
+    return { editing, cellEditing, selectionActions, rowMenuItems, toast: toastView, overlay, error, onDrop };
 }

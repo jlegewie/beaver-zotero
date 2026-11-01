@@ -2535,6 +2535,7 @@ export function registerTableLocalCommands(
         history: async (ref: TableRef) => (await Zotero.Beaver.libraryOperations.run('table_openTable', [ref], { owner })).history,
         revert: (ref: TableRef, version: number) => Zotero.Beaver.libraryOperations.run('table_revertTable', [ref, version, { actor: 'user' }], { owner }),
         edit: (ref, operations, options) => Zotero.Beaver.libraryOperations.run('table_applyUserEdit', [ref, operations, options], { owner }),
+        editCells: (ref, edits, options) => Zotero.Beaver.libraryOperations.run('table_applyUserCellEdit', [ref, edits, options], { owner }),
         undo: (ref, target) => Zotero.Beaver.libraryOperations.run('table_undoTableEdit', [ref, target, { actor: 'user' }], { owner }),
         restoreShadow: (ref: TableRef) => Zotero.Beaver.libraryOperations.run('table_restoreShadowVersion', [ref], { owner }),
     };

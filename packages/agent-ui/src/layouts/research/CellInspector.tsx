@@ -35,10 +35,11 @@ export interface CellInspectorProps {
     renderText: TextRenderer;
     documents?: TableDocuments;
     /**
-     * Controls under the user's answer (Edit, Clear, Restore Beaver's answer)
-     * and beside the document line (Change). Absent in a read-only view.
+     * Controls under the cell's answer (Edit; on the user's answer also Clear
+     * and Restore Beaver's answer) and beside the document line (Change).
+     * Absent in a read-only view.
      */
-    userAnswerActions?: (row: Row, column: Column) => React.ReactNode;
+    cellActions?: (row: Row, column: Column) => React.ReactNode;
     documentAction?: (row: Row) => React.ReactNode;
 }
 
@@ -62,7 +63,7 @@ export function CellInspector({
     onClose,
     renderText,
     documents,
-    userAnswerActions,
+    cellActions,
     documentAction,
 }: CellInspectorProps): React.ReactElement {
     const reference = rowReference(row);
@@ -131,7 +132,7 @@ export function CellInspector({
                         column={column}
                         renderText={renderText}
                         documents={documents}
-                        userAnswerActions={userAnswerActions}
+                        cellActions={cellActions}
                     />
                 ) : (
                     <WholePaper
@@ -162,15 +163,17 @@ function CellDetails({
     column,
     renderText,
     documents,
-    userAnswerActions,
+    cellActions,
 }: {
     row: Row;
     column: Column;
     renderText: TextRenderer;
     documents?: TableDocuments;
-    userAnswerActions?: (row: Row, column: Column) => React.ReactNode;
+    cellActions?: (row: Row, column: Column) => React.ReactNode;
 }): React.ReactElement {
     const content = inspectorContent(row, column, documents);
+    const actions = content.kind === "system" ? null : cellActions?.(row, column);
+    const actionRow = actions ? <div className="rt-inspector-actions">{actions}</div> : null;
     switch (content.kind) {
         case "pending":
             return (
@@ -180,12 +183,14 @@ function CellDetails({
                             ? "Not answered: the last fill could not read this paper."
                             : "Not filled yet. The next Fill answers it."}
                     </p>
+                    {actionRow}
                 </section>
             );
         case "failed":
             return (
                 <section className="rt-inspector-section">
                     <p className="rt-failed">{content.message}</p>
+                    {actionRow}
                 </section>
             );
         case "system":
@@ -203,10 +208,10 @@ function CellDetails({
                     renderText={renderText}
                     documents={documents}
                     primary
+                    actions={actionRow}
                 />
             );
         case "user": {
-            const actions = userAnswerActions?.(row, column);
             return (
                 <>
                     <section className="rt-inspector-section">
@@ -229,7 +234,7 @@ function CellDetails({
                                 {tagDefinition({ kind: "stale", reason: "question" }, content.cell)}
                             </p>
                         ) : null}
-                        {actions ? <div className="rt-inspector-actions">{actions}</div> : null}
+                        {actionRow}
                     </section>
                     {content.replaced ? (
                         <AnswerSection
@@ -258,6 +263,7 @@ function AnswerSection({
     renderText,
     documents,
     primary = false,
+    actions,
 }: {
     row: Row;
     column: Column;
@@ -265,6 +271,8 @@ function AnswerSection({
     renderText: TextRenderer;
     documents?: TableDocuments;
     primary?: boolean;
+    /** Controls under the answer (Edit). */
+    actions?: React.ReactNode;
 }): React.ReactElement {
     const heading = answer.outcome === "not_reported" ? "Closest passages" : "Evidence";
     return (
@@ -290,6 +298,7 @@ function AnswerSection({
                           : "The paper's document changed after this answer was written."}
                 </p>
             ) : null}
+            {actions}
             {answer.reasoning ? <div className="rt-inspector-reasoning">{renderText(answer.reasoning)}</div> : null}
             {answer.evidence.length ? (
                 <div className="rt-passages">

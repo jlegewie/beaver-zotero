@@ -137,6 +137,17 @@ version (`collapse_key: tab:<session>`); a destructive one (a removal, a type
 change, a removed option) passes `seal`. The result says whether a version was
 `committed`, so a no-op edit offers no Undo. An `operation` seals by default.
 
+The tab's cell edits go through `applyUserCellEdit(ref, edits, { session })`
+(`table_applyUserCellEdit`), with the same `applyTableEdit` and the tab
+session's collapse key. Each edit becomes engine mutations under the lock:
+the user's answer, Not reported or cleared cell is a `set_cells` write with
+`provenance: "user"` (a note is its `reasoning`; the model cell it replaces is
+kept as `replaced`); a reset is `restore_cell`; choosing a row's document is
+`update_row` with `expected_documents` set to the documents the user saw, and
+a row that names others by then is refused (`documents_changed`). A chosen
+document must be a readable attachment (PDF, EPUB, snapshot or text) of the
+row's own item. All edits of a call land or none do.
+
 `undoTableEdit(ref, { version, sha256?, run_id? }, meta)` takes one edit back.
 Under the lock it requires that `version` is still the tip and that the
 current spec hash equals `sha256` (absent: that version's log entry's hash);
@@ -346,8 +357,9 @@ cell is unattempted. `value` appears exactly with `answered`, `error` exactly wi
 cell, written by the backend; its optional `error_code` (`download_failed`,
 `deadline`, …) is stable and appears only on failed cells. Raw diagnostics stay
 out of the table. A user clear stores
-`{outcome: "cleared", provenance: "user"}`; a reset deletes the cell so the next
-fill answers it. Summary columns count each outcome,
+`{outcome: "cleared", provenance: "user"}`; a reset (`restore_cell`) restores the
+model cell the user cell replaced when it still fits the column, and otherwise
+deletes the cell so the next fill answers it. Summary columns count each outcome,
 unattempted cells (in-scope rows for extraction columns), stale, unsure and
 metadata-only cells. The shared fixtures specify these semantics for other clients.
 

@@ -10,7 +10,9 @@ import {
     type TableRef,
 } from '../../../src/services/artifacts/tableItemIdentity';
 import { isTableChatEnabled } from '../../../src/services/tableCapability';
-import { TableFillBanner, TableFillButton, useTableFillJob } from './TableFillControl';
+import { TableFillBanner, TableFillButton, useTableFillJob, type TableFillButtonHandle } from './TableFillControl';
+import type { TableFillScope } from '@beaver/agent-core/protocol/tableFillProtocol';
+import type { ResearchTableFill } from '@beaver/agent-ui/layouts';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
 import type { TableTabMountOptions, TableTabRenderReport } from '../../../src/ui/tableTabTypes';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
@@ -290,11 +292,27 @@ export default function TableTabView({
     const readOnly = library ? !tableFilesEditable(library) : false;
     const editDisabledReason = readOnly ? 'This library is read-only.' : undefined;
     const [dropNotice, setDropNotice] = React.useState<string | null>(null);
+    // A plan asked for from a row, a column or the selection bar, shown by
+    // the Fill button's popover.
+    const fillButton = React.useRef<TableFillButtonHandle>(null);
+    const requestFill = React.useCallback((scope: TableFillScope) => fillButton.current?.openPlan(scope), []);
+    const fillRunning = !!fillJob && fillJob.state !== 'done';
+    const fill = React.useMemo<ResearchTableFill | undefined>(
+        () =>
+            fillEnabled
+                ? {
+                      disabledReason: editDisabledReason ?? (fillRunning ? 'A fill of this table is running.' : undefined),
+                      onFillRows: (rowIds) => requestFill({ kind: 'cells', rows: rowIds }),
+                      onFillColumn: (column) => requestFill({ kind: 'cells', columns: [column.id] }),
+                  }
+                : undefined,
+        [fillEnabled, editDisabledReason, fillRunning, requestFill],
+    );
     const edits = useTableEditing({
         tableRef,
         spec: table?.spec ?? EMPTY_SPEC,
         disabledReason: editDisabledReason,
-        fillRunning: !!fillJob && fillJob.state !== 'done',
+        fillRunning,
         surfaceWindow,
         portalContainer: hostRef.current,
         newBySource: newPapers.bySource,
@@ -381,19 +399,25 @@ export default function TableTabView({
                     newPapers={newPapers.notice}
                     virtualize
                     editing={edits.editing}
+                    cellEditing={edits.cellEditing}
+                    fill={fill}
                     selectionActions={edits.selectionActions}
                     rowMenuItems={edits.rowMenuItems}
                     notice={notices.length ? notices.join(' ') : undefined}
                     headerEnd={
-                        fillEnabled ? (
-                            <TableFillButton
-                                tableRef={tableRef}
-                                table={state.table.spec}
-                                job={fillJob}
-                                improvableRows={improvableRows}
-                                disabledReason={editDisabledReason}
-                            />
-                        ) : undefined
+                        fillEnabled
+                            ? (selectedRowIds: string[]) => (
+                                  <TableFillButton
+                                      tableRef={tableRef}
+                                      table={state.table.spec}
+                                      job={fillJob}
+                                      improvableRows={improvableRows}
+                                      disabledReason={editDisabledReason}
+                                      selectedRowIds={selectedRowIds}
+                                      ref={fillButton}
+                                  />
+                              )
+                            : undefined
                     }
                     banner={
                         fillBanner || edits.toast ? (

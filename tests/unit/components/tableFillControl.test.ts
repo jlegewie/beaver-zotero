@@ -15,7 +15,7 @@ import type { TableFillJobSnapshot, TableFillPlanSummary } from '@beaver/agent-c
 
 vi.mock('../../../react/runtime/windowRuntime', () => ({ getWindowRuntime: () => ({}) }));
 
-import { TableFillBanner, TableFillButton } from '../../../react/components/tables/TableFillControl';
+import { TableFillBanner, TableFillButton, type TableFillButtonHandle } from '../../../react/components/tables/TableFillControl';
 
 const ref = { libraryID: 1, key: 'TABLE001' };
 
@@ -154,6 +154,49 @@ describe('TableFillButton', () => {
         const main = buttonNamed('Fill 1 row')!;
         expect(main.disabled).toBe(true);
         expect(main.getAttribute('title')).toBe('This library is read-only.');
+    });
+});
+
+describe('the Fill menu and plans asked for elsewhere in the tab', () => {
+    const rows = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => row(id));
+    const menuItem = (text: string) =>
+        [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent?.startsWith(text));
+
+    it('offers everything pending, the five-row trial, the selected rows and retries, each with its count', async () => {
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>() }));
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="More ways to fill"]')!.click());
+        expect(menuItem('Fill everything pending')?.textContent).toContain('7');
+        expect(menuItem('Try on 5 rows first')?.textContent).toContain('5');
+        expect(menuItem('Fill selected rows')?.textContent).toContain('Select rows first');
+        expect(menuItem('Fill selected rows')?.getAttribute('aria-disabled')).toBe('true');
+        await act(async () => menuItem('Try on 5 rows first')!.click());
+        expect(fills.plan).toHaveBeenCalledWith(ref, { kind: 'pending', limit: 5 });
+    });
+
+    it('fills the rows selected in the table', async () => {
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>(), selectedRowIds: ['b', 'c'] }));
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="More ways to fill"]')!.click());
+        await act(async () => menuItem('Fill selected rows')!.click());
+        expect(fills.plan).toHaveBeenCalledWith(ref, { kind: 'cells', rows: ['b', 'c'] });
+    });
+
+    it("offers the trial in a whole fill's plan", async () => {
+        fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7 } });
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>() }));
+        await act(async () => buttonNamed('Fill 7 rows')!.click());
+        await act(async () => buttonNamed('Try on 5 rows first')!.click());
+        expect(fills.plan).toHaveBeenLastCalledWith(ref, { kind: 'pending', limit: 5 });
+    });
+
+    it('shows the plan a row or a column asks for, unless a fill is running', async () => {
+        const handle = React.createRef<TableFillButtonHandle>();
+        render(React.createElement(TableFillButton, { ref: handle, tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>() }));
+        await act(async () => handle.current!.openPlan({ kind: 'cells', rows: ['a'] }));
+        expect(fills.plan).toHaveBeenCalledWith(ref, { kind: 'cells', rows: ['a'] });
+        expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+        render(React.createElement(TableFillButton, { ref: handle, tableRef: ref, table: spec(rows), job: running, improvableRows: new Set<string>() }));
+        await act(async () => handle.current!.openPlan({ kind: 'cells', columns: ['method'] }));
+        expect(fills.plan).toHaveBeenCalledTimes(1);
     });
 });
 

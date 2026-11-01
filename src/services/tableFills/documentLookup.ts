@@ -9,14 +9,9 @@ import { getReadableContentKind } from '../documentExtraction/attachmentResoluti
 import { getBestAttachmentBatch } from '../documentExtraction/attachmentInfoBatch';
 import { isLibrarySearchable } from '../agentDataProvider/utils';
 import { libraryRefForLibraryID, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
-import { DOCUMENT_KINDS, type DocumentCandidate, type RowDocumentKind, type RowLookup } from './planner';
+import { isRowDocumentKind, type DocumentCandidate, type RowLookup } from './planner';
 
 const LOOKUP_CHUNK = 200;
-
-/** A kind a row may name: the rule's kinds, and plain text a row already names. */
-function isDocumentKind(kind: string | null): kind is RowDocumentKind {
-    return kind === 'text' || (DOCUMENT_KINDS as readonly string[]).includes(kind ?? '');
-}
 
 /** The local library of a Zotero row, or null when this device has none. */
 export function rowLibraryID(row: Pick<Row, 'ref'>): number | null {
@@ -93,7 +88,7 @@ async function lookupChunk(rows: readonly Row[], out: Map<string, RowLookup>): P
             const attachment = byId.get(id);
             if (!attachment || attachment.deleted) continue;
             const kind = getReadableContentKind(attachment);
-            if (!isDocumentKind(kind)) continue;
+            if (!isRowDocumentKind(kind)) continue;
             documents.push({
                 id: `${libraryRef}-${attachment.key}`,
                 kind,

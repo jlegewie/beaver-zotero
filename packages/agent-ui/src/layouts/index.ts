@@ -81,12 +81,16 @@ export type { ExtractionTableProps } from "./surfaces/ExtractionTable";
 export { ResearchTable } from "./research/ResearchTable";
 export type {
     NewPapersNotice,
+    ResearchCellEditing,
     ResearchColumnType,
     ResearchTableEditing,
+    ResearchTableFill,
     ResearchTableFocus,
     ResearchTableProps,
 } from "./research/ResearchTable";
 export { CellInspector } from "./research/CellInspector";
+export { CellEditor, editsAsList } from "./research/CellEditor";
+export type { CellEditInput } from "./research/CellEditor";
 export type { CellInspectorProps, InspectorView } from "./research/CellInspector";
 export {
     cellState,

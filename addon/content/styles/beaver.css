@@ -5658,6 +5658,59 @@
     color: var(--fill-secondary);
 }
 
+/* Choose document…: the paper's readable attachments, one to read the row from. */
+[id^="beaver-pane-"] .rt-document-paper {
+    margin-top: -0.5rem;
+    color: var(--fill-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+[id^="beaver-pane-"] .rt-document-choices {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.35rem;
+    border-radius: 9px;
+    background: var(--fill-senary);
+    box-shadow: inset 0 0 0 1px var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .rt-document-choice {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2rem;
+    padding: 0 0.4rem;
+    border-radius: 6px;
+}
+
+[id^="beaver-pane-"] .rt-document-choice:hover {
+    background: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .rt-document-choice-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The Fill menu's closing note. */
+[id^="beaver-pane-"] .bt-fill-menu-note {
+    display: block;
+    font-size: 0.8125rem;
+    line-height: 1.3;
+    white-space: normal;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .bt-fill-actions-gap {
+    flex: 1 1 auto;
+}
+
 [id^="beaver-pane-"] .rt-add-papers,
 [id^="beaver-pane-"] .rt-sources-add-menu,
 [id^="beaver-pane-"] .rt-selection-action {

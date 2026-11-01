@@ -40,9 +40,16 @@ import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import type { SkippedCell } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableVersionEntry } from './tableItemIdentity';
-import type { TableWriteResult, TableShadowRestoreCheck, TableShadowRestoreResult, TableUndoResult, TableUndoTarget } from './tableStore';
+import type {
+    TableApplyEditResult,
+    TableWriteResult,
+    TableShadowRestoreCheck,
+    TableShadowRestoreResult,
+    TableUndoResult,
+    TableUndoTarget,
+} from './tableStore';
 import type { TableUserEditOptions, TableUserEditResult } from './tableUserEdits';
-import type { TableUserEdit } from '@beaver/agent-core/layouts/tableEdit';
+import type { TableCellEdit, TableUserEdit } from '@beaver/agent-core/layouts/tableEdit';
 import type { OpenTableOptions, OpenTableOutcome } from '../../ui/openTable';
 import type { TableItemPaneReport } from '../../ui/tableItemPane';
 import type { TableTabRenderReport } from '../../ui/tableTabTypes';
@@ -205,6 +212,8 @@ export interface TableLocalCommands {
     revert(ref: TableRef, version: number): Promise<TableWriteResult>;
     /** A structural edit from the tab, resolved and applied in the plugin realm. */
     edit(ref: TableRef, operations: TableUserEdit, options: TableUserEditOptions): Promise<TableUserEditResult>;
+    /** Cell edits from the tab (the user's answers, a reset, a row's document). */
+    editCells(ref: TableRef, edits: TableCellEdit[], options: { session?: string; change?: string }): Promise<TableApplyEditResult>;
     /** Takes back one edit while the table is as the edit left it. */
     undo(ref: TableRef, target: TableUndoTarget): Promise<TableUndoResult>;
     restoreShadow: TableShadowRestore;

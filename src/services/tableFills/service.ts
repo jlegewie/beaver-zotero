@@ -899,6 +899,7 @@ export class InstanceTableFills {
                 this.deps.lookupRows(toLookUp),
             ]);
             planned = buildPlan(spec, selection, lookups);
+            if (scope.kind === 'pending' && scope.limit) planned = trialPlan(planned, scope.limit);
         } catch (error) {
             if (error instanceof TableSelectionError) return { ok: false, code: error.code, message: error.message };
             throw error;
@@ -1150,6 +1151,22 @@ export class InstanceTableFills {
         await Promise.all(running.map((job) => job.abandon(this.settings.shutdownFlushMs)));
         this.plans.clear();
     }
+}
+
+/**
+ * The five-row trial: the first `limit` rows of a plan, in table order, with
+ * only their own document changes. Validation at start re-selects on the
+ * table as it is then and keeps only these rows, so nothing is added.
+ */
+export function trialPlan(planned: ReturnType<typeof buildPlan>, limit: number): ReturnType<typeof buildPlan> {
+    const rows = planned.rows.slice(0, Math.max(1, Math.floor(limit)));
+    const kept = new Set(rows.map((row) => row.row));
+    return {
+        ...planned,
+        rows,
+        documentUpdates: planned.documentUpdates.filter((update) => kept.has(update.row)),
+        cells: rows.reduce((sum, row) => sum + row.columns.length, 0),
+    };
 }
 
 /**

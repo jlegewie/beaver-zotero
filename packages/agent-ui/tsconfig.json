@@ -281,6 +281,7 @@
     "./src/layouts/research/PaperCell.tsx",
     "./src/layouts/research/ResearchGrid.tsx",
     "./src/layouts/research/CellInspector.tsx",
+    "./src/layouts/research/CellEditor.tsx",
     "./src/layouts/research/ResearchTable.tsx",
     "./src/layouts/research/TableEditing.tsx",
 
